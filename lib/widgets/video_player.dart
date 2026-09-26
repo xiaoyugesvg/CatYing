@@ -1394,8 +1394,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
               child: Row(
                 children: [
-                  _buildPlayPauseButton(),
-                  _buildTimeView(),
                   if (widget.canPlayPrevious)
                     _iconButton(
                       icon: Icons.skip_previous,
@@ -1406,6 +1404,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         widget.onPlayPrevious?.call();
                       },
                     ),
+                  _buildPlayPauseButton(),
                   if (widget.canPlayNext)
                     _iconButton(
                       icon: Icons.skip_next,
@@ -1416,6 +1415,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         widget.onPlayNext?.call();
                       },
                     ),
+                  _buildTimeView(),
                   const Spacer(),
                   _iconButton(
                     icon: _volume > 0
@@ -1709,6 +1709,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           onDragEnd: () {
             setState(() => _isDragging = false);
             _scheduleHideControls();
+            // **修复拖动进度不生效 (2026-09-26)**：松手时用拖动预览值
+            // 真正执行 seek。之前只更新预览位置不跳转，滑动进度无效。
+            if (totalMs > 0) {
+              _seekTo(Duration(milliseconds: _dragValue.round()));
+            }
           },
         ),
       ),
@@ -2120,12 +2125,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         return;
       }
       final currentPos = _player.state.position;
-      // **修复自动/手动 PiP 无声**: 启动系统 PiP 前先暂停主播放器(mpv),
-      // 释放 AVAudioSession 独占, AVPlayer 启动后才能正常出声。
-      try {
-        _player.pause();
-      } catch (_) {}
-      await Future<void>.delayed(const Duration(milliseconds: 120));
+      // **丝滑切换 (2026-09-26)**：进入系统 PiP 前不暂停主播放器，
+      // 由系统 AVPlayer 无缝接管画面与声音，切换过程不断声、不卡顿。
       final entered = await VideoPlayerPip.instance.enterIos(
         url: playUrl,
         headers: widget.headers,
@@ -2192,12 +2193,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
     _autoPipInFlight = true;
     final currentPos = _player.state.position;
-    // **修复自动 PiP 无声**: 与手动路径一致, 进入系统 PiP 前先暂停
-    // 主播放器(mpv)释放 audio session, AVPlayer 出声后才无感切换。
-    try {
-      _player.pause();
-    } catch (_) {}
-    await Future<void>.delayed(const Duration(milliseconds: 120));
+    // **丝滑切换 (2026-09-26)**：退后台自动进 PiP 同样不暂停主播放器，
+    // AVPlayer 无缝接管，切换过程中不断声、不卡顿。
     try {
       final entered = await VideoPlayerPip.instance.enterIos(
         url: playUrl,
