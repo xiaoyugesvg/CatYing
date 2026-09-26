@@ -64,6 +64,11 @@ class VideoPlayerWidget extends StatefulWidget {
   /// 是否显示"听剧模式"按钮（点播页开启；直播页有自己的听剧入口，不传）
   final bool showAudioModeButton;
 
+  /// 初始画面比例（null 默认 contain"自动"）。
+  /// 详情页传入 cover，让 16:9 视频铺满 4:3 容器，画面与黑框完全一致
+  /// （修复"播放器画面比黑框小、上下留黑边"的问题）。
+  final VideoFitType? initialVideoFit;
+
   /// 跳过片头秒数（0 表示关闭），对应 Swift skipIntroSeconds
   final int skipIntroSeconds;
 
@@ -99,6 +104,7 @@ class VideoPlayerWidget extends StatefulWidget {
     this.canPlayPrevious = false,
     this.isPipMode = false,
     this.showAudioModeButton = false,
+    this.initialVideoFit,
     this.skipIntroSeconds = 0,
     this.skipOutroSeconds = 0,
     this.onPlaying,
@@ -152,7 +158,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   bool _isLocked = false;
   bool _showEpisodeSheet = false;
   bool _showSettingsSheet = false;
-  VideoFitType _videoFit = VideoFitType.contain;
+  late VideoFitType _videoFit;
   double _volume = 1.0;
   double _brightness = 0.5;
 
@@ -237,6 +243,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
     _isNativeFullscreen = _persisted.isNativeFullscreen;
     _isImmersive = _persisted.isImmersive;
+    _videoFit = widget.initialVideoFit ?? VideoFitType.contain;
 
     // 启动时间定时器 (每分钟整点更新,用于全屏状态栏显示)
     _currentTime = _formatTimeNow();
