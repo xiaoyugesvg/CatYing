@@ -19,8 +19,19 @@ void main() async {
   // 关键事件写不进 <Documents>/nodejs-project/runtime/app.log
   await AppLog.instance.init();
 
-  // 初始化 media_kit
-  MediaKit.ensureInitialized();
+  // 初始化 media_kit + 启用 mpv 磁盘缓存（点播复用, 不重复下载）
+  // 缓存目录用应用 Cache 目录, 设置页"缓存大小/清除缓存"已统计该目录
+  final mediaCacheDir = await getApplicationCacheDirectory();
+  MediaKit.ensureInitialized(
+    configuration: MediaKitConfiguration(
+      libmpvOptions: [
+        '--cache=yes',
+        '--cache-dir=${mediaCacheDir.path}/video_cache',
+        '--cache-on-disk=yes',
+        '--cache-pause-initial=no',
+      ],
+    ),
+  );
 
   // 初始化 Hive 数据目录
   final appDir = await getApplicationDocumentsDirectory();

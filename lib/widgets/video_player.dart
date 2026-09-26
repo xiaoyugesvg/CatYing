@@ -173,6 +173,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// 内部追踪 native fullscreen 状态（与 mpv / OS 窗口同步）
   bool _isNativeFullscreen = false;
 
+  /// 播放器实际可用高度（由 _buildContentStack 的 LayoutBuilder 记录），
+  /// 用于上下控制栏间距随播放器大小自适应（小窗紧凑 / 全屏舒展）。
+  double _playerAreaHeight = 0;
+
   /// iOS / 移动端 immersive 状态（WindowFullScreen 在 iOS 是 no-op）
   bool _isImmersive = false;
 
@@ -490,6 +494,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         } catch (_) {}
       }
       _persisted.resumeApplied = false;
+      // 换源后重新拉取弹幕（弹幕按视频 URL 匹配, 选集/换源需刷新）
+      _danmuLoaded = false;
+      _danmus = [];
+      if (_danmuApiUrl.isNotEmpty) {
+        _ensureDanmuLoaded();
+      }
       if (_ownsPlayer) {
         _openMedia();
       } else {
@@ -945,6 +955,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   Widget _buildContentStack() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        _playerAreaHeight = constraints.maxHeight;
+        return _buildContentStackInner();
+      },
+    );
+  }
+
+  Widget _buildContentStackInner() {
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -1373,19 +1392,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 },
               ),
 
-            // 弹幕开关（设置里配置弹幕 API 后显示）
-            if (_danmuApiUrl.isNotEmpty)
-              _iconButton(
-                icon: _danmuOn ? Icons.subtitles : Icons.subtitles_off,
-                size: 20,
-                width: 44,
-                onTap: () {
-                  _scheduleHideControls();
-                  setState(() => _danmuOn = !_danmuOn);
-                  _persistDanmuOn();
-                },
-              ),
-
             // 画中画
             _iconButton(
               icon: Icons.picture_in_picture_alt,
@@ -1515,15 +1521,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         setState(() => _showEpisodeSheet = true);
                       },
                     ),
-                  // 设置：倍速 / 画面比例 / 弹幕 / 跳过片头片尾 全部收进设置弹窗
-                  _iconButton(
-                    icon: Icons.settings,
-                    size: 22,
-                    width: 36,
-                    onTap: () {
-                      setState(() => _showSettingsSheet = true);
-                    },
-                  ),
+                  // 弹幕开关（配置弹幕 API 后显示；开关放控制栏, 不进设置弹窗）
+                  if (_danmuApiUrl.isNotEmpty)
+                    _iconButton(
+                      icon: _danmuOn ? Icons.subtitles : Icons.subtitles_off,
+                      size: 22,
+                      width: 36,
+                      onTap: () {
+                        _scheduleHideControls();
+                        setState(() => _danmuOn = !_danmuOn);
+                        _persistDanmuOn();
+                      },
+                    ),
                   _iconButton(
                     icon: _isNativeFullscreen
                         ? Icons.fullscreen_exit
@@ -2138,23 +2147,32 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             Container(
               constraints: const BoxConstraints(maxHeight: 460),
               margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
+              clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
-                color: const Color(0xFF1E1E1E),
-                borderRadius: BorderRadius.circular(12),
+                color: const Color(0xE61C1C1E),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: Colors.white12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
                     child: Row(
                       children: [
                         const Text(
                           '播放设置',
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                         const Spacer(),
@@ -2162,12 +2180,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                           behavior: HitTestBehavior.opaque,
                           onTap: () =>
                               setState(() => _showSettingsSheet = false),
-                          child: const Padding(
-                            padding: EdgeInsets.all(4),
-                            child: Icon(
+                          child: Container(
+                            width: 26,
+                            height: 26,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.08),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
                               Icons.close,
                               color: Colors.white70,
-                              size: 18,
+                              size: 15,
                             ),
                           ),
                         ),
@@ -2181,23 +2204,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // 弹幕开关
-                          Row(
-                            children: [
-                              const Expanded(
-                                child: _SettingsRowLabel('弹幕'),
-                              ),
-                              Switch(
-                                value: _danmuOn,
-                                activeColor: AppTheme.accentColor,
-                                onChanged: (v) {
-                                  setState(() => _danmuOn = v);
-                                  _persistDanmuOn();
-                                },
-                              ),
-                            ],
-                          ),
-                          const Divider(color: Colors.white12, height: 16),
                           const _SettingsRowLabel('倍速'),
                           const SizedBox(height: 8),
                           Wrap(
@@ -2341,19 +2347,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         return;
       }
       final currentPos = _player.state.position;
-      // **手动 PiP 稳定性 (2026-09-26)**：发起系统 PiP 前先暂停主播放器(mpv)，
-      // 释放 AVAudioSession，避免 audio session 被 mpv 占用导致系统拒绝启动
-      // 悬浮窗（"手动点 PiP 没反应"）。AVPlayer 内部已预热缓冲，接管无缝。
-      try {
-        if (_player.state.playing) {
-          _player.pause();
-        }
-      } catch (_) {}
-      // **丝滑切换 v2 (2026-09-26)**：进入系统 PiP 前不暂停主播放器，
-      // 由系统 AVPlayer 无缝接管画面与声音，切换过程不断声、不卡顿。
-      // PiP 悬浮窗**真实激活后**（onPipStarted）才暂停主播放器(mpv)：
-      //  - 释放 audio session 给 AVPlayer，修复"PiP 无声"
-      //  - 避免双路解码/双路声音，修复"切换中断/卡顿"
+      // **丝滑切换 v3 (2026-09-26)**：手动与自动路径完全一致 ——
+      // 进入系统 PiP 前**不暂停**主播放器，由系统 AVPlayer 无缝接管画面与声音，
+      // PiP 悬浮窗**真实激活后**（onPipStarted 回调）才暂停主播放器(mpv)：
+      //  - 切换过程不断声、不卡顿（之前手动路径提前 pause 导致黑屏/断声）
+      //  - 激活后再暂停释放 audio session，避免双路声音/无声
       final entered = await VideoPlayerPip.instance.enterIos(
         url: playUrl,
         headers: widget.headers,
@@ -2512,6 +2510,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Widget _gradientTopContainer({required Widget child}) {
     final mediaPadding = MediaQuery.of(context).padding;
+    // 顶栏底部留白随播放器高度自适应：小窗(高度<420)紧凑、全屏舒展
+    final bottomPad = _playerAreaHeight <= 0
+        ? 30.0
+        : (_playerAreaHeight < 420 ? 16.0 : 34.0);
     return DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -2525,7 +2527,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           top: 18 + mediaPadding.top,
           left: 8 + mediaPadding.left,
           right: 8 + mediaPadding.right,
-          bottom: 30,
+          bottom: bottomPad,
         ),
         child: child,
       ),
@@ -2534,6 +2536,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Widget _gradientBottomContainer({required Widget child}) {
     final mediaPadding = MediaQuery.of(context).padding;
+    // 底栏顶部留白随播放器高度自适应：小窗紧凑、全屏舒展
+    final topPad = _playerAreaHeight <= 0
+        ? 26.0
+        : (_playerAreaHeight < 420 ? 14.0 : 30.0);
     return DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -2544,7 +2550,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       ),
       child: Padding(
         padding: EdgeInsets.only(
-          top: 26,
+          top: topPad,
           bottom: 8 + mediaPadding.bottom,
           left: 8 + mediaPadding.left,
           right: 8 + mediaPadding.right,
