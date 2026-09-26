@@ -66,6 +66,36 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   /// 跳过片尾秒数（0 表示关闭）- 对应 Swift skipOutroSeconds
   final skipOutroSeconds = 0.obs;
 
+  /// 推荐 tab 数据（同类型/关键词推荐）
+  final recommended = <Video>[].obs;
+  final isRecommendLoading = false.obs;
+  /// 详情页 tab 索引: 0=简介, 1=推荐, 2=快搜
+  final detailTabIndex = 0.obs;
+
+  /// 加载推荐（同类型名称关键词在当前源搜索，失败静默）
+  Future<void> loadRecommended() async {
+    if (recommended.isNotEmpty || isRecommendLoading.value) return;
+    final info = vodInfo.value;
+    if (info == null) return;
+    final source = ApiConfig.instance.getSource(info.sourceKey) ??
+        ApiConfig.instance.homeSourceBean.value;
+    if (source == null) return;
+
+    isRecommendLoading.value = true;
+    try {
+      final keyword = info.typeName.isNotEmpty ? info.typeName : info.name;
+      final results = await SourceService.instance.search(source, keyword);
+      recommended.value = results
+          .where((v) => v.id != info.id)
+          .take(30)
+          .toList();
+    } catch (_) {
+      recommended.value = [];
+    } finally {
+      isRecommendLoading.value = false;
+    }
+  }
+
   double _realtimeProgressSeconds = 0;
 
   String _qualityBaseEpisodeURL = '';

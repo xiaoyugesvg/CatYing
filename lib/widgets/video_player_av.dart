@@ -598,9 +598,9 @@ class _AVPlayerPlayerState extends State<AVPlayerPlayer> {
                                 ? AppTheme.accentColor
                                 : Colors.white70,
                             fontSize: 11,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -641,10 +641,11 @@ class _AVPlayerPlayerState extends State<AVPlayerPlayer> {
                   ),
                 ),
               ),
-              Wrap(
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                child: Wrap(
                 spacing: 10,
                 runSpacing: 10,
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
                 children: speeds.map((s) {
                   final selected = (_lastSpeed - s).abs() < 0.01;
                   return GestureDetector(
@@ -680,6 +681,7 @@ class _AVPlayerPlayerState extends State<AVPlayerPlayer> {
                     ),
                   );
                 }).toList(),
+                ),
               ),
             ],
           ),

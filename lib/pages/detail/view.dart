@@ -11,6 +11,10 @@ import '../../common/theme.dart';
 import '../../common/constants.dart';
 import '../../models/movie.dart';
 import '../../models/vod_info.dart';
+import '../../models/player_engine.dart';
+import '../../services/api_config.dart';
+import '../../widgets/vod_card.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import '../../models/cache_store.dart';
 import '../../services/background_service.dart';
 import '../../services/player_fullscreen_controller.dart';
@@ -619,60 +623,245 @@ class _DetailPageState extends State<DetailPage> {
 
   // MARK: - 视频信息区
 
-  /// 视频信息区 - 对应 Swift videoInfoSection (AppCard)
-  /// **布局重组（2026-09-26）**：
-  /// - 收藏按钮缩小为纯图标，前置到视频名称前（不再是大按钮）
-  /// - 影片简介并入名称同一卡片（不再独立卡片），过长收起点击展开
+  /// 视频信息区 - 兰香如故式三 tab 布局（2026-09-26）
+  /// 顶部「简介/推荐/快搜」tab；简介 tab 为左海报 + 右信息卡
+  /// （名称大字 / 出品方 / 右上角收藏 / 下方简介收起展开）。
   Widget _buildVideoInfo() {
     final info = _controller.vodInfo.value;
     if (info == null) return const SizedBox.shrink();
 
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // 顶部 tab 栏：简介 / 推荐 / 快搜
+        _buildDetailTabBar(),
+        const SizedBox(height: AppTheme.spacingMD),
+        Obx(() {
+          switch (_controller.detailTabIndex.value) {
+            case 1:
+              return _buildRecommendTab();
+            case 2:
+              return _buildQuickSearchTab();
+            default:
+              return _buildIntroTab(info);
+          }
+        }),
+      ],
+    );
+  }
+
+  /// 顶部 tab 栏（简介/推荐/快搜）- 对应参考图 segmentedTab
+  Widget _buildDetailTabBar() {
+    const tabs = ['简介', '推荐', '快搜'];
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingLG, AppTheme.spacingLG, AppTheme.spacingLG, 0),
-      child: AppCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 名称行：收藏小图标 + 片名（图标前置）
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                _buildCollectIconButton(),
-                const SizedBox(width: AppTheme.spacingSM),
-                Expanded(
+      padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingLG),
+      child: Container(
+        height: 36,
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(11),
+        ),
+        child: Row(
+          children: List.generate(tabs.length, (index) {
+            final selected = _controller.detailTabIndex.value == index;
+            return Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  _controller.detailTabIndex.value = index;
+                  if (index == 1) {
+                    _controller.loadRecommended();
+                  }
+                },
+                child: Container(
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: selected ? Colors.white.withValues(alpha: 0.10) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(9),
+                  ),
                   child: Text(
-                    info.name,
-                    style: const TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.bold,
+                    tabs[index],
+                    style: TextStyle(
+                      color: selected ? AppTheme.textPrimary : AppTheme.textTertiary,
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
+              ),
+            );
+          }),
+        ),
+      ),
+    );
+  }
+
+  /// 简介 tab - 左海报 + 右信息卡（对应参考图）
+  Widget _buildIntroTab(VodInfo info) {
+    final sourceName = ApiConfig.instance.getSource(info.sourceKey)?.name ?? '';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingLG),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 左侧大海报 - 对应参考图左侧封面
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: AspectRatio(
+              aspectRatio: 3 / 4,
+              child: info.pic.isNotEmpty
+                  ? CachedNetworkImage(
+                      imageUrl: info.pic,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => Container(
+                        color: AppTheme.backgroundTertiary,
+                        alignment: Alignment.center,
+                        child: const Icon(Icons.movie_outlined,
+                            color: AppTheme.textTertiary, size: 28),
+                      ),
+                      errorWidget: (_, __, ___) => Container(
+                        color: AppTheme.backgroundTertiary,
+                        alignment: Alignment.center,
+                        child: const Icon(Icons.broken_image_outlined,
+                            color: AppTheme.textTertiary, size: 28),
+                      ),
+                    )
+                  : Container(
+                      color: AppTheme.backgroundTertiary,
+                      alignment: Alignment.center,
+                      child: const Icon(Icons.movie_outlined,
+                          color: AppTheme.textTertiary, size: 28),
+                    ),
+            ),
+          ),
+          const SizedBox(width: AppTheme.spacingLG),
+          // 右侧信息卡
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 名称大字 + 右上角收藏
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        info.name,
+                        style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontTitle2,
+                          fontWeight: FontWeight.w700,
+                          height: 1.2,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: AppTheme.spacingSM),
+                    _buildCollectIconButton(),
+                  ],
+                ),
+                const SizedBox(height: AppTheme.spacingXS),
+                // 出品方 - 对应参考图"奇优影院"
+                if (sourceName.isNotEmpty)
+                  Text(
+                    sourceName,
+                    style: const TextStyle(
+                      color: AppTheme.accentColor,
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                const SizedBox(height: AppTheme.spacingSM),
+                // 元数据（导演/演员/年份/地区）
+                _buildMetadataFlow(info),
+                const SizedBox(height: AppTheme.spacingMD),
+                // 简介 - 2 行收起 / 点击展开
+                if (info.des.isNotEmpty) _buildInlineDescription(info),
               ],
             ),
-            const SizedBox(height: AppTheme.spacingMD),
+          ),
+        ],
+      ),
+    );
+  }
 
-            // 元数据药丸 - 对应 Swift metadataFlow
-            _buildMetadataFlow(info),
-
-            // 播放按钮 - 对应 Swift playButton（未播放时显示）；
-            // 正在播放时按钮隐藏，间距也不保留，简介上方不再留大空挡
-            if (!_controller.isPlaying.value) ...[
-              const SizedBox(height: AppTheme.spacingMD),
-              _buildPlayButton(),
-            ],
-
-            // 影片简介 - 并入名称卡片（对应 Swift descriptionSection）
-            if (info.des.isNotEmpty) ...[
-              const SizedBox(height: AppTheme.spacingMD),
-              _buildInlineDescription(info),
-            ],
-          ],
+  /// 推荐 tab - 同类型影片网格
+  Widget _buildRecommendTab() {
+    return Obx(() {
+      if (_controller.isRecommendLoading.value) {
+        return const SizedBox(
+          height: 200,
+          child: Center(child: AppLoading(message: '加载推荐中...')),
+        );
+      }
+      final items = _controller.recommended;
+      if (items.isEmpty) {
+        return const SizedBox(
+          height: 120,
+          child: Center(child: AppError(message: '暂无推荐')),
+        );
+      }
+      return GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingLG),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 3,
+          childAspectRatio: 0.62,
+          mainAxisSpacing: AppTheme.cardSpacing,
+          crossAxisSpacing: AppTheme.cardSpacing,
         ),
+        itemCount: items.length,
+        itemBuilder: (context, index) {
+          final video = items[index];
+          return VodCard(
+            video: video,
+            onTap: () => Get.toNamed('/detail', arguments: video),
+          );
+        },
+      );
+    });
+  }
+
+  /// 快搜 tab - 快捷搜索入口（关键词直达全局搜索）
+  Widget _buildQuickSearchTab() {
+    final info = _controller.vodInfo.value;
+    final keywords = <String>[
+      if (info != null && info.name.isNotEmpty) info.name,
+      if (info != null && info.actor.isNotEmpty)
+        ...info.actor.split(',').where((a) => a.trim().isNotEmpty).take(3),
+      if (info != null && info.typeName.isNotEmpty) info.typeName,
+    ];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingLG),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '快速搜索',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: AppTheme.fontHeadline,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: AppTheme.spacingMD),
+          Wrap(
+            spacing: AppTheme.spacingSM,
+            runSpacing: AppTheme.spacingSM,
+            children: keywords.map((keyword) {
+              return SelectableChip(
+                title: keyword,
+                isSelected: false,
+                onTap: () {
+                  Get.toNamed('/search', arguments: keyword);
+                },
+              );
+            }).toList(),
+          ),
+        ],
       ),
     );
   }
