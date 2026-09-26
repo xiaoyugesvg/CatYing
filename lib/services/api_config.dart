@@ -631,10 +631,21 @@ class ApiConfig extends GetxController {
     }
   }
 
-  /// 解析 M3U / TXT 格式的直播内容
+  /// 解析 M3U / TXT（#genre#）/ JSON 三种格式的直播内容，自动识别
+  ///
+  /// - M3U：`#EXTM3U` 开头，提取 `tvg-logo`（台标）与 `group-title`（分组）
+  /// - TXT：`分组名,#genre#` 分组，`频道名,url[,logo]` 频道行
+  /// - JSON：`[{name,channels:[{name,url,logo}]}]` / `{"group":{...}}` /
+  ///   `{"groups":[...]}` / `{"lives":[...]}` 结构
   List<LiveChannelGroup> parseLiveContent(String content) {
     final groups = <String, LiveChannelGroup>{};
-    var currentGroupName = '默认';
+
+    final trimmedContent = content.trim();
+    // JSON 优先识别
+    if (trimmedContent.startsWith('{') || trimmedContent.startsWith('[')) {
+      final parsed = _tryParseJsonLiveContent(trimmedContent, groups);
+      if (parsed) return _sortedGroups(groups);
+    }
 
     final lines = content.split(RegExp(r'\r?\n'));
     final firstNonEmpty = lines.firstWhere(
@@ -646,6 +657,7 @@ class ApiConfig extends GetxController {
     if (isM3U) {
       var currentName = '';
       var currentGroup = '默认';
+      var currentLogo = '';
 
       for (final line in lines) {
         final trimmed = line.trim();
@@ -660,12 +672,18 @@ class ApiConfig extends GetxController {
           if (groupMatch != null) {
             currentGroup = groupMatch.group(1) ?? '默认';
           }
+          // 台标：tvg-logo="https://..."
+          currentLogo = '';
+          final logoMatch = RegExp(r'tvg-logo="([^"]*)"').firstMatch(trimmed);
+          if (logoMatch != null) {
+            currentLogo = logoMatch.group(1) ?? '';
+          }
         } else if (_isLiveStreamUrl(trimmed)) {
           if (currentName.isNotEmpty) {
             _appendChannel(
               channelName: currentName,
               urls: [trimmed],
-              logo: '',
+              logo: currentLogo,
               groupName: currentGroup,
               groups: groups,
             );
@@ -674,7 +692,8 @@ class ApiConfig extends GetxController {
         }
       }
     } else {
-      // TXT 格式: 分组名,#genre#  或  频道名,url
+      // TXT 格式: 分组名,#genre#  或  频道名,url[,logo]
+      var currentGroupName = '默认';
       for (final line in lines) {
         final trimmed = line.trim();
         if (trimmed.isEmpty) continue;
@@ -691,12 +710,17 @@ class ApiConfig extends GetxController {
         if (parts.length >= 2) {
           final name = parts[0].trim();
           final url = parts.sublist(1).join(',').trim();
+          String logo = '';
+          if (parts.length >= 3) {
+            final candidate = parts[2].trim();
+            if (candidate.toLowerCase().startsWith('http')) logo = candidate;
+          }
 
           if (name.isNotEmpty && _isLiveStreamUrl(url)) {
             _appendChannel(
               channelName: name,
               urls: [url],
-              logo: '',
+              logo: logo,
               groupName: currentGroupName,
               groups: groups,
             );
@@ -706,6 +730,95 @@ class ApiConfig extends GetxController {
     }
 
     return _sortedGroups(groups);
+  }
+
+  /// 尝试解析 JSON 直播源，成功则返回 true 并写入 groups
+  bool _tryParseJsonLiveContent(
+    String content,
+    Map<String, LiveChannelGroup> groups,
+  ) {
+    dynamic decoded;
+    try {
+      decoded = jsonDecode(content);
+    } catch (_) {
+      return false;
+    }
+
+    final entries = <dynamic>[];
+    if (decoded is List) {
+      entries.addAll(decoded);
+    } else if (decoded is Map) {
+      if (decoded['lives'] is List) entries.addAll(decoded['lives'] as List);
+      else if (decoded['groups'] is List) entries.addAll(decoded['groups'] as List);
+      else if (decoded['group'] is Map) entries.add(decoded['group']);
+      else entries.add(decoded);
+    } else {
+      return false;
+    }
+
+    var appended = false;
+    for (final entry in entries) {
+      if (entry is! Map) continue;
+      final groupName =
+          (entry['group'] ?? entry['groupName'] ?? entry['name'] ?? '默认').toString().trim();
+
+      // 单个频道对象：带 url / urls
+      final directUrls = _extractLiveUrls(entry);
+      if (directUrls.isNotEmpty) {
+        final name = (entry['name'] ?? entry['channelName'] ?? '').toString().trim();
+        if (name.isNotEmpty) {
+          _appendChannel(
+            channelName: name,
+            urls: directUrls,
+            logo: _extractLiveLogo(entry),
+            groupName: groupName,
+            groups: groups,
+          );
+          appended = true;
+        }
+        continue;
+      }
+
+      final channels = entry['channels'] ?? entry['channelList'];
+      if (channels is List) {
+        for (final ch in channels) {
+          if (ch is! Map) continue;
+          final name = (ch['name'] ?? ch['channelName'] ?? '').toString().trim();
+          final urls = _extractLiveUrls(ch);
+          if (name.isEmpty || urls.isEmpty) continue;
+          _appendChannel(
+            channelName: name,
+            urls: urls,
+            logo: _extractLiveLogo(ch),
+            groupName: groupName,
+            groups: groups,
+          );
+          appended = true;
+        }
+      }
+    }
+    return appended;
+  }
+
+  /// 从 JSON 频道对象提取播放地址列表（url 或 urls，支持 String / List）
+  List<String> _extractLiveUrls(Map<dynamic, dynamic> item) {
+    final raw = item['url'] ?? item['urls'];
+    if (raw is String) {
+      return raw.trim().isEmpty ? [] : [raw.trim()];
+    }
+    if (raw is List) {
+      return raw
+          .map((e) => e.toString().trim())
+          .where((u) => u.isNotEmpty)
+          .toList();
+    }
+    return [];
+  }
+
+  /// 从 JSON 频道对象提取台标（logo 或 tvg-logo）
+  String _extractLiveLogo(Map<dynamic, dynamic> item) {
+    final logo = item['logo'] ?? item['tvg-logo'];
+    return logo is String ? logo.trim() : '';
   }
 
   void _appendChannel({
