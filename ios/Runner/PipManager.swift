@@ -86,7 +86,9 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
 
     var options: [String: Any] = [:]
     if !headers.isEmpty {
-      options[AVURLAssetHTTPHeaderFieldsKey] = headers
+      // AVURLAssetHTTPHeaderFieldsKey 在新版 iOS SDK 中已不可见（deprecated 后移除），
+      // 其值即字符串字面量 "AVURLAssetHTTPHeaderFieldsKey"，直接使用等价。
+      options["AVURLAssetHTTPHeaderFieldsKey"] = headers
     }
     let asset = AVURLAsset(url: videoURL, options: options)
     let playerItem = AVPlayerItem(asset: asset)
