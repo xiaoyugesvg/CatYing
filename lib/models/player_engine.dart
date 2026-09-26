@@ -1,20 +1,17 @@
 /// 播放器引擎类型 - 对应 Swift PlayerEngine
-/// 核心只保留 4 个：MPV(media_kit)、KSPlayer、UPlayer(DASH→HLS)、Webview
-/// AVPlayer(video_player) 内核已移除（2026-09-27），统一以 MPV 为主播放内核。
+/// 核心只保留 2 个真内核：MPV(media_kit)、Webview(WKWebView)
+/// KSPlayer / UPlayer / AVPlayer 均已移除（2026-09-27）：
+///  - KSPlayer Core 层耦合 FFmpeg/MEPlayer 无法剥离，集成成本过高
+///  - UPlayer 无 tag/pod 源不可靠、要求 iOS16+
+///  - AVPlayer(video_player) 内核已删除
+/// 统一以 MPV 为主播放内核，网页源走 Webview。
 
 /// 播放器引擎类型
 enum PlayerEngine {
   /// MPV 内核（基于 media_kit + libmpv），功能最全（倍速/硬解/画中画/弹幕）
   mpv(0, 'MPV播放器'),
-  /// KSPlayer 内核（基于 AVPlayer + FFmpeg，原生 Swift 播放器），
-  /// 支持 HDR10/Dolby Vision/杜比全景声/字幕/手势调节（音量/亮度/进度）
-  ksplayer(1, 'KSPlayer'),
-  /// UPlayer 内核（DASH→HLS 转换框架，iOS16+），
-  /// 用于 DASH/MPD 直播与点播流播放
-  uplayer(2, 'UPlayer'),
-  /// Webview 内核（webview_flutter + WKWebView），
-  /// 用于网页播放页面
-  webview(3, 'Webview播放器');
+  /// Webview 内核（webview_flutter + WKWebView），用于网页播放页面
+  webview(1, 'Webview播放器');
 
   final int value;
   final String title;

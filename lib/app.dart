@@ -34,7 +34,7 @@ class TVBoxApp extends StatelessWidget {
     // 详情页也能渲染同样的悬浮栏并切回对应 tab.
     Get.put(MainTabController(), permanent: true);
     return GetMaterialApp(
-      title: 'TVBox',
+      title: '猫',
       theme: AppTheme.darkTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.dark,

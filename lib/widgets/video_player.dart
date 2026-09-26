@@ -1340,9 +1340,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       child: _gradientTopContainer(
         child: Row(
           children: [
-            // **v6 (2026-09-27)**：播放器顶栏不再显示视频名称/线路名
-            // （用户明确要求"播放器上面不要放播放名称和播放线路"），
-            // 顶栏只保留分辨率/网速/功能按钮，整体贴最上。
+            // **v7 (2026-09-27)**：顶栏极简 —— 不再显示视频名称/线路名，
+            // 右上角只保留 分辨率 + 网速 + 设置 三个元素（听剧/PiP/投屏
+            // 已移到底栏功能行，避免右上角堆满按钮）。
             const Spacer(),
 
             // 分辨率
@@ -1373,43 +1373,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 ),
               ),
 
-            // 听剧模式（仅点播页显示）
-            if (widget.showAudioModeButton)
-              _iconButton(
-                icon: _audioMode ? Icons.headphones : Icons.headphones_outlined,
-                size: 20,
-                width: 44,
-                onTap: () {
-                  _scheduleHideControls();
-                  _toggleAudioMode();
-                },
-              ),
-
-            // 画中画
-            _iconButton(
-              icon: Icons.picture_in_picture_alt,
-              size: 20,
-              width: 44,
-              onTap: () {
-                _scheduleHideControls();
-                _togglePiP();
-              },
-            ),
-
-            // 投屏（AirPlay / DLNA 入口）
-            _iconButton(
-              icon: Icons.cast,
-              size: 20,
-              width: 44,
-              onTap: () {
-                _scheduleHideControls();
-                _toggleCast();
-              },
-            ),
-
             if (_isNativeFullscreen) ...[const SizedBox(width: 4), _buildStatusBarInfo()],
 
-            // 设置
+            // 设置（倍速/清晰度/裁剪都在这里）
             _iconButton(
               icon: Icons.more_horiz,
               size: 22,
@@ -2511,9 +2477,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Widget _gradientTopContainer({required Widget child}) {
     final mediaPadding = MediaQuery.of(context).padding;
-    // **v6 (2026-09-27)**：顶栏按钮贴最上，不再用 bottomPad 把按钮往
-    // 画面中部拉。上下两排完全贴边，中间大留白给视频画面。
-    final bottomPad = 6.0;
+    // **v8 (2026-09-27)**：恢复"最开始的播放器UI布局"(fd08e78)，
+    // 顶栏按钮距底部 30 留白，与底栏间距拉开，不挤在一起。
+    final bottomPad = 30.0;
     return DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -2536,9 +2502,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Widget _gradientBottomContainer({required Widget child}) {
     final mediaPadding = MediaQuery.of(context).padding;
-    // **v6 (2026-09-27)**：底栏按钮贴最下，不再用 topPad 把按钮往
-    // 画面中部拉。上下两排完全贴边，中间大留白给视频画面。
-    final topPad = 6.0;
+    // **v8 (2026-09-27)**：恢复"最开始的播放器UI布局"(fd08e78)，
+    // 底栏按钮距顶部 26 留白，与顶栏间距拉开，不挤在一起。
+    final topPad = 26.0;
     return DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
