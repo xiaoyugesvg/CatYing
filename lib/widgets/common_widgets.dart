@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../common/theme.dart';
+import 'glass.dart';
 
 /// 通用加载组件
 class AppLoading extends StatelessWidget {
@@ -133,18 +134,18 @@ class EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Container(
-        margin: const EdgeInsets.all(AppTheme.spacingXXL + AppTheme.spacingLG),
-        padding: const EdgeInsets.all(AppTheme.spacingXXL + AppTheme.spacingLG),
-        decoration: BoxDecoration(
-          // 半透明卡片色, 让 BackgroundService 全局背景层透出
-          color: AppTheme.backgroundCard,
-          borderRadius: BorderRadius.circular(30),
-          border: Border.all(
-            color: AppTheme.backgroundTertiary,
-            width: 1,
-          ),
-        ),
+      child: GlassPanel(
+        margin: const EdgeInsets.all(
+            AppTheme.spacingXXL + AppTheme.spacingLG),
+        radius: 30,
+        blur: false,
+        tint: AppTheme.glassTintDeep,
+        borderColor: AppTheme.glassBorderSoft,
+        borderWidth: 0.8,
+        highlightStrength: 0.5,
+        shadow: false,
+        padding: const EdgeInsets.all(
+            AppTheme.spacingXXL + AppTheme.spacingLG),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -226,33 +227,34 @@ class SectionHeader extends StatelessWidget {
 }
 
 /// 卡片容器 - 对应 Swift AppCard
+/// iOS 27 Liquid Glass: 深色半透明玻璃底 + 顶部镜面高光 + 亮描边
+/// 页面内低频卡片默认不开 blur (伪玻璃, 保性能); 需要真实毛玻璃时传 [blur] = true
 class AppCard extends StatelessWidget {
   final Widget child;
   final double cornerRadius;
   final EdgeInsetsGeometry? padding;
+  final bool blur;
 
   const AppCard({
     super.key,
     required this.child,
-    this.cornerRadius = AppTheme.radiusLG,
+    this.cornerRadius = AppTheme.glassRadiusCard,
     this.padding,
+    this.blur = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: padding ??
-          const EdgeInsets.all(AppTheme.spacingLG),
-      decoration: BoxDecoration(
-        // 半透明卡片色, 让 BackgroundService 全局背景层透出
-        // 替换原 backgroundSecondary (完全不透明) 造成的"黑色板块"问题
-        color: AppTheme.backgroundCard,
-        borderRadius: BorderRadius.circular(cornerRadius),
-        border: Border.all(
-          color: AppTheme.borderLight,
-          width: 0.5,
-        ),
-      ),
+    return GlassPanel(
+      radius: cornerRadius,
+      blur: blur,
+      tint: AppTheme.glassTintDeep,
+      borderColor: AppTheme.glassBorderSoft,
+      borderWidth: 0.8,
+      highlightStrength: blur ? 0.8 : 0.5,
+      shadow: false,
+      padding:
+          padding ?? const EdgeInsets.all(AppTheme.spacingLG),
       child: child,
     );
   }
@@ -266,23 +268,9 @@ class MetadataPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppTheme.spacingSM,
-        vertical: AppTheme.spacingXS,
-      ),
-      decoration: BoxDecoration(
-        color: AppTheme.backgroundTertiary,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: AppTheme.textSecondary,
-          fontSize: AppTheme.fontFootnote,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
+    return GlassPill(
+      text: text,
+      color: AppTheme.textSecondary,
     );
   }
 }
@@ -386,13 +374,16 @@ class SelectionModal<T> extends StatelessWidget {
     return Material(
       color: Colors.black54,
       child: Center(
-        child: Container(
+        child: GlassPanel(
           width: 360,
+          radius: AppTheme.glassRadius,
+          blur: true,
+          tint: AppTheme.glassTintDeep,
+          borderColor: AppTheme.glassBorder,
+          borderWidth: 1,
+          highlightStrength: 0.8,
+          shadow: true,
           margin: const EdgeInsets.all(AppTheme.spacingXXL),
-          decoration: BoxDecoration(
-            color: AppTheme.backgroundSecondary,
-            borderRadius: BorderRadius.circular(AppTheme.radiusXL),
-          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [

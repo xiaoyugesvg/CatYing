@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// 主题配置 - 匹配 tvbox-Swift 设计系统
+/// 主题配置 - 匹配 tvbox-Swift 设计系统 + iOS 27 Liquid Glass 玻璃体系
 class AppTheme {
   // 颜色
   static const Color accentColor = Color(0xFF5CB67B);
@@ -21,6 +21,23 @@ class AppTheme {
   static const Color backgroundCard = Color(0xCC1A1A1A);
   static const Color backgroundCardElevated = Color(0xE61A1A1A);
   static const Color backgroundNavBar = Color(0xCC1C1C1E);
+
+  // ===== iOS 27 Liquid Glass 玻璃体系 =====
+  // 玻璃底色: 白 10% tint, 叠加在全局背景层/页面内容上形成磨砂观感
+  static const Color glassTint = Color(0x1AFFFFFF);
+  // 深色玻璃底: 供列表内高频卡片模拟玻璃 (不开 blur 保性能)
+  static const Color glassTintDeep = Color(0x18181A1F);
+  // 高光层: 顶部镜面高光 (iOS 27 更亮的 specular highlight)
+  static const Color glassHighlightTop = Color(0x2EFFFFFF); // white 18%
+  static const Color glassHighlightMid = Color(0x0FFFFFFF); // white 6%
+  // 描边: 亮描边增强边缘分离感
+  static const Color glassBorder = Color(0x2EFFFFFF); // white 18%
+  static const Color glassBorderSoft = Color(0x1FFFFFFF); // white 12%
+  // 玻璃圆角
+  static const double glassRadius = 24; // 面板/弹窗大圆角
+  static const double glassRadiusCard = 16; // 卡片圆角
+  // 玻璃模糊强度 (iOS 27 对背景内容扩散更强)
+  static const double glassBlurSigma = 28;
 
   static const Color textPrimary = Color(0xEBEBEBEB); // white 92%
   static const Color textSecondary = Color(0x8CFFFFFF); // white 55%
@@ -69,7 +86,11 @@ class AppTheme {
         error: Colors.red,
       ),
       appBarTheme: const AppBarTheme(
-        backgroundColor: backgroundPrimary,
+        // 透明 + 无 elevation: 让全局背景层透出, 配合页面顶部形成玻璃观感;
+        // 需要真实毛玻璃的页面 (detail 等) 自行用 GlassPanel/flexibleSpace
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
         elevation: 0,
         centerTitle: false,
         titleTextStyle: TextStyle(

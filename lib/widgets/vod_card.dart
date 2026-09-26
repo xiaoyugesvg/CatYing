@@ -16,10 +16,24 @@ class VodCard extends StatelessWidget {
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          // 半透明卡片色, 让 BackgroundService 全局背景层透出
-          // 替换原 backgroundSecondary (完全不透明) 造成的"黑色板块"问题
-          color: AppTheme.backgroundCard,
-          borderRadius: BorderRadius.circular(AppTheme.radiusSM),
+          // iOS 27 Liquid Glass 深色玻璃卡:
+          // 半透明深色底 + 顶部镜面高光渐变 + 亮描边
+          // 列表内高频卡片不开 blur (BackdropFilter), 保证滚动性能
+          gradient: const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0x33FFFFFF), // white 20% 顶部高光
+              Color(0x16181A1F), // 深色半透明
+              Color(0x16181A1F),
+            ],
+            stops: [0.0, 0.25, 1.0],
+          ),
+          borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
+          border: Border.all(
+            color: AppTheme.glassBorderSoft,
+            width: 0.6,
+          ),
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
