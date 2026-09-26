@@ -307,41 +307,19 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     final indexJSPath = '$sourcePath/index.js';
     final indexMd5Path = '$sourcePath/index.js.md5';
     final configJSPath = '$sourcePath/index.config.js';
-    final configMd5Path = '$sourcePath/index.config.js.md5';
 
     final localJSExists = await File(indexJSPath).exists();
     final localMd5Exists = await File(indexMd5Path).exists();
     print('[IOSNodeJS] 缓存检查: index.js 存在=$localJSExists, '
         'index.js.md5 存在=$localMd5Exists');
 
-    if (localJSExists && localMd5Exists) {
-      try {
-        final md5Url = '$normalizedUrl.md5';
-        String? remoteMd5;
-        try {
-          final response = await _dio.get<String>(
-            md5Url,
-            options: Options(responseType: ResponseType.plain),
-          );
-          if (response.statusCode == 200 && response.data != null) {
-            remoteMd5 = response.data!.trim();
-          }
-        } on DioException catch (e) {
-          print('[IOSNodeJS] 远程 MD5 下载失败: ${e.message}');
-        }
-
-        if (remoteMd5 != null && remoteMd5.isNotEmpty) {
-          final localMd5Content =
-              await File(indexMd5Path).readAsString();
-          final localMd5 = localMd5Content.trim();
-          if (localMd5 == remoteMd5) {
-            print('[IOSNodeJS] MD5 匹配！使用缓存源，跳过下载');
-            return await _sendLoadCommandToNodeJS(sourcePath);
-          }
-        }
-      } catch (e) {
-        print('[IOSNodeJS] MD5 缓存检查异常: $e');
-      }
+    if (localJSExists) {
+      // **本地缓存优先 (2026-09-27)**：源文件已存在就直接使用, 不等远程 MD5
+      // 请求（避免每次启动都显示"正在下载源文件..."）。远程 MD5 校验改为
+      // 后台异步执行：若发现源已更新, 后台重新下载并替换。
+      print('[IOSNodeJS] 本地缓存源存在, 直接使用（后台异步校验更新）');
+      _refreshSourceInBackground(normalizedUrl, sourcePath);
+      return await _sendLoadCommandToNodeJS(sourcePath);
     }
 
     try {
@@ -442,6 +420,82 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       return (true, '源加载成功');
     } on DioException catch (e) {
       return (false, '加载请求失败: ${e.message}');
+    }
+  }
+
+  /// 后台异步刷新源文件：本地缓存存在时, 静默下载远程 MD5 比对,
+  /// 发现源已更新则重新下载并替换本地缓存。不阻塞启动、不显示下载文案。
+  void _refreshSourceInBackground(String normalizedUrl, String sourcePath) {
+    unawaited(_refreshSourceAsync(normalizedUrl, sourcePath));
+  }
+
+  Future<void> _refreshSourceAsync(
+      String normalizedUrl, String sourcePath) async {
+    try {
+      final indexJSPath = '$sourcePath/index.js';
+      final indexMd5Path = '$sourcePath/index.js.md5';
+      final configJSPath = '$sourcePath/index.config.js';
+
+      // 远程 MD5
+      String? remoteMd5;
+      try {
+        final response = await _dio.get<String>(
+          '$normalizedUrl.md5',
+          options: Options(responseType: ResponseType.plain),
+        );
+        if (response.statusCode == 200 && response.data != null) {
+          remoteMd5 = response.data!.trim();
+        }
+      } on DioException catch (e) {
+        print('[IOSNodeJS] 后台 MD5 获取失败: ${e.message}');
+        return;
+      }
+      if (remoteMd5 == null || remoteMd5.isEmpty) return;
+
+      // 本地 MD5
+      if (!await File(indexMd5Path).exists()) {
+        // 没有本地 MD5 记录 → 强制更新
+      } else {
+        final localMd5 = (await File(indexMd5Path).readAsString()).trim();
+        if (localMd5 == remoteMd5) {
+          print('[IOSNodeJS] 后台 MD5 匹配, 源无需更新');
+          return;
+        }
+      }
+
+      print('[IOSNodeJS] 后台检测到源已更新, 重新下载...');
+      final jsResponse = await _dio.get<List<int>>(
+        normalizedUrl,
+        options: Options(responseType: ResponseType.bytes),
+      );
+      if (jsResponse.statusCode != 200 || jsResponse.data == null) return;
+      final jsData = jsResponse.data!;
+
+      // 校验下载内容 MD5
+      final actualMd5 = md5.convert(jsData).toString();
+      if (actualMd5 != remoteMd5) {
+        print('[IOSNodeJS] 后台下载 MD5 校验失败, 丢弃');
+        return;
+      }
+
+      // 写回缓存
+      await File(indexJSPath).writeAsBytes(jsData);
+      await File(indexMd5Path).writeAsString(remoteMd5);
+      try {
+        final configUrl =
+            normalizedUrl.replaceAll('/index.js', '/index.config.js');
+        final configResponse = await _dio.get<List<int>>(
+          configUrl,
+          options: Options(responseType: ResponseType.bytes),
+        );
+        if (configResponse.statusCode == 200 &&
+            configResponse.data != null) {
+          await File(configJSPath).writeAsBytes(configResponse.data!);
+        }
+      } on DioException catch (_) {}
+      print('[IOSNodeJS] 后台源更新完成');
+    } catch (e) {
+      print('[IOSNodeJS] 后台源刷新异常: $e');
     }
   }
 

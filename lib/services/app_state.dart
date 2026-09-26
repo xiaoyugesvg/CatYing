@@ -82,6 +82,10 @@ class AppState extends GetxController {
   String _lastVodUrl = '';
   bool _nodeJSStarted = false;
 
+  /// 本次会话已成功加载过 Spider 源（Node.js 已持有源脚本）。
+  /// 再次启动加载流程时直接复用, 不再走"下载源文件"检查与提示。
+  bool _sourceLoadedThisSession = false;
+
   /// 重入 guard - 避免 lifecycle 抖动导致 handleSceneActive 嵌套跑
   /// 第二次及以后的调用直接跳过, 不浪费 CPU 也不互相覆盖 loadingPhase
   bool _isHandleSceneActiveRunning = false;
@@ -222,6 +226,21 @@ class AppState extends GetxController {
         .firstWhereOrNull((s) => s.isSpiderSource);
     if (spiderSource == null || spiderSource.api.isEmpty) return;
 
+    // **会话级复用**: 本次启动已成功加载过源, 直接复用,
+    // 不再显示"正在下载源文件..."、不再发 MD5/下载请求
+    if (_sourceLoadedThisSession) {
+      print('[AppState] 源已在本次会话加载, 跳过下载阶段');
+      loadingPhase.value = LoadingPhase.waitingSpiderPort;
+      final portReady = await NodeJSManager.instance.waitForSpiderPort();
+      if (!portReady) {
+        loadingPhase.value = LoadingPhase.failed;
+        configLoadError.value = '等待 Spider 服务超时';
+        return;
+      }
+      await _fetchSpiderConfig();
+      return;
+    }
+
     loadingPhase.value = LoadingPhase.downloadingSource;
     final (loadSuccess, loadMessage) =
         await NodeJSManager.instance.loadSource(spiderSource.api);
@@ -233,6 +252,7 @@ class AppState extends GetxController {
       return;
     }
     print('[AppState] Spider 源加载成功');
+    _sourceLoadedThisSession = true;
 
     loadingPhase.value = LoadingPhase.waitingSpiderPort;
     final portReady = await NodeJSManager.instance.waitForSpiderPort();
