@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import '../../common/theme.dart';
 import '../../models/live_models.dart';
 import '../../services/player_fullscreen_controller.dart';
+import '../../widgets/live_av_player.dart';
 import '../../widgets/video_player.dart';
 import '../../widgets/common_widgets.dart';
 import 'controller.dart';
@@ -154,6 +156,10 @@ class _LivePageState extends State<LivePage> {
   // MARK: - 播放器
 
   /// 播放器 - 对应 Swift 播放器区域
+  /// 内核选择（对应 tvbox-Swift selectedEngine）：
+  /// - iOS：系统 AVPlayer 内核（video_player），根治 mpv 对部分直播流黑屏
+  ///   （黑屏表现：有声音无画面，而同一流进画中画 AVPlayer 能播）。
+  /// - 其他平台：media_kit(mpv) 兜底，兼容更广协议（flv / rtmp 等）。
   Widget _buildPlayer() {
     return Obx(() {
       final channel = _controller.currentChannel.value;
@@ -162,10 +168,23 @@ class _LivePageState extends State<LivePage> {
       if (playUrl.isEmpty) {
         return const SizedBox.shrink();
       }
-      // 直播页不可见（切到其他 tab）时，**不渲染** VideoPlayerWidget，
+      // 直播页不可见（切到其他 tab）时，**不渲染**播放器，
       // 避免 IndexedStack 中 player 持续在后台播放。
       if (!liveVisible) {
         return const SizedBox.shrink();
+      }
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        return SizedBox.expand(
+          child: LiveAVPlayer(
+            key: ValueKey('live-av-$playUrl'),
+            url: playUrl,
+            title: channel?.channelName ?? '',
+            onError: () {
+              _handlePlaybackFailure(trigger: 'avplayer_error');
+            },
+            onTap: _reportUserActivity,
+          ),
+        );
       }
       return SizedBox.expand(
         child: VideoPlayerWidget(
