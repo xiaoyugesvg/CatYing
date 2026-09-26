@@ -865,20 +865,17 @@ class _ContentViewState extends State<ContentView>
               if (PlayerFullscreenController.instance.isFullscreen.value) {
                 return const SizedBox.shrink();
               }
-              // iOS 27 Liquid Glass 悬浮导航条:
-              // 真实毛玻璃 (BackdropFilter) + 深色半透明底 + 顶部镜面高光 +
-              // 亮描边 + 柔和深投影, 让全局背景层透过形成磨砂观感
+              // **彻底透明底栏 (2026-09-26)**：去掉毛玻璃模糊/阴影/高光，
+              // 只保留 2% 超浅底色 + 细描边，全局渐变背景完全透出，
+              // 悬浮栏不再是一块深色背景块，显示更多内容。
               return GlassPanel(
                 radius: 30,
-                blur: true,
-                // **沉浸式底栏**: 用超浅玻璃底 (alpha≈2%) 代替浅玻璃底
-                // (alpha≈4%), 只留模糊+描边+高光, 背景几乎全透明,
-                // 让全局渐变背景透出, 显示更多内容 (2026-09-26)。
+                blur: false,
                 tint: AppTheme.glassTintClear,
                 borderColor: AppTheme.glassBorderSoft,
                 borderWidth: 0.8,
-                highlightStrength: 0.9,
-                shadow: true,
+                highlightStrength: 0,
+                shadow: false,
                 padding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 child: Row(
@@ -1014,7 +1011,7 @@ class _ContentViewState extends State<ContentView>
                     _DisclaimerText(
                       title: '七、无担保声明',
                       body:
-                          '7.1 提供方不保证本软件无缺陷、无错误、无中断、无病毒或其它有害成分；不保证本软件之结果准确、可靠或满足用户之特定目的。\n'
+                          '7.1 提供方不保证本软件无缺陷、无错误、无中断、无病毒或其它有害成分；不保证本软件之结果准确、可靠或满足用户之特定需求。\n'
                           '7.2 本软件可能随版本更新而变更功能、界面或行为，提供方不保证向后兼容或长期维持某一功能。用户应自行备份重要配置与数据。',
                     ),
                     _DisclaimerText(
