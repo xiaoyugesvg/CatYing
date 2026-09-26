@@ -400,12 +400,9 @@ class _DetailPageState extends State<DetailPage> {
             // 4:3 加载占位，解析完成后自动出画面（不再"先进文字后出视频"）
             _buildPlayerArea(),
 
-            // 2. 视频信息区 - 对应 Swift videoInfoSection
+            // 2. 视频信息区：简介/推荐/快搜 tab
+            //    （简介 tab 内含 播放源/画质/合集 线路列表卡片；推荐/快搜 不显示）
             _buildVideoInfo(),
-
-            // 3. 播放线路 + 清晰度 + 选集播放 —— 合并为一张独立卡片
-            //    （三段式：播放器 / 简介·推荐·快搜 tab / 线路+列表卡片）
-            _buildPlaybackCard(),
 
             // 底部间距 - 预留悬浮导航栏高度, 让内容能完整滚出悬浮栏
             // (不再被底部悬浮菜单栏挡住最后一行内容)
@@ -570,7 +567,8 @@ class _DetailPageState extends State<DetailPage> {
 
   /// 视频信息区 - 兰香如故式三 tab 布局（2026-09-26）
   /// 顶部「简介/推荐/快搜」tab；简介 tab 为左海报 + 右信息卡
-  /// （名称大字 / 出品方 / 右上角收藏 / 下方简介收起展开）。
+  /// （名称大字 / 出品方 / 右上角收藏 / 下方简介收起展开）
+  /// + 下方 播放源/画质/合集 线路列表卡片（仅简介 tab 显示）。
   Widget _buildVideoInfo() {
     final info = _controller.vodInfo.value;
     if (info == null) return const SizedBox.shrink();
@@ -588,7 +586,15 @@ class _DetailPageState extends State<DetailPage> {
             case 2:
               return _buildQuickSearchTab();
             default:
-              return _buildIntroTab(info);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildIntroTab(info),
+                  const SizedBox(height: AppTheme.spacingMD),
+                  // 线路列表卡片只在简介 tab 出现（参考图）
+                  _buildPlaybackCard(),
+                ],
+              );
           }
         }),
       ],
@@ -642,7 +648,8 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
-  /// 简介 tab - 左海报 + 右信息卡（对应参考图）
+  /// 简介 tab - 左海报 + 右信息卡（对应参考图兰香如故）
+  /// 海报必须给死宽度：Row + AspectRatio 无宽度约束会塌成 0（内容「缺失」）。
   Widget _buildIntroTab(VodInfo info) {
     final sourceName = ApiConfig.instance.getSource(info.sourceKey)?.name ?? '';
     return Padding(
@@ -650,11 +657,12 @@ class _DetailPageState extends State<DetailPage> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 左侧大海报 - 对应参考图左侧封面
+          // 左侧大海报 - 固定宽 112，3:4
           ClipRRect(
             borderRadius: BorderRadius.circular(14),
-            child: AspectRatio(
-              aspectRatio: 3 / 4,
+            child: SizedBox(
+              width: 112,
+              height: 149,
               child: info.pic.isNotEmpty
                   ? CachedNetworkImage(
                       imageUrl: info.pic,
@@ -692,7 +700,7 @@ class _DetailPageState extends State<DetailPage> {
                   children: [
                     Expanded(
                       child: Text(
-                        info.name,
+                        info.name.isEmpty ? '未知片名' : info.name,
                         style: const TextStyle(
                           color: AppTheme.textPrimary,
                           fontSize: AppTheme.fontTitle2,
@@ -707,21 +715,44 @@ class _DetailPageState extends State<DetailPage> {
                     _buildCollectIconButton(),
                   ],
                 ),
-                const SizedBox(height: AppTheme.spacingXS),
-                // 出品方 - 对应参考图"奇优影院"
+                const SizedBox(height: AppTheme.spacingSM),
+                // 出品方胶囊 - 对应参考图「奇优影院」
                 if (sourceName.isNotEmpty)
-                  Text(
-                    sourceName,
-                    style: const TextStyle(
-                      color: AppTheme.accentColor,
-                      fontSize: AppTheme.fontSubhead,
-                      fontWeight: FontWeight.w500,
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accentColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: AppTheme.accentColor.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.theaters_outlined,
+                            size: 12, color: AppTheme.accentColor),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            sourceName,
+                            style: const TextStyle(
+                              color: AppTheme.accentColor,
+                              fontSize: AppTheme.fontCaption,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 const SizedBox(height: AppTheme.spacingSM),
                 // 元数据（导演/演员/年份/地区）
                 _buildMetadataFlow(info),
-                const SizedBox(height: AppTheme.spacingMD),
+                const SizedBox(height: AppTheme.spacingSM),
                 // 简介 - 2 行收起 / 点击展开
                 if (info.des.isNotEmpty)
                   _buildInlineDescription(info)
@@ -1092,8 +1123,9 @@ class _DetailPageState extends State<DetailPage> {
 
   /// 播放线路 + 清晰度 + 选集播放 —— 合并成一张独立卡片（三段式底部）
   Widget _buildPlaybackCard() {
-    final hasFlag = _controller.flags.length > 1;
-    final hasQuality = _controller.hasQualityChoices;
+    // 有一条也显示，对齐参考图（播放源/画质/合集完整三段）
+    final hasFlag = _controller.flags.isNotEmpty;
+    final hasQuality = _controller.qualityOptions.isNotEmpty;
     final hasEpisodes = _controller.currentEpisodes.isNotEmpty;
     if (!hasFlag && !hasQuality && !hasEpisodes) {
       return const SizedBox.shrink();
@@ -1106,7 +1138,7 @@ class _DetailPageState extends State<DetailPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (hasFlag) ...[
-              const SectionHeader(title: '播放线路', icon: Icons.settings_input_antenna),
+              const SectionHeader(title: '播放源', icon: Icons.settings_input_antenna),
               const SizedBox(height: AppTheme.spacingSM),
               Obx(() => SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
@@ -1131,40 +1163,11 @@ class _DetailPageState extends State<DetailPage> {
                     ),
                   )),
             ],
-            if (hasQuality) ...[
-              const SizedBox(height: AppTheme.spacingMD),
-              const Divider(height: 1, color: AppTheme.borderLight),
-              const SizedBox(height: AppTheme.spacingMD),
-              const SectionHeader(title: '视频清晰度', icon: Icons.auto_awesome),
-              const SizedBox(height: AppTheme.spacingSM),
-              Obx(() => SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: _controller.qualityOptions.map((option) {
-                        final isSelected =
-                            _controller.selectedQualityId.value == option.id;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: AppTheme.spacingSM),
-                          child: _PillChip(
-                            title: option.name,
-                            isSelected: isSelected,
-                            onTap: () {
-                              _controller.selectQuality(option);
-                              if (_controller.isPlaying.value) {
-                                _saveHistoryForCurrentEpisode();
-                              }
-                            },
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  )),
-            ],
             if (hasEpisodes) ...[
               const SizedBox(height: AppTheme.spacingMD),
               const Divider(height: 1, color: AppTheme.borderLight),
               const SizedBox(height: AppTheme.spacingMD),
-              const SectionHeader(title: '选集播放', icon: Icons.list),
+              const SectionHeader(title: '合集', icon: Icons.list),
               const SizedBox(height: AppTheme.spacingSM),
               Obx(() => EpisodeListView(
                     episodeNames: _controller.currentEpisodes

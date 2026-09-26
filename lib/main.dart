@@ -55,7 +55,7 @@ void main() async {
       backgroundColor: Colors.transparent,
       skipTaskbar: false,
       titleBarStyle: TitleBarStyle.normal,
-      title: 'TVBox',
+      title: '猫影',
     );
     windowManager.waitUntilReadyToShow(windowOptions, () async {
       await windowManager.show();

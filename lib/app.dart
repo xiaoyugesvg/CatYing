@@ -34,7 +34,7 @@ class TVBoxApp extends StatelessWidget {
     // 详情页也能渲染同样的悬浮栏并切回对应 tab.
     Get.put(MainTabController(), permanent: true);
     return GetMaterialApp(
-      title: '猫',
+      title: '猫影',
       theme: AppTheme.darkTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.dark,
@@ -200,64 +200,10 @@ class _ContentViewState extends State<ContentView>
   // 加载视图 - 对应 Swift loadingView
   // ============================================================
 
-  /// Node.js 下载进度条
-  Widget _buildNodeJSDownloadProgress() {
-    final mgr = NodeJSManager.instance;
-    return ValueListenableBuilder<double?>(
-      valueListenable: mgr.nodeDownloadProgress,
-      builder: (ctx, progress, _) {
-        final p = progress ?? 0.0;
-        return SizedBox(
-          width: 320,
-          child: Column(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: p > 0 ? p : null,
-                  minHeight: 6,
-                  backgroundColor: Colors.white.withValues(alpha: 0.1),
-                  valueColor: const AlwaysStoppedAnimation<Color>(
-                      AppTheme.accentColor),
-                ),
-              ),
-              const SizedBox(height: 8),
-              ValueListenableBuilder<String?>(
-                valueListenable: mgr.nodeDownloadStatus,
-                builder: (ctx2, status, _) {
-                  String text;
-                  if (status == 'downloading') {
-                    text = '下载中... ${(p * 100).toStringAsFixed(0)}%';
-                  } else if (status == 'extracting') {
-                    text = '解压中...';
-                  } else if (status == 'done') {
-                    text = '完成！';
-                  } else if (status == 'error') {
-                    text = '下载失败';
-                  } else {
-                    text = '准备下载...';
-                  }
-                  return Text(
-                    text,
-                    style: const TextStyle(
-                      color: AppTheme.textTertiary,
-                      fontSize: AppTheme.fontCaption,
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
+  /// 圆形进度 + 中心 Logo（猫影）
   Widget _buildLoadingView() {
     final appState = Get.find<AppState>();
 
-    // iOS 风格开屏: 深色径向渐变 + 毛玻璃发光 logo + Cupertino 活动指示器
-    // (2026-09-26 美化: 取代原"黑底+转圈"朴素加载页)
     return Container(
       decoration: const BoxDecoration(
         gradient: RadialGradient(
@@ -274,140 +220,54 @@ class _ContentViewState extends State<ContentView>
         child: Center(
           child: Obx(() {
             final phase = appState.loadingPhase.value;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Logo - 大圆角玻璃质感方块 + 内发光
-                Container(
-                  width: 108,
-                  height: 108,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(26),
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Color(0xFF6BDC9A),
-                        AppTheme.accentColor,
-                        Color(0xFF3E8F5E),
-                      ],
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppTheme.accentColor.withValues(alpha: 0.45),
-                        blurRadius: 32,
-                        spreadRadius: 2,
-                      ),
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        blurRadius: 12,
-                        offset: const Offset(0, 6),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.play_arrow_rounded,
-                    size: 62,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: AppTheme.spacingXXL + 6),
-                const Text(
-                  'TVBox',
-                  style: TextStyle(
-                    fontSize: 34,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.textPrimary,
-                    letterSpacing: 1.5,
-                  ),
-                ),
-                const SizedBox(height: AppTheme.spacingSM),
-                const Text(
-                  '极致视听 · 沉浸体验',
-                  style: TextStyle(
-                    fontSize: AppTheme.fontFootnote,
-                    color: AppTheme.textTertiary,
-                    letterSpacing: 3,
-                  ),
-                ),
-                const SizedBox(height: AppTheme.spacingXXL + AppTheme.spacingLG),
-                // 加载中 / 错误状态 - 对应 Swift loadingView 中的条件判断
-                if (phase.isLoading)
-                  Column(
-                    children: [
-                      if (phase == LoadingPhase.downloadingNodeJS)
-                        _buildNodeJSDownloadProgress()
-                      else
-                        // 注意: color 是运行时属性, 不能用 const
-                        CupertinoActivityIndicator(
-                          radius: 12,
-                          color: AppTheme.textSecondary,
-                        ),
-                      const SizedBox(height: AppTheme.spacingLG),
-                      Text(
-                        phase.description,
-                        style: const TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: AppTheme.fontSubhead,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ],
-                  )
-                else if (phase.isFailed)
-                  Column(
-                    children: [
-                      const Icon(
-                        Icons.error_outline,
-                        color: Colors.redAccent,
-                        size: 44,
-                      ),
-                      const SizedBox(height: AppTheme.spacingMD),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 32),
-                        child: Text(
-                          appState.phaseDisplayText,
-                          style: const TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: AppTheme.fontSubhead,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                      const SizedBox(height: AppTheme.spacingLG),
-                      ElevatedButton(
-                        onPressed: () {
-                          // 对应 Swift onRetry: { hasSavedConfig = false }
-                          setState(() {
-                            _hasSavedConfig = false;
-                          });
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.accentColor,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppTheme.spacingXXL,
-                            vertical: AppTheme.spacingMD,
-                          ),
-                        ),
-                        child: const Text('重试'),
-                      ),
-                    ],
-                  ),
-              ],
+            final downloading = phase == LoadingPhase.downloadingNodeJS;
+            double? progress;
+            String statusText = phase.description;
+            if (downloading) {
+              final mgr = NodeJSManager.instance;
+              return ValueListenableBuilder<double?>(
+                valueListenable: mgr.nodeDownloadProgress,
+                builder: (ctx, p, _) {
+                  final value = p ?? 0.0;
+                  return ValueListenableBuilder<String?>(
+                    valueListenable: mgr.nodeDownloadStatus,
+                    builder: (ctx2, status, __) {
+                      String label = phase.description;
+                      if (status == 'downloading') {
+                        label = '下载源运行时';
+                      } else if (status == 'extracting') {
+                        label = '解压中';
+                      } else if (status == 'error') {
+                        label = '下载失败';
+                      }
+                      return _CircularLogoProgress(
+                        progress: value > 0 ? value : null,
+                        percentText:
+                            '${(value * 100).toStringAsFixed(0)}%',
+                        caption: label,
+                        failed: status == 'error',
+                      );
+                    },
+                  );
+                },
+              );
+            }
+            final indeterminate = phase.isLoading;
+            final failed = phase.isFailed;
+            return _CircularLogoProgress(
+              progress: indeterminate ? null : (failed ? 0 : 1),
+              percentText: indeterminate
+                  ? ''
+                  : (failed ? '!' : '100%'),
+              caption: statusText,
+              failed: failed,
+              indeterminate: indeterminate,
             );
           }),
         ),
       ),
     );
   }
-
-  // ============================================================
-  // 设置视图 - 对应 Swift setupView
-  // ============================================================
 
   Widget _buildSetupView() {
     final appState = Get.find<AppState>();
@@ -1245,6 +1105,120 @@ class _DisclaimerText extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+
+/// 启动加载：圆形进度环 + 中心 Logo + 百分比
+class _CircularLogoProgress extends StatelessWidget {
+  final double? progress; // null=不确定转圈
+  final String percentText;
+  final String caption;
+  final bool failed;
+  final bool indeterminate;
+
+  const _CircularLogoProgress({
+    required this.progress,
+    required this.percentText,
+    required this.caption,
+    this.failed = false,
+    this.indeterminate = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ringColor = failed ? Colors.redAccent : AppTheme.accentColor;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: 160,
+          height: 160,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // 进度环
+              SizedBox(
+                width: 160,
+                height: 160,
+                child: CircularProgressIndicator(
+                  value: progress,
+                  strokeWidth: 6,
+                  strokeCap: StrokeCap.round,
+                  backgroundColor: Colors.white.withValues(alpha: 0.10),
+                  valueColor: AlwaysStoppedAnimation<Color>(ringColor),
+                ),
+              ),
+              // 中心 Logo（圆形裁切 + 猫影）
+              Container(
+                width: 112,
+                height: 112,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFFFFF8F0),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.accentColor.withValues(alpha: 0.35),
+                      blurRadius: 28,
+                    ),
+                  ],
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.pets,
+                          size: 36, color: Color(0xFFD4A574)),
+                      const SizedBox(height: 4),
+                      Text(
+                        '猫影',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFF3A2A1A),
+                          letterSpacing: 2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              // 百分比（压在 logo 下方）
+              if (percentText.isNotEmpty)
+                Positioned(
+                  bottom: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      percentText,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 28),
+        Text(
+          caption,
+          style: TextStyle(
+            color: failed ? Colors.redAccent : AppTheme.textSecondary,
+            fontSize: AppTheme.fontSubhead,
+            letterSpacing: 0.5,
+          ),
+        ),
+      ],
     );
   }
 }

@@ -22,11 +22,23 @@ class _SettingsPageState extends State<SettingsPage> {
 
   /// 弹幕 API 地址（Logvr-danmu / 弹弹play 兼容），播放器按视频 URL 匹配弹幕
   String _danmuApiUrl = '';
+  bool _sourceCacheEnabled = true;
+  int _autoCleanIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _loadDanmuApiUrl();
+    _loadCachePrefs();
+  }
+
+  Future<void> _loadCachePrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _sourceCacheEnabled = prefs.getBool('source_cache_enabled') ?? true;
+      _autoCleanIndex = prefs.getInt('source_cache_auto_clean') ?? 0;
+    });
   }
 
   Future<void> _loadDanmuApiUrl() async {
@@ -373,13 +385,88 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildCacheSection() {
     return AppCard(
-      child: Obx(() => SettingsRow(
-            icon: Icons.delete_outline,
-            title: '清除缓存',
-            value: controller.cacheSizeString.value,
-            onTap: () => controller.clearCache(),
-          )),
+      child: Column(
+        children: [
+          // 源文件缓存开关
+          Obx(() => SettingsRow(
+                icon: Icons.offline_bolt_outlined,
+                title: '源文件缓存',
+                value: _sourceCacheEnabled ? '已开启' : '已关闭',
+                onTap: () async {
+                  _sourceCacheEnabled = !_sourceCacheEnabled;
+                  setState(() {});
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setBool(
+                      'source_cache_enabled', _sourceCacheEnabled);
+                },
+              )),
+          const Divider(color: AppTheme.borderLight, height: 1),
+          // 自动清理
+          SettingsRow(
+            icon: Icons.auto_delete_outlined,
+            title: '自动清理缓存',
+            value: const ['关闭', '每天', '每周', '每月'][_autoCleanIndex],
+            onTap: _pickAutoClean,
+          ),
+          const Divider(color: AppTheme.borderLight, height: 1),
+          // 清理源文件
+          SettingsRow(
+            icon: Icons.cleaning_services_outlined,
+            title: '清理源文件缓存',
+            value: '',
+            onTap: () async {
+              await controller.clearCache();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('源文件缓存已清理')),
+                );
+              }
+            },
+          ),
+          const Divider(color: AppTheme.borderLight, height: 1),
+          Obx(() => SettingsRow(
+                icon: Icons.delete_outline,
+                title: '清除应用缓存',
+                value: controller.cacheSizeString.value,
+                onTap: () => controller.clearCache(),
+              )),
+        ],
+      ),
     );
+  }
+
+  Future<void> _pickAutoClean() async {
+    const options = ['关闭', '每天', '每周', '每月'];
+    final selected = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: const Color(0xFF1C1C1E),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('自动清理缓存',
+                  style: TextStyle(color: Colors.white, fontSize: 15)),
+            ),
+            for (var i = 0; i < options.length; i++)
+              ListTile(
+                title: Text(options[i],
+                    style: const TextStyle(color: Colors.white70)),
+                trailing: _autoCleanIndex == i
+                    ? const Icon(Icons.check, color: AppTheme.accentColor)
+                    : null,
+                onTap: () => Navigator.pop(ctx, i),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (selected != null) {
+      setState(() => _autoCleanIndex = selected);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('source_cache_auto_clean', selected);
+    }
   }
 
   // ============================================================

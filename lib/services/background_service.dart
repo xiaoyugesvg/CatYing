@@ -234,7 +234,7 @@ class BackgroundService extends GetxService {
             ),
           ),
         ),
-        // 装饰圆形
+        // 装饰圆形（弱化底部，避免像一截背景压住内容）
         Positioned(
           top: -120,
           right: -80,
@@ -244,11 +244,11 @@ class BackgroundService extends GetxService {
           ),
         ),
         Positioned(
-          bottom: -160,
-          left: -100,
+          bottom: -220,
+          left: -140,
           child: _buildCircle(
-            size: 520,
-            color: Colors.white.withValues(alpha: 0.03),
+            size: 420,
+            color: Colors.white.withValues(alpha: 0.02),
           ),
         ),
         Positioned(
