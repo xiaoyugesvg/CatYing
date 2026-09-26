@@ -22,6 +22,18 @@ class LiveController extends GetxController {
   /// "自己添加直播源"能力。
   final customLiveSources = <Map<String, String>>[].obs;
 
+  /// 内置直播源（参照 CxiaoyuN/movie tv.dart 的 kLiveSources）：
+  /// 打开直播页自动拉取并合并展示，保证即使订阅接口没有直播也有内容可看。
+  static const kBuiltinLiveSources = <Map<String, String>>[
+    {'name': 'IPTV-合集', 'url': 'https://raw.githubusercontent.com/vbskycn/iptv/master/tv/iptv4.m3u'},
+    {'name': '电视直播', 'url': 'https://raw.githubusercontent.com/kimwang1978/collect-tv-txt/main/bbxx_lite.m3u'},
+    {'name': '自动更新源', 'url': 'https://raw.githubusercontent.com/Guovin/iptv-api/gd/output/ipv4/result.m3u'},
+    {'name': '综合直播', 'url': 'https://raw.githubusercontent.com/TianmuTNT/iptv/main/iptv.m3u'},
+  ];
+  /// 内置源内容缓存（避免订阅源变化时重复拉取）
+  final Map<String, ({String content, DateTime fetchedAt})> _builtinCache = {};
+  static const _builtinCacheTtl = Duration(minutes: 5);
+
   /// 自定义直播源持久化 key
   static const _customLiveSourcesKey = 'custom_live_sources';
 
@@ -57,6 +69,8 @@ class LiveController extends GetxController {
     super.onInit();
     bindLiveChannelGroups();
     _loadCustomLiveSources();
+    // 首次进入立即加载：订阅源可能为空，内置源兜底保证直播页有内容
+    loadChannels();
   }
 
   @override
@@ -171,6 +185,32 @@ class LiveController extends GetxController {
         print('[LiveController] 自定义直播源加载失败: $url, error: $e');
       }
     }
+    // 3) 内置直播源：并发拉取并自动合并（参照 movie 内置 IPTV 源，
+    //    从 GitHub 拉 m3u 解析分组, 与订阅源/自定义源合并展示）
+    await Future.wait(kBuiltinLiveSources.map((source) async {
+      final url = source['url'] ?? '';
+      if (url.isEmpty) return;
+      final cached = _builtinCache[url];
+      if (cached != null &&
+          DateTime.now().difference(cached.fetchedAt) < _builtinCacheTtl) {
+        try {
+          final parsed = ApiConfig.instance.parseLiveContent(cached.content);
+          groups = _mergeGroups(groups, parsed);
+        } catch (e) {
+          print('[LiveController] 内置直播源缓存解析失败: $url, error: $e');
+        }
+        return;
+      }
+      try {
+        final content = await NetworkManager.instance.getString(url);
+        if (content.trim().isEmpty) return;
+        _builtinCache[url] = (content: content, fetchedAt: DateTime.now());
+        final parsed = ApiConfig.instance.parseLiveContent(content);
+        groups = _mergeGroups(groups, parsed);
+      } catch (e) {
+        print('[LiveController] 内置直播源加载失败: $url, error: $e');
+      }
+    }));
     applyChannelGroups(groups);
   }
 
@@ -287,7 +327,8 @@ class LiveController extends GetxController {
     _channelGroupsSubscription?.cancel();
     _channelGroupsSubscription =
         ApiConfig.instance.liveChannelGroupList.listen((groups) {
-      applyChannelGroups(groups);
+      // 订阅源变化时重新合并（含自定义源 + 内置源），保证展示完整
+      loadChannels();
     });
   }
 
