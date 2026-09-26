@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart' show DragToMoveArea;
 import '../common/theme.dart';
 import 'video_player_pip.dart';
@@ -158,6 +160,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   bool _isLocked = false;
   bool _showEpisodeSheet = false;
   bool _showSettingsSheet = false;
+
+  // 弹幕（Logvr-danmu / 弹弹play 兼容）
+  List<_DanmuItem> _danmus = [];
+  bool _danmuOn = true;
+  bool _danmuLoaded = false;
+  String _danmuApiUrl = '';
   late VideoFitType _videoFit;
   double _volume = 1.0;
   double _brightness = 0.5;
@@ -345,6 +353,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
     _scheduleHideControls();
     _startBitrateTimer();
+    _loadDanmuSettings();
 
     // **关键**：监听 WindowFullScreen 状态变化
     WindowFullScreen.instance.activeNotifier.addListener(
@@ -557,6 +566,51 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     } catch (e) {
       debugPrint('=== _applyPendingResumeSeek: 兜底 seek 失败: $e ===');
     }
+  }
+
+  /// 读取弹幕配置（设置页配置的 Logvr-danmu / 弹弹play 兼容 API 地址）
+  Future<void> _loadDanmuSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _danmuApiUrl = (prefs.getString('danmu_api_url') ?? '').trim();
+      _danmuOn = prefs.getBool('danmu_enabled') ?? true;
+      if (mounted && _danmuApiUrl.isNotEmpty) {
+        _ensureDanmuLoaded();
+      }
+    } catch (_) {}
+  }
+
+  /// 通过视频 URL 直接匹配弹幕（Logvr-danmu 的 /api/v2/comment?url= 接口）
+  Future<void> _ensureDanmuLoaded() async {
+    if (_danmuLoaded || _danmuApiUrl.isEmpty) return;
+    _danmuLoaded = true;
+    final url = _player.state.playlist.medias.isNotEmpty
+        ? _player.state.playlist.medias.last.uri
+        : widget.url;
+    if (url.isEmpty) return;
+    try {
+      final base = _danmuApiUrl.replaceAll(RegExp(r'/+$'), '');
+      final api =
+          '$base/api/v2/comment?url=${Uri.encodeQueryComponent(url)}&format=json';
+      final http = await HttpClient().getUrl(Uri.parse(api));
+      http.headers.set('User-Agent', 'NewTv/1.0');
+      final res = await http.close();
+      if (res.statusCode == 200) {
+        final body = await res.transform(utf8.decoder).join();
+        final list = parseDanmuBody(body);
+        if (mounted && list.isNotEmpty) {
+          setState(() => _danmus = list);
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// 持久化弹幕开关
+  Future<void> _persistDanmuOn() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('danmu_enabled', _danmuOn);
+    } catch (_) {}
   }
 
   void _startBitrateTimer() {
@@ -927,6 +981,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             ),
           ),
 
+        // 弹幕层（手势层之上, 不阻挡点击）
+        if (_danmuOn && _danmus.isNotEmpty) _buildDanmuLayer(),
+
         // 手势层（覆盖整个区域，识别单击/双击/长按/拖动）
         Positioned.fill(child: _buildGestureLayer()),
 
@@ -976,6 +1033,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         // 退不出去的直接原因。
         if (_audioMode) _buildAudioModeOverlay(),
       ],
+    );
+  }
+
+  // ============================================================
+  // 弹幕层
+  // ============================================================
+
+  Widget _buildDanmuLayer() {
+    return _DanmuLayer(
+      danmus: _danmus,
+      positionOf: () => _player.state.position,
     );
   }
 
@@ -1305,6 +1373,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 },
               ),
 
+            // 弹幕开关（设置里配置弹幕 API 后显示）
+            if (_danmuApiUrl.isNotEmpty)
+              _iconButton(
+                icon: _danmuOn ? Icons.subtitles : Icons.subtitles_off,
+                size: 20,
+                width: 36,
+                onTap: () {
+                  _scheduleHideControls();
+                  setState(() => _danmuOn = !_danmuOn);
+                  _persistDanmuOn();
+                },
+              ),
+
             // 画中画
             _iconButton(
               icon: Icons.picture_in_picture_alt,
@@ -1415,7 +1496,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         widget.onPlayNext?.call();
                       },
                     ),
-                  _buildTimeView(),
                   const Spacer(),
                   _iconButton(
                     icon: _volume > 0
@@ -1434,8 +1514,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         setState(() => _showEpisodeSheet = true);
                       },
                     ),
-                  _buildVideoFitMenu(),
-                  _buildSpeedMenu(),
+                  // 设置：倍速 / 画面比例 / 弹幕 / 跳过片头片尾 全部收进设置弹窗
+                  _iconButton(
+                    icon: Icons.settings,
+                    size: 22,
+                    width: 36,
+                    onTap: () {
+                      setState(() => _showSettingsSheet = true);
+                    },
+                  ),
                   _iconButton(
                     icon: _isNativeFullscreen
                         ? Icons.fullscreen_exit
@@ -1688,34 +1775,69 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     final progress = totalMs > 0 ? (currentMs / totalMs).clamp(0.0, 1.0) : 0.0;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: SizedBox(
-        height: 20,
-        child: _ProgressBarGesture(
-          progress: progress,
-          onSeekToRatio: (ratio) {
-            if (totalMs > 0) {
-              final targetMs = ratio * totalMs;
-              _seekTo(Duration(milliseconds: targetMs.round()));
-            }
-          },
-          onDrag: (ratio) {
-            setState(() {
-              _isDragging = true;
-              _dragValue = ratio * totalMs;
-            });
-            _scheduleHideControls();
-          },
-          onDragEnd: () {
-            setState(() => _isDragging = false);
-            _scheduleHideControls();
-            // **修复拖动进度不生效 (2026-09-26)**：松手时用拖动预览值
-            // 真正执行 seek。之前只更新预览位置不跳转，滑动进度无效。
-            if (totalMs > 0) {
-              _seekTo(Duration(milliseconds: _dragValue.round()));
-            }
-          },
-        ),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      // 开始时间在进度条起点正下方, 结束时间在终点正下方
+      child: Row(
+        children: [
+          SizedBox(
+            width: 56,
+            child: Text(
+              _formatDuration(
+                _isDragging
+                    ? Duration(milliseconds: _dragValue.round())
+                    : _position,
+              ),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontFamily: 'monospace',
+              ),
+              textAlign: TextAlign.left,
+            ),
+          ),
+          Expanded(
+            child: SizedBox(
+              height: 20,
+              child: _ProgressBarGesture(
+                progress: progress,
+                onSeekToRatio: (ratio) {
+                  if (totalMs > 0) {
+                    final targetMs = ratio * totalMs;
+                    _seekTo(Duration(milliseconds: targetMs.round()));
+                  }
+                },
+                onDrag: (ratio) {
+                  setState(() {
+                    _isDragging = true;
+                    _dragValue = ratio * totalMs;
+                  });
+                  _scheduleHideControls();
+                },
+                onDragEnd: () {
+                  setState(() => _isDragging = false);
+                  _scheduleHideControls();
+                  // **修复拖动进度不生效 (2026-09-26)**：松手时用拖动预览值
+                  // 真正执行 seek。之前只更新预览位置不跳转，滑动进度无效。
+                  if (totalMs > 0) {
+                    _seekTo(Duration(milliseconds: _dragValue.round()));
+                  }
+                },
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 56,
+            child: Text(
+              _duration > Duration.zero ? _formatDuration(_duration) : '--:--',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.82),
+                fontSize: 10,
+                fontFamily: 'monospace',
+              ),
+              textAlign: TextAlign.right,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1747,7 +1869,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   // ============================================================
-  // 时间显示
+  // 时间显示（已移至进度条两端, 此方法保留未再被调用）
   // ============================================================
 
   Widget _buildTimeView() {
@@ -1783,7 +1905,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   // ============================================================
-  // 倍速菜单
+  // 倍速菜单（已收进设置弹窗, 保留兼容）
   // ============================================================
 
   Widget _buildSpeedMenu() {
@@ -1844,7 +1966,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   // ============================================================
-  // 画面比例菜单
+  // 画面比例菜单（已收进设置弹窗, 保留兼容）
   // ============================================================
 
   Widget _buildVideoFitMenu() {
@@ -2013,7 +2135,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               child: const SizedBox(height: 1, width: double.infinity),
             ),
             Container(
-              constraints: const BoxConstraints(maxHeight: 360),
+              constraints: const BoxConstraints(maxHeight: 460),
               margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
               decoration: BoxDecoration(
                 color: const Color(0xFF1E1E1E),
@@ -2052,12 +2174,105 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                     ),
                   ),
                   SizedBox(
-                    height: 240,
+                    height: 340,
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // 弹幕开关
+                          Row(
+                            children: [
+                              const Expanded(
+                                child: _SettingsRowLabel('弹幕'),
+                              ),
+                              Switch(
+                                value: _danmuOn,
+                                activeColor: AppTheme.accentColor,
+                                onChanged: (v) {
+                                  setState(() => _danmuOn = v);
+                                  _persistDanmuOn();
+                                },
+                              ),
+                            ],
+                          ),
+                          const Divider(color: Colors.white12, height: 16),
+                          const _SettingsRowLabel('倍速'),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: _supportedSpeeds.map((s) {
+                              final selected = (s - _playbackSpeed).abs() < 0.01;
+                              return GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => _setSpeed(s),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? AppTheme.accentColor
+                                        : Colors.white.withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Text(
+                                    _formatSpeed(s),
+                                    style: TextStyle(
+                                      color: selected
+                                          ? Colors.white
+                                          : Colors.white70,
+                                      fontSize: 12,
+                                      fontWeight: selected
+                                          ? FontWeight.w600
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 16),
+                          const _SettingsRowLabel('画面比例'),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: VideoFitType.values.map((fit) {
+                              final selected = fit == _videoFit;
+                              return GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => _setVideoFit(fit),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? AppTheme.accentColor
+                                        : Colors.white.withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Text(
+                                    fit.desc,
+                                    style: TextStyle(
+                                      color: selected
+                                          ? Colors.white
+                                          : Colors.white70,
+                                      fontSize: 12,
+                                      fontWeight: selected
+                                          ? FontWeight.w600
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 16),
                           const _SettingsRowLabel('跳过片头'),
                           const SizedBox(height: 8),
                           _SkipSecondsEditor(
@@ -2779,6 +2994,226 @@ class _PipAudioModeMusicIconState extends State<_PipAudioModeMusicIcon>
         Icons.graphic_eq,
         size: widget.size,
         color: widget.color,
+      ),
+    );
+  }
+}
+
+// ============================================================
+// 弹幕（Logvr-danmu / 弹弹play / B站 XML 兼容解析与渲染）
+// ============================================================
+
+class _DanmuItem {
+  final double time; // 秒
+  final String text;
+  final Color color;
+  final int mode; // 1 滚动, 4 顶部, 5 底部
+  _DanmuItem(this.time, this.text, this.color, this.mode);
+}
+
+/// 解析弹幕响应体：兼容
+/// - Logvr-danmu / 弹弹play JSON（data 数组, 元素含 p/m 或 time/text 或 timepoint/ct/content 或 progress/mode/content）
+/// - B站 XML（<d p="...">text</d>）
+List<_DanmuItem> parseDanmuBody(String body) {
+  final items = <_DanmuItem>[];
+  try {
+    final trimmed = body.trim();
+    if (trimmed.isEmpty) return items;
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      final decoded = jsonDecode(trimmed);
+      List<dynamic> arr = [];
+      if (decoded is List) {
+        arr = decoded;
+      } else if (decoded is Map) {
+        if (decoded['data'] is List) arr = decoded['data'] as List;
+        else if (decoded['comments'] is List) arr = decoded['comments'] as List;
+        else if (decoded['danmaku'] is List) arr = decoded['danmaku'] as List;
+      }
+      for (final e in arr) {
+        if (e is! Map) continue;
+        double? t;
+        String? text;
+        var color = 0xFFFFFFFF;
+        var mode = 1;
+        // 新格式 progress/mode/content
+        if (e['progress'] is num) t = (e['progress'] as num) / 1000.0;
+        // DPlayer time/text
+        if (e['time'] is num) t = (e['time'] as num).toDouble();
+        if (e['time'] is String) t = double.tryParse(e['time'] as String);
+        // 弹弹play t（毫秒）/ timepoint
+        if (e['t'] is num) t = (e['t'] as num).toDouble();
+        if (e['timepoint'] is num) t = (e['timepoint'] as num).toDouble();
+        // p 属性（弹弹play: 时间,模式,颜色,...）
+        final p = e['p'];
+        if (p is String) {
+          final parts = p.split(',');
+          if (parts.isNotEmpty) {
+            final pt = double.tryParse(parts[0].trim());
+            if (pt != null) t = pt;
+          }
+          if (parts.length > 1) mode = int.tryParse(parts[1].trim()) ?? mode;
+          if (parts.length > 2) {
+            final c = int.tryParse(parts[2].trim());
+            if (c != null) color = c | 0xFF000000;
+          }
+        }
+        if (e['mode'] is num) mode = (e['mode'] as num).toInt();
+        if (e['ct'] is num) mode = (e['ct'] as num).toInt();
+        if (e['color'] is num) color = ((e['color'] as num).toInt() & 0xFFFFFF) | 0xFF000000;
+        text = e['text']?.toString() ?? e['m']?.toString() ?? e['content']?.toString() ?? e['c']?.toString();
+        if (t != null && text != null && text.isNotEmpty) {
+          items.add(_DanmuItem(t, text, Color(color), mode));
+        }
+      }
+    } else if (trimmed.startsWith('<')) {
+      // B站 XML
+      final re = RegExp(r'<d p="([^"]+)">([^<]+)</d>');
+      for (final m in re.allMatches(trimmed)) {
+        final parts = m.group(1)!.split(',');
+        final t = double.tryParse(parts[0]);
+        final mode = parts.length > 1 ? (int.tryParse(parts[1]) ?? 1) : 1;
+        var color = 0xFFFFFFFF;
+        if (parts.length > 3) {
+          final c = int.tryParse(parts[3]);
+          if (c != null) color = c | 0xFF000000;
+        }
+        if (t != null) items.add(_DanmuItem(t, m.group(2)!, Color(color), mode));
+      }
+    }
+  } catch (_) {}
+  return items;
+}
+
+class _ActiveDanmu {
+  final _DanmuItem item;
+  int track;
+  double x; // 滚动弹幕当前 x
+  double width;
+  bool topFixed;
+  bool bottomFixed;
+  double remaining; // 顶部/底部固定显示剩余秒
+  _ActiveDanmu(
+    this.item, {
+    this.track = 0,
+    this.x = 0,
+    this.width = 0,
+    this.topFixed = false,
+    this.bottomFixed = false,
+    this.remaining = 4.0,
+  });
+}
+
+/// 弹幕渲染层：按当前播放位置发射弹幕, 滚动/顶部/底部
+class _DanmuLayer extends StatefulWidget {
+  final List<_DanmuItem> danmus;
+  final Duration Function() positionOf;
+  const _DanmuLayer({required this.danmus, required this.positionOf});
+
+  @override
+  State<_DanmuLayer> createState() => _DanmuLayerState();
+}
+
+class _DanmuLayerState extends State<_DanmuLayer> {
+  late List<_DanmuItem> _sorted;
+  final List<_ActiveDanmu> _active = [];
+  int _nextIndex = 0;
+  int _nextTrack = 0;
+  Timer? _timer;
+  static const double _speed = 150.0; // px/s
+
+  @override
+  void initState() {
+    super.initState();
+    _sorted = List<_DanmuItem>.of(widget.danmus)
+      ..sort((a, b) => a.time.compareTo(b.time));
+    _timer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (!mounted) return;
+      final pos = widget.positionOf().inMilliseconds / 1000.0;
+      while (_nextIndex < _sorted.length &&
+          _sorted[_nextIndex].time <= pos + 0.25) {
+        _spawn(_sorted[_nextIndex]);
+        _nextIndex++;
+      }
+      for (final a in _active) {
+        if (a.item.mode == 1) {
+          a.x -= _speed * 0.1;
+        } else {
+          a.remaining -= 0.1;
+        }
+      }
+      _active.removeWhere(
+          (a) => a.item.mode == 1 ? a.x + a.width < -16 : a.remaining <= 0);
+      setState(() {});
+    });
+  }
+
+  void _spawn(_DanmuItem item) {
+    if (item.mode == 4) {
+      _active.add(_ActiveDanmu(item, topFixed: true));
+    } else if (item.mode == 5) {
+      _active.add(_ActiveDanmu(item, bottomFixed: true));
+    } else {
+      _active.add(_ActiveDanmu(item, track: _nextTrack));
+      _nextTrack = (_nextTrack + 1) % 4;
+    }
+  }
+
+  double _textWidth(String text, double fontSize) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w500),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return tp.width;
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final w = constraints.maxWidth;
+          final h = constraints.maxHeight;
+          for (final a in _active) {
+            if (a.item.mode == 1) {
+              a.width = _textWidth(a.item.text, 14);
+              if (a.x == 0) a.x = w.toDouble();
+            }
+          }
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              for (final a in _active)
+                Positioned(
+                  left: a.item.mode == 1 ? a.x : 0,
+                  top: a.item.mode == 1
+                      ? 12.0 + a.track * 28.0
+                      : (a.topFixed ? 12.0 : h - 34.0),
+                  child: Text(
+                    a.item.text,
+                    style: TextStyle(
+                      color: a.item.color,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      shadows: const [
+                        Shadow(blurRadius: 2, color: Colors.black87),
+                      ],
+                    ),
+                    maxLines: 1,
+                    softWrap: false,
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     );
   }
