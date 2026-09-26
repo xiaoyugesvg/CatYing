@@ -255,15 +255,17 @@ class _ContentViewState extends State<ContentView>
   Widget _buildLoadingView() {
     final appState = Get.find<AppState>();
 
+    // iOS 风格开屏: 深色径向渐变 + 毛玻璃发光 logo + Cupertino 活动指示器
+    // (2026-09-26 美化: 取代原"黑底+转圈"朴素加载页)
     return Container(
       decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+        gradient: RadialGradient(
+          center: Alignment(0, -0.35),
+          radius: 1.3,
           colors: [
-            Color(0xFF0F0F0F),
-            Color(0xFF141414),
-            Color(0xFF0F0F0F),
+            Color(0xFF2A2F33),
+            Color(0xFF141618),
+            Color(0xFF0C0D0F),
           ],
         ),
       ),
@@ -274,42 +276,60 @@ class _ContentViewState extends State<ContentView>
             return Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Logo
+                // Logo - 大圆角玻璃质感方块 + 内发光
                 Container(
-                  width: 100,
-                  height: 100,
+                  width: 108,
+                  height: 108,
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
+                    borderRadius: BorderRadius.circular(26),
                     gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                       colors: [
+                        Color(0xFF6BDC9A),
                         AppTheme.accentColor,
-                        AppTheme.accentLightColor,
+                        Color(0xFF3E8F5E),
                       ],
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: AppTheme.accentColor.withValues(alpha: 0.4),
-                        blurRadius: 20,
+                        color: AppTheme.accentColor.withValues(alpha: 0.45),
+                        blurRadius: 32,
+                        spreadRadius: 2,
+                      ),
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        blurRadius: 12,
+                        offset: const Offset(0, 6),
                       ),
                     ],
                   ),
                   child: const Icon(
-                    Icons.play_circle_filled,
-                    size: 50,
+                    Icons.play_arrow_rounded,
+                    size: 62,
                     color: Colors.white,
                   ),
                 ),
-                const SizedBox(height: AppTheme.spacingXL),
+                const SizedBox(height: AppTheme.spacingXXL + 6),
                 const Text(
                   'TVBox',
                   style: TextStyle(
-                    fontSize: 48,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 34,
+                    fontWeight: FontWeight.w700,
                     color: AppTheme.textPrimary,
-                    letterSpacing: 2,
+                    letterSpacing: 1.5,
                   ),
                 ),
-                const SizedBox(height: AppTheme.spacingSM + AppTheme.spacingMD),
+                const SizedBox(height: AppTheme.spacingSM),
+                const Text(
+                  '极致视听 · 沉浸体验',
+                  style: TextStyle(
+                    fontSize: AppTheme.fontFootnote,
+                    color: AppTheme.textTertiary,
+                    letterSpacing: 3,
+                  ),
+                ),
+                const SizedBox(height: AppTheme.spacingXXL + AppTheme.spacingLG),
                 // 加载中 / 错误状态 - 对应 Swift loadingView 中的条件判断
                 if (phase.isLoading)
                   Column(
@@ -317,8 +337,9 @@ class _ContentViewState extends State<ContentView>
                       if (phase == LoadingPhase.downloadingNodeJS)
                         _buildNodeJSDownloadProgress()
                       else
-                        const CircularProgressIndicator(
-                          color: AppTheme.accentColor,
+                        const CupertinoActivityIndicator(
+                          radius: 12,
+                          color: AppTheme.textSecondary,
                         ),
                       const SizedBox(height: AppTheme.spacingLG),
                       Text(
@@ -326,6 +347,7 @@ class _ContentViewState extends State<ContentView>
                         style: const TextStyle(
                           color: AppTheme.textSecondary,
                           fontSize: AppTheme.fontSubhead,
+                          letterSpacing: 0.5,
                         ),
                       ),
                     ],
@@ -335,8 +357,8 @@ class _ContentViewState extends State<ContentView>
                     children: [
                       const Icon(
                         Icons.error_outline,
-                        color: Colors.red,
-                        size: 48,
+                        color: Colors.redAccent,
+                        size: 44,
                       ),
                       const SizedBox(height: AppTheme.spacingMD),
                       Padding(
@@ -361,6 +383,13 @@ class _ContentViewState extends State<ContentView>
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppTheme.accentColor,
                           foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppTheme.spacingXXL,
+                            vertical: AppTheme.spacingMD,
+                          ),
                         ),
                         child: const Text('重试'),
                       ),
@@ -736,11 +765,15 @@ class _ContentViewState extends State<ContentView>
     // - bottomInset: Home Indicator 安全区（刘海屏/iPad 手势条避让）
     // - 悬浮胶囊离底 8pt, 左右留 32pt
     // - 面板高度 ≈ 内容 35(icon18+3+label14) + 内边距 16 ≈ 51
+    //
+    // **真悬浮 (2026-09-26)**: 不再为底栏预留全局 navReserve 高度,
+    // IndexedStack 直接全屏铺满, 底栏作为 Positioned 浮在内容之上。
+    // 各 tab 页自身的滚动列表在内容底部留少量内边距即可,
+    // 底栏底色已改为近透明玻璃, 内容滚过其下方时依旧清晰可见。
     final bottomInset = MediaQuery.of(context).padding.bottom;
     const navSideGap = 32.0;
     const navFloatGap = 8.0;
     const navBarHeight = 51.0;
-    final navReserve = bottomInset + navFloatGap + navBarHeight + 22.0;
 
     return Scaffold(
       body: Stack(
@@ -751,15 +784,12 @@ class _ContentViewState extends State<ContentView>
           Positioned.fill(
             child: BackgroundService.instance.buildBackground(overlayAlpha: 0.3),
           ),
-          // 5 个 tab 页 (底部预留悬浮导航栏高度, 避免最后一行内容被遮挡)
+          // 5 个 tab 页 - 全屏铺满, 不做底部预留, 悬浮栏浮于其上
           // 关键: IndexedStack 的 index 必须包在 Obx 里, 切 tab 才生效
-          Padding(
-            padding: EdgeInsets.only(bottom: navReserve),
-            child: Obx(() => IndexedStack(
-                  index: MainTabController.instance.selectedTab.value,
-                  children: _tabPages,
-                )),
-          ),
+          Obx(() => IndexedStack(
+                index: MainTabController.instance.selectedTab.value,
+                children: _tabPages,
+              )),
           // 搜索页 - 对应 Swift .sheet(isPresented: $showSearch)
           if (_showSearch)
             Positioned.fill(
@@ -796,13 +826,13 @@ class _ContentViewState extends State<ContentView>
               if (PlayerFullscreenController.instance.isFullscreen.value) {
                 return const SizedBox.shrink();
               }
-              // **轻玻璃悬浮胶囊 (2026-09-26)**：恢复毛玻璃+极薄半透明底色，
-              // 面板有清晰的悬浮圆角轮廓，但底色很薄，下方内容仍透过
-              // 模糊玻璃可见，不再是一整条实心横带挡住内容。
+              // **真悬浮轻玻璃 (2026-09-26)**：底色用近透明 glassTintClear
+              // (alpha≈2%)，只保留毛玻璃模糊+细描边+高光，几乎不遮内容。
+              // 内容滚过底栏下方时依旧清晰可见，真正"沉浸式悬浮"。
               return GlassPanel(
                 radius: 30,
                 blur: true,
-                tint: Colors.black.withValues(alpha: 0.16),
+                tint: AppTheme.glassTintClear,
                 borderColor: Colors.white.withValues(alpha: 0.10),
                 borderWidth: 0.8,
                 highlightStrength: 0.2,

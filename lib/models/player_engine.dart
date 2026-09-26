@@ -1,10 +1,14 @@
 /// 播放器引擎类型 - 对应 Swift PlayerEngine
-/// 当前 Flutter 项目使用 media_kit（基于 libmpv）作为统一播放器后端
+/// iOS 上 mpv(media_kit) 对部分 HLS/TS 流存在黑屏/转圈渲染问题,
+/// 而系统 AVPlayer(video_player) 可正常解码, 因此提供双内核切换。
 
 /// 播放器引擎类型
 enum PlayerEngine {
-  /// MPV 内核（基于 media_kit + libmpv），项目当前唯一可用的播放器
-  mpv(0, 'MPV播放器');
+  /// MPV 内核（基于 media_kit + libmpv），功能最全（倍速/硬解/画中画）
+  mpv(0, 'MPV播放器'),
+  /// AVPlayer 内核（基于 video_player，iOS 系统播放器），
+  /// 对 HLS/TS 直播与部分点播流兼容性最好，画面稳定不黑屏
+  avplayer(1, 'AVPlayer播放器');
 
   final int value;
   final String title;

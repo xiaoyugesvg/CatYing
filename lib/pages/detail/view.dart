@@ -361,8 +361,8 @@ class _DetailPageState extends State<DetailPage> {
         return _buildPlayerArea();
       }
 
-      // 悬浮导航栏占位高度: 内容滚动区域底部预留, 避免最后一项
-      // (选集/简介) 滚动到底时被底部悬浮菜单栏遮挡 (2026-09-26)
+      // 悬浮导航栏占位高度: 滚动内容底部少量留白, 让最后一项
+      // (选集/简介) 滚动到底时能完全滚出悬浮栏上方 (真悬浮, 非全局预留)
       final bottomInset = MediaQuery.of(context).padding.bottom;
       const navFloatGap = 8.0;
       const navBarHeight = 51.0;

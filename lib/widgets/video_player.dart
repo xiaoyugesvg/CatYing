@@ -1325,7 +1325,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               Expanded(
                 child: Text(
                   _displayTitle,
-                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1336,7 +1336,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             // 分辨率
             if (_resolutionText.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
+                padding: const EdgeInsets.only(left: 10, right: 6),
                 child: Text(
                   _resolutionText,
                   style: const TextStyle(
@@ -1350,7 +1350,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             // 网速
             if (_bitrateText.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
+                padding: const EdgeInsets.only(left: 2, right: 10),
                 child: Text(
                   _bitrateText,
                   style: const TextStyle(
@@ -1366,7 +1366,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               _iconButton(
                 icon: _audioMode ? Icons.headphones : Icons.headphones_outlined,
                 size: 20,
-                width: 36,
+                width: 44,
                 onTap: () {
                   _scheduleHideControls();
                   _toggleAudioMode();
@@ -1378,7 +1378,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               _iconButton(
                 icon: _danmuOn ? Icons.subtitles : Icons.subtitles_off,
                 size: 20,
-                width: 36,
+                width: 44,
                 onTap: () {
                   _scheduleHideControls();
                   setState(() => _danmuOn = !_danmuOn);
@@ -1390,7 +1390,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             _iconButton(
               icon: Icons.picture_in_picture_alt,
               size: 20,
-              width: 36,
+              width: 44,
               onTap: () {
                 _scheduleHideControls();
                 _togglePiP();
@@ -1401,7 +1401,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             _iconButton(
               icon: Icons.cast,
               size: 20,
-              width: 36,
+              width: 44,
               onTap: () {
                 _scheduleHideControls();
                 _toggleCast();
@@ -1414,7 +1414,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             _iconButton(
               icon: Icons.more_horiz,
               size: 22,
-              width: 40,
+              width: 44,
               onTap: () {
                 setState(() => _showSettingsSheet = true);
               },
@@ -1472,8 +1472,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           children: [
             _buildProgressBar(),
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 20),
               child: Row(
+                mainAxisSize: MainAxisSize.max,
                 children: [
                   if (widget.canPlayPrevious)
                     _iconButton(
@@ -1789,7 +1790,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               ),
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 10,
+                fontSize: 11,
                 fontFamily: 'monospace',
               ),
               textAlign: TextAlign.left,
@@ -1831,7 +1832,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               _duration > Duration.zero ? _formatDuration(_duration) : '--:--',
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.82),
-                fontSize: 10,
+                fontSize: 11,
                 fontFamily: 'monospace',
               ),
               textAlign: TextAlign.right,
@@ -2498,9 +2499,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       ),
       child: Padding(
         padding: EdgeInsets.only(
-          top: 11 + mediaPadding.top,
-          left: 4 + mediaPadding.left,
-          right: 4 + mediaPadding.right,
+          top: 18 + mediaPadding.top,
+          left: 8 + mediaPadding.left,
+          right: 8 + mediaPadding.right,
+          bottom: 30,
         ),
         child: child,
       ),
@@ -2519,9 +2521,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       ),
       child: Padding(
         padding: EdgeInsets.only(
-          bottom: mediaPadding.bottom,
-          left: mediaPadding.left,
-          right: mediaPadding.right,
+          top: 26,
+          bottom: 8 + mediaPadding.bottom,
+          left: 8 + mediaPadding.left,
+          right: 8 + mediaPadding.right,
         ),
         child: child,
       ),
@@ -2590,7 +2593,7 @@ class _ProgressBarGesture extends StatelessWidget {
           },
           onHorizontalDragEnd: (_) => onDragEnd(),
           child: CustomPaint(
-            size: Size(w, 20),
+            size: Size(w, 26),
             painter: _ProgressBarPainter(progress: progress),
           ),
         );
