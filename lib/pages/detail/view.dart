@@ -252,14 +252,14 @@ class _DetailPageState extends State<DetailPage> {
         final current = MainTabController.instance.selectedTab.value;
         return GlassPanel(
           radius: 30,
-          blur: true,
-          // **沉浸式底栏**：与根底栏一致改用超浅玻璃底 (alpha≈2%)，
-          // 只留模糊+描边+高光，背景几乎全透明，显示更多内容。
+          // **彻底透明底栏 (2026-09-26)**：去掉毛玻璃模糊/阴影/高光，
+          // 只保留 2% 超浅底色 + 细描边，背景内容完全透出，显示更多。
+          blur: false,
           tint: AppTheme.glassTintClear,
           borderColor: AppTheme.glassBorderSoft,
           borderWidth: 0.8,
-          highlightStrength: 0.9,
-          shadow: true,
+          highlightStrength: 0,
+          shadow: false,
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -415,8 +415,9 @@ class _DetailPageState extends State<DetailPage> {
         return _buildPlayerWidget(isFull: isFull, isPip: isPip);
       } else {
         // 正在播放但 URL 尚未就绪
+        // 4:3 容器: 比 16:9 更高, 上下控制条间距拉开, 视频画面不再被压成细缝
         return AspectRatio(
-          aspectRatio: 16 / 9,
+          aspectRatio: 4 / 3,
           child: Container(
             color: Colors.black,
             child: const Center(
@@ -495,12 +496,13 @@ class _DetailPageState extends State<DetailPage> {
     );
 
     // immersive 模式（native 全屏 / PiP）：视频填满父容器
-    // 正常模式：16:9 容器
+    // 正常模式：4:3 容器 (比 16:9 更高, 上下控制条间距拉开,
+    // 视频画面可视区域约翻倍, 修复"上下菜单栏挨着近"的问题)
     if (isFull || isPip) {
       return SizedBox.expand(child: widget);
     }
     return AspectRatio(
-      aspectRatio: 16 / 9,
+      aspectRatio: 4 / 3,
       child: widget,
     );
   }
