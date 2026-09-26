@@ -14,6 +14,7 @@ import '../../widgets/common_widgets.dart';
 import '../../widgets/video_player.dart';
 import '../../widgets/video_player_pip.dart';
 import '../../widgets/window_fullscreen.dart';
+import '../play/webview_player_page.dart';
 import 'controller.dart';
 import 'episode_list.dart';
 
@@ -307,6 +308,14 @@ class _DetailPageState extends State<DetailPage> {
   /// 否则 Rx 变化时这里还是用闭包捕获的旧值，导致全屏态无法退出
   Widget _buildPlayerWidget({required bool isFull, required bool isPip}) {
     final url = _controller.playUrl.value!;
+    // 网页播放器页（非直链媒体 URL）→ 用 WebView 兜底播放
+    // （对应 catmovie WebviewView：第三方解析页 / parse=1 网页端 / player 页）
+    if (_isWebPageUrl(url)) {
+      return WebviewPlayerPage(
+        url: url,
+        title: _controller.vodInfo.value?.name,
+      );
+    }
     final headers = _controller.playHeaders.isNotEmpty
         ? Map<String, String>.from(_controller.playHeaders)
         : const <String, String>{};
@@ -367,6 +376,30 @@ class _DetailPageState extends State<DetailPage> {
       aspectRatio: 16 / 9,
       child: widget,
     );
+  }
+
+  /// 判断播放 URL 是否为"网页播放器页"（需 WebView 兜底）而非直链媒体。
+  ///
+  /// 规则：
+  /// - 非 http/https（如 rtmp/rtsp）→ 不是网页，走原生播放器
+  /// - 含常见媒体扩展名（m3u8/mp4/flv/ts 等）→ 直链，走原生播放器
+  /// - 其余 http(s) URL → 视为网页播放页（解析页 / player 页 / 网页端地址）
+  static const List<String> _directMediaExtensions = [
+    '.m3u8', '.m3u', '.mp4', '.flv', '.ts', '.mkv', '.avi', '.mov',
+    '.webm', '.rmvb', '.rm', '.wmv', '.mp3', '.aac', '.ogg', '.flac',
+  ];
+
+  bool _isWebPageUrl(String url) {
+    final lower = url.trim().toLowerCase();
+    if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
+      return false;
+    }
+    for (final ext in _directMediaExtensions) {
+      if (lower.contains(ext)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   // MARK: - 视频信息区
