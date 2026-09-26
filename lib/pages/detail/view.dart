@@ -342,6 +342,7 @@ class _DetailPageState extends State<DetailPage> {
           _controller.currentEpisodes.length - 1,
       canPlayPrevious: _controller.selectedEpisodeIndex.value > 0,
       isPipMode: isPip,
+      showAudioModeButton: true,
       skipIntroSeconds: _controller.skipIntroSeconds.value,
       skipOutroSeconds: _controller.skipOutroSeconds.value,
       onPlayNext: () => _playNextEpisode(),
