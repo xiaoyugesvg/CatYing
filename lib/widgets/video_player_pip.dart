@@ -1,44 +1,125 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
-/// 画中画管理器 - 桌面端 (Windows/macOS/Linux) 通过 window_manager
-/// 实现真正的桌面级悬浮窗口：
+/// 画中画管理器
+///
+/// **桌面端** (Windows/macOS/Linux)：通过 window_manager 实现桌面级悬浮窗口：
 ///   - 窗口置顶 (alwaysOnTop)
 ///   - 调整窗口为小尺寸悬浮窗 (默认 480x270 - 16:9)
 ///   - 移动到屏幕右下角
 ///
-/// 与 Swift 的 AVPictureInPictureController 行为类似：
-///   - 视频始终在播放
-///   - 窗口可拖动
-///   - 单击视频可退出 PiP 恢复原窗口
+/// **iOS 端**：系统级画中画（悬浮小窗 + 切后台继续播放），
+/// 由原生 PipManager.swift 实现（AVPlayer + AVPictureInPictureController），
+/// 本类通过 "pip_manager" MethodChannel 桥接：
+///   - 进入：把 url/headers/当前进度交给原生，原生起系统 PiP 悬浮窗，
+///     主播放器（media_kit）由调用方暂停，避免双路声音/解码
+///   - 退出：原生 delegate 回调 onPipStopped → 通知调用方恢复主播放器
 ///
-/// 视频播放器由调用方通过 [VideoPlayerPipController.attach] 注入，
-/// 这样可以避免重建 Player 实例，保留播放状态。
+/// 注意：iOS 系统 PiP 是独立悬浮窗，**不**翻转 activeNotifier
+/// （activeNotifier 驱动 detail view 的 immersive 模式，仅桌面端小窗需要）。
 class VideoPlayerPip {
   static final VideoPlayerPip instance = VideoPlayerPip._();
-  VideoPlayerPip._();
-
+  VideoPlayerPip._() {
+    // iOS：注册原生 PiP 回调通道
+    if (Platform.isIOS) {
+      _iosChannel.setMethodCallHandler(_handleIosCall);
+    }
+  }
   static final GlobalKey<NavigatorState> navigatorKey =
       GlobalKey<NavigatorState>();
 
-  // ========== 状态 ==========
+  /// iOS 系统 PiP 通道（对应 ios/Runner/PipManager.swift）
+  static const MethodChannel _iosChannel = MethodChannel('pip_manager');
+
+  // ========== 桌面端状态 ==========
   bool _isActive = false;
   Rect? _savedBounds;
   Player? _attachedPlayer;
-
-  /// 当前是否处于画中画模式
+  /// 当前是否处于画中画模式（桌面端悬浮窗）
   bool get isActive => _isActive;
-
   /// 监听 PiP 状态变化（用于 detail 页同步隐藏 AppBar 等 UI）
   final ValueNotifier<bool> activeNotifier = ValueNotifier<bool>(false);
-
   /// 当前已附加的 Player（用于上层构建 PiP 预览视图）
   Player? get attachedPlayer => _attachedPlayer;
 
-  // ========== 入口 API ==========
+  // ========== iOS 系统 PiP 状态 ==========
+  bool _iosActive = false;
+  double _iosLastPosition = 0;
+  VoidCallback? _iosOnStopped;
+  /// iOS 是否处于系统画中画
+  bool get isIosActive => _iosActive;
+  /// iOS PiP 最后播放位置（供主播放器恢复进度）
+  Duration get iosLastPosition =>
+      Duration(milliseconds: (_iosLastPosition * 1000).round());
 
+  Future<void> _handleIosCall(MethodCall call) async {
+    switch (call.method) {
+      case 'onPipStopped':
+        final args = call.arguments as Map<dynamic, dynamic>? ?? {};
+        _iosLastPosition = (args['position'] as num?)?.toDouble() ?? 0;
+        final cb = _iosOnStopped;
+        _iosOnStopped = null;
+        _iosActive = false;
+        cb?.call();
+        break;
+      default:
+        break;
+    }
+  }
+
+  /// iOS：设备是否支持系统画中画（模拟器 false，真机 true）
+  Future<bool> isIosPipSupported() async {
+    if (!Platform.isIOS) return false;
+    try {
+      return await _iosChannel.invokeMethod<bool>('isPipSupported') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// iOS：进入系统画中画
+  /// - [url] 播放地址
+  /// - [headers] 请求头（Referer / User-Agent 等）
+  /// - [position] 当前进度（原生 AVPlayer 从此处续播）
+  /// - [onStopped] 原生 PiP 结束时回调（调用方恢复主播放器并 seek）
+  Future<bool> enterIos({
+    required String url,
+    Map<String, String>? headers,
+    Duration? position,
+    VoidCallback? onStopped,
+  }) async {
+    if (!Platform.isIOS) return false;
+    if (_iosActive) return true;
+    _iosOnStopped = onStopped;
+    _iosLastPosition = 0;
+    try {
+      await _iosChannel.invokeMethod<void>('startPip', {
+        'url': url,
+        'headers': headers ?? const <String, String>{},
+        'position': position?.inMilliseconds ?? 0,
+      });
+      _iosActive = true;
+      return true;
+    } catch (e) {
+      _iosOnStopped = null;
+      debugPrint('[VideoPlayerPip] iOS enter failed: $e');
+      return false;
+    }
+  }
+
+  /// iOS：退出系统画中画
+  Future<void> exitIos() async {
+    if (!Platform.isIOS || !_iosActive) return;
+    try {
+      await _iosChannel.invokeMethod<void>('stopPip');
+    } catch (_) {}
+    _iosActive = false;
+  }
+
+  // ========== 桌面端入口 API ==========
   /// 附加播放器到 PiP 模块（不创建新 Player，复用已有实例）
   void attachPlayer(Player player) {
     _attachedPlayer = player;
@@ -49,7 +130,7 @@ class VideoPlayerPip {
     _attachedPlayer = null;
   }
 
-  /// 进入画中画
+  /// 进入画中画（桌面端悬浮窗）
   Future<void> enter() async {
     if (_isActive) return;
     if (_attachedPlayer == null) {
@@ -57,12 +138,11 @@ class VideoPlayerPip {
       return;
     }
     if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
-      // 移动端平台：不支持桌面级 PiP 浮动窗口
-      // 可以使用系统 PiP API（暂未实现）
+      // 移动端平台：不支持桌面级 PiP 浮动窗口；
+      // iOS 请走 enterIos（系统画中画），Android 暂未实现
       debugPrint('[VideoPlayerPip] enter: unsupported platform');
       return;
     }
-
     try {
       // 1) 保存当前窗口状态（仅大小/位置）
       _savedBounds = await windowManager.getBounds();
@@ -70,10 +150,8 @@ class VideoPlayerPip {
       // _toggleNativeFullscreen 通过 media_kit 的 Utils.EnterNativeFullscreen
       // 管理，与 windowManager.setFullScreen 不是同一个 API，
       // 互相调用会导致窗口状态混乱。
-
       // 2) 设置窗口为可调整大小（解除最小尺寸限制以便恢复）
       await windowManager.setMinimumSize(const Size(240, 160));
-
       // 3) 计算悬浮窗位置：屏幕右下角，留 16px 边距
       const pipSize = Size(480, 270); // 16:9
       final screenBounds = _getScreenBounds();
@@ -81,17 +159,13 @@ class VideoPlayerPip {
         screenBounds.right - pipSize.width - 16,
         screenBounds.bottom - pipSize.height - 16,
       );
-
       // 4) 调整窗口大小并移动到右下角
       await windowManager.setSize(pipSize);
       await windowManager.setPosition(pipPosition);
-
       // 5) 隐藏窗口标题栏（最大/最小/关闭那一栏），让 PiP 看起来更纯粹
       await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
-
       // 6) 设置窗口置顶
       await windowManager.setAlwaysOnTop(true);
-
       _isActive = true;
       activeNotifier.value = true;
       debugPrint('[VideoPlayerPip] enter: PiP active');
@@ -102,16 +176,14 @@ class VideoPlayerPip {
     }
   }
 
-  /// 退出画中画
+  /// 退出画中画（桌面端悬浮窗）
   Future<void> exit() async {
     if (!_isActive) return;
     try {
       // 1) 取消置顶
       await windowManager.setAlwaysOnTop(false);
-
       // 2) 恢复窗口标题栏显示
       await windowManager.setTitleBarStyle(TitleBarStyle.normal);
-
       // 3) 恢复窗口大小与位置
       if (_savedBounds != null) {
         await windowManager.setSize(_savedBounds!.size);
@@ -128,7 +200,7 @@ class VideoPlayerPip {
     }
   }
 
-  /// 切换画中画
+  /// 切换画中画（桌面端悬浮窗）
   Future<void> toggle() async {
     if (_isActive) {
       await exit();
