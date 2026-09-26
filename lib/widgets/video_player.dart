@@ -2343,6 +2343,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
         try {
           _player.pause();
         } catch (_) {}
+      } else {
+        // 原生侧启动失败（源未就绪 / 加载失败 / 超时），提示用户
+        _showMessage('画中画启动失败，请稍后重试');
       }
       return;
     }
