@@ -69,7 +69,14 @@ class SourceService {
       jsonStr = await _network.getString(api);
     } else if (sourceBean.type == 4) {
       // Type 4: 远程接口，需要 extend 和 filter 参数
-      final queryParams = <String, String>{'filter': 'true'};
+      // **OmniBox 兼容**：主请求必须带 ac=detail，否则 OmniBox 的
+      // type=4 远程接口（tvbox2 订阅）收到 {filter:true} 不带 ac 会返回 500，
+      // 导致首页/分类加载失败。getList / getDetail / search 均已带 ac=detail，
+      // 这里补齐保持一致。
+      final queryParams = <String, String>{
+        'ac': 'detail',
+        'filter': 'true',
+      };
       final ext = sourceBean.ext;
       if (ext != null && ext.isNotEmpty) {
         final extend = await _resolveExtend(ext);
@@ -175,7 +182,7 @@ class SourceService {
             final n = vv['n'] as String? ?? '';
             final val = vv['v'] as String? ?? '';
             if (n.isNotEmpty || val.isNotEmpty) {
-              values.add(SortFilterValue(n: n, v: val));
+              values.add(SortFilterValue(n: n, val: val));
             }
           }
         }
