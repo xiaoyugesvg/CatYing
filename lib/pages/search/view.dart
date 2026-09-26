@@ -106,10 +106,13 @@ class _SearchPageState extends State<SearchPage> {
           Expanded(
             child: Container(
               padding: const EdgeInsets.symmetric(
-                  horizontal: AppTheme.spacingLG, vertical: AppTheme.spacingMD),
+                  horizontal: AppTheme.spacingLG, vertical: 10),
               decoration: BoxDecoration(
                 color: AppTheme.backgroundSecondary,
-                borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.05),
+                ),
               ),
               child: Row(
                 children: [
@@ -163,8 +166,8 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
           ),
-          const SizedBox(width: AppTheme.spacingMD),
-          // 搜索按钮 - 对应 Swift 独立"搜索"按钮 (accentGradient)
+          const SizedBox(width: AppTheme.spacingSM),
+          // 搜索按钮 - iOS 风格圆形图标按钮 (不喧宾夺主)
           GestureDetector(
             onTap: () {
               final text = _inputController.text.trim();
@@ -174,21 +177,23 @@ class _SearchPageState extends State<SearchPage> {
               }
             },
             child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppTheme.spacingLG, vertical: AppTheme.spacingMD),
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF5CB67B), Color(0xFF7DCEA0)],
-                ),
-                borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+                color: AppTheme.accentColor,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.accentColor.withValues(alpha: 0.35),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
               ),
-              child: const Text(
-                '搜索',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: AppTheme.fontHeadline,
-                  fontWeight: FontWeight.bold,
-                ),
+              child: const Icon(
+                Icons.search,
+                color: Colors.white,
+                size: 20,
               ),
             ),
           ),
@@ -225,10 +230,10 @@ class _SearchPageState extends State<SearchPage> {
 
   // MARK: - 站点列表面板
 
-  /// 站点列表面板 - 对应 Swift siteListPanel
+  /// 站点列表面板 - iOS 风格分组列表
   Widget _buildSiteListPanel() {
     return Container(
-      color: AppTheme.backgroundSecondary,
+      color: Colors.transparent,
       child: Obx(() => ListView.builder(
             padding: const EdgeInsets.symmetric(vertical: AppTheme.spacingSM),
             itemCount: _searchController.activeSites.length,

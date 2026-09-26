@@ -252,10 +252,10 @@ class _DetailPageState extends State<DetailPage> {
         final current = MainTabController.instance.selectedTab.value;
         return GlassPanel(
           radius: 30,
-          // **轻玻璃悬浮胶囊 (2026-09-26)**：与首页底栏同款，毛玻璃+极薄
-          // 半透明底色，悬浮轮廓清晰但内容可透出，不遮挡。
+          // **真悬浮轻玻璃 (2026-09-26)**：与首页底栏同款 glassTintClear
+          // (alpha≈2%)，毛玻璃+细描边+高光，内容滚过其下依旧清晰可见。
           blur: true,
-          tint: Colors.black.withValues(alpha: 0.16),
+          tint: AppTheme.glassTintClear,
           borderColor: Colors.white.withValues(alpha: 0.10),
           borderWidth: 0.8,
           highlightStrength: 0.2,
