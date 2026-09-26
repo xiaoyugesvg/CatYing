@@ -32,18 +32,6 @@ target 'Runner' do
   use_modular_headers!
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
-
-  # KSPlayer (Swift AVPlayer 内核) - git 依赖绕过 podspec 1.1.0 tag 缺失
-  # 只取 AVPlayer 内核相关 subspec, 不引 FFmpegKit(MEPlayer 才需要)
-  # 注意: 不加 Metal subspec - Metal 层依赖 FFmpeg(Libavutil), AVPlayer 内核不需要
-  # DisplayCriteria 与 KSPlayer 同仓库, 需一并声明 (AVPlayer subspec 依赖它)
-  pod 'KSPlayer',
-    :git => 'https://github.com/kingslay/KSPlayer.git',
-    :branch => 'main',
-    :subspecs => ['AVPlayer', 'Core', 'Video', 'Subtitle']
-  pod 'DisplayCriteria',
-    :git => 'https://github.com/kingslay/KSPlayer.git',
-    :branch => 'main'
 end
 
 post_install do |installer|
