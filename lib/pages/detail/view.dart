@@ -723,7 +723,8 @@ class _DetailPageState extends State<DetailPage> {
         const SizedBox(height: AppTheme.spacingSM),
 
         // 导演 - 对应 Swift director row
-        if (info.director.isNotEmpty) ...[\n          Row(
+        if (info.director.isNotEmpty) ...[
+          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(
