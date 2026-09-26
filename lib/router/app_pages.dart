@@ -1,6 +1,5 @@
 import 'package:get/get.dart';
 import '../pages/home/view.dart';
-import '../pages/live/view.dart';
 import '../pages/history/view.dart';
 import '../pages/favorites/view.dart';
 import '../pages/settings/view.dart';

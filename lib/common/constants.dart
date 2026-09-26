@@ -3,11 +3,9 @@ class AppConstants {
   // 配置键
   static const String apiUrl = 'api_url';
   static const String homeApi = 'home_api';
-  static const String liveApiUrl = 'live_api_url';
   static const String searchHistory = 'search_history';
   static const String playType = 'play_type';
   static const String playTypeVod = 'play_type_vod';
-  static const String playTypeLive = 'play_type_live';
   static const String dohUrl = 'doh_url';
   static const String playScale = 'play_scale';
   static const String playSpeed = 'play_speed';

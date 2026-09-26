@@ -4,7 +4,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../common/theme.dart';
 import '../../services/api_config.dart';
 import '../../services/background_service.dart';
-import '../../pages/live/controller.dart';
 import '../../models/source_bean.dart';
 import '../../models/player_engine.dart';
 import '../../widgets/common_widgets.dart';
@@ -208,49 +207,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                   // 清除自定义
-                  if (bg.choice.value == BackgroundChoice.custom) ...[
-                    const SizedBox(height: 8),
-                    Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius:
-                            BorderRadius.circular(AppTheme.radiusMD),
-                        onTap: () async {
-                          await bg.clearCustom();
-                          if (ctx.mounted) Navigator.pop(ctx);
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 12,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.red.withValues(alpha: 0.1),
-                            borderRadius:
-                                BorderRadius.circular(AppTheme.radiusMD),
-                            border: Border.all(
-                              color: Colors.red.withValues(alpha: 0.3),
-                              width: 0.5,
-                            ),
-                          ),
-                          child: const Row(
-                            children: [
-                              Icon(Icons.delete_outline,
-                                  color: Colors.redAccent, size: 18),
-                              SizedBox(width: 10),
-                              Text(
-                                '清除自定义图片,恢复默认',
-                                style: TextStyle(
-                                  color: Colors.redAccent,
-                                  fontSize: AppTheme.fontSubhead,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                  if (bg.choice.value == BackgroundChoice.custom) ...[],
                 ],
               )),
         ),
@@ -273,27 +230,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 value: controller.vodApiUrl.value.isEmpty
                     ? '未配置'
                     : _truncateUrl(controller.vodApiUrl.value),
-                onTap: () => _showApiEditDialog(isVod: true),
+                onTap: () => _showApiEditDialog(),
               )),
-          const Divider(color: AppTheme.borderLight, height: 1),
-          // 直播接口地址
-          Obx(() => SettingsRow(
-                icon: Icons.tv,
-                title: '直播接口地址',
-                value: controller.liveApiUrl.value.isEmpty
-                    ? '跟随点播接口'
-                    : _truncateUrl(controller.liveApiUrl.value),
-                onTap: () => _showApiEditDialog(isVod: false),
-              )),
-          const Divider(color: AppTheme.borderLight, height: 1),
-          // 自定义直播源管理 - 对应 tvbox-Swift / TVBox-tvs "自己添加直播源链接"
-          // 支持 m3u / txt(#genre#) / json 三种格式, 与订阅接口 lives 合并展示
-          SettingsRow(
-            icon: Icons.playlist_add,
-            title: '自定义直播源',
-            value: '添加 / 管理',
-            onTap: _showLiveSourceManager,
-          ),
           const Divider(color: AppTheme.borderLight, height: 1),
           // 主页数据源
           Obx(() => SettingsRow(
@@ -318,179 +256,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ============================================================
-  // 自定义直播源管理
-  // ============================================================
-
-  /// 自定义直播源管理弹窗：列出已添加源(可删除) + 添加新源链接。
-  /// 复用 LiveController 的 customLiveSources(SharedPreferences 持久化),
-  /// 与订阅接口 lives 字段合并展示在直播页。
-  void _showLiveSourceManager() {
-    // 惰性获取 LiveController（直播页首次打开时才会 put, 这里兜底）
-    if (!Get.isRegistered<LiveController>()) {
-      Get.put(LiveController());
-    }
-    final live = Get.find<LiveController>();
-
-    final nameCtrl = TextEditingController();
-    final urlCtrl = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.backgroundSecondary,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppTheme.radiusLG),
-        ),
-        title: const Text('自定义直播源',
-            style: TextStyle(color: AppTheme.textPrimary)),
-        content: SizedBox(
-          width: 420,
-          child: Obx(() {
-            final sources = live.customLiveSources.value;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  '支持 M3U / TXT(#genre#) / JSON 三种格式的直播源链接，'
-                  '添加后立即与订阅接口直播合并展示。',
-                  style: TextStyle(
-                    color: AppTheme.textTertiary,
-                    fontSize: AppTheme.fontCaption,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: AppTheme.spacingLG),
-                // 已添加源列表
-                if (sources.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Text(
-                      '暂无自定义直播源',
-                      style: TextStyle(color: AppTheme.textTertiary),
-                    ),
-                  )
-                else
-                  ...sources.asMap().entries.map((entry) {
-                    final i = entry.key;
-                    final s = entry.value;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  s['name'] ?? '未命名',
-                                  style: const TextStyle(
-                                    color: AppTheme.textPrimary,
-                                    fontSize: AppTheme.fontFootnote,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                Text(
-                                  s['url'] ?? '',
-                                  style: const TextStyle(
-                                    color: AppTheme.textTertiary,
-                                    fontSize: 11,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline,
-                                color: Colors.redAccent, size: 18),
-                            onPressed: () => live.removeCustomLiveSource(i),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-                const SizedBox(height: AppTheme.spacingLG),
-                const Divider(color: AppTheme.borderLight, height: 1),
-                const SizedBox(height: AppTheme.spacingMD),
-                // 名称
-                TextField(
-                  controller: nameCtrl,
-                  style: const TextStyle(color: AppTheme.textPrimary),
-                  decoration: const InputDecoration(
-                    labelText: '名称（可选）',
-                    labelStyle: TextStyle(color: AppTheme.textTertiary),
-                    hintText: '例如：我的直播源',
-                    hintStyle: TextStyle(color: AppTheme.textTertiary),
-                    enabledBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: AppTheme.borderLight),
-                    ),
-                    focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: AppTheme.accentColor),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: AppTheme.spacingSM),
-                // URL
-                TextField(
-                  controller: urlCtrl,
-                  style: const TextStyle(color: AppTheme.textPrimary),
-                  keyboardType: TextInputType.url,
-                  decoration: const InputDecoration(
-                    labelText: '直播源链接',
-                    labelStyle: TextStyle(color: AppTheme.textTertiary),
-                    hintText: 'https://.../live.m3u 或 txt / json',
-                    hintStyle: TextStyle(color: AppTheme.textTertiary),
-                    enabledBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: AppTheme.borderLight),
-                    ),
-                    focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: AppTheme.accentColor),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: AppTheme.spacingLG),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('关闭',
-                          style: TextStyle(color: AppTheme.textTertiary)),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      onPressed: () async {
-                        final url = urlCtrl.text.trim();
-                        if (url.isEmpty) return;
-                        await live.addCustomLiveSource(
-                          name: nameCtrl.text.trim(),
-                          url: url,
-                        );
-                        nameCtrl.clear();
-                        urlCtrl.clear();
-                        Get.snackbar('成功', '直播源已添加并合并加载');
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.accentColor,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: const Text('添加'),
-                    ),
-                  ],
-                ),
-              ],
-            );
-          }),
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
   // 播放设置
   // ============================================================
 
@@ -509,20 +274,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   selected: controller.vodPlayerEngine.value,
                   labelBuilder: (e) => e.title,
                   onSelect: (e) => controller.setVodPlayerEngine(e),
-                ),
-              )),
-          const Divider(color: AppTheme.borderLight, height: 1),
-          // 直播播放器
-          Obx(() => SettingsRow(
-                icon: Icons.radar,
-                title: '直播播放器',
-                value: controller.livePlayerEngine.value.title,
-                onTap: () => _showEnumSelector<PlayerEngine>(
-                  title: '直播播放器',
-                  options: PlayerEngine.availableEngines,
-                  selected: controller.livePlayerEngine.value,
-                  labelBuilder: (e) => e.title,
-                  onSelect: (e) => controller.setLivePlayerEngine(e),
                 ),
               )),
           const Divider(color: AppTheme.borderLight, height: 1),
@@ -613,12 +364,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: Icons.auto_fix_high,
                 title: '解析数量',
                 value: '${ApiConfig.instance.parseBeanList.length}',
-              )),
-          const Divider(color: AppTheme.borderLight, height: 1),
-          Obx(() => SettingsRow(
-                icon: Icons.live_tv_outlined,
-                title: '直播分组',
-                value: '${ApiConfig.instance.liveChannelGroupList.length}',
               )),
           const Divider(color: AppTheme.borderLight, height: 1),
           SettingsRow(
@@ -718,12 +463,11 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ============================================================
-  // API 编辑弹窗（同时支持 VOD 和 Live）
+  // API 编辑弹窗（点播接口）
   // ============================================================
 
-  void _showApiEditDialog({required bool isVod}) {
+  void _showApiEditDialog() {
     final vodController = TextEditingController(text: controller.vodApiUrl.value);
-    final liveController = TextEditingController(text: controller.liveApiUrl.value);
 
     showDialog(
       context: context,
@@ -732,9 +476,9 @@ class _SettingsPageState extends State<SettingsPage> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppTheme.radiusLG),
         ),
-        title: Text(
-          isVod ? '点播接口地址' : '直播接口地址',
-          style: const TextStyle(color: AppTheme.textPrimary),
+        title: const Text(
+          '点播接口地址',
+          style: TextStyle(color: AppTheme.textPrimary),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -762,33 +506,6 @@ class _SettingsPageState extends State<SettingsPage> {
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 isDense: true,
                 prefixIcon: const Icon(Icons.movie_outlined,
-                    size: 18, color: AppTheme.textTertiary),
-              ),
-            ),
-            const SizedBox(height: AppTheme.spacingMD),
-            // 直播接口
-            TextField(
-              controller: liveController,
-              style: const TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: AppTheme.fontSubhead,
-              ),
-              decoration: InputDecoration(
-                hintText: '输入直播接口地址（留空则跟随点播接口）',
-                hintStyle: const TextStyle(
-                  color: AppTheme.textTertiary,
-                  fontSize: AppTheme.fontSubhead,
-                ),
-                filled: true,
-                fillColor: AppTheme.backgroundTertiary,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppTheme.radiusSM),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                isDense: true,
-                prefixIcon: const Icon(Icons.tv,
                     size: 18, color: AppTheme.textTertiary),
               ),
             ),
@@ -856,8 +573,6 @@ class _SettingsPageState extends State<SettingsPage> {
                     : () {
                         controller.vodApiUrl.value =
                             vodController.text.trim();
-                        controller.liveApiUrl.value =
-                            liveController.text.trim();
                         controller.loadConfig();
                       },
                 child: const Text('加载',
@@ -875,7 +590,7 @@ class _SettingsPageState extends State<SettingsPage> {
   void _showSourcePicker() {
     final sources = ApiConfig.instance.sourceBeanList;
     if (sources.isEmpty) {
-      _showApiEditDialog(isVod: true);
+      _showApiEditDialog();
       return;
     }
 
@@ -1062,7 +777,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ],
         ),
         content: const Text(
-          '将清除已保存的点播/直播接口地址、接口历史以及已下载的源缓存。\n\n'
+          '将清除已保存的点播接口地址、接口历史以及已下载的源缓存。\n\n'
           '播放器、主题、字体等本地设置会保留。\n\n'
           '重置后请重启应用，下次打开将回到初始设置界面。',
           style: TextStyle(
