@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:io';
+import '../../widgets/video_player_av.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart' hide Video;
 import 'dart:ui' show ImageFilter;
 import '../../common/theme.dart';
+import '../../common/constants.dart';
 import '../../models/movie.dart';
 import '../../models/vod_info.dart';
 import '../../models/cache_store.dart';
@@ -53,6 +57,8 @@ class _DetailPageState extends State<DetailPage> {
   VideoController? _videoController;
   String? _lastPlayerUrl;
   String? _lastPlayerHeadersKey;
+  SharedPreferences? _prefs;
+  int? _prefsPlayTypeVod;
 
   /// VideoPlayerWidget 状态变化回调（mpv native fullscreen 状态变化时）
   /// true=进入 native 全屏，false=退出 native 全屏
@@ -73,12 +79,21 @@ class _DetailPageState extends State<DetailPage> {
   @override
   void initState() {
     super.initState();
+    _loadPrefs();
     _loadDetailIfNeeded();
     // 监听 PiP 状态变化，确保退出 PiP 时退出全屏（互斥）
     VideoPlayerPip.instance.activeNotifier.addListener(_onPipChanged);
     // 监听 WindowFullScreen 状态变化：作为冗余同步通道，
     // 保证 WindowFullScreen.toggle 后 isFullScreen Rx 一定被同步
     WindowFullScreen.instance.activeNotifier.addListener(_onFullScreenActiveChanged);
+  }
+
+  Future<void> _loadPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _prefs = prefs;
+      _prefsPlayTypeVod = prefs.getInt(AppConstants.playTypeVod);
+    } catch (_) {}
   }
 
   void _loadDetailIfNeeded() {
@@ -451,6 +466,21 @@ class _DetailPageState extends State<DetailPage> {
     final headers = _controller.playHeaders.isNotEmpty
         ? Map<String, String>.from(_controller.playHeaders)
         : const <String, String>{};
+
+    // **播放内核切换 (2026-09-26)**：iOS 上按设置选择 AVPlayer(video_player)
+    // 或 MPV(media_kit)。AVPlayer 对部分 HLS/TS 流解码更稳定，不黑屏。
+    if (Platform.isIOS &&
+        PlayerEngine.fromStoredValue(
+                _prefsPlayTypeVod ?? 0) ==
+            PlayerEngine.avplayer) {
+      return _buildAvPlayerWidget(
+        url: url,
+        headers: headers,
+        isFull: isFull,
+        isPip: isPip,
+      );
+    }
+
     // 把续播位置透传给 _ensurePlayer, 让 libmpv 通过 Media.start 参数
     // 直接从续播位置开始解码, 避免 "先从 0 播几秒再回退" 的现象
     _ensurePlayer(url, headers, startPosition: _controller.resumeSeconds.value);
@@ -504,6 +534,56 @@ class _DetailPageState extends State<DetailPage> {
     // immersive 模式（native 全屏 / PiP）：视频填满父容器
     // 正常模式：4:3 容器 (比 16:9 更高, 上下控制条间距拉开,
     // 视频画面可视区域约翻倍, 修复"上下菜单栏挨着近"的问题)
+    if (isFull || isPip) {
+      return SizedBox.expand(child: widget);
+    }
+    return AspectRatio(
+      aspectRatio: 4 / 3,
+      child: widget,
+    );
+  }
+
+  /// 构建 AVPlayer 内核播放器（设置中选择了 AVPlayer 播放器时使用）
+  Widget _buildAvPlayerWidget({
+    required String url,
+    required Map<String, String> headers,
+    required bool isFull,
+    required bool isPip,
+  }) {
+    final info = _controller.vodInfo.value;
+    final episode = info?.currentEpisode;
+    final widget = AVPlayerPlayer(
+      key: const ValueKey('detail_player_av'),
+      url: url,
+      headers: headers.isEmpty ? null : headers,
+      resumeSeconds: _controller.resumeSeconds.value,
+      videoTitle: info?.name,
+      currentEpisodeName: episode?.name,
+      episodeNames: _controller.currentEpisodes.map((e) => e.name).toList(),
+      selectedEpisodeIndex: _controller.selectedEpisodeIndex.value,
+      canPlayNext: _controller.selectedEpisodeIndex.value <
+          _controller.currentEpisodes.length - 1,
+      canPlayPrevious: _controller.selectedEpisodeIndex.value > 0,
+      isPipMode: isPip,
+      onPlaying: () {},
+      onPositionChanged: (pos) =>
+          _handlePlaybackProgress(pos.inSeconds.toDouble()),
+      onEnded: () => _playNextEpisode(),
+      onFullScreenChanged: _onFullScreenChanged,
+      onPlayNext: () => _playNextEpisode(),
+      onPlayPrevious: () => _playPreviousEpisode(),
+      onSelectEpisode: (index) {
+        _controller.selectEpisode(index);
+        _saveHistoryForCurrentEpisode();
+      },
+      onBack: () {
+        if (VideoPlayerPip.instance.isActive) {
+          VideoPlayerPip.instance.exit();
+          return;
+        }
+        Get.back();
+      },
+    );
     if (isFull || isPip) {
       return SizedBox.expand(child: widget);
     }
