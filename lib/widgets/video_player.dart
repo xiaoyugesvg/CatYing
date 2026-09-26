@@ -2347,17 +2347,25 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         return;
       }
       final currentPos = _player.state.position;
-      // **丝滑切换 v3 (2026-09-26)**：手动与自动路径完全一致 ——
-      // 进入系统 PiP 前**不暂停**主播放器，由系统 AVPlayer 无缝接管画面与声音，
-      // PiP 悬浮窗**真实激活后**（onPipStarted 回调）才暂停主播放器(mpv)：
-      //  - 切换过程不断声、不卡顿（之前手动路径提前 pause 导致黑屏/断声）
-      //  - 激活后再暂停释放 audio session，避免双路声音/无声
+      // **手动 PiP v6 (2026-09-27)**：
+      // 1) 进入前**短暂暂停主播放器**（释放 AVAudioSession），
+      //    让原生 AVPlayer 能更快满足 isPictureInPicturePossible，
+      //    修复 iOS 前台手动启动"静默失败/点了没反应"（后台自动路径
+      //    不受影响，原生 didEnterBackground 直接启动）。
+      // 2) PiP 悬浮窗真实激活（onPipStarted）后保持主播放器暂停，
+      //    由系统 AVPlayer 无缝接管画面与声音，切换不断声、不黑屏。
+      // 3) 启动失败（含 possible 超时）→ 立即恢复主播放器播放。
+      try {
+        if (_player.state.playing) {
+          _player.pause();
+        }
+      } catch (_) {}
       final entered = await VideoPlayerPip.instance.enterIos(
         url: playUrl,
         headers: widget.headers,
         position: currentPos,
         onStarted: () {
-          // PiP 真实激活 → 立即暂停主播放器，AVPlayer 已接管（无缝）
+          // PiP 真实激活 → 主播放器保持暂停，AVPlayer 已接管（无缝）
           if (!mounted) return;
           try {
             if (_player.state.playing) {

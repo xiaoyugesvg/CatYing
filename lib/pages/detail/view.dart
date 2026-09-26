@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
-import '../../widgets/video_player_av.dart';
 import 'package:media_kit/media_kit.dart';
 import '../../common/constants.dart';
 import 'package:path_provider/path_provider.dart';
@@ -474,17 +473,16 @@ class _DetailPageState extends State<DetailPage> {
         ? Map<String, String>.from(_controller.playHeaders)
         : const <String, String>{};
 
-    // **播放内核切换 (2026-09-26)**：iOS 上按设置选择 AVPlayer(video_player)
-    // 或 MPV(media_kit)。AVPlayer 对部分 HLS/TS 流解码更稳定，不黑屏。
-    if (Platform.isIOS &&
-        PlayerEngine.fromStoredValue(
-                _prefsPlayTypeVod ?? 0) ==
-            PlayerEngine.avplayer) {
-      return _buildAvPlayerWidget(
+    // **播放内核 (2026-09-27)**：核心只保留 MPV / KSPlayer / UPlayer / Webview。
+    // AVPlayer(video_player) 内核已移除。设置中选 Webview 引擎时直接走网页播放页；
+    // KSPlayer/UPlayer 由对应原生内核播放（未完成桥接时兜底回 MPV，见 _ensurePlayer）。
+    final engine = Platform.isIOS
+        ? PlayerEngine.fromStoredValue(_prefsPlayTypeVod ?? 0)
+        : PlayerEngine.mpv;
+    if (engine == PlayerEngine.webview) {
+      return WebviewPlayerPage(
         url: url,
-        headers: headers,
-        isFull: isFull,
-        isPip: isPip,
+        title: _controller.vodInfo.value?.name,
       );
     }
 
@@ -541,56 +539,6 @@ class _DetailPageState extends State<DetailPage> {
     // immersive 模式（native 全屏 / PiP）：视频填满父容器
     // 正常模式：4:3 容器 (比 16:9 更高, 上下控制条间距拉开,
     // 视频画面可视区域约翻倍, 修复"上下菜单栏挨着近"的问题)
-    if (isFull || isPip) {
-      return SizedBox.expand(child: widget);
-    }
-    return AspectRatio(
-      aspectRatio: 4 / 3,
-      child: widget,
-    );
-  }
-
-  /// 构建 AVPlayer 内核播放器（设置中选择了 AVPlayer 播放器时使用）
-  Widget _buildAvPlayerWidget({
-    required String url,
-    required Map<String, String> headers,
-    required bool isFull,
-    required bool isPip,
-  }) {
-    final info = _controller.vodInfo.value;
-    final episode = info?.currentEpisode;
-    final widget = AVPlayerPlayer(
-      key: const ValueKey('detail_player_av'),
-      url: url,
-      headers: headers.isEmpty ? null : headers,
-      resumeSeconds: _controller.resumeSeconds.value,
-      videoTitle: info?.name,
-      currentEpisodeName: episode?.name,
-      episodeNames: _controller.currentEpisodes.map((e) => e.name).toList(),
-      selectedEpisodeIndex: _controller.selectedEpisodeIndex.value,
-      canPlayNext: _controller.selectedEpisodeIndex.value <
-          _controller.currentEpisodes.length - 1,
-      canPlayPrevious: _controller.selectedEpisodeIndex.value > 0,
-      isPipMode: isPip,
-      onPlaying: () {},
-      onPositionChanged: (pos) =>
-          _handlePlaybackProgress(pos.inSeconds.toDouble()),
-      onEnded: () => _playNextEpisode(),
-      onFullScreenChanged: _onFullScreenChanged,
-      onPlayNext: () => _playNextEpisode(),
-      onPlayPrevious: () => _playPreviousEpisode(),
-      onSelectEpisode: (index) {
-        _controller.selectEpisode(index);
-        _saveHistoryForCurrentEpisode();
-      },
-      onBack: () {
-        if (VideoPlayerPip.instance.isActive) {
-          VideoPlayerPip.instance.exit();
-          return;
-        }
-        Get.back();
-      },
-    );
     if (isFull || isPip) {
       return SizedBox.expand(child: widget);
     }

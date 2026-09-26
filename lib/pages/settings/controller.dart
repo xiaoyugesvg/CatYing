@@ -72,9 +72,15 @@ class SettingsController extends GetxController {
       );
     }
 
-    vodPlayerEngine.value = PlayerEngine.fromStoredValue(
-      prefs.getInt(AppConstants.playTypeVod) ?? 0,
-    );
+    // 迁移旧内核值（2026-09-27）：AVPlayer(1) 已移除，旧值 1 → 兜底回 MPV(0)
+    final storedEngineRaw = prefs.getInt(AppConstants.playTypeVod) ?? 0;
+    final migratedRaw =
+        storedEngineRaw == 1 ? PlayerEngine.mpv.value : storedEngineRaw;
+    if (migratedRaw != storedEngineRaw) {
+      await prefs.setInt(AppConstants.playTypeVod, migratedRaw);
+    }
+
+    vodPlayerEngine.value = PlayerEngine.fromStoredValue(migratedRaw);
     decodeMode.value = VideoDecodeMode.fromStoredValue(
       prefs.getInt('play_decode_mode') ?? 0,
     );

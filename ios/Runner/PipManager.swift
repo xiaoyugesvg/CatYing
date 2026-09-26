@@ -253,9 +253,22 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
       pipPlayer?.volume = 1.0 // 恢复音量（PiP 悬浮窗需要声音）
       pipPlayer?.play()
       startingPip = true
-      controller.startPictureInPicture()
-      // 真实激活由 didStart / didStop 回调维护，这里只回传"已发起"
-      result(nil)
+      // **v6 修复手动 PiP 静默失败**：iOS 前台手动启动前必须确认
+      // isPictureInPicturePossible == true，否则 startPictureInPicture()
+      // 会被系统静默忽略（不回调 didStart、不报错）→"点了没反应"。
+      // 轮询直到 possible（audio session / layer 就绪），超时明确报错返回。
+      waitForPipPossible(controller, timeoutSeconds: 4, result: result) { [weak self] in
+        guard let self = self else { return }
+        if self.isActive || self.startingPip {
+          // 轮询期间被后台自动路径抢先激活：直接回传成功
+          result(nil)
+          return
+        }
+        self.startingPip = true
+        controller.startPictureInPicture()
+        NSLog("[PipManager] startPictureInPicture() (reuse, after possible)")
+        result(nil)
+      }
       return
     }
 
@@ -358,9 +371,59 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
     preparedReady = true
     pipPlayer?.volume = 1.0
     startingPip = true
-    controller.startPictureInPicture()
-    // 真实激活状态由 didStart / didStop 回调维护，这里不置位
-    NSLog("[PipManager] startPictureInPicture() called")
+    // **v6**：同样等待 isPictureInPicturePossible 再启动，避免静默失败
+    waitForPipPossible(controller, timeoutSeconds: 4) { [weak self] in
+      guard let self = self else { return }
+      if self.isActive || self.startingPip {
+        return
+      }
+      self.startingPip = true
+      controller.startPictureInPicture()
+      NSLog("[PipManager] startPictureInPicture() (slow path, after possible)")
+    }
+    NSLog("[PipManager] startPictureInPicture() called (slow path)")
+  }
+
+  /// **v6 手动 PiP 修复**：轮询等待 AVPictureInPictureController 的
+  /// isPictureInPicturePossible 变为 true，再执行 startPictureInPicture()。
+  /// iOS 前台手动启动时，若 audio session / playerLayer 未就绪，
+  /// startPictureInPicture() 会被系统静默忽略（不回调、不报错），
+  /// 表现为"点了没反应"。轮询到超时则明确报错返回给 Dart。
+  /// - Parameters:
+  ///   - controller: PiP 控制器
+  ///   - timeoutSeconds: 超时（秒），默认 4
+  ///   - result: 手动路径的 FlutterResult（超时时回传错误）
+  ///   - onReady: possible 就绪后的回调（在 main queue 执行）
+  private func waitForPipPossible(
+    _ controller: AVPictureInPictureController,
+    timeoutSeconds: Double = 4,
+    result: FlutterResult? = nil,
+    onReady: @escaping () -> Void
+  ) {
+    let startTime = Date()
+    var timer: Timer?
+    timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { t in
+      guard t.isValid else { return }
+      if controller.isPictureInPicturePossible {
+        t.invalidate()
+        DispatchQueue.main.async { onReady() }
+        return
+      }
+      if Date().timeIntervalSince(startTime) >= timeoutSeconds {
+        t.invalidate()
+        NSLog("[PipManager] waitForPipPossible TIMEOUT (possible=\(controller.isPictureInPicturePossible))")
+        if let r = result {
+          r(FlutterError(
+            code: "pip_not_possible",
+            message: "画中画当前不可用（请稍后重试）",
+            details: nil
+          ))
+        }
+      }
+    }
+    // 保底：定时器强引用置空防泄漏（Timer 自身持有 closure，closure 持有 timer，
+    // 但 repeats 定时器在 invalidate 后自然释放）
+    _ = timer
   }
 
   /// 启动失败统一出口（超时 / 加载失败 / 其它）
