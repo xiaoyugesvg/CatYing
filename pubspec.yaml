@@ -45,6 +45,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # 禁用 Swift Package Manager：media_kit_libs_ios_video / media_kit_video
+  # 不支持 SPM（Flutter 3.44 起 SPM 默认接管依赖，会导致 iOS 构建硬失败），
+  # 走 CocoaPods 兼容路径（Podfile 一直正常 pod install）。
+  config:
+    enable-swift-package-manager: false
   assets:
     - assets/nodejs-project/dist/
     - assets/nodejs-project/src/

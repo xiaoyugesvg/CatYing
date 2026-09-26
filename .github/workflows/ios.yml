@@ -181,18 +181,22 @@ jobs:
           echo "=== pbxproj 改动 diff ==="
           git diff --stat Runner.xcodeproj/project.pbxproj || true
 
+      - name: Disable Swift Package Manager
+        # media_kit_libs_ios_video / media_kit_video 不支持 Swift Package Manager。
+        # Flutter 3.44 起 SPM 默认接管 iOS 依赖，media_kit 会触发硬错误导致构建失败。
+        # 正确禁用方式是 flutter config（不是 build 的 flag）：
+        #   flutter config --no-enable-swift-package-manager
+        # 项目级配置已同时写在 pubspec.yaml（flutter.config.enable-swift-package-manager=false），
+        # 这里再跑一次全局兜底。
+        run: |
+          flutter config --no-enable-swift-package-manager
+
       - name: Build iOS (no codesign)
-        # --no-enable-swift-package-manager:
-        #   media_kit_libs_ios_video / media_kit_video 不支持 Swift Package Manager
-        #   （构建日志里一直是 "will become an error in a future version of Flutter"）。
-        #   2026-09 Flutter stable 更新后该警告已升级为硬错误，导致 build 失败。
-        #   禁用 SPM 后 media_kit 走 CocoaPods（Podfile 一直正常 pod install），兼容稳定。
         run: |
           flutter build ios \
             --release \
             --no-codesign \
-            --no-tree-shake-icons \
-            --no-enable-swift-package-manager
+            --no-tree-shake-icons
 
       - name: Locate Runner.app
         id: locate
