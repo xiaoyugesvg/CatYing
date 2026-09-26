@@ -128,7 +128,8 @@ class VideoPlayerWidget extends StatefulWidget {
   State<VideoPlayerWidget> createState() => _VideoPlayerWidgetState();
 }
 
-class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
+class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
+    with WidgetsBindingObserver {
   late final Player _player;
   late final VideoController _controller;
   bool _ownsPlayer = false; // 是否自己创建并需要释放
@@ -152,6 +153,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   late final String _cacheKey;
 
   bool _isPlaying = false;
+
+  /// iOS 自动画中画进行中（防止退后台重复触发）
+  bool _autoPipInFlight = false;
 
   /// 缓冲状态：不再默认 true，而是从 player.state 同步读取，避免全屏/普通模式
   /// 切换时新实例显示"转圈"假象
@@ -254,6 +258,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   @override
   void initState() {
     super.initState();
+    // iOS 退后台自动画中画需要监听 App 生命周期
+    WidgetsBinding.instance.addObserver(this);
     // 跨 widget rebuild 持久化状态（按 widget.key 区分）
     // detail view 在 immersive 切换时会重建 VideoPlayerWidget 的 Element，
     // 没有这个缓存，state 重置会导致全屏 icon 卡住需要点两次。
@@ -1012,6 +1018,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     WindowFullScreen.instance.activeNotifier.removeListener(
       _onWindowFullScreenChanged,
     );
@@ -1714,35 +1721,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (locked) ...[
-                      const Icon(
-                        Icons.touch_app,
-                        color: Colors.white70,
-                        size: 11,
-                      ),
-                      const SizedBox(width: 3),
-                      const Text(
-                        '点击解除',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 9,
-                        ),
-                      ),
-                    ] else ...[
-                      const Icon(
-                        Icons.arrow_upward,
-                        color: Colors.white70,
-                        size: 11,
-                      ),
-                      const SizedBox(width: 3),
-                      const Text(
-                        '上滑锁定',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 9,
-                        ),
-                      ),
-                    ],
+                    if (locked) ...[const Icon(Icons.touch_app, color: Colors.white70, size: 11), const SizedBox(width: 3), const Text('点击解除', style: TextStyle(color: Colors.white70, fontSize: 9))] else ...[const Icon(Icons.arrow_upward, color: Colors.white70, size: 11), const SizedBox(width: 3), const Text('上滑锁定', style: TextStyle(color: Colors.white70, fontSize: 9))],
                   ],
                 ),
               ],
@@ -1961,10 +1940,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                   fontSize: 13,
                 ),
               ),
-              if (selected) ...[
-                const Spacer(),
-                const Icon(Icons.check, color: AppTheme.accentColor, size: 16),
-              ],
+              if (selected) ...[const Spacer(), const Icon(Icons.check, color: AppTheme.accentColor, size: 16)],
             ],
           ),
         );
@@ -2017,10 +1993,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                   fontSize: 13,
                 ),
               ),
-              if (selected) ...[
-                const Spacer(),
-                const Icon(Icons.check, color: AppTheme.accentColor, size: 16),
-              ],
+              if (selected) ...[const Spacer(), const Icon(Icons.check, color: AppTheme.accentColor, size: 16)],
             ],
           ),
         );
@@ -2250,25 +2223,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                             maxSeconds: _skipMaxSeconds,
                           ),
                           const SizedBox(height: 16),
-                          if (_resolutionText.isNotEmpty) ...[
-                            const _SettingsRowLabel('播放信息'),
-                            const SizedBox(height: 8),
-                            Text(
-                              '分辨率: $_resolutionText',
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                              ),
-                            ),
-                            if (_bitrateText.isNotEmpty)
-                              Text(
-                                '网速: $_bitrateText',
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
-                                ),
-                              ),
-                          ],
+                          if (_resolutionText.isNotEmpty) ...[const _SettingsRowLabel('播放信息'), const SizedBox(height: 8), Text('分辨率: $_resolutionText', style: const TextStyle(color: Colors.white70, fontSize: 12)), if (_bitrateText.isNotEmpty) Text('网速: $_bitrateText', style: const TextStyle(color: Colors.white70, fontSize: 12))],
                         ],
                       ),
                     ),
@@ -2357,6 +2312,72 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     // 附加当前 Player 到 PiP 模块（不创建新实例，保留播放状态）
     VideoPlayerPip.instance.attachPlayer(_player);
     await VideoPlayerPip.instance.toggle();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // iOS：播放中退到后台（按 Home / 切到其他 App）自动进入系统画中画小窗，
+    // 视频悬浮继续播放。回前台时 PiP 小窗仍在角落，由系统/用户关闭时
+    // onStopped 回调恢复主播放器续播。
+    if (state == AppLifecycleState.paused) {
+      _autoEnterPipOnBackground();
+    }
+  }
+
+  /// iOS：退后台自动进入画中画小窗（静默，失败不打扰用户）
+  Future<void> _autoEnterPipOnBackground() async {
+    if (!Platform.isIOS) return;
+    // 已在 PiP / 自动触发进行中 → 跳过
+    if (VideoPlayerPip.instance.isIosActive) return;
+    if (_autoPipInFlight) return;
+    // 未在播放（暂停/结束）→ 不进 PiP
+    if (!_player.state.playing) return;
+
+    final playUrl = _player.state.playlist.medias.isNotEmpty
+        ? _player.state.playlist.medias.last.uri
+        : widget.url;
+    if (playUrl.isEmpty) return;
+
+    // 设备不支持（模拟器返回 false）→ 静默跳过
+    bool supported;
+    try {
+      supported = await VideoPlayerPip.instance.isIosPipSupported();
+    } catch (_) {
+      supported = false;
+    }
+    if (!supported) return;
+
+    _autoPipInFlight = true;
+    final currentPos = _player.state.position;
+    try {
+      final entered = await VideoPlayerPip.instance.enterIos(
+        url: playUrl,
+        headers: widget.headers,
+        position: currentPos,
+        onStopped: () {
+          // PiP 被系统关闭 / 用户点"返回App"：恢复主播放器续播
+          if (!mounted) return;
+          final resume = VideoPlayerPip.instance.iosLastPosition;
+          if (resume > Duration.zero) {
+            try {
+              _player.seek(resume);
+            } catch (_) {}
+          }
+          try {
+            _player.play();
+          } catch (_) {}
+        },
+      );
+      if (entered) {
+        // 主播放器暂停，避免双路声音 / 解码
+        try {
+          _player.pause();
+        } catch (_) {}
+      }
+    } finally {
+      _autoPipInFlight = false;
+    }
   }
 
   /// 投屏入口（DLNA/UPnP）
@@ -2864,13 +2885,7 @@ class _SkipSecondsEditorState extends State<_SkipSecondsEditor> {
             ),
           ],
         ),
-        if (_errorText != null) ...[
-          const SizedBox(height: 4),
-          Text(
-            _errorText!,
-            style: const TextStyle(color: Colors.red, fontSize: 11),
-          ),
-        ],
+        if (_errorText != null) ...[const SizedBox(height: 4), Text(_errorText!, style: const TextStyle(color: Colors.red, fontSize: 11))],
         const SizedBox(height: 8),
         // 快捷预设
         Wrap(
