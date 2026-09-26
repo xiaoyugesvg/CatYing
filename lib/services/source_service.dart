@@ -182,7 +182,7 @@ class SourceService {
             final n = vv['n'] as String? ?? '';
             final val = vv['v'] as String? ?? '';
             if (n.isNotEmpty || val.isNotEmpty) {
-              values.add(SortFilterValue(n: n, val: val));
+              values.add(SortFilterValue(n: n, v: val));
             }
           }
         }
