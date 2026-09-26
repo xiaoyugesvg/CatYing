@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../common/theme.dart';
 import '../../services/api_config.dart';
 import '../../services/background_service.dart';
@@ -19,6 +20,23 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   final controller = Get.put(SettingsController());
+
+  /// 弹幕 API 地址（Logvr-danmu / 弹弹play 兼容），播放器按视频 URL 匹配弹幕
+  String _danmuApiUrl = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDanmuApiUrl();
+  }
+
+  Future<void> _loadDanmuApiUrl() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final url = (prefs.getString('danmu_api_url') ?? '').trim();
+      if (mounted) setState(() => _danmuApiUrl = url);
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -538,6 +556,14 @@ class _SettingsPageState extends State<SettingsPage> {
                 value: '${controller.playTimeStep.value}秒',
                 onTap: () => _showTimeStepSelector(),
               )),
+          const Divider(color: AppTheme.borderLight, height: 1),
+          // 弹幕 API（Logvr-danmu / 弹弹play 兼容）
+          SettingsRow(
+            icon: Icons.subtitles,
+            title: '弹幕 API',
+            value: _danmuApiUrl.isEmpty ? '未配置' : _danmuApiUrl,
+            onTap: _showDanmuApiEditDialog,
+          ),
         ],
       ),
     );
@@ -595,6 +621,91 @@ class _SettingsPageState extends State<SettingsPage> {
             title: '关于版本',
             value: '',
             onTap: () => _showAboutDialog(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // 弹幕 API 编辑弹窗
+  // ============================================================
+
+  void _showDanmuApiEditDialog() {
+    final textController = TextEditingController(text: _danmuApiUrl);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+        ),
+        title: const Text(
+          '弹幕 API 地址',
+          style: TextStyle(color: AppTheme.textPrimary),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: textController,
+              style: const TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontSubhead,
+              ),
+              decoration: InputDecoration(
+                hintText: '输入 Logvr-danmu / 弹弹play API 地址，如 https://xx.vercel.app',
+                hintStyle: const TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontSubhead,
+                ),
+                filled: true,
+                fillColor: AppTheme.backgroundTertiary,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppTheme.radiusSM),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                isDense: true,
+                prefixIcon: const Icon(Icons.subtitles,
+                    size: 18, color: AppTheme.textTertiary),
+              ),
+            ),
+            const SizedBox(height: AppTheme.spacingMD),
+            const Text(
+              '播放器会按当前视频 URL 请求 {API}/api/v2/comment?url=... 拉取弹幕',
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text(
+              '取消',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              final url = textController.text.trim();
+              try {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setString('danmu_api_url', url);
+              } catch (_) {}
+              if (ctx.mounted) {
+                Navigator.of(ctx).pop();
+                if (mounted) setState(() => _danmuApiUrl = url);
+              }
+            },
+            child: const Text(
+              '保存',
+              style: TextStyle(color: AppTheme.accentColor),
+            ),
           ),
         ],
       ),
