@@ -204,7 +204,7 @@ class _EpisodeListViewState extends State<EpisodeListView> {
                       '合集',
                       style: TextStyle(
                         color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontTitle,
+                        fontSize: AppTheme.fontTitle3,
                         fontWeight: FontWeight.w700,
                       ),
                     ),

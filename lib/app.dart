@@ -337,7 +337,8 @@ class _ContentViewState extends State<ContentView>
                       if (phase == LoadingPhase.downloadingNodeJS)
                         _buildNodeJSDownloadProgress()
                       else
-                        const CupertinoActivityIndicator(
+                        // 注意: color 是运行时属性, 不能用 const
+                        CupertinoActivityIndicator(
                           radius: 12,
                           color: AppTheme.textSecondary,
                         ),

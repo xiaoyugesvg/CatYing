@@ -2341,14 +2341,31 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         return;
       }
       final currentPos = _player.state.position;
-      // **丝滑切换 (2026-09-26)**：进入系统 PiP 前不暂停主播放器，
+      // **手动 PiP 稳定性 (2026-09-26)**：发起系统 PiP 前先暂停主播放器(mpv)，
+      // 释放 AVAudioSession，避免 audio session 被 mpv 占用导致系统拒绝启动
+      // 悬浮窗（"手动点 PiP 没反应"）。AVPlayer 内部已预热缓冲，接管无缝。
+      try {
+        if (_player.state.playing) {
+          _player.pause();
+        }
+      } catch (_) {}
+      // **丝滑切换 v2 (2026-09-26)**：进入系统 PiP 前不暂停主播放器，
       // 由系统 AVPlayer 无缝接管画面与声音，切换过程不断声、不卡顿。
+      // PiP 悬浮窗**真实激活后**（onPipStarted）才暂停主播放器(mpv)：
+      //  - 释放 audio session 给 AVPlayer，修复"PiP 无声"
+      //  - 避免双路解码/双路声音，修复"切换中断/卡顿"
       final entered = await VideoPlayerPip.instance.enterIos(
         url: playUrl,
         headers: widget.headers,
         position: currentPos,
         onStarted: () {
-          // 主播放器已暂停, 保留空实现兼容旧回调语义
+          // PiP 真实激活 → 立即暂停主播放器，AVPlayer 已接管（无缝）
+          if (!mounted) return;
+          try {
+            if (_player.state.playing) {
+              _player.pause();
+            }
+          } catch (_) {}
         },
         onStopped: () {
           if (!mounted) return;
@@ -2409,15 +2426,21 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
     _autoPipInFlight = true;
     final currentPos = _player.state.position;
-    // **丝滑切换 (2026-09-26)**：退后台自动进 PiP 同样不暂停主播放器，
-    // AVPlayer 无缝接管，切换过程中不断声、不卡顿。
+    // **丝滑切换 v2 (2026-09-26)**：退后台自动进 PiP 同样不提前暂停主播放器，
+    // AVPlayer 无缝接管；悬浮窗真实激活后暂停主播放器，避免双路声音/无声。
     try {
       final entered = await VideoPlayerPip.instance.enterIos(
         url: playUrl,
         headers: widget.headers,
         position: currentPos,
         onStarted: () {
-          // 主播放器已暂停, 保留空实现兼容旧回调语义
+          // PiP 真实激活 → 立即暂停主播放器，AVPlayer 已接管（无缝）
+          if (!mounted) return;
+          try {
+            if (_player.state.playing) {
+              _player.pause();
+            }
+          } catch (_) {}
         },
         onStopped: () {
           if (!mounted) return;
