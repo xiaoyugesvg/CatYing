@@ -144,7 +144,7 @@ class LiveController extends GetxController {
   /// 订阅源由 ApiConfig 解析配置 lives 字段（name/type/url）后远程加载
   /// M3U / TXT / JSON 并分组；自定义源同样支持三种格式。
   Future<void> loadChannels() async {
-    final groups = <LiveChannelGroup>[];
+    var groups = <LiveChannelGroup>[];
     // 1) 订阅源
     groups.addAll(ApiConfig.instance.liveChannelGroupList.toList());
     // 2) 自定义源：逐个远程拉取并解析，按分组名合并
