@@ -112,5 +112,14 @@
 			<string>_upnp._tcp</string>
 			<string>_http._tcp</string>
 		</array>
+		<!-- 放行任意 http 明文流（TrollStore 侧载，不面向 App Store 审核）
+		     原因：大量影视/直播 m3u8 源是 http://，原生 AVPlayer(画中画) 受 ATS
+		     限制会直接加载失败 → PiP 时灵时不灵；media_kit/libmpv 用自己的
+		     网络栈不受 ATS 影响，所以表现为"主播放器能播、PiP 失败" -->
+		<key>NSAppTransportSecurity</key>
+		<dict>
+			<key>NSAllowsArbitraryLoads</key>
+			<true/>
+		</dict>
 	</dict>
 </plist>
