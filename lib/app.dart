@@ -871,7 +871,10 @@ class _ContentViewState extends State<ContentView>
               return GlassPanel(
                 radius: 30,
                 blur: true,
-                tint: AppTheme.glassTintDeep,
+                // **修复底栏背景厚**: 原 glassTintDeep (alpha≈9%) 叠上
+                // 背景层后看起来像一层厚色块。改用浅玻璃底 (alpha≈4%),
+                // 让全局渐变背景更透出, 悬浮感更强。
+                tint: AppTheme.glassTintLight,
                 borderColor: AppTheme.glassBorderSoft,
                 borderWidth: 0.8,
                 highlightStrength: 0.9,
