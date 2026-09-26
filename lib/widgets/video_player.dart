@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import '../../common/constants.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart' show DragToMoveArea;
 import '../common/theme.dart';
@@ -274,8 +275,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _player = widget.player!;
       _ownsPlayer = false;
     } else {
+      // mpv 磁盘缓存：点播视频缓存到应用 Cache 目录, 下次播放同 URL 直接复用,
+      // 解决"每次打开都要重新下载"。缓存目录在 main() 启动时预取到 gMpvCacheDir,
+      // 与设置页"清除缓存"统计/清理的目录一致。
       _player = Player(
-        configuration: const PlayerConfiguration(title: 'TVBox'),
+        configuration: PlayerConfiguration(
+          title: 'TVBox',
+          libmpvOptions: [
+            '--cache=yes',
+            '--cache-dir=$gMpvCacheDir/video_cache',
+            '--cache-on-disk=yes',
+            '--cache-pause-initial=no',
+          ],
+        ),
       );
       _ownsPlayer = true;
     }
