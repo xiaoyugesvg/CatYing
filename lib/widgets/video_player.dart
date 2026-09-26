@@ -325,6 +325,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           // 还有值, 说明 Media.start 没生效或被 libmpv 丢弃, 再次 seek 一次
           // 对应 Swift `handlePlayingState → applyPendingSeekIfNeeded` 模式
           _applyPendingResumeSeek();
+          // iOS：前台预热原生 AVPlayer（静音预缓冲常驻），退后台/点 PiP 时
+          // 原生立即启动系统悬浮窗，避免"后台等缓冲"导致 PiP 时灵时不灵
+          if (Platform.isIOS) {
+            final u = _player.state.playlist.medias.isNotEmpty
+                ? _player.state.playlist.medias.last.uri
+                : widget.url;
+            if (u.isNotEmpty) {
+              VideoPlayerPip.instance
+                  .prepareIos(url: u, headers: widget.headers);
+            }
+          }
         }
       }
     });
@@ -1028,6 +1039,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     // 全屏状态栏 (时间 + 电池)
     _timeTimer?.cancel();
     _batteryStateSub?.cancel();
+    // iOS：离开播放页，释放原生 PiP 常驻实例
+    if (Platform.isIOS) {
+      VideoPlayerPip.instance.releaseIos();
+    }
     if (_ownsPlayer) {
       _player.dispose();
     }
@@ -2279,6 +2294,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         url: playUrl,
         headers: widget.headers,
         position: currentPos,
+        onStarted: () {
+          // 系统 PiP 悬浮窗真正出现 → 暂停主播放器，避免双路声音
+          if (!mounted) return;
+          try {
+            _player.pause();
+          } catch (_) {}
+        },
         onStopped: () {
           // PiP 被系统关闭 / 用户点"返回App"：恢复主播放器续播
           if (!mounted) return;
@@ -2293,15 +2315,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           } catch (_) {}
         },
       );
-      if (entered) {
-        // 主播放器暂停，避免双路声音 / 解码
-        try {
-          _player.pause();
-        } catch (_) {}
-      } else {
+      if (!entered) {
         // 原生侧启动失败（源未就绪 / 加载失败 / 超时），提示用户
         _showMessage('画中画启动失败，请稍后重试');
       }
+      // 启动成功：主播放器暂停交给 onStarted（PiP 真实激活后）处理
       return;
     }
     // 互斥：如果当前是全屏状态，先 await 退出全屏再进入 PiP
@@ -2355,6 +2373,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         url: playUrl,
         headers: widget.headers,
         position: currentPos,
+        onStarted: () {
+          // 系统 PiP 悬浮窗真正出现 → 暂停主播放器，避免双路声音
+          if (!mounted) return;
+          try {
+            _player.pause();
+          } catch (_) {}
+        },
         onStopped: () {
           // PiP 被系统关闭 / 用户点"返回App"：恢复主播放器续播
           if (!mounted) return;
@@ -2369,12 +2394,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           } catch (_) {}
         },
       );
-      if (entered) {
-        // 主播放器暂停，避免双路声音 / 解码
-        try {
-          _player.pause();
-        } catch (_) {}
-      }
+      // 启动成功：主播放器暂停交给 onStarted（PiP 真实激活后）处理；
+      // 失败（entered=false）则主播放器继续播，静默不打扰
     } finally {
       _autoPipInFlight = false;
     }
