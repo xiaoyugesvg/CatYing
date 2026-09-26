@@ -15,8 +15,17 @@ import 'package:window_manager/window_manager.dart';
 /// 由原生 PipManager.swift 实现（AVPlayer + AVPictureInPictureController），
 /// 本类通过 "pip_manager" MethodChannel 桥接：
 ///   - 进入：把 url/headers/当前进度交给原生，原生起系统 PiP 悬浮窗，
-///     主播放器（media_kit）由调用方暂停，避免双路声音/解码
+///     主播放器（media_kit）由调用方**在收到 onPipStarted（PiP 真实激活）后**
+///     暂停，避免双路声音/解码
 ///   - 退出：原生 delegate 回调 onPipStopped → 通知调用方恢复主播放器
+///
+/// **稳定性 v2（2026-09-26）**：
+///   - 新增 [prepareIos]：前台播放时预热原生 AVPlayer（静音预缓冲常驻），
+///     退后台/手动点 PiP 时原生立即 startPictureInPicture（毫秒级），
+///     不再"后台等缓冲"导致 PiP 时灵时不灵。
+///   - 新增 [releaseIos]：离开播放页时释放常驻实例。
+///   - 新增 onPipStarted 通道事件：系统 PiP 悬浮窗真正出现才置 isIosActive
+///     并回调 [onStarted]，避免"假 PiP"（Dart 侧以为已进入、实际没有）。
 ///
 /// 注意：iOS 系统 PiP 是独立悬浮窗，**不**翻转 activeNotifier
 /// （activeNotifier 驱动 detail view 的 immersive 模式，仅桌面端小窗需要）。
@@ -49,6 +58,7 @@ class VideoPlayerPip {
   bool _iosActive = false;
   double _iosLastPosition = 0;
   VoidCallback? _iosOnStopped;
+  VoidCallback? _iosOnStarted;
   /// iOS 是否处于系统画中画
   bool get isIosActive => _iosActive;
   /// iOS PiP 最后播放位置（供主播放器恢复进度）
@@ -57,6 +67,13 @@ class VideoPlayerPip {
 
   Future<void> _handleIosCall(MethodCall call) async {
     switch (call.method) {
+      case 'onPipStarted':
+        // 系统 PiP 悬浮窗真正出现 → 置激活状态，通知调用方暂停主播放器
+        _iosActive = true;
+        final cb = _iosOnStarted;
+        _iosOnStarted = null;
+        cb?.call();
+        break;
       case 'onPipStopped':
         final args = call.arguments as Map<dynamic, dynamic>? ?? {};
         _iosLastPosition = (args['position'] as num?)?.toDouble() ?? 0;
@@ -80,20 +97,48 @@ class VideoPlayerPip {
     }
   }
 
+  /// iOS：前台预热原生 AVPlayer（静音预缓冲并常驻待命）。
+  /// 播放开始/换源时调用，退后台或手动点 PiP 时原生可直接启动（毫秒级）。
+  Future<void> prepareIos({
+    required String url,
+    Map<String, String>? headers,
+  }) async {
+    if (!Platform.isIOS) return;
+    try {
+      await _iosChannel.invokeMethod<void>('preparePip', {
+        'url': url,
+        'headers': headers ?? const <String, String>{},
+      });
+    } catch (e) {
+      debugPrint('[VideoPlayerPip] prepare failed: $e');
+    }
+  }
+
+  /// iOS：释放原生常驻 PiP 实例（离开播放页时调用）
+  Future<void> releaseIos() async {
+    if (!Platform.isIOS) return;
+    try {
+      await _iosChannel.invokeMethod<void>('releasePip');
+    } catch (_) {}
+  }
+
   /// iOS：进入系统画中画
   /// - [url] 播放地址
   /// - [headers] 请求头（Referer / User-Agent 等）
   /// - [position] 当前进度（原生 AVPlayer 从此处续播）
+  /// - [onStarted] 原生 PiP 悬浮窗**真正出现**时回调（调用方暂停主播放器）
   /// - [onStopped] 原生 PiP 结束时回调（调用方恢复主播放器并 seek）
   Future<bool> enterIos({
     required String url,
     Map<String, String>? headers,
     Duration? position,
     VoidCallback? onStopped,
+    VoidCallback? onStarted,
   }) async {
     if (!Platform.isIOS) return false;
     if (_iosActive) return true;
     _iosOnStopped = onStopped;
+    _iosOnStarted = onStarted;
     _iosLastPosition = 0;
     try {
       await _iosChannel.invokeMethod<void>('startPip', {
@@ -101,10 +146,11 @@ class VideoPlayerPip {
         'headers': headers ?? const <String, String>{},
         'position': position?.inMilliseconds ?? 0,
       });
-      _iosActive = true;
+      // 已发起：等待 onPipStarted 真实激活后再置 isIosActive
       return true;
     } catch (e) {
       _iosOnStopped = null;
+      _iosOnStarted = null;
       final msg = (e is PlatformException) ? '${e.code}: ${e.message}' : e.toString();
       debugPrint('[VideoPlayerPip] iOS enter failed: $msg');
       return false;
