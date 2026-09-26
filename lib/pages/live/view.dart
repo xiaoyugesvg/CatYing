@@ -39,6 +39,10 @@ class _LivePageState extends State<LivePage> {
   /// 当前跟踪的频道 ID - 对应 Swift trackedChannelId
   String _trackedChannelId = '';
 
+  /// 听剧模式（音频播放） - 对应 TVBox-tvs 听剧模式
+  /// 开启后隐藏视频画面、只保留音频输出，可后台/息屏继续播放
+  bool _audioMode = false;
+
   @override
   void initState() {
     super.initState();
@@ -75,6 +79,9 @@ class _LivePageState extends State<LivePage> {
 
             // 播放器 - 对应 Swift VLCLivePlayerView / PlatformVideoPlayer
             _buildPlayer(),
+
+            // 听剧模式全屏音频层（盖住画面，仅保留音频输出）
+            if (_audioMode) _buildAudioModeOverlay(),
 
             // 覆盖 UI - 对应 Swift overlayUI
             _buildOverlayUI(),
@@ -154,6 +161,101 @@ class _LivePageState extends State<LivePage> {
     });
   }
 
+  // MARK: - 听剧模式（音频播放）
+
+  /// 听剧模式全屏音频层 - 对应 TVBox-tvs 听剧模式
+  /// 全黑背景 + 台标 + 频道名 + 旋转音乐图标 + 退出按钮
+  /// 播放器仍在底层运行（player 是外部注入的 _controller.player），
+  /// 因此仅隐藏画面、音频持续输出；Info.plist 已配置
+  /// UIBackgroundModes=audio，后台/息屏可继续播放。
+  Widget _buildAudioModeOverlay() {
+    return Obx(() {
+      final channel = _controller.currentChannel.value;
+      return Container(
+        color: Colors.black.withValues(alpha: 0.92),
+        width: double.infinity,
+        height: double.infinity,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 台标
+              if (channel != null && channel.logo.isNotEmpty)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(
+                    channel.logo,
+                    width: 72,
+                    height: 72,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                ),
+              const SizedBox(height: 28),
+              // 旋转音乐图标
+              const _RotatingMusicIcon(size: 44, color: AppTheme.accentColor),
+              const SizedBox(height: 24),
+              // 频道名
+              Text(
+                channel?.channelName ?? '',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '听剧模式 · 后台可继续播放',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.55),
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(height: 32),
+              // 退出听剧模式
+              GestureDetector(
+                onTap: () {
+                  setState(() => _audioMode = false);
+                  _wakeUpCurrentChannelInfo();
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      width: 0.5,
+                    ),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.tv, color: Colors.white, size: 15),
+                      SizedBox(width: 8),
+                      Text(
+                        '退出听剧模式',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    });
+  }
+
   // MARK: - 覆盖 UI
 
   /// 覆盖 UI - 对应 Swift overlayUI
@@ -186,6 +288,9 @@ class _LivePageState extends State<LivePage> {
               child: Row(
                 children: [
                   _buildChannelDrawerToggleButton(),
+                  const SizedBox(width: 8),
+                  // 听剧模式切换按钮
+                  _buildAudioModeToggleButton(),
                   const Spacer(),
                 ],
               ),
@@ -251,6 +356,53 @@ class _LivePageState extends State<LivePage> {
               _showChannelDrawer ? '收起菜单' : '频道菜单',
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.9),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // MARK: - 听剧模式切换按钮
+
+  /// 听剧模式切换按钮 - 对应 TVBox-tvs 听剧模式入口
+  Widget _buildAudioModeToggleButton() {
+    return GestureDetector(
+      onTap: () {
+        setState(() => _audioMode = !_audioMode);
+        if (_audioMode) {
+          // 进入听剧模式后收起频道抽屉，沉浸听音频
+          _showChannelDrawer = false;
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: _audioMode
+              ? AppTheme.accentColor.withValues(alpha: 0.9)
+              : Colors.black.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.15),
+            width: 0.5,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _audioMode ? Icons.headphones : Icons.headphones_outlined,
+              color: Colors.white,
+              size: 16,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              _audioMode ? '听剧中' : '听剧',
+              style: const TextStyle(
+                color: Colors.white,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
@@ -650,5 +802,51 @@ class _LivePageState extends State<LivePage> {
     }
 
     return false;
+  }
+}
+
+/// 旋转音乐图标 - 听剧模式装饰动画
+class _RotatingMusicIcon extends StatefulWidget {
+  final double size;
+  final Color color;
+
+  const _RotatingMusicIcon({
+    required this.size,
+    required this.color,
+  });
+
+  @override
+  State<_RotatingMusicIcon> createState() => _RotatingMusicIconState();
+}
+
+class _RotatingMusicIconState extends State<_RotatingMusicIcon>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _controller,
+      child: Icon(
+        Icons.graphic_eq,
+        size: widget.size,
+        color: widget.color,
+      ),
+    );
   }
 }
