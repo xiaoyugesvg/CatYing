@@ -47,7 +47,12 @@ class _SettingsPageState extends State<SettingsPage> {
         color: Colors.transparent,
         child: SafeArea(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(AppTheme.spacingLG),
+            padding: const EdgeInsets.fromLTRB(
+              AppTheme.spacingLG,
+              AppTheme.spacingLG,
+              AppTheme.spacingLG,
+              AppTheme.spacingLG + 96,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

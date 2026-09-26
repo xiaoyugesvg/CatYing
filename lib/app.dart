@@ -684,7 +684,7 @@ class _ContentViewState extends State<ContentView>
                     );
                   }),
                 // 错误信息 - 对应 Swift settingsVM.configError
-                if (_configError != null) ...[  
+                if (_configError != null) ...[
                   const SizedBox(height: AppTheme.spacingLG),
                   Container(
                     padding: const EdgeInsets.all(AppTheme.spacingMD),
@@ -809,7 +809,7 @@ class _ContentViewState extends State<ContentView>
     const navSideGap = 32.0;
     const navFloatGap = 8.0;
     const navBarHeight = 51.0;
-    final navReserve = bottomInset + navFloatGap + navBarHeight + 6.0;
+    final navReserve = bottomInset + navFloatGap + navBarHeight + 22.0;
 
     return Scaffold(
       body: Stack(
@@ -1005,7 +1005,7 @@ class _ContentViewState extends State<ContentView>
                       title: '六、免责与责任限制',
                       body:
                           '6.1 在法律允许的最大范围内，本软件按"现状"和"可用性"提供，提供方不对本软件作任何明示、默示或法定之保证，包括但不限于对适销性、特定用途适用性、不侵权、安全性、稳定性、无错误或不间断运行之保证。\n'
-                          '6.2 除法律明确规定不得排除之责任外，提供方在任何情况下均不对因使用或无法使用本软件、因本声明、因用户配置之来源或第三方服务、或因本软件与任何硬件/软件/网络之交互而产生的下列损害承担责任：直接、间接、附带、后果性、惩罚性、特殊或类似损害；利润、数据、商誉或业务机会之损失；人身伤害或财产损失；或任何其他基于合同、侵权（包括过失）、严格责任、保证或其他法律理论之索赔，无论提供方是否被告知该等损害之可能性。\n'
+                          '6.2 除法律明确规定不得排除之责任外，提供方在任何情况下均不对因使用或无法使用本软件、因使用本软件、因本声明、因用户配置之来源或第三方服务、或因本软件与任何硬件/软件/网络之交互而产生的下列损害承担责任：直接、间接、附带、后果性、惩罚性、特殊或类似损害；利润、数据、商誉或业务机会之损失；人身伤害或财产损失；或任何其他基于合同、侵权（包括过失）、严格责任、保证或其他法律理论之索赔，无论提供方是否被告知该等损害之可能性。\n'
                           '6.3 即或提供方被认定需承担任何责任，该责任之总额亦以用户为获得本软件所实际支付之金额为上限（若本软件系免费提供，则该上限为零）。前述限制在适用法律允许之范围内适用。',
                     ),
                     _DisclaimerText(
@@ -1244,17 +1244,7 @@ class _ContentViewState extends State<ContentView>
                   ),
                 ),
                 // 对应 Swift: if appState.isRetryingConfig { ProgressView() }
-                if (isRetrying) ...[  
-                  const SizedBox(width: AppTheme.spacingSM),
-                  const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
+                if (isRetrying) ...[const SizedBox(width: AppTheme.spacingSM), const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))],
               ],
             ),
           ),
