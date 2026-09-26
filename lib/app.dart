@@ -20,6 +20,7 @@ import 'pages/settings/controller.dart';
 import 'router/app_pages.dart';
 import 'services/player_fullscreen_controller.dart';
 import 'widgets/video_player_pip.dart';
+import 'widgets/glass.dart';
 
 class TVBoxApp extends StatelessWidget {
   const TVBoxApp({super.key});
@@ -813,7 +814,9 @@ class _ContentViewState extends State<ContentView>
           if (_showSearch)
             Positioned.fill(
               child: Material(
-                color: const Color(0xFF0F0F0F),
+                // 半透明遮罩, 让 BackgroundService 全局背景层透出
+                // (纯黑会盖住玻璃背景层, 搜索页看起来像"死板黑块")
+                color: AppTheme.glassTintDeep,
                 child: SearchPage(
                   onClose: () {
                     setState(() {
@@ -833,46 +836,39 @@ class _ContentViewState extends State<ContentView>
         if (PlayerFullscreenController.instance.isFullscreen.value) {
           return const SizedBox.shrink();
         }
-        return Container(
-        margin: const EdgeInsets.fromLTRB(32, 0, 32, 4),
-        decoration: BoxDecoration(
-          // 半透明色, 让 BackgroundService 全局背景层透出
-          // 替换原 Color(0xFF1C1C1E) (完全不透明) 造成的"黑色板块"问题
-          color: AppTheme.backgroundNavBar,
-          borderRadius: BorderRadius.circular(30),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.08),
-            width: 0.5,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
-              blurRadius: 10,
-              offset: const Offset(0, -2),
-            ),
-          ],
-        ),
-        child: SafeArea(
-          top: false,
-          child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _navItem(Icons.home_outlined, Icons.home, '首页', 0),
-                _navItem(Icons.tv_outlined, Icons.tv, '直播', 1),
-                _navItem(
-                    Icons.schedule_outlined, Icons.schedule, '历史', 2),
-                _navItem(
-                    Icons.favorite_border, Icons.favorite, '收藏', 3),
-                _navItem(
-                    Icons.settings_outlined, Icons.settings, '设置', 4),
-              ],
+        // iOS 27 Liquid Glass 悬浮导航条:
+        // 真实毛玻璃 (BackdropFilter) + 深色半透明底 + 顶部镜面高光 +
+        // 亮描边 + 柔和深投影, 让全局背景层透过形成磨砂观感
+        return GlassPanel(
+          radius: 30,
+          blur: true,
+          tint: AppTheme.glassTintDeep,
+          borderColor: AppTheme.glassBorderSoft,
+          borderWidth: 0.8,
+          highlightStrength: 0.9,
+          shadow: true,
+          margin: const EdgeInsets.fromLTRB(32, 0, 32, 4),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _navItem(Icons.home_outlined, Icons.home, '首页', 0),
+                  _navItem(Icons.tv_outlined, Icons.tv, '直播', 1),
+                  _navItem(
+                      Icons.schedule_outlined, Icons.schedule, '历史', 2),
+                  _navItem(
+                      Icons.favorite_border, Icons.favorite, '收藏', 3),
+                  _navItem(
+                      Icons.settings_outlined, Icons.settings, '设置', 4),
+                ],
+              ),
             ),
           ),
-        ),
-      );
+        );
       }),
     );
   }
