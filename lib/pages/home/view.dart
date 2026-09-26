@@ -206,7 +206,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildCategoryTabBar() {
     return SizedBox(
-      height: 40,
+      height: 44,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingLG),
@@ -220,13 +220,24 @@ class _HomePageState extends State<HomePage> {
               child: GestureDetector(
                 onTap: () => _controller.selectSort(sort),
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  // alignment: center —— 修复分类胶囊“框和名字不居中”：
+                  // 原实现 Container 未设置 alignment，横向 ListView 交叉轴
+                  // 会拉伸 item 高度，文字默认顶对齐，视觉上胶囊框与名字偏上。
+                  alignment: Alignment.center,
+                  height: 32,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
                   decoration: BoxDecoration(
                     color: isSelected
-                        ? AppTheme.accentColor.withValues(alpha: 0.12)
+                        ? AppTheme.accentColor.withValues(alpha: 0.14)
                         : AppTheme.backgroundTertiary,
                     borderRadius: BorderRadius.circular(20),
+                    // 选中态加一圈细描边，让“框”更明确，整体更精致
+                    border: Border.all(
+                      color: isSelected
+                          ? AppTheme.accentColor.withValues(alpha: 0.45)
+                          : Colors.white.withValues(alpha: 0.06),
+                      width: isSelected ? 1 : 0.5,
+                    ),
                   ),
                   child: Text(
                     sort.name,

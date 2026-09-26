@@ -10,6 +10,8 @@ import '../../models/vod_info.dart';
 import '../../models/cache_store.dart';
 import '../../services/background_service.dart';
 import '../../services/player_fullscreen_controller.dart';
+import '../../services/main_tab_controller.dart';
+import '../../widgets/glass.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/video_player.dart';
 import '../../widgets/video_player_pip.dart';
@@ -70,7 +72,11 @@ class _DetailPageState extends State<DetailPage> {
     final video = Get.arguments;
     if (video != null && video is Video && _controller.vodInfo.value == null) {
       _controller.loadDetail(video).then((_) {
-        _restorePlaybackFromHistory();
+        // 有历史则恢复续播；无历史则直接自动播放当前选集第一集
+        final restored = _restorePlaybackFromHistory();
+        if (!restored && _controller.currentEpisodes.isNotEmpty) {
+          _controller.selectEpisode(_controller.selectedEpisodeIndex.value);
+        }
         _refreshCollectState();
       });
     }
@@ -154,53 +160,158 @@ class _DetailPageState extends State<DetailPage> {
       final isPip = VideoPlayerPip.instance.activeNotifier.value;
       final immersive = isFull || isPip;
 
-      return Scaffold(
-        appBar: immersive
-            ? null
-            : AppBar(
-                leading: IconButton(
-                  icon: const Icon(Icons.chevron_left,
-                      color: AppTheme.textPrimary, size: 28),
-                  onPressed: () => Get.back(),
-                ),
-                // iOS 27 Liquid Glass: 顶部毛玻璃 AppBar
-                // BackdropFilter 模糊全局背景层 + 深色半透明底, 形成磨砂观感
-                backgroundColor: Colors.transparent,
-                elevation: 0,
-                flexibleSpace: ClipRect(
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(
-                        sigmaX: AppTheme.glassBlurSigma,
-                        sigmaY: AppTheme.glassBlurSigma),
-                    child: Container(
-                      color: AppTheme.glassTintDeep,
+      // 背景层放到 Scaffold 外层: 普通模式下全局背景贯穿整个页面
+      // (含 AppBar 毛玻璃区域), 修复详情页背景与全局不一致的问题;
+      // 沉浸(全屏/PiP)模式保持视频黑底。
+      return Stack(
+        children: [
+          if (!immersive)
+            Positioned.fill(
+              child: BackgroundService.instance
+                  .buildBackground(overlayAlpha: 0.3),
+            ),
+          Scaffold(
+            backgroundColor: Colors.transparent,
+            extendBodyBehindAppBar: !immersive,
+            appBar: immersive
+                ? null
+                : AppBar(
+                    leading: IconButton(
+                      icon: const Icon(Icons.chevron_left,
+                          color: AppTheme.textPrimary, size: 28),
+                      onPressed: () => Get.back(),
+                    ),
+                    // iOS 27 Liquid Glass: 顶部毛玻璃 AppBar
+                    // BackdropFilter 模糊外层全局背景层 + 深色半透明底
+                    backgroundColor: Colors.transparent,
+                    elevation: 0,
+                    flexibleSpace: ClipRect(
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(
+                            sigmaX: AppTheme.glassBlurSigma,
+                            sigmaY: AppTheme.glassBlurSigma),
+                        child: Container(
+                          color: AppTheme.glassTintDeep,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-        body: immersive
-            // 全屏/沉浸: 视频黑底, 不需要背景层
-            ? Container(
-                color: Colors.black,
-                child: _buildBody(),
-              )
-            // 普通模式: Stack 底 = BackgroundService 全局背景, 顶 = body 内容
-            // body 透明让背景层透出, 内容里的 AppCard 等用半透明色
-            : Stack(
-                children: [
-                  Positioned.fill(
-                    child: BackgroundService.instance
-                        .buildBackground(overlayAlpha: 0.3),
+            body: immersive
+                // 全屏/沉浸: 视频黑底, 不需要背景层
+                ? Container(
+                    color: Colors.black,
+                    child: _buildBody(),
+                  )
+                // 普通模式: body 内容 + 底部悬浮导航栏
+                // (与根 ContentView 悬浮栏同款, 详情页也能一键切回主 tab)
+                : Stack(
+                    children: [
+                      // extendBodyBehindAppBar 后 body 延伸到 AppBar 之后,
+                      // 顶部补出 AppBar 高度 + 状态栏高度, 避免内容被毛玻璃盖住
+                      Padding(
+                        padding: EdgeInsets.only(
+                          top: MediaQuery.of(context).padding.top +
+                              kToolbarHeight,
+                        ),
+                        child: _buildBody(),
+                      ),
+                      _buildFloatingNavBar(context),
+                    ],
                   ),
-                  // 不传 immersive, 让 _buildBody 自己在 Obx 内读取 isFull/isPip
-                  // 否则外层 rebuild 时内层 Obx 用的是闭包捕获的旧值
-                  _buildBody(),
-                ],
-              ),
+          ),
+        ],
       );
     });
   }
 
+  /// 详情页底部悬浮导航栏 - 与根 ContentView 悬浮栏同款
+  /// 详情页是 Get.toNamed push 的独立路由, 盖在根界面之上;
+  /// 这里复刻同一套 GlassPanel 悬浮栏, 让详情页也能一键切回主 tab。
+  Widget _buildFloatingNavBar(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+    const navSideGap = 32.0;
+    const navFloatGap = 8.0;
+    return Positioned(
+      left: navSideGap,
+      right: navSideGap,
+      bottom: bottomInset + navFloatGap,
+      child: Obx(() {
+        final current = MainTabController.instance.selectedTab.value;
+        return GlassPanel(
+          radius: 30,
+          blur: true,
+          tint: AppTheme.glassTintDeep,
+          borderColor: AppTheme.glassBorderSoft,
+          borderWidth: 0.8,
+          highlightStrength: 0.9,
+          shadow: true,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _floatingNavItem(
+                Icons.home_outlined, Icons.home, '首页', 0, current),
+              _floatingNavItem(
+                Icons.tv_outlined, Icons.tv, '直播', 1, current),
+              _floatingNavItem(
+                Icons.schedule_outlined, Icons.schedule, '历史', 2, current),
+              _floatingNavItem(
+                Icons.favorite_border, Icons.favorite, '收藏', 3, current),
+              _floatingNavItem(
+                Icons.settings_outlined, Icons.settings, '设置', 4, current),
+            ],
+          ),
+        );
+      }),
+    );
+  }
+
+  Widget _floatingNavItem(
+      IconData icon, IconData activeIcon, String label, int index, int current) {
+    final isSelected = current == index;
+    return GestureDetector(
+      onTap: () {
+        // 切 tab 并返回根界面; 直播 tab 的可见性/暂停由
+        // MainTabController.select 内部统一处理
+        MainTabController.instance.select(index);
+        Get.back();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isSelected ? activeIcon : icon,
+              size: 18,
+              color: isSelected
+                  ? AppTheme.accentColor
+                  : Colors.white.withValues(alpha: 0.35),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+                color: isSelected
+                    ? AppTheme.accentColor
+                    : Colors.white.withValues(alpha: 0.35),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
   /// build 的 body 部分（视频区域 + 信息 + 选集 + 简介）
   /// isFull / isPip 必须在本方法内自己读 Rx，闭包捕获的旧值会让全屏态卡死
   Widget _buildBody() {
@@ -843,18 +954,20 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   /// 对应 Swift restorePlaybackFromHistory
-  void _restorePlaybackFromHistory() {
+  /// 返回是否成功恢复了历史（无历史/参数缺失返回 false）
+  bool _restorePlaybackFromHistory() {
     final video = Get.arguments;
-    if (video == null || video is! Video) return;
+    if (video == null || video is! Video) return false;
 
     final playbackState = CacheStore.instance.getPlaybackState(
       video.id,
       video.sourceKey,
     );
-    if (playbackState == null) return;
+    if (playbackState == null) return false;
 
     _controller.applyPlaybackState(playbackState);
     _lastPersistedProgress = playbackState.progressSeconds.clamp(0.0, double.infinity).toDouble();
+    return true;
   }
 
   /// 对应 Swift refreshCollectState
@@ -930,6 +1043,8 @@ class _PillChip extends StatelessWidget {
 }
 
 /// VodInfo 扩展 - 转换为 Video
+/// 详情页自动播放: 无历史时自动调用 selectEpisode, 直接播放当前选集第一集
+/// (进入详情页即播放, 不再需要点击绿色播放按钮)
 extension VodInfoExt on VodInfo {
   Video toVideo() => Video(
         id: id,
