@@ -60,7 +60,7 @@ class _DetailPageState extends State<DetailPage> {
     if (!mounted) return;
     _controller.isFullScreen.value = isFull;
     // **2026-07-09**: 同步全局全屏状态, 让 app.dart 根 Scaffold 的
-    // 底栏(首页/直播/历史/收藏/设置) 在全屏时隐藏
+    // 底栏(首页/历史/收藏/设置) 在全屏时隐藏
     if (isFull) {
       PlayerFullscreenController.instance.enter('detail');
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
@@ -267,13 +267,11 @@ class _DetailPageState extends State<DetailPage> {
               _floatingNavItem(
                 Icons.home_outlined, Icons.home, '首页', 0, current),
               _floatingNavItem(
-                Icons.tv_outlined, Icons.tv, '直播', 1, current),
+                Icons.schedule_outlined, Icons.schedule, '历史', 1, current),
               _floatingNavItem(
-                Icons.schedule_outlined, Icons.schedule, '历史', 2, current),
+                Icons.favorite_border, Icons.favorite, '收藏', 2, current),
               _floatingNavItem(
-                Icons.favorite_border, Icons.favorite, '收藏', 3, current),
-              _floatingNavItem(
-                Icons.settings_outlined, Icons.settings, '设置', 4, current),
+                Icons.settings_outlined, Icons.settings, '设置', 3, current),
             ],
           ),
         );
@@ -286,8 +284,7 @@ class _DetailPageState extends State<DetailPage> {
     final isSelected = current == index;
     return GestureDetector(
       onTap: () {
-        // 切 tab 并返回根界面; 直播 tab 的可见性/暂停由
-        // MainTabController.select 内部统一处理
+        // 切 tab 并返回根界面
         MainTabController.instance.select(index);
         Get.back();
       },
@@ -369,7 +366,7 @@ class _DetailPageState extends State<DetailPage> {
       final bottomInset = MediaQuery.of(context).padding.bottom;
       const navFloatGap = 8.0;
       const navBarHeight = 51.0;
-      final navReserve = bottomInset + navFloatGap + navBarHeight + 6.0;
+      final navReserve = bottomInset + navFloatGap + navBarHeight + 22.0;
 
       // 正常模式：视频 + 视频信息 + 选集 + 简介
       return SingleChildScrollView(

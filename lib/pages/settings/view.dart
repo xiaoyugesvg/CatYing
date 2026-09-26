@@ -207,7 +207,49 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                   // 清除自定义
-                  if (bg.choice.value == BackgroundChoice.custom) ...[],
+                  if (bg.choice.value == BackgroundChoice.custom) ...[
+                    const SizedBox(height: 8),
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius:
+                            BorderRadius.circular(AppTheme.radiusMD),
+                        onTap: () async {
+                          await bg.clearCustom();
+                          if (ctx.mounted) Navigator.pop(ctx);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.red.withValues(alpha: 0.1),
+                            borderRadius:
+                                BorderRadius.circular(AppTheme.radiusMD),
+                            border: Border.all(
+                              color: Colors.red.withValues(alpha: 0.3),
+                              width: 0.5,
+                            ),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.delete_outline,
+                                  color: Colors.redAccent, size: 18),
+                              SizedBox(width: 10),
+                              Text(
+                                '清除自定义图片,恢复默认',
+                                style: TextStyle(
+                                  color: Colors.redAccent,
+                                  fontSize: AppTheme.fontSubhead,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               )),
         ),

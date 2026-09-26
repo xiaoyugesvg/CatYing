@@ -11,7 +11,7 @@ import '../../services/app_state.dart';
 import '../../services/nodejs_manager.dart';
 import '../../common/constants.dart';
 
-enum PendingMultiRepoTarget { vod, live }
+enum PendingMultiRepoTarget { vod }
 
 class PendingMultiRepoSelection {
   final String id;
@@ -29,14 +29,12 @@ class PendingMultiRepoSelection {
 
 class SettingsController extends GetxController {
   final vodApiUrl = ''.obs;
-  final liveApiUrl = ''.obs;
   final isLoadingConfig = false.obs;
   final configError = Rx<String?>(null);
   final configSuccess = false.obs;
   final pendingMultiRepoSelection = Rx<PendingMultiRepoSelection?>(null);
   final apiHistory = <String>[].obs;
   final vodPlayerEngine = PlayerEngine.mpv.obs;
-  final livePlayerEngine = PlayerEngine.mpv.obs;
   final decodeMode = VideoDecodeMode.auto.obs;
   final vlcBufferMode = VLCBufferMode.balanced.obs;
   final playTimeStep = 10.obs;
@@ -59,8 +57,6 @@ class SettingsController extends GetxController {
     final prefs = await SharedPreferences.getInstance();
     final savedVod = prefs.getString(AppConstants.apiUrl) ?? '';
     vodApiUrl.value = savedVod;
-    final savedLive = prefs.getString(AppConstants.liveApiUrl);
-    liveApiUrl.value = savedLive ?? savedVod;
 
     await _loadApiHistory();
 
@@ -75,18 +71,9 @@ class SettingsController extends GetxController {
         hasLegacyPlayer ? legacyPlayerRaw : defaultRaw,
       );
     }
-    if (!prefs.containsKey(AppConstants.playTypeLive)) {
-      await prefs.setInt(
-        AppConstants.playTypeLive,
-        hasLegacyPlayer ? legacyPlayerRaw : defaultRaw,
-      );
-    }
 
     vodPlayerEngine.value = PlayerEngine.fromStoredValue(
       prefs.getInt(AppConstants.playTypeVod) ?? 0,
-    );
-    livePlayerEngine.value = PlayerEngine.fromStoredValue(
-      prefs.getInt(AppConstants.playTypeLive) ?? 0,
     );
     decodeMode.value = VideoDecodeMode.fromStoredValue(
       prefs.getInt('play_decode_mode') ?? 0,
@@ -103,7 +90,6 @@ class SettingsController extends GetxController {
 
   Future<void> loadConfig() async {
     final trimmedVod = vodApiUrl.value.trim();
-    final trimmedLive = liveApiUrl.value.trim();
 
     if (trimmedVod.isEmpty) {
       configError.value = '请输入点播接口地址';
@@ -116,12 +102,9 @@ class SettingsController extends GetxController {
     pendingMultiRepoSelection.value = null;
 
     try {
-      final resolvedLive = trimmedLive.isEmpty ? trimmedVod : trimmedLive;
-
       // 若探测到多仓库入口，先中断加载并弹出候选
       final pending = await _detectPendingMultiRepoSelection(
         vodUrl: trimmedVod,
-        liveUrl: resolvedLive,
       );
       if (pending != null) {
         pendingMultiRepoSelection.value = pending;
@@ -129,18 +112,12 @@ class SettingsController extends GetxController {
         return;
       }
 
-      await ApiConfig.instance.loadConfigs(
-        vodApiUrl: trimmedVod,
-        liveApiUrl: resolvedLive,
-      );
+      await ApiConfig.instance.loadConfigs(vodApiUrl: trimmedVod);
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(AppConstants.apiUrl, trimmedVod);
-      await prefs.setString(AppConstants.liveApiUrl, trimmedLive);
       vodApiUrl.value = trimmedVod;
-      liveApiUrl.value = trimmedLive;
       await addToApiHistory(trimmedVod);
-      await addToApiHistory(resolvedLive);
       configSuccess.value = true;
 
       // 对应 Swift: ensureNodeJSAndLoadSource()
@@ -167,18 +144,7 @@ class SettingsController extends GetxController {
 
     switch (pending.target) {
       case PendingMultiRepoTarget.vod:
-        final normalizedLive =
-            ApiConfig.normalizeConfigUrl(liveApiUrl.value);
-        final shouldSyncLive =
-            liveApiUrl.value.trim().isNotEmpty &&
-                normalizedLive == normalizedSource;
         vodApiUrl.value = option.url;
-        if (shouldSyncLive) {
-          liveApiUrl.value = option.url;
-        }
-        break;
-      case PendingMultiRepoTarget.live:
-        liveApiUrl.value = option.url;
         break;
     }
 
@@ -193,7 +159,6 @@ class SettingsController extends GetxController {
 
   Future<PendingMultiRepoSelection?> _detectPendingMultiRepoSelection({
     required String vodUrl,
-    required String liveUrl,
   }) async {
     final vodOptions =
         await ApiConfig.instance.fetchMultiRepoOptions(vodUrl);
@@ -206,24 +171,6 @@ class SettingsController extends GetxController {
         target: PendingMultiRepoTarget.vod,
         sourceUrl: vodUrl,
         options: vodOptions,
-      );
-    }
-
-    final normalizedVod = ApiConfig.normalizeConfigUrl(vodUrl);
-    final normalizedLive = ApiConfig.normalizeConfigUrl(liveUrl);
-    if (normalizedLive == normalizedVod) return null;
-
-    final liveOptions =
-        await ApiConfig.instance.fetchMultiRepoOptions(liveUrl);
-    if (liveOptions != null) {
-      if (liveOptions.isEmpty) {
-        throw Exception('直播多仓库配置中没有可用地址');
-      }
-      return PendingMultiRepoSelection(
-        id: '${DateTime.now().microsecondsSinceEpoch}',
-        target: PendingMultiRepoTarget.live,
-        sourceUrl: liveUrl,
-        options: liveOptions,
       );
     }
 
@@ -312,13 +259,11 @@ class SettingsController extends GetxController {
   Future<bool> resetConfig() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(AppConstants.apiUrl);
-    await prefs.remove(AppConstants.liveApiUrl);
     await prefs.remove(AppConstants.homeApi);
     await prefs.remove('api_history');
 
     // 清内存中的状态
     vodApiUrl.value = '';
-    liveApiUrl.value = '';
     apiHistory.clear();
 
     // 删下载的源缓存（<Documents>/nodejs/source/）
@@ -342,13 +287,6 @@ class SettingsController extends GetxController {
     vodPlayerEngine.value = engine;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(AppConstants.playTypeVod, engine.value);
-  }
-
-  Future<void> setLivePlayerEngine(PlayerEngine engine) async {
-    if (!playerEngineOptions.contains(engine)) return;
-    livePlayerEngine.value = engine;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(AppConstants.playTypeLive, engine.value);
   }
 
   Future<void> setDecodeMode(VideoDecodeMode mode) async {

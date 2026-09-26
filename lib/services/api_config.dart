@@ -3,7 +3,6 @@ import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_config.dart';
 import '../models/source_bean.dart';
-import '../models/live_models.dart';
 import '../common/constants.dart';
 import 'network_manager.dart';
 
@@ -55,11 +54,9 @@ class ApiConfig extends GetxController {
   final sourceBeanList = <SourceBean>[].obs;
   final homeSourceBean = Rx<SourceBean?>(null);
   final parseBeanList = <ParseBean>[].obs;
-  final liveChannelGroupList = <LiveChannelGroup>[].obs;
   final dohList = <(String, String)>[].obs;
   final isLoaded = false.obs;
   final configUrl = ''.obs;
-  final liveConfigUrl = ''.obs;
   final wallpaper = ''.obs;
 
   final NetworkManager _network = NetworkManager.instance;
@@ -76,18 +73,14 @@ class ApiConfig extends GetxController {
   // 公开 API
   // ============================================================
 
-  /// 加载远程配置
+  /// 加载远程配置（点播）
   Future<void> loadConfig(String apiUrl) async {
-    await loadConfigs(vodApiUrl: apiUrl, liveApiUrl: apiUrl);
+    await loadConfigs(vodApiUrl: apiUrl);
   }
 
-  /// 分别加载点播配置和直播配置
-  Future<void> loadConfigs({
-    required String vodApiUrl,
-    required String liveApiUrl,
-  }) async {
+  /// 加载远程点播配置
+  Future<void> loadConfigs({required String vodApiUrl}) async {
     final trimmedVod = vodApiUrl.trim();
-    final trimmedLive = liveApiUrl.trim();
 
     if (trimmedVod.isEmpty) {
       throw ConfigError.parseError.message('点播接口地址不能为空');
@@ -96,47 +89,16 @@ class ApiConfig extends GetxController {
     final loadToken = DateTime.now().microsecondsSinceEpoch;
     _activeLoadToken = loadToken;
 
-    final resolvedLive = trimmedLive.isEmpty ? trimmedVod : trimmedLive;
     configUrl.value = trimmedVod;
-    liveConfigUrl.value = resolvedLive;
 
-    if (trimmedVod == resolvedLive) {
-      final configResult = await _fetchConfig(trimmedVod);
-      if (_activeLoadToken != loadToken) return;
-      await _parseConfig(
-        configResult.config,
-        apiUrl: configResult.loadedFrom,
-        includeSources: true,
-        includeLive: false,
-        loadToken: loadToken,
-      );
-      // 后台解析直播
-      await _parseConfig(
-        configResult.config,
-        apiUrl: configResult.loadedFrom,
-        includeSources: false,
-        includeLive: true,
-        loadToken: loadToken,
-      );
-    } else {
-      final vodConfig = await _fetchConfig(trimmedVod);
-      final liveConfig = await _fetchConfig(resolvedLive);
-      if (_activeLoadToken != loadToken) return;
-      await _parseConfig(
-        vodConfig.config,
-        apiUrl: vodConfig.loadedFrom,
-        includeSources: true,
-        includeLive: false,
-        loadToken: loadToken,
-      );
-      await _parseConfig(
-        liveConfig.config,
-        apiUrl: liveConfig.loadedFrom,
-        includeSources: false,
-        includeLive: true,
-        loadToken: loadToken,
-      );
-    }
+    final configResult = await _fetchConfig(trimmedVod);
+    if (_activeLoadToken != loadToken) return;
+    await _parseConfig(
+      configResult.config,
+      apiUrl: configResult.loadedFrom,
+      includeSources: true,
+      loadToken: loadToken,
+    );
 
     if (_activeLoadToken != loadToken) return;
     isLoaded.value = true;
@@ -397,7 +359,7 @@ class ApiConfig extends GetxController {
       }
 
       // 解码成功但缺少可用内容
-      throw ConfigError.parseError.message('配置缺少可用站点（sites / lives / parses）');
+      throw ConfigError.parseError.message('配置缺少可用站点（sites / parses）');
     }
 
     throw ConfigError.parseError.message('配置格式不受支持');
@@ -441,7 +403,6 @@ class ApiConfig extends GetxController {
     AppConfigData config, {
     required String apiUrl,
     required bool includeSources,
-    required bool includeLive,
     required int loadToken,
   }) async {
     if (_activeLoadToken != loadToken) return;
@@ -512,20 +473,6 @@ class ApiConfig extends GetxController {
       // 壁纸
       wallpaper.value = config.wallpaper ?? '';
     }
-
-    if (includeLive) {
-      if (config.lives != null) {
-        final parsedGroups = await _parseLives(
-          config.lives!,
-          apiUrl: apiUrl,
-          loadToken: loadToken,
-        );
-        if (_activeLoadToken != loadToken) return;
-        liveChannelGroupList.value = parsedGroups;
-      } else {
-        liveChannelGroupList.value = [];
-      }
-    }
   }
 
   Future<void> _restoreHomeSource(List<SourceBean> sources) async {
@@ -540,400 +487,6 @@ class ApiConfig extends GetxController {
         }
       }
     } catch (_) {}
-  }
-
-  // ============================================================
-  // 直播解析
-  // ============================================================
-
-  Future<List<LiveChannelGroup>> _parseLives(
-    List<LiveConfig> lives, {
-    required String apiUrl,
-    required int loadToken,
-  }) async {
-    final mergedGroups = <String, LiveChannelGroup>{};
-    final remoteLiveTargets = <(int order, String url)>[];
-
-    for (var index = 0; index < lives.length; index++) {
-      final live = lives[index];
-      if (_activeLoadToken != loadToken) return [];
-
-      // 如果有 url，从远程加载
-      if (live.url != null && live.url!.trim().isNotEmpty) {
-        final resolvedUrl = _resolveLiveUrl(live.url!, baseConfigUrl: apiUrl);
-        remoteLiveTargets.add((index, resolvedUrl));
-      }
-
-      // 如果有内嵌频道
-      if (live.channels != null) {
-        final inlineGroups = _parseInlineLiveChannels(live.channels!);
-        _mergeLiveGroups(inlineGroups, mergedGroups);
-      }
-    }
-
-    if (remoteLiveTargets.isNotEmpty) {
-      // 并发加载远程直播源
-      final futures = <Future<(int order, String content)>>[];
-      for (final target in remoteLiveTargets) {
-        futures.add(
-          _network.getString(target.$2).then((content) => (target.$1, content)).catchError((e) {
-            print('加载直播源失败: ${target.$2}, error: $e');
-            return (target.$1, '');
-          }),
-        );
-      }
-
-      final fetchedContents = await Future.wait(futures);
-      fetchedContents.sort((a, b) => a.$1.compareTo(b.$1));
-
-      for (final (_, content) in fetchedContents) {
-        if (_activeLoadToken != loadToken) return [];
-        if (content.isEmpty) continue;
-        final groups = parseLiveContent(content);
-        _mergeLiveGroups(groups, mergedGroups);
-        liveChannelGroupList.value = _sortedGroups(mergedGroups);
-      }
-    }
-
-    return _sortedGroups(mergedGroups);
-  }
-
-  List<LiveChannelGroup> _parseInlineLiveChannels(
-    List<LiveChannelConfig> channels,
-  ) {
-    final groups = <String, LiveChannelGroup>{};
-    for (final channel in channels) {
-      _appendChannel(
-        channelName: channel.name ?? '',
-        urls: channel.urls ?? [],
-        logo: channel.logo ?? '',
-        groupName: channel.group ?? '其他',
-        groups: groups,
-      );
-    }
-    return _sortedGroups(groups);
-  }
-
-  void _mergeLiveGroups(
-    List<LiveChannelGroup> incomingGroups,
-    Map<String, LiveChannelGroup> groups,
-  ) {
-    for (final group in incomingGroups) {
-      for (final channel in group.channels) {
-        _appendChannel(
-          channelName: channel.channelName,
-          urls: channel.channelUrls,
-          logo: channel.logo,
-          groupName: group.groupName,
-          groups: groups,
-        );
-      }
-    }
-  }
-
-  /// 解析 M3U / TXT（#genre#）/ JSON 三种格式的直播内容，自动识别
-  ///
-  /// - M3U：`#EXTM3U` 开头，提取 `tvg-logo`（台标）与 `group-title`（分组）
-  /// - TXT：`分组名,#genre#` 分组，`频道名,url[,logo]` 频道行
-  /// - JSON：`[{name,channels:[{name,url,logo}]}]` / `{"group":{...}}` /
-  ///   `{"groups":[...]}` / `{"lives":[...]}` 结构
-  List<LiveChannelGroup> parseLiveContent(String content) {
-    final groups = <String, LiveChannelGroup>{};
-
-    final trimmedContent = content.trim();
-    // JSON 优先识别
-    if (trimmedContent.startsWith('{') || trimmedContent.startsWith('[')) {
-      final parsed = _tryParseJsonLiveContent(trimmedContent, groups);
-      if (parsed) return _sortedGroups(groups);
-    }
-
-    final lines = content.split(RegExp(r'\r?\n'));
-    final firstNonEmpty = lines.firstWhere(
-      (l) => l.trim().isNotEmpty,
-      orElse: () => '',
-    );
-    final isM3U = firstNonEmpty.toUpperCase().startsWith('#EXTM3U');
-
-    if (isM3U) {
-      var currentName = '';
-      var currentGroup = '默认';
-      var currentLogo = '';
-
-      for (final line in lines) {
-        final trimmed = line.trim();
-        if (trimmed.startsWith('#EXTINF:')) {
-          // 解析频道名
-          final commaIndex = trimmed.lastIndexOf(',');
-          if (commaIndex >= 0) {
-            currentName = trimmed.substring(commaIndex + 1).trim();
-          }
-          currentGroup = '默认';
-          final groupMatch = RegExp(r'group-title="([^"]*)"').firstMatch(trimmed);
-          if (groupMatch != null) {
-            currentGroup = groupMatch.group(1) ?? '默认';
-          }
-          // 台标：tvg-logo="https://..."
-          currentLogo = '';
-          final logoMatch = RegExp(r'tvg-logo="([^"]*)"').firstMatch(trimmed);
-          if (logoMatch != null) {
-            currentLogo = logoMatch.group(1) ?? '';
-          }
-        } else if (_isLiveStreamUrl(trimmed)) {
-          if (currentName.isNotEmpty) {
-            _appendChannel(
-              channelName: currentName,
-              urls: [trimmed],
-              logo: currentLogo,
-              groupName: currentGroup,
-              groups: groups,
-            );
-            currentName = '';
-          }
-        }
-      }
-    } else {
-      // TXT 格式: 分组名,#genre#  或  频道名,url[,logo]
-      var currentGroupName = '默认';
-      for (final line in lines) {
-        final trimmed = line.trim();
-        if (trimmed.isEmpty) continue;
-
-        if (trimmed.endsWith(',#genre#') || trimmed.endsWith('，#genre#')) {
-          currentGroupName = trimmed
-              .replaceAll(',#genre#', '')
-              .replaceAll('，#genre#', '')
-              .trim();
-          continue;
-        }
-
-        final parts = trimmed.split(',');
-        if (parts.length >= 2) {
-          final name = parts[0].trim();
-          final url = parts.sublist(1).join(',').trim();
-          String logo = '';
-          if (parts.length >= 3) {
-            final candidate = parts[2].trim();
-            if (candidate.toLowerCase().startsWith('http')) logo = candidate;
-          }
-
-          if (name.isNotEmpty && _isLiveStreamUrl(url)) {
-            _appendChannel(
-              channelName: name,
-              urls: [url],
-              logo: logo,
-              groupName: currentGroupName,
-              groups: groups,
-            );
-          }
-        }
-      }
-    }
-
-    return _sortedGroups(groups);
-  }
-
-  /// 尝试解析 JSON 直播源，成功则返回 true 并写入 groups
-  bool _tryParseJsonLiveContent(
-    String content,
-    Map<String, LiveChannelGroup> groups,
-  ) {
-    dynamic decoded;
-    try {
-      decoded = jsonDecode(content);
-    } catch (_) {
-      return false;
-    }
-
-    final entries = <dynamic>[];
-    if (decoded is List) {
-      entries.addAll(decoded);
-    } else if (decoded is Map) {
-      if (decoded['lives'] is List) entries.addAll(decoded['lives'] as List);
-      else if (decoded['groups'] is List) entries.addAll(decoded['groups'] as List);
-      else if (decoded['group'] is Map) entries.add(decoded['group']);
-      else entries.add(decoded);
-    } else {
-      return false;
-    }
-
-    var appended = false;
-    for (final entry in entries) {
-      if (entry is! Map) continue;
-      final groupName =
-          (entry['group'] ?? entry['groupName'] ?? entry['name'] ?? '默认').toString().trim();
-
-      // 单个频道对象：带 url / urls
-      final directUrls = _extractLiveUrls(entry);
-      if (directUrls.isNotEmpty) {
-        final name = (entry['name'] ?? entry['channelName'] ?? '').toString().trim();
-        if (name.isNotEmpty) {
-          _appendChannel(
-            channelName: name,
-            urls: directUrls,
-            logo: _extractLiveLogo(entry),
-            groupName: groupName,
-            groups: groups,
-          );
-          appended = true;
-        }
-        continue;
-      }
-
-      final channels = entry['channels'] ?? entry['channelList'];
-      if (channels is List) {
-        for (final ch in channels) {
-          if (ch is! Map) continue;
-          final name = (ch['name'] ?? ch['channelName'] ?? '').toString().trim();
-          final urls = _extractLiveUrls(ch);
-          if (name.isEmpty || urls.isEmpty) continue;
-          _appendChannel(
-            channelName: name,
-            urls: urls,
-            logo: _extractLiveLogo(ch),
-            groupName: groupName,
-            groups: groups,
-          );
-          appended = true;
-        }
-      }
-    }
-    return appended;
-  }
-
-  /// 从 JSON 频道对象提取播放地址列表（url 或 urls，支持 String / List）
-  List<String> _extractLiveUrls(Map<dynamic, dynamic> item) {
-    final raw = item['url'] ?? item['urls'];
-    if (raw is String) {
-      return raw.trim().isEmpty ? [] : [raw.trim()];
-    }
-    if (raw is List) {
-      return raw
-          .map((e) => e.toString().trim())
-          .where((u) => u.isNotEmpty)
-          .toList();
-    }
-    return [];
-  }
-
-  /// 从 JSON 频道对象提取台标（logo 或 tvg-logo）
-  String _extractLiveLogo(Map<dynamic, dynamic> item) {
-    final logo = item['logo'] ?? item['tvg-logo'];
-    return logo is String ? logo.trim() : '';
-  }
-
-  void _appendChannel({
-    required String channelName,
-    required List<String> urls,
-    required String logo,
-    required String groupName,
-    required Map<String, LiveChannelGroup> groups,
-  }) {
-    final normalizedName = _normalizeChannelName(channelName);
-    if (normalizedName.isEmpty) return;
-
-    final validUrls = _uniqueLiveUrls(urls);
-    if (validUrls.isEmpty) return;
-
-    final normalizedGroupName = _normalizeGroupName(groupName);
-    if (!groups.containsKey(normalizedGroupName)) {
-      groups[normalizedGroupName] = LiveChannelGroup(
-        groupName: normalizedGroupName,
-        groupIndex: groups.length,
-        channels: [],
-      );
-    }
-
-    final group = groups[normalizedGroupName]!;
-
-    final existingIndex = group.channels.indexWhere(
-      (ch) => _normalizeChannelName(ch.channelName) == normalizedName,
-    );
-
-    if (existingIndex >= 0) {
-      final existing = group.channels[existingIndex];
-      // 确保 channelUrls 是可变列表（默认 const [] 不可变）
-      existing.channelUrls = List<String>.from(existing.channelUrls);
-      final existingUrlSet = existing.channelUrls.map(_normalizeLiveUrl).toSet();
-      for (final url in validUrls) {
-        final normalizedUrl = _normalizeLiveUrl(url);
-        if (!existingUrlSet.contains(normalizedUrl)) {
-          existing.channelUrls.add(url);
-          existingUrlSet.add(normalizedUrl);
-        }
-      }
-      final trimmedLogo = logo.trim();
-      if (existing.logo.isEmpty && trimmedLogo.isNotEmpty) {
-        existing.logo = trimmedLogo;
-      }
-    } else {
-      group.channels.add(LiveChannelItem(
-        channelName: normalizedName,
-        channelIndex: group.channels.length,
-        channelUrls: List<String>.from(validUrls),
-        logo: logo.trim(),
-      ));
-    }
-  }
-
-  List<LiveChannelGroup> _sortedGroups(Map<String, LiveChannelGroup> groups) {
-    final sorted = groups.values.toList()
-      ..sort((a, b) => a.groupIndex.compareTo(b.groupIndex));
-    for (var i = 0; i < sorted.length; i++) {
-      for (var j = 0; j < sorted[i].channels.length; j++) {
-        sorted[i].channels[j].channelIndex = j;
-      }
-    }
-    return sorted;
-  }
-
-  String _resolveLiveUrl(String urlString, {required String baseConfigUrl}) {
-    final trimmed = urlString.trim();
-    if (trimmed.isEmpty) return trimmed;
-    final uri = Uri.tryParse(trimmed);
-    if (uri != null && uri.hasScheme) {
-      return normalizeConfigUrl(trimmed);
-    }
-    final baseUri = Uri.tryParse(baseConfigUrl);
-    if (baseUri == null) return trimmed;
-    final resolved = baseUri.resolve(trimmed);
-    return normalizeConfigUrl(resolved.toString());
-  }
-
-  List<String> _uniqueLiveUrls(List<String> urls) {
-    final result = <String>[];
-    final seen = <String>{};
-
-    for (final url in urls) {
-      final normalized = _normalizeLiveUrl(url);
-      if (normalized.isEmpty || !_isLiveStreamUrl(normalized) || seen.contains(normalized)) {
-        continue;
-      }
-      seen.add(normalized);
-      result.add(normalized);
-    }
-
-    return result;
-  }
-
-  String _normalizeGroupName(String groupName) {
-    final trimmed = groupName.trim();
-    return trimmed.isEmpty ? '默认' : trimmed;
-  }
-
-  String _normalizeChannelName(String channelName) {
-    return channelName.trim();
-  }
-
-  String _normalizeLiveUrl(String url) {
-    return url.trim();
-  }
-
-  bool _isLiveStreamUrl(String url) {
-    final lower = url.toLowerCase();
-    return lower.startsWith('http://') ||
-        lower.startsWith('https://') ||
-        lower.startsWith('rtmp://') ||
-        lower.startsWith('rtsp://');
   }
 
   // ============================================================

@@ -80,7 +80,6 @@ class AppState extends GetxController {
   final showAboutOnLaunch = false.obs;
 
   String _lastVodUrl = '';
-  String _lastLiveUrl = '';
   bool _nodeJSStarted = false;
 
   /// 重入 guard - 避免 lifecycle 抖动导致 handleSceneActive 嵌套跑
@@ -122,31 +121,17 @@ class AppState extends GetxController {
   // 配置加载主流程 - 对应 Swift loadConfig
   // ============================================================
 
-  /// 加载配置（仅点播 URL）- 对应 Swift loadConfig(url:)
-  Future<void> loadConfig(String url) async {
-    await loadConfigWithLive(vodUrl: url, liveUrl: null);
-  }
-
-  /// 加载配置（分别指定点播和直播 URL）- 对应 Swift loadConfig(vodUrl:liveUrl:)
-  Future<void> loadConfigWithLive({
-    required String vodUrl,
-    String? liveUrl,
-  }) async {
+  /// 加载配置 - 对应 Swift loadConfig(url:)
+  Future<void> loadConfig({required String vodUrl}) async {
     final trimmedVod = vodUrl.trim();
-    final trimmedLive = (liveUrl ?? '').trim();
     if (trimmedVod.isEmpty) return;
-    final resolvedLive = trimmedLive.isEmpty ? trimmedVod : trimmedLive;
 
     _lastVodUrl = trimmedVod;
-    _lastLiveUrl = resolvedLive;
     configLoadError.value = null;
     loadingPhase.value = LoadingPhase.loadingConfig;
 
     try {
-      await ApiConfig.instance.loadConfigs(
-        vodApiUrl: trimmedVod,
-        liveApiUrl: resolvedLive,
-      );
+      await ApiConfig.instance.loadConfigs(vodApiUrl: trimmedVod);
       await _ensureNodeJSAndLoadSource();
       loadingPhase.value = LoadingPhase.completed;
       applyLoadedConfigState();
@@ -326,8 +311,7 @@ class AppState extends GetxController {
           !isConfigLoaded.value &&
           _lastVodUrl.isNotEmpty) {
         isRetryingConfig.value = true;
-        loadConfigWithLive(vodUrl: _lastVodUrl, liveUrl: _lastLiveUrl)
-            .then((_) {
+        loadConfig(vodUrl: _lastVodUrl).then((_) {
           isRetryingConfig.value = false;
         });
       }
