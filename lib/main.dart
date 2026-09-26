@@ -5,7 +5,6 @@ import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'app.dart';
-import 'common/constants.dart';
 import 'models/cache_store.dart';
 import 'services/api_config.dart';
 import 'services/app_log.dart';
@@ -27,10 +26,7 @@ void main() async {
   final appDir = await getApplicationDocumentsDirectory();
   Hive.init(appDir.path);
 
-  // 预取 mpv 磁盘缓存根目录（Player 创建时同步读取 gMpvCacheDir,
-  // 点播视频缓存到应用 Cache 目录, 下次播放同 URL 直接复用, 避免重复下载）
-  final cacheRoot = await getApplicationCacheDirectory();
-  gMpvCacheDir = cacheRoot.path;
+
 
   // 注册 ApiConfig 为 GetxController - 对应 Swift ApiConfig.shared
   Get.put<ApiConfig>(ApiConfig());

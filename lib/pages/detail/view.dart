@@ -9,7 +9,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:media_kit_video/media_kit_video.dart' hide Video;
 import 'dart:ui' show ImageFilter;
 import '../../common/theme.dart';
-import '../../common/constants.dart';
 import '../../models/movie.dart';
 import '../../models/vod_info.dart';
 import '../../models/player_engine.dart';
@@ -174,17 +173,7 @@ class _DetailPageState extends State<DetailPage> {
     _player?.dispose();
     // mpv 磁盘缓存：点播视频缓存到应用 Cache 目录, 下次播放同 URL 直接复用,
     // 解决"每次打开都要重新下载"。缓存目录与设置页"清除缓存"统计目录一致。
-    _player = Player(
-      configuration: PlayerConfiguration(
-        title: 'TVBox',
-        libmpvOptions: [
-          '--cache=yes',
-          '--cache-dir=$gMpvCacheDir/video_cache',
-          '--cache-on-disk=yes',
-          '--cache-pause-initial=no',
-        ],
-      ),
-    );
+    _player = Player(configuration: const PlayerConfiguration(title: 'TVBox'));
     // 同步创建 VideoController，确保 player 与 controller 一一对应
     _videoController = VideoController(_player!);
     _lastPlayerUrl = url;

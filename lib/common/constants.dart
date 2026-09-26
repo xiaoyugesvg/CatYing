@@ -1,8 +1,4 @@
 /// 应用常量和配置键 - 对应 Swift HawkConfig
-
-/// mpv 磁盘缓存根目录（main() 启动时异步预取, Player 创建同步读取）
-String gMpvCacheDir = '';
-
 class AppConstants {
   // 配置键
   static const String apiUrl = 'api_url';
