@@ -403,15 +403,9 @@ class _DetailPageState extends State<DetailPage> {
             // 2. 视频信息区 - 对应 Swift videoInfoSection
             _buildVideoInfo(),
 
-            // 3. 线路选择 - 对应 Swift flagSelector
-            if (_controller.flags.length > 1) _buildFlagSelector(),
-
-            // 4. 清晰度选择 - 对应 Swift qualitySelector
-            if (_controller.hasQualityChoices) _buildQualitySelector(),
-
-            // 5. 选集播放 - 对应 Swift episodeSection
-            if (_controller.currentEpisodes.isNotEmpty)
-              _buildEpisodeList(),
+            // 3. 播放线路 + 清晰度 + 选集播放 —— 合并为一张独立卡片
+            //    （三段式：播放器 / 简介·推荐·快搜 tab / 线路+列表卡片）
+            _buildPlaybackCard(),
 
             // 底部间距 - 预留悬浮导航栏高度, 让内容能完整滚出悬浮栏
             // (不再被底部悬浮菜单栏挡住最后一行内容)
@@ -729,7 +723,16 @@ class _DetailPageState extends State<DetailPage> {
                 _buildMetadataFlow(info),
                 const SizedBox(height: AppTheme.spacingMD),
                 // 简介 - 2 行收起 / 点击展开
-                if (info.des.isNotEmpty) _buildInlineDescription(info),
+                if (info.des.isNotEmpty)
+                  _buildInlineDescription(info)
+                else
+                  Text(
+                    '暂无简介内容',
+                    style: const TextStyle(
+                      color: AppTheme.textTertiary,
+                      fontSize: AppTheme.fontCaption,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -1081,6 +1084,99 @@ class _DetailPageState extends State<DetailPage> {
                     }).toList(),
                   ),
                 )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 播放线路 + 清晰度 + 选集播放 —— 合并成一张独立卡片（三段式底部）
+  Widget _buildPlaybackCard() {
+    final hasFlag = _controller.flags.length > 1;
+    final hasQuality = _controller.hasQualityChoices;
+    final hasEpisodes = _controller.currentEpisodes.isNotEmpty;
+    if (!hasFlag && !hasQuality && !hasEpisodes) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppTheme.spacingLG, AppTheme.spacingMD, AppTheme.spacingLG, 0),
+      child: AppCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (hasFlag) ...[
+              const SectionHeader(title: '播放线路', icon: Icons.settings_input_antenna),
+              const SizedBox(height: AppTheme.spacingSM),
+              Obx(() => SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: _controller.flags.map((flag) {
+                        final isSelected =
+                            _controller.selectedFlag.value == flag;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: AppTheme.spacingSM),
+                          child: _PillChip(
+                            title: flag,
+                            isSelected: isSelected,
+                            onTap: () {
+                              _controller.selectFlag(flag);
+                              if (_controller.isPlaying.value) {
+                                _saveHistoryForCurrentEpisode();
+                              }
+                            },
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  )),
+            ],
+            if (hasQuality) ...[
+              const SizedBox(height: AppTheme.spacingMD),
+              const Divider(height: 1, color: AppTheme.borderLight),
+              const SizedBox(height: AppTheme.spacingMD),
+              const SectionHeader(title: '视频清晰度', icon: Icons.auto_awesome),
+              const SizedBox(height: AppTheme.spacingSM),
+              Obx(() => SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: _controller.qualityOptions.map((option) {
+                        final isSelected =
+                            _controller.selectedQualityId.value == option.id;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: AppTheme.spacingSM),
+                          child: _PillChip(
+                            title: option.name,
+                            isSelected: isSelected,
+                            onTap: () {
+                              _controller.selectQuality(option);
+                              if (_controller.isPlaying.value) {
+                                _saveHistoryForCurrentEpisode();
+                              }
+                            },
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  )),
+            ],
+            if (hasEpisodes) ...[
+              const SizedBox(height: AppTheme.spacingMD),
+              const Divider(height: 1, color: AppTheme.borderLight),
+              const SizedBox(height: AppTheme.spacingMD),
+              const SectionHeader(title: '选集播放', icon: Icons.list),
+              const SizedBox(height: AppTheme.spacingSM),
+              Obx(() => EpisodeListView(
+                    episodeNames: _controller.currentEpisodes
+                        .map((e) => e.name)
+                        .toList(),
+                    selectedIndex: _controller.selectedEpisodeIndex.value,
+                    onEpisodeTap: (index) {
+                      _controller.selectEpisode(index);
+                      _saveHistoryForCurrentEpisode();
+                    },
+                  )),
+            ],
           ],
         ),
       ),

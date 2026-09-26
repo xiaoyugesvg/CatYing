@@ -1340,17 +1340,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       child: _gradientTopContainer(
         child: Row(
           children: [
-            if (_displayTitle.isNotEmpty)
-              Expanded(
-                child: Text(
-                  _displayTitle,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              )
-            else
-              const Spacer(),
+            // **v6 (2026-09-27)**：播放器顶栏不再显示视频名称/线路名
+            // （用户明确要求"播放器上面不要放播放名称和播放线路"），
+            // 顶栏只保留分辨率/网速/功能按钮，整体贴最上。
+            const Spacer(),
 
             // 分辨率
             if (_resolutionText.isNotEmpty)
@@ -2518,10 +2511,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Widget _gradientTopContainer({required Widget child}) {
     final mediaPadding = MediaQuery.of(context).padding;
-    // 顶栏底部留白随播放器高度自适应：小窗(高度<420)紧凑、全屏舒展
-    final bottomPad = _playerAreaHeight <= 0
-        ? 30.0
-        : (_playerAreaHeight < 420 ? 16.0 : 34.0);
+    // **v6 (2026-09-27)**：顶栏按钮贴最上，不再用 bottomPad 把按钮往
+    // 画面中部拉。上下两排完全贴边，中间大留白给视频画面。
+    final bottomPad = 6.0;
     return DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -2544,10 +2536,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Widget _gradientBottomContainer({required Widget child}) {
     final mediaPadding = MediaQuery.of(context).padding;
-    // 底栏顶部留白随播放器高度自适应：小窗紧凑、全屏舒展
-    final topPad = _playerAreaHeight <= 0
-        ? 26.0
-        : (_playerAreaHeight < 420 ? 14.0 : 30.0);
+    // **v6 (2026-09-27)**：底栏按钮贴最下，不再用 topPad 把按钮往
+    // 画面中部拉。上下两排完全贴边，中间大留白给视频画面。
+    final topPad = 6.0;
     return DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(

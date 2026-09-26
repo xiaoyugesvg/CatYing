@@ -23,6 +23,9 @@ class EpisodeListView extends StatefulWidget {
 }
 
 class _EpisodeListViewState extends State<EpisodeListView> {
+  /// 网格弹窗当前页（每页 10 集：1-10 / 11-20 ...）
+  int _gridPage = 0;
+
   @override
   Widget build(BuildContext context) {
     if (widget.episodeNames.isEmpty) return const SizedBox.shrink();
@@ -164,6 +167,62 @@ class _EpisodeListViewState extends State<EpisodeListView> {
     );
   }
 
+  /// 当前页的剧集切片（每页 10 集）
+  List<String> get _pagedNames {
+    final start = _gridPage * 10;
+    final end = (start + 10).clamp(0, widget.episodeNames.length);
+    return widget.episodeNames.sublist(start, end);
+  }
+
+  /// 分页 tab 行：1-10 / 11-20 ...（超过 10 集才显示）
+  Widget _buildGridPager() {
+    final total = widget.episodeNames.length;
+    if (total <= 10) return const SizedBox.shrink();
+    final pageCount = (total / 10).ceil();
+    return SizedBox(
+      height: 32,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: pageCount,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, p) {
+          final isSelected = p == _gridPage;
+          final start = p * 10 + 1;
+          final end = ((p + 1) * 10).clamp(0, total);
+          final label = '$start-$end';
+          return GestureDetector(
+            onTap: () => setState(() => _gridPage = p),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? AppTheme.accentColor.withValues(alpha: 0.14)
+                    : AppTheme.backgroundTertiary,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: isSelected
+                      ? AppTheme.accentColor.withValues(alpha: 0.6)
+                      : Colors.white.withValues(alpha: 0.06),
+                  width: isSelected ? 1.2 : 0.6,
+                ),
+              ),
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? AppTheme.accentColor : AppTheme.textSecondary,
+                  fontSize: AppTheme.fontCaption,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   /// 网格选集弹窗 - 对应参考图：合集标题 + 每行 5 个 + 当前集绿框
   void _showAllEpisodesSheet() {
     showModalBottomSheet<void>(
@@ -228,7 +287,10 @@ class _EpisodeListViewState extends State<EpisodeListView> {
                   ],
                 ),
               ),
-              // 网格剧集
+              // 分页 tab（1-10 / 11-20 ...）
+              _buildGridPager(),
+              const SizedBox(height: 8),
+              // 网格剧集（当前页切片）
               Expanded(
                 child: GridView.builder(
                   controller: scrollController,
@@ -239,13 +301,14 @@ class _EpisodeListViewState extends State<EpisodeListView> {
                     crossAxisSpacing: 10,
                     childAspectRatio: 1.35,
                   ),
-                  itemCount: widget.episodeNames.length,
+                  itemCount: _pagedNames.length,
                   itemBuilder: (context, i) {
-                    final isSelected = i == widget.selectedIndex;
+                    final globalIndex = _gridPage * 10 + i;
+                    final isSelected = globalIndex == widget.selectedIndex;
                     return GestureDetector(
                       onTap: () {
                         Navigator.pop(ctx);
-                        widget.onEpisodeTap(i);
+                        widget.onEpisodeTap(globalIndex);
                       },
                       child: Container(
                         alignment: Alignment.center,
@@ -262,7 +325,7 @@ class _EpisodeListViewState extends State<EpisodeListView> {
                           ),
                         ),
                         child: Text(
-                          widget.episodeNames[i],
+                          _pagedNames[i],
                           style: TextStyle(
                             color: isSelected
                                 ? AppTheme.accentColor
