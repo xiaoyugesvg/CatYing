@@ -4,10 +4,10 @@ import 'package:get/get.dart';
 import '../../common/theme.dart';
 import '../../services/api_config.dart';
 import '../../services/app_state.dart';
-import '../../models/source_bean.dart';
 import '../../models/movie.dart';
 import '../../widgets/vod_card.dart';
 import '../../widgets/common_widgets.dart';
+import '../../widgets/source_switch_sheet.dart';
 import '../webview/view.dart';
 import 'controller.dart';
 
@@ -153,33 +153,17 @@ class _HomePageState extends State<HomePage> {
           AppTheme.spacingXL, AppTheme.spacingLG, AppTheme.spacingXL, AppTheme.spacingSM),
       child: Row(
         children: [
-          PopupMenuButton<SourceBean>(
-            offset: const Offset(0, 40),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppTheme.radiusMD)),
-            color: AppTheme.backgroundSecondary,
-            onSelected: (source) {
-              ApiConfig.instance.setHomeSource(source);
-              _controller.refresh();
-            },
-            itemBuilder: (context) {
-              return ApiConfig.instance.sourceBeanList.value.map((source) {
-                return PopupMenuItem<SourceBean>(
-                  value: source,
-                  child: Row(
-                    children: [
-                      Text(source.name,
-                          style: const TextStyle(color: AppTheme.textPrimary)),
-                      if (source.key ==
-                          ApiConfig.instance.homeSourceBean.value?.key)
-                        const SizedBox(width: 8),
-                      if (source.key ==
-                          ApiConfig.instance.homeSourceBean.value?.key)
-                        const Icon(Icons.check, color: AppTheme.accentColor, size: 16),
-                    ],
-                  ),
-                );
-              }).toList();
+          // 源切换 + 搜索（2026-09-26）：替代原 PopupMenuButton 简单菜单，
+          // 点击弹出 SourceSwitchSheet 底部弹窗：搜索框(搜索源...) +
+          // 单列/双排切换 + 可滚动源列表(带选中圈)，选中后刷新首页
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () async {
+              final changed =
+                  await SourceSwitchSheet.show(context);
+              if (changed && mounted) {
+                _controller.refresh();
+              }
             },
             child: Row(
               mainAxisSize: MainAxisSize.min,
