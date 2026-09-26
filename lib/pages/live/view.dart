@@ -407,6 +407,21 @@ class _LivePageState extends State<LivePage> {
                   : Colors.transparent,
               child: Row(
                 children: [
+                  // 台标 logo - 对应 Swift channelLogo
+                  if (channel.logo.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 10),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: Image.network(
+                          channel.logo,
+                          width: 28,
+                          height: 28,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                        ),
+                      ),
+                    ),
                   Expanded(
                     child: Text(
                       channel.channelName,
@@ -476,6 +491,20 @@ class _LivePageState extends State<LivePage> {
                 children: [
                   Row(
                     children: [
+                      // 台标 logo - 对应 Swift channelLogo
+                      if (channel.logo.isNotEmpty) ...[
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Image.network(
+                            channel.logo,
+                            width: 36,
+                            height: 36,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                      ],
                       Container(
                         width: 8,
                         height: 8,
