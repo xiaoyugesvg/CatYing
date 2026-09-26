@@ -185,4 +185,4 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                   // 清除自定义
-                  if (bg.choice.value == BackgroundChoice.custom) ...[...]
+                  if (bg.choice.value == BackgroundChoice.custom) ...[
