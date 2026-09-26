@@ -26,6 +26,7 @@ import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'app_log.dart';
 import 'nodejs_platform.dart';
 
 class IOSNodeJSPlatform implements NodeJSPlatform {
@@ -79,12 +80,21 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
                 ? call.arguments as int
                 : (call.arguments is Map ? call.arguments['code'] as int? : null);
             print('[IOSNodeJS] Swift 通知: Node.js 退出，code=$code');
+            // **关键**：iOS 后台/锁屏过久 embed library 会被系统回收,
+            // 此时必须清掉旧端口, 否则 AppState.handleSceneActive 拿旧
+            // spiderPort/managementPort 去探测, connection refused 但
+            // nodeIsRunning=true 还以为进程在, 错过重启时机.
             _isRunning = false;
             _isNodeReady = false;
+            _spiderPort = 0;
+            _managementPort = 0;
             onNodeReadyChanged.value = false;
+            onManagementPortChanged.value = 0;
+            onSpiderPortChanged.value = 0;
             return null;
           case 'onNodeReady':
             print('[IOSNodeJS] Swift 通知: Node.js ready');
+            AppLog.instance.log('IOSNodeJS onNodeReady 回调');
             _isNodeReady = true;
             onNodeReadyChanged.value = true;
             return null;
@@ -129,6 +139,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
 
   @override
   Future<bool> startNodeJS() async {
+    AppLog.instance.log('IOSNodeJS startNodeJS 开始 (isRunning=$_isRunning)');
     if (_isRunning) return true;
 
     _isNodeReady = false;
@@ -141,6 +152,8 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     final sourcePath = await getDocumentsSourcePath();
     final nativePort = _nativeServerPort;
 
+    AppLog.instance.log(
+        'IOSNodeJS 调 Swift 启动 Node.js, nativePort=$nativePort, sourcePath=$sourcePath');
     print('[IOSNodeJS] 调 Swift 启动 Node.js, nativePort=$nativePort, '
         'sourcePath=$sourcePath');
 
@@ -156,18 +169,25 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
         'nativePort': nativePort,
         'sourcePath': sourcePath,
       });
+      AppLog.instance.log('IOSNodeJS Swift invokeMethod 返回: $result');
       if (result == true) {
         _isRunning = true;
         print('[IOSNodeJS] Swift 启动成功');
-        return await waitForNodeReady();
+        AppLog.instance.log('IOSNodeJS Swift 启动成功, 等 waitForNodeReady');
+        final ready = await waitForNodeReady();
+        AppLog.instance.log('IOSNodeJS waitForNodeReady 返回: $ready');
+        return ready;
       }
       print('[IOSNodeJS] Swift 启动失败');
+      AppLog.instance.log('IOSNodeJS Swift 启动失败');
       return false;
     } on PlatformException catch (e) {
       print('[IOSNodeJS] startNodeJS PlatformException: ${e.code}/${e.message}');
+      AppLog.instance.log('IOSNodeJS startNodeJS PlatformException: ${e.code}/${e.message}');
       return false;
-    } catch (e) {
+    } catch (e, st) {
       print('[IOSNodeJS] startNodeJS 异常: $e');
+      AppLog.instance.log('IOSNodeJS startNodeJS 异常: $e\n$st');
       return false;
     }
   }
@@ -211,9 +231,16 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   /// HTTP server 收到 Node.js 的 `/onCatPawOpenPort?port=&type=` 时调用
   void onPortReceived(int port, String type) {
     print('[IOSNodeJS] 收到端口通知: $port, 类型: $type');
+    AppLog.instance.log('IOSNodeJS onPortReceived: port=$port, type=$type');
     if (type == 'management') {
       _managementPort = port;
       onManagementPortChanged.value = port;
+      // **iOS SIGKILL 修复**: 同步 mgmt port 给 Swift,
+      // Swift 在 app 回前台时主动 ping /check 确认 Node.js 是否被 SIGKILL
+      _channel.invokeMethod('setManagementPort', {'port': port}).catchError((e) {
+        print('[IOSNodeJS] setManagementPort 异常: $e');
+        return null;
+      });
     } else {
       _spiderPort = port;
       onSpiderPortChanged.value = port;
