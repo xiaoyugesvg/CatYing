@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../common/theme.dart';
 
-/// 选集列表 - 对应 Swift EpisodeListView
-/// **2026-09-26 分页化**：超过 10 集时按「1-10 / 11-20 / 21-30 …」分页切换，
-/// 不再一屏塞下所有集数。
+/// 剧集列表组件 - 对应 Swift EpisodeListView
+/// **2026-09-26 重写**：由"50 集一组全部平铺"改为"每页 10 集 +
+/// 页码切换（1-10 / 11-20 / 21-30 ...）"，避免超长剧集列表一次
+/// 渲染上百个 chip 导致卡顿，也让用户能快速跳转到任意区间。
 class EpisodeListView extends StatefulWidget {
   final List<String> episodeNames;
   final int selectedIndex;
@@ -21,131 +22,209 @@ class EpisodeListView extends StatefulWidget {
 }
 
 class _EpisodeListViewState extends State<EpisodeListView> {
+  /// 每页集数（用户要求 1-10 / 11-20 这种按 10 集一页切换）
   static const int _pageSize = 10;
-  /// 当前页码（0-based），切换集数时自动跳到所在页
-  int _page = 0;
+
+  /// 当前页码（0 基）
+  late int _page;
 
   @override
   void initState() {
     super.initState();
+    // 初始定位到已选集所在的页，进入即看到当前播放的集
     _page = widget.selectedIndex ~/ _pageSize;
   }
 
   @override
-  void didUpdateWidget(covariant EpisodeListView oldWidget) {
+  void didUpdateWidget(EpisodeListView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.selectedIndex != oldWidget.selectedIndex) {
-      setState(() {
-        _page = widget.selectedIndex ~/ _pageSize;
-      });
+    // 选集切换（如播放器内切集）后若超出当前页，跟随跳页
+    final targetPage = widget.selectedIndex ~/ _pageSize;
+    if (targetPage != _page && _pageValid(targetPage)) {
+      _page = targetPage;
     }
+  }
+
+  int get _pageCount {
+    final total = widget.episodeNames.length;
+    if (total == 0) return 1;
+    return (total + _pageSize - 1) ~/ _pageSize;
+  }
+
+  bool _pageValid(int page) => page >= 0 && page < _pageCount;
+
+  /// 当前页的全局起始/结束下标（含）
+  (int, int) get _currentRange {
+    final start = _page * _pageSize;
+    final end =
+        (start + _pageSize - 1).clamp(0, widget.episodeNames.length - 1);
+    return (start, end);
   }
 
   @override
   Widget build(BuildContext context) {
-    final names = widget.episodeNames;
-    if (names.isEmpty) return const SizedBox.shrink();
-
-    final pageCount = (names.length + _pageSize - 1) ~/ _pageSize;
-    if (_page >= pageCount) _page = pageCount - 1;
-
-    final start = _page * _pageSize;
-    final end = (start + _pageSize).clamp(0, names.length);
-    final visible = names.sublist(start, end);
+    if (widget.episodeNames.isEmpty) return const SizedBox.shrink();
+    final (start, end) = _currentRange;
+    final pageCount = _pageCount;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        // 分页切换行：1-10 / 11-20 / 21-30 …
-        if (pageCount > 1) ...[
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: List.generate(pageCount, (page) {
-                final isSelected = page == _page;
-                final labelStart = page * _pageSize + 1;
-                final labelEnd = ((page + 1) * _pageSize).clamp(0, names.length);
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => setState(() => _page = page),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 7,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? AppTheme.accentColor.withValues(alpha: 0.14)
-                            : AppTheme.backgroundTertiary,
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                          color: isSelected
-                              ? AppTheme.accentColor.withValues(alpha: 0.4)
-                              : AppTheme.borderLight,
-                          width: 0.8,
-                        ),
-                      ),
-                      child: Text(
-                        '$labelStart-$labelEnd',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                          color: isSelected
-                              ? AppTheme.accentColor
-                              : AppTheme.textSecondary,
-                        ),
-                      ),
-                    ),
-                  ),
-                );
+        // 页切换条：左箭头 + 页码胶囊（可横向滑动）+ 右箭头
+        Row(
+          children: [
+            _buildPageArrow(
+              icon: Icons.chevron_left,
+              enabled: _page > 0,
+              onTap: () => setState(() {
+                if (_page > 0) _page--;
               }),
             ),
-          ),
-          const SizedBox(height: 12),
-        ],
-        // 当前页集数网格
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: List.generate(visible.length, (i) {
-            final index = start + i;
-            final isSelected = index == widget.selectedIndex;
-            return GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => widget.onEpisodeTap(index),
-              child: Container(
-                width: 52,
-                height: 36,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? AppTheme.accentColor
-                      : AppTheme.backgroundTertiary,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: isSelected
-                        ? AppTheme.accentColor
-                        : AppTheme.borderLight,
-                    width: 0.8,
-                  ),
-                ),
-                child: Text(
-                  visible[i],
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isSelected ? Colors.white : AppTheme.textPrimary,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+            Expanded(
+              child: SizedBox(
+                height: 34,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: pageCount,
+                  itemBuilder: (context, i) {
+                    final pageStart = i * _pageSize + 1;
+                    final pageEnd =
+                        ((i + 1) * _pageSize)
+                            .clamp(1, widget.episodeNames.length);
+                    return _buildPagePill(
+                      title: '$pageStart-$pageEnd',
+                      isSelected: i == _page,
+                      onTap: () => setState(() => _page = i),
+                    );
+                  },
                 ),
               ),
-            );
-          }),
+            ),
+            _buildPageArrow(
+              icon: Icons.chevron_right,
+              enabled: _page < pageCount - 1,
+              onTap: () => setState(() {
+                if (_page < pageCount - 1) _page++;
+              }),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppTheme.spacingMD),
+
+        // 当前页剧集 chip
+        Wrap(
+          spacing: AppTheme.spacingSM,
+          runSpacing: AppTheme.spacingSM,
+          children: [
+            for (var i = start; i <= end; i++)
+              _buildEpisodeChip(
+                globalIndex: i,
+                name: widget.episodeNames[i],
+                isSelected: i == widget.selectedIndex,
+              ),
+          ],
         ),
       ],
+    );
+  }
+
+  /// 页码胶囊（1-10 / 11-20 ...）
+  Widget _buildPagePill({
+    required String title,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(right: AppTheme.spacingSM),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: isSelected
+                ? AppTheme.accentColor.withValues(alpha: 0.14)
+                : AppTheme.backgroundTertiary,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isSelected
+                  ? AppTheme.accentColor.withValues(alpha: 0.45)
+                  : Colors.white.withValues(alpha: 0.06),
+              width: isSelected ? 1 : 0.5,
+            ),
+          ),
+          child: Text(
+            title,
+            style: TextStyle(
+              color: isSelected ? AppTheme.accentColor : AppTheme.textSecondary,
+              fontSize: AppTheme.fontFootnote,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPageArrow({
+    required IconData icon,
+    required bool enabled,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: Container(
+        width: 32,
+        height: 32,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: enabled
+              ? AppTheme.backgroundTertiary
+              : AppTheme.backgroundTertiary.withValues(alpha: 0.4),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          icon,
+          size: 18,
+          color: enabled ? AppTheme.textSecondary : AppTheme.textTertiary,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEpisodeChip({
+    required int globalIndex,
+    required String name,
+    required bool isSelected,
+  }) {
+    return GestureDetector(
+      onTap: () => widget.onEpisodeTap(globalIndex),
+      child: Container(
+        constraints: const BoxConstraints(minWidth: 60, maxWidth: 120),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppTheme.accentColor.withValues(alpha: 0.15)
+              : AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(AppTheme.radiusSM),
+          border: isSelected
+              ? Border.all(color: AppTheme.accentColor.withValues(alpha: 0.4))
+              : null,
+        ),
+        child: Text(
+          name,
+          style: TextStyle(
+            color: isSelected ? AppTheme.accentColor : AppTheme.textSecondary,
+            fontSize: AppTheme.fontSubhead,
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+          ),
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
     );
   }
 }
