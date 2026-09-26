@@ -110,10 +110,40 @@ class _LivePageState extends State<LivePage> {
           ),
           const SizedBox(height: 8),
           Text(
-            '请在设置中配置包含直播源的接口',
+            '请在设置中配置包含直播源的接口，或点击右上角“＋”添加直播源链接',
             style: TextStyle(
               color: Colors.grey.withValues(alpha: 0.7),
               fontSize: AppTheme.fontSubhead,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          // 空状态也提供添加入口
+          GestureDetector(
+            onTap: _showAddLiveSourceDialog,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF5CB67B), Color(0xFF7DCEA0)],
+                ),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.add_link, color: Colors.white, size: 15),
+                  SizedBox(width: 8),
+                  Text(
+                    '添加直播源',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -292,6 +322,8 @@ class _LivePageState extends State<LivePage> {
                   // 听剧模式切换按钮
                   _buildAudioModeToggleButton(),
                   const Spacer(),
+                  // 添加自定义直播源按钮
+                  _buildAddLiveSourceButton(),
                 ],
               ),
             ),
@@ -410,6 +442,207 @@ class _LivePageState extends State<LivePage> {
           ],
         ),
       ),
+    );
+  }
+
+  // MARK: - 添加自定义直播源
+
+  /// 添加自定义直播源按钮 - 对应 tvbox-Swift / TVBox-tvs "自己添加链接"能力
+  Widget _buildAddLiveSourceButton() {
+    return GestureDetector(
+      onTap: _showAddLiveSourceDialog,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.15),
+            width: 0.5,
+          ),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.add_link, color: Colors.white, size: 16),
+            SizedBox(width: 6),
+            Text(
+              '添加源',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 添加/管理自定义直播源弹窗
+  /// 支持：输入名称 + URL（m3u / txt / json），
+  /// 列出已添加源可删除；添加后立即合并加载。
+  void _showAddLiveSourceDialog() {
+    final nameCtrl = TextEditingController();
+    final urlCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: AppTheme.backgroundSecondary,
+          title: const Text(
+            '添加直播源',
+            style: TextStyle(color: Colors.white, fontSize: 16),
+          ),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 已添加源列表
+                  Obx(() {
+                    final sources = _controller.customLiveSources.value;
+                    if (sources.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          '暂无自定义直播源，支持 m3u / txt / json 格式链接',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.5),
+                            fontSize: 12,
+                          ),
+                        ),
+                      );
+                    }
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (var i = 0; i < sources.length; i++)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    sources[i]['name'] ?? '',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: () {
+                                    _controller.removeCustomLiveSource(i);
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red.withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Text(
+                                      '删除',
+                                      style: TextStyle(
+                                        color: Colors.redAccent,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        const Divider(height: 20, color: Colors.white24),
+                      ],
+                    );
+                  }),
+                  const SizedBox(height: 4),
+                  // 名称输入
+                  TextField(
+                    controller: nameCtrl,
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                    decoration: InputDecoration(
+                      labelText: '名称（可选，留空用链接）',
+                      labelStyle: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.5),
+                        fontSize: 12,
+                      ),
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.06),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // URL 输入
+                  TextField(
+                    controller: urlCtrl,
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                    decoration: InputDecoration(
+                      labelText: '直播源链接（m3u / txt / json）',
+                      labelStyle: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.5),
+                        fontSize: 12,
+                      ),
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.06),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(
+                '取消',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.7),
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () async {
+                final url = urlCtrl.text.trim();
+                if (url.isEmpty) {
+                  Get.snackbar('提示', '请输入直播源链接');
+                  return;
+                }
+                await _controller.addCustomLiveSource(
+                  name: nameCtrl.text,
+                  url: url,
+                );
+                if (dialogContext.mounted) {
+                  Navigator.of(dialogContext).pop();
+                }
+                Get.snackbar('成功', '直播源已添加并加载');
+              },
+              child: const Text(
+                '添加',
+                style: TextStyle(
+                  color: AppTheme.accentColor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
