@@ -1649,87 +1649,104 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     );
   }
 
-  /// 长按倍速提示 - 屏幕中央圆形 2X 浮层
-  /// - 锁定时：显示 "已锁定 2X 倍速，单击取消"
+  /// 长按倍速提示 - 顶部居中紧凑浮层
+  /// - 锁定时：显示 "2X 已锁定，单击取消"
   /// - 按下中未锁定：显示 "2X 长按倍速中" + "↑ 上滑锁定"
+  ///
+  /// **2026-07-09 调整**: 尺寸缩小 + 透明度降低 + 位置上移
+  ///   原版用屏幕中央大圆角方块 (padding 22x16, font 36/13/11, alpha 0.55-0.7),
+  ///   严重遮挡视频画面. 改成顶部小药丸 (padding 12x8, font 22/11/9, alpha 0.28),
+  ///   居中靠上 (top: 48), 不再压住视频主体.
   Widget _buildLongPressSpeedHint() {
     final speed = _playbackSpeed * 2;
     final speedLabel = _formatSpeed(speed);
     final locked = _isLongPressSpeedLocked;
-    return IgnorePointer(
-      child: Center(
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: locked ? 0.7 : 0.55),
-            borderRadius: BorderRadius.circular(20),
-            border: locked
-                ? Border.all(color: AppTheme.accentColor, width: 1.5)
-                : null,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 倍速大字
-              Text(
-                speedLabel,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 36,
-                  fontWeight: FontWeight.w700,
-                  fontFamily: 'monospace',
-                  letterSpacing: 1.5,
+    return Positioned(
+      top: 48,
+      left: 0,
+      right: 0,
+      child: IgnorePointer(
+        child: Center(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.28),
+              borderRadius: BorderRadius.circular(24),
+              border: locked
+                  ? Border.all(color: AppTheme.accentColor, width: 1)
+                  : null,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // 倍速大字
+                Text(
+                  speedLabel,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    fontFamily: 'monospace',
+                    letterSpacing: 1.0,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 4),
-              // 提示文字
-              Text(
-                locked ? '倍速已锁定' : '长按倍速中',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
+                const SizedBox(width: 8),
+                // 提示文字 (中间)
+                Text(
+                  locked ? '已锁定' : '长按倍速中',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              // 底部小提示
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (locked) ...[
-                    const Icon(
-                      Icons.touch_app,
-                      color: Colors.white70,
-                      size: 14,
-                    ),
-                    const SizedBox(width: 4),
-                    const Text(
-                      '点击屏幕解除锁定',
-                      style: TextStyle(
+                const SizedBox(width: 8),
+                Container(
+                  width: 0.5,
+                  height: 12,
+                  color: Colors.white.withValues(alpha: 0.35),
+                ),
+                const SizedBox(width: 8),
+                // 底部小提示 (右侧)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (locked) ...[
+                      const Icon(
+                        Icons.touch_app,
                         color: Colors.white70,
-                        fontSize: 11,
+                        size: 11,
                       ),
-                    ),
-                  ] else ...[
-                    const Icon(
-                      Icons.arrow_upward,
-                      color: Colors.white70,
-                      size: 14,
-                    ),
-                    const SizedBox(width: 4),
-                    const Text(
-                      '上滑锁定倍速',
-                      style: TextStyle(
+                      const SizedBox(width: 3),
+                      const Text(
+                        '点击解除',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 9,
+                        ),
+                      ),
+                    ] else ...[
+                      const Icon(
+                        Icons.arrow_upward,
                         color: Colors.white70,
-                        fontSize: 11,
+                        size: 11,
                       ),
-                    ),
+                      const SizedBox(width: 3),
+                      const Text(
+                        '上滑锁定',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 9,
+                        ),
+                      ),
+                    ],
                   ],
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -2270,14 +2287,63 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   // ============================================================
 
   Future<void> _togglePiP() async {
-    // iOS 端：当前 Flutter 端没有原生 AVPictureInPictureController 实现，
-    // 直接调 VideoPlayerPip.toggle() 会因为 unsupported platform 静默失败。
-    // 给出明确提示让用户知道原因。
+    // iOS 端：系统级画中画（双播放器方案）
+    // 主播放器 media_kit 暂停，原生 PipManager（AVPlayer + AVPictureInPictureController）
+    // 起系统悬浮窗播同一条流；PiP 结束后恢复主播放器并 seek 到 PiP 最后位置。
     if (Platform.isIOS) {
-      _showMessage(
-        'iOS 端画中画：当前版本暂未集成 AVPictureInPictureController。\n'
-        '如需小窗播放，请先退出全屏并手动从控制中心选择 AirPlay 设备。',
+      // 已在 PiP：退出并恢复主播放器
+      if (VideoPlayerPip.instance.isIosActive) {
+        final resume = VideoPlayerPip.instance.iosLastPosition;
+        await VideoPlayerPip.instance.exitIos();
+        if (resume > Duration.zero) {
+          try {
+            _player.seek(resume);
+          } catch (_) {}
+        }
+        try {
+          _player.play();
+        } catch (_) {}
+        return;
+      }
+      // 设备不支持（模拟器返回 false）
+      final supported = await VideoPlayerPip.instance.isIosPipSupported();
+      if (!supported) {
+        _showMessage('当前设备不支持画中画（真机可用）');
+        return;
+      }
+      // 取当前实际播放地址（清晰度切换后以 player 为准）
+      final playUrl = _player.state.playlist.medias.isNotEmpty
+          ? _player.state.playlist.medias.last.uri
+          : widget.url;
+      if (playUrl.isEmpty) {
+        _showMessage('当前没有可用的播放地址');
+        return;
+      }
+      final currentPos = _player.state.position;
+      final entered = await VideoPlayerPip.instance.enterIos(
+        url: playUrl,
+        headers: widget.headers,
+        position: currentPos,
+        onStopped: () {
+          // PiP 被系统关闭 / 用户点"返回App"：恢复主播放器续播
+          if (!mounted) return;
+          final resume = VideoPlayerPip.instance.iosLastPosition;
+          if (resume > Duration.zero) {
+            try {
+              _player.seek(resume);
+            } catch (_) {}
+          }
+          try {
+            _player.play();
+          } catch (_) {}
+        },
       );
+      if (entered) {
+        // 主播放器暂停，避免双路声音 / 解码
+        try {
+          _player.pause();
+        } catch (_) {}
+      }
       return;
     }
     // 互斥：如果当前是全屏状态，先 await 退出全屏再进入 PiP
