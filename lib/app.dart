@@ -21,6 +21,7 @@ import 'router/app_pages.dart';
 import 'services/player_fullscreen_controller.dart';
 import 'widgets/video_player_pip.dart';
 import 'widgets/glass.dart';
+import 'services/main_tab_controller.dart';
 
 class TVBoxApp extends StatelessWidget {
   const TVBoxApp({super.key});
@@ -30,6 +31,9 @@ class TVBoxApp extends StatelessWidget {
     // 提前注册全屏状态控制器, 这样直播页/详情页 onFullScreenChanged 才能
     // 直接 PlayerFullscreenController.instance.enter/exit 调用.
     Get.put(PlayerFullscreenController(), permanent: true);
+    // 全局主 Tab 控制器: 底部悬浮导航选中项全局共享,
+    // 详情页也能渲染同样的悬浮栏并切回对应 tab.
+    Get.put(MainTabController(), permanent: true);
     return GetMaterialApp(
       title: 'TVBox',
       theme: AppTheme.darkTheme,
@@ -55,7 +59,7 @@ class ContentView extends StatefulWidget {
 
 class _ContentViewState extends State<ContentView>
     with WidgetsBindingObserver {
-  int _selectedTab = 0;
+  // int _selectedTab 已迁移到 MainTabController.selectedTab (全局共享)
   bool _hasSavedConfig = false;
   bool _showSearch = false;
   // 防止 ever() 回调重入 - 在回调内部清空 pendingSearchKeyword 时会再次触发 ever()
@@ -817,12 +821,13 @@ class _ContentViewState extends State<ContentView>
             child: BackgroundService.instance.buildBackground(overlayAlpha: 0.3),
           ),
           // 5 个 tab 页 (底部预留悬浮导航栏高度, 避免最后一行内容被遮挡)
+          // 关键: IndexedStack 的 index 必须包在 Obx 里, 切 tab 才生效
           Padding(
             padding: EdgeInsets.only(bottom: navReserve),
-            child: IndexedStack(
-              index: _selectedTab,
-              children: _tabPages,
-            ),
+            child: Obx(() => IndexedStack(
+                  index: MainTabController.instance.selectedTab.value,
+                  children: _tabPages,
+                )),
           ),
           // 搜索页 - 对应 Swift .sheet(isPresented: $showSearch)
           if (_showSearch)
@@ -1129,12 +1134,12 @@ class _ContentViewState extends State<ContentView>
   /// 导航栏项 - 对应 Swift navBarItem
   Widget _navItem(
       IconData icon, IconData activeIcon, String label, int index) {
-    final isSelected = _selectedTab == index;
+    final isSelected = MainTabController.instance.selectedTab.value == index;
     return GestureDetector(
       onTap: () {
-        final prev = _selectedTab;
+        final prev = MainTabController.instance.selectedTab.value;
         setState(() {
-          _selectedTab = index;
+          MainTabController.instance.selectedTab.value = index;
         });
         // **关键**：切走直播 tab 时通知 LiveController 暂停 / 隐藏，
         // 避免 IndexedStack 中 LivePage 持续在后台播放声音。
