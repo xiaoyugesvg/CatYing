@@ -3,7 +3,7 @@ import '../../common/theme.dart';
 
 /// 剧集列表组件 - 对应 Swift EpisodeListView
 /// **2026-09-26 重写**：由"50 集一组全部平铺"改为"每页 10 集 +
-/// 页码切换（1-10 / 11-20 / 21-30 ...）"，避免超长剧集列表一次
+/// 页码切换（1-10 / 11-20 / 21-30 ...）",避免超长剧集列表一次
 /// 渲染上百个 chip 导致卡顿，也让用户能快速跳转到任意区间。
 class EpisodeListView extends StatefulWidget {
   final List<String> episodeNames;
@@ -71,46 +71,49 @@ class _EpisodeListViewState extends State<EpisodeListView> {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 页切换条：左箭头 + 页码胶囊（可横向滑动）+ 右箭头
-        Row(
-          children: [
-            _buildPageArrow(
-              icon: Icons.chevron_left,
-              enabled: _page > 0,
-              onTap: () => setState(() {
-                if (_page > 0) _page--;
-              }),
-            ),
-            Expanded(
-              child: SizedBox(
-                height: 34,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: pageCount,
-                  itemBuilder: (context, i) {
-                    final pageStart = i * _pageSize + 1;
-                    final pageEnd =
-                        ((i + 1) * _pageSize)
-                            .clamp(1, widget.episodeNames.length);
-                    return _buildPagePill(
-                      title: '$pageStart-$pageEnd',
-                      isSelected: i == _page,
-                      onTap: () => setState(() => _page = i),
-                    );
-                  },
+        // 页切换条（仅超过 1 页即 >10 集时才显示）：
+        // 左箭头 + 页码胶囊（可横向滑动）+ 右箭头
+        if (pageCount > 1) ...[  
+          Row(
+            children: [
+              _buildPageArrow(
+                icon: Icons.chevron_left,
+                enabled: _page > 0,
+                onTap: () => setState(() {
+                  if (_page > 0) _page--;
+                }),
+              ),
+              Expanded(
+                child: SizedBox(
+                  height: 34,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: pageCount,
+                    itemBuilder: (context, i) {
+                      final pageStart = i * _pageSize + 1;
+                      final pageEnd =
+                          ((i + 1) * _pageSize)
+                              .clamp(1, widget.episodeNames.length);
+                      return _buildPagePill(
+                        title: '$pageStart-$pageEnd',
+                        isSelected: i == _page,
+                        onTap: () => setState(() => _page = i),
+                      );
+                    },
+                  ),
                 ),
               ),
-            ),
-            _buildPageArrow(
-              icon: Icons.chevron_right,
-              enabled: _page < pageCount - 1,
-              onTap: () => setState(() {
-                if (_page < pageCount - 1) _page++;
-              }),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppTheme.spacingMD),
+              _buildPageArrow(
+                icon: Icons.chevron_right,
+                enabled: _page < pageCount - 1,
+                onTap: () => setState(() {
+                  if (_page < pageCount - 1) _page++;
+                }),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppTheme.spacingMD),
+        ],
 
         // 当前页剧集 chip
         Wrap(

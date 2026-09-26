@@ -252,14 +252,14 @@ class _DetailPageState extends State<DetailPage> {
         final current = MainTabController.instance.selectedTab.value;
         return GlassPanel(
           radius: 30,
-          // **彻底透明底栏 (2026-09-26)**：去掉毛玻璃模糊/阴影/高光/描边，
-          // 玻璃底色与描边全部透明，这一截不再遮挡下方内容。
-          blur: false,
-          tint: Colors.transparent,
-          borderColor: Colors.transparent,
-          borderWidth: 0,
-          highlightStrength: 0,
-          shadow: false,
+          // **轻玻璃悬浮胶囊 (2026-09-26)**：与首页底栏同款，毛玻璃+极薄
+          // 半透明底色，悬浮轮廓清晰但内容可透出，不遮挡。
+          blur: true,
+          tint: Colors.black.withValues(alpha: 0.16),
+          borderColor: Colors.white.withValues(alpha: 0.10),
+          borderWidth: 0.8,
+          highlightStrength: 0.2,
+          shadow: true,
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -464,7 +464,7 @@ class _DetailPageState extends State<DetailPage> {
       key: const ValueKey('detail_player'),
       player: _player,
       controller: _videoController, // 跨全屏/普通模式共享同一个 controller
-      initialVideoFit: VideoFitType.cover, // 16:9 画面铺满 4:3 容器, 与黑框一致
+      initialVideoFit: VideoFitType.contain, // 4:3 容器 + 黑框适配: 画面按原始比例完整显示, 上下黑边
       url: url,
       headers: headers.isEmpty ? null : headers,
       resumeSeconds: _controller.resumeSeconds.value,
@@ -581,10 +581,13 @@ class _DetailPageState extends State<DetailPage> {
 
             // 元数据药丸 - 对应 Swift metadataFlow
             _buildMetadataFlow(info),
-            const SizedBox(height: AppTheme.spacingMD),
 
-            // 播放按钮 - 对应 Swift playButton（未播放时显示）
-            _buildPlayButton(),
+            // 播放按钮 - 对应 Swift playButton（未播放时显示）；
+            // 正在播放时按钮隐藏，间距也不保留，简介上方不再留大空挡
+            if (!_controller.isPlaying.value) ...[
+              const SizedBox(height: AppTheme.spacingMD),
+              _buildPlayButton(),
+            ],
 
             // 影片简介 - 并入名称卡片（对应 Swift descriptionSection）
             if (info.des.isNotEmpty) ...[

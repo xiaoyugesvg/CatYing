@@ -684,7 +684,7 @@ class _ContentViewState extends State<ContentView>
                     );
                   }),
                 // 错误信息 - 对应 Swift settingsVM.configError
-                if (_configError != null) ...[
+                if (_configError != null) ...[  
                   const SizedBox(height: AppTheme.spacingLG),
                   Container(
                     padding: const EdgeInsets.all(AppTheme.spacingMD),
@@ -865,17 +865,17 @@ class _ContentViewState extends State<ContentView>
               if (PlayerFullscreenController.instance.isFullscreen.value) {
                 return const SizedBox.shrink();
               }
-              // **彻底透明底栏 (2026-09-26)**：去掉毛玻璃模糊/阴影/高光/描边，
-              // 玻璃底色与描边全部透明，全局渐变背景完全透出，
-              // 悬浮栏这一截不再遮挡下方内容。
+              // **轻玻璃悬浮胶囊 (2026-09-26)**：恢复毛玻璃+极薄半透明底色，
+              // 面板有清晰的悬浮圆角轮廓，但底色很薄，下方内容仍透过
+              // 模糊玻璃可见，不再是一整条实心横带挡住内容。
               return GlassPanel(
                 radius: 30,
-                blur: false,
-                tint: Colors.transparent,
-                borderColor: Colors.transparent,
-                borderWidth: 0,
-                highlightStrength: 0,
-                shadow: false,
+                blur: true,
+                tint: Colors.black.withValues(alpha: 0.16),
+                borderColor: Colors.white.withValues(alpha: 0.10),
+                borderWidth: 0.8,
+                highlightStrength: 0.2,
+                shadow: true,
                 padding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 child: Row(
@@ -1244,7 +1244,7 @@ class _ContentViewState extends State<ContentView>
                   ),
                 ),
                 // 对应 Swift: if appState.isRetryingConfig { ProgressView() }
-                if (isRetrying) ...[
+                if (isRetrying) ...[  
                   const SizedBox(width: AppTheme.spacingSM),
                   const SizedBox(
                     width: 14,
