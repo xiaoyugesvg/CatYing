@@ -74,6 +74,9 @@ class VideoPlayerWidget extends StatefulWidget {
   /// 是否处于画中画模式（窗口无标题栏，需要在视频上叠加 DragToMoveArea）
   final bool isPipMode;
 
+  /// 是否显示"听剧模式"按钮（点播页开启；直播页有自己的听剧入口，不传）
+  final bool showAudioModeButton;
+
   /// 跳过片头秒数（0 表示关闭），对应 Swift skipIntroSeconds
   final int skipIntroSeconds;
 
@@ -109,6 +112,7 @@ class VideoPlayerWidget extends StatefulWidget {
     this.canPlayNext = false,
     this.canPlayPrevious = false,
     this.isPipMode = false,
+    this.showAudioModeButton = false,
     this.skipIntroSeconds = 0,
     this.skipOutroSeconds = 0,
     this.onPlaying,
@@ -156,6 +160,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   /// iOS 自动画中画进行中（防止退后台重复触发）
   bool _autoPipInFlight = false;
+
+  /// 听剧模式（点播页）：开启后隐藏视频画面、只保留音频输出，
+  /// 可后台/息屏继续播放（Info.plist 已配置 UIBackgroundModes=audio）
+  bool _audioMode = false;
 
   /// 缓冲状态：不再默认 true，而是从 player.state 同步读取，避免全屏/普通模式
   /// 切换时新实例显示"转圈"假象
@@ -1131,6 +1139,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             ),
           ),
 
+        // 听剧模式覆盖层（隐藏画面、保留音频）
+        if (_audioMode) _buildAudioModeOverlay(),
+
         // 手势层（覆盖整个区域，识别单击/双击/长按/拖动）
         Positioned.fill(child: _buildGestureLayer()),
 
@@ -1363,6 +1374,99 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   // 顶部导航栏 - 对应 Swift headerBar
   // ============================================================
 
+  // ============================================================
+  // 听剧模式（点播页）
+  // ============================================================
+
+  /// 切换听剧模式：隐藏画面只留音频，可后台/息屏继续播放。
+  /// 进入时隐藏普通控制条（覆盖层自带退出按钮）；退出时恢复。
+  void _toggleAudioMode() {
+    setState(() {
+      _audioMode = !_audioMode;
+      if (_audioMode) {
+        _showControls = false;
+      } else {
+        _showControls = true;
+        _scheduleHideControls();
+      }
+    });
+  }
+
+  /// 听剧模式全屏音频层：全黑背景 + 旋转音乐图标 + 片名 + 退出按钮。
+  /// 播放器（media_kit）继续在底层运行，仅隐藏画面，音频持续输出。
+  Widget _buildAudioModeOverlay() {
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const _PipAudioModeMusicIcon(size: 44, color: Colors.white70),
+              const SizedBox(height: 28),
+              if (_displayTitle.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  child: Text(
+                    _displayTitle,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              const SizedBox(height: 10),
+              Text(
+                '听剧模式 · 后台可继续播放',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.5),
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 40),
+              GestureDetector(
+                onTap: _toggleAudioMode,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      width: 0.5,
+                    ),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.tv, color: Colors.white, size: 15),
+                      SizedBox(width: 8),
+                      Text(
+                        '退出听剧模式',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildHeaderBar() {
     return Positioned(
       top: 0,
@@ -1413,6 +1517,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                     fontFamily: 'monospace',
                   ),
                 ),
+              ),
+
+            // 听剧模式（仅点播页显示）
+            if (widget.showAudioModeButton)
+              _iconButton(
+                icon: _audioMode ? Icons.headphones : Icons.headphones_outlined,
+                size: 20,
+                width: 36,
+                onTap: () {
+                  _scheduleHideControls();
+                  _toggleAudioMode();
+                },
               ),
 
             // 画中画
@@ -2941,6 +3057,52 @@ class _SkipSecondsEditorState extends State<_SkipSecondsEditor> {
           }).toList(),
         ),
       ],
+    );
+  }
+}
+
+/// 听剧模式旋转音乐图标（装饰动画）
+class _PipAudioModeMusicIcon extends StatefulWidget {
+  final double size;
+  final Color color;
+
+  const _PipAudioModeMusicIcon({
+    required this.size,
+    required this.color,
+  });
+
+  @override
+  State<_PipAudioModeMusicIcon> createState() => _PipAudioModeMusicIconState();
+}
+
+class _PipAudioModeMusicIconState extends State<_PipAudioModeMusicIcon>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _controller,
+      child: Icon(
+        Icons.graphic_eq,
+        size: widget.size,
+        color: widget.color,
+      ),
     );
   }
 }
