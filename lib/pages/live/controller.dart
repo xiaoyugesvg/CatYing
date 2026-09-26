@@ -36,6 +36,17 @@ class LiveController extends GetxController {
   Player? _player;
   Player get player {
     _player ??= Player(configuration: const PlayerConfiguration(title: 'TVBox Live'));
+    // 直播黑屏修复: 同一流 PiP(AVPlayer) 能播但 mpv 黑屏,
+    // 通常是 mpv 软件解码/OpenGLES 纹理输出对 HLS/TS 直播兼容差。
+    // 设置 hwdec=videotoolbox(iOS 硬件解码) + vo=gpu, 与 PiP 的 AVPlayer
+    // 解码路径对齐, 避免直播画面黑屏(有声音无画面)。
+    try {
+      final platform = _player!.platform;
+      if (platform is NativePlayer) {
+        platform.setProperty('hwdec', 'videotoolbox');
+        platform.setProperty('vo', 'gpu');
+      }
+    } catch (_) {}
     return _player!;
   }
 
