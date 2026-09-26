@@ -42,9 +42,6 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0x00000000))
-      // WKWebView 内联播放 HTML5 视频：允许内联 + 不需要用户手势
-      ..setAllowsInlineMediaPlayback(true)
-      ..setMediaPlaybackRequiresUserGesture(false)
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (progress) {
