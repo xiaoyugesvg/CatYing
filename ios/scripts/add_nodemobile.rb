@@ -26,9 +26,10 @@ require 'pathname'
 options = {
   xcframework: nil,
   pbxproj: 'Runner.xcodeproj/project.pbxproj',
-  # 默认只注册 NodeJSBridge.swift（其它 Swift bridge 在需要时通过
-  # --extra-swift 显式传入）
-  extra_swift_files: %w[NodeJSBridge.swift],
+  # 默认注册 NodeJSBridge.swift + BackgroundAudio.swift (2026-07-08 方案 A
+  # Background Audio 启动器). 其它 Swift bridge 在需要时通过
+  # --extra-swift 显式传入.
+  extra_swift_files: %w[NodeJSBridge.swift BackgroundAudio.swift],
 }
 
 OptionParser.new do |opts|
@@ -38,7 +39,7 @@ OptionParser.new do |opts|
   opts.on('--pbxproj PATH', 'project.pbxproj 路径（默认 Runner.xcodeproj/project.pbxproj）') do |v|
     options[:pbxproj] = v
   end
-  opts.on('--extra-swift x,y,z', Array, '额外的 Swift 文件列表（默认 NodeJSBridge.swift）') do |v|
+  opts.on('--extra-swift x,y,z', Array, '额外的 Swift 文件列表（默认 NodeJSBridge.swift + BackgroundAudio.swift）') do |v|
     options[:extra_swift_files] = v
   end
 end.parse!
@@ -118,17 +119,17 @@ framework_relative_path = options[:xcframework]  # 例如 'Frameworks/NodeMobile
 framework_basename = File.basename(framework_relative_path)
 
 # Frameworks group（顶层那个）
-frameworks_group = project.main_group['Frameworks']
-unless frameworks_group
+framework_group = project.main_group['Frameworks']
+unless framework_group
   # 关键：第二个参数是 group 的 path，所以新 group 的 path = 'Frameworks'
-  frameworks_group = project.main_group.new_group('Frameworks', 'Frameworks')
+  framework_group = project.main_group.new_group('Frameworks', 'Frameworks')
 end
 
-framework_ref = frameworks_group.files.find { |f| f.path == framework_relative_path || f.name == framework_basename }
+framework_ref = framework_group.files.find { |f| f.path == framework_relative_path || f.name == framework_basename }
 unless framework_ref
   # 用相对 path（'Frameworks/NodeMobile.xcframework'）让 xcodeproj 写入 pbxproj
   # source_tree 默认为 '<group>'
-  framework_ref = frameworks_group.new_file(framework_relative_path)
+  framework_ref = framework_group.new_file(framework_relative_path)
   framework_ref.name = framework_basename
   framework_ref.last_known_file_type = 'wrapper.xcframework'
   puts "✅ 已加 #{framework_basename} 到 Frameworks group (path=#{framework_ref.path})"
