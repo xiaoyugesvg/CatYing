@@ -25,29 +25,29 @@ import UIKit
 ///   - AVAudioSession .playback（BackgroundAudio.swift 已激活）✅
 ///   - 无需特殊 entitlement（TrollStore 侧载可用）✅
 ///
-/// 稳定性修复 v3（2026-09-26）：
+/// 稳定性修复 v4（2026-09-26）：
 ///   旧版根因导致"画中画时灵时不灵"：
 ///   a) 后台才调 startPip：App 已进后台才创建 AVPlayer 等 readyToPlay，
-///      后台缓冲慢/受限，15s 超时或系统拒绝启动 → 无小窗但主播放器还在播
-///      （用户听到声音、看不到小窗）。
+///      后台缓冲慢/受限，15s 超时或系统拒绝启动 → 无小窗但主播放器还在播。
 ///   b) http 明文源：原生 AVPlayer 受 ATS 限制，http:// m3u8 直接加载失败
 ///      （Info.plist 已放行 NSAllowsArbitraryLoads）；media_kit 自己的网络栈
 ///      不受 ATS 影响 → "主播放器能播、PiP 失败"。
-///   c) v2 的 appDidEnterBackground 仍要求 preparedReady==true 才启动：
-///      源加载慢 / 换源后刚重建实例时退后台，预热未就绪 → 直接跳过启动
-///      → 无小窗但主播放器继续出声。
+///   c) v2/v3 的 appDidEnterBackground 只要求 preparedReady / 只要求实例存在
+///      才启动，但存在竞态：原生已 startPictureInPicture（didStart 尚未回调，
+///      isActive 仍为 false）时，Dart 侧 paused 回调又调 enterIos → startPip
+///      开头 `if pipController != nil { cleanup() }` 会把刚启动的实例销毁 →
+///      自动 PiP 时灵时不灵。
 ///
-///   修复：
-///   - 新增 preparePip(url, headers)：**前台播放时预热**创建 AVPlayer，
-///     静音预缓冲并常驻待命（readyToPlay 后保持），退后台/点 PiP 时
-///     立即 startPictureInPicture()，不再后台等缓冲。
-///   - 监听 UIApplication.didEnterBackgroundNotification：**只要存在常驻
-///     实例且未在 PiP**，退后台瞬间即启动系统 PiP——不等待就绪。
-///     未就绪时系统 PiP 窗口先出现（黑屏/loading），AVPlayer 缓冲完成后
-///     画面自然呈现，避免"有声音无小窗"。
-///   - startPip 快路径：已预热就绪 → seek + 立即启动（毫秒级）。
+///   修复（v4）：
+///   - preparePip(url, headers)：**前台播放时预热**创建 AVPlayer，静音预缓冲
+///     并常驻待命（readyToPlay 后保持），退后台/点 PiP 时立即启动。
+///   - startPip 复用路径：**存在常驻实例（同 URL，无论是否就绪）即 seek + 启动**，
+///     不再 cleanup 销毁；实例正处启动中（startingPip，didStart 未回调）时
+///     直接回传成功，消除双路径竞态。
+///   - appDidEnterBackground：只要存在常驻实例且未在 PiP，即启动系统悬浮窗；
+///     预热中（源慢）时窗口先出现，AVPlayer 缓冲完成后面面自然呈现。
 ///   - 真实激活由 pictureInPictureControllerDidStartPictureInPicture 确认，
-///     并通过新通道事件 onPipStarted 通知 Dart 暂停主播放器。
+///     并通过通道事件 onPipStarted 通知 Dart 暂停主播放器。
 class PipManager: NSObject, AVPictureInPictureControllerDelegate {
   static let shared = PipManager()
 
@@ -70,6 +70,11 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
   private var preparedReady = false
   /// 预热时的源 URL（换源时重建实例）
   private var preparedURL = ""
+
+  /// 是否正在启动 PiP（startPictureInPicture 已调用、didStart 尚未回调）
+  /// 用于消除原生退后台自动触发与 Dart paused 回调的竞态：
+  /// 启动中收到重复 startPip 时直接回传成功，不销毁实例。
+  private var startingPip = false
 
   /// 当前是否处于系统 PiP（didStart 置 true，didStop 置 false）
   private(set) var isActive = false
@@ -224,22 +229,29 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
       return
     }
 
-    // ---- 快路径：常驻实例已预热就绪 → seek + 立即启动（毫秒级）----
-    if preparedReady, let controller = pipController, preparedURL == url {
-      NSLog("[PipManager] startPip (fast path, prepared ready)")
+    // ---- 复用路径：存在常驻实例（同 URL，无论是否就绪）→ 立即启动 ----
+    if let controller = pipController, preparedURL == url {
+      // 实例正处启动中（退后台自动触发 / 上一步手动发起，didStart 未回调）：
+      // 不重复启动、不销毁，直接回传成功，消除双路径竞态。
+      if isActive || startingPip {
+        result(nil)
+        return
+      }
+      NSLog("[PipManager] startPip (reuse, preparedReady=\(preparedReady))")
       if positionMs > 0 {
         pipPlayer?.seek(to: CMTime(seconds: positionMs / 1000.0, preferredTimescale: 600))
       }
       pipPlayer?.volume = 1.0 // 恢复音量（PiP 悬浮窗需要声音）
       pipPlayer?.play()
+      startingPip = true
       controller.startPictureInPicture()
       // 真实激活由 didStart / didStop 回调维护，这里只回传"已发起"
       result(nil)
       return
     }
 
-    // ---- 慢路径：未预热（懒加载 + 门闩，兜底）----
-    // 已有 PiP / 待启动请求先清理
+    // ---- 慢路径：无同 URL 常驻实例（懒加载 + 门闩，兜底）----
+    // 已有不同源实例 / 待启动请求先清理
     if pipController != nil || pendingStart { cleanup() }
     guard let videoURL = URL(string: url) else {
       result(FlutterError(code: "bad_url", message: "播放地址无效", details: nil))
@@ -335,6 +347,7 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
     startResult = nil
     preparedReady = true
     pipPlayer?.volume = 1.0
+    startingPip = true
     controller.startPictureInPicture()
     // 真实激活状态由 didStart / didStop 回调维护，这里不置位
     NSLog("[PipManager] startPictureInPicture() called")
@@ -355,7 +368,7 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
   // MARK: - 停止 PiP
 
   func stopPip() {
-    NSLog("[PipManager] stopPip (isActive=\(isActive), pendingStart=\(pendingStart))")
+    NSLog("[PipManager] stopPip (isActive=\(isActive), pendingStart=\(pendingStart), startingPip=\(startingPip))")
     if isActive {
       lastPositionSeconds = pipPlayer?.currentTime().seconds ?? 0
       pipController?.stopPictureInPicture()
@@ -377,6 +390,7 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
     startTimeoutWork?.cancel()
     startTimeoutWork = nil
     pendingStart = false
+    startingPip = false
     if startResult != nil {
       startResult?(nil)
       startResult = nil
@@ -394,15 +408,15 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
 
   // MARK: - 退后台自动启动 PiP
 
-  /// App 进入后台：**只要存在常驻实例且未在 PiP**，立即启动系统悬浮窗。
-  /// 不再要求 preparedReady——预热中（源加载慢）退后台时，
-  /// PiP 窗口先出现（黑屏/loading），AVPlayer 缓冲完成后画面自然呈现，
-  /// 避免"退后台只有声音没有小窗"。
+  /// App 进入后台：**只要存在常驻实例、未在 PiP 且未在启动中**，立即启动系统悬浮窗。
+  /// 不再要求 preparedReady——预热中（源加载慢）退后台时，PiP 窗口先出现
+  /// （黑屏/loading），AVPlayer 缓冲完成后画面自然呈现，避免"退后台只有声音没有小窗"。
   @objc private func appDidEnterBackground() {
-    NSLog("[PipManager] appDidEnterBackground (preparedReady=\(preparedReady), isActive=\(isActive))")
-    guard !isActive, let controller = pipController else { return }
+    NSLog("[PipManager] appDidEnterBackground (preparedReady=\(preparedReady), isActive=\(isActive), startingPip=\(startingPip))")
+    guard !isActive, !startingPip, let controller = pipController else { return }
     pipPlayer?.volume = 1.0
     pipPlayer?.play()
+    startingPip = true
     controller.startPictureInPicture()
     // 真实激活由 didStart 回调确认并通知 Dart
     NSLog("[PipManager] auto startPictureInPicture on background (preparedReady=\(preparedReady))")
@@ -414,6 +428,7 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
   func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
     NSLog("[PipManager] didStartPictureInPicture")
     isActive = true
+    startingPip = false
     // 通知 Dart：PiP 真实激活，主播放器可以暂停了（避免双路声音）
     notifyFlutter("onPipStarted", position: 0)
   }
