@@ -171,28 +171,7 @@ class AppState extends GetxController {
     if (!hasSpiderSource) return;
 
     if (!_nodeJSStarted) {
-      // 0) 如果 node.exe 缺失，先下载（弹进度 dialog）
-      try {
-        if (!await NodeJSManager.instance.isNodeRuntimeInstalled()) {
-          print('[AppState] node.exe 缺失，准备下载...');
-          AppLog.instance.log('node.exe 缺失, 准备下载');
-          loadingPhase.value = LoadingPhase.downloadingNodeJS;
-          final cfg = NodeJSManager.instance.nodeDownloadConfig ??
-              await NodeJSManager.loadNodeDownloadConfigStatic();
-          try {
-            await NodeJSManager.instance.downloadAndExtractNodeRuntime(cfg);
-          } catch (e) {
-            loadingPhase.value = LoadingPhase.failed;
-            configLoadError.value = 'Node.js 下载失败: $e';
-            print('[AppState] Node.js 下载失败: $e');
-            AppLog.instance.log('Node.js 下载失败: $e');
-            return;
-          }
-        }
-      } catch (e) {
-        AppLog.instance.log('isNodeRuntimeInstalled 异常: $e');
-      }
-
+      // iOS: Node.js 运行时内嵌（NodeMobile.xcframework）, 无需下载
       AppLog.instance.log('phase=startingNodeJS');
       loadingPhase.value = LoadingPhase.startingNodeJS;
       try {

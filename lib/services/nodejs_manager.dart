@@ -29,9 +29,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'app_log.dart';
 import 'nodejs_platform.dart';
-import 'nodejs_platform_android.dart';
 import 'nodejs_platform_ios.dart';
-import 'nodejs_platform_windows.dart';
 
 class NodeJSManager {
   static final NodeJSManager _instance = NodeJSManager._internal();
@@ -58,29 +56,16 @@ class NodeJSManager {
   final ValueNotifier<int> _spiderPortBridge = ValueNotifier(0);
 
   NodeJSManager._internal() {
-    if (Platform.isWindows) {
-      _platform = WindowsNodeJSPlatform(
-        onNodeReadyChanged: _nodeReadyBridge,
-        onManagementPortChanged: _managementPortBridge,
-        onSpiderPortChanged: _spiderPortBridge,
-      );
-    } else if (Platform.isIOS) {
-      final ios = IOSNodeJSPlatform(
-        onNodeReadyChanged: _nodeReadyBridge,
-        onManagementPortChanged: _managementPortBridge,
-        onSpiderPortChanged: _spiderPortBridge,
-      );
-      ios.initialize();
-      _platform = ios;
-    } else if (Platform.isAndroid) {
-      _platform = AndroidNodeJSPlatform(
-        onNodeReadyChanged: _nodeReadyBridge,
-        onManagementPortChanged: _managementPortBridge,
-        onSpiderPortChanged: _spiderPortBridge,
-      );
-    } else {
-      throw UnsupportedError('Node.js 集成不支持当前平台: ${Platform.operatingSystem}');
+    if (!Platform.isIOS) {
+      throw UnsupportedError('Node.js 集成仅支持 iOS: ${Platform.operatingSystem}');
     }
+    final ios = IOSNodeJSPlatform(
+      onNodeReadyChanged: _nodeReadyBridge,
+      onManagementPortChanged: _managementPortBridge,
+      onSpiderPortChanged: _spiderPortBridge,
+    );
+    ios.initialize();
+    _platform = ios;
   }
 
   // ============================================================
@@ -157,13 +142,8 @@ class NodeJSManager {
 
   Future<String> getDocumentsSourcePath() => _platform.getDocumentsSourcePath();
 
-  /// 当前平台的 NodeDownloadConfig（仅 Windows 端有值）
-  NodeDownloadConfig? get nodeDownloadConfig {
-    if (_platform is WindowsNodeJSPlatform) {
-      return (_platform as WindowsNodeJSPlatform).nodeDownloadConfig;
-    }
-    return null;
-  }
+  /// 当前平台的 NodeDownloadConfig（iOS 无需下载运行时）
+  NodeDownloadConfig? get nodeDownloadConfig => null;
 
   /// 公开 API：加载 Node.js 下载配置（从 rootBundle 读 version.json）
   ///
