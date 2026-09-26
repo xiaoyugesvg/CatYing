@@ -295,8 +295,12 @@ class SpiderService {
 
   /// 获取当前 Spider 的 key/type/apiBase
   /// 用于非并发场景（如详情页获取播放 URL）
+  /// **2026-09-26 修复**：原实现 `_currentKey!` / `_currentType!` 强解包，
+  /// 若用户从未经过首页/分类加载（如从历史/收藏直接进 Spider 源详情），
+  /// `_currentKey` 为 null，强解包抛空安全异常 → App 崩溃"像重启一样"。
+  /// 改为空安全返回：未设置时返回 ('', 0, '')，调用方自行降级。
   (String, int, String) getCurrentSpiderInfo() {
-    return (_currentKey!, _currentType!, _currentApiBase ?? '');
+    return (_currentKey ?? '', _currentType ?? 0, _currentApiBase ?? '');
   }
 
   /// 使当前 Spider 会话失效 - 对应 Swift invalidateSession

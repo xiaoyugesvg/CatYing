@@ -30,6 +30,9 @@ class AppTheme {
   /// 浅玻璃底（悬浮栏用）：alpha≈4%，比 glassTintDeep 更透，
   /// 让全局渐变背景透出，悬浮导航栏看起来更"轻"。
   static const Color glassTintLight = Color(0x0A0F1013);
+  /// 超浅玻璃底（沉浸式底栏用）：alpha≈2%，几乎全透明只留模糊+描边，
+  /// 底栏不再遮挡内容，真正"沉浸式"（2026-09-26 新增）。
+  static const Color glassTintClear = Color(0x050F1013);
   // 高光层: 顶部镜面高光 (iOS 27 更亮的 specular highlight)
   static const Color glassHighlightTop = Color(0x2EFFFFFF); // white 18%
   static const Color glassHighlightMid = Color(0x0FFFFFFF); // white 6%
