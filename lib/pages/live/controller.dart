@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/live_models.dart';
 import '../../services/api_config.dart';
+import '../../services/network_manager.dart';
 
 class LiveController extends GetxController {
   final channelGroups = <LiveChannelGroup>[].obs;
@@ -12,6 +15,15 @@ class LiveController extends GetxController {
   final epgList = <Epginfo>[].obs;
   final isLoading = false.obs;
   final showChannelList = false.obs;
+
+  /// 自定义直播源列表 [{name, url}]，本地持久化（SharedPreferences）
+  /// 用户可在直播页自行添加 m3u / txt / json 直播源链接，
+  /// 与订阅接口返回的 lives 合并展示。对应 tvbox-Swift / TVBox-tvs 的
+  /// "自己添加直播源"能力。
+  final customLiveSources = <Map<String, String>>[].obs;
+
+  /// 自定义直播源持久化 key
+  static const _customLiveSourcesKey = 'custom_live_sources';
 
   /// 直播页是否可见（由 ContentView tab 切换驱动）：
   /// 不可见时自动 pause 播放器，避免在 IndexedStack 中
@@ -33,6 +45,7 @@ class LiveController extends GetxController {
   void onInit() {
     super.onInit();
     bindLiveChannelGroups();
+    _loadCustomLiveSources();
   }
 
   @override
@@ -62,8 +75,129 @@ class LiveController extends GetxController {
     } catch (_) {}
   }
 
-  void loadChannels() {
-    applyChannelGroups(ApiConfig.instance.liveChannelGroupList.toList());
+  // ============================================================
+  // 自定义直播源（本地持久化 + 合并加载）
+  // ============================================================
+
+  /// 从 SharedPreferences 读取自定义直播源
+  Future<void> _loadCustomLiveSources() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_customLiveSourcesKey);
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw) as List<dynamic>;
+        final list = <Map<String, String>>[];
+        for (final e in decoded) {
+          if (e is Map) {
+            final name = (e['name'] ?? '').toString().trim();
+            final url = (e['url'] ?? '').toString().trim();
+            if (url.isNotEmpty) {
+              list.add({
+                'name': name.isEmpty ? url : name,
+                'url': url,
+              });
+            }
+          }
+        }
+        customLiveSources.value = list;
+      }
+    } catch (_) {}
+  }
+
+  /// 持久化自定义直播源
+  Future<void> _persistCustomLiveSources() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _customLiveSourcesKey,
+        jsonEncode(customLiveSources.value),
+      );
+    } catch (_) {}
+  }
+
+  /// 添加自定义直播源（m3u / txt / json 链接），保存后立即加载合并
+  Future<void> addCustomLiveSource({
+    required String name,
+    required String url,
+  }) async {
+    final normalizedUrl = ApiConfig.normalizeConfigUrl(url.trim());
+    if (normalizedUrl.isEmpty) return;
+
+    final trimmedName = name.trim();
+    customLiveSources.add({
+      'name': trimmedName.isEmpty ? normalizedUrl : trimmedName,
+      'url': normalizedUrl,
+    });
+    await _persistCustomLiveSources();
+    await loadChannels();
+  }
+
+  /// 删除自定义直播源，保存后重新加载合并
+  Future<void> removeCustomLiveSource(int index) async {
+    if (index < 0 || index >= customLiveSources.length) return;
+    customLiveSources.removeAt(index);
+    await _persistCustomLiveSources();
+    await loadChannels();
+  }
+
+  /// 加载频道：订阅源（ApiConfig.liveChannelGroupList）+ 自定义源（本地）合并
+  /// 订阅源由 ApiConfig 解析配置 lives 字段（name/type/url）后远程加载
+  /// M3U / TXT / JSON 并分组；自定义源同样支持三种格式。
+  Future<void> loadChannels() async {
+    final groups = <LiveChannelGroup>[];
+    // 1) 订阅源
+    groups.addAll(ApiConfig.instance.liveChannelGroupList.toList());
+    // 2) 自定义源：逐个远程拉取并解析，按分组名合并
+    for (final source in customLiveSources.value) {
+      final url = source['url'] ?? '';
+      if (url.isEmpty) continue;
+      try {
+        final content = await NetworkManager.instance.getString(url);
+        if (content.trim().isEmpty) continue;
+        final parsed = ApiConfig.instance.parseLiveContent(content);
+        groups = _mergeGroups(groups, parsed);
+      } catch (e) {
+        print('[LiveController] 自定义直播源加载失败: $url, error: $e');
+      }
+    }
+    applyChannelGroups(groups);
+  }
+
+  /// 按分组名合并两组频道（保留 base 顺序，同名组合并频道）
+  List<LiveChannelGroup> _mergeGroups(
+    List<LiveChannelGroup> base,
+    List<LiveChannelGroup> incoming,
+  ) {
+    final byName = <String, LiveChannelGroup>{};
+    for (final g in base) {
+      byName[g.groupName] = LiveChannelGroup(
+        groupName: g.groupName,
+        groupIndex: byName.length,
+        channels: List.of(g.channels),
+      );
+    }
+    for (final g in incoming) {
+      final existing = byName[g.groupName];
+      if (existing == null) {
+        byName[g.groupName] = LiveChannelGroup(
+          groupName: g.groupName,
+          groupIndex: byName.length,
+          channels: [],
+        );
+      }
+      for (final ch in g.channels) {
+        byName[g.groupName]!.channels.add(ch);
+      }
+    }
+    final result = byName.values.toList()
+      ..sort((a, b) => a.groupIndex.compareTo(b.groupIndex));
+    // 重建 channelIndex
+    for (var i = 0; i < result.length; i++) {
+      for (var j = 0; j < result[i].channels.length; j++) {
+        result[i].channels[j].channelIndex = j;
+      }
+    }
+    return result;
   }
 
   void selectGroup(int index) {
