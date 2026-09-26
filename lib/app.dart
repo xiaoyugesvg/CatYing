@@ -797,6 +797,16 @@ class _ContentViewState extends State<ContentView>
     // 对应 Swift: .sheet(isPresented: $appState.showAboutOnLaunch)
     _handleShowAboutOnLaunch(appState);
 
+    // 悬浮导航栏布局参数:
+    // - bottomInset: Home Indicator 安全区（刘海屏/iPad 手势条避让）
+    // - 悬浮胶囊离底 8pt, 左右留 32pt
+    // - 面板高度 ≈ 内容 35(icon18+3+label14) + 内边距 16 ≈ 51
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+    const navSideGap = 32.0;
+    const navFloatGap = 8.0;
+    const navBarHeight = 51.0;
+    final navReserve = bottomInset + navFloatGap + navBarHeight + 6.0;
+
     return Scaffold(
       body: Stack(
         children: [
@@ -806,9 +816,13 @@ class _ContentViewState extends State<ContentView>
           Positioned.fill(
             child: BackgroundService.instance.buildBackground(overlayAlpha: 0.3),
           ),
-          IndexedStack(
-            index: _selectedTab,
-            children: _tabPages,
+          // 5 个 tab 页 (底部预留悬浮导航栏高度, 避免最后一行内容被遮挡)
+          Padding(
+            padding: EdgeInsets.only(bottom: navReserve),
+            child: IndexedStack(
+              index: _selectedTab,
+              children: _tabPages,
+            ),
           ),
           // 搜索页 - 对应 Swift .sheet(isPresented: $showSearch)
           if (_showSearch)
@@ -826,50 +840,57 @@ class _ContentViewState extends State<ContentView>
                 ),
               ),
             ),
+          // 悬浮导航栏 - 对应 Swift floatingNavBar
+          // **2026-07-09**: 全屏时隐藏, 让视频真正铺满屏幕
+          // 直播页/详情页 onFullScreenChanged 时调 PlayerFullscreenController
+          // .enter/.exit, 这里 Obx 监听后切到 SizedBox.shrink().
+          //
+          // **关键修复**: 必须放在 body Stack 里而不是 Scaffold 的
+          // bottomNavigationBar。Scaffold 会把 body 和 bottomNavigationBar
+          // 渲染成上下两个互不重叠的层, BackdropFilter 只能模糊自己下方
+          // 已有的内容, bottomNavigationBar 下层只有 Scaffold 纯色背景,
+          // 毛玻璃永远透不出 body 里的渐变背景层, 真机上看起来就是
+          // "死板半透明深色块"。放进 Stack 后, 面板下方就是全局背景层
+          // + 页面内容, 磨砂悬浮效果才真正生效。
+          Positioned(
+            left: navSideGap,
+            right: navSideGap,
+            bottom: bottomInset + navFloatGap,
+            child: Obx(() {
+              if (PlayerFullscreenController.instance.isFullscreen.value) {
+                return const SizedBox.shrink();
+              }
+              // iOS 27 Liquid Glass 悬浮导航条:
+              // 真实毛玻璃 (BackdropFilter) + 深色半透明底 + 顶部镜面高光 +
+              // 亮描边 + 柔和深投影, 让全局背景层透过形成磨砂观感
+              return GlassPanel(
+                radius: 30,
+                blur: true,
+                tint: AppTheme.glassTintDeep,
+                borderColor: AppTheme.glassBorderSoft,
+                borderWidth: 0.8,
+                highlightStrength: 0.9,
+                shadow: true,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _navItem(Icons.home_outlined, Icons.home, '首页', 0),
+                    _navItem(Icons.tv_outlined, Icons.tv, '直播', 1),
+                    _navItem(
+                        Icons.schedule_outlined, Icons.schedule, '历史', 2),
+                    _navItem(
+                        Icons.favorite_border, Icons.favorite, '收藏', 3),
+                    _navItem(
+                        Icons.settings_outlined, Icons.settings, '设置', 4),
+                  ],
+                ),
+              );
+            }),
+          ),
         ],
       ),
-      // 浮动导航栏 - 对应 Swift floatingNavBar
-      // **2026-07-09**: 全屏时隐藏, 让视频真正铺满屏幕
-      // 直播页/详情页 onFullScreenChanged 时调 PlayerFullscreenController
-      // .enter/.exit, 这里 Obx 监听后切到 SizedBox.shrink().
-      bottomNavigationBar: Obx(() {
-        if (PlayerFullscreenController.instance.isFullscreen.value) {
-          return const SizedBox.shrink();
-        }
-        // iOS 27 Liquid Glass 悬浮导航条:
-        // 真实毛玻璃 (BackdropFilter) + 深色半透明底 + 顶部镜面高光 +
-        // 亮描边 + 柔和深投影, 让全局背景层透过形成磨砂观感
-        return GlassPanel(
-          radius: 30,
-          blur: true,
-          tint: AppTheme.glassTintDeep,
-          borderColor: AppTheme.glassBorderSoft,
-          borderWidth: 0.8,
-          highlightStrength: 0.9,
-          shadow: true,
-          margin: const EdgeInsets.fromLTRB(32, 0, 32, 4),
-          child: SafeArea(
-            top: false,
-            child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _navItem(Icons.home_outlined, Icons.home, '首页', 0),
-                  _navItem(Icons.tv_outlined, Icons.tv, '直播', 1),
-                  _navItem(
-                      Icons.schedule_outlined, Icons.schedule, '历史', 2),
-                  _navItem(
-                      Icons.favorite_border, Icons.favorite, '收藏', 3),
-                  _navItem(
-                      Icons.settings_outlined, Icons.settings, '设置', 4),
-                ],
-              ),
-            ),
-          ),
-        );
-      }),
     );
   }
 
