@@ -25,21 +25,26 @@ import UIKit
 ///   - AVAudioSession .playback（BackgroundAudio.swift 已激活）✅
 ///   - 无需特殊 entitlement（TrollStore 侧载可用）✅
 ///
-/// 稳定性修复 v2（2026-09-26）：
-///   旧版两个根因导致"画中画时灵时不灵"：
+/// 稳定性修复 v3（2026-09-26）：
+///   旧版根因导致"画中画时灵时不灵"：
 ///   a) 后台才调 startPip：App 已进后台才创建 AVPlayer 等 readyToPlay，
 ///      后台缓冲慢/受限，15s 超时或系统拒绝启动 → 无小窗但主播放器还在播
 ///      （用户听到声音、看不到小窗）。
 ///   b) http 明文源：原生 AVPlayer 受 ATS 限制，http:// m3u8 直接加载失败
 ///      （Info.plist 已放行 NSAllowsArbitraryLoads）；media_kit 自己的网络栈
 ///      不受 ATS 影响 → "主播放器能播、PiP 失败"。
+///   c) v2 的 appDidEnterBackground 仍要求 preparedReady==true 才启动：
+///      源加载慢 / 换源后刚重建实例时退后台，预热未就绪 → 直接跳过启动
+///      → 无小窗但主播放器继续出声。
 ///
 ///   修复：
 ///   - 新增 preparePip(url, headers)：**前台播放时预热**创建 AVPlayer，
 ///     静音预缓冲并常驻待命（readyToPlay 后保持），退后台/点 PiP 时
 ///     立即 startPictureInPicture()，不再后台等缓冲。
-///   - 监听 UIApplication.didEnterBackgroundNotification：常驻实例已就绪
-///     且未在 PiP → 退后台瞬间自动启动系统 PiP。
+///   - 监听 UIApplication.didEnterBackgroundNotification：**只要存在常驻
+///     实例且未在 PiP**，退后台瞬间即启动系统 PiP——不等待就绪。
+///     未就绪时系统 PiP 窗口先出现（黑屏/loading），AVPlayer 缓冲完成后
+///     画面自然呈现，避免"有声音无小窗"。
 ///   - startPip 快路径：已预热就绪 → seek + 立即启动（毫秒级）。
 ///   - 真实激活由 pictureInPictureControllerDidStartPictureInPicture 确认，
 ///     并通过新通道事件 onPipStarted 通知 Dart 暂停主播放器。
@@ -73,8 +78,8 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
 
   private override init() {
     super.init()
-    // 退后台自动启动 PiP：前台已预热就绪时，进后台瞬间直接启动系统悬浮窗
-    // （比 Dart 侧 AppLifecycleState 回调更早、更稳，且此时 AVPlayer 已缓冲好）
+    // 退后台自动启动 PiP：前台已预热（含预热中）时，进后台瞬间直接启动系统悬浮窗
+    // （比 Dart 侧 AppLifecycleState 回调更早、更稳，且此时 AVPlayer 已开始缓冲）
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(appDidEnterBackground),
@@ -389,15 +394,18 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
 
   // MARK: - 退后台自动启动 PiP
 
-  /// App 进入后台：若常驻实例已就绪且未在 PiP，立即启动系统悬浮窗
+  /// App 进入后台：**只要存在常驻实例且未在 PiP**，立即启动系统悬浮窗。
+  /// 不再要求 preparedReady——预热中（源加载慢）退后台时，
+  /// PiP 窗口先出现（黑屏/loading），AVPlayer 缓冲完成后画面自然呈现，
+  /// 避免"退后台只有声音没有小窗"。
   @objc private func appDidEnterBackground() {
     NSLog("[PipManager] appDidEnterBackground (preparedReady=\(preparedReady), isActive=\(isActive))")
-    guard preparedReady, !isActive, let controller = pipController else { return }
+    guard !isActive, let controller = pipController else { return }
     pipPlayer?.volume = 1.0
     pipPlayer?.play()
     controller.startPictureInPicture()
     // 真实激活由 didStart 回调确认并通知 Dart
-    NSLog("[PipManager] auto startPictureInPicture on background")
+    NSLog("[PipManager] auto startPictureInPicture on background (preparedReady=\(preparedReady))")
   }
 
   // MARK: - AVPictureInPictureControllerDelegate
