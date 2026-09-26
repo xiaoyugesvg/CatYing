@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../common/theme.dart';
 
-/// 剧集列表组件 - 对应 Swift EpisodeListView
-/// 分组展示剧集（每组50个），网格布局
-class EpisodeListView extends StatelessWidget {
+/// 选集列表 - 对应 Swift EpisodeListView
+/// **2026-09-26 分页化**：超过 10 集时按「1-10 / 11-20 / 21-30 …」分页切换，
+/// 不再一屏塞下所有集数。
+class EpisodeListView extends StatefulWidget {
   final List<String> episodeNames;
   final int selectedIndex;
   final ValueChanged<int> onEpisodeTap;
@@ -15,95 +16,136 @@ class EpisodeListView extends StatelessWidget {
     required this.onEpisodeTap,
   });
 
-  static const int _groupSize = 50;
+  @override
+  State<EpisodeListView> createState() => _EpisodeListViewState();
+}
 
-  List<List<String>> get _groups {
-    final groups = <List<String>>[];
-    for (var i = 0; i < episodeNames.length; i += _groupSize) {
-      final end = (i + _groupSize).clamp(0, episodeNames.length);
-      groups.add(episodeNames.sublist(i, end));
-    }
-    return groups;
+class _EpisodeListViewState extends State<EpisodeListView> {
+  static const int _pageSize = 10;
+  /// 当前页码（0-based），切换集数时自动跳到所在页
+  int _page = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _page = widget.selectedIndex ~/ _pageSize;
   }
 
-  String _groupTitle(int groupIndex, int groupLength) {
-    final start = groupIndex * _groupSize + 1;
-    final end = start + groupLength - 1;
-    return '$start-$end';
+  @override
+  void didUpdateWidget(covariant EpisodeListView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.selectedIndex != oldWidget.selectedIndex) {
+      setState(() {
+        _page = widget.selectedIndex ~/ _pageSize;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final groups = _groups;
-    if (groups.isEmpty) return const SizedBox.shrink();
+    final names = widget.episodeNames;
+    if (names.isEmpty) return const SizedBox.shrink();
+
+    final pageCount = (names.length + _pageSize - 1) ~/ _pageSize;
+    if (_page >= pageCount) _page = pageCount - 1;
+
+    final start = _page * _pageSize;
+    final end = (start + _pageSize).clamp(0, names.length);
+    final visible = names.sublist(start, end);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
       children: [
-        for (var g = 0; g < groups.length; g++) ...[
-          Padding(
-            padding: const EdgeInsets.only(
-              top: AppTheme.spacingSM,
-              bottom: AppTheme.spacingSM,
-            ),
-            child: Text(
-              _groupTitle(g, groups[g].length),
-              style: const TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: AppTheme.fontSubhead,
-                fontWeight: FontWeight.w600,
-              ),
+        // 分页切换行：1-10 / 11-20 / 21-30 …
+        if (pageCount > 1) ...[
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: List.generate(pageCount, (page) {
+                final isSelected = page == _page;
+                final labelStart = page * _pageSize + 1;
+                final labelEnd = ((page + 1) * _pageSize).clamp(0, names.length);
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => setState(() => _page = page),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? AppTheme.accentColor.withValues(alpha: 0.14)
+                            : AppTheme.backgroundTertiary,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: isSelected
+                              ? AppTheme.accentColor.withValues(alpha: 0.4)
+                              : AppTheme.borderLight,
+                          width: 0.8,
+                        ),
+                      ),
+                      child: Text(
+                        '$labelStart-$labelEnd',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                          color: isSelected
+                              ? AppTheme.accentColor
+                              : AppTheme.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
             ),
           ),
-          Wrap(
-            spacing: AppTheme.spacingSM,
-            runSpacing: AppTheme.spacingSM,
-            children: [
-              for (var i = 0; i < groups[g].length; i++)
-                _buildEpisodeChip(
-                  globalIndex: g * _groupSize + i,
-                  name: groups[g][i],
-                  isSelected: g * _groupSize + i == selectedIndex,
-                ),
-            ],
-          ),
+          const SizedBox(height: 12),
         ],
+        // 当前页集数网格
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: List.generate(visible.length, (i) {
+            final index = start + i;
+            final isSelected = index == widget.selectedIndex;
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => widget.onEpisodeTap(index),
+              child: Container(
+                width: 52,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? AppTheme.accentColor
+                      : AppTheme.backgroundTertiary,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isSelected
+                        ? AppTheme.accentColor
+                        : AppTheme.borderLight,
+                    width: 0.8,
+                  ),
+                ),
+                child: Text(
+                  visible[i],
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isSelected ? Colors.white : AppTheme.textPrimary,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            );
+          }),
+        ),
       ],
-    );
-  }
-
-  Widget _buildEpisodeChip({
-    required int globalIndex,
-    required String name,
-    required bool isSelected,
-  }) {
-    return GestureDetector(
-      onTap: () => onEpisodeTap(globalIndex),
-      child: Container(
-        constraints: const BoxConstraints(minWidth: 60, maxWidth: 120),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? AppTheme.accentColor.withValues(alpha: 0.15)
-              : AppTheme.backgroundTertiary,
-          borderRadius: BorderRadius.circular(AppTheme.radiusSM),
-          border: isSelected
-              ? Border.all(color: AppTheme.accentColor.withValues(alpha: 0.4))
-              : null,
-        ),
-        child: Text(
-          name,
-          style: TextStyle(
-            color: isSelected ? AppTheme.accentColor : AppTheme.textSecondary,
-            fontSize: AppTheme.fontSubhead,
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-          ),
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
     );
   }
 }
