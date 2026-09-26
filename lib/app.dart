@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'common/theme.dart';
 import 'common/constants.dart';
 import 'services/app_state.dart';
+import 'services/app_log.dart';
 import 'services/background_service.dart';
 import 'services/nodejs_manager.dart';
 import 'pages/home/view.dart';
@@ -17,6 +18,7 @@ import 'pages/search/view.dart';
 import 'pages/search/controller.dart';
 import 'pages/settings/controller.dart';
 import 'router/app_pages.dart';
+import 'services/player_fullscreen_controller.dart';
 import 'widgets/video_player_pip.dart';
 
 class TVBoxApp extends StatelessWidget {
@@ -24,6 +26,9 @@ class TVBoxApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 提前注册全屏状态控制器, 这样直播页/详情页 onFullScreenChanged 才能
+    // 直接 PlayerFullscreenController.instance.enter/exit 调用.
+    Get.put(PlayerFullscreenController(), permanent: true);
     return GetMaterialApp(
       title: 'TVBox',
       theme: AppTheme.darkTheme,
@@ -68,6 +73,10 @@ class _ContentViewState extends State<ContentView>
   // 设置控制器（多仓库选择）
   SettingsController? _settingsVM;
 
+  /// 上一次 lifecycle state (用于记录 from→to 转换)
+  AppLifecycleState? _lastLifecycleState;
+  DateTime? _lastLifecycleChangeAt;
+
   @override
   void initState() {
     super.initState();
@@ -110,8 +119,36 @@ class _ContentViewState extends State<ContentView>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // 对应 Swift onChange(of: scenePhase) - 应用恢复前台时检查服务
+    final from = _lastLifecycleState;
+    final now = DateTime.now();
+    final prevAt = _lastLifecycleChangeAt;
+    final sincePrevMs =
+        prevAt == null ? null : now.difference(prevAt).inMilliseconds;
+
+    AppLog.instance.lifecycle(
+      'didChange',
+      from: from,
+      to: state,
+      source: 'ContentView',
+      fields: {
+        'isConfigLoaded': Get.find<AppState>().isConfigLoaded.value,
+        if (sincePrevMs != null) 'sincePrevMs': sincePrevMs,
+      },
+    );
+
+    _lastLifecycleState = state;
+    _lastLifecycleChangeAt = now;
+
     if (state == AppLifecycleState.resumed) {
       final appState = Get.find<AppState>();
+      AppLog.instance.lifecycle(
+        'trigger_handleSceneActive',
+        to: state,
+        source: 'ContentView.resumed',
+        fields: {
+          'reason': 'AppLifecycleState.resumed → handleSceneActive',
+        },
+      );
       appState.handleSceneActive();
     }
   }
@@ -789,7 +826,14 @@ class _ContentViewState extends State<ContentView>
         ],
       ),
       // 浮动导航栏 - 对应 Swift floatingNavBar
-      bottomNavigationBar: Container(
+      // **2026-07-09**: 全屏时隐藏, 让视频真正铺满屏幕
+      // 直播页/详情页 onFullScreenChanged 时调 PlayerFullscreenController
+      // .enter/.exit, 这里 Obx 监听后切到 SizedBox.shrink().
+      bottomNavigationBar: Obx(() {
+        if (PlayerFullscreenController.instance.isFullscreen.value) {
+          return const SizedBox.shrink();
+        }
+        return Container(
         margin: const EdgeInsets.fromLTRB(32, 0, 32, 4),
         decoration: BoxDecoration(
           // 半透明色, 让 BackgroundService 全局背景层透出
@@ -828,7 +872,8 @@ class _ContentViewState extends State<ContentView>
             ),
           ),
         ),
-      ),
+      );
+      }),
     );
   }
 
