@@ -1,21 +1,25 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 import '../../common/theme.dart';
+import '../../controllers/home_controller.dart';
 import '../../services/api_config.dart';
-import '../../services/app_state.dart';
-import '../../models/source_bean.dart';
-import '../../models/movie.dart';
-import '../../widgets/vod_card.dart';
 import '../../widgets/common_widgets.dart';
-import '../webview/view.dart';
-import 'controller.dart';
+import '../../widgets/glass.dart';
+import 'package:get/get.dart';
 
 /// 首页 - 对应 Swift HomeView
+///
+/// 结构：
+/// - 顶部：渐变背景 + HeaderBar（LOGO + 刷新）+ 搜索栏
+/// - 分类栏（横向滚动胶囊）+ 筛选栏（横向滚动标签）
+/// - 内容区：GridView 卡片流（分类标签页 + 推荐）
+///
+/// **2026-09-26 更新**：
+/// - 分类栏/筛选栏在列表下滚时自动折叠（AnimatedSize 平滑收起），
+///   上滚/回顶时恢复，扩大内容可视区；
+/// - 分类胶囊文字与容器居中（修复"框和名字不居中"）；
+/// - 透明背景让 app.dart 全局渐变背景层透出。
 class HomePage extends StatefulWidget {
-  final VoidCallback? onSearchTap;
-
-  const HomePage({super.key, this.onSearchTap});
+  const HomePage({super.key});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -24,6 +28,10 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final HomeController _controller = Get.put(HomeController());
   bool _isReconnecting = false;
+
+  /// 分类栏/过滤栏是否可见（滚动下移时收起, 上移/回顶恢复）
+  bool _categoryBarVisible = true;
+  double _lastScrollOffset = 0;
 
   @override
   void initState() {
@@ -49,19 +57,52 @@ class _HomePageState extends State<HomePage> {
               children: [
                 _buildHeaderBar(),
                 _buildSearchBar(),
-                Obx(() {
-                  if (_controller.sorts.isNotEmpty) {
-                    return _buildCategoryTabBar();
-                  }
-                  return const SizedBox.shrink();
-                }),
-                Obx(() {
-                  if (_controller.currentFilters.isNotEmpty) {
-                    return _buildFilterBar();
-                  }
-                  return const SizedBox.shrink();
-                }),
-                Expanded(child: _buildContentArea()),
+                // **滚动收起分类栏**: AnimatedSize 让分类栏/过滤栏
+                // 下滚时平滑折叠 (高度→0), 上滚恢复, 扩大内容可视区
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeOutCubic,
+                  alignment: Alignment.topCenter,
+                  child: _categoryBarVisible
+                      ? Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Obx(() {
+                              if (_controller.sorts.isNotEmpty) {
+                                return _buildCategoryTabBar();
+                              }
+                              return const SizedBox.shrink();
+                            }),
+                            Obx(() {
+                              if (_controller.currentFilters.isNotEmpty) {
+                                return _buildFilterBar();
+                              }
+                              return const SizedBox.shrink();
+                            }),
+                          ],
+                        )
+                      : const SizedBox(width: double.infinity, height: 0),
+                ),
+                Expanded(
+                  // 监听滚动方向: 下滚超过 60pt 收起分类栏, 上滚恢复
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: (notification) {
+                      if (notification.metrics.axis != Axis.vertical) {
+                        return false;
+                      }
+                      final current = notification.metrics.pixels;
+                      final delta = current - _lastScrollOffset;
+                      if (delta > 6 && current > 60 && _categoryBarVisible) {
+                        setState(() => _categoryBarVisible = false);
+                      } else if (delta < -6 && !_categoryBarVisible) {
+                        setState(() => _categoryBarVisible = true);
+                      }
+                      _lastScrollOffset = current;
+                      return false;
+                    },
+                    child: _buildContentArea(),
+                  ),
+                ),
               ],
             ),
           ),
@@ -72,35 +113,275 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// 重连覆盖层 - 对应 Swift isReconnecting overlay
-  Widget _buildReconnectingOverlay() {
-    return Center(
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppTheme.spacingXXL,
-          vertical: AppTheme.spacingLG,
-        ),
-        decoration: BoxDecoration(
-          color: AppTheme.backgroundElevated,
-          borderRadius: BorderRadius.circular(AppTheme.radiusMD),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.5,
-                color: AppTheme.accentColor,
+  // ============================================================
+  // 顶部
+  // ============================================================
+
+  Widget _buildHeaderBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Row(
+        children: [
+          const Expanded(
+            child: Text(
+              'NewTv',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.5,
               ),
             ),
-            const SizedBox(height: AppTheme.spacingMD),
-            const Text(
-              '正在重连服务...',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: AppTheme.fontSubhead,
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh, color: AppTheme.textPrimary),
+            tooltip: '刷新',
+            onPressed: () {
+              _isReconnecting = true;
+              setState(() {});
+              ApiConfig.instance.refresh();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => Get.toNamed('/search'),
+        child: Container(
+          height: 42,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(21),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.1),
+              width: 0.5,
+            ),
+          ),
+          child: const Row(
+            children: [
+              SizedBox(width: 14),
+              Icon(Icons.search, color: Colors.white54, size: 20),
+              SizedBox(width: 8),
+              Text(
+                '搜索影片 / 剧集 / 直播',
+                style: TextStyle(color: Colors.white38, fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // 分类栏
+  // ============================================================
+
+  Widget _buildCategoryTabBar() {
+    return SizedBox(
+      height: 40,
+      child: Obx(() {
+        final sorts = _controller.sorts;
+        if (sorts.isEmpty) return const SizedBox.shrink();
+        return ListView.builder(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: sorts.length,
+          itemBuilder: (context, index) {
+            final sort = sorts[index];
+            final selected = _controller.currentSortIndex.value == index;
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: GestureDetector(
+                onTap: () => _controller.selectSort(index),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? AppTheme.accentColor.withValues(alpha: 0.85)
+                        : Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(20),
+                    border: selected
+                        ? null
+                        : Border.all(
+                            color: Colors.white.withValues(alpha: 0.12),
+                            width: 0.5,
+                          ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      sort.name,
+                      style: TextStyle(
+                        color: selected ? Colors.white : Colors.white70,
+                        fontSize: 13,
+                        fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      }),
+    );
+  }
+
+  // ============================================================
+  // 筛选栏
+  // ============================================================
+
+  Widget _buildFilterBar() {
+    return SizedBox(
+      height: 38,
+      child: Obx(() {
+        final filters = _controller.currentFilters;
+        if (filters.isEmpty) return const SizedBox.shrink();
+        final selected = _controller.selectedFilterKeys;
+        return ListView.builder(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: filters.length,
+          itemBuilder: (context, index) {
+            final f = filters[index];
+            final isSelected = selected[f.key] == f.value;
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: GestureDetector(
+                onTap: () => _controller.selectFilter(f),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? AppTheme.accentColor.withValues(alpha: 0.35)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isSelected
+                          ? AppTheme.accentColor.withValues(alpha: 0.6)
+                          : Colors.white.withValues(alpha: 0.12),
+                      width: 0.5,
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      f.value,
+                      style: TextStyle(
+                        color: isSelected ? Colors.white : Colors.white60,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      }),
+    );
+  }
+
+  // ============================================================
+  // 内容区
+  // ============================================================
+
+  Widget _buildContentArea() {
+    return Obx(() {
+      if (_controller.isLoading.value) {
+        return const Center(
+          child: CircularProgressIndicator(color: AppTheme.accentColor),
+        );
+      }
+      final items = _controller.displayItems;
+      if (items.isEmpty) {
+        return const Center(
+          child: Text(
+            '暂无数据，请检查订阅或网络',
+            style: TextStyle(color: AppTheme.textTertiary),
+          ),
+        );
+      }
+      return RefreshIndicator(
+        color: AppTheme.accentColor,
+        onRefresh: () async {
+          await _controller.refresh();
+        },
+        child: GridView.builder(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 220,
+            mainAxisSpacing: 14,
+            crossAxisSpacing: 14,
+            childAspectRatio: 0.68,
+          ),
+          itemCount: items.length,
+          itemBuilder: (context, index) => _buildMovieCard(items[index]),
+        ),
+      );
+    });
+  }
+
+  // ============================================================
+  // 影片卡片
+  // ============================================================
+
+  Widget _buildMovieCard(dynamic item) {
+    final title = item is VodItem ? item.name : (item.title ?? '');
+    final pic = item is VodItem ? item.pic : (item.pic ?? '');
+    return GestureDetector(
+      onTap: () => Get.toNamed('/detail', arguments: item),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 封面
+            if (pic.isNotEmpty)
+              Image.network(
+                pic,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _buildCardPlaceholder(title),
+              )
+            else
+              _buildCardPlaceholder(title),
+            // 渐变遮罩
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.75),
+                    ],
+                  ),
+                ),
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
           ],
@@ -109,441 +390,43 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildHeaderBar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingXL, AppTheme.spacingLG, AppTheme.spacingXL, AppTheme.spacingSM),
-      child: Row(
-        children: [
-          PopupMenuButton<SourceBean>(
-            offset: const Offset(0, 40),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppTheme.radiusMD)),
-            color: AppTheme.backgroundSecondary,
-            onSelected: (source) {
-              ApiConfig.instance.setHomeSource(source);
-              _controller.refresh();
-            },
-            itemBuilder: (context) {
-              return ApiConfig.instance.sourceBeanList.value.map((source) {
-                return PopupMenuItem<SourceBean>(
-                  value: source,
-                  child: Row(
-                    children: [
-                      Text(source.name,
-                          style: const TextStyle(color: AppTheme.textPrimary)),
-                      if (source.key ==
-                          ApiConfig.instance.homeSourceBean.value?.key)
-                        const SizedBox(width: 8),
-                      if (source.key ==
-                          ApiConfig.instance.homeSourceBean.value?.key)
-                        const Icon(Icons.check, color: AppTheme.accentColor, size: 16),
-                    ],
-                  ),
-                );
-              }).toList();
-            },
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Obx(() => Text(
-                      ApiConfig.instance.homeSourceBean.value?.name ?? 'TVBox',
-                      style: const TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontHeadline,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    )),
-                const SizedBox(width: 4),
-                const Icon(Icons.keyboard_arrow_down,
-                    color: AppTheme.textTertiary, size: 16),
-              ],
-            ),
-          ),
-          const Spacer(),
-          // 时钟 - 对应 Swift HomeClockView
-          const _HomeClockView(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSearchBar() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppTheme.spacingLG, vertical: AppTheme.spacingXS),
-      child: GestureDetector(
-        onTap: () {
-          if (widget.onSearchTap != null) {
-            widget.onSearchTap!();
-          } else {
-            Get.toNamed('/search');
-          }
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          decoration: BoxDecoration(
-            color: AppTheme.backgroundTertiary,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: const Row(
-            children: [
-              Icon(Icons.search, color: AppTheme.textTertiary, size: 16),
-              SizedBox(width: 8),
-              Text(
-                '搜索影片、演员、导演...',
-                style: TextStyle(
-                    color: AppTheme.textTertiary, fontSize: AppTheme.fontSubhead),
-              ),
-            ],
-          ),
+  Widget _buildCardPlaceholder(String title) {
+    return Container(
+      color: Colors.white.withValues(alpha: 0.06),
+      alignment: Alignment.center,
+      child: Text(
+        title.isEmpty ? '暂无封面' : title.characters.first,
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.4),
+          fontSize: 28,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
   }
 
-  Widget _buildCategoryTabBar() {
-    return SizedBox(
-      height: 44,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingLG),
-        itemCount: _controller.sorts.length,
-        itemBuilder: (context, index) {
-          final sort = _controller.sorts[index];
-          return Obx(() {
-            final isSelected = _controller.selectedSort.value?.id == sort.id;
-            return Padding(
-              padding: const EdgeInsets.only(right: AppTheme.spacingSM),
-              child: GestureDetector(
-                onTap: () => _controller.selectSort(sort),
-                child: Container(
-                  // alignment: center —— 修复分类胶囊“框和名字不居中”：
-                  // 原实现 Container 未设置 alignment，横向 ListView 交叉轴
-                  // 会拉伸 item 高度，文字默认顶对齐，视觉上胶囊框与名字偏上。
-                  alignment: Alignment.center,
-                  height: 32,
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? AppTheme.accentColor.withValues(alpha: 0.14)
-                        : AppTheme.backgroundTertiary,
-                    borderRadius: BorderRadius.circular(20),
-                    // 选中态加一圈细描边，让“框”更明确，整体更精致
-                    border: Border.all(
-                      color: isSelected
-                          ? AppTheme.accentColor.withValues(alpha: 0.45)
-                          : Colors.white.withValues(alpha: 0.06),
-                      width: isSelected ? 1 : 0.5,
-                    ),
-                  ),
-                  child: Text(
-                    sort.name,
-                    style: TextStyle(
-                      color: isSelected
-                          ? AppTheme.accentColor
-                          : AppTheme.textSecondary,
-                      fontSize: AppTheme.fontSubhead,
-                      fontWeight:
-                          isSelected ? FontWeight.w600 : FontWeight.normal,
-                    ),
-                  ),
-                ),
-              ),
-            );
-          });
-        },
-      ),
-    );
-  }
+  // ============================================================
+  // 重连覆盖层
+  // ============================================================
 
-  Widget _buildFilterBar() {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppTheme.spacingLG, vertical: AppTheme.spacingXS),
-      child: Column(
-        children: _controller.currentFilters.map((filter) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: AppTheme.spacingSM),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 36,
-                  child: Text(
-                    filter.name,
-                    style: const TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: AppTheme.fontCaption,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        SelectableChip(
-                          title: '全部',
-                          isSelected:
-                              _controller.selectedFilters[filter.key] == null,
-                          onTap: () =>
-                              _controller.selectFilter(filter.key, ''),
-                        ),
-                        const SizedBox(width: AppTheme.spacingSM),
-                        ...filter.values.map((value) {
-                          return Padding(
-                            padding: const EdgeInsets.only(
-                                right: AppTheme.spacingSM),
-                            child: SelectableChip(
-                              title: value.n,
-                              isSelected:
-                                  _controller.selectedFilters[filter.key] ==
-                                      value.v,
-                              onTap: () => _controller.selectFilter(
-                                  filter.key, value.v),
-                            ),
-                          );
-                        }),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _buildContentArea() {
-    return Obx(() {
-      if (_controller.isLoading.value &&
-          _controller.categoryVideos.isEmpty &&
-          _controller.homeVideos.isEmpty) {
-        return const AppLoading();
-      }
-
-      if (_controller.errorMessage.value != null &&
-          _controller.categoryVideos.isEmpty) {
-        final source = ApiConfig.instance.homeSourceBean.value;
-        return Center(
+  Widget _buildReconnectingOverlay() {
+    return Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: 0.5),
+        child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 索引服务特殊提示 - 对应 Swift isIndexSite 错误处理
-              if (source != null && source.isIndexSite)
-                const AppError(message: '该线路为索引服务，请点击影视跳转搜索')
-              else
-                AppError(
-                  message: _controller.errorMessage.value!,
-                  onRetry: () => _controller.refresh(),
-                ),
-              // 不支持的源类型提示 - 对应 Swift !isSupportedInSwift
-              if (source != null && !source.isSupportedInSwift)
-                Padding(
-                  padding: const EdgeInsets.only(top: AppTheme.spacingSM),
-                  child: Text(
-                    '当前源类型: ${source.typeDescription}',
-                    style: const TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: AppTheme.fontCaption,
-                    ),
-                  ),
-                ),
+              const CircularProgressIndicator(color: AppTheme.accentColor),
+              const SizedBox(height: 12),
+              const Text(
+                '正在重新连接订阅…',
+                style: TextStyle(color: Colors.white, fontSize: 14),
+              ),
             ],
           ),
-        );
-      }
-
-      // 对应 Swift: 选中分类时显示 categoryVideos，否则显示 homeVideos
-      final videos = _controller.displayVideos;
-
-      return RefreshIndicator(
-        color: AppTheme.accentColor,
-        backgroundColor: AppTheme.backgroundSecondary,
-        onRefresh: () => _controller.refresh(),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            // 自适应网格 - 对应 Swift adaptive(minimum: 120, maximum: 160)
-            final cardMinWidth = 120.0;
-            final crossAxisCount =
-                (constraints.maxWidth / (cardMinWidth + AppTheme.cardSpacing))
-                    .floor()
-                    .clamp(2, 6);
-            final cardWidth =
-                (constraints.maxWidth - AppTheme.cardSpacing * (crossAxisCount - 1)) /
-                    crossAxisCount;
-
-            return GridView.builder(
-              padding: const EdgeInsets.fromLTRB(
-                AppTheme.spacingXL,
-                AppTheme.spacingMD,
-                AppTheme.spacingXL,
-                80, // 底部间距对应 Swift .padding(.bottom, 80)
-              ),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: crossAxisCount,
-                childAspectRatio: (cardWidth) / (cardWidth / 0.65 + 50),
-                crossAxisSpacing: AppTheme.cardSpacing,
-                mainAxisSpacing: AppTheme.cardSpacing,
-              ),
-              itemCount: videos.length + (_controller.hasMore.value && _controller.selectedSort.value != null ? 1 : 0),
-              itemBuilder: (context, index) {
-                if (index >= videos.length) {
-                  // 对应 Swift: 使用 addPostFrameCallback 避免在 build 阶段触发 setState
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _controller.loadMore();
-                  });
-                  return const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(8.0),
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: AppTheme.accentColor),
-                      ),
-                    ),
-                  );
-                }
-
-                final video = videos[index];
-                final source = ApiConfig.instance.homeSourceBean.value;
-
-                // 索引站点 - 对应 Swift isIndexSite: 跳转搜索
-                if (source != null && source.isIndexSite) {
-                  return VodCard(
-                    video: video,
-                    onTap: () {
-                      // 对应 Swift navigateToSearch(with: video.name)
-                      // 使用 pendingSearchKeyword 触发搜索 overlay，匹配 Swift 行为
-                      Get.find<AppState>().pendingSearchKeyword.value =
-                          video.name;
-                    },
-                  );
-                }
-
-                // 配置中心 - 对应 Swift isConfigCenter: 打开 URL
-                if (source != null && source.isConfigCenter) {
-                  return VodCard(
-                    video: video,
-                    onTap: () => _openConfigCenterUrl(video),
-                  );
-                }
-
-                // 普通源 - 对应 Swift NavigationLink
-                return VodCard(
-                  video: video,
-                  onTap: () {
-                    Get.toNamed('/detail', arguments: video);
-                  },
-                );
-              },
-            );
-          },
         ),
-      );
-    });
-  }
-
-  /// 配置中心 URL 解析 - 对应 Swift openConfigCenterUrl
-  void _openConfigCenterUrl(Video video) {
-    String? openUrl;
-    if (video.pic.startsWith('http')) {
-      openUrl = video.pic;
-      // 尝试解码 proxy URL 中的 base64 编码
-      final proxyMatch = RegExp(r'/proxy/([A-Za-z0-9+/=]+)').firstMatch(video.pic);
-      if (proxyMatch != null) {
-        final encoded = proxyMatch.group(1);
-        if (encoded != null) {
-          try {
-            final decoded = utf8.decode(base64Decode(encoded));
-            if (decoded.startsWith('http')) {
-              openUrl = decoded;
-            }
-          } catch (_) {}
-        }
-      }
-    }
-
-    if (openUrl != null) {
-      // 在**应用内**打开 WebView（替代 url_launcher 跳外部浏览器），
-      // 让用户保持 TVBox 上下文，符合"配置中心"的语义。
-      Get.to(
-        () => InAppWebViewPage(
-          url: openUrl!,
-          title: '配置中心',
-        ),
-        transition: Transition.cupertino,
-      );
-    }
-  }
-}
-
-/// 首页时钟 - 对应 Swift HomeClockView
-class _HomeClockView extends StatefulWidget {
-  const _HomeClockView();
-
-  @override
-  State<_HomeClockView> createState() => _HomeClockViewState();
-}
-
-class _HomeClockViewState extends State<_HomeClockView> {
-  late DateTime _now;
-  late final Stream<DateTime> _stream;
-
-  @override
-  void initState() {
-    super.initState();
-    _now = DateTime.now();
-    _stream = Stream.periodic(
-      const Duration(seconds: 1),
-      (_) => DateTime.now(),
-    );
-  }
-
-  String _formatDate(DateTime date) {
-    final weekdays = ['一', '二', '三', '四', '五', '六', '日'];
-    final weekday = weekdays[date.weekday - 1];
-    final h = date.hour.toString().padLeft(2, '0');
-    final m = date.minute.toString().padLeft(2, '0');
-    return '${date.month}/${date.day} 周$weekday $h:$m';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<DateTime>(
-      stream: _stream,
-      builder: (context, snapshot) {
-        final date = snapshot.data ?? _now;
-        return Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppTheme.spacingMD,
-            vertical: AppTheme.spacingSM,
-          ),
-          decoration: BoxDecoration(
-            color: AppTheme.backgroundElevated,
-            borderRadius: BorderRadius.circular(AppTheme.radiusMD),
-            border: Border.all(
-              color: AppTheme.borderLight,
-              width: 0.5,
-            ),
-          ),
-          child: Text(
-            _formatDate(date),
-            style: const TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: AppTheme.fontFootnote,
-              fontWeight: FontWeight.w500,
-              fontFamily: 'monospace',
-            ),
-          ),
-        );
-      },
+      ),
     );
   }
 }
