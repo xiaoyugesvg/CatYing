@@ -364,6 +364,13 @@ class _DetailPageState extends State<DetailPage> {
         return _buildPlayerArea();
       }
 
+      // 悬浮导航栏占位高度: 内容滚动区域底部预留, 避免最后一项
+      // (选集/简介) 滚动到底时被底部悬浮菜单栏遮挡 (2026-09-26)
+      final bottomInset = MediaQuery.of(context).padding.bottom;
+      const navFloatGap = 8.0;
+      const navBarHeight = 51.0;
+      final navReserve = bottomInset + navFloatGap + navBarHeight + 6.0;
+
       // 正常模式：视频 + 视频信息 + 选集 + 简介
       return SingleChildScrollView(
         child: Column(
@@ -372,7 +379,7 @@ class _DetailPageState extends State<DetailPage> {
             // 1. 播放器 - 对应 Swift PlayerView
             // **进详情即显示播放界面**：不依赖 isPlaying，只要 vodInfo 就绪
             // 就渲染播放器容器；URL 未就绪时 _buildPlayerArea 内部显示
-            // 16:9 加载占位，解析完成后自动出画面（不再"先进文字后出视频"）
+            // 4:3 加载占位，解析完成后自动出画面（不再"先进文字后出视频"）
             _buildPlayerArea(),
 
             // 2. 视频信息区 - 对应 Swift videoInfoSection
@@ -388,8 +395,9 @@ class _DetailPageState extends State<DetailPage> {
             if (_controller.currentEpisodes.isNotEmpty)
               _buildEpisodeList(),
 
-            // 底部间距 - 对应 Swift .padding(.bottom, 80)
-            const SizedBox(height: 80),
+            // 底部间距 - 预留悬浮导航栏高度, 让内容能完整滚出悬浮栏
+            // (不再被底部悬浮菜单栏挡住最后一行内容)
+            SizedBox(height: navReserve),
           ],
         ),
       );
@@ -631,7 +639,9 @@ class _DetailPageState extends State<DetailPage> {
     });
   }
 
-  /// 影片简介（内联版）- 并入名称卡片，3 行收起 / 点击展开全文
+  /// 影片简介（内联版）- 并入名称卡片，2 行收起 / 点击展开全文
+  /// 展开/收起按钮缩为右下角小文本+箭头，不再居中占整行，
+  /// 压缩卡片高度，简介框不再过大 (2026-09-26)
   Widget _buildInlineDescription(VodInfo info) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -644,7 +654,7 @@ class _DetailPageState extends State<DetailPage> {
               fontSize: AppTheme.fontBody,
               height: 1.5,
             ),
-            maxLines: 3,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
           secondChild: Text(
@@ -664,16 +674,29 @@ class _DetailPageState extends State<DetailPage> {
           behavior: HitTestBehavior.opaque,
           onTap: () =>
               setState(() => _isDescriptionExpanded = !_isDescriptionExpanded),
-          child: Padding(
-            padding: const EdgeInsets.only(top: AppTheme.spacingXS),
-            child: Center(
-              child: Text(
-                _isDescriptionExpanded ? '收起' : '展开',
-                style: const TextStyle(
-                  color: AppTheme.accentColor,
-                  fontSize: AppTheme.fontFootnote,
-                  fontWeight: FontWeight.w500,
-                ),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.only(top: AppTheme.spacingXS),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _isDescriptionExpanded ? '收起' : '展开',
+                    style: const TextStyle(
+                      color: AppTheme.accentColor,
+                      fontSize: AppTheme.fontFootnote,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  Icon(
+                    _isDescriptionExpanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    size: 14,
+                    color: AppTheme.accentColor,
+                  ),
+                ],
               ),
             ),
           ),
@@ -700,8 +723,7 @@ class _DetailPageState extends State<DetailPage> {
         const SizedBox(height: AppTheme.spacingSM),
 
         // 导演 - 对应 Swift director row
-        if (info.director.isNotEmpty) ...[
-          Row(
+        if (info.director.isNotEmpty) ...[\n          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(
