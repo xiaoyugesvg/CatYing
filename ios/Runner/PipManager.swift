@@ -23,6 +23,15 @@ import UIKit
 ///   - Info.plist UIBackgroundModes 含 audio ✅（已有）
 ///   - AVAudioSession .playback（BackgroundAudio.swift 已激活）✅
 ///   - 无需特殊 entitlement（TrollStore 侧载可用）
+///
+/// 稳定性修复（2026-09-26）：
+///   - 旧版在 AVPlayerItem 尚未就绪（readyToPlay）时立即调
+///     startPictureInPicture()，网络流缓冲未完成时系统会静默拒绝启动，
+///     表现为"画中画时灵时不灵"。
+///   - 现改为：先 play() 预缓冲，监听 item.status 到 .readyToPlay 后再
+///     启动系统 PiP；15s 超时 / 加载失败回传 FlutterError 给 Dart 提示。
+///   - 真实激活状态由 pictureInPictureControllerDidStartPictureInPicture
+///     回调确认，避免"假 PiP"（Dart 侧以为已进入，实际没有）。
 class PipManager: NSObject, AVPictureInPictureControllerDelegate {
   static let shared = PipManager()
 
@@ -32,7 +41,15 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
   private var pipLayer: AVPlayerLayer?
   private var containerView: UIView?
 
-  /// 当前是否处于系统 PiP
+  // -- 启动门闩（等 readyToPlay 再进 PiP）--
+  private var itemStatusObserver: NSKeyValueObservation?
+  private var startTimeoutWork: DispatchWorkItem?
+  /// 是否有待启动请求（等就绪后自动进 PiP）
+  private var pendingStart = false
+  /// 挂起的 startPip result（就绪/失败后才回传）
+  private var startResult: FlutterResult?
+
+  /// 当前是否处于系统 PiP（didStart 置 true，didStop 置 false）
   private(set) var isActive = false
   /// PiP 最后播放位置（秒，供 Dart 恢复主播放器进度）
   private(set) var lastPositionSeconds: Double = 0
@@ -81,8 +98,8 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
       result(FlutterError(code: "bad_url", message: "播放地址无效", details: nil))
       return
     }
-    // 已有 PiP 先清理
-    if pipController != nil { cleanup() }
+    // 已有 PiP / 待启动请求先清理
+    if pipController != nil || pendingStart { cleanup() }
 
     var options: [String: Any] = [:]
     if !headers.isEmpty {
@@ -125,26 +142,100 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
     if positionMs > 0 {
       player.seek(to: CMTime(seconds: positionMs / 1000.0, preferredTimescale: 600))
     }
-    player.play()
 
-    // 启动系统 PiP 悬浮窗
+    // ---- 启动门闩：等 item 就绪再进系统 PiP ----
+    // 网络流（m3u8/mp4）缓冲需要 1~3 秒，立即 startPictureInPicture()
+    // 在未就绪时会被系统静默拒绝 → "时灵时不灵"。先预缓冲，就绪后自动启动。
+    startResult = result
+    pendingStart = true
+
+    itemStatusObserver = playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
+      guard let self = self else { return }
+      DispatchQueue.main.async { self.handleItemStatus(item.status) }
+    }
+
+    // 15s 兜底：源加载慢 / 网络异常时不能一直挂着
+    let timeout = DispatchWorkItem { [weak self] in
+      self?.failStart("画中画启动超时（源加载慢）")
+    }
+    startTimeoutWork = timeout
+    DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: timeout)
+
+    player.play() // 预缓冲（先出声音，进 PiP 后无感切换）
+    NSLog("[PipManager] startPip(await-ready): \(url)")
+  }
+
+  /// item 状态变化处理
+  private func handleItemStatus(_ status: AVPlayerItem.Status) {
+    switch status {
+    case .readyToPlay:
+      NSLog("[PipManager] item readyToPlay → start PiP")
+      doStartPiP()
+    case .failed:
+      let reason = pipPlayer?.currentItem?.error?.localizedDescription ?? "未知"
+      NSLog("[PipManager] item failed: \(reason)")
+      failStart("画中画启动失败：源加载失败（\(reason)）")
+    case .unknown:
+      break
+    @unknown default:
+      break
+    }
+  }
+
+  /// 就绪后真正启动系统 PiP
+  private func doStartPiP() {
+    guard pendingStart, let controller = pipController else { return }
+    pendingStart = false
+    startTimeoutWork?.cancel()
+    startTimeoutWork = nil
+    // 回传成功：Dart 侧暂停主播放器，避免双路声音
+    startResult?(nil)
+    startResult = nil
     controller.startPictureInPicture()
-    isActive = true
-    NSLog("[PipManager] startPip: \(url)")
-    result(nil)
+    // 真实激活状态由 didStart / didStop 回调维护，这里不置位
+    NSLog("[PipManager] startPictureInPicture() called")
+  }
+
+  /// 启动失败统一出口（超时 / 加载失败 / 其它）
+  private func failStart(_ message: String) {
+    guard pendingStart else { return }
+    pendingStart = false
+    startTimeoutWork?.cancel()
+    startTimeoutWork = nil
+    startResult?(FlutterError(code: "pip_start_failed", message: message, details: nil))
+    startResult = nil
+    NSLog("[PipManager] failStart: \(message)")
+    cleanup()
   }
 
   // MARK: - 停止 PiP
 
   func stopPip() {
-    guard pipController != nil || isActive else { return }
-    NSLog("[PipManager] stopPip")
-    lastPositionSeconds = pipPlayer?.currentTime().seconds ?? 0
-    pipController?.stopPictureInPicture()
+    NSLog("[PipManager] stopPip (isActive=\(isActive), pendingStart=\(pendingStart))")
+    if isActive {
+      lastPositionSeconds = pipPlayer?.currentTime().seconds ?? 0
+      pipController?.stopPictureInPicture()
+      // didStop delegate 里会 notify + cleanup，这里只触发停止
+      return
+    }
+    if pendingStart {
+      // 启动门闩未完成时被要求退出：直接放弃启动
+      startResult?(nil)
+      startResult = nil
+    }
     cleanup()
   }
 
   private func cleanup() {
+    itemStatusObserver?.invalidate()
+    itemStatusObserver = nil
+    startTimeoutWork?.cancel()
+    startTimeoutWork = nil
+    pendingStart = false
+    if startResult != nil {
+      startResult?(nil)
+      startResult = nil
+    }
     pipPlayer?.pause()
     pipPlayer = nil
     pipLayer?.removeFromSuperlayer()
@@ -156,6 +247,12 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
   }
 
   // MARK: - AVPictureInPictureControllerDelegate
+
+  /// 系统 PiP 悬浮窗真正出现
+  func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
+    NSLog("[PipManager] didStartPictureInPicture")
+    isActive = true
+  }
 
   /// 用户点了 PiP 悬浮窗的关闭（×）或 PiP 被系统终止
   func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {

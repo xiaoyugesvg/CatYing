@@ -105,7 +105,8 @@ class VideoPlayerPip {
       return true;
     } catch (e) {
       _iosOnStopped = null;
-      debugPrint('[VideoPlayerPip] iOS enter failed: $e');
+      final msg = (e is PlatformException) ? '${e.code}: ${e.message}' : e.toString();
+      debugPrint('[VideoPlayerPip] iOS enter failed: $msg');
       return false;
     }
   }
