@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart' hide Video;
+import 'dart:ui' show ImageFilter;
 import '../../common/theme.dart';
 import '../../models/movie.dart';
 import '../../models/vod_info.dart';
@@ -161,9 +162,20 @@ class _DetailPageState extends State<DetailPage> {
                       color: AppTheme.textPrimary, size: 28),
                   onPressed: () => Get.back(),
                 ),
-                // AppBar 半透明, 让 BackgroundService 全局背景层透出
-                backgroundColor: AppTheme.backgroundCard,
+                // iOS 27 Liquid Glass: 顶部毛玻璃 AppBar
+                // BackdropFilter 模糊全局背景层 + 深色半透明底, 形成磨砂观感
+                backgroundColor: Colors.transparent,
                 elevation: 0,
+                flexibleSpace: ClipRect(
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(
+                        sigmaX: AppTheme.glassBlurSigma,
+                        sigmaY: AppTheme.glassBlurSigma),
+                    child: Container(
+                      color: AppTheme.glassTintDeep,
+                    ),
+                  ),
+                ),
               ),
         body: immersive
             // 全屏/沉浸: 视频黑底, 不需要背景层
