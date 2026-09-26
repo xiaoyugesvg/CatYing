@@ -29,11 +29,20 @@ class DetailPage extends StatefulWidget {
 }
 
 class _DetailPageState extends State<DetailPage> {
-  /// 每次进入详情页强制重建 controller：
-  /// Get.put 默认会复用已存在的同名实例，导致第二次进入时残留上次的
-  /// vodInfo/isPlaying/playUrl，表现为"进详情页像重启/显示旧视频"。
-  /// force: true 确保每次进入都是全新实例、重新加载当前视频。
-  final _controller = Get.put(DetailController(), force: true);
+
+  /// 每次进入详情页强制重建 controller（兼容旧版 GetX，无 force 参数）：
+  /// 先删除旧实例再重新 put，确保 vodInfo/isPlaying/playUrl 不残留上次状态，
+  /// 避免"进详情页像重启/显示旧视频"。
+  final _controller = _rebuildController();
+
+  /// 强制重建 DetailController：Get.put 默认复用已存在实例，
+  /// 先 Get.delete 再 put，保证每次进入详情页都是全新实例。
+  static DetailController _rebuildController() {
+    if (Get.isRegistered<DetailController>()) {
+      Get.delete<DetailController>();
+    }
+    return Get.put(DetailController());
+  }
   bool _isDescriptionExpanded = false;
   double _lastPersistedProgress = 0;
 
