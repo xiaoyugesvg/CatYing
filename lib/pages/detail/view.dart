@@ -1,25 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart' hide Video;
+import 'dart:ui' show ImageFilter;
 import '../../common/theme.dart';
+import '../../models/movie.dart';
 import '../../models/vod_info.dart';
-import '../../models/video.dart';
 import '../../models/cache_store.dart';
-import '../../services/source_service.dart';
-import '../../widgets/common_widgets.dart';
-import '../../widgets/glass.dart';
+import '../../services/background_service.dart';
 import '../../services/player_fullscreen_controller.dart';
 import '../../services/main_tab_controller.dart';
+import '../../widgets/glass.dart';
+import '../../widgets/common_widgets.dart';
+import '../../widgets/video_player.dart';
+import '../../widgets/video_player_pip.dart';
+import '../../widgets/window_fullscreen.dart';
+import '../play/webview_player_page.dart';
 import 'controller.dart';
 import 'episode_list.dart';
 
-/// 视频详情页 - 对应 Swift DetailView
-/// **2026-09-26 布局重组**：
-/// - 进详情即渲染播放器区域（URL 未就绪时显示 16:9 加载占位，解析完自动出画面）
-/// - 收藏按钮缩为 36px 小图标，前置在视频名称前
-/// - 影片简介并入名称同一卡片，3 行收起 / 点击展开全文
-/// - 底部悬浮导航栏改超浅玻璃底（沉浸式，与根底栏一致）
+/// 详情页 - 对应 Swift DetailView
 class DetailPage extends StatefulWidget {
-  const DetailPage({super.key});
+  DetailPage({super.key});
 
   @override
   State<DetailPage> createState() => _DetailPageState();
@@ -31,23 +34,42 @@ class _DetailPageState extends State<DetailPage> {
   /// vodInfo/isPlaying/playUrl，表现为"进详情页像重启/显示旧视频"。
   /// force: true 确保每次进入都是全新实例、重新加载当前视频。
   final _controller = Get.put(DetailController(), force: true);
-
-  // 视频信息已载入后是否处于"播放中"（仅用于 UI 显示播放按钮的状态）
-  bool _isPlaying = false;
-
-  /// 简介展开状态（收起 3 行 / 展开全文）
   bool _isDescriptionExpanded = false;
+  double _lastPersistedProgress = 0;
+
+  /// 持有 Player 实例，全屏/普通模式之间复用同一实例，避免状态丢失
+  Player? _player;
+  /// 持有 VideoController 实例，与上面 _player 配套使用，跨全屏/普通模式共享，
+  /// 保证 ANGLE surface / texture 通道在 OS 全屏切换时不被重建。
+  VideoController? _videoController;
+  String? _lastPlayerUrl;
+  String? _lastPlayerHeadersKey;
+
+  /// VideoPlayerWidget 状态变化回调（mpv native fullscreen 状态变化时）
+  /// true=进入 native 全屏，false=退出 native 全屏
+  void _onFullScreenChanged(bool isFull) {
+    if (!mounted) return;
+    _controller.isFullScreen.value = isFull;
+    // **2026-07-09**: 同步全局全屏状态, 让 app.dart 根 Scaffold 的
+    // 底栏(首页/直播/历史/收藏/设置) 在全屏时隐藏
+    if (isFull) {
+      PlayerFullscreenController.instance.enter('detail');
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
+    } else {
+      PlayerFullscreenController.instance.exit('detail');
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _loadDetailIfNeeded();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+    // 监听 PiP 状态变化，确保退出 PiP 时退出全屏（互斥）
+    VideoPlayerPip.instance.activeNotifier.addListener(_onPipChanged);
+    // 监听 WindowFullScreen 状态变化：作为冗余同步通道，
+    // 保证 WindowFullScreen.toggle 后 isFullScreen Rx 一定被同步
+    WindowFullScreen.instance.activeNotifier.addListener(_onFullScreenActiveChanged);
   }
 
   void _loadDetailIfNeeded() {
@@ -64,184 +86,441 @@ class _DetailPageState extends State<DetailPage> {
     }
   }
 
-  /// 尝试从播放历史恢复续播位置；返回是否成功恢复
-  bool _restorePlaybackFromHistory() {
-    final video = Get.arguments as Video?;
-    if (video == null) return false;
-    final history = CacheStore.instance.getHistory(video.id);
-    if (history == null) return false;
-    final epIndex = _controller.currentEpisodes
-        .indexWhere((ep) => ep.name == history.episodeName);
-    if (epIndex >= 0) {
-      _controller.selectEpisode(epIndex);
-      return true;
-    }
-    return false;
+  void _onPipChanged() {
+    if (mounted) setState(() {});
   }
 
-  void _refreshCollectState() {
-    setState(() {});
+  /// 冗余同步通道：WindowFullScreen 状态变化时同步 detail view 的 Rx
+  /// （与 onFullScreenChanged 回调功能相同，作为兜底）
+  void _onFullScreenActiveChanged() {
+    if (!mounted) return;
+    final isFull = WindowFullScreen.instance.isActive;
+    if (_controller.isFullScreen.value != isFull) {
+      _controller.isFullScreen.value = isFull;
+    }
+  }
+
+  @override
+  void dispose() {
+    VideoPlayerPip.instance.activeNotifier.removeListener(_onPipChanged);
+    WindowFullScreen.instance.activeNotifier.removeListener(_onFullScreenActiveChanged);
+    // 退出页面时关闭 PiP，恢复窗口
+    if (VideoPlayerPip.instance.isActive) {
+      VideoPlayerPip.instance.exit();
+    }
+    // 退出页面时退出全屏，恢复窗口
+    if (WindowFullScreen.instance.isActive) {
+      WindowFullScreen.instance.exit();
+    }
+    VideoPlayerPip.instance.detachPlayer();
+    _player?.dispose();
+    _player = null;
+    _videoController = null;
+    super.dispose();
+  }
+
+  /// 确保 player 已创建并打开当前 url
+  /// 同一 url+headers 不重复创建
+  ///
+  /// **startPosition 续播**：传 `Duration` 给 `Media.start` 参数，
+  /// 让 libmpv 在 player open 时**直接**从续播位置开始解码，
+  /// 避免 "先从 0 播几秒再回退" 的现象。对应 Swift 的
+  /// `mediaPlayerStateChanged → state=.playing → applyPendingSeekIfNeeded`
+  /// 模式，但 libmpv 端做更彻底 (根本不会经过 0 位置)。
+  /// - 传 null / 0 → 从 0 开始（冷启动 / 切换集数）
+  /// - 传 > 0 → 从该秒数开始（续播）
+  void _ensurePlayer(
+    String url,
+    Map<String, String> headers, {
+    double? startPosition,
+  }) {
+    final headersKey = headers.entries
+        .map((e) => '${e.key}=${e.value}')
+        .join('&');
+    if (_player != null &&
+        _lastPlayerUrl == url &&
+        _lastPlayerHeadersKey == headersKey) {
+      return;
+    }
+    _player?.dispose();
+    _player = Player(configuration: const PlayerConfiguration(title: 'TVBox'));
+    // 同步创建 VideoController，确保 player 与 controller 一一对应
+    _videoController = VideoController(_player!);
+    _lastPlayerUrl = url;
+    _lastPlayerHeadersKey = headersKey;
+    final start = (startPosition != null && startPosition > 0)
+        ? Duration(seconds: startPosition.toInt())
+        : null;
+    _player!.open(Media(url, httpHeaders: headers, start: start));
   }
 
   @override
   Widget build(BuildContext context) {
-    final info = _controller.vodInfo.value;
-    final isFullscreen = PlayerFullscreenController.instance.isFullscreen.value;
-
+    // 关键：isFull / isPip 必须在 Obx 内读取，Rx 变化才能触发 rebuild
+    // 否则在 _exitFullScreenRoute 里 _controller.isFullScreen.value = false
+    // 不会触发顶层 build，immersive 永远停留在 true（AppBar 永远隐藏）
     return Obx(() {
-      final fullscreen = PlayerFullscreenController.instance.isFullscreen.value;
+      final isFull = _controller.isFullScreen.value;
+      final isPip = VideoPlayerPip.instance.activeNotifier.value;
+      final immersive = isFull || isPip;
 
-      // 沉浸式全屏：纯黑背景 + 播放器铺满（无 AppBar / 无信息区）
-      if (fullscreen) {
-        return Scaffold(
-          backgroundColor: Colors.black,
-          body: _buildPlayerArea(),
-        );
-      }
-
+      // 背景层放到 Scaffold 外层: 普通模式下全局背景贯穿整个页面
+      // (含 AppBar 毛玻璃区域), 修复详情页背景与全局不一致的问题;
+      // 沉浸(全屏/PiP)模式保持视频黑底。
       return Stack(
         children: [
-          // 背景层：让详情页背景与首页/全局背景一致（对应 Swift DetailBackgroundView）
-          Positioned.fill(
-            child: BackgroundService.instance.buildBackground(overlayAlpha: 0.3),
-          ),
+          if (!immersive)
+            Positioned.fill(
+              child: BackgroundService.instance
+                  .buildBackground(overlayAlpha: 0.3),
+            ),
           Scaffold(
             backgroundColor: Colors.transparent,
-            extendBodyBehindAppBar: true,
-            appBar: AppBar(
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              flexibleSpace: FlexibleSpaceBar(
-                background: Container(
-                  decoration: BoxDecoration(
-                    color: AppTheme.glassTintDeep,
-                    borderRadius: const BorderRadius.vertical(
-                      bottom: Radius.circular(20),
+            extendBodyBehindAppBar: !immersive,
+            appBar: immersive
+                ? null
+                : AppBar(
+                    leading: IconButton(
+                      icon: const Icon(Icons.chevron_left,
+                          color: AppTheme.textPrimary, size: 28),
+                      onPressed: () => Get.back(),
+                    ),
+                    // iOS 27 Liquid Glass: 顶部毛玻璃 AppBar
+                    // BackdropFilter 模糊外层全局背景层 + 深色半透明底
+                    backgroundColor: Colors.transparent,
+                    elevation: 0,
+                    flexibleSpace: ClipRect(
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(
+                            sigmaX: AppTheme.glassBlurSigma,
+                            sigmaY: AppTheme.glassBlurSigma),
+                        child: Container(
+                          color: AppTheme.glassTintDeep,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-              title: Text(
-                info?.name ?? '详情',
-                style: const TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: AppTheme.fontTitle3,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              centerTitle: true,
-              leading: IconButton(
-                icon: const Icon(Icons.arrow_back_ios_new,
-                    color: AppTheme.textPrimary, size: 20),
-                onPressed: () => Navigator.of(context).maybePop(),
-              ),
-            ),
-            body: Stack(
-              children: [
-                Padding(
-                  padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top + kToolbarHeight),
-                  child: _buildBody(),
-                ),
-                // 详情页底部悬浮导航栏 - 对应 Swift floatingNavBar
-                // 与根底栏一致：沉浸式超浅玻璃底，可切回其他 tab
-                Positioned(
-                  left: 32,
-                  right: 32,
-                  bottom: MediaQuery.of(context).padding.bottom + 8,
-                  child: _buildFloatingNavBar(),
-                ),
-              ],
-            ),
+            body: immersive
+                // 全屏/沉浸: 视频黑底, 不需要背景层
+                ? Container(
+                    color: Colors.black,
+                    child: _buildBody(),
+                  )
+                // 普通模式: body 内容 + 底部悬浮导航栏
+                // (与根 ContentView 悬浮栏同款, 详情页也能一键切回主 tab)
+                : Stack(
+                    children: [
+                      // extendBodyBehindAppBar 后 body 延伸到 AppBar 之后,
+                      // 顶部补出 AppBar 高度 + 状态栏高度, 避免内容被毛玻璃盖住
+                      Padding(
+                        padding: EdgeInsets.only(
+                          top: MediaQuery.of(context).padding.top +
+                              kToolbarHeight,
+                        ),
+                        child: _buildBody(),
+                      ),
+                      _buildFloatingNavBar(context),
+                    ],
+                  ),
           ),
         ],
       );
     });
   }
 
-  Widget _buildBody() {
-    final info = _controller.vodInfo.value;
-    if (_controller.isLoading.value && info == null) {
-      return const Center(child: CircularProgressIndicator(color: AppTheme.accentColor));
-    }
-    if (info == null) {
-      return const Center(
-        child: Text(
-          '视频信息加载失败',
-          style: TextStyle(color: AppTheme.textSecondary),
+  /// 详情页底部悬浮导航栏 - 与根 ContentView 悬浮栏同款
+  /// 详情页是 Get.toNamed push 的独立路由, 盖在根界面之上;
+  /// 这里复刻同一套 GlassPanel 悬浮栏, 让详情页也能一键切回主 tab。
+  Widget _buildFloatingNavBar(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+    const navSideGap = 32.0;
+    const navFloatGap = 8.0;
+    return Positioned(
+      left: navSideGap,
+      right: navSideGap,
+      bottom: bottomInset + navFloatGap,
+      child: Obx(() {
+        final current = MainTabController.instance.selectedTab.value;
+        return GlassPanel(
+          radius: 30,
+          blur: true,
+          // **沉浸式底栏**：与根底栏一致改用超浅玻璃底 (alpha≈2%)，
+          // 只留模糊+描边+高光，背景几乎全透明，显示更多内容。
+          tint: AppTheme.glassTintClear,
+          borderColor: AppTheme.glassBorderSoft,
+          borderWidth: 0.8,
+          highlightStrength: 0.9,
+          shadow: true,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _floatingNavItem(
+                Icons.home_outlined, Icons.home, '首页', 0, current),
+              _floatingNavItem(
+                Icons.tv_outlined, Icons.tv, '直播', 1, current),
+              _floatingNavItem(
+                Icons.schedule_outlined, Icons.schedule, '历史', 2, current),
+              _floatingNavItem(
+                Icons.favorite_border, Icons.favorite, '收藏', 3, current),
+              _floatingNavItem(
+                Icons.settings_outlined, Icons.settings, '设置', 4, current),
+            ],
+          ),
+        );
+      }),
+    );
+  }
+
+  Widget _floatingNavItem(
+      IconData icon, IconData activeIcon, String label, int index, int current) {
+    final isSelected = current == index;
+    return GestureDetector(
+      onTap: () {
+        // 切 tab 并返回根界面; 直播 tab 的可见性/暂停由
+        // MainTabController.select 内部统一处理
+        MainTabController.instance.select(index);
+        Get.back();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
         ),
-      );
-    }
-
-    // 正常模式：视频 + 视频信息 + 选集
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // 1. 播放器 - 对应 Swift PlayerView
-          // **进详情即显示播放界面**：不依赖 isPlaying，只要 vodInfo 就绪
-          // 就渲染播放器容器；URL 未就绪时 _buildPlayerArea 内部显示
-          // 16:9 加载占位，解析完成后自动出画面（不再"先进文字后出视频"）
-          _buildPlayerArea(),
-
-          // 2. 视频信息 - 对应 Swift videoInfoSection (AppCard)
-          _buildVideoInfo(),
-
-          // 3. 选集播放 - 对应 Swift episodeSection
-          if (_controller.currentEpisodes.isNotEmpty)
-            _buildEpisodeList(),
-
-          // 底部间距 - 对应 Swift .padding(.bottom, 80)
-          const SizedBox(height: 80),
-        ],
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isSelected ? activeIcon : icon,
+              size: 18,
+              color: isSelected
+                  ? AppTheme.accentColor
+                  : Colors.white.withValues(alpha: 0.35),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+                color: isSelected
+                    ? AppTheme.accentColor
+                    : Colors.white.withValues(alpha: 0.35),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
+  /// build 的 body 部分（视频区域 + 信息 + 选集 + 简介）
+  /// isFull / isPip 必须在本方法内自己读 Rx，闭包捕获的旧值会让全屏态卡死
+  Widget _buildBody() {
+    return Obx(() {
+      // 关键：这里再读一次 isFullScreen / activeNotifier，让本 Obx 监听它们
+      // 外层 Obx rebuild 时本 Obx 也会跟着 rebuild
+      final isFull = _controller.isFullScreen.value;
+      final isPip = VideoPlayerPip.instance.activeNotifier.value;
+      // 兜底：如果 Rx 与 WindowFullScreen 状态不一致，以 WindowFullScreen 为准
+      final actualFull = isFull || WindowFullScreen.instance.isActive;
+      final immersive = actualFull || isPip;
 
-  /// 播放器区域 - 16:9 容器，URL 未就绪时显示加载占位
-  Widget _buildPlayerArea() {
-    final url = _controller.playUrl.value;
-    final isFullscreen = PlayerFullscreenController.instance.isFullscreen.value;
+      if (_controller.isLoading.value && _controller.vodInfo.value == null) {
+        return const AppLoading();
+      }
 
-    if (url == null || url.isEmpty) {
-      return AspectRatio(
-        aspectRatio: 16 / 9,
-        child: Container(
-          color: Colors.black,
-          alignment: Alignment.center,
-          child: const CircularProgressIndicator(
-            color: AppTheme.accentColor,
-          ),
+      if (_controller.errorMessage.value != null &&
+          _controller.vodInfo.value == null) {
+        return AppError(
+          message: _controller.errorMessage.value!,
+          onRetry: () {
+            final video = Get.arguments;
+            if (video != null && video is Video) {
+              _controller.loadDetail(video);
+            }
+          },
+        );
+      }
+
+      final info = _controller.vodInfo.value;
+      if (info == null) return const SizedBox.shrink();
+
+      // 全屏 / PiP 模式：只显示视频（视频始终在 tree 中同一位置）
+      if (immersive) {
+        return _buildPlayerArea();
+      }
+
+      // 正常模式：视频 + 视频信息 + 选集 + 简介
+      return SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 1. 播放器 - 对应 Swift PlayerView
+            // **进详情即显示播放界面**：不依赖 isPlaying，只要 vodInfo 就绪
+            // 就渲染播放器容器；URL 未就绪时 _buildPlayerArea 内部显示
+            // 16:9 加载占位，解析完成后自动出画面（不再"先进文字后出视频"）
+            _buildPlayerArea(),
+
+            // 2. 视频信息区 - 对应 Swift videoInfoSection
+            _buildVideoInfo(),
+
+            // 3. 线路选择 - 对应 Swift flagSelector
+            if (_controller.flags.length > 1) _buildFlagSelector(),
+
+            // 4. 清晰度选择 - 对应 Swift qualitySelector
+            if (_controller.hasQualityChoices) _buildQualitySelector(),
+
+            // 5. 选集播放 - 对应 Swift episodeSection
+            if (_controller.currentEpisodes.isNotEmpty)
+              _buildEpisodeList(),
+
+            // 底部间距 - 对应 Swift .padding(.bottom, 80)
+            const SizedBox(height: 80),
+          ],
         ),
       );
-    }
+    });
+  }
 
-    return VideoPlayerWidget(
-      key: ValueKey(url),
+  // MARK: - 播放器
+
+  /// 播放器区域 - 始终在 tree 中同一位置，避免 VideoPlayerWidget 被重建
+  /// 16:9 容器内放视频；如果父容器充满（immersive 模式），则视频也充满父容器
+  /// 全屏切换由 detail view 自己管理的 Overlay + EnterNativeFullscreen/ExitNativeFullscreen
+  /// 通道处理（见 _enterFullScreenRoute / _exitFullScreenRoute）。
+  /// PiP 互斥由 widget 内部的 _togglePiP / _onUserToggleFullscreen 处理。
+
+  Widget _buildPlayerArea() {
+    // 关键：isFull/isPip/playUrl 都在同一个 Obx 内读取，
+    // 任何一个变化都会触发 rebuild，_buildPlayerWidget 内能拿到最新值
+    return Obx(() {
+      final isFull = _controller.isFullScreen.value;
+      final isPip = VideoPlayerPip.instance.activeNotifier.value;
+      final url = _controller.playUrl.value;
+      if (url != null && url.isNotEmpty) {
+        return _buildPlayerWidget(isFull: isFull, isPip: isPip);
+      } else {
+        // 正在播放但 URL 尚未就绪
+        return AspectRatio(
+          aspectRatio: 16 / 9,
+          child: Container(
+            color: Colors.black,
+            child: const Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
+          ),
+        );
+      }
+    });
+  }
+
+  /// 创建并返回播放器 widget
+  /// 视频组件本身不感知全屏/普通模式，全屏由 VideoState 内部处理
+  /// isFull/isPip 必须由 _buildPlayerArea 在 Obx 内传入，
+  /// 否则 Rx 变化时这里还是用闭包捕获的旧值，导致全屏态无法退出
+  Widget _buildPlayerWidget({required bool isFull, required bool isPip}) {
+    final url = _controller.playUrl.value!;
+    // 网页播放器页（非直链媒体 URL）→ 用 WebView 兜底播放
+    // （对应 catmovie WebviewView：第三方解析页 / parse=1 网页端 / player 页）
+    if (_isWebPageUrl(url)) {
+      return WebviewPlayerPage(
+        url: url,
+        title: _controller.vodInfo.value?.name,
+      );
+    }
+    final headers = _controller.playHeaders.isNotEmpty
+        ? Map<String, String>.from(_controller.playHeaders)
+        : const <String, String>{};
+    // 把续播位置透传给 _ensurePlayer, 让 libmpv 通过 Media.start 参数
+    // 直接从续播位置开始解码, 避免 "先从 0 播几秒再回退" 的现象
+    _ensurePlayer(url, headers, startPosition: _controller.resumeSeconds.value);
+
+    final info = _controller.vodInfo.value;
+    final episode = info?.currentEpisode;
+    final widget = VideoPlayerWidget(
+      key: const ValueKey('detail_player'),
+      player: _player,
+      controller: _videoController, // 跨全屏/普通模式共享同一个 controller
       url: url,
-      headers: _controller.playHeaders.value,
-      title: _controller.vodInfo.value?.name ?? '',
-      isPlaying: _controller.isPlaying.value,
-      onPlayingChanged: (playing) {
-        _controller.isPlaying.value = playing;
+      headers: headers.isEmpty ? null : headers,
+      resumeSeconds: _controller.resumeSeconds.value,
+      videoTitle: info?.name,
+      currentEpisodeName: episode?.name,
+      episodeNames: _controller.currentEpisodes
+          .map((e) => e.name)
+          .toList(),
+      selectedEpisodeIndex: _controller.selectedEpisodeIndex.value,
+      canPlayNext: _controller.selectedEpisodeIndex.value <
+          _controller.currentEpisodes.length - 1,
+      canPlayPrevious: _controller.selectedEpisodeIndex.value > 0,
+      isPipMode: isPip,
+      showAudioModeButton: true,
+      skipIntroSeconds: _controller.skipIntroSeconds.value,
+      skipOutroSeconds: _controller.skipOutroSeconds.value,
+      onPlayNext: () => _playNextEpisode(),
+      onPlayPrevious: () => _playPreviousEpisode(),
+      onSelectEpisode: (index) {
+        _controller.selectEpisode(index);
+        _saveHistoryForCurrentEpisode();
       },
-      onFullScreenChanged: (fullscreen) {
-        if (fullscreen) {
-          PlayerFullscreenController.instance.enter();
-        } else {
-          PlayerFullscreenController.instance.exit();
+      onPositionChanged: (pos) =>
+          _handlePlaybackProgress(pos.inSeconds.toDouble()),
+      onEnded: () => _playNextEpisode(),
+      // native fullscreen 状态变化回调：同步 detail view 的 immersive 模式
+      onFullScreenChanged: _onFullScreenChanged,
+      onBack: () {
+        // 处于 PiP 模式时，返回键先退出 PiP 恢复原窗口
+        if (VideoPlayerPip.instance.isActive) {
+          VideoPlayerPip.instance.exit();
+          return;
         }
+        Get.back();
       },
-      onPlayError: (msg) {
-        _controller.errorMessage.value = msg;
-      },
-      // 听剧模式回调（音频模式覆盖层已由 VideoPlayerWidget 内部管理）
-      onAudioModeChanged: (enabled) {
-        _controller.audioMode.value = enabled;
-      },
-      // 画中画回调
-      onPipChanged: (enabled) {},
+      onSetSkipIntro: (s) => _controller.setSkipIntroSeconds(s),
+      onSetSkipOutro: (s) => _controller.setSkipOutroSeconds(s),
+    );
+
+    // immersive 模式（native 全屏 / PiP）：视频填满父容器
+    // 正常模式：16:9 容器
+    if (isFull || isPip) {
+      return SizedBox.expand(child: widget);
+    }
+    return AspectRatio(
+      aspectRatio: 16 / 9,
+      child: widget,
     );
   }
+
+  /// 判断播放 URL 是否为"网页播放器页"（需 WebView 兜底）而非直链媒体。
+  ///
+  /// 规则：
+  /// - 非 http/https（如 rtmp/rtsp）→ 不是网页，走原生播放器
+  /// - 含常见媒体扩展名（m3u8/mp4/flv/ts 等）→ 直链，走原生播放器
+  /// - 其余 http(s) URL → 视为网页播放页（解析页 / player 页 / 网页端地址）
+  static const List<String> _directMediaExtensions = [
+    '.m3u8', '.m3u', '.mp4', '.flv', '.ts', '.mkv', '.avi', '.mov',
+    '.webm', '.rmvb', '.rm', '.wmv', '.mp3', '.aac', '.ogg', '.flac',
+  ];
+
+  bool _isWebPageUrl(String url) {
+    final lower = url.trim().toLowerCase();
+    if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
+      return false;
+    }
+    for (final ext in _directMediaExtensions) {
+      if (lower.contains(ext)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // MARK: - 视频信息区
 
   /// 视频信息区 - 对应 Swift videoInfoSection (AppCard)
   /// **布局重组（2026-09-26）**：
@@ -392,79 +671,117 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
-  /// 元数据药丸 - 对应 Swift metadataFlow
+  /// 元数据流 - 对应 Swift metadataFlow
   Widget _buildMetadataFlow(VodInfo info) {
-    final chips = <Widget>[];
-
-    void addChip(String label) {
-      if (label.isEmpty) return;
-      chips.add(Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: AppTheme.backgroundTertiary,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: AppTheme.borderLight, width: 0.5),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 药丸行 - 对应 Swift HStack(metadataPill)
+        Wrap(
+          spacing: AppTheme.spacingSM,
+          runSpacing: AppTheme.spacingXS,
+          children: [
+            if (info.year.isNotEmpty) MetadataPill(text: info.year),
+            if (info.typeName.isNotEmpty) MetadataPill(text: info.typeName),
+            if (info.area.isNotEmpty) MetadataPill(text: info.area),
+          ],
         ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: AppTheme.fontFootnote,
+        const SizedBox(height: AppTheme.spacingSM),
+
+        // 导演 - 对应 Swift director row
+        if (info.director.isNotEmpty) ...[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(
+                width: 36,
+                child: Text(
+                  '导演',
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  info.director,
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ),
-        ),
-      ));
-    }
+          const SizedBox(height: AppTheme.spacingSM),
+        ],
 
-    addChip(info.typeName);
-    addChip(info.year);
-    addChip(info.area);
-    addChip(info.lang);
-
-    if (chips.isEmpty) return const SizedBox.shrink();
-
-    return Wrap(
-      spacing: AppTheme.spacingSM,
-      runSpacing: AppTheme.spacingSM,
-      children: chips,
+        // 演员 - 对应 Swift actor row
+        if (info.actor.isNotEmpty) ...[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(
+                width: 36,
+                child: Text(
+                  '演员',
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  info.actor,
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 
-  /// 播放按钮 - 对应 Swift playButton
+  /// 播放按钮 - 对应 Swift playButton (仅未播放且有 vodInfo 时显示)
   Widget _buildPlayButton() {
     return Obx(() {
-      final isPlaying = _controller.isPlaying.value;
+      if (_controller.isPlaying.value || _controller.vodInfo.value == null) {
+        return const SizedBox.shrink();
+      }
       return GestureDetector(
         onTap: () {
-          if (isPlaying) {
-            _controller.pause();
-          } else {
-            _controller.resume();
-          }
+          _controller.selectEpisode(0);
+          _saveHistoryForCurrentEpisode();
         },
         child: Container(
-          width: double.infinity,
           padding: const EdgeInsets.symmetric(vertical: AppTheme.spacingMD),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
-              colors: [AppTheme.accentColor, AppTheme.accentLightColor],
+              colors: [Color(0xFF5CB67B), Color(0xFF7DCEA0)],
             ),
             borderRadius: BorderRadius.circular(AppTheme.radiusMD),
           ),
-          child: Row(
+          child: const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                isPlaying ? Icons.pause : Icons.play_arrow,
-                size: 20,
-                color: Colors.white,
-              ),
-              const SizedBox(width: AppTheme.spacingXS),
+              Icon(Icons.play_arrow, color: Colors.white, size: 18),
+              SizedBox(width: AppTheme.spacingSM),
               Text(
-                isPlaying ? '暂停' : '播放',
-                style: const TextStyle(
+                '播放',
+                style: TextStyle(
                   color: Colors.white,
-                  fontSize: AppTheme.fontSubhead,
-                  fontWeight: FontWeight.w600,
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ],
@@ -474,96 +791,267 @@ class _DetailPageState extends State<DetailPage> {
     });
   }
 
-  /// 选集播放列表 - 对应 Swift episodeSection
-  Widget _buildEpisodeList() {
+  // MARK: - 线路选择
+
+  /// 线路选择 - 对应 Swift flagSelector (AppCard)
+  Widget _buildFlagSelector() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingLG, AppTheme.spacingLG, AppTheme.spacingLG, 0),
+          AppTheme.spacingLG, AppTheme.spacingMD, AppTheme.spacingLG, 0),
       child: AppCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SectionHeader(title: '选集', icon: Icons.video_library_outlined),
-            const SizedBox(height: AppTheme.spacingMD),
-            EpisodeListView(
-              episodeNames: _controller.currentEpisodes
-                  .map((e) => e.name)
-                  .toList(),
-              selectedIndex: _controller.selectedEpisodeIndex.value,
-              onEpisodeTap: (index) {
-                _controller.selectEpisode(index);
-              },
-            ),
+            const SectionHeader(title: '播放线路', icon: Icons.settings_input_antenna),
+            const SizedBox(height: AppTheme.spacingSM),
+            Obx(() => SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: _controller.flags.map((flag) {
+                      final isSelected =
+                          _controller.selectedFlag.value == flag;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: AppTheme.spacingSM),
+                        child: _PillChip(
+                          title: flag,
+                          isSelected: isSelected,
+                          onTap: () {
+                            _controller.selectFlag(flag);
+                            if (_controller.isPlaying.value) {
+                              _saveHistoryForCurrentEpisode();
+                            }
+                          },
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                )),
           ],
         ),
       ),
     );
   }
 
-  /// 详情页底部悬浮导航栏 - 对应 Swift floatingNavBar
-  /// 与根底栏一致：沉浸式超浅玻璃底（alpha≈2%），显示更多内容
-  Widget _buildFloatingNavBar() {
-    return Obx(() {
-      if (PlayerFullscreenController.instance.isFullscreen.value) {
-        return const SizedBox.shrink();
-      }
-      return GlassPanel(
-        radius: 30,
-        blur: true,
-        // **沉浸式底栏**：与根底栏一致改用超浅玻璃底 (alpha≈2%)，
-        // 只留模糊+描边+高光，背景几乎全透明，显示更多内容。
-        tint: AppTheme.glassTintClear,
-        borderColor: AppTheme.glassBorderSoft,
-        borderWidth: 0.8,
-        highlightStrength: 0.9,
-        shadow: true,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
+  // MARK: - 清晰度选择
+
+  /// 清晰度选择 - 对应 Swift qualitySelector (AppCard)
+  Widget _buildQualitySelector() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppTheme.spacingLG, AppTheme.spacingMD, AppTheme.spacingLG, 0),
+      child: AppCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _navItem(Icons.home_outlined, Icons.home, '首页', 0),
-            _navItem(Icons.tv_outlined, Icons.tv, '直播', 1),
-            _navItem(Icons.schedule_outlined, Icons.schedule, '历史', 2),
-            _navItem(Icons.favorite_border, Icons.favorite, '收藏', 3),
-            _navItem(Icons.settings_outlined, Icons.settings, '设置', 4),
+            const SectionHeader(title: '视频清晰度', icon: Icons.auto_awesome),
+            const SizedBox(height: AppTheme.spacingSM),
+            Obx(() => SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children:
+                        _controller.qualityOptions.map((option) {
+                      final isSelected =
+                          _controller.selectedQualityId.value == option.id;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: AppTheme.spacingSM),
+                        child: _PillChip(
+                          title: option.name,
+                          isSelected: isSelected,
+                          onTap: () {
+                            _controller.selectQuality(option);
+                            if (_controller.isPlaying.value) {
+                              _saveHistoryForCurrentEpisode();
+                            }
+                          },
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                )),
           ],
         ),
-      );
-    });
+      ),
+    );
   }
 
-  Widget _navItem(IconData icon, IconData activeIcon, String label, int index) {
-    return Obx(() {
-      final selected = MainTabController.instance.selectedTab.value == index;
-      return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () {
-          MainTabController.instance.switchTab(index);
-          Navigator.of(context).maybePop();
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                selected ? activeIcon : icon,
-                size: 20,
-                color: selected ? AppTheme.accentColor : AppTheme.textSecondary,
-              ),
-              const SizedBox(height: 3),
-              Text(
-                label,
-                style: TextStyle(
-                  color: selected ? AppTheme.accentColor : AppTheme.textSecondary,
-                  fontSize: 11,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-                ),
-              ),
-            ],
+  // MARK: - 选集播放
+
+  /// 选集播放 - 对应 Swift episodeSection
+  Widget _buildEpisodeList() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppTheme.spacingLG, AppTheme.spacingMD, AppTheme.spacingLG, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionHeader(title: '选集播放', icon: Icons.list),
+          const SizedBox(height: AppTheme.spacingSM),
+          Obx(() => EpisodeListView(
+                episodeNames: _controller.currentEpisodes
+                    .map((e) => e.name)
+                    .toList(),
+                selectedIndex: _controller.selectedEpisodeIndex.value,
+                onEpisodeTap: (index) {
+                  _controller.selectEpisode(index);
+                  _saveHistoryForCurrentEpisode();
+                },
+              )),
+        ],
+      ),
+    );
+  }
+
+  // MARK: - 播放控制逻辑
+
+  /// 对应 Swift saveHistoryForCurrentEpisode
+  void _saveHistoryForCurrentEpisode({double? progressOverride}) {
+    final info = _controller.vodInfo.value;
+    if (info == null) return;
+
+    final episodeName = info.currentEpisode?.name.trim() ?? '';
+    final episodeLabel = episodeName.isEmpty
+        ? '第${_controller.selectedEpisodeIndex.value + 1}集'
+        : episodeName;
+    final progress = (progressOverride ?? _controller.currentPlaybackSeconds()).clamp(0.0, double.infinity).toDouble();
+    final timeLabel = progress > 0 ? _formatDuration(progress) : '';
+    final playNote = timeLabel.isEmpty ? episodeLabel : '$episodeLabel $timeLabel';
+
+    final playbackState = VodPlaybackState(
+      flag: _controller.selectedFlag.value,
+      episodeIndex: _controller.selectedEpisodeIndex.value,
+      progressSeconds: progress,
+    );
+
+    CacheStore.instance.addRecord(
+      info.toVideo(),
+      playNote,
+      playbackState: playbackState,
+    );
+  }
+
+  /// 对应 Swift handlePlaybackProgress
+  void _handlePlaybackProgress(double seconds) {
+    _controller.updatePlaybackProgress(seconds);
+    _persistHistoryIfNeeded(force: false, currentProgress: seconds);
+  }
+
+  /// 对应 Swift persistHistoryIfNeeded
+  void _persistHistoryIfNeeded({required bool force, double? currentProgress}) {
+    if (!_controller.isPlaying.value) return;
+    final progress = (currentProgress ?? _controller.currentPlaybackSeconds()).clamp(0.0, double.infinity).toDouble();
+    if (!progress.isFinite) return;
+
+    if (!force && (progress - _lastPersistedProgress).abs() < 20) {
+      return;
+    }
+
+    _lastPersistedProgress = progress;
+    _saveHistoryForCurrentEpisode(progressOverride: progress);
+  }
+
+  /// 对应 Swift restorePlaybackFromHistory
+  /// 返回是否成功恢复了历史（无历史/参数缺失返回 false）
+  bool _restorePlaybackFromHistory() {
+    final video = Get.arguments;
+    if (video == null || video is! Video) return false;
+
+    final playbackState = CacheStore.instance.getPlaybackState(
+      video.id,
+      video.sourceKey,
+    );
+    if (playbackState == null) return false;
+
+    _controller.applyPlaybackState(playbackState);
+    _lastPersistedProgress = playbackState.progressSeconds.clamp(0.0, double.infinity).toDouble();
+    return true;
+  }
+
+  /// 对应 Swift refreshCollectState
+  void _refreshCollectState() {
+    // 收藏状态通过 Obx 实时读取，无需额外操作
+  }
+
+  /// 对应 Swift playNextEpisodeIfNeeded
+  void _playNextEpisode() {
+    final moved = _controller.playNext();
+    if (moved) {
+      _saveHistoryForCurrentEpisode();
+    }
+  }
+
+  /// 对应 Swift playPreviousEpisode
+  void _playPreviousEpisode() {
+    final moved = _controller.playPrevious();
+    if (moved) {
+      _saveHistoryForCurrentEpisode();
+    }
+  }
+
+  String _formatDuration(double seconds) {
+    final h = (seconds ~/ 3600);
+    final m = ((seconds % 3600) ~/ 60);
+    final s = (seconds.toInt() % 60);
+    if (h > 0) {
+      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+}
+
+/// 药丸选择芯片 - 对应 Swift pillChip
+class _PillChip extends StatelessWidget {
+  final String title;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _PillChip({
+    required this.title,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppTheme.spacingLG,
+          vertical: AppTheme.spacingSM,
+        ),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              : AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          title,
+          style: TextStyle(
+            color: isSelected ? AppTheme.accentColor : AppTheme.textSecondary,
+            fontSize: AppTheme.fontFootnote,
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
           ),
         ),
-      );
-    });
+      ),
+    );
   }
+}
+
+/// VodInfo 扩展 - 转换为 Video
+/// 详情页自动播放: 无历史时自动调用 selectEpisode, 直接播放当前选集第一集
+/// (进入详情页即播放, 不再需要点击绿色播放按钮)
+extension VodInfoExt on VodInfo {
+  Video toVideo() => Video(
+        id: id,
+        name: name,
+        pic: pic,
+        note: note,
+        year: year,
+        area: area,
+        director: director,
+        actor: actor,
+        des: des,
+        sourceKey: sourceKey,
+      );
 }
