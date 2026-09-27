@@ -630,9 +630,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       final base = _danmuApiUrl.replaceAll(RegExp(r'/+$'), '');
       final api =
           '$base/api/v2/comment?url=${Uri.encodeQueryComponent(url)}&format=json';
-      final http = await HttpClient().getUrl(Uri.parse(api));
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 8);
+      final http = await client.getUrl(Uri.parse(api));
       http.headers.set('User-Agent', 'NewTv/1.0');
-      final res = await http.close();
+      final res = await http.close().timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         final body = await res.transform(utf8.decoder).join();
         final list = parseDanmuBody(body);
@@ -712,7 +714,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   void _toggleControls() {
     if (_isLongPressSpeedLocked) {
+      // #26 倍速锁定后单击：解锁并显示控制条
       _unlockLongPressSpeed();
+      setState(() => _showControls = true);
+      _scheduleHideControls();
       return;
     }
     if (_isLocked) return;
@@ -908,9 +913,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   void _setBrightness(double b) {
-    setState(() => _brightness = b.clamp(0.0, 1.0));
+    final v = b.clamp(0.0, 1.0);
+    setState(() => _brightness = v);
     // #7 真实亮度：同步 iOS/Android 系统屏幕亮度（0-255）
-    ScreenBrightness().setScreenBrightness(b.clamp(0.0, 1.0) * 255.0).catchError((_) {});
+    ScreenBrightness().setScreenBrightness(v * 255.0).catchError((_) {});
   }
 
   void _showIndicatorLater() {
@@ -1012,10 +1018,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 黑色背景底（视频加载前/透明时避免白屏）
-        Positioned.fill(
-          child: Container(color: Colors.black),
-        ),
         // 视频画面（左右/上下翻转）
         Positioned.fill(
           child: Transform(
@@ -1032,7 +1034,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           ),
         ),
 
-        // #7 亮度已改为真实系统亮度调节（ScreenBrightness），移除黑色蒙层
+        // #7 亮度已改为真实系统亮度调节，移除黑色蒙层（避免对比度下降）
 
         // 缓冲指示器
         if (_isBuffering)
@@ -1165,10 +1167,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             behavior: HitTestBehavior.opaque,
             onTap: _toggleControls,
             onDoubleTapDown: (details) {
+              // #27 全屏时快进/快退区域收窄到 1/6，避免误触
+              final zone = (_isNativeFullscreen || _isImmersive) ? 1 / 6 : 1 / 4;
               final x = details.localPosition.dx;
-              if (x < width / 4) {
+              if (x < width * zone) {
                 _seekBy(-_seekStep, isLeft: true);
-              } else if (x > width * 3 / 4) {
+              } else if (x > width * (1 - zone)) {
                 _seekBy(_seekStep, isLeft: false);
               } else {
                 _togglePlayPause();
@@ -1401,27 +1405,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   widget.onBack!();
                 },
               ),
-            // 切歌（上一集/下一集）——随返回同行，底部不再重复
-            if (widget.canPlayPrevious)
-              _iconButton(
-                icon: Icons.skip_previous,
-                size: 20,
-                width: 40,
-                onTap: () {
-                  _scheduleHideControls();
-                  widget.onPlayPrevious?.call();
-                },
-              ),
-            if (widget.canPlayNext)
-              _iconButton(
-                icon: Icons.skip_next,
-                size: 20,
-                width: 40,
-                onTap: () {
-                  _scheduleHideControls();
-                  widget.onPlayNext?.call();
-                },
-              ),
             const Spacer(),
 
             // 分辨率
@@ -1529,10 +1512,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   void _resumeAfterPip() {
     if (!mounted) return;
     final resume = VideoPlayerPip.instance.iosLastPosition;
-    final playUrl = _player.state.playlist.medias.isNotEmpty
-        ? _player.state.playlist.medias.last.uri
-        : widget.url;
-    Future<void>.delayed(const Duration(milliseconds: 300), () {
+    Future<void>.delayed(const Duration(milliseconds: 120), () {
       if (!mounted) return;
       try {
         if (resume > Duration.zero) {
@@ -1542,14 +1522,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       try {
         _player.play();
       } catch (_) {}
-      // PiP 退出后重新预热原生 AVPlayer，确保下次退后台仍能自动进入小窗
-      // （cleanup 会销毁实例，这里显式重新建一份，不依赖 playing 流回调的竞态）
-      if (Platform.isIOS && playUrl.isNotEmpty) {
-        VideoPlayerPip.instance.prepareIos(
-          url: playUrl,
-          headers: widget.headers,
-        );
-      }
       setState(() {});
     });
   }
@@ -1605,8 +1577,27 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               child: Row(
                 mainAxisSize: MainAxisSize.max,
                 children: [
-                  // 切歌已上移顶栏（与返回对齐），底部只留播放控制
+                  if (widget.canPlayPrevious)
+                    _iconButton(
+                      icon: Icons.skip_previous,
+                      size: 22,
+                      width: 36,
+                      onTap: () {
+                        _scheduleHideControls();
+                        widget.onPlayPrevious?.call();
+                      },
+                    ),
                   _buildPlayPauseButton(),
+                  if (widget.canPlayNext)
+                    _iconButton(
+                      icon: Icons.skip_next,
+                      size: 22,
+                      width: 36,
+                      onTap: () {
+                        _scheduleHideControls();
+                        widget.onPlayNext?.call();
+                      },
+                    ),
                   const Spacer(),
                   _iconButton(
                     icon: _volume > 0
@@ -1749,6 +1740,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   Widget _buildLongPressSpeedHint() {
+    // #25 显示实际使用的长按倍速（_longPressSpeed），不再用 _playbackSpeed*2
     final speed = _longPressSpeed;
     final speedLabel = _formatSpeed(speed);
     final locked = _isLongPressSpeedLocked;
@@ -2030,7 +2022,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Widget _buildSpeedMenu() {
     final displaySpeed = _isLongPressSpeedLocked
-        ? _playbackSpeed * 2
+        ? _longPressSpeed
         : _playbackSpeed;
     return PopupMenuButton<double>(
       tooltip: '倍速',
@@ -2740,6 +2732,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   // ============================================================
 
   Future<void> _togglePiP() async {
+    // #46 手动/自动共用 _autoPipInFlight 门闩，避免双路径竞态重建
+    if (_autoPipInFlight) return;
     // iOS 端：系统级画中画（双播放器方案）
     if (Platform.isIOS) {
       if (VideoPlayerPip.instance.isIosActive) {
@@ -2814,8 +2808,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (VideoPlayerPip.instance.isIosActive) return;
     if (_autoPipInFlight) return;
     if (!_player.state.playing) return;
-    // 听剧模式：用户本意就是"只听不看"，退后台不应弹出视频小窗
-    if (_audioMode) return;
 
     final playUrl = _player.state.playlist.medias.isNotEmpty
         ? _player.state.playlist.medias.last.uri
