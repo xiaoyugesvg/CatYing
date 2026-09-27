@@ -1018,20 +1018,31 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 视频画面（左右/上下翻转）
+        // 视频画面（左右/上下翻转）。
+        // 注意：无翻转时直接渲染 Video，不包 Transform ——
+        // iOS 上 Transform 包裹会导致 media_kit 纹理渲染失效（有声无画面），
+        // 与 备份分支(6c2a9c9) 的渲染路径保持一致。
         Positioned.fill(
-          child: Transform(
-            transform: Matrix4.identity()
-              ..scale(_flipH ? -1 : 1, _flipV ? -1 : 1),
-            alignment: Alignment.center,
-            child: Video(
-              key: ValueKey('video_$_videoRebuildKey'),
-              controller: _controller,
-              controls: null,
-              fit: _videoFit.boxFit,
-              aspectRatio: _videoFit.aspectRatio,
-            ),
-          ),
+          child: (_flipH || _flipV)
+              ? Transform(
+                  transform: Matrix4.identity()
+                    ..scale(_flipH ? -1 : 1, _flipV ? -1 : 1),
+                  alignment: Alignment.center,
+                  child: Video(
+                    key: ValueKey('video_$_videoRebuildKey'),
+                    controller: _controller,
+                    controls: null,
+                    fit: _videoFit.boxFit,
+                    aspectRatio: _videoFit.aspectRatio,
+                  ),
+                )
+              : Video(
+                  key: ValueKey('video_$_videoRebuildKey'),
+                  controller: _controller,
+                  controls: null,
+                  fit: _videoFit.boxFit,
+                  aspectRatio: _videoFit.aspectRatio,
+                ),
         ),
 
         // #7 亮度已改为真实系统亮度调节，移除黑色蒙层（避免对比度下降）
