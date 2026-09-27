@@ -188,6 +188,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   /// 内部追踪 native fullscreen 状态（与 mpv / OS 窗口同步）
   bool _isNativeFullscreen = false;
+  /// 首次 build 后是否已触发延迟重建（iOS PlatformView 初始化竞态）
+  bool _didInitialRebuild = false;
 
   /// 播放器实际可用高度（由 _buildContentStack 的 LayoutBuilder 记录），
   /// 用于上下控制栏间距随播放器大小自适应（小窗紧凑 / 全屏舒展）。
@@ -356,6 +358,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (_playOrderMode == 2) {
         // 循环本集
         _player.open(Media(widget.url, httpHeaders: widget.headers));
+        _scheduleDelayedRebuild();
       } else if (_playOrderMode == 1) {
         // 自动下一集（交给外层切换）
         widget.onEnded?.call();
@@ -549,6 +552,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _persisted.resumeApplied = true;
     _player.open(Media(widget.url, httpHeaders: headers, start: start));
     _scheduleResumeSeek();
+    _scheduleDelayedRebuild();
   }
 
   /// 续播 seek（safety net 模式，对应 Swift `applyPendingSeekIfNeeded`）
@@ -975,6 +979,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   @override
   Widget build(BuildContext context) {
+    // iOS PlatformView(Video) 初始化竞态: 首次渲染后延迟重建 3 次,
+    // 否则可能出现"有声音无画面"（渲染层创建失败）。
+    // 与 _onWindowFullScreenChanged 里的处理保持一致。
+    if (!_didInitialRebuild) {
+      _didInitialRebuild = true;
+      _scheduleDelayedRebuild();
+    }
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
         SingleActivator(LogicalKeyboardKey.escape): _onUserExitFullscreen,
