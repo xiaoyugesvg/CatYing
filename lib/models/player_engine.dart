@@ -1,17 +1,17 @@
+import 'dart:io';
+
 /// 播放器引擎类型 - 对应 Swift PlayerEngine
-/// 核心只保留 2 个真内核：MPV(media_kit)、Webview(WKWebView)
-/// KSPlayer / UPlayer / AVPlayer 均已移除（2026-09-27）：
-///  - KSPlayer Core 层耦合 FFmpeg/MEPlayer 无法剥离，集成成本过高
-///  - UPlayer 无 tag/pod 源不可靠、要求 iOS16+
-///  - AVPlayer(video_player) 内核已删除
-/// 统一以 MPV 为主播放内核，网页源走 Webview。
+/// iOS 默认使用 AVPlayer（系统原生，兼容性好、PiP 无缝），可选 MPV；
+/// 其余平台使用 MPV(media_kit)；网页源统一走 Webview。
 
 /// 播放器引擎类型
 enum PlayerEngine {
-  /// MPV 内核（基于 media_kit + libmpv），功能最全（倍速/硬解/画中画/弹幕）
+  /// MPV 内核（基于 media_kit + libmpv），全平台可用
   mpv(0, 'MPV播放器'),
   /// Webview 内核（webview_flutter + WKWebView），用于网页播放页面
-  webview(1, 'Webview播放器');
+  webview(1, 'Webview播放器'),
+  /// AVPlayer 内核（仅 iOS），系统原生硬解码，兼容性好，PiP 切换无缝
+  avplayer(2, '系统播放器');
 
   final int value;
   final String title;
@@ -22,13 +22,36 @@ enum PlayerEngine {
   static PlayerEngine fromStoredValue(int rawValue) {
     final engine = PlayerEngine.values.where((e) => e.value == rawValue).firstOrNull;
     if (engine == null) {
+      return _defaultForPlatform();
+    }
+    // 非 iOS 平台选了 avplayer → 兜底到 mpv
+    if (engine == PlayerEngine.avplayer && !_isIOS) {
       return PlayerEngine.mpv;
     }
     return engine;
   }
 
-  /// 实际可供用户选择的播放器列表
-  static List<PlayerEngine> get availableEngines => PlayerEngine.values;
+  static bool get _isIOS {
+    try {
+      return Platform.isIOS;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 当前平台的默认播放器
+  static PlayerEngine _defaultForPlatform() {
+    if (_isIOS) return PlayerEngine.avplayer;
+    return PlayerEngine.mpv;
+  }
+
+  /// 实际可供用户选择的播放器列表（按平台过滤）
+  static List<PlayerEngine> get availableEngines {
+    if (_isIOS) {
+      return const [PlayerEngine.avplayer, PlayerEngine.mpv, PlayerEngine.webview];
+    }
+    return const [PlayerEngine.mpv, PlayerEngine.webview];
+  }
 }
 
 /// 视频解码模式

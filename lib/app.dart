@@ -12,6 +12,7 @@ import 'services/nodejs_manager.dart';
 import 'pages/home/view.dart';
 import 'pages/history/view.dart';
 import 'pages/favorites/view.dart';
+import 'pages/live/view.dart';
 import 'pages/settings/view.dart';
 import 'pages/search/view.dart';
 import 'pages/search/controller.dart';
@@ -638,6 +639,8 @@ class _ContentViewState extends State<ContentView>
     const HistoryPage(),
     const FavoritesPage(),
     const SettingsPage(),
+    // 直播作为第 5 个 tab（选中才高亮，修复"首页+直播同时高亮"）
+    const LivePage(),
   ];
 
   Widget _buildMainTabView() {
@@ -977,35 +980,9 @@ class _ContentViewState extends State<ContentView>
     );
   }
 
-  /// 直播：独立路由入口（不占底部 Tab）
+  /// 直播：第 5 个底部 tab（选中才高亮，修复"首页+直播同时高亮"）
   Widget _navLiveItem() {
-    return GestureDetector(
-      onTap: () => Get.toNamed('/live'),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: AppTheme.accentColor.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.live_tv, size: 18, color: AppTheme.accentColor),
-            const SizedBox(height: 3),
-            Text(
-              '直播',
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w500,
-                color: AppTheme.accentColor,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return _navItem(Icons.live_tv, Icons.live_tv, '直播', 4);
   }
 
   /// 导航栏项 - 对应 Swift navBarItem
