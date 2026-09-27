@@ -21,7 +21,7 @@ import 'package:get/get.dart';
 /// 2. 监听 devices.stream 实时显示新发现的设备
 /// 3. 30 秒后自动 stop（避免长时间占用网络）
 /// 4. 用户点击某个设备 → 调 device.setUrl(url, title) + device.play()
-/// 5. 二次点击同一设备 → return（避免重复投屏）
+/// 5. 已投屏设备可控制：暂停/继续/停止
 class DLNAPage extends StatefulWidget {
   const DLNAPage({super.key});
 
@@ -38,6 +38,15 @@ class _DLNAPageState extends State<DLNAPage> {
   StreamSubscription? _devicesSub;
   Timer? _stopTimer;
   bool _isSearching = false;
+
+  /// 当前正在投屏的设备 key（null 表示未投屏）
+  String? _activeDeviceKey;
+
+  /// 当前投屏设备的播放状态
+  bool _isPlaying = false;
+
+  /// 是否正在执行控制操作（防止重复点击）
+  bool _isControlBusy = false;
 
   @override
   void initState() {
@@ -108,7 +117,88 @@ class _DLNAPageState extends State<DLNAPage> {
           const SizedBox(width: 6),
         ],
       ),
-      body: _buildBody(colorScheme),
+      body: Column(
+        children: [
+          Expanded(child: _buildBody(colorScheme)),
+          // 底部投屏控制栏（仅在已投屏时显示）
+          if (_activeDeviceKey != null) _buildActiveCastBar(),
+        ],
+      ),
+    );
+  }
+
+  /// 底部"正在投屏"控制栏
+  Widget _buildActiveCastBar() {
+    final device = _deviceList[_activeDeviceKey];
+    final deviceName = device?.info.friendlyName ?? '未知设备';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade900,
+        border: Border(
+          top: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.cast_connected,
+                    color: Colors.greenAccent.shade400, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '正在投屏到 $deviceName',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _title ?? '',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.5),
+                          fontSize: 11,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // 暂停/继续
+                IconButton(
+                  onPressed: _isControlBusy ? null : _togglePause,
+                  icon: Icon(
+                    _isPlaying ? Icons.pause : Icons.play_arrow,
+                    color: Colors.white,
+                  ),
+                  tooltip: _isPlaying ? '暂停' : '继续播放',
+                ),
+                // 停止投屏
+                IconButton(
+                  onPressed: _isControlBusy ? null : _stopCast,
+                  icon: const Icon(Icons.stop_circle_outlined,
+                      color: Colors.white70),
+                  tooltip: '停止投屏',
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -171,16 +261,31 @@ class _DLNAPageState extends State<DLNAPage> {
         }
         final key = keys[index];
         final device = _deviceList[key]!;
+        final isActive = key == _activeDeviceKey;
         return ListTile(
-          leading: const Icon(Icons.tv, color: Colors.white70),
+          leading: Icon(
+            isActive ? Icons.cast_connected : Icons.tv,
+            color: isActive ? Colors.greenAccent.shade400 : Colors.white70,
+          ),
           title: Text(
             device.info.friendlyName,
-            style: const TextStyle(color: Colors.white),
+            style: TextStyle(
+              color: isActive ? Colors.greenAccent.shade400 : Colors.white,
+              fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+            ),
           ),
-          subtitle: Text(key,
-              style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.4), fontSize: 11)),
-          trailing: const Icon(Icons.cast, color: Colors.white54),
+          subtitle: Text(
+            isActive ? '正在播放' : key,
+            style: TextStyle(
+                color: isActive
+                    ? Colors.greenAccent.shade400.withValues(alpha: 0.7)
+                    : Colors.white.withValues(alpha: 0.4),
+                fontSize: 11),
+          ),
+          trailing: Icon(
+            isActive ? Icons.check_circle : Icons.cast,
+            color: isActive ? Colors.greenAccent.shade400 : Colors.white54,
+          ),
           onTap: () => _castTo(device, key),
         );
       },
@@ -192,11 +297,27 @@ class _DLNAPageState extends State<DLNAPage> {
       Get.snackbar('投屏失败', '视频地址为空', snackPosition: SnackPosition.BOTTOM);
       return;
     }
+    // 同一设备：如果正在投屏则忽略；如果是其他设备则切换
+    if (key == _activeDeviceKey && _isPlaying) {
+      Get.snackbar(
+        '提示',
+        '当前已在此设备上播放',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.black87,
+        colorText: Colors.white,
+      );
+      return;
+    }
+    setState(() => _isControlBusy = true);
     try {
       // setUrl 把视频 URL 推到 DMR；play 触发 DMR 开始播放
       await device.setUrl(_url, title: _title ?? '');
       await device.play();
       if (!mounted) return;
+      setState(() {
+        _activeDeviceKey = key;
+        _isPlaying = true;
+      });
       Get.snackbar(
         '投屏成功',
         '正在 ${device.info.friendlyName} 上播放：${_title ?? ''}',
@@ -212,6 +333,71 @@ class _DLNAPageState extends State<DLNAPage> {
           snackPosition: SnackPosition.BOTTOM,
           backgroundColor: Colors.red.shade700,
           colorText: Colors.white);
+    } finally {
+      if (mounted) setState(() => _isControlBusy = false);
+    }
+  }
+
+  /// 暂停/继续切换
+  Future<void> _togglePause() async {
+    final device = _deviceList[_activeDeviceKey];
+    if (device == null) return;
+    setState(() => _isControlBusy = true);
+    try {
+      if (_isPlaying) {
+        await device.pause();
+        if (mounted) setState(() => _isPlaying = false);
+      } else {
+        await device.play();
+        if (mounted) setState(() => _isPlaying = true);
+      }
+    } catch (e) {
+      debugPrint('DLNA control failed: $e');
+      if (mounted) {
+        Get.snackbar(
+          '操作失败',
+          '$e',
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: Colors.red.shade700,
+          colorText: Colors.white,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isControlBusy = false);
+    }
+  }
+
+  /// 停止投屏
+  Future<void> _stopCast() async {
+    final device = _deviceList[_activeDeviceKey];
+    if (device == null) return;
+    setState(() => _isControlBusy = true);
+    try {
+      await device.stop();
+      if (mounted) {
+        setState(() {
+          _activeDeviceKey = null;
+          _isPlaying = false;
+        });
+        Get.snackbar(
+          '已停止投屏',
+          '已断开与设备的连接',
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: Colors.black87,
+          colorText: Colors.white,
+        );
+      }
+    } catch (e) {
+      debugPrint('DLNA stop failed: $e');
+      // 停止失败也强制清除本地状态，避免UI卡死
+      if (mounted) {
+        setState(() {
+          _activeDeviceKey = null;
+          _isPlaying = false;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isControlBusy = false);
     }
   }
 }

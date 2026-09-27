@@ -158,27 +158,10 @@ class _LivePageState extends State<LivePage> {
                         ),
                       ),
                       const Spacer(),
-                      _TopIcon(
-                        icon: _audioMode
-                            ? Icons.headphones
-                            : Icons.headphones_outlined,
-                        onTap: _toggleAudioMode,
-                      ),
+                      // 公告（页面级功能，保留在外层顶栏）
                       _TopIcon(
                         icon: Icons.campaign,
                         onTap: () => _showAnnouncements(context),
-                      ),
-                      _TopIcon(
-                        icon: Icons.cast,
-                        onTap: () => ScaffoldMessenger.of(context)
-                            .showSnackBar(
-                                const SnackBar(content: Text('暂不支持投屏'))),
-                      ),
-                      _TopIcon(
-                        icon: _fullscreen
-                            ? Icons.fullscreen_exit
-                            : Icons.fullscreen,
-                        onTap: _toggleFullscreen,
                       ),
                     ],
                   ),
@@ -296,25 +279,25 @@ class _LivePageState extends State<LivePage> {
               child: Icon(Icons.live_tv,
                   color: AppTheme.textTertiary, size: 56),
             ),
-          // 左上：返回（对齐直播页顶栏）
+          // 左上：返回（对齐点播播放器顶栏）
           Positioned(
             top: 8 + pad.top,
             left: 8 + pad.left,
             child: GestureDetector(
-              onTap: () => Get.back(),
+              onTap: () {
+                _toggleFullscreen();
+                Get.back();
+              },
               child: Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.5),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(Icons.arrow_back_ios_new,
-                    color: Colors.white, size: 16),
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                child: const Icon(Icons.arrow_back_ios_new,
+                    color: Colors.white, size: 20),
               ),
             ),
           ),
-          // 右上：当前频道名 + 退出全屏
+          // 右上：功能按钮（听剧/小窗/投屏/退出全屏）—— 与点播播放器顶栏对齐
           Positioned(
             top: 8 + pad.top,
             right: 8 + pad.right,
@@ -323,34 +306,38 @@ class _LivePageState extends State<LivePage> {
               children: [
                 if (current != null)
                   Container(
-                    constraints: const BoxConstraints(maxWidth: 180),
+                    constraints: const BoxConstraints(maxWidth: 150),
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.5),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
                     child: Text(
                       current.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style:
-                          const TextStyle(color: Colors.white, fontSize: 12),
+                      style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                          fontFamily: 'monospace'),
                     ),
                   ),
-                const SizedBox(width: 8),
-                GestureDetector(
+                _VideoTopIcon(
+                  icon: _audioMode
+                      ? Icons.headphones
+                      : Icons.headphones_outlined,
+                  onTap: _toggleAudioMode,
+                ),
+                _VideoTopIcon(
+                  icon: Icons.picture_in_picture_alt,
+                  onTap: _togglePip,
+                ),
+                _VideoTopIcon(
+                  icon: Icons.cast,
+                  onTap: () => ScaffoldMessenger.of(context)
+                      .showSnackBar(
+                          const SnackBar(content: Text('暂不支持投屏'))),
+                ),
+                _VideoTopIcon(
+                  icon: Icons.fullscreen_exit,
                   onTap: _toggleFullscreen,
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.5),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(Icons.fullscreen_exit,
-                        color: Colors.white, size: 18),
-                  ),
                 ),
               ],
             ),
@@ -380,21 +367,67 @@ class _LivePageState extends State<LivePage> {
                 child: Icon(Icons.live_tv,
                     color: AppTheme.textTertiary, size: 56),
               ),
-            // 小窗（PiP）右下 —— 全屏/听剧/公告在顶部，这里只留小窗
+            // 顶部渐变遮罩 + 功能按钮（与点播播放器顶栏风格一致）
+            // 左上：LIVE 角标
             Positioned(
-              right: 12,
-              bottom: 12,
+              top: 10,
+              left: 12,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.45),
+                  color: Colors.black.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: GestureDetector(
-                  onTap: () => _togglePip(),
-                  child: Icon(Icons.picture_in_picture_alt,
-                      color: AppTheme.textPrimary, size: 20),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('LIVE',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5)),
+                    const SizedBox(width: 5),
+                    const _LiveDot(size: 7),
+                  ],
                 ),
+              ),
+            ),
+            // 右上：功能按钮（听剧/小窗/投屏/全屏）—— 与点播播放器顶栏对齐
+            Positioned(
+              top: 6,
+              right: 8,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _VideoTopIcon(
+                    icon: _audioMode
+                        ? Icons.headphones
+                        : Icons.headphones_outlined,
+                    onTap: _toggleAudioMode,
+                    tooltip: '听剧模式',
+                  ),
+                  _VideoTopIcon(
+                    icon: Icons.picture_in_picture_alt,
+                    onTap: _togglePip,
+                    tooltip: '小窗播放',
+                  ),
+                  _VideoTopIcon(
+                    icon: Icons.cast,
+                    onTap: () => ScaffoldMessenger.of(context)
+                        .showSnackBar(
+                            const SnackBar(content: Text('暂不支持投屏'))),
+                    tooltip: '投屏',
+                  ),
+                  _VideoTopIcon(
+                    icon: _fullscreen
+                        ? Icons.fullscreen_exit
+                        : Icons.fullscreen,
+                    onTap: _toggleFullscreen,
+                    tooltip: _fullscreen ? '退出全屏' : '全屏',
+                  ),
+                ],
               ),
             ),
           ],
@@ -707,7 +740,8 @@ class _LivePageState extends State<LivePage> {
 }
 
 class _LiveDot extends StatefulWidget {
-  const _LiveDot();
+  final double size;
+  const _LiveDot({this.size = 8});
   @override
   State<_LiveDot> createState() => _LiveDotState();
 }
@@ -729,8 +763,8 @@ class _LiveDotState extends State<_LiveDot>
     return FadeTransition(
       opacity: Tween(begin: 0.35, end: 1.0).animate(_c),
       child: Container(
-        width: 8,
-        height: 8,
+        width: widget.size,
+        height: widget.size,
         decoration: const BoxDecoration(
           color: Colors.redAccent,
           shape: BoxShape.circle,
@@ -759,6 +793,38 @@ class _TopIcon extends StatelessWidget {
             shape: BoxShape.circle,
           ),
           child: Icon(icon, color: AppTheme.textSecondary, size: 18),
+        ),
+      ),
+    );
+  }
+}
+
+/// 视频画面上的顶栏功能按钮（半透明黑底 + 白色图标，与点播播放器风格一致）
+class _VideoTopIcon extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final String? tooltip;
+  final double size;
+  const _VideoTopIcon({
+    required this.icon,
+    required this.onTap,
+    this.tooltip,
+    this.size = 20,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip ?? '',
+      preferBelow: false,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          width: 38,
+          height: 38,
+          alignment: Alignment.center,
+          child: Icon(icon, color: Colors.white, size: size),
         ),
       ),
     );

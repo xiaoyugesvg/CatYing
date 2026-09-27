@@ -37,14 +37,6 @@ if (NODE_LOG_ENABLED) try {
         const origErr = console.error.bind(console);
         console.log = function () { writeLine('INFO', Array.from(arguments)); origLog.apply(null, arguments); };
         console.error = function () { writeLine('ERROR', Array.from(arguments)); origErr.apply(null, arguments); };
-        // uncaughtException 立即写日志, 不调 exit (iOS embed library 进程死 = host 闪退)
-        process.on('uncaughtException', function (err) {
-            writeLine('FATAL_UNCAUGHT', [err && err.stack ? err.stack : (err && err.message ? err.message : String(err))]);
-        });
-        process.on('unhandledRejection', function (reason) {
-            const r = reason && reason.stack ? reason.stack : (reason && reason.message ? reason.message : String(reason));
-            writeLine('FATAL_UNHANDLED_REJECTION', [r]);
-        });
         console.log('=== main.js boot start, pid=' + process.pid + ', argv=' + JSON.stringify(process.argv.slice(2)) + ' ===');
     }
 } catch (e) {
@@ -287,6 +279,19 @@ mgmtServer.listen(0, '127.0.0.1', () => {
     console.log('=== after sendMessageToNative(ready) ===');
 });
 
+// 全局未捕获异常处理：不退出进程（iOS embed library 进程死 = host 闪退）
+// 日志模式启用时额外写入文件，否则仅 console.error
 process.on('uncaughtException', function (err) {
-    console.error('Caught exception:', err);
+    const msg = err && err.stack ? err.stack : (err && err.message ? err.message : String(err));
+    console.error('Caught uncaughtException:', msg);
+    if (typeof writeLine === 'function') {
+        try { writeLine('FATAL_UNCAUGHT', [msg]); } catch (_) {}
+    }
+});
+process.on('unhandledRejection', function (reason) {
+    const r = reason && reason.stack ? reason.stack : (reason && reason.message ? reason.message : String(reason));
+    console.error('Caught unhandledRejection:', r);
+    if (typeof writeLine === 'function') {
+        try { writeLine('FATAL_UNHANDLED_REJECTION', [r]); } catch (_) {}
+    }
 });

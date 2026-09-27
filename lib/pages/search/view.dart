@@ -149,6 +149,7 @@ class _SearchPageState extends State<SearchPage> {
                       ? GestureDetector(
                           onTap: () {
                             _inputController.clear();
+                            _focusNode.unfocus();
                             // 对应 Swift: 清空所有搜索状态
                             _searchController.keyword.value = '';
                             _searchController.resultsBySite.clear();
@@ -419,10 +420,30 @@ class _SearchPageState extends State<SearchPage> {
   /// 结果面板 - 对应 Swift resultsPanel
   Widget _buildResultsPanel() {
     return Obx(() {
-      // 对应 Swift: selectedSiteKey == nil → "请输入搜索关键词"
+      // 还没有选中具体站点 → 引导用户从左侧站点列表选择
       if (_searchController.selectedSiteKey.value == null) {
-        return const Center(
-          child: AppError(message: '请输入搜索关键词'),
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Icon(Icons.touch_app, size: 48, color: Colors.white24),
+                SizedBox(height: 16),
+                Text(
+                  '选择左侧站点查看搜索结果',
+                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(height: 8),
+                Text(
+                  '已完成全部站点搜索，点击站点名称查看对应结果',
+                  style: TextStyle(color: Colors.white38, fontSize: 12),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
         );
       }
 
@@ -436,8 +457,26 @@ class _SearchPageState extends State<SearchPage> {
 
       // 对应 Swift: currentResults.isEmpty → "暂无搜索结果"
       if (_searchController.currentResults.isEmpty) {
-        return const Center(
-          child: AppError(message: '暂无搜索结果'),
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Icon(Icons.search_off, size: 48, color: Colors.white24),
+                SizedBox(height: 16),
+                Text(
+                  '该站点暂无搜索结果',
+                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  '试试左侧其他站点',
+                  style: TextStyle(color: Colors.white38, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
         );
       }
 

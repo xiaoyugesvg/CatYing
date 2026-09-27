@@ -177,40 +177,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildSearchBar() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppTheme.spacingLG, vertical: AppTheme.spacingXS),
-      child: GestureDetector(
-        onTap: () {
-          if (widget.onSearchTap != null) {
-            widget.onSearchTap!();
-          } else {
-            Get.toNamed('/search');
-          }
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          decoration: BoxDecoration(
-            color: AppTheme.backgroundTertiary,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.search, color: AppTheme.textTertiary, size: 16),
-              SizedBox(width: 8),
-              Text(
-                '搜索影片、演员、导演...',
-                style: TextStyle(
-                    color: AppTheme.textTertiary, fontSize: AppTheme.fontSubhead),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildCategoryTabBar() {
     return SizedBox(
       height: 44,
@@ -667,12 +633,23 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
                 ),
                 GestureDetector(
                   onTap: () {
-                    setState(() {
-                      _expanded = false;
-                      _ctrl.clear();
-                    });
-                    _focus.unfocus();
-                    widget.onOpenFull();
+                    final text = _ctrl.text.trim();
+                    if (text.isNotEmpty) {
+                      // 有输入内容：直接提交搜索（和按回车行为一致）
+                      setState(() {
+                        _expanded = false;
+                        _ctrl.clear();
+                      });
+                      _focus.unfocus();
+                      widget.onSubmitted(text);
+                    } else {
+                      // 无输入内容：打开完整搜索页
+                      setState(() {
+                        _expanded = false;
+                      });
+                      _focus.unfocus();
+                      widget.onOpenFull();
+                    }
                   },
                   child: Icon(Icons.search,
                       color: AppTheme.accentColor, size: 18),

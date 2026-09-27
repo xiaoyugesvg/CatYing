@@ -77,32 +77,51 @@ class FavoritesPage extends StatelessWidget {
         );
       }
 
-      return GridView.builder(
-        padding: const EdgeInsets.all(AppTheme.spacingLG),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 4,
-          childAspectRatio: 0.65,
-          crossAxisSpacing: AppTheme.cardSpacing,
-          mainAxisSpacing: AppTheme.cardSpacing,
-        ),
-        itemCount: favorites.length,
-        itemBuilder: (context, index) {
-          final item = favorites[index];
-          final video = Video(
-            id: item.vodId,
-            name: item.vodName,
-            pic: item.vodPic,
-            sourceKey: item.sourceKey,
-          );
-          return GestureDetector(
-            onSecondaryTap: () =>
-                _showUnfavoriteDialog(context, controller, item),
-            onLongPress: () =>
-                _showUnfavoriteDialog(context, controller, item),
-            child: VodCard(
-              video: video,
-              onTap: () => Get.toNamed('/detail', arguments: video),
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          // 自适应网格（与首页保持一致）
+          final cardMinWidth = 120.0;
+          final crossAxisCount =
+              (constraints.maxWidth / (cardMinWidth + AppTheme.cardSpacing))
+                  .floor()
+                  .clamp(2, 6);
+          final cardWidth =
+              (constraints.maxWidth - AppTheme.cardSpacing * (crossAxisCount - 1)) /
+                  crossAxisCount;
+
+          return GridView.builder(
+            padding: const EdgeInsets.fromLTRB(
+              AppTheme.spacingLG,
+              AppTheme.spacingLG,
+              AppTheme.spacingLG,
+              100, // 底部预留悬浮导航栏空间
             ),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: crossAxisCount,
+              childAspectRatio: (cardWidth) / (cardWidth / 0.65 + 50),
+              crossAxisSpacing: AppTheme.cardSpacing,
+              mainAxisSpacing: AppTheme.cardSpacing,
+            ),
+            itemCount: favorites.length,
+            itemBuilder: (context, index) {
+              final item = favorites[index];
+              final video = Video(
+                id: item.vodId,
+                name: item.vodName,
+                pic: item.vodPic,
+                sourceKey: item.sourceKey,
+              );
+              return GestureDetector(
+                onSecondaryTap: () =>
+                    _showUnfavoriteDialog(context, controller, item),
+                onLongPress: () =>
+                    _showUnfavoriteDialog(context, controller, item),
+                child: VodCard(
+                  video: video,
+                  onTap: () => Get.toNamed('/detail', arguments: video),
+                ),
+              );
+            },
           );
         },
       );

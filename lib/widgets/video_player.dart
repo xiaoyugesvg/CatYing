@@ -1736,7 +1736,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   Widget _buildLongPressSpeedHint() {
-    final speed = _playbackSpeed * 2;
+    final speed = _longPressSpeed;
     final speedLabel = _formatSpeed(speed);
     final locked = _isLongPressSpeedLocked;
     return Positioned(
@@ -2801,6 +2801,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (VideoPlayerPip.instance.isIosActive) return;
     if (_autoPipInFlight) return;
     if (!_player.state.playing) return;
+    // 听剧模式：用户本意就是"只听不看"，退后台不应弹出视频小窗
+    if (_audioMode) return;
 
     final playUrl = _player.state.playlist.medias.isNotEmpty
         ? _player.state.playlist.medias.last.uri

@@ -13,7 +13,6 @@ async function request(reqUrl) {
 }
 
 async function home(_inReq, _outResp) {
-    let fiters = '';
     let classes = [{'type_id':'1','type_name':'电影'},{'type_id':'2','type_name':'剧集'},{'type_id':'4','type_name':'动漫'},{'type_id':'3','type_name':'综艺'},{'type_id':'5','type_name':'短剧'},{'type_id':'20','type_name':'纪录片'}];
     let filterObj = {};
     return({
@@ -27,9 +26,9 @@ async function category(inReq, _outResp) {
     const tid = inReq.body.id;
     const pg = inReq.body.page;
     let page = pg || 1;
-    if (page == 0) page = 1;
+    if (page === 0) page = 1;
     let reqUrl = url + `/index.php/vod/show/id/${tid}/page/${pg}.html`;
-    let html = await request(reqUrl, ua);
+    let html = await request(reqUrl);
     const $ = load(html);
     let items = $('#main .module-item');
     let videos = [];

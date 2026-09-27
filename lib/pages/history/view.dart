@@ -85,7 +85,7 @@ class HistoryPage extends StatelessWidget {
 
       return ListView.separated(
         padding: const EdgeInsets.fromLTRB(
-            AppTheme.spacingLG, 0, AppTheme.spacingLG, AppTheme.spacingLG),
+            AppTheme.spacingLG, 0, AppTheme.spacingLG, 100),
         itemCount: records.length,
         separatorBuilder: (_, __) => const SizedBox(height: AppTheme.spacingSM),
         itemBuilder: (context, index) {
