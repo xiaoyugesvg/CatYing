@@ -242,14 +242,9 @@ class NodeJSManager {
       }
       final body = resp.data ?? '';
       // main.js /source/status 返回 { sourceLoaded: sourceModule !== null, ... }
-      // 必须 sourceLoaded=true 才算 Node.js 源真的已加载（JSON 解析，不做字符串匹配）
-      var loaded = false;
-      try {
-        final decoded = jsonDecode(body);
-        if (decoded is Map) loaded = decoded['sourceLoaded'] == true;
-      } catch (_) {
-        loaded = false;
-      }
+      // 必须 sourceLoaded=true 才算 Node.js 源真的已加载
+      final loaded = body.contains('"sourceLoaded":true') ||
+          body.contains('"sourceLoaded": true');
       AppLog.instance.http('GET', url, port: managementPort,
           statusCode: resp.statusCode, elapsedMs: elapsed, ok: true,
           caller: 'verifySourceLoaded');

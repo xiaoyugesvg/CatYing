@@ -25,9 +25,8 @@ class _HomePageState extends State<HomePage> {
   final HomeController _controller = Get.put(HomeController());
   bool _isReconnecting = false;
 
-  /// 分类栏/过滤栏是否可见（滚动下移时收起, 上移/回顶恢复）
-  /// 对应 tvbox-Swift / 主流影视壳: 列表下滚时顶部分类折叠, 扩大可视区
-  bool _categoryBarVisible = true;
+  /// 顶部搜索栏是否可见（滚动下移时收起, 上移/回顶恢复）
+  bool _headerVisible = true;
   double _lastScrollOffset = 0;
 
   @override
@@ -52,8 +51,16 @@ class _HomePageState extends State<HomePage> {
           SafeArea(
             child: Column(
               children: [
-                _buildHeaderBar(),
-                // 分类/筛选：滚动时保持显示（吸顶，不再折叠）
+                // 顶部搜索栏：下滑隐藏，上滑/回顶显示
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeOutCubic,
+                  height: _headerVisible ? null : 0,
+                  clipBehavior: Clip.hardEdge,
+                  decoration: const BoxDecoration(),
+                  child: _buildHeaderBar(),
+                ),
+                // 分类/筛选：吸顶显示
                 Obx(() {
                   final hasCat = _controller.sorts.isNotEmpty;
                   final hasFilter = _controller.currentFilters.isNotEmpty;
@@ -335,7 +342,27 @@ class _HomePageState extends State<HomePage> {
       // 对应 Swift: 选中分类时显示 categoryVideos，否则显示 homeVideos
       final videos = _controller.displayVideos;
 
-      return RefreshIndicator(
+      return NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (notification is ScrollUpdateNotification && notification.depth == 0) {
+            final currentOffset = notification.metrics.pixels;
+            final delta = currentOffset - _lastScrollOffset;
+            final atTop = currentOffset <= 0;
+            if (atTop) {
+              // 回到顶部 → 显示搜索栏
+              if (!_headerVisible) setState(() => _headerVisible = true);
+            } else if (delta > 3) {
+              // 向下滚动（内容上移）→ 隐藏搜索栏
+              if (_headerVisible) setState(() => _headerVisible = false);
+            } else if (delta < -3) {
+              // 向上滚动（内容下移）→ 显示搜索栏
+              if (!_headerVisible) setState(() => _headerVisible = true);
+            }
+            _lastScrollOffset = currentOffset;
+          }
+          return false;
+        },
+        child: RefreshIndicator(
         color: AppTheme.accentColor,
         backgroundColor: AppTheme.backgroundSecondary,
         onRefresh: () => _controller.refresh(),
@@ -419,8 +446,9 @@ class _HomePageState extends State<HomePage> {
             );
           },
         ),
-      );
-    });
+      ),
+    );
+  });
   }
 
   /// 配置中心 URL 解析 - 对应 Swift openConfigCenterUrl
@@ -633,16 +661,21 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
                 ),
                 GestureDetector(
                   onTap: () {
-                    final v = _ctrl.text.trim();
-                    setState(() {
-                      _expanded = false;
-                      _ctrl.clear();
-                    });
-                    _focus.unfocus();
-                    if (v.isNotEmpty) {
-                      // 有关键词 → 直接带词搜索，不再丢词
-                      widget.onSubmitted(v);
+                    final text = _ctrl.text.trim();
+                    if (text.isNotEmpty) {
+                      // 有输入内容：直接提交搜索（和按回车行为一致）
+                      setState(() {
+                        _expanded = false;
+                        _ctrl.clear();
+                      });
+                      _focus.unfocus();
+                      widget.onSubmitted(text);
                     } else {
+                      // 无输入内容：打开完整搜索页
+                      setState(() {
+                        _expanded = false;
+                      });
+                      _focus.unfocus();
                       widget.onOpenFull();
                     }
                   },

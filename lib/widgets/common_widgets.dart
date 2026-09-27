@@ -291,8 +291,6 @@ class SettingsRow extends StatelessWidget {
   final VoidCallback? onTap;
   final Color? iconColor;
   final Color? titleColor;
-  // #21 支持真 Switch 等 trailing 控件（iOS 设置页规范）
-  final Widget? trailing;
 
   const SettingsRow({
     super.key,
@@ -302,7 +300,6 @@ class SettingsRow extends StatelessWidget {
     this.onTap,
     this.iconColor,
     this.titleColor,
-    this.trailing,
   });
 
   @override
@@ -325,9 +322,7 @@ class SettingsRow extends StatelessWidget {
               ),
             ),
           ),
-          if (trailing != null)
-            trailing!
-          else if (value.isNotEmpty)
+          if (value.isNotEmpty)
             Flexible(
               child: Text(
                 value,
@@ -338,7 +333,7 @@ class SettingsRow extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-          if (trailing == null && onTap != null) ...[
+          if (onTap != null) ...[
             const SizedBox(width: AppTheme.spacingXS),
             Icon(
               Icons.chevron_right,

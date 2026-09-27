@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,7 +13,6 @@ import 'pages/home/view.dart';
 import 'pages/history/view.dart';
 import 'pages/favorites/view.dart';
 import 'pages/settings/view.dart';
-import 'pages/live/view.dart';
 import 'pages/search/view.dart';
 import 'pages/search/controller.dart';
 import 'pages/settings/controller.dart';
@@ -640,7 +638,6 @@ class _ContentViewState extends State<ContentView>
     const HistoryPage(),
     const FavoritesPage(),
     const SettingsPage(),
-    const LivePage(), // 直播作为第 5 个 tab（index 4），选中态与底部导航联动
   ];
 
   Widget _buildMainTabView() {
@@ -946,9 +943,9 @@ class _ContentViewState extends State<ContentView>
                     children: [
                       TextButton(
                         onPressed: () {
-                          // 不同意则退出应用（iOS 上 SystemNavigator.pop 不生效 → 直接 exit）
+                          // 不同意则退出应用
                           Navigator.pop(ctx);
-                          exit(0);
+                          SystemNavigator.pop();
                         },
                         child: Text('不同意',
                             style:
@@ -982,40 +979,27 @@ class _ContentViewState extends State<ContentView>
 
   /// 直播：独立路由入口（不占底部 Tab）
   Widget _navLiveItem() {
-    final isSelected = MainTabController.instance.selectedTab.value == 4;
     return GestureDetector(
-      onTap: () {
-        setState(() {
-          MainTabController.instance.selectedTab.value = 4;
-        });
-      },
+      onTap: () => Get.toNamed('/live'),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOutCubic,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected
-              ? AppTheme.accentColor.withValues(alpha: 0.12)
-              : Colors.transparent,
+          color: AppTheme.accentColor.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(20),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.live_tv,
-                size: 18,
-                color: isSelected
-                    ? AppTheme.accentColor
-                    : Colors.white.withValues(alpha: 0.35)),
+            const Icon(Icons.live_tv, size: 18, color: AppTheme.accentColor),
             const SizedBox(height: 3),
             Text(
               '直播',
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.w500,
-                color: isSelected
-                    ? AppTheme.accentColor
-                    : Colors.white.withValues(alpha: 0.35),
+                color: AppTheme.accentColor,
               ),
             ),
           ],
@@ -1030,7 +1014,6 @@ class _ContentViewState extends State<ContentView>
     final isSelected = MainTabController.instance.selectedTab.value == index;
     return GestureDetector(
       onTap: () {
-        HapticFeedback.lightImpact();
         setState(() {
           MainTabController.instance.selectedTab.value = index;
         });

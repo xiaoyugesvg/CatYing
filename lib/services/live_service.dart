@@ -18,6 +18,30 @@ class LiveService extends GetxService {
   void onInit() {
     super.onInit();
     _restoreBlocked();
+    _restoreLives();
+  }
+
+  /// 从本地恢复多源配置
+  Future<void> _restoreLives() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString('live_lives');
+      if (saved != null && saved.isNotEmpty) {
+        final list = jsonDecode(saved);
+        if (list is List && list.isNotEmpty) {
+          final lives = list.whereType<Map>().toList();
+          if (lives.isNotEmpty) {
+            await loadFromLivesJson(lives);
+            return;
+          }
+        }
+      }
+      // 没有多源配置，尝试恢复单源 URL
+      final url = prefs.getString('live_url') ?? '';
+      if (url.isNotEmpty) {
+        _persistedUrl = url;
+      }
+    } catch (_) {}
   }
 
   Future<void> _restoreBlocked() async {
@@ -48,6 +72,8 @@ class LiveService extends GetxService {
   final groups = <LiveGroup>[].obs;
   /// 多直播源列表（参考图：综合直播[刚刚更新]/虎牙[未下载]/斗鱼[未下载]...）
   final sources = <LiveSource>[].obs;
+  /// 当前选中的直播源索引
+  final selectedSourceIndex = 0.obs;
   /// 公告列表（任意源可携带 announcements / notice 字段）
   final announcements = <String>[].obs;
   final isLoading = false.obs;
@@ -85,9 +111,11 @@ class LiveService extends GetxService {
       }
       if (_rawLives!.isNotEmpty) {
         await _loadSourceLocked(0);
+        selectedSourceIndex.value = 0;
       } else {
         channels.value = [];
         groups.value = [];
+        selectedSourceIndex.value = 0;
       }
     } finally {
       isLoading.value = false;
@@ -106,6 +134,7 @@ class LiveService extends GetxService {
         next.add(LiveSource(name: sources[i].name, loaded: i == index));
       }
       sources.value = next;
+      selectedSourceIndex.value = index;
     } finally {
       isLoading.value = false;
     }
@@ -154,6 +183,7 @@ class LiveService extends GetxService {
       _rebuildGroups();
       _rawLives = null;
       sources.value = [LiveSource(name: '自定义直播源', loaded: true)];
+      selectedSourceIndex.value = 0;
       if (list.isEmpty) {
         error.value = '未解析到频道';
       } else {
@@ -174,6 +204,7 @@ class LiveService extends GetxService {
       if (_rawLives!.isEmpty) {
         await clearAll();
       } else {
+        await _persistLives();
         await loadFromLivesJson(_rawLives!);
       }
     } else {
@@ -188,6 +219,86 @@ class LiveService extends GetxService {
     } else if (_persistedUrl != null && _persistedUrl!.isNotEmpty) {
       await loadFromUrl(_persistedUrl!);
     }
+  }
+
+  /// 添加一个新的直播源（追加到列表末尾）
+  /// 单源模式下自动转成多源模式
+  Future<void> addSource(String url, {String? name}) async {
+    url = url.trim();
+    if (url.isEmpty) return;
+    isLoading.value = true;
+    error.value = null;
+    try {
+      final newItem = <String, dynamic>{
+        'name': name?.trim().isEmpty ?? true ? '直播源${sources.length + 1}' : name!,
+        'url': url,
+      };
+      if (_rawLives == null) {
+        // 单源模式 → 先把当前的转成多源第一项，再追加新源
+        if (_persistedUrl != null && _persistedUrl!.isNotEmpty) {
+          _rawLives = [
+            {'name': '自定义直播源', 'url': _persistedUrl},
+            newItem,
+          ];
+        } else {
+          _rawLives = [newItem];
+        }
+        await _persistLives();
+        await loadFromLivesJson(_rawLives!);
+      } else {
+        // 多源模式：直接追加
+        _rawLives!.add(newItem);
+        sources.add(LiveSource(name: newItem['name'] as String, loaded: false));
+        await _persistLives();
+        // 加载新增的源
+        final newIndex = _rawLives!.length - 1;
+        await loadSource(newIndex);
+      }
+    } catch (e) {
+      error.value = '添加失败：$e';
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  /// 更新指定索引的直播源 URL（设置页编辑用）
+  Future<void> updateSourceUrl(int index, String url) async {
+    url = url.trim();
+    if (url.isEmpty || index < 0 || index >= sources.length) return;
+    isLoading.value = true;
+    error.value = null;
+    try {
+      if (_rawLives != null && index < _rawLives!.length) {
+        // 多源模式
+        _rawLives![index]['url'] = url;
+        await _persistLives();
+        await loadSource(index);
+      } else {
+        // 单源模式
+        await loadFromUrl(url);
+      }
+    } catch (e) {
+      error.value = '更新失败：$e';
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  /// 获取指定源的 URL（设置页编辑用）
+  String? getSourceUrl(int index) {
+    if (_rawLives != null && index < _rawLives!.length) {
+      return _rawLives![index]['url']?.toString();
+    }
+    return _persistedUrl;
+  }
+
+  /// 持久化多源配置到本地
+  Future<void> _persistLives() async {
+    if (_rawLives == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('live_lives', jsonEncode(_rawLives));
+    } catch (_) {}
   }
 
   Future<String> _fetch(String url, {String? ua}) async {
@@ -303,11 +414,14 @@ class LiveService extends GetxService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('live_url');
+      await prefs.remove('live_lives');
     } catch (_) {}
     _persistedUrl = null;
     channels.value = [];
     groups.value = [];
     sources.value = [];
+    selectedSourceIndex.value = 0;
+    selectedGroup.value = 0;
     announcements.value = [];
     _rawLives = null;
     error.value = null;

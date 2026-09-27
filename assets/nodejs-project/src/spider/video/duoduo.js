@@ -26,7 +26,7 @@ async function category(inReq, _outResp) {
     const tid = inReq.body.id;
     const pg = inReq.body.page;
     let page = pg || 1;
-    if (page == 0) page = 1;
+    if (page === 0) page = 1;
     let reqUrl = url + `/index.php/vod/show/id/${tid}/page/${pg}.html`;
     let html = await request(reqUrl);
     const $ = load(html);

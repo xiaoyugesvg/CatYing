@@ -1109,7 +1109,86 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   /// 播放按钮 - 对应 Swift playButton (仅未播放且有 vodInfo 时显示)
+  Widget _buildPlayButton() {
+    return Obx(() {
+      if (_controller.isPlaying.value || _controller.vodInfo.value == null) {
+        return const SizedBox.shrink();
+      }
+      return GestureDetector(
+        onTap: () {
+          _controller.selectEpisode(0);
+          _saveHistoryForCurrentEpisode();
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: AppTheme.spacingMD),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF5CB67B), Color(0xFF7DCEA0)],
+            ),
+            borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.play_arrow, color: Colors.white, size: 18),
+              SizedBox(width: AppTheme.spacingSM),
+              Text(
+                '播放',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    });
+  }
 
+  // MARK: - 线路选择
+
+  /// 线路选择 - 对应 Swift flagSelector (AppCard)
+  Widget _buildFlagSelector() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppTheme.spacingLG, AppTheme.spacingMD, AppTheme.spacingLG, 0),
+      child: AppCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SectionHeader(title: '播放线路', icon: Icons.settings_input_antenna),
+            const SizedBox(height: AppTheme.spacingSM),
+            Obx(() => SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: _controller.flags.map((flag) {
+                      final isSelected =
+                          _controller.selectedFlag.value == flag;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: AppTheme.spacingSM),
+                        child: _PillChip(
+                          title: flag,
+                          isSelected: isSelected,
+                          onTap: () {
+                            _controller.selectFlag(flag);
+                            if (_controller.isPlaying.value) {
+                              _saveHistoryForCurrentEpisode();
+                            }
+                          },
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 播放线路 + 清晰度 + 选集播放 —— 合并成一张独立卡片（三段式底部）
   Widget _buildPlaybackCard() {
     // 有一条也显示，对齐参考图（播放源/画质/合集完整三段）
     final hasFlag = _controller.flags.isNotEmpty;

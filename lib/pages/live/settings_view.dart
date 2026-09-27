@@ -203,7 +203,8 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
   Widget _sourceTile(int index, LiveSource src) {
     final svc = LiveService.instance;
     final loaded = src.loaded;
-    final canEdit = svc.currentUrl != null && svc.currentUrl!.isNotEmpty;
+    final sourceUrl = svc.getSourceUrl(index);
+    final canEdit = sourceUrl != null && sourceUrl.isNotEmpty;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       leading: Container(
@@ -242,7 +243,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               context: context,
               builder: (ctx) {
                 final ctrl =
-                    TextEditingController(text: svc.currentUrl ?? '');
+                    TextEditingController(text: sourceUrl ?? '');
                 return AlertDialog(
                   backgroundColor: const Color(0xFF1C1C1E),
                   title: const Text('编辑直播源',
@@ -267,7 +268,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               },
             );
             if (url != null && url.isNotEmpty) {
-              await svc.loadFromUrl(url);
+              await svc.updateSourceUrl(index, url);
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                     content: Text(svc.error.value == null
@@ -368,13 +369,14 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
           },
         );
         if (url != null && url.isNotEmpty) {
-          await LiveService.instance.loadFromUrl(url);
+          await LiveService.instance.addSource(url);
           if (mounted) {
             final err = LiveService.instance.error.value;
             final count = LiveService.instance.channels.length;
+            final srcCount = LiveService.instance.sources.length;
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                 content: Text(err == null
-                    ? '已添加直播源，共 $count 个频道'
+                    ? '已添加第 $srcCount 个直播源，共 $count 个频道'
                     : '添加失败：$err'),
                 duration: const Duration(seconds: 3)));
           }
