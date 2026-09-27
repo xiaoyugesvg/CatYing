@@ -1225,15 +1225,17 @@ class _CircularLogoProgress extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 28),
-        Text(
-          caption,
-          style: TextStyle(
-            color: failed ? Colors.redAccent : AppTheme.textSecondary,
-            fontSize: AppTheme.fontSubhead,
-            letterSpacing: 0.5,
+        if (caption.isNotEmpty) ...[
+          const SizedBox(height: 28),
+          Text(
+            caption,
+            style: TextStyle(
+              color: failed ? Colors.redAccent : AppTheme.textSecondary,
+              fontSize: AppTheme.fontSubhead,
+              letterSpacing: 0.5,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
