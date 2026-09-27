@@ -1405,6 +1405,27 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   widget.onBack!();
                 },
               ),
+            // 切歌（上一集/下一集）——随返回同行，底部不再重复
+            if (widget.canPlayPrevious)
+              _iconButton(
+                icon: Icons.skip_previous,
+                size: 20,
+                width: 40,
+                onTap: () {
+                  _scheduleHideControls();
+                  widget.onPlayPrevious?.call();
+                },
+              ),
+            if (widget.canPlayNext)
+              _iconButton(
+                icon: Icons.skip_next,
+                size: 20,
+                width: 40,
+                onTap: () {
+                  _scheduleHideControls();
+                  widget.onPlayNext?.call();
+                },
+              ),
             const Spacer(),
 
             // 分辨率
@@ -1588,27 +1609,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               child: Row(
                 mainAxisSize: MainAxisSize.max,
                 children: [
-                  if (widget.canPlayPrevious)
-                    _iconButton(
-                      icon: Icons.skip_previous,
-                      size: 22,
-                      width: 36,
-                      onTap: () {
-                        _scheduleHideControls();
-                        widget.onPlayPrevious?.call();
-                      },
-                    ),
+                  // 切歌已上移顶栏（与返回对齐），底部只留播放控制
                   _buildPlayPauseButton(),
-                  if (widget.canPlayNext)
-                    _iconButton(
-                      icon: Icons.skip_next,
-                      size: 22,
-                      width: 36,
-                      onTap: () {
-                        _scheduleHideControls();
-                        widget.onPlayNext?.call();
-                      },
-                    ),
                   const Spacer(),
                   _iconButton(
                     icon: _volume > 0

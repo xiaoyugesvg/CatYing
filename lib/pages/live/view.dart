@@ -10,6 +10,8 @@ import 'package:media_kit_video/media_kit_video.dart'
 import '../../common/theme.dart';
 import '../../models/live_models.dart';
 import '../../services/live_service.dart';
+import '../../services/main_tab_controller.dart';
+import '../../services/player_fullscreen_controller.dart';
 import '../../widgets/video_player_pip.dart';
 import 'controller.dart';
 
@@ -125,7 +127,14 @@ class _LivePageState extends State<LivePage> {
                   child: Row(
                     children: [
                       GestureDetector(
-                        onTap: () => Get.back(),
+                        onTap: () {
+                          // tab 模式：返回切回首页；独立路由模式：退路由
+                          if (MainTabController.instance.selectedTab.value == 4) {
+                            MainTabController.instance.selectedTab.value = 0;
+                          } else {
+                            Get.back();
+                          }
+                        },
                         child: Container(
                           width: 36,
                           height: 36,
@@ -367,7 +376,11 @@ class _LivePageState extends State<LivePage> {
             child: GestureDetector(
               onTap: () {
                 _toggleFullscreen();
-                Get.back();
+                if (MainTabController.instance.selectedTab.value == 4) {
+                  MainTabController.instance.selectedTab.value = 0;
+                } else {
+                  Get.back();
+                }
               },
               child: Container(
                 width: 40,
@@ -791,6 +804,12 @@ class _LivePageState extends State<LivePage> {
 
   Future<void> _toggleFullscreen() async {
     setState(() => _fullscreen = !_fullscreen);
+    // 通知全局：全屏时隐藏底部悬浮导航栏
+    if (_fullscreen) {
+      PlayerFullscreenController.instance.enter('live');
+    } else {
+      PlayerFullscreenController.instance.exit('live');
+    }
     if (_fullscreen) {
       if (Platform.isIOS) {
         await SystemChrome.setPreferredOrientations(const [

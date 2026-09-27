@@ -36,10 +36,11 @@ class LiveService extends GetxService {
           }
         }
       }
-      // 没有多源配置，尝试恢复单源 URL
+      // 没有多源配置，尝试恢复单源 URL（自动加载，避免直播页空白）
       final url = prefs.getString('live_url') ?? '';
       if (url.isNotEmpty) {
         _persistedUrl = url;
+        await loadFromUrl(url);
       }
     } catch (_) {}
   }

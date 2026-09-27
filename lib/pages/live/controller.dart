@@ -1,5 +1,4 @@
 import 'package:get/get.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../models/live_models.dart';
 import '../../services/live_service.dart';
@@ -14,25 +13,12 @@ class LiveController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    _restorePersisted();
-    // 监听 service 中的源/分组变化，自动刷新 UI
+    // 恢复统一由 LiveService.onInit 完成（live_lives 优先 / live_url 自动加载），
+    // 这里只监听变化刷新 UI，避免双重恢复互相覆盖导致直播页空白
     ever(service.sources, (_) => update());
     ever(service.groups, (_) => update());
     ever(service.selectedSourceIndex, (_) => update());
     ever(service.selectedGroup, (_) => update());
-  }
-
-  /// 重启后自动恢复上次添加的直播源（保存过 m3u URL 且当前无任何配置时）
-  Future<void> _restorePersisted() async {
-    if (service.sources.isNotEmpty || service.channels.isNotEmpty) return;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final url = (prefs.getString('live_url') ?? '').trim();
-      if (url.isNotEmpty) {
-        await service.loadFromUrl(url);
-        update();
-      }
-    } catch (_) {}
   }
 
   /// 直播源列表
