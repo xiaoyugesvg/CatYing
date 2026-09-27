@@ -133,6 +133,30 @@ class LiveService extends GetxService {
     }
   }
 
+  /// 删除单个直播源（设置页）：多源从 lives 移除并重建，自定义单源清空全部
+  Future<void> removeSource(int index) async {
+    if (index < 0 || index >= sources.length) return;
+    if (_rawLives != null) {
+      if (index < _rawLives!.length) _rawLives!.removeAt(index);
+      if (_rawLives!.isEmpty) {
+        await clearAll();
+      } else {
+        await loadFromLivesJson(_rawLives!);
+      }
+    } else {
+      await clearAll();
+    }
+  }
+
+  /// 刷新单个直播源（设置页）
+  Future<void> reloadSource(int index) async {
+    if (_rawLives != null && index < _rawLives!.length) {
+      await loadSource(index);
+    } else if (_persistedUrl != null && _persistedUrl!.isNotEmpty) {
+      await loadFromUrl(_persistedUrl!);
+    }
+  }
+
   Future<String> _fetch(String url, {String? ua}) async {
     final dio = Dio(BaseOptions(
       connectTimeout: const Duration(seconds: 15),

@@ -111,6 +111,9 @@ class _LivePageState extends State<LivePage> {
           final groups = c.groups;
           final channels = c.channels;
           final current = c.currentChannel;
+          if (_fullscreen) {
+            return _buildFullscreen(context, c, current);
+          }
           return SafeArea(
             child: Column(
               children: [
@@ -270,6 +273,91 @@ class _LivePageState extends State<LivePage> {
   void _toggleAudioMode() {
     setState(() => _audioMode = !_audioMode);
     // 进入听剧时保持播放（后台可续播由 UIBackgroundModes=audio 保证）
+  }
+
+  /// 全屏：只显示视频画面（横屏铺满），左上返回、右上频道名+退出全屏
+  Widget _buildFullscreen(
+      BuildContext context, LiveController c, LiveChannel? current) {
+    final pad = MediaQuery.of(context).padding;
+    return Container(
+      color: Colors.black,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (_audioMode)
+            _buildAudioModeOverlay(c, current)
+          else if (_videoController != null && current != null)
+            Video(
+              controller: _videoController!,
+              controls: AdaptiveVideoControls,
+            )
+          else
+            Center(
+              child: Icon(Icons.live_tv,
+                  color: AppTheme.textTertiary, size: 56),
+            ),
+          // 左上：返回（对齐直播页顶栏）
+          Positioned(
+            top: 8 + pad.top,
+            left: 8 + pad.left,
+            child: GestureDetector(
+              onTap: () => Get.back(),
+              child: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.arrow_back_ios_new,
+                    color: Colors.white, size: 16),
+              ),
+            ),
+          ),
+          // 右上：当前频道名 + 退出全屏
+          Positioned(
+            top: 8 + pad.top,
+            right: 8 + pad.right,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (current != null)
+                  Container(
+                    constraints: const BoxConstraints(maxWidth: 180),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      current.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          const TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: _toggleFullscreen,
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.5),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.fullscreen_exit,
+                        color: Colors.white, size: 18),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildVideoArea(LiveController c, LiveChannel? current) {
@@ -509,8 +597,6 @@ class _LivePageState extends State<LivePage> {
       if (Platform.isIOS) {
         await SystemChrome.setPreferredOrientations(const [
           DeviceOrientation.portraitUp,
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
         ]);
       }
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);

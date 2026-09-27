@@ -67,13 +67,14 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               borderRadius: BorderRadius.circular(14),
             ),
             child: Obx(() {
-              final groups = LiveService.instance.groups;
-              final items = groups.isEmpty
+              final srcs = LiveService.instance.sources;
+              final items = srcs.isEmpty
                   ? <Widget>[
                       const _EmptyRow(),
                     ]
                   : [
-                      for (final g in groups) _sourceTile(g.name),
+                      for (var i = 0; i < srcs.length; i++)
+                        _sourceTile(i, srcs[i]),
                       _addTile(),
                     ];
               return Column(children: items);
@@ -204,34 +205,41 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
     );
   }
 
-  Widget _sourceTile(String name) {
+  Widget _sourceTile(int index, LiveSource src) {
+    final svc = LiveService.instance;
+    final loaded = src.loaded;
+    final canEdit = svc.currentUrl != null && svc.currentUrl!.isNotEmpty;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       leading: Container(
         width: 36,
         height: 36,
         decoration: BoxDecoration(
-          color: AppTheme.accentColor.withValues(alpha: 0.18),
+          color: loaded
+              ? AppTheme.accentColor.withValues(alpha: 0.18)
+              : Colors.white.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(10),
         ),
-        child: const Icon(Icons.live_tv, color: AppTheme.accentColor, size: 20),
+        child: Icon(Icons.live_tv,
+            color: loaded ? AppTheme.accentColor : Colors.white38, size: 20),
       ),
-      title: Text(name,
-          style:
-              const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500)),
-      subtitle: const Text('已加载',
-          style: TextStyle(color: Colors.white38, fontSize: 12)),
+      title: Text(src.name,
+          style: const TextStyle(
+              color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500)),
+      subtitle: Text(loaded ? '刚刚更新' : '未下载',
+          style: TextStyle(
+              color: loaded ? Colors.white54 : Colors.white38, fontSize: 12)),
       trailing: PopupMenuButton<String>(
         color: const Color(0xFF2A2A2E),
         icon: const Icon(Icons.more_vert, color: Colors.white54),
         onSelected: (v) async {
-          final svc = LiveService.instance;
           if (v == 'refresh') {
-            await svc.reloadCurrent();
+            await svc.reloadSource(index);
             final err = svc.error.value;
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(err == null ? '已刷新 $name' : '刷新失败：$err')));
+                  content: Text(
+                      err == null ? '已刷新 ${src.name}' : '刷新失败：$err')));
             }
             setState(() {});
           } else if (v == 'edit') {
@@ -268,32 +276,54 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                     content: Text(svc.error.value == null
-                        ? '已更新 $name'
+                        ? '已更新 ${src.name}'
                         : '更新失败：${svc.error.value}'),
                     duration: const Duration(seconds: 3)));
               }
               setState(() {});
             }
           } else if (v == 'delete') {
-            await svc.clearAll();
-            if (mounted) {
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(SnackBar(content: Text('已删除 $name')));
+            final ok = await showDialog<bool>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                backgroundColor: const Color(0xFF1C1C1E),
+                title: const Text('删除直播源',
+                    style: TextStyle(color: Colors.white, fontSize: 15)),
+                content: Text('确定删除「${src.name}」吗？',
+                    style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('取消')),
+                  TextButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('删除',
+                          style: TextStyle(color: Colors.redAccent))),
+                ],
+              ),
+            );
+            if (ok == true) {
+              await svc.removeSource(index);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('已删除 ${src.name}')));
+              }
+              setState(() {});
             }
-            setState(() {});
           }
         },
-        itemBuilder: (_) => const [
-          PopupMenuItem(
+        itemBuilder: (_) => [
+          const PopupMenuItem(
               value: 'refresh',
               child: Text('立即刷新', style: TextStyle(color: Colors.white70))),
-          PopupMenuItem(
-              value: 'edit',
-              child: Text('编辑直播源', style: TextStyle(color: Colors.white70))),
-          PopupMenuItem(
+          if (canEdit)
+            const PopupMenuItem(
+                value: 'edit',
+                child: Text('编辑直播源', style: TextStyle(color: Colors.white70))),
+          const PopupMenuItem(
               value: 'delete',
-              child: Text('删除',
-                  style: TextStyle(color: Colors.redAccent))),
+              child:
+                  Text('删除', style: TextStyle(color: Colors.redAccent))),
         ],
       ),
     );
