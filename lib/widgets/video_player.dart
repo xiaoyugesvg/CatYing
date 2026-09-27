@@ -1409,6 +1409,27 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   widget.onBack!();
                 },
               ),
+            // 上一集/下一集：顶栏与返回同一水平线（切歌不再占用底部行）
+            if (widget.canPlayPrevious)
+              _iconButton(
+                icon: Icons.skip_previous,
+                size: 20,
+                width: 40,
+                onTap: () {
+                  _scheduleHideControls();
+                  widget.onPlayPrevious?.call();
+                },
+              ),
+            if (widget.canPlayNext)
+              _iconButton(
+                icon: Icons.skip_next,
+                size: 20,
+                width: 40,
+                onTap: () {
+                  _scheduleHideControls();
+                  widget.onPlayNext?.call();
+                },
+              ),
             const Spacer(),
 
             // 分辨率
@@ -1592,27 +1613,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               child: Row(
                 mainAxisSize: MainAxisSize.max,
                 children: [
-                  if (widget.canPlayPrevious)
-                    _iconButton(
-                      icon: Icons.skip_previous,
-                      size: 22,
-                      width: 36,
-                      onTap: () {
-                        _scheduleHideControls();
-                        widget.onPlayPrevious?.call();
-                      },
-                    ),
                   _buildPlayPauseButton(),
-                  if (widget.canPlayNext)
-                    _iconButton(
-                      icon: Icons.skip_next,
-                      size: 22,
-                      width: 36,
-                      onTap: () {
-                        _scheduleHideControls();
-                        widget.onPlayNext?.call();
-                      },
-                    ),
                   const Spacer(),
                   _iconButton(
                     icon: _volume > 0
