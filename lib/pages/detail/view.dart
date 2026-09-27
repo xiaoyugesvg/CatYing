@@ -478,13 +478,11 @@ class _DetailPageState extends State<DetailPage> {
     // 网页播放器页（非直链媒体 URL）→ 用 WebView 兜底播放
     // （对应 catmovie WebviewView：第三方解析页 / parse=1 网页端 / player 页）
     if (_isWebPageUrl(url)) {
-      // 4:3 固定高度: Webview 内嵌在 Column 时若高度塌陷, 网页播放会有声无画面
-      return AspectRatio(
-        aspectRatio: 4 / 3,
-        child: WebviewPlayerPage(
-          url: url,
-          title: _controller.vodInfo.value?.name,
-        ),
+      // 内嵌模式: 4:3 固定高度(内部处理), 避免 Column 内高度塌陷致有声无画面
+      return WebviewPlayerPage(
+        url: url,
+        title: _controller.vodInfo.value?.name,
+        embedded: true,
       );
     }
     final headers = _controller.playHeaders.isNotEmpty
@@ -498,13 +496,11 @@ class _DetailPageState extends State<DetailPage> {
         ? PlayerEngine.fromStoredValue(_prefsPlayTypeVod ?? 0)
         : PlayerEngine.mpv;
     if (engine == PlayerEngine.webview) {
-      // 同上: 内嵌模式固定 4:3 高度, 避免 Column 内高度塌陷
-      return AspectRatio(
-        aspectRatio: 4 / 3,
-        child: WebviewPlayerPage(
-          url: url,
-          title: _controller.vodInfo.value?.name,
-        ),
+      // 同上: 内嵌模式
+      return WebviewPlayerPage(
+        url: url,
+        title: _controller.vodInfo.value?.name,
+        embedded: true,
       );
     }
 

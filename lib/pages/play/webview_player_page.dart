@@ -12,11 +12,15 @@ import 'package:webview_flutter/webview_flutter.dart';
 class WebviewPlayerPage extends StatefulWidget {
   final String url;
   final String? title;
+  /// 内嵌模式：详情页播放器区域内嵌显示（4:3 固定高度，不强制横屏）。
+  /// 默认 false = 全屏独立页（Scaffold + 横屏 + 浮动返回）。
+  final bool embedded;
 
   const WebviewPlayerPage({
     super.key,
     required this.url,
     this.title,
+    this.embedded = false,
   });
 
   @override
@@ -30,11 +34,13 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
   @override
   void initState() {
     super.initState();
-    // 网页播放页强制横屏（视频播放体验）
-    SystemChrome.setPreferredOrientations(const [
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
+    // 网页播放页强制横屏（仅全屏页；内嵌模式保持竖屏布局）
+    if (!widget.embedded) {
+      SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
     _initController(widget.url);
   }
 
@@ -79,17 +85,44 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
 
   @override
   void dispose() {
-    // 恢复允许竖屏 + 横屏
-    SystemChrome.setPreferredOrientations(const [
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
+    // 恢复允许竖屏 + 横屏（仅全屏页改过方向）
+    if (!widget.embedded) {
+      SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final body = Column(
+      children: [
+        // 加载进度条
+        if (_loadingProgress > 0 && _loadingProgress < 100)
+          LinearProgressIndicator(
+            value: _loadingProgress / 100.0,
+            minHeight: 2,
+            backgroundColor: Colors.white12,
+            valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+          ),
+        Expanded(
+          child: WebViewWidget(controller: _controller),
+        ),
+      ],
+    );
+    if (widget.embedded) {
+      // 内嵌模式：4:3 固定高度（Column 内不会高度塌陷），无 Scaffold/返回按钮
+      return AspectRatio(
+        aspectRatio: 4 / 3,
+        child: ColoredBox(
+          color: Colors.black,
+          child: body,
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: Colors.black,
       resizeToAvoidBottomInset: false,
@@ -109,21 +142,7 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.startTop,
-      body: Column(
-        children: [
-          // 加载进度条
-          if (_loadingProgress > 0 && _loadingProgress < 100)
-            LinearProgressIndicator(
-              value: _loadingProgress / 100.0,
-              minHeight: 2,
-              backgroundColor: Colors.white12,
-              valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
-            ),
-          Expanded(
-            child: WebViewWidget(controller: _controller),
-          ),
-        ],
-      ),
+      body: body,
     );
   }
 }
