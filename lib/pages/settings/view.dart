@@ -564,13 +564,21 @@ class _SettingsPageState extends State<SettingsPage> {
           SettingsRow(
             icon: Icons.offline_bolt_outlined,
             title: '源文件缓存',
-            value: _sourceCacheEnabled ? '已开启' : '已关闭',
+            value: '',
             onTap: () async {
               setState(() => _sourceCacheEnabled = !_sourceCacheEnabled);
               final prefs = await SharedPreferences.getInstance();
               await prefs.setBool(
                   'source_cache_enabled', _sourceCacheEnabled);
             },
+            trailing: Switch(
+              value: _sourceCacheEnabled,
+              onChanged: (v) async {
+                setState(() => _sourceCacheEnabled = v);
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('source_cache_enabled', v);
+              },
+            ),
           ),
           Divider(color: AppTheme.borderLight, height: 1),
           // 自动清理
