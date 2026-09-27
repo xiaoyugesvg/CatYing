@@ -163,6 +163,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   // —— 播放设置面板状态（对照参考图）——
   int _sleepMinutes = 0; // 0=不启用
+  Timer? _sleepTimer;
   int _playOrderMode = 0; // 0=播完暂停 1=自动下一集 2=循环本集
   bool _flipH = false;
   bool _flipV = false;
@@ -350,7 +351,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     });
 
     _player.stream.completed.listen((completed) {
-      if (completed) widget.onEnded?.call();
+      if (!completed) return;
+      if (_playOrderMode == 2) {
+        // 循环本集
+        _player.open(Media(widget.url, httpHeaders: widget.headers));
+      } else if (_playOrderMode == 1) {
+        // 自动下一集（交给外层切换）
+        widget.onEnded?.call();
+      } else {
+        // 播完暂停
+        _player.pause();
+        widget.onEnded?.call();
+      }
     });
 
     _volume = _player.state.volume;
@@ -941,6 +953,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _indicatorTimer?.cancel();
     _timeTimer?.cancel();
     _batteryStateSub?.cancel();
+    _sleepTimer?.cancel();
     // iOS：离开播放页，释放原生 PiP 常驻实例
     if (Platform.isIOS) {
       VideoPlayerPip.instance.releaseIos();
@@ -996,14 +1009,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 视频画面
+        // 视频画面（左右/上下翻转）
         Positioned.fill(
-          child: Video(
-            key: ValueKey('video_$_videoRebuildKey'),
-            controller: _controller,
-            controls: null,
-            fit: _videoFit.boxFit,
-            aspectRatio: _videoFit.aspectRatio,
+          child: Transform(
+            transform: Matrix4.identity()
+              ..scale(_flipH ? -1 : 1, _flipV ? -1 : 1),
+            alignment: Alignment.center,
+            child: Video(
+              key: ValueKey('video_$_videoRebuildKey'),
+              controller: _controller,
+              controls: null,
+              fit: _videoFit.boxFit,
+              aspectRatio: _videoFit.aspectRatio,
+            ),
           ),
         ),
 
@@ -2354,9 +2372,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                           _settingsActionRow(
                             icon: Icons.settings,
                             title: '弹幕设置',
-                            onTap: () {
-                              _showMessage('请到 设置 → 弹幕 API 配置地址');
-                            },
+                            onTap: _pickDanmuSettings,
                           ),
                           _settingsActionRow(
                             icon: Icons.skip_next,
@@ -2568,6 +2584,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                     ? const Icon(Icons.check, color: AppTheme.accentColor)
                     : null,
                 onTap: () {
+                  _sleepTimer?.cancel();
+                  if (m > 0) {
+                    _sleepTimer = Timer(Duration(minutes: m), () {
+                      if (!mounted) return;
+                      if (_player.state.playing) _player.pause();
+                      setState(() => _sleepMinutes = 0);
+                      _showMessage('定时关闭：已暂停播放');
+                    });
+                  }
                   setState(() => _sleepMinutes = m);
                   Navigator.pop(ctx);
                   setState(() => _showSettingsSheet = false);
@@ -2575,6 +2600,58 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 弹幕设置：内嵌弹窗配置弹幕 API 地址，保存后自动匹配当前视频
+  void _pickDanmuSettings() {
+    final ctrl = TextEditingController(text: _danmuApiUrl);
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1C1E),
+        title: const Text('弹幕设置',
+            style: TextStyle(color: Colors.white, fontSize: 15)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: ctrl,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              decoration: const InputDecoration(
+                hintText: '弹幕 API 地址（Logvr-danmu / 弹弹play）',
+                hintStyle: TextStyle(color: Colors.white38),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text('保存后自动按当前视频匹配弹幕',
+                style: TextStyle(color: Colors.white38, fontSize: 11)),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () async {
+                final v = ctrl.text.trim();
+                try {
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setString('danmu_api_url', v);
+                } catch (_) {}
+                _danmuApiUrl = v;
+                _danmuLoaded = false;
+                if (mounted) {
+                  setState(() => _danmuOn = v.isNotEmpty ? _danmuOn : false);
+                }
+                Navigator.pop(ctx);
+                if (v.isNotEmpty) {
+                  _ensureDanmuLoaded();
+                }
+              },
+              child: const Text('保存')),
+        ],
       ),
     );
   }
@@ -2709,7 +2786,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.paused) {
-      _autoEnterPipOnBackground();
+      if (_bgPlay) {
+        _autoEnterPipOnBackground();
+      } else {
+        // 后台播放关闭 → 退后台暂停
+        if (_player.state.playing) _player.pause();
+      }
     }
   }
 
