@@ -38,7 +38,7 @@ class FavoritesPage extends StatelessWidget {
           AppTheme.spacingXL, AppTheme.spacingLG, AppTheme.spacingXL, AppTheme.spacingSM),
       child: Row(
         children: [
-          const Text(
+          Text(
             '我的收藏',
             style: TextStyle(
               color: AppTheme.textPrimary,
@@ -53,7 +53,7 @@ class FavoritesPage extends StatelessWidget {
             }
             return TextButton(
               onPressed: () => _showClearConfirmDialog(Get.context!, controller),
-              child: const Text(
+              child: Text(
                 '清空',
                 style: TextStyle(
                     color: AppTheme.textTertiary,
@@ -120,14 +120,14 @@ class FavoritesPage extends StatelessWidget {
         backgroundColor: AppTheme.backgroundSecondary,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppTheme.radiusLG)),
-        title: const Text('取消收藏',
+        title: Text('取消收藏',
             style: TextStyle(color: AppTheme.textPrimary)),
         content: Text('确定取消收藏「${item.vodName}」？',
-            style: const TextStyle(color: AppTheme.textSecondary)),
+            style: TextStyle(color: AppTheme.textSecondary)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('取消',
+            child: Text('取消',
                 style: TextStyle(color: AppTheme.textTertiary)),
           ),
           TextButton(
@@ -152,14 +152,14 @@ class FavoritesPage extends StatelessWidget {
         backgroundColor: AppTheme.backgroundSecondary,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppTheme.radiusLG)),
-        title: const Text('清空收藏',
+        title: Text('清空收藏',
             style: TextStyle(color: AppTheme.textPrimary)),
-        content: const Text('确定清空所有收藏？此操作不可恢复。',
+        content: Text('确定清空所有收藏？此操作不可恢复。',
             style: TextStyle(color: AppTheme.textSecondary)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('取消',
+            child: Text('取消',
                 style: TextStyle(color: AppTheme.textTertiary)),
           ),
           TextButton(

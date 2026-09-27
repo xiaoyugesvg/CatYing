@@ -167,7 +167,7 @@ class _SetupPageState extends State<SetupPage> {
                     ),
                   ),
                   const SizedBox(height: AppTheme.spacingXL),
-                  const Text(
+                  Text(
                     'TVBox',
                     style: TextStyle(
                       fontSize: 48,
@@ -177,7 +177,7 @@ class _SetupPageState extends State<SetupPage> {
                     ),
                   ),
                   const SizedBox(height: AppTheme.spacingSM),
-                  const Text(
+                  Text(
                     '极致视听 · 简洁至上',
                     style: TextStyle(
                       fontSize: AppTheme.fontSubhead,
@@ -193,7 +193,7 @@ class _SetupPageState extends State<SetupPage> {
                     alignment: Alignment.centerLeft,
                     padding: const EdgeInsets.only(
                         left: AppTheme.spacingXS),
-                    child: const Text(
+                    child: Text(
                       '接口配置',
                       style: TextStyle(
                         fontSize: AppTheme.fontHeadline,
@@ -219,9 +219,9 @@ class _SetupPageState extends State<SetupPage> {
                         Expanded(
                           child: TextField(
                             controller: _urlController,
-                            style: const TextStyle(
+                            style: TextStyle(
                                 color: AppTheme.textPrimary),
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               hintText: '请输入配置地址 (URL)',
                               hintStyle: TextStyle(
                                   color: AppTheme.textTertiary),

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart' hide Video;
+import 'package:media_kit_video/media_kit_video.dart' show VideoController, Video, AdaptiveVideoControls;
 
 import '../../common/theme.dart';
 import '../../services/live_service.dart';

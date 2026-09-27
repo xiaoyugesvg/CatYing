@@ -39,7 +39,7 @@ class _EpisodeListViewState extends State<EpisodeListView> {
         // 头部行：合集 正在播放：第X集 …… 查看全部
         Row(
           children: [
-            const Text(
+            Text(
               '合集',
               style: TextStyle(
                 color: AppTheme.textPrimary,
@@ -51,7 +51,7 @@ class _EpisodeListViewState extends State<EpisodeListView> {
             Expanded(
               child: Text(
                 '正在播放：$currentName',
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppTheme.textTertiary,
                   fontSize: AppTheme.fontCaption,
                 ),
@@ -70,7 +70,7 @@ class _EpisodeListViewState extends State<EpisodeListView> {
                   color: AppTheme.backgroundTertiary,
                   borderRadius: BorderRadius.circular(AppTheme.radiusSM),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
@@ -235,7 +235,7 @@ class _EpisodeListViewState extends State<EpisodeListView> {
         maxChildSize: 0.92,
         expand: false,
         builder: (context, scrollController) => Container(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             color: AppTheme.backgroundPrimary,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
@@ -259,7 +259,7 @@ class _EpisodeListViewState extends State<EpisodeListView> {
                 padding: const EdgeInsets.fromLTRB(20, 6, 12, 12),
                 child: Row(
                   children: [
-                    const Text(
+                    Text(
                       '合集',
                       style: TextStyle(
                         color: AppTheme.textPrimary,
@@ -277,7 +277,7 @@ class _EpisodeListViewState extends State<EpisodeListView> {
                           color: AppTheme.backgroundTertiary,
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(
+                        child: Icon(
                           Icons.close,
                           size: 18,
                           color: AppTheme.textSecondary,

@@ -342,7 +342,7 @@ class _ContentViewState extends State<ContentView>
                   ),
                 ),
                 const SizedBox(height: AppTheme.spacingXL),
-                const Text(
+                Text(
                   'TVBox',
                   style: TextStyle(
                     fontSize: 48,
@@ -352,7 +352,7 @@ class _ContentViewState extends State<ContentView>
                   ),
                 ),
                 const SizedBox(height: AppTheme.spacingSM),
-                const Text(
+                Text(
                   '极致视听 · 简洁至上',
                   style: TextStyle(
                     fontSize: AppTheme.fontSubhead,
@@ -366,7 +366,7 @@ class _ContentViewState extends State<ContentView>
                 Container(
                   alignment: Alignment.centerLeft,
                   padding: const EdgeInsets.only(left: AppTheme.spacingXS),
-                  child: const Text(
+                  child: Text(
                     '接口配置',
                     style: TextStyle(
                       fontSize: AppTheme.fontHeadline,
@@ -391,9 +391,9 @@ class _ContentViewState extends State<ContentView>
                       Expanded(
                         child: TextField(
                           controller: _vodUrlController,
-                          style: const TextStyle(
+                          style: TextStyle(
                               color: AppTheme.textPrimary),
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             hintText: '请输入点播接口地址 (URL)',
                             hintStyle: TextStyle(
                                 color: AppTheme.textTertiary),
@@ -477,7 +477,7 @@ class _ContentViewState extends State<ContentView>
                         Padding(
                           padding: const EdgeInsets.symmetric(
                               horizontal: AppTheme.spacingXS),
-                          child: const Text(
+                          child: Text(
                             '最近使用',
                             style: TextStyle(
                               fontSize: AppTheme.fontCaption,
@@ -507,7 +507,7 @@ class _ContentViewState extends State<ContentView>
                                   ),
                                   child: Row(
                                     children: [
-                                      const Icon(
+                                      Icon(
                                           Icons
                                               .history_rounded,
                                           size: AppTheme.fontCaption,
@@ -518,7 +518,7 @@ class _ContentViewState extends State<ContentView>
                                       Expanded(
                                         child: Text(
                                           url,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize:
                                                 AppTheme.fontCaption,
                                             color:
@@ -529,7 +529,7 @@ class _ContentViewState extends State<ContentView>
                                               TextOverflow.ellipsis,
                                         ),
                                       ),
-                                      const Icon(Icons.chevron_right,
+                                      Icon(Icons.chevron_right,
                                           size: 8,
                                           color: AppTheme.textTertiary),
                                     ],
@@ -781,7 +781,7 @@ class _ContentViewState extends State<ContentView>
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(AppTheme.radiusLG),
             ),
-            title: const Row(
+            title: Row(
               children: [
                 Icon(Icons.gavel,
                     color: AppTheme.accentColor, size: 22),
@@ -928,7 +928,7 @@ class _ContentViewState extends State<ContentView>
                         materialTapTargetSize:
                             MaterialTapTargetSize.shrinkWrap,
                       ),
-                      const Text(
+                      Text(
                         '不再提示',
                         style: TextStyle(
                           color: AppTheme.textSecondary,
@@ -946,7 +946,7 @@ class _ContentViewState extends State<ContentView>
                           Navigator.pop(ctx);
                           SystemNavigator.pop();
                         },
-                        child: const Text('不同意',
+                        child: Text('不同意',
                             style:
                                 TextStyle(color: AppTheme.textTertiary)),
                       ),
@@ -1111,7 +1111,7 @@ class _DisclaimerText extends StatelessWidget {
         children: [
           Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppTheme.textPrimary,
               fontSize: AppTheme.fontFootnote,
               fontWeight: FontWeight.bold,
@@ -1120,7 +1120,7 @@ class _DisclaimerText extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             body,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppTheme.textSecondary,
               fontSize: AppTheme.fontCaption,
               height: 1.5,

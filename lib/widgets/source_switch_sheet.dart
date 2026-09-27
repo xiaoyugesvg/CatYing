@@ -95,18 +95,18 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.search,
+                              Icon(Icons.search,
                                   color: AppTheme.textTertiary, size: 18),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: TextField(
                                   controller: _searchController,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       color: AppTheme.textPrimary,
                                       fontSize: 14),
                                   onChanged: (v) =>
                                       setState(() => _keyword = v.trim()),
-                                  decoration: const InputDecoration(
+                                  decoration: InputDecoration(
                                     hintText: '搜索源...',
                                     hintStyle: TextStyle(
                                         color: AppTheme.textTertiary,
@@ -124,7 +124,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                                     _searchController.clear();
                                     setState(() => _keyword = '');
                                   },
-                                  child: const Icon(Icons.close,
+                                  child: Icon(Icons.close,
                                       color: AppTheme.textTertiary, size: 16),
                                 ),
                             ],
@@ -169,7 +169,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                               .contains(_keyword.toLowerCase()))
                           .toList();
                   if (list.isEmpty) {
-                    return const Padding(
+                    return Padding(
                       padding: EdgeInsets.symmetric(vertical: 48),
                       child: Center(
                         child: Text(

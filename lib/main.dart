@@ -11,6 +11,7 @@ import 'services/app_log.dart';
 import 'services/app_state.dart';
 import 'services/background_service.dart';
 import 'services/live_service.dart';
+import 'services/tmdb_service.dart';
 import 'pages/search/controller.dart';
 
 void main() async {
@@ -48,6 +49,10 @@ void main() async {
 
   // 直播源服务（解析 lives / m3u）
   Get.put<LiveService>(LiveService(), permanent: true);
+
+  // TMDB 智能刮削
+  Get.put<TmdbService>(TmdbService(), permanent: true);
+  await TmdbService.instance.loadPrefs();
 
   // 初始化窗口管理器（桌面端）- 对应 Swift .defaultSize(width: 1200, height: 800)
   try {

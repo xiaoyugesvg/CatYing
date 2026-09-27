@@ -81,7 +81,7 @@ class VodCard extends StatelessWidget {
                 children: [
                   Text(
                     video.name,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppTheme.textPrimary,
                       fontSize: AppTheme.fontFootnote,
                       fontWeight: FontWeight.w500,
@@ -118,7 +118,7 @@ class VodCard extends StatelessWidget {
     if (picUrl.isEmpty || !picUrl.startsWith('http')) {
       return ColoredBox(
         color: AppTheme.backgroundTertiary,
-        child: const Center(
+        child: Center(
           child: Icon(Icons.movie, color: AppTheme.textTertiary, size: 24),
         ),
       );
@@ -149,7 +149,7 @@ class VodCard extends StatelessWidget {
       ),
       errorBuilder: (context, url, error) => ColoredBox(
         color: AppTheme.backgroundTertiary,
-        child: const Center(
+        child: Center(
           child: Icon(Icons.movie, color: AppTheme.textTertiary, size: 24),
         ),
       ),

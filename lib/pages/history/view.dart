@@ -46,7 +46,7 @@ class HistoryPage extends StatelessWidget {
           AppTheme.spacingXL, AppTheme.spacingLG, AppTheme.spacingXL, AppTheme.spacingSM),
       child: Row(
         children: [
-          const Text(
+          Text(
             '历史记录',
             style: TextStyle(
               color: AppTheme.textPrimary,
@@ -59,7 +59,7 @@ class HistoryPage extends StatelessWidget {
             if (CacheStore.instance.records.isEmpty) return const SizedBox.shrink();
             return TextButton(
               onPressed: () => _showClearConfirmDialog(Get.context!, controller),
-              child: const Text(
+              child: Text(
                 '清空',
                 style: TextStyle(
                     color: AppTheme.textTertiary,
@@ -115,14 +115,14 @@ class HistoryPage extends StatelessWidget {
         backgroundColor: AppTheme.backgroundSecondary,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppTheme.radiusLG)),
-        title: const Text('删除记录',
+        title: Text('删除记录',
             style: TextStyle(color: AppTheme.textPrimary)),
         content: Text('确定删除「${item.vodName}」的观看记录？',
-            style: const TextStyle(color: AppTheme.textSecondary)),
+            style: TextStyle(color: AppTheme.textSecondary)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('取消',
+            child: Text('取消',
                 style: TextStyle(color: AppTheme.textTertiary)),
           ),
           TextButton(
@@ -147,14 +147,14 @@ class HistoryPage extends StatelessWidget {
         backgroundColor: AppTheme.backgroundSecondary,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppTheme.radiusLG)),
-        title: const Text('清空历史',
+        title: Text('清空历史',
             style: TextStyle(color: AppTheme.textPrimary)),
-        content: const Text('确定清空所有观看记录？此操作不可恢复。',
+        content: Text('确定清空所有观看记录？此操作不可恢复。',
             style: TextStyle(color: AppTheme.textSecondary)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('取消',
+            child: Text('取消',
                 style: TextStyle(color: AppTheme.textTertiary)),
           ),
           TextButton(
@@ -248,7 +248,7 @@ class _HistoryListItem extends StatelessWidget {
                   color: AppTheme.accentColor,
                 ),
               )
-            : const Icon(Icons.movie,
+            : Icon(Icons.movie,
                 color: AppTheme.textTertiary, size: 24),
       ),
     );
@@ -263,7 +263,7 @@ class _HistoryListItem extends StatelessWidget {
         // 标题 (最多 2 行)
         Text(
           record.vodName,
-          style: const TextStyle(
+          style: TextStyle(
             color: AppTheme.textPrimary,
             fontSize: AppTheme.fontBody,
             fontWeight: FontWeight.w600,
@@ -278,7 +278,7 @@ class _HistoryListItem extends StatelessWidget {
             padding: const EdgeInsets.only(top: 2),
             child: Text(
               record.playNote,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppTheme.textSecondary,
                 fontSize: AppTheme.fontFootnote,
               ),
@@ -309,12 +309,12 @@ class _HistoryListItem extends StatelessWidget {
         // 底部时间
         Row(
           children: [
-            const Icon(Icons.schedule,
+            Icon(Icons.schedule,
                 color: AppTheme.textTertiary, size: 11),
             const SizedBox(width: 4),
             Text(
               _formatUpdateTime(record.updateTime),
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppTheme.textTertiary,
                 fontSize: AppTheme.fontCaption,
               ),

@@ -103,7 +103,7 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             const SizedBox(height: AppTheme.spacingMD),
-            const Text(
+            Text(
               '正在重连服务...',
               style: TextStyle(
                 color: AppTheme.textSecondary,
@@ -153,7 +153,7 @@ class _HomePageState extends State<HomePage> {
                   constraints: const BoxConstraints(maxWidth: 140),
                   child: Obx(() => Text(
                         ApiConfig.instance.homeSourceBean.value?.name ?? '选择源',
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppTheme.textPrimary,
                           fontSize: AppTheme.fontHeadline,
                           fontWeight: FontWeight.bold,
@@ -213,7 +213,7 @@ class _HomePageState extends State<HomePage> {
                     color: Colors.white.withValues(alpha: 0.08),
                   ),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.search,
@@ -252,7 +252,7 @@ class _HomePageState extends State<HomePage> {
             color: AppTheme.backgroundTertiary,
             borderRadius: BorderRadius.circular(20),
           ),
-          child: const Row(
+          child: Row(
             children: [
               Icon(Icons.search, color: AppTheme.textTertiary, size: 16),
               SizedBox(width: 8),
@@ -337,7 +337,7 @@ class _HomePageState extends State<HomePage> {
                   width: 36,
                   child: Text(
                     filter.name,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: AppTheme.fontCaption,
                       fontWeight: FontWeight.w500,
@@ -412,7 +412,7 @@ class _HomePageState extends State<HomePage> {
                   padding: const EdgeInsets.only(top: AppTheme.spacingSM),
                   child: Text(
                     '当前源类型: ${source.typeDescription}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: AppTheme.fontCaption,
                     ),
@@ -599,7 +599,7 @@ class _HomeClockViewState extends State<_HomeClockView> {
           ),
           child: Text(
             _formatDate(date),
-            style: const TextStyle(
+            style: TextStyle(
               color: AppTheme.textSecondary,
               fontSize: AppTheme.fontFootnote,
               fontWeight: FontWeight.w500,

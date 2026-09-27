@@ -17,6 +17,7 @@ import '../../widgets/vod_card.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import '../../models/cache_store.dart';
 import '../../services/background_service.dart';
+import '../../services/tmdb_service.dart';
 import '../../services/player_fullscreen_controller.dart';
 import '../../services/main_tab_controller.dart';
 import '../../widgets/glass.dart';
@@ -110,12 +111,26 @@ class _DetailPageState extends State<DetailPage> {
           _controller.selectEpisode(_controller.selectedEpisodeIndex.value);
         }
         _refreshCollectState();
+        // TMDB 智能刮削（设置里可关）
+        _enrichFromTmdb();
       });
     }
   }
 
   void _onPipChanged() {
     if (mounted) setState(() {});
+  }
+
+  /// TMDB 智能刮削：配置了 Key 且开启自动时，补全海报/简介/演职员
+  Future<void> _enrichFromTmdb() async {
+    final tmdb = TmdbService.instance;
+    if (!tmdb.configured || !tmdb.autoScrape.value) return;
+    final info = _controller.vodInfo.value;
+    if (info == null) return;
+    final ok = await tmdb.enrich(info);
+    if (ok && mounted) {
+      setState(() {});
+    }
   }
 
   /// 冗余同步通道：WindowFullScreen 状态变化时同步 detail view 的 Rx
@@ -653,20 +668,20 @@ class _DetailPageState extends State<DetailPage> {
                       placeholder: (_, __) => Container(
                         color: AppTheme.backgroundTertiary,
                         alignment: Alignment.center,
-                        child: const Icon(Icons.movie_outlined,
+                        child: Icon(Icons.movie_outlined,
                             color: AppTheme.textTertiary, size: 28),
                       ),
                       errorWidget: (_, __, ___) => Container(
                         color: AppTheme.backgroundTertiary,
                         alignment: Alignment.center,
-                        child: const Icon(Icons.broken_image_outlined,
+                        child: Icon(Icons.broken_image_outlined,
                             color: AppTheme.textTertiary, size: 28),
                       ),
                     )
                   : Container(
                       color: AppTheme.backgroundTertiary,
                       alignment: Alignment.center,
-                      child: const Icon(Icons.movie_outlined,
+                      child: Icon(Icons.movie_outlined,
                           color: AppTheme.textTertiary, size: 28),
                     ),
             ),
@@ -684,7 +699,7 @@ class _DetailPageState extends State<DetailPage> {
                     Expanded(
                       child: Text(
                         info.name.isEmpty ? '未知片名' : info.name,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppTheme.textPrimary,
                           fontSize: AppTheme.fontTitle2,
                           fontWeight: FontWeight.w700,
@@ -742,7 +757,7 @@ class _DetailPageState extends State<DetailPage> {
                 else
                   Text(
                     '暂无简介内容',
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppTheme.textTertiary,
                       fontSize: AppTheme.fontCaption,
                     ),
@@ -807,7 +822,7 @@ class _DetailPageState extends State<DetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             '快速搜索',
             style: TextStyle(
               color: AppTheme.textPrimary,
@@ -887,7 +902,7 @@ class _DetailPageState extends State<DetailPage> {
         AnimatedCrossFade(
           firstChild: Text(
             info.des,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppTheme.textSecondary,
               fontSize: AppTheme.fontBody,
               height: 1.5,
@@ -897,7 +912,7 @@ class _DetailPageState extends State<DetailPage> {
           ),
           secondChild: Text(
             info.des,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppTheme.textSecondary,
               fontSize: AppTheme.fontBody,
               height: 1.5,
@@ -965,7 +980,7 @@ class _DetailPageState extends State<DetailPage> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(
+              SizedBox(
                 width: 36,
                 child: Text(
                   '导演',
@@ -978,7 +993,7 @@ class _DetailPageState extends State<DetailPage> {
               Expanded(
                 child: Text(
                   info.director,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppTheme.textSecondary,
                     fontSize: AppTheme.fontCaption,
                   ),
@@ -996,7 +1011,7 @@ class _DetailPageState extends State<DetailPage> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(
+              SizedBox(
                 width: 36,
                 child: Text(
                   '演员',
@@ -1009,7 +1024,7 @@ class _DetailPageState extends State<DetailPage> {
               Expanded(
                 child: Text(
                   info.actor,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppTheme.textSecondary,
                     fontSize: AppTheme.fontCaption,
                   ),
@@ -1148,7 +1163,7 @@ class _DetailPageState extends State<DetailPage> {
             ],
             if (hasEpisodes) ...[
               const SizedBox(height: AppTheme.spacingMD),
-              const Divider(height: 1, color: AppTheme.borderLight),
+              Divider(height: 1, color: AppTheme.borderLight),
               const SizedBox(height: AppTheme.spacingMD),
               const SectionHeader(title: '合集', icon: Icons.list),
               const SizedBox(height: AppTheme.spacingSM),

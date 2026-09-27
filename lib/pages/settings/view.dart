@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../common/theme.dart';
 import '../../services/api_config.dart';
+import '../../services/tmdb_service.dart';
 import '../../services/background_service.dart';
 import '../../models/source_bean.dart';
 import '../../models/player_engine.dart';
@@ -68,7 +69,7 @@ class _SettingsPageState extends State<SettingsPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   '设置',
                   style: TextStyle(
                     color: AppTheme.textPrimary,
@@ -96,6 +97,12 @@ class _SettingsPageState extends State<SettingsPage> {
                 const SectionHeader(title: '播放设置'),
                 const SizedBox(height: AppTheme.spacingSM),
                 _buildPlayerSettingsSection(),
+                const SizedBox(height: AppTheme.spacingXXL),
+
+                // TMDB 智能刮削
+                const SectionHeader(title: '元数据'),
+                const SizedBox(height: AppTheme.spacingSM),
+                _buildTmdbSection(),
                 const SizedBox(height: AppTheme.spacingXXL),
 
                 // 缓存
@@ -221,7 +228,7 @@ class _SettingsPageState extends State<SettingsPage> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppTheme.radiusLG),
         ),
-        title: const Text('选择应用背景',
+        title: Text('选择应用背景',
             style: TextStyle(color: AppTheme.textPrimary)),
         content: SizedBox(
           width: 360,
@@ -281,7 +288,7 @@ class _SettingsPageState extends State<SettingsPage> {
                             const Icon(Icons.photo_library_outlined,
                                 color: AppTheme.accentColor, size: 18),
                             const SizedBox(width: 10),
-                            const Text(
+                            Text(
                               '从相册选择图片',
                               style: TextStyle(
                                 color: AppTheme.textPrimary,
@@ -365,7 +372,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     : _truncateUrl(controller.vodApiUrl.value),
                 onTap: () => _showApiEditDialog(),
               )),
-          const Divider(color: AppTheme.borderLight, height: 1),
+          Divider(color: AppTheme.borderLight, height: 1),
           // 主页数据源
           Obx(() => SettingsRow(
                 icon: Icons.dns_outlined,
@@ -373,7 +380,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 value: ApiConfig.instance.homeSourceBean.value?.name ?? '未选择',
                 onTap: () => _showSourcePicker(),
               )),
-          const Divider(color: AppTheme.borderLight, height: 1),
+          Divider(color: AppTheme.borderLight, height: 1),
           // 重置配置 - 回到 setupView 重新输入源 URL
           SettingsRow(
             icon: Icons.restart_alt,
@@ -409,7 +416,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   onSelect: (e) => controller.setVodPlayerEngine(e),
                 ),
               )),
-          const Divider(color: AppTheme.borderLight, height: 1),
+          Divider(color: AppTheme.borderLight, height: 1),
           // 视频解码
           Obx(() => SettingsRow(
                 icon: Icons.memory,
@@ -424,7 +431,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               )),
           // MPV缓冲（始终显示）
-          const Divider(color: AppTheme.borderLight, height: 1),
+          Divider(color: AppTheme.borderLight, height: 1),
           Obx(() => SettingsRow(
                 icon: Icons.storage_outlined,
                 title: 'MPV缓冲',
@@ -437,7 +444,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   onSelect: (e) => controller.setVLCBufferMode(e),
                 ),
               )),
-          const Divider(color: AppTheme.borderLight, height: 1),
+          Divider(color: AppTheme.borderLight, height: 1),
           // 快进步长
           Obx(() => SettingsRow(
                 icon: Icons.fast_forward,
@@ -445,13 +452,86 @@ class _SettingsPageState extends State<SettingsPage> {
                 value: '${controller.playTimeStep.value}秒',
                 onTap: () => _showTimeStepSelector(),
               )),
-          const Divider(color: AppTheme.borderLight, height: 1),
+          Divider(color: AppTheme.borderLight, height: 1),
           // 弹幕 API（Logvr-danmu / 弹弹play 兼容）
           SettingsRow(
             icon: Icons.subtitles,
             title: '弹幕 API',
             value: _danmuApiUrl.isEmpty ? '未配置' : _danmuApiUrl,
             onTap: _showDanmuApiEditDialog,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // TMDB 智能刮削
+  // ============================================================
+
+  Widget _buildTmdbSection() {
+    final tmdb = TmdbService.instance;
+    return AppCard(
+      child: Column(
+        children: [
+          SettingsRow(
+            icon: Icons.movie_filter_outlined,
+            title: 'TMDB API Key',
+            value: tmdb.configured
+                ? '${tmdb.apiKey.value.substring(0, tmdb.apiKey.value.length.clamp(0, 6))}***'
+                : '未配置',
+            onTap: _showTmdbKeyDialog,
+          ),
+          Divider(color: AppTheme.borderLight, height: 1),
+          Obx(() => SettingsRow(
+                icon: Icons.auto_awesome,
+                title: '自动刮削元数据',
+                value: tmdb.autoScrape.value ? '已开启' : '已关闭',
+                onTap: () async {
+                  await tmdb.setAutoScrape(!tmdb.autoScrape.value);
+                  if (mounted) setState(() {});
+                },
+              )),
+          Divider(color: AppTheme.borderLight, height: 1),
+          SettingsRow(
+            icon: Icons.info_outline,
+            title: '说明',
+            value: '在 themoviedb.org 申请 Key',
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTmdbKeyDialog() {
+    final tmdb = TmdbService.instance;
+    final ctrl = TextEditingController(text: tmdb.apiKey.value);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1C1E),
+        title: const Text('TMDB API Key',
+            style: TextStyle(color: Colors.white, fontSize: 15)),
+        content: TextField(
+          controller: ctrl,
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          decoration: const InputDecoration(
+            hintText: '粘贴 API Key (v3)',
+            hintStyle: TextStyle(color: Colors.white38),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () async {
+              await tmdb.saveApiKey(ctrl.text);
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (mounted) setState(() {});
+            },
+            child: const Text('保存'),
           ),
         ],
       ),
@@ -479,7 +559,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       'source_cache_enabled', _sourceCacheEnabled);
                 },
               )),
-          const Divider(color: AppTheme.borderLight, height: 1),
+          Divider(color: AppTheme.borderLight, height: 1),
           // 自动清理
           SettingsRow(
             icon: Icons.auto_delete_outlined,
@@ -487,7 +567,7 @@ class _SettingsPageState extends State<SettingsPage> {
             value: const ['关闭', '每天', '每周', '每月'][_autoCleanIndex],
             onTap: _pickAutoClean,
           ),
-          const Divider(color: AppTheme.borderLight, height: 1),
+          Divider(color: AppTheme.borderLight, height: 1),
           // 清理源文件
           SettingsRow(
             icon: Icons.cleaning_services_outlined,
@@ -495,7 +575,7 @@ class _SettingsPageState extends State<SettingsPage> {
             value: '',
             onTap: () => controller.clearSourceCache(),
           ),
-          const Divider(color: AppTheme.borderLight, height: 1),
+          Divider(color: AppTheme.borderLight, height: 1),
           Obx(() => SettingsRow(
                 icon: Icons.delete_outline,
                 title: '清除应用缓存',
@@ -554,19 +634,19 @@ class _SettingsPageState extends State<SettingsPage> {
             title: '版本',
             value: '1.0.0',
           ),
-          const Divider(color: AppTheme.borderLight, height: 1),
+          Divider(color: AppTheme.borderLight, height: 1),
           Obx(() => SettingsRow(
                 icon: Icons.public,
                 title: '站点数量',
                 value: '${ApiConfig.instance.sourceBeanList.length}',
               )),
-          const Divider(color: AppTheme.borderLight, height: 1),
+          Divider(color: AppTheme.borderLight, height: 1),
           Obx(() => SettingsRow(
                 icon: Icons.auto_fix_high,
                 title: '解析数量',
                 value: '${ApiConfig.instance.parseBeanList.length}',
               )),
-          const Divider(color: AppTheme.borderLight, height: 1),
+          Divider(color: AppTheme.borderLight, height: 1),
           SettingsRow(
             icon: Icons.person_outline,
             title: '关于版本',
@@ -591,7 +671,7 @@ class _SettingsPageState extends State<SettingsPage> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppTheme.radiusLG),
         ),
-        title: const Text(
+        title: Text(
           '弹幕 API 地址',
           style: TextStyle(color: AppTheme.textPrimary),
         ),
@@ -600,13 +680,13 @@ class _SettingsPageState extends State<SettingsPage> {
           children: [
             TextField(
               controller: textController,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppTheme.textPrimary,
                 fontSize: AppTheme.fontSubhead,
               ),
               decoration: InputDecoration(
                 hintText: '输入 Logvr-danmu / 弹弹play API 地址，如 https://xx.vercel.app',
-                hintStyle: const TextStyle(
+                hintStyle: TextStyle(
                   color: AppTheme.textTertiary,
                   fontSize: AppTheme.fontSubhead,
                 ),
@@ -619,12 +699,12 @@ class _SettingsPageState extends State<SettingsPage> {
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 isDense: true,
-                prefixIcon: const Icon(Icons.subtitles,
+                prefixIcon: Icon(Icons.subtitles,
                     size: 18, color: AppTheme.textTertiary),
               ),
             ),
             const SizedBox(height: AppTheme.spacingMD),
-            const Text(
+            Text(
               '播放器会按当前视频 URL 请求 {API}/api/v2/comment?url=... 拉取弹幕',
               style: TextStyle(
                 color: AppTheme.textTertiary,
@@ -636,7 +716,7 @@ class _SettingsPageState extends State<SettingsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text(
+            child: Text(
               '取消',
               style: TextStyle(color: AppTheme.textSecondary),
             ),
@@ -677,7 +757,7 @@ class _SettingsPageState extends State<SettingsPage> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppTheme.radiusLG),
         ),
-        title: const Text(
+        title: Text(
           '点播接口地址',
           style: TextStyle(color: AppTheme.textPrimary),
         ),
@@ -687,13 +767,13 @@ class _SettingsPageState extends State<SettingsPage> {
             // 点播接口
             TextField(
               controller: vodController,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppTheme.textPrimary,
                 fontSize: AppTheme.fontSubhead,
               ),
               decoration: InputDecoration(
                 hintText: '输入点播接口地址',
-                hintStyle: const TextStyle(
+                hintStyle: TextStyle(
                   color: AppTheme.textTertiary,
                   fontSize: AppTheme.fontSubhead,
                 ),
@@ -706,7 +786,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 isDense: true,
-                prefixIcon: const Icon(Icons.movie_outlined,
+                prefixIcon: Icon(Icons.movie_outlined,
                     size: 18, color: AppTheme.textTertiary),
               ),
             ),
@@ -726,7 +806,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       ),
                       const SizedBox(width: AppTheme.spacingSM),
-                      const Text(
+                      Text(
                         '正在加载配置...',
                         style: TextStyle(
                           color: AppTheme.textSecondary,
@@ -765,7 +845,7 @@ class _SettingsPageState extends State<SettingsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消',
+            child: Text('取消',
                 style: TextStyle(color: AppTheme.textTertiary)),
           ),
           Obx(() => TextButton(
@@ -802,7 +882,7 @@ class _SettingsPageState extends State<SettingsPage> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppTheme.radiusLG),
         ),
-        title: const Text('主页数据源',
+        title: Text('主页数据源',
             style: TextStyle(color: AppTheme.textPrimary)),
         content: Obx(() {
           final homeKey = ApiConfig.instance.homeSourceBean.value?.key;
@@ -830,7 +910,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     subtitle: Text(
                       source.api,
-                      style: const TextStyle(
+                      style: TextStyle(
                           color: AppTheme.textTertiary, fontSize: 10),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -872,7 +952,7 @@ class _SettingsPageState extends State<SettingsPage> {
           borderRadius: BorderRadius.circular(AppTheme.radiusLG),
         ),
         title:
-            Text(title, style: const TextStyle(color: AppTheme.textPrimary)),
+            Text(title, style: TextStyle(color: AppTheme.textPrimary)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: options.map((option) {
@@ -917,7 +997,7 @@ class _SettingsPageState extends State<SettingsPage> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppTheme.radiusLG),
         ),
-        title: const Text('快进步长',
+        title: Text('快进步长',
             style: TextStyle(color: AppTheme.textPrimary)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -963,7 +1043,7 @@ class _SettingsPageState extends State<SettingsPage> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppTheme.radiusLG),
         ),
-        title: const Row(
+        title: Row(
           children: [
             Icon(Icons.restart_alt, color: Colors.redAccent, size: 22),
             SizedBox(width: 8),
@@ -977,7 +1057,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ],
         ),
-        content: const Text(
+        content: Text(
           '将清除已保存的点播接口地址、接口历史以及已下载的源缓存。\n\n'
           '播放器、主题、字体等本地设置会保留。\n\n'
           '重置后请重启应用，下次打开将回到初始设置界面。',
@@ -990,7 +1070,7 @@ class _SettingsPageState extends State<SettingsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消',
+            child: Text('取消',
                 style: TextStyle(color: AppTheme.textTertiary)),
           ),
           TextButton(
@@ -1005,7 +1085,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(AppTheme.radiusLG),
                   ),
-                  content: const Column(
+                  content: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(Icons.check_circle,
@@ -1067,7 +1147,7 @@ class _SettingsPageState extends State<SettingsPage> {
             const Icon(Icons.play_circle_filled,
                 color: AppTheme.accentColor, size: 48),
             const SizedBox(height: AppTheme.spacingLG),
-            const Text(
+            Text(
               'TVBox',
               style: TextStyle(
                 color: AppTheme.textPrimary,
@@ -1076,7 +1156,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
             const SizedBox(height: AppTheme.spacingXS),
-            const Text(
+            Text(
               '版本 1.0.0',
               style: TextStyle(
                 color: AppTheme.textTertiary,
@@ -1084,7 +1164,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
             const SizedBox(height: AppTheme.spacingXS),
-            const Text(
+            Text(
               '软件作者：包子',
               style: TextStyle(
                 color: AppTheme.textTertiary,

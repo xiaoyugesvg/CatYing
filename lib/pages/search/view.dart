@@ -91,7 +91,7 @@ class _SearchPageState extends State<SearchPage> {
         children: [
           // 返回按钮 - 对应 Swift .sheet dismiss
           IconButton(
-            icon: const Icon(Icons.arrow_back,
+            icon: Icon(Icons.arrow_back,
                 color: AppTheme.textPrimary, size: 22),
             onPressed: () {
               if (widget.onClose != null) {
@@ -116,18 +116,18 @@ class _SearchPageState extends State<SearchPage> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.search,
+                  Icon(Icons.search,
                       color: AppTheme.textSecondary, size: 18),
                   const SizedBox(width: AppTheme.spacingSM + AppTheme.spacingXS),
                   Expanded(
                     child: TextField(
                       controller: _inputController,
                       focusNode: _focusNode,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppTheme.textPrimary,
                         fontSize: AppTheme.fontHeadline,
                       ),
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         hintText: '搜索影片...',
                         hintStyle: TextStyle(
                             color: AppTheme.textTertiary,
@@ -158,7 +158,7 @@ class _SearchPageState extends State<SearchPage> {
                             _searchController.selectedSiteKey.value = null;
                             _searchController.isSearching.value = false;
                           },
-                          child: const Icon(Icons.cancel,
+                          child: Icon(Icons.cancel,
                               color: AppTheme.textTertiary, size: 18),
                         )
                       : const SizedBox.shrink()),
@@ -240,7 +240,7 @@ class _SearchPageState extends State<SearchPage> {
                   color: Colors.white.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     SizedBox(
@@ -381,7 +381,7 @@ class _SearchPageState extends State<SearchPage> {
               Row(
                 children: [
                   if (isSearching) ...[
-                    const SizedBox(
+                    SizedBox(
                       width: 10,
                       height: 10,
                       child: CircularProgressIndicator(
@@ -390,7 +390,7 @@ class _SearchPageState extends State<SearchPage> {
                       ),
                     ),
                     const SizedBox(width: AppTheme.spacingXS),
-                    const Text(
+                    Text(
                       '搜索中...',
                       style: TextStyle(
                         color: AppTheme.textTertiary,
@@ -400,7 +400,7 @@ class _SearchPageState extends State<SearchPage> {
                   ] else
                     Text(
                       '$count 条结果',
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppTheme.textTertiary,
                         fontSize: AppTheme.fontCaption,
                       ),
@@ -494,7 +494,7 @@ class _SearchPageState extends State<SearchPage> {
           if (_searchController.searchHistory.isNotEmpty) ...[
             Row(
               children: [
-                const Text(
+                Text(
                   '搜索历史',
                   style: TextStyle(
                     color: AppTheme.textPrimary,
@@ -507,10 +507,10 @@ class _SearchPageState extends State<SearchPage> {
                   onTap: () => _searchController.clearHistory(),
                   child: Row(
                     children: [
-                      const Icon(Icons.delete_outline,
+                      Icon(Icons.delete_outline,
                           color: AppTheme.textTertiary, size: 14),
                       const SizedBox(width: AppTheme.spacingXS),
-                      const Text(
+                      Text(
                         '清空',
                         style: TextStyle(
                           color: AppTheme.textTertiary,
