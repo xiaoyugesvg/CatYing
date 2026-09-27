@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:get/get.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/live_models.dart';
 
@@ -22,6 +23,10 @@ class LiveService extends GetxService {
 
   /// 原始 lives 配置缓存（loadSource 切源时重解析）
   List<Map<String, dynamic>>? _rawLives;
+
+  /// 最近一次成功加载的 m3u/txt URL（持久化到本地，重启自动恢复）
+  String? _persistedUrl;
+  String? get currentUrl => _persistedUrl;
 
   /// 从 tvbox JSON 的 lives 数组加载（多源：默认只加载第一个源，其余标记"未下载"）
   Future<void> loadFromLivesJson(List<dynamic> lives) async {
@@ -118,6 +123,8 @@ class LiveService extends GetxService {
       sources.value = [LiveSource(name: '自定义直播源', loaded: true)];
       if (list.isEmpty) {
         error.value = '未解析到频道';
+      } else {
+        await _persistUrl(url);
       }
     } catch (e) {
       error.value = '加载失败：$e';
