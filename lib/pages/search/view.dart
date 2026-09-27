@@ -149,6 +149,7 @@ class _SearchPageState extends State<SearchPage> {
                       ? GestureDetector(
                           onTap: () {
                             _inputController.clear();
+                            _focusNode.unfocus();
                             // 对应 Swift: 清空所有搜索状态
                             _searchController.keyword.value = '';
                             _searchController.resultsBySite.clear();
@@ -422,7 +423,7 @@ class _SearchPageState extends State<SearchPage> {
       // 对应 Swift: selectedSiteKey == nil → "请输入搜索关键词"
       if (_searchController.selectedSiteKey.value == null) {
         return const Center(
-          child: AppError(message: '请输入搜索关键词'),
+          child: AppError(message: '请选择上方站点查看结果'),
         );
       }
 
@@ -437,7 +438,7 @@ class _SearchPageState extends State<SearchPage> {
       // 对应 Swift: currentResults.isEmpty → "暂无搜索结果"
       if (_searchController.currentResults.isEmpty) {
         return const Center(
-          child: AppError(message: '暂无搜索结果'),
+          child: AppError(message: '暂无搜索结果，可尝试切换上方其他站点'),
         );
       }
 

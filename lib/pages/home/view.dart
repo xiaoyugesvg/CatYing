@@ -177,40 +177,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildSearchBar() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppTheme.spacingLG, vertical: AppTheme.spacingXS),
-      child: GestureDetector(
-        onTap: () {
-          if (widget.onSearchTap != null) {
-            widget.onSearchTap!();
-          } else {
-            Get.toNamed('/search');
-          }
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          decoration: BoxDecoration(
-            color: AppTheme.backgroundTertiary,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.search, color: AppTheme.textTertiary, size: 16),
-              SizedBox(width: 8),
-              Text(
-                '搜索影片、演员、导演...',
-                style: TextStyle(
-                    color: AppTheme.textTertiary, fontSize: AppTheme.fontSubhead),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildCategoryTabBar() {
     return SizedBox(
       height: 44,
@@ -667,12 +633,18 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
                 ),
                 GestureDetector(
                   onTap: () {
+                    final v = _ctrl.text.trim();
                     setState(() {
                       _expanded = false;
                       _ctrl.clear();
                     });
                     _focus.unfocus();
-                    widget.onOpenFull();
+                    if (v.isNotEmpty) {
+                      // 有关键词 → 直接带词搜索，不再丢词
+                      widget.onSubmitted(v);
+                    } else {
+                      widget.onOpenFull();
+                    }
                   },
                   child: Icon(Icons.search,
                       color: AppTheme.accentColor, size: 18),

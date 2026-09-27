@@ -154,12 +154,17 @@ class _DLNAPageState extends State<DLNAPage> {
       );
     }
     final keys = _deviceList.keys.toList();
+    final cardOffset = _casting ? 1 : 0;
     return ListView.separated(
-      itemCount: keys.length + (_isSearching ? 1 : 0),
+      itemCount: keys.length + (_isSearching ? 1 : 0) + cardOffset,
       separatorBuilder: (_, __) =>
           Divider(height: 1, color: Colors.white.withValues(alpha: 0.05)),
       itemBuilder: (context, index) {
-        if (index == keys.length) {
+        if (_casting && index == 0) {
+          return _buildControlCard();
+        }
+        final listIndex = index - cardOffset;
+        if (listIndex == keys.length) {
           // 列表底部"还在搜索"提示
           return const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
@@ -169,7 +174,7 @@ class _DLNAPageState extends State<DLNAPage> {
             ),
           );
         }
-        final key = keys[index];
+        final key = keys[listIndex];
         final device = _deviceList[key]!;
         return ListTile(
           leading: const Icon(Icons.tv, color: Colors.white70),

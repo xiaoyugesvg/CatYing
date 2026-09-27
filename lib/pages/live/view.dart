@@ -185,7 +185,7 @@ class _LivePageState extends State<LivePage> {
                                 ),
                               ),
                               const SizedBox(width: 2),
-                              const Icon(Icons.keyboard_arrow_down,
+                              Icon(Icons.keyboard_arrow_down,
                                   color: AppTheme.textTertiary, size: 16),
                             ],
                           ),
@@ -305,7 +305,7 @@ class _LivePageState extends State<LivePage> {
       builder: (ctx) => SafeArea(
         child: srcs.isEmpty
             ? ListTile(
-                leading: const Icon(Icons.info_outline,
+                leading: Icon(Icons.info_outline,
                     color: AppTheme.textTertiary, size: 20),
                 title: Text('暂无直播源，点右上角设置图标添加',
                     style: TextStyle(
@@ -314,8 +314,8 @@ class _LivePageState extends State<LivePage> {
             : Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.all(16),
+                  Padding(
+                    padding: const EdgeInsets.all(16),
                     child: Text('选择直播源',
                         style: TextStyle(
                             color: AppTheme.textPrimary, fontSize: 15)),

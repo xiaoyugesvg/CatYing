@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -945,9 +946,9 @@ class _ContentViewState extends State<ContentView>
                     children: [
                       TextButton(
                         onPressed: () {
-                          // 不同意则退出应用
+                          // 不同意则退出应用（iOS 上 SystemNavigator.pop 不生效 → 直接 exit）
                           Navigator.pop(ctx);
-                          SystemNavigator.pop();
+                          exit(0);
                         },
                         child: Text('不同意',
                             style:
@@ -1029,6 +1030,7 @@ class _ContentViewState extends State<ContentView>
     final isSelected = MainTabController.instance.selectedTab.value == index;
     return GestureDetector(
       onTap: () {
+        HapticFeedback.lightImpact();
         setState(() {
           MainTabController.instance.selectedTab.value = index;
         });

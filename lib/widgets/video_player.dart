@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:screen_brightness/screen_brightness.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart' show DragToMoveArea;
 import '../common/theme.dart';
@@ -629,9 +630,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       final base = _danmuApiUrl.replaceAll(RegExp(r'/+$'), '');
       final api =
           '$base/api/v2/comment?url=${Uri.encodeQueryComponent(url)}&format=json';
-      final http = await HttpClient().getUrl(Uri.parse(api));
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 8);
+      final http = await client.getUrl(Uri.parse(api));
       http.headers.set('User-Agent', 'NewTv/1.0');
-      final res = await http.close();
+      final res = await http.close().timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         final body = await res.transform(utf8.decoder).join();
         final list = parseDanmuBody(body);
@@ -711,7 +714,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   void _toggleControls() {
     if (_isLongPressSpeedLocked) {
+      // #26 倍速锁定后单击：解锁并显示控制条
       _unlockLongPressSpeed();
+      setState(() => _showControls = true);
+      _scheduleHideControls();
       return;
     }
     if (_isLocked) return;
@@ -907,7 +913,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   void _setBrightness(double b) {
-    setState(() => _brightness = b.clamp(0.0, 1.0));
+    final v = b.clamp(0.0, 1.0);
+    setState(() => _brightness = v);
+    // #7 真实亮度：同步 iOS/Android 系统屏幕亮度（0-255）
+    ScreenBrightness().setScreenBrightness(v * 255.0).catchError((_) {});
   }
 
   void _showIndicatorLater() {
@@ -1025,14 +1034,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           ),
         ),
 
-        // 亮度遮罩 - 用半透明黑色覆盖调整亮度
-        Positioned.fill(
-          child: IgnorePointer(
-            child: Container(
-              color: Colors.black.withValues(alpha: 1.0 - _brightness),
-            ),
-          ),
-        ),
+        // #7 亮度已改为真实系统亮度调节，移除黑色蒙层（避免对比度下降）
 
         // 缓冲指示器
         if (_isBuffering)
@@ -1165,10 +1167,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             behavior: HitTestBehavior.opaque,
             onTap: _toggleControls,
             onDoubleTapDown: (details) {
+              // #27 全屏时快进/快退区域收窄到 1/6，避免误触
+              final zone = (_isNativeFullscreen || _isImmersive) ? 1 / 6 : 1 / 4;
               final x = details.localPosition.dx;
-              if (x < width / 4) {
+              if (x < width * zone) {
                 _seekBy(-_seekStep, isLeft: true);
-              } else if (x > width * 3 / 4) {
+              } else if (x > width * (1 - zone)) {
                 _seekBy(_seekStep, isLeft: false);
               } else {
                 _togglePlayPause();
@@ -1736,7 +1740,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   Widget _buildLongPressSpeedHint() {
-    final speed = _playbackSpeed * 2;
+    // #25 显示实际使用的长按倍速（_longPressSpeed），不再用 _playbackSpeed*2
+    final speed = _longPressSpeed;
     final speedLabel = _formatSpeed(speed);
     final locked = _isLongPressSpeedLocked;
     return Positioned(
@@ -2017,7 +2022,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Widget _buildSpeedMenu() {
     final displaySpeed = _isLongPressSpeedLocked
-        ? _playbackSpeed * 2
+        ? _longPressSpeed
         : _playbackSpeed;
     return PopupMenuButton<double>(
       tooltip: '倍速',
@@ -2727,6 +2732,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   // ============================================================
 
   Future<void> _togglePiP() async {
+    // #46 手动/自动共用 _autoPipInFlight 门闩，避免双路径竞态重建
+    if (_autoPipInFlight) return;
     // iOS 端：系统级画中画（双播放器方案）
     if (Platform.isIOS) {
       if (VideoPlayerPip.instance.isIosActive) {

@@ -492,7 +492,7 @@ class _SettingsPageState extends State<SettingsPage> {
             icon: Icons.movie_filter_outlined,
             title: 'TMDB API Key',
             value: tmdb.configured
-                ? '${tmdb.apiKey.value.substring(0, tmdb.apiKey.value.length.clamp(0, 6))}***'
+                ? '${tmdb.apiKey.value.substring(0, tmdb.apiKey.value.length.clamp(0, 2))}${tmdb.apiKey.value.length <= 2 ? '' : '***'}'
                 : '未配置',
             onTap: _showTmdbKeyDialog,
           ),

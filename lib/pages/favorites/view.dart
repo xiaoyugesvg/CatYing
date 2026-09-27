@@ -78,9 +78,10 @@ class FavoritesPage extends StatelessWidget {
       }
 
       return GridView.builder(
-        padding: const EdgeInsets.all(AppTheme.spacingLG),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 4,
+        padding: const EdgeInsets.fromLTRB(AppTheme.spacingLG,
+            AppTheme.spacingLG, AppTheme.spacingLG, AppTheme.spacingLG + 80),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 150,
           childAspectRatio: 0.65,
           crossAxisSpacing: AppTheme.cardSpacing,
           mainAxisSpacing: AppTheme.cardSpacing,

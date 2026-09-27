@@ -41,6 +41,8 @@ dependencies:
   dlna_dart: ^0.1.0
   # 应用内 WebView（用于配置中心 URL，替代 url_launcher 跳外部浏览器）
   webview_flutter: ^4.10.0
+  # 真实屏幕亮度调节（#7 修复：替换黑色蒙层假亮度）
+  screen_brightness: ^0.2.2
 
 dev_dependencies:
   flutter_test:
