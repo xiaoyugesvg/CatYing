@@ -30,8 +30,9 @@ class LiveController extends GetxController {
   /// 当前选中的直播源名称
   String get currentSourceName {
     final list = service.sources;
+    if (list.isEmpty) return '选择源'; // 空列表防 clamp(0,-1) 异常导致白屏
     final i = selectedSourceIndex.clamp(0, list.length - 1);
-    return list.isEmpty ? '选择源' : list[i].name;
+    return list[i].name;
   }
 
   /// 分组列表（过滤已屏蔽）
@@ -48,8 +49,9 @@ class LiveController extends GetxController {
   /// 当前选中的分组名称
   String get currentGroupName {
     final list = groups;
+    if (list.isEmpty) return '选择分组'; // 空列表防 clamp(0,-1) 异常导致白屏
     final i = selectedGroup.clamp(0, list.length - 1);
-    return list.isEmpty ? '选择分组' : list[i].name;
+    return list[i].name;
   }
 
   /// 当前分组的频道列表
