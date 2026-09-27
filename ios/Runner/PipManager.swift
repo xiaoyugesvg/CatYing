@@ -477,6 +477,7 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
     pipController = nil
     isActive = false
     preparedReady = false
+    preparedURL = ""
   }
 
   // MARK: - 退后台自动启动 PiP

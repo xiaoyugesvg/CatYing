@@ -1009,6 +1009,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     return Stack(
       fit: StackFit.expand,
       children: [
+        // 黑色背景底（视频加载前/透明时避免白屏）
+        Positioned.fill(
+          child: Container(color: Colors.black),
+        ),
         // 视频画面（左右/上下翻转）
         Positioned.fill(
           child: Transform(
@@ -1508,7 +1512,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   void _resumeAfterPip() {
     if (!mounted) return;
     final resume = VideoPlayerPip.instance.iosLastPosition;
-    Future<void>.delayed(const Duration(milliseconds: 120), () {
+    final playUrl = _player.state.playlist.medias.isNotEmpty
+        ? _player.state.playlist.medias.last.uri
+        : widget.url;
+    Future<void>.delayed(const Duration(milliseconds: 300), () {
       if (!mounted) return;
       try {
         if (resume > Duration.zero) {
@@ -1518,6 +1525,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       try {
         _player.play();
       } catch (_) {}
+      // PiP 退出后重新预热原生 AVPlayer，确保下次退后台仍能自动进入小窗
+      // （cleanup 会销毁实例，这里显式重新建一份，不依赖 playing 流回调的竞态）
+      if (Platform.isIOS && playUrl.isNotEmpty) {
+        VideoPlayerPip.instance.prepareIos(
+          url: playUrl,
+          headers: widget.headers,
+        );
+      }
       setState(() {});
     });
   }

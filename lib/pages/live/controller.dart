@@ -15,6 +15,11 @@ class LiveController extends GetxController {
   void onInit() {
     super.onInit();
     _restorePersisted();
+    // 监听 service 中的源/分组变化，自动刷新 UI
+    ever(service.sources, (_) => update());
+    ever(service.groups, (_) => update());
+    ever(service.selectedSourceIndex, (_) => update());
+    ever(service.selectedGroup, (_) => update());
   }
 
   /// 重启后自动恢复上次添加的直播源（保存过 m3u URL 且当前无任何配置时）
@@ -30,6 +35,20 @@ class LiveController extends GetxController {
     } catch (_) {}
   }
 
+  /// 直播源列表
+  List<LiveSource> get sources => service.sources;
+
+  /// 当前选中的直播源索引
+  int get selectedSourceIndex => service.selectedSourceIndex.value;
+
+  /// 当前选中的直播源名称
+  String get currentSourceName {
+    final list = service.sources;
+    final i = selectedSourceIndex.clamp(0, list.length - 1);
+    return list.isEmpty ? '选择源' : list[i].name;
+  }
+
+  /// 分组列表（过滤已屏蔽）
   List<LiveGroup> get groups {
     final all = service.groups;
     final blocked = service.blockedGroups;
@@ -37,8 +56,17 @@ class LiveController extends GetxController {
     return all.where((g) => !blocked.contains(g.name)).toList();
   }
 
+  /// 当前选中的分组索引
   int get selectedGroup => service.selectedGroup.value;
 
+  /// 当前选中的分组名称
+  String get currentGroupName {
+    final list = groups;
+    final i = selectedGroup.clamp(0, list.length - 1);
+    return list.isEmpty ? '选择分组' : list[i].name;
+  }
+
+  /// 当前分组的频道列表
   List<LiveChannel> get channels {
     var list = service.currentChannels;
     final blocked = service.blockedGroups;
@@ -50,6 +78,14 @@ class LiveController extends GetxController {
     return list.where((c) => c.name.contains(kw)).toList();
   }
 
+  /// 切换直播源
+  Future<void> selectSource(int index) async {
+    await service.loadSource(index);
+    selectedChannelIndex.value = 0;
+    update();
+  }
+
+  /// 切换分组
   void selectGroup(int index) {
     service.selectedGroup.value = index;
     selectedChannelIndex.value = 0;
