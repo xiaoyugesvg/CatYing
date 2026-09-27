@@ -104,9 +104,11 @@ class _LivePageState extends State<LivePage> {
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.backgroundPrimary,
+      backgroundColor:
+          _fullscreen ? Colors.black : AppTheme.backgroundPrimary,
       body: GetBuilder<LiveController>(
         builder: (c) {
           final groups = c.groups;
@@ -115,198 +117,183 @@ class _LivePageState extends State<LivePage> {
           final currentSourceName = c.currentSourceName;
           final currentGroupName = c.currentGroupName;
           final sources = c.sources;
-          if (_fullscreen) {
-            return _buildFullscreen(context, c, current);
-          }
-          return SafeArea(
-            child: Column(
-              children: [
-                // 顶部导航：返回 + LIVE + 公告
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                  child: Row(
-                    children: [
-                      GestureDetector(
-                        onTap: () {
-                          // tab 模式：返回切回首页；独立路由模式：退路由
-                          if (MainTabController.instance.selectedTab.value == 4) {
-                            MainTabController.instance.selectedTab.value = 0;
-                          } else {
-                            Get.back();
-                          }
-                        },
-                        child: Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: AppTheme.backgroundTertiary,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(Icons.arrow_back_ios_new,
-                              color: AppTheme.textSecondary, size: 16),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: AppTheme.backgroundTertiary,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
+          // 视频层常驻 Stack 首位：全屏/普通切换只改高度，Video 永不重建
+          // （修复直播全屏/横屏后"有声音没画面"——同一 VideoController
+          //   被反复 attach/detach 时 media_kit 渲染层会黑屏）
+          return LayoutBuilder(
+            builder: (ctx, cons) {
+              final videoHeight = _fullscreen
+                  ? cons.maxHeight
+                  : cons.maxWidth * 9 / 16;
+              return Stack(
+                children: [
+                  // 视频层（同一位置，尺寸随全屏变化）
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: videoHeight,
+                    child: _buildVideoLayer(c, current),
+                  ),
+                  // 非全屏：内容层（选择器 + 频道列表）
+                  if (!_fullscreen)
+                    Positioned(
+                      top: videoHeight,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: SafeArea(
+                        child: Column(
                           children: [
-                            Text('LIVE',
-                                style: TextStyle(
-                                    color: AppTheme.textPrimary,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 1)),
-                            const SizedBox(width: 6),
-                            const _LiveDot(),
+                            Obx(() {
+                              final err = LiveService.instance.error.value;
+                              if (err == null) return const SizedBox.shrink();
+                              return Padding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                                child: Text(
+                                  err,
+                                  style: TextStyle(
+                                      color: Colors.redAccent
+                                          .withValues(alpha: 0.9),
+                                      fontSize: 12),
+                                ),
+                              );
+                            }),
+                            const SizedBox(height: 8),
+                            // 双层选择器：直播源 + 分组
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
+                              child: Row(
+                                children: [
+                                  // 刷新按钮
+                                  GestureDetector(
+                                    onTap: _onRefreshSource,
+                                    child: Container(
+                                      width: 38,
+                                      height: 38,
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.backgroundTertiary,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(Icons.refresh,
+                                          color: AppTheme.textSecondary,
+                                          size: 18),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  // 直播源选择（左下拉）
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () =>
+                                          _showSourcePicker(context, c),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 14, vertical: 9),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.backgroundTertiary,
+                                          borderRadius:
+                                              BorderRadius.circular(20),
+                                          border: Border.all(
+                                            color: AppTheme.accentColor
+                                                .withValues(alpha: 0.3),
+                                          ),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.rss_feed,
+                                                color: AppTheme.accentColor,
+                                                size: 16),
+                                            const SizedBox(width: 6),
+                                            Expanded(
+                                              child: Text(
+                                                currentSourceName,
+                                                maxLines: 1,
+                                                overflow:
+                                                    TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  color: AppTheme.accentColor,
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                            Icon(Icons.arrow_drop_down,
+                                                color: AppTheme.textSecondary,
+                                                size: 18),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  // 分组选择（右下拉）
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: groups.isEmpty
+                                          ? null
+                                          : () => _showGroupPicker(
+                                              context, c, groups),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 14, vertical: 9),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.backgroundTertiary,
+                                          borderRadius:
+                                              BorderRadius.circular(20),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.playlist_play,
+                                                color: AppTheme.textSecondary,
+                                                size: 16),
+                                            const SizedBox(width: 6),
+                                            Expanded(
+                                              child: Text(
+                                                currentGroupName,
+                                                maxLines: 1,
+                                                overflow:
+                                                    TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  color: AppTheme.textPrimary,
+                                                  fontSize: 13,
+                                                ),
+                                              ),
+                                            ),
+                                            Icon(Icons.arrow_drop_down,
+                                                color: AppTheme.textSecondary,
+                                                size: 18),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            // 频道列表（占满宽度）
+                            Expanded(
+                              child: groups.isEmpty
+                                  ? _EmptyLive(
+                                      onReload: () =>
+                                          _pickSource(context, c))
+                                  : _buildChannelList(c, channels),
+                            ),
                           ],
                         ),
                       ),
-                      const Spacer(),
-                      // 公告（页面级功能，保留在外层顶栏）
-                      _TopIcon(
-                        icon: Icons.campaign,
-                        onTap: () => _showAnnouncements(context),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                // 视频播放区
-                _buildVideoArea(c, current),
-                // 加载错误提示
-                Obx(() {
-                  final err = LiveService.instance.error.value;
-                  if (err == null) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                    child: Text(
-                      err,
-                      style: TextStyle(
-                          color: Colors.redAccent.withValues(alpha: 0.9),
-                          fontSize: 12),
                     ),
-                  );
-                }),
-                const SizedBox(height: 8),
-                // 双层选择器：直播源 + 分组
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Row(
-                    children: [
-                      // 刷新按钮
-                      GestureDetector(
-                        onTap: _onRefreshSource,
-                        child: Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: AppTheme.backgroundTertiary,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(Icons.refresh,
-                              color: AppTheme.textSecondary, size: 18),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // 直播源选择（左下拉）
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => _showSourcePicker(context, c),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 9),
-                            decoration: BoxDecoration(
-                              color: AppTheme.backgroundTertiary,
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: AppTheme.accentColor.withValues(alpha: 0.3),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(Icons.rss_feed,
-                                    color: AppTheme.accentColor, size: 16),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    currentSourceName,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: AppTheme.accentColor,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                                Icon(Icons.arrow_drop_down,
-                                    color: AppTheme.textSecondary, size: 18),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // 分组选择（右下拉）
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: groups.isEmpty
-                              ? null
-                              : () => _showGroupPicker(context, c, groups),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 9),
-                            decoration: BoxDecoration(
-                              color: AppTheme.backgroundTertiary,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(Icons.playlist_play,
-                                    color: AppTheme.textSecondary, size: 16),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    currentGroupName,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: AppTheme.textPrimary,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ),
-                                Icon(Icons.arrow_drop_down,
-                                    color: AppTheme.textSecondary, size: 18),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-                // 频道列表（占满宽度）
-                Expanded(
-                  child: groups.isEmpty
-                      ? _EmptyLive(onReload: () => _pickSource(context, c))
-                      : _buildChannelList(c, channels),
-                ),
-              ],
-            ),
+                ],
+              );
+            },
           );
         },
       ),
     );
   }
+
 
   Future<void> _pickSource(BuildContext context, LiveController c) async {
     // 导入/覆盖直播源（m3u/txt URL）——左栏底部 + 号进入
@@ -343,15 +330,36 @@ class _LivePageState extends State<LivePage> {
     }
   }
 
+  /// 投屏入口（DLNA/UPnP）—— 与点播播放器同通道
+  void _toggleCast() {
+    final ch = _controller.currentChannel;
+    final url = ch?.playUrl ?? '';
+    if (url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先选择频道')),
+      );
+      return;
+    }
+    Get.toNamed(
+      '/dlna',
+      parameters: {
+        'url': url,
+        'title': ch!.name,
+      },
+    );
+  }
+
   void _toggleAudioMode() {
     setState(() => _audioMode = !_audioMode);
     // 进入听剧时保持播放（后台可续播由 UIBackgroundModes=audio 保证）
   }
 
   /// 全屏：只显示视频画面（横屏铺满），左上返回、右上频道名+退出全屏
-  Widget _buildFullscreen(
-      BuildContext context, LiveController c, LiveChannel? current) {
+  /// 视频层（常驻 Stack 首位）：全屏/普通切换只改外层高度，Video 永不重建
+  /// 修复直播全屏后"有声音没画面"（同一 VideoController 反复 attach 黑屏）
+  Widget _buildVideoLayer(LiveController c, LiveChannel? current) {
     final pad = MediaQuery.of(context).padding;
+    final topInset = _fullscreen ? pad.top : 0.0;
     return Container(
       color: Colors.black,
       child: Stack(
@@ -369,100 +377,8 @@ class _LivePageState extends State<LivePage> {
               child: Icon(Icons.live_tv,
                   color: AppTheme.textTertiary, size: 56),
             ),
-          // 左上：返回（对齐点播播放器顶栏）
-          Positioned(
-            top: 8 + pad.top,
-            left: 8 + pad.left,
-            child: GestureDetector(
-              onTap: () {
-                _toggleFullscreen();
-                if (MainTabController.instance.selectedTab.value == 4) {
-                  MainTabController.instance.selectedTab.value = 0;
-                } else {
-                  Get.back();
-                }
-              },
-              child: Container(
-                width: 40,
-                height: 40,
-                alignment: Alignment.center,
-                child: const Icon(Icons.arrow_back_ios_new,
-                    color: Colors.white, size: 20),
-              ),
-            ),
-          ),
-          // 右上：功能按钮（听剧/小窗/投屏/退出全屏）—— 与点播播放器顶栏对齐
-          Positioned(
-            top: 8 + pad.top,
-            right: 8 + pad.right,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (current != null)
-                  Container(
-                    constraints: const BoxConstraints(maxWidth: 150),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 8),
-                    child: Text(
-                      current.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11,
-                          fontFamily: 'monospace'),
-                    ),
-                  ),
-                _VideoTopIcon(
-                  icon: _audioMode
-                      ? Icons.headphones
-                      : Icons.headphones_outlined,
-                  onTap: _toggleAudioMode,
-                ),
-                _VideoTopIcon(
-                  icon: Icons.picture_in_picture_alt,
-                  onTap: _togglePip,
-                ),
-                _VideoTopIcon(
-                  icon: Icons.cast,
-                  onTap: () => ScaffoldMessenger.of(context)
-                      .showSnackBar(
-                          const SnackBar(content: Text('暂不支持投屏'))),
-                ),
-                _VideoTopIcon(
-                  icon: Icons.fullscreen_exit,
-                  onTap: _toggleFullscreen,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildVideoArea(LiveController c, LiveChannel? current) {
-    return AspectRatio(
-      aspectRatio: 16 / 9,
-      child: Container(
-        color: Colors.black,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (_audioMode)
-              _buildAudioModeOverlay(c, current)
-            else if (_videoController != null && current != null)
-              Video(
-                controller: _videoController!,
-                controls: AdaptiveVideoControls,
-              )
-            else
-              Center(
-                child: Icon(Icons.live_tv,
-                    color: AppTheme.textTertiary, size: 56),
-              ),
-            // 顶部渐变遮罩 + 功能按钮（与点播播放器顶栏风格一致）
-            // 左上：LIVE 角标
+          // 普通模式左上：LIVE 角标
+          if (!_fullscreen)
             Positioned(
               top: 10,
               left: 12,
@@ -488,47 +404,83 @@ class _LivePageState extends State<LivePage> {
                 ),
               ),
             ),
-            // 右上：功能按钮（听剧/小窗/投屏/全屏）—— 与点播播放器顶栏对齐
+          // 全屏：左上返回（退出全屏并回首页/退路由）
+          if (_fullscreen)
             Positioned(
-              top: 6,
-              right: 8,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _VideoTopIcon(
-                    icon: _audioMode
-                        ? Icons.headphones
-                        : Icons.headphones_outlined,
-                    onTap: _toggleAudioMode,
-                    tooltip: '听剧模式',
-                  ),
-                  _VideoTopIcon(
-                    icon: Icons.picture_in_picture_alt,
-                    onTap: _togglePip,
-                    tooltip: '小窗播放',
-                  ),
-                  _VideoTopIcon(
-                    icon: Icons.cast,
-                    onTap: () => ScaffoldMessenger.of(context)
-                        .showSnackBar(
-                            const SnackBar(content: Text('暂不支持投屏'))),
-                    tooltip: '投屏',
-                  ),
-                  _VideoTopIcon(
-                    icon: _fullscreen
-                        ? Icons.fullscreen_exit
-                        : Icons.fullscreen,
-                    onTap: _toggleFullscreen,
-                    tooltip: _fullscreen ? '退出全屏' : '全屏',
-                  ),
-                ],
+              top: 8 + topInset,
+              left: 8 + pad.left,
+              child: GestureDetector(
+                onTap: () {
+                  _toggleFullscreen();
+                  if (MainTabController.instance.selectedTab.value == 4) {
+                    MainTabController.instance.selectedTab.value = 0;
+                  } else {
+                    Get.back();
+                  }
+                },
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.arrow_back_ios_new,
+                      color: Colors.white, size: 20),
+                ),
               ),
             ),
-          ],
-        ),
+          // 右上：功能按钮（听剧/小窗/投屏/全屏）—— 与点播播放器顶栏对齐
+          Positioned(
+            top: 6 + (_fullscreen ? topInset : 0),
+            right: 8 + pad.right,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_fullscreen && current != null)
+                  Container(
+                    constraints: const BoxConstraints(maxWidth: 150),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 8),
+                    child: Text(
+                      current.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                          fontFamily: 'monospace'),
+                    ),
+                  ),
+                _VideoTopIcon(
+                  icon: _audioMode
+                      ? Icons.headphones
+                      : Icons.headphones_outlined,
+                  onTap: _toggleAudioMode,
+                  tooltip: '听剧模式',
+                ),
+                _VideoTopIcon(
+                  icon: Icons.picture_in_picture_alt,
+                  onTap: _togglePip,
+                  tooltip: '小窗播放',
+                ),
+                _VideoTopIcon(
+                  icon: Icons.cast,
+                  onTap: _toggleCast,
+                  tooltip: '投屏',
+                ),
+                _VideoTopIcon(
+                  icon: _fullscreen
+                      ? Icons.fullscreen_exit
+                      : Icons.fullscreen,
+                  onTap: _toggleFullscreen,
+                  tooltip: _fullscreen ? '退出全屏' : '全屏',
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
+
 
   Widget _buildAudioModeOverlay(LiveController c, LiveChannel? current) {
     final name = current?.name ?? '';

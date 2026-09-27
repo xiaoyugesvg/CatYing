@@ -341,35 +341,52 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
           style: TextStyle(color: Colors.white, fontSize: 15)),
       trailing: const Icon(Icons.chevron_right, color: Colors.white38),
       onTap: () async {
-        final url = await showDialog<String>(
+        final result = await showDialog<(String, String)>(
           context: context,
           builder: (ctx) {
+            final nameCtrl = TextEditingController();
             final ctrl = TextEditingController();
             return AlertDialog(
               backgroundColor: const Color(0xFF1C1C1E),
               title: const Text('添加直播源',
                   style: TextStyle(color: Colors.white, fontSize: 15)),
-              content: TextField(
-                controller: ctrl,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  hintText: 'm3u / txt 地址',
-                  hintStyle: TextStyle(color: Colors.white38),
-                ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameCtrl,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      hintText: '源名称（可选，留空自动取地址）',
+                      hintStyle: TextStyle(color: Colors.white38),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: ctrl,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      hintText: 'm3u / txt 地址',
+                      hintStyle: TextStyle(color: Colors.white38),
+                    ),
+                  ),
+                ],
               ),
               actions: [
                 TextButton(
                     onPressed: () => Navigator.pop(ctx),
                     child: const Text('取消')),
                 TextButton(
-                    onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                    onPressed: () => Navigator.pop(
+                        ctx, (nameCtrl.text.trim(), ctrl.text.trim())),
                     child: const Text('添加')),
               ],
             );
           },
         );
-        if (url != null && url.isNotEmpty) {
-          await LiveService.instance.addSource(url);
+        if (result != null && result.$2.isNotEmpty) {
+          await LiveService.instance.addSource(result.$2,
+              name: result.$1.isEmpty ? null : result.$1);
           if (mounted) {
             final err = LiveService.instance.error.value;
             final count = LiveService.instance.channels.length;
