@@ -1,4 +1,5 @@
 import 'package:get/get.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../models/live_models.dart';
 import '../../services/live_service.dart';
@@ -9,6 +10,25 @@ class LiveController extends GetxController {
 
   final searchKeyword = ''.obs;
   final selectedChannelIndex = 0.obs;
+
+  @override
+  void onInit() {
+    super.onInit();
+    _restorePersisted();
+  }
+
+  /// 重启后自动恢复上次添加的直播源（保存过 m3u URL 且当前无任何配置时）
+  Future<void> _restorePersisted() async {
+    if (service.sources.isNotEmpty || service.channels.isNotEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final url = (prefs.getString('live_url') ?? '').trim();
+      if (url.isNotEmpty) {
+        await service.loadFromUrl(url);
+        update();
+      }
+    } catch (_) {}
+  }
 
   List<LiveGroup> get groups => service.groups;
   int get selectedGroup => service.selectedGroup.value;

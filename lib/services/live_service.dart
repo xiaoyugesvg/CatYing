@@ -225,6 +225,46 @@ class LiveService extends GetxService {
     final i = selectedGroup.value.clamp(0, groups.length - 1);
     return groups[i].channels;
   }
+
+  Future<void> _persistUrl(String url) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('live_url', url);
+      _persistedUrl = url;
+    } catch (_) {}
+  }
+
+  /// 清空全部直播数据（删除直播源）
+  Future<void> clearAll() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('live_url');
+    } catch (_) {}
+    _persistedUrl = null;
+    channels.value = [];
+    groups.value = [];
+    sources.value = [];
+    announcements.value = [];
+    _rawLives = null;
+    error.value = null;
+  }
+
+  /// 刷新当前源：优先重拉保存的 m3u URL，否则重载 lives 中已选中的源
+  Future<void> reloadCurrent() async {
+    final saved = _persistedUrl;
+    if (saved != null && saved.isNotEmpty) {
+      await loadFromUrl(saved);
+      return;
+    }
+    if (_rawLives != null) {
+      for (var i = 0; i < sources.length; i++) {
+        if (sources[i].loaded) {
+          await loadSource(i);
+          return;
+        }
+      }
+    }
+  }
 }
 
 /// 直播源条目（参考图：名称 + 刚刚更新/未下载 状态）

@@ -81,14 +81,14 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
                 child: Row(
                   children: [
-                    // 搜索胶囊：左侧输入，右侧搜索钮（参考图）
+                    // 搜索胶囊：左侧输入，右侧搜索钮（缩小尺寸，不占屏）
                     Expanded(
                       child: Container(
-                        height: 42,
-                        padding: const EdgeInsets.only(left: 16, right: 4),
+                        height: 34,
+                        padding: const EdgeInsets.only(left: 12, right: 3),
                         decoration: BoxDecoration(
                           color: const Color(0xFF2A2A2E),
-                          borderRadius: BorderRadius.circular(22),
+                          borderRadius: BorderRadius.circular(17),
                         ),
                         child: Row(
                           children: [
@@ -97,18 +97,18 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                                 controller: _searchController,
                                 style: TextStyle(
                                     color: AppTheme.textPrimary,
-                                    fontSize: 14),
+                                    fontSize: 13),
                                 onChanged: (v) =>
                                     setState(() => _keyword = v.trim()),
                                 decoration: InputDecoration(
                                   hintText: '搜索源...',
                                   hintStyle: TextStyle(
                                       color: AppTheme.textTertiary,
-                                      fontSize: 14),
+                                      fontSize: 13),
                                   border: InputBorder.none,
                                   isDense: true,
                                   contentPadding:
-                                      const EdgeInsets.symmetric(vertical: 10),
+                                      const EdgeInsets.symmetric(vertical: 8),
                                 ),
                               ),
                             ),
@@ -119,32 +119,32 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                                   setState(() => _keyword = '');
                                 },
                                 child: Padding(
-                                  padding: const EdgeInsets.all(6),
+                                  padding: const EdgeInsets.all(4),
                                   child: Icon(Icons.close,
-                                      color: AppTheme.textTertiary, size: 16),
+                                      color: AppTheme.textTertiary, size: 14),
                                 ),
                               ),
                             Container(
-                              width: 34,
-                              height: 34,
+                              width: 28,
+                              height: 28,
                               decoration: BoxDecoration(
                                 color: Colors.white.withValues(alpha: 0.12),
                                 shape: BoxShape.circle,
                               ),
                               child: Icon(Icons.search,
-                                  color: AppTheme.textSecondary, size: 18),
+                                  color: AppTheme.textSecondary, size: 15),
                             ),
                           ],
                         ),
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    // 单列/双排切换按钮
+                    const SizedBox(width: 8),
+                    // 单列/双排切换按钮（缩小）
                     GestureDetector(
                       onTap: () => setState(() => _gridMode = !_gridMode),
                       child: Container(
-                        width: 40,
-                        height: 40,
+                        width: 34,
+                        height: 34,
                         decoration: BoxDecoration(
                           color: AppTheme.backgroundTertiary,
                           shape: BoxShape.circle,
@@ -153,7 +153,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                           _gridMode
                               ? Icons.view_list_outlined
                               : Icons.grid_view_outlined,
-                          size: 20,
+                          size: 17,
                           color: AppTheme.textSecondary,
                         ),
                       ),

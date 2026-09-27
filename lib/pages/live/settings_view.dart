@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../common/theme.dart';
 import '../../services/live_service.dart';
@@ -19,7 +20,15 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
   @override
   void initState() {
     super.initState();
-    _epgCtrl.text = '';
+    _restoreEpg();
+  }
+
+  Future<void> _restoreEpg() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString('epg_url') ?? '';
+      if (mounted) _epgCtrl.text = saved;
+    } catch (_) {}
   }
 
   @override
@@ -121,9 +130,16 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 18, vertical: 14),
                       ),
-                      onPressed: () {
+                      onPressed: () async {
+                        final v = _epgCtrl.text.trim();
+                        try {
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.setString('epg_url', v);
+                        } catch (_) {}
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('EPG 地址已保存')),
+                          SnackBar(
+                              content:
+                                  Text(v.isEmpty ? '已清空 EPG 地址' : 'EPG 地址已保存')),
                         );
                       },
                       child: const Text('保存',
@@ -208,16 +224,63 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
       trailing: PopupMenuButton<String>(
         color: const Color(0xFF2A2A2E),
         icon: const Icon(Icons.more_vert, color: Colors.white54),
-        onSelected: (v) {
+        onSelected: (v) async {
+          final svc = LiveService.instance;
           if (v == 'refresh') {
-            ScaffoldMessenger.of(context)
-                .showSnackBar(SnackBar(content: Text('已刷新 $name')));
+            await svc.reloadCurrent();
+            final err = svc.error.value;
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(err == null ? '已刷新 $name' : '刷新失败：$err')));
+            }
+            setState(() {});
           } else if (v == 'edit') {
-            ScaffoldMessenger.of(context)
-                .showSnackBar(const SnackBar(content: Text('编辑直播源')));
+            final url = await showDialog<String>(
+              context: context,
+              builder: (ctx) {
+                final ctrl =
+                    TextEditingController(text: svc.currentUrl ?? '');
+                return AlertDialog(
+                  backgroundColor: const Color(0xFF1C1C1E),
+                  title: const Text('编辑直播源',
+                      style: TextStyle(color: Colors.white, fontSize: 15)),
+                  content: TextField(
+                    controller: ctrl,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      hintText: 'm3u / txt 地址',
+                      hintStyle: TextStyle(color: Colors.white38),
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('取消')),
+                    TextButton(
+                        onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                        child: const Text('保存')),
+                  ],
+                );
+              },
+            );
+            if (url != null && url.isNotEmpty) {
+              await svc.loadFromUrl(url);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(svc.error.value == null
+                        ? '已更新 $name'
+                        : '更新失败：${svc.error.value}'),
+                    duration: const Duration(seconds: 3)));
+              }
+              setState(() {});
+            }
           } else if (v == 'delete') {
-            ScaffoldMessenger.of(context)
-                .showSnackBar(SnackBar(content: Text('删除 $name')));
+            await svc.clearAll();
+            if (mounted) {
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text('已删除 $name')));
+            }
+            setState(() {});
           }
         },
         itemBuilder: (_) => const [
@@ -281,6 +344,15 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
         );
         if (url != null && url.isNotEmpty) {
           await LiveService.instance.loadFromUrl(url);
+          if (mounted) {
+            final err = LiveService.instance.error.value;
+            final count = LiveService.instance.channels.length;
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(err == null
+                    ? '已添加直播源，共 $count 个频道'
+                    : '添加失败：$err'),
+                duration: const Duration(seconds: 3)));
+          }
           setState(() {});
         }
       },

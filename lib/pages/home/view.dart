@@ -637,7 +637,24 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
                     style: TextStyle(
                         color: AppTheme.textPrimary, fontSize: 13),
                     textInputAction: TextInputAction.search,
-                    onSubmitted: widget.onSubmitted,
+                    onSubmitted: (v) {
+                      setState(() {
+                        _expanded = false;
+                        _ctrl.clear();
+                      });
+                      _focus.unfocus();
+                      widget.onSubmitted(v);
+                    },
+                    onTapOutside: (_) {
+                      // 点输入框外部 → 收起搜索框并清空文字
+                      if (_expanded) {
+                        setState(() {
+                          _expanded = false;
+                          _ctrl.clear();
+                        });
+                        _focus.unfocus();
+                      }
+                    },
                     decoration: InputDecoration(
                       hintText: '搜索影片...',
                       hintStyle: TextStyle(
@@ -650,7 +667,11 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
                 ),
                 GestureDetector(
                   onTap: () {
-                    setState(() => _expanded = false);
+                    setState(() {
+                      _expanded = false;
+                      _ctrl.clear();
+                    });
+                    _focus.unfocus();
                     widget.onOpenFull();
                   },
                   child: Icon(Icons.search,
