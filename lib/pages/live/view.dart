@@ -10,6 +10,8 @@ import 'package:media_kit_video/media_kit_video.dart'
 import '../../common/theme.dart';
 import '../../models/live_models.dart';
 import '../../services/live_service.dart';
+import '../../services/main_tab_controller.dart';
+import '../../services/player_fullscreen_controller.dart';
 import '../../widgets/video_player_pip.dart';
 import 'controller.dart';
 
@@ -117,13 +119,13 @@ class _LivePageState extends State<LivePage> {
           return SafeArea(
             child: Column(
               children: [
-                // 顶部：返回 + LIVE + 右上（公告/投屏/全屏）—— 对齐参考图
+                // 顶部：返回 + LIVE + 当前源名▾ + 右上（耳机/公告/投屏/小窗/全屏/设置）
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                   child: Row(
                     children: [
                       GestureDetector(
-                        onTap: () => Get.back(),
+                        onTap: _goBack,
                         child: Container(
                           width: 36,
                           height: 36,
@@ -157,6 +159,38 @@ class _LivePageState extends State<LivePage> {
                           ],
                         ),
                       ),
+                      const SizedBox(width: 8),
+                      // 当前直播源下拉（参考图：综合直播 ▾）
+                      GestureDetector(
+                        onTap: () => _showSourceSheet(context, c),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: AppTheme.backgroundTertiary,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  _currentSourceName(),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      color: AppTheme.textSecondary,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500),
+                                ),
+                              ),
+                              const SizedBox(width: 2),
+                              const Icon(Icons.keyboard_arrow_down,
+                                  color: AppTheme.textTertiary, size: 16),
+                            ],
+                          ),
+                        ),
+                      ),
                       const Spacer(),
                       _TopIcon(
                         icon: _audioMode
@@ -174,11 +208,21 @@ class _LivePageState extends State<LivePage> {
                             .showSnackBar(
                                 const SnackBar(content: Text('暂不支持投屏'))),
                       ),
+                      // 小窗（PiP）放在投屏旁边
+                      _TopIcon(
+                        icon: Icons.picture_in_picture_alt,
+                        onTap: _togglePip,
+                      ),
                       _TopIcon(
                         icon: _fullscreen
                             ? Icons.fullscreen_exit
                             : Icons.fullscreen,
                         onTap: _toggleFullscreen,
+                      ),
+                      // 设置/添加链接：放全屏图标右边
+                      _TopIcon(
+                        icon: Icons.settings_outlined,
+                        onTap: () => _pickSource(context, c),
                       ),
                     ],
                   ),
@@ -231,6 +275,83 @@ class _LivePageState extends State<LivePage> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  /// 返回：直播作为主 tab 时切回首页；独立 push 时正常返回
+  void _goBack() {
+    if (MainTabController.instance.selectedTab.value == 4) {
+      MainTabController.instance.selectedTab.value = 0;
+    } else {
+      Get.back();
+    }
+  }
+
+  /// 当前已加载的直播源名（参考图顶部"综合直播"位置）
+  String _currentSourceName() {
+    for (final s in LiveService.instance.sources) {
+      if (s.loaded) return s.name;
+    }
+    return '选择直播源';
+  }
+
+  /// 顶部源名下拉（参考图 IMG_7748：绿播放图标 + 名称 + 刚刚更新/未下载）
+  void _showSourceSheet(BuildContext context, LiveController c) {
+    final srcs = LiveService.instance.sources;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1C1C1E),
+      builder: (ctx) => SafeArea(
+        child: srcs.isEmpty
+            ? ListTile(
+                leading: const Icon(Icons.info_outline,
+                    color: AppTheme.textTertiary, size: 20),
+                title: Text('暂无直播源，点右上角设置图标添加',
+                    style: TextStyle(
+                        color: AppTheme.textSecondary, fontSize: 13)),
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text('选择直播源',
+                        style: TextStyle(
+                            color: AppTheme.textPrimary, fontSize: 15)),
+                  ),
+                  for (var i = 0; i < srcs.length; i++)
+                    ListTile(
+                      dense: true,
+                      leading: Icon(Icons.play_circle_fill,
+                          color: srcs[i].loaded
+                              ? AppTheme.accentColor
+                              : Colors.white24,
+                          size: 20),
+                      title: Text(srcs[i].name,
+                          style: TextStyle(
+                              color: srcs[i].loaded
+                                  ? AppTheme.textPrimary
+                                  : AppTheme.textSecondary,
+                              fontSize: 13)),
+                      trailing: Text(srcs[i].loaded ? '刚刚更新' : '未下载',
+                          style: TextStyle(
+                              color: srcs[i].loaded
+                                  ? AppTheme.accentColor
+                                  : AppTheme.textTertiary,
+                              fontSize: 11)),
+                      onTap: () async {
+                        if (!srcs[i].loaded) {
+                          await LiveService.instance.loadSource(i);
+                        }
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (mounted) {
+                          setState(() => _showGroupChannels = false);
+                        }
+                      },
+                    ),
+                ],
+              ),
       ),
     );
   }
@@ -296,12 +417,12 @@ class _LivePageState extends State<LivePage> {
               child: Icon(Icons.live_tv,
                   color: AppTheme.textTertiary, size: 56),
             ),
-          // 左上：返回（对齐直播页顶栏）
+          // 左上：返回（对齐直播页顶栏，tab 模式切回首页）
           Positioned(
             top: 8 + pad.top,
             left: 8 + pad.left,
             child: GestureDetector(
-              onTap: () => Get.back(),
+              onTap: _goBack,
               child: Container(
                 width: 36,
                 height: 36,
@@ -380,23 +501,6 @@ class _LivePageState extends State<LivePage> {
                 child: Icon(Icons.live_tv,
                     color: AppTheme.textTertiary, size: 56),
               ),
-            // 小窗（PiP）右下 —— 全屏/听剧/公告在顶部，这里只留小窗
-            Positioned(
-              right: 12,
-              bottom: 12,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.45),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: GestureDetector(
-                  onTap: () => _togglePip(),
-                  child: Icon(Icons.picture_in_picture_alt,
-                      color: AppTheme.textPrimary, size: 20),
-                ),
-              ),
-            ),
           ],
         ),
       ),
@@ -586,6 +690,7 @@ class _LivePageState extends State<LivePage> {
   Future<void> _toggleFullscreen() async {
     setState(() => _fullscreen = !_fullscreen);
     if (_fullscreen) {
+      PlayerFullscreenController.instance.enter('live');
       if (Platform.isIOS) {
         await SystemChrome.setPreferredOrientations(const [
           DeviceOrientation.landscapeLeft,
@@ -594,6 +699,7 @@ class _LivePageState extends State<LivePage> {
       }
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     } else {
+      PlayerFullscreenController.instance.exit('live');
       if (Platform.isIOS) {
         await SystemChrome.setPreferredOrientations(const [
           DeviceOrientation.portraitUp,

@@ -13,6 +13,7 @@ import 'pages/home/view.dart';
 import 'pages/history/view.dart';
 import 'pages/favorites/view.dart';
 import 'pages/settings/view.dart';
+import 'pages/live/view.dart';
 import 'pages/search/view.dart';
 import 'pages/search/controller.dart';
 import 'pages/settings/controller.dart';
@@ -638,6 +639,7 @@ class _ContentViewState extends State<ContentView>
     const HistoryPage(),
     const FavoritesPage(),
     const SettingsPage(),
+    const LivePage(), // 直播作为第 5 个 tab（index 4），选中态与底部导航联动
   ];
 
   Widget _buildMainTabView() {
@@ -979,27 +981,40 @@ class _ContentViewState extends State<ContentView>
 
   /// 直播：独立路由入口（不占底部 Tab）
   Widget _navLiveItem() {
+    final isSelected = MainTabController.instance.selectedTab.value == 4;
     return GestureDetector(
-      onTap: () => Get.toNamed('/live'),
+      onTap: () {
+        setState(() {
+          MainTabController.instance.selectedTab.value = 4;
+        });
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOutCubic,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: AppTheme.accentColor.withValues(alpha: 0.12),
+          color: isSelected
+              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.live_tv, size: 18, color: AppTheme.accentColor),
+            Icon(Icons.live_tv,
+                size: 18,
+                color: isSelected
+                    ? AppTheme.accentColor
+                    : Colors.white.withValues(alpha: 0.35)),
             const SizedBox(height: 3),
             Text(
               '直播',
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.w500,
-                color: AppTheme.accentColor,
+                color: isSelected
+                    ? AppTheme.accentColor
+                    : Colors.white.withValues(alpha: 0.35),
               ),
             ),
           ],
