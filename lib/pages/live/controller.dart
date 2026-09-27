@@ -30,11 +30,21 @@ class LiveController extends GetxController {
     } catch (_) {}
   }
 
-  List<LiveGroup> get groups => service.groups;
+  List<LiveGroup> get groups {
+    final all = service.groups;
+    final blocked = service.blockedGroups;
+    if (blocked.isEmpty) return all;
+    return all.where((g) => !blocked.contains(g.name)).toList();
+  }
+
   int get selectedGroup => service.selectedGroup.value;
 
   List<LiveChannel> get channels {
-    final list = service.currentChannels;
+    var list = service.currentChannels;
+    final blocked = service.blockedGroups;
+    if (blocked.isNotEmpty) {
+      list = list.where((c) => !blocked.contains(c.group)).toList();
+    }
     final kw = searchKeyword.value.trim();
     if (kw.isEmpty) return list;
     return list.where((c) => c.name.contains(kw)).toList();

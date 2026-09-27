@@ -15,7 +15,6 @@ class LiveSettingsPage extends StatefulWidget {
 
 class _LiveSettingsPageState extends State<LiveSettingsPage> {
   final _epgCtrl = TextEditingController();
-  final _blocked = <String>{}.obs;
 
   @override
   void initState() {
@@ -164,7 +163,9 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               borderRadius: BorderRadius.circular(14),
             ),
             child: Obx(() {
-              final groups = LiveService.instance.groups;
+              final svc = LiveService.instance;
+              // 屏蔽列表显示全部分组（含已屏蔽），勾选状态实时反映
+              final groups = svc.groups;
               return Column(
                 children: [
                   if (groups.isEmpty)
@@ -172,14 +173,8 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                   else
                     for (final g in groups)
                       CheckboxListTile(
-                        value: !_blocked.contains(g.name),
-                        onChanged: (v) {
-                          if (v == true) {
-                            _blocked.remove(g.name);
-                          } else {
-                            _blocked.add(g.name);
-                          }
-                        },
+                        value: !svc.blockedGroups.contains(g.name),
+                        onChanged: (_) => svc.toggleBlockedGroup(g.name),
                         title: Text(g.name,
                             style:
                                 const TextStyle(color: Colors.white70, fontSize: 14)),

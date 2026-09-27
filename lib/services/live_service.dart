@@ -11,6 +11,39 @@ import '../models/live_models.dart';
 class LiveService extends GetxService {
   static LiveService get instance => Get.find<LiveService>();
 
+  /// 屏蔽的分组名（持久化：直播页隐藏对应分类）
+  final blockedGroups = <String>[].obs;
+
+  @override
+  void onInit() {
+    super.onInit();
+    _restoreBlocked();
+  }
+
+  Future<void> _restoreBlocked() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getStringList('blocked_groups') ?? const [];
+      blockedGroups.value = saved;
+    } catch (_) {}
+  }
+
+  Future<void> _persistBlocked() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('blocked_groups', blockedGroups.toList());
+    } catch (_) {}
+  }
+
+  void toggleBlockedGroup(String name) {
+    if (blockedGroups.contains(name)) {
+      blockedGroups.remove(name);
+    } else {
+      blockedGroups.add(name);
+    }
+    _persistBlocked();
+  }
+
   final channels = <LiveChannel>[].obs;
   final groups = <LiveGroup>[].obs;
   /// 多直播源列表（参考图：综合直播[刚刚更新]/虎牙[未下载]/斗鱼[未下载]...）
