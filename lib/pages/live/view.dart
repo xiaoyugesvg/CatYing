@@ -28,6 +28,7 @@ class _LivePageState extends State<LivePage> {
   Player? _player;
   VideoController? _videoController;
   bool _fullscreen = false;
+  bool _audioMode = false;
   bool _showGroupChannels = false;
   int _activeGroupIndex = 0;
 
@@ -155,6 +156,12 @@ class _LivePageState extends State<LivePage> {
                       ),
                       const Spacer(),
                       _TopIcon(
+                        icon: _audioMode
+                            ? Icons.headphones
+                            : Icons.headphones_outlined,
+                        onTap: _toggleAudioMode,
+                      ),
+                      _TopIcon(
                         icon: Icons.campaign,
                         onTap: () => _showAnnouncements(context),
                       ),
@@ -174,128 +181,48 @@ class _LivePageState extends State<LivePage> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                // 视频区
-                AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: Container(
-                    color: Colors.black,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        if (_videoController != null && current != null)
-                          Video(
-                            controller: _videoController!,
-                            controls: AdaptiveVideoControls,
-                          )
-                        else
-                          Center(
-                            child: Icon(Icons.live_tv,
-                                color: AppTheme.textTertiary, size: 56),
-                          ),
-                        // 小窗（PiP）右下 —— 全屏已移到顶部，这里只留小窗
-                        Positioned(
-                          right: 12,
-                          bottom: 12,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.45),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: GestureDetector(
-                              onTap: () => _togglePip(),
-                              child: Icon(Icons.picture_in_picture_alt,
-                                  color: AppTheme.textPrimary, size: 20),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                // 下拉行：左=直播源选择（参考图 IMG_7748）、右=公告（IMG_7749）
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                // 主体：左侧直播源列表 + 右侧源内容（参考图：一侧源、一侧内容）
+                Expanded(
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      GestureDetector(
-                        onTap: () => _pickSource(context, c),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: AppTheme.backgroundTertiary,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.live_tv,
-                                  color: AppTheme.accentColor, size: 15),
-                              const SizedBox(width: 6),
-                              Text(
-                                _currentSourceName(c),
-                                style: TextStyle(
-                                    color: AppTheme.textSecondary, fontSize: 13),
-                              ),
-                              const SizedBox(width: 4),
-                              Icon(Icons.keyboard_arrow_down,
-                                  color: AppTheme.textTertiary, size: 16),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const Spacer(),
-                      GestureDetector(
-                        onTap: () => _showAnnouncements(context),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: AppTheme.backgroundTertiary,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.campaign,
-                                  color: AppTheme.textSecondary, size: 15),
-                              const SizedBox(width: 6),
-                              Text('公告',
+                      // 左栏：直播源列表
+                      _buildSourceRail(c),
+                      // 右栏：视频 + 分类/频道列表
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildVideoArea(c, current),
+                            // 加载错误提示
+                            Obx(() {
+                              final err = LiveService.instance.error.value;
+                              if (err == null) return const SizedBox.shrink();
+                              return Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                                child: Text(
+                                  err,
                                   style: TextStyle(
-                                      color: AppTheme.textSecondary,
-                                      fontSize: 13)),
-                            ],
-                          ),
+                                      color: Colors.redAccent.withValues(alpha: 0.9),
+                                      fontSize: 12),
+                                ),
+                              );
+                            }),
+                            const SizedBox(height: 8),
+                            // 列表区：先"分类（分组）列表"（参考图 IMG_7749），点分类进频道
+                            Expanded(
+                              child: groups.isEmpty
+                                  ? _EmptyLive(
+                                      onReload: () => _pickSource(context, c))
+                                  : _showGroupChannels
+                                      ? _buildChannelList(c, channels)
+                                      : _buildGroupList(c),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 8),
-                // 加载错误提示
-                Obx(() {
-                  final err = LiveService.instance.error.value;
-                  if (err == null) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                    child: Text(
-                      err,
-                      style: TextStyle(
-                          color: Colors.redAccent.withValues(alpha: 0.9),
-                          fontSize: 12),
-                    ),
-                  );
-                }),
-                // 列表区：先"分类（分组）列表"（参考图 IMG_7749），点分类进频道
-                Expanded(
-                  child: groups.isEmpty
-                      ? _EmptyLive(onReload: () => _pickSource(context, c))
-                      : _showGroupChannels
-                          ? _buildChannelList(c, channels)
-                          : _buildGroupList(c),
                 ),
               ],
             ),
@@ -306,95 +233,230 @@ class _LivePageState extends State<LivePage> {
   }
 
   Future<void> _pickSource(BuildContext context, LiveController c) async {
-    final srcs = LiveService.instance.sources;
-    if (srcs.isEmpty) {
-      // 没有任何源：引导导入 m3u/txt
-      final url = await showDialog<String>(
-        context: context,
-        builder: (ctx) {
-          final ctrl = TextEditingController();
-          return AlertDialog(
-            backgroundColor: const Color(0xFF1C1C1E),
-            title: Text('导入直播源',
-                style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
-            content: TextField(
-              controller: ctrl,
-              style: TextStyle(color: AppTheme.textPrimary),
-              decoration: InputDecoration(
-                hintText: 'm3u / txt 地址',
-                hintStyle: TextStyle(color: AppTheme.textTertiary),
-              ),
-            ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('取消')),
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-                  child: const Text('加载')),
-            ],
-          );
-        },
-      );
-      if (url != null && url.isNotEmpty) {
-        await c.reloadFromUrl(url);
-      }
-      return;
-    }
-    // 多源列表（参考图 IMG_7748：绿色播放图标 + 名称 + 刚刚更新/未下载）
-    showModalBottomSheet(
+    // 导入/覆盖直播源（m3u/txt URL）——左栏底部 + 号进入
+    final url = await showDialog<String>(
       context: context,
-      backgroundColor: const Color(0xFF1C1C1E),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text('直播源',
-                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
+      builder: (ctx) {
+        final ctrl = TextEditingController();
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1C1C1E),
+          title: Text('导入直播源',
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
+          content: TextField(
+            controller: ctrl,
+            style: TextStyle(color: AppTheme.textPrimary),
+            decoration: InputDecoration(
+              hintText: 'm3u / txt 地址',
+              hintStyle: TextStyle(color: AppTheme.textTertiary),
             ),
-            for (var i = 0; i < srcs.length; i++)
-              ListTile(
-                leading: Icon(Icons.play_circle_fill,
-                    color: srcs[i].loaded
-                        ? AppTheme.accentColor
-                        : Colors.white24,
-                    size: 22),
-                title: Text(srcs[i].name,
-                    style: TextStyle(color: AppTheme.textSecondary)),
-                subtitle: Text(srcs[i].loaded ? '刚刚更新' : '未下载',
-                    style: TextStyle(
-                        color: srcs[i].loaded
-                            ? AppTheme.accentColor.withValues(alpha: 0.8)
-                            : AppTheme.textTertiary,
-                        fontSize: 11)),
-                trailing: srcs[i].loaded
-                    ? const Icon(Icons.check, color: AppTheme.accentColor)
-                    : null,
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  if (!srcs[i].loaded) {
-                    await LiveService.instance.loadSource(i);
-                  }
-                  if (context.mounted) setState(() => _showGroupChannels = false);
-                },
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('取消')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                child: const Text('加载')),
+          ],
+        );
+      },
+    );
+    if (url != null && url.isNotEmpty) {
+      await c.reloadFromUrl(url);
+      if (mounted) setState(() => _showGroupChannels = false);
+    }
+  }
+
+  void _toggleAudioMode() {
+    setState(() => _audioMode = !_audioMode);
+    // 进入听剧时保持播放（后台可续播由 UIBackgroundModes=audio 保证）
+  }
+
+  Widget _buildVideoArea(LiveController c, LiveChannel? current) {
+    return AspectRatio(
+      aspectRatio: 16 / 9,
+      child: Container(
+        color: Colors.black,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (_audioMode)
+              _buildAudioModeOverlay(c, current)
+            else if (_videoController != null && current != null)
+              Video(
+                controller: _videoController!,
+                controls: AdaptiveVideoControls,
+              )
+            else
+              Center(
+                child: Icon(Icons.live_tv,
+                    color: AppTheme.textTertiary, size: 56),
               ),
+            // 小窗（PiP）右下 —— 全屏/听剧/公告在顶部，这里只留小窗
+            Positioned(
+              right: 12,
+              bottom: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: GestureDetector(
+                  onTap: () => _togglePip(),
+                  child: Icon(Icons.picture_in_picture_alt,
+                      color: AppTheme.textPrimary, size: 20),
+                ),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  String _currentSourceName(LiveController c) {
+  Widget _buildAudioModeOverlay(LiveController c, LiveChannel? current) {
+    final name = current?.name ?? '';
+    return Container(
+      color: Colors.black,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.headphones, color: Colors.white70, size: 44),
+            const SizedBox(height: 16),
+            if (name.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600),
+                ),
+              ),
+            const SizedBox(height: 6),
+            Text(
+              '听剧模式 · 后台可继续播放',
+              style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.5), fontSize: 11),
+            ),
+            const SizedBox(height: 18),
+            GestureDetector(
+              onTap: _toggleAudioMode,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Text('退出听剧模式',
+                    style: TextStyle(color: Colors.white, fontSize: 12)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 左栏：直播源列表（参考图：一侧是直播源）——绿点=已加载，灰点=未下载
+  Widget _buildSourceRail(LiveController c) {
     final srcs = LiveService.instance.sources;
-    if (srcs.isEmpty) {
-      return c.groups.isEmpty ? '播放源' : c.groups[c.selectedGroup].name;
-    }
-    for (var i = 0; i < srcs.length; i++) {
-      if (srcs[i].loaded) return srcs[i].name;
-    }
-    return srcs.first.name;
+    return Container(
+      width: 104,
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundTertiary,
+        border:
+            Border(right: BorderSide(color: AppTheme.borderLight, width: 0.5)),
+      ),
+      child: srcs.isEmpty
+          ? Center(
+              child: IconButton(
+                icon: Icon(Icons.add_circle_outline,
+                    color: AppTheme.textSecondary, size: 24),
+                onPressed: () => _pickSource(context, c),
+              ),
+            )
+          : Column(
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.only(top: 4),
+                    itemCount: srcs.length,
+                    itemBuilder: (_, i) {
+                      final src = srcs[i];
+                      final selected = src.loaded;
+                      return InkWell(
+                        onTap: () async {
+                          if (!src.loaded) {
+                            await LiveService.instance.loadSource(i);
+                          }
+                          if (mounted) {
+                            setState(() => _showGroupChannels = false);
+                          }
+                        },
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 3),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? AppTheme.backgroundSecondary
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Column(
+                            children: [
+                              Icon(Icons.play_circle_fill,
+                                  color: selected
+                                      ? AppTheme.accentColor
+                                      : Colors.white24,
+                                  size: 18),
+                              const SizedBox(height: 4),
+                              Text(
+                                src.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    color: selected
+                                        ? AppTheme.accentColor
+                                        : AppTheme.textSecondary,
+                                    fontSize: 11),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                selected ? '刚刚更新' : '未下载',
+                                style: TextStyle(
+                                    color: selected
+                                        ? AppTheme.accentColor
+                                            .withValues(alpha: 0.8)
+                                        : AppTheme.textTertiary,
+                                    fontSize: 9),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                // 底部导入按钮
+                InkWell(
+                  onTap: () => _pickSource(context, c),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: Icon(Icons.add_circle_outline,
+                        color: AppTheme.textSecondary, size: 22),
+                  ),
+                ),
+              ],
+            ),
+    );
   }
 
   void _showAnnouncements(BuildContext context) {
