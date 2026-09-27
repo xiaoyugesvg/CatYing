@@ -5,6 +5,7 @@ import '../models/app_config.dart';
 import '../models/source_bean.dart';
 import '../common/constants.dart';
 import 'network_manager.dart';
+import 'live_service.dart';
 
 /// 配置错误枚举
 enum ConfigError {
@@ -427,6 +428,32 @@ class ApiConfig extends GetxController {
         }
       }
       sourceBeanList.value = sources;
+
+      // 直播 lives：交给 LiveService 解析（内嵌 channels 或 m3u URL）
+      try {
+        final lives = config.lives;
+        if (lives != null && lives.isNotEmpty) {
+          final raw = lives
+              .map((e) => {
+                    'name': e.name,
+                    'url': e.url,
+                    'ua': e.ua,
+                    'type': e.type?.value,
+                    'channels': e.channels
+                        ?.map((ch) => {
+                              'name': ch.name,
+                              'urls': ch.urls,
+                              'group': ch.group,
+                              'logo': ch.logo,
+                            })
+                        .toList(),
+                  })
+              .toList();
+          await LiveService.instance.loadFromLivesJson(raw);
+        }
+      } catch (e) {
+        print('[ApiConfig] lives 解析失败: $e');
+      }
 
       // 关键修复：如果当前解析结果包含 Spider 源（type=3），
       // 那么 sources 列表里那个 SourceBean 是 _createSpiderSourceConfig

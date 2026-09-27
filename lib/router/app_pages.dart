@@ -6,11 +6,13 @@ import '../pages/settings/view.dart';
 import '../pages/detail/view.dart';
 import '../pages/search/view.dart';
 import '../pages/dlna/view.dart';
+import '../pages/live/view.dart';
 
 class AppPages {
   static const String detail = '/detail';
   static const String search = '/search';
   static const String dlna = '/dlna';
+  static const String live = '/live';
 
   static final pages = [
     GetPage(
@@ -27,6 +29,10 @@ class AppPages {
     GetPage(
       name: dlna,
       page: () => const DLNAPage(),
+    ),
+    GetPage(
+      name: live,
+      page: () => const LivePage(),
     ),
   ];
 }

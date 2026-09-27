@@ -259,6 +259,27 @@ class SettingsController extends GetxController {
     await refreshCacheSize();
   }
 
+  /// 清理源文件缓存（删除 Documents 下已下载的源 JS），不清图片等
+  Future<void> clearSourceCache() async {
+    try {
+      final ok = await NodeJSManager.instance.deleteSource();
+      Get.snackbar(
+        '源文件缓存',
+        ok ? '已删除本地源文件' : '源文件清理失败或本无源文件',
+        snackPosition: SnackPosition.BOTTOM,
+        duration: const Duration(seconds: 2),
+      );
+    } catch (e) {
+      Get.snackbar(
+        '源文件缓存',
+        '清理失败：$e',
+        snackPosition: SnackPosition.BOTTOM,
+        duration: const Duration(seconds: 2),
+      );
+    }
+    await refreshCacheSize();
+  }
+
   /// 重置配置：清除已保存的源 URL + 历史记录 + 下载的源缓存
   /// 下次启动 App 会回到 setupView（输入源 URL 的初始页面）
   /// 不会清播放器设置 / 主题 / 字体大小等本地化设置

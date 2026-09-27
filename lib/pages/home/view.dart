@@ -53,51 +53,21 @@ class _HomePageState extends State<HomePage> {
             child: Column(
               children: [
                 _buildHeaderBar(),
-                // 搜索已移到右上角图标；下方仅保留吸顶分类/筛选
-                // **吸顶分类**: 下滚后分类栏保持可见（半透明），上滚回顶
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 250),
-                  curve: Curves.easeOutCubic,
-                  alignment: Alignment.topCenter,
-                  child: _categoryBarVisible
-                      ? Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Obx(() {
-                              if (_controller.sorts.isNotEmpty) {
-                                return _buildCategoryTabBar();
-                              }
-                              return const SizedBox.shrink();
-                            }),
-                            Obx(() {
-                              if (_controller.currentFilters.isNotEmpty) {
-                                return _buildFilterBar();
-                              }
-                              return const SizedBox.shrink();
-                            }),
-                          ],
-                        )
-                      : const SizedBox(width: double.infinity, height: 0),
-                ),
+                // 分类/筛选：滚动时保持显示（吸顶，不再折叠）
+                Obx(() {
+                  final hasCat = _controller.sorts.isNotEmpty;
+                  final hasFilter = _controller.currentFilters.isNotEmpty;
+                  if (!hasCat && !hasFilter) return const SizedBox.shrink();
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (hasCat) _buildCategoryTabBar(),
+                      if (hasFilter) _buildFilterBar(),
+                    ],
+                  );
+                }),
                 Expanded(
-                  // 监听滚动方向: 下滚超过 60pt 收起分类栏, 上滚恢复
-                  child: NotificationListener<ScrollNotification>(
-                    onNotification: (notification) {
-                      if (notification.metrics.axis != Axis.vertical) {
-                        return false;
-                      }
-                      final current = notification.metrics.pixels;
-                      final delta = current - _lastScrollOffset;
-                      if (delta > 6 && current > 60 && _categoryBarVisible) {
-                        setState(() => _categoryBarVisible = false);
-                      } else if (delta < -6 && !_categoryBarVisible) {
-                        setState(() => _categoryBarVisible = true);
-                      }
-                      _lastScrollOffset = current;
-                      return false;
-                    },
-                    child: _buildContentArea(),
-                  ),
+                  child: _buildContentArea(),
                 ),
               ],
             ),
@@ -152,67 +122,113 @@ class _HomePageState extends State<HomePage> {
           AppTheme.spacingLG, AppTheme.spacingSM, AppTheme.spacingLG, AppTheme.spacingXS),
       child: Row(
         children: [
-          // 左上：日期时间
-          const _HomeClockView(),
-          // 中间：源切换
-          Expanded(
-            child: Center(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () async {
-                  final changed = await SourceSwitchSheet.show(context);
-                  if (changed && mounted) {
-                    _controller.refresh();
-                  }
-                },
-                child: Row(
+          // 左：软件 Logo + 源名（无下箭头，点击换源）
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () async {
+              final changed = await SourceSwitchSheet.show(context);
+              if (changed && mounted) {
+                _controller.refresh();
+              }
+            },
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF6BDC9A), AppTheme.accentColor],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.live_tv_rounded,
+                      color: Colors.white, size: 18),
+                ),
+                const SizedBox(width: 8),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 140),
+                  child: Obx(() => Text(
+                        ApiConfig.instance.homeSourceBean.value?.name ?? '选择源',
+                        style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      )),
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+          // 直播入口
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Get.toNamed('/live'),
+            child: Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: AppTheme.accentColor.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: AppTheme.accentColor.withValues(alpha: 0.4),
+                ),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.live_tv, color: AppTheme.accentColor, size: 14),
+                  SizedBox(width: 4),
+                  Text('直播',
+                      style: TextStyle(
+                          color: AppTheme.accentColor, fontSize: 12)),
+                ],
+              ),
+            ),
+          ),
+          // 右：胶囊搜索栏 + 日期时间
+          Flexible(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                if (widget.onSearchTap != null) {
+                  widget.onSearchTap!();
+                } else {
+                  Get.toNamed('/search');
+                }
+              },
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: AppTheme.backgroundTertiary,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.08),
+                  ),
+                ),
+                child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Flexible(
-                      child: Obx(() => Text(
-                            ApiConfig.instance.homeSourceBean.value?.name ??
-                                '选择源',
-                            style: const TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: AppTheme.fontHeadline,
-                              fontWeight: FontWeight.bold,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          )),
-                    ),
-                    const SizedBox(width: 4),
-                    const Icon(Icons.keyboard_arrow_down,
-                        color: AppTheme.textTertiary, size: 18),
+                    Icon(Icons.search,
+                        color: AppTheme.textTertiary, size: 14),
+                    SizedBox(width: 4),
+                    Text('搜索',
+                        style: TextStyle(
+                            color: AppTheme.textTertiary, fontSize: 12)),
                   ],
                 ),
               ),
             ),
           ),
-          // 右上：搜索入口
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              if (widget.onSearchTap != null) {
-                widget.onSearchTap!();
-              } else {
-                Get.toNamed('/search');
-              }
-            },
-            child: Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: AppTheme.backgroundTertiary,
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.08),
-                ),
-              ),
-              child: const Icon(Icons.search,
-                  color: AppTheme.textSecondary, size: 18),
-            ),
-          ),
+          const SizedBox(width: 8),
+          const _HomeClockView(),
         ],
       ),
     );

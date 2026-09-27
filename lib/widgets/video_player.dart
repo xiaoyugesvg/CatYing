@@ -604,14 +604,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     } catch (_) {}
   }
 
-  /// 通过视频 URL 直接匹配弹幕（Logvr-danmu 的 /api/v2/comment?url= 接口）
+  /// 通过视频 URL 直接匹配弹幕（Logvr-danmu / 弹弹play 的 /api/v2/comment?url=）
   Future<void> _ensureDanmuLoaded() async {
     if (_danmuLoaded || _danmuApiUrl.isEmpty) return;
-    _danmuLoaded = true;
+    if (!mounted) return;
     final url = _player.state.playlist.medias.isNotEmpty
         ? _player.state.playlist.medias.last.uri
         : widget.url;
     if (url.isEmpty) return;
+    _danmuLoaded = true;
     try {
       final base = _danmuApiUrl.replaceAll(RegExp(r'/+$'), '');
       final api =
@@ -622,11 +623,26 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (res.statusCode == 200) {
         final body = await res.transform(utf8.decoder).join();
         final list = parseDanmuBody(body);
-        if (mounted && list.isNotEmpty) {
+        if (mounted) {
           setState(() => _danmus = list);
+          if (list.isNotEmpty) {
+            _showMessage('弹幕已加载 ${list.length} 条');
+          } else {
+            _showMessage('弹幕接口无数据（可换视频或检查 API）');
+          }
+        }
+      } else {
+        if (mounted) {
+          _danmuLoaded = false;
+          _showMessage('弹幕加载失败 HTTP ${res.statusCode}');
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) {
+        _danmuLoaded = false;
+        _showMessage('弹幕加载失败：$e');
+      }
+    }
   }
 
   /// 持久化弹幕开关
@@ -1386,6 +1402,36 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
             if (_isNativeFullscreen) ...[const SizedBox(width: 4), _buildStatusBarInfo()],
 
+            // 小窗 / 听剧 / 投屏（放顶栏，方便一点就用）
+            if (widget.showAudioModeButton)
+              _iconButton(
+                icon: _audioMode ? Icons.headphones : Icons.headphones_outlined,
+                size: 20,
+                width: 40,
+                onTap: () {
+                  _scheduleHideControls();
+                  _toggleAudioMode();
+                },
+              ),
+            _iconButton(
+              icon: Icons.picture_in_picture_alt,
+              size: 20,
+              width: 40,
+              onTap: () {
+                _scheduleHideControls();
+                _togglePiP();
+              },
+            ),
+            _iconButton(
+              icon: Icons.cast,
+              size: 20,
+              width: 40,
+              onTap: () {
+                _scheduleHideControls();
+                _toggleCast();
+              },
+            ),
+
             // 设置（倍速/清晰度/裁剪都在这里）
             _iconButton(
               icon: Icons.more_horiz,
@@ -2140,31 +2186,37 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Widget _buildSettingsSheet() {
     return Positioned.fill(
-      child: ColoredBox(
-        color: Colors.black.withValues(alpha: 0.55),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => setState(() => _showSettingsSheet = false),
-              child: const SizedBox(height: 1, width: double.infinity),
-            ),
-            Container(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _showSettingsSheet = false),
+        child: Container(
+          color: Colors.black.withValues(alpha: 0.45),
+          alignment: Alignment.bottomCenter,
+          child: GestureDetector(
+            onTap: () {},
+            child: Container(
+              width: double.infinity,
               constraints: const BoxConstraints(maxHeight: 560),
-              margin: const EdgeInsets.fromLTRB(10, 10, 10, 12),
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(
-                color: const Color(0xF01C1C1E),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: Colors.white12),
+              margin: const EdgeInsets.fromLTRB(0, 0, 0, 0),
+              decoration: const BoxDecoration(
+                color: Color(0xFF1C1C1E),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // 标题栏
+                  // 拖拽条
+                  Container(
+                    margin: const EdgeInsets.only(top: 8),
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                     child: Row(
                       children: [
                         const Text(
@@ -2188,7 +2240,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   ),
                   Flexible(
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 18),
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -2219,7 +2271,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                             },
                           ),
                           const SizedBox(height: 10),
-                          // 翻转 / 听视频 / 后台播放
                           SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
                             child: Row(
@@ -2364,7 +2415,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );

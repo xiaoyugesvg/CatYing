@@ -1,26 +1,37 @@
 import 'package:flutter/material.dart';
 
+/// 全局明暗：外观模式切换后 AppTheme 颜色跟着变（深色/浅色/跟随系统）
+class AppBrightness {
+  /// true = 浅色界面
+  static final ValueNotifier<bool> isLight = ValueNotifier(false);
+}
+
 /// 主题配置 - 匹配 tvbox-Swift 设计系统 + iOS 27 Liquid Glass 玻璃体系
 class AppTheme {
-  // 颜色
+  // 颜色（getter 跟随外观模式）
   static const Color accentColor = Color(0xFF5CB67B);
   static const Color accentLightColor = Color(0xFF7DCEA0);
-  static const Color backgroundPrimary = Color(0xFF0F0F0F);
-  static const Color backgroundSecondary = Color(0xFF1A1A1A);
-  static const Color backgroundTertiary = Color(0x0FFFFFFF); // white 6%
-  static const Color backgroundElevated = Color(0x14FFFFFF); // white 8%
+  static Color get backgroundPrimary =>
+      AppBrightness.isLight.value ? const Color(0xFFF6F6F7) : const Color(0xFF0F0F0F);
+  static Color get backgroundSecondary =>
+      AppBrightness.isLight.value ? const Color(0xFFFFFFFF) : const Color(0xFF1A1A1A);
+  static Color get backgroundTertiary => AppBrightness.isLight.value
+      ? const Color(0x0F000000)
+      : const Color(0x0FFFFFFF);
+  static Color get backgroundElevated => AppBrightness.isLight.value
+      ? const Color(0x14000000)
+      : const Color(0x14FFFFFF);
 
   // ===== 半透明卡片色 =====
-  // 专为主 tab 视图内的卡片/容器设计, 让 BackgroundService 全局背景层透出
-  // 替换原 backgroundSecondary (完全不透明) 造成的"黑色板块"问题
-  //
-  // backgroundCard: 80% 透明度的 #1A1A1A, 适合 AppCard / VodCard
-  // backgroundCardElevated: 90% 透明度, 适合高亮/选中状态容器
-  // backgroundNavBar: 80% 透明度的 #1C1C1E, 适合底部导航栏
-  // 0xCC = 204/255 ≈ 80%, 0xE6 = 230/255 ≈ 90%
-  static const Color backgroundCard = Color(0xCC1A1A1A);
-  static const Color backgroundCardElevated = Color(0xE61A1A1A);
-  static const Color backgroundNavBar = Color(0xCC1C1C1E);
+  static Color get backgroundCard => AppBrightness.isLight.value
+      ? const Color(0xCCFFFFFF)
+      : const Color(0xCC1A1A1A);
+  static Color get backgroundCardElevated => AppBrightness.isLight.value
+      ? const Color(0xE6FFFFFF)
+      : const Color(0xE61A1A1A);
+  static Color get backgroundNavBar => AppBrightness.isLight.value
+      ? const Color(0xCCFFFFFF)
+      : const Color(0xCC1C1C1E);
 
   // ===== iOS 27 Liquid Glass 玻璃体系 =====
   // 玻璃底色: 白 10% tint, 叠加在全局背景层/页面内容上形成磨砂观感
@@ -45,12 +56,17 @@ class AppTheme {
   // 玻璃模糊强度 (iOS 27 对背景内容扩散更强)
   static const double glassBlurSigma = 28;
 
-  static const Color textPrimary = Color(0xEBEBEBEB); // white 92%
-  static const Color textSecondary = Color(0x8CFFFFFF); // white 55%
-  static const Color textTertiary = Color(0x59FFFFFF); // white 35%
+  static Color get textPrimary =>
+      AppBrightness.isLight.value ? const Color(0xE61A1A1A) : const Color(0xEBEBEBEB);
+  static Color get textSecondary =>
+      AppBrightness.isLight.value ? const Color(0x8C1A1A1A) : const Color(0x8CFFFFFF);
+  static Color get textTertiary =>
+      AppBrightness.isLight.value ? const Color(0x591A1A1A) : const Color(0x59FFFFFF);
 
-  static const Color borderLight = Color(0x14FFFFFF); // white 8%
-  static const Color borderMedium = Color(0x24FFFFFF); // white 14%
+  static Color get borderLight =>
+      AppBrightness.isLight.value ? const Color(0x14000000) : const Color(0x14FFFFFF);
+  static Color get borderMedium =>
+      AppBrightness.isLight.value ? const Color(0x24000000) : const Color(0x24FFFFFF);
 
   // 间距
   static const double spacingXS = 4;

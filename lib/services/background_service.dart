@@ -7,11 +7,12 @@ import 'package:path_provider/path_provider.dart';
 
 /// 背景选择类型
 enum BackgroundChoice {
-  /// 4 个内置渐变(1-4)
+  /// 4 个内置渐变(1-4) + 皎月白
   builtin1,
   builtin2,
   builtin3,
   builtin4,
+  moonWhite,
 
   /// 用户上传的自定义图片
   custom,
@@ -162,6 +163,13 @@ class BackgroundService extends GetxService {
     Color(0xFFEA580C),
   ];
 
+  /// 皎月白
+  static const List<Color> _moonWhite = [
+    Color(0xFFF7F4EF),
+    Color(0xFFE8E4DC),
+    Color(0xFFD9D4C8),
+  ];
+
   List<Color> _getGradientForChoice(BackgroundChoice c) {
     switch (c) {
       case BackgroundChoice.builtin1:
@@ -172,6 +180,8 @@ class BackgroundService extends GetxService {
         return _builtin3;
       case BackgroundChoice.builtin4:
         return _builtin4;
+      case BackgroundChoice.moonWhite:
+        return _moonWhite;
       case BackgroundChoice.custom:
         return _builtin1;
     }
@@ -296,6 +306,8 @@ class BackgroundService extends GetxService {
         return '赛博蓝';
       case BackgroundChoice.builtin4:
         return '暖阳橙';
+      case BackgroundChoice.moonWhite:
+        return '皎月白';
       case BackgroundChoice.custom:
         return '自定义图片';
     }
@@ -324,6 +336,11 @@ class BackgroundService extends GetxService {
         name: '暖阳橙',
         choice: BackgroundChoice.builtin4,
         colors: _builtin4,
+      ),
+      (
+        name: '皎月白',
+        choice: BackgroundChoice.moonWhite,
+        colors: _moonWhite,
       ),
     ];
   }

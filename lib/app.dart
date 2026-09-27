@@ -35,17 +35,24 @@ class TVBoxApp extends StatelessWidget {
     Get.put(MainTabController(), permanent: true);
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: ThemeModeStore.notifier,
-      builder: (context, themeMode, _) => GetMaterialApp(
-        title: '猫影',
-        theme: AppTheme.lightTheme,
-        darkTheme: AppTheme.darkTheme,
-        themeMode: themeMode,
-        // 把 NavigatorState 暴露给 VideoPlayerPip，让画中画能插入到顶层 Overlay
-        navigatorKey: VideoPlayerPip.navigatorKey,
-        home: const ContentView(),
-        getPages: AppPages.pages,
-        debugShowCheckedModeBanner: false,
-      ),
+      builder: (context, themeMode, _) {
+        // 跟随系统：把平台亮度同步给 AppTheme
+        final platformLight =
+            View.of(context).platformDispatcher.platformBrightness ==
+                Brightness.light;
+        ThemeModeStore.syncFromPlatform(platformLight);
+        return GetMaterialApp(
+          title: '猫影',
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: themeMode,
+          // 把 NavigatorState 暴露给 VideoPlayerPip，让画中画能插入到顶层 Overlay
+          navigatorKey: VideoPlayerPip.navigatorKey,
+          home: const ContentView(),
+          getPages: AppPages.pages,
+          debugShowCheckedModeBanner: false,
+        );
+      },
     );
   }
 }
@@ -1249,6 +1256,15 @@ class ThemeModeStore {
 
   static ThemeMode get mode => notifier.value;
 
+  static void _syncBrightness(ThemeMode m, {bool? systemLight}) {
+    final light = switch (m) {
+      ThemeMode.light => true,
+      ThemeMode.dark => false,
+      ThemeMode.system => systemLight ?? false,
+    };
+    AppBrightness.isLight.value = light;
+  }
+
   static Future<void> load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -1258,11 +1274,13 @@ class ThemeModeStore {
         'system' => ThemeMode.system,
         _ => ThemeMode.dark,
       };
+      _syncBrightness(notifier.value);
     } catch (_) {}
   }
 
   static Future<void> set(ThemeMode m) async {
     notifier.value = m;
+    _syncBrightness(m);
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
@@ -1274,5 +1292,12 @@ class ThemeModeStore {
         },
       );
     } catch (_) {}
+  }
+
+  /// 跟随系统时调用（View 平台亮度变化）
+  static void syncFromPlatform(bool platformLight) {
+    if (notifier.value == ThemeMode.system) {
+      AppBrightness.isLight.value = platformLight;
+    }
   }
 }

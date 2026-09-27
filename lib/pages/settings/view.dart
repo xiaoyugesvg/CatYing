@@ -493,14 +493,7 @@ class _SettingsPageState extends State<SettingsPage> {
             icon: Icons.cleaning_services_outlined,
             title: '清理源文件缓存',
             value: '',
-            onTap: () async {
-              await controller.clearCache();
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('源文件缓存已清理')),
-                );
-              }
-            },
+            onTap: () => controller.clearSourceCache(),
           ),
           const Divider(color: AppTheme.borderLight, height: 1),
           Obx(() => SettingsRow(
