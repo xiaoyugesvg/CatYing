@@ -25,9 +25,7 @@ class _HomePageState extends State<HomePage> {
   final HomeController _controller = Get.put(HomeController());
   bool _isReconnecting = false;
 
-  /// 顶部搜索栏是否可见（滚动下移时收起, 上移/回顶恢复）
-  bool _headerVisible = true;
-  double _lastScrollOffset = 0;
+  // 源切换行 + 分类/筛选行：滚动时保持显示（吸顶，不再折叠）
 
   @override
   void initState() {
@@ -51,15 +49,8 @@ class _HomePageState extends State<HomePage> {
           SafeArea(
             child: Column(
               children: [
-                // 顶部搜索栏：下滑隐藏，上滑/回顶显示
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
-                  curve: Curves.easeOutCubic,
-                  height: _headerVisible ? null : 0,
-                  clipBehavior: Clip.hardEdge,
-                  decoration: const BoxDecoration(),
-                  child: _buildHeaderBar(),
-                ),
+                // 顶部源切换行 + 分类/筛选行：下滑保留（吸顶常驻）
+                _buildHeaderBar(),
                 // 分类/筛选：吸顶显示
                 Obx(() {
                   final hasCat = _controller.sorts.isNotEmpty;
@@ -342,27 +333,7 @@ class _HomePageState extends State<HomePage> {
       // 对应 Swift: 选中分类时显示 categoryVideos，否则显示 homeVideos
       final videos = _controller.displayVideos;
 
-      return NotificationListener<ScrollNotification>(
-        onNotification: (notification) {
-          if (notification is ScrollUpdateNotification && notification.depth == 0) {
-            final currentOffset = notification.metrics.pixels;
-            final delta = currentOffset - _lastScrollOffset;
-            final atTop = currentOffset <= 0;
-            if (atTop) {
-              // 回到顶部 → 显示搜索栏
-              if (!_headerVisible) setState(() => _headerVisible = true);
-            } else if (delta > 3) {
-              // 向下滚动（内容上移）→ 隐藏搜索栏
-              if (_headerVisible) setState(() => _headerVisible = false);
-            } else if (delta < -3) {
-              // 向上滚动（内容下移）→ 显示搜索栏
-              if (!_headerVisible) setState(() => _headerVisible = true);
-            }
-            _lastScrollOffset = currentOffset;
-          }
-          return false;
-        },
-        child: RefreshIndicator(
+      return RefreshIndicator(
         color: AppTheme.accentColor,
         backgroundColor: AppTheme.backgroundSecondary,
         onRefresh: () => _controller.refresh(),
@@ -446,8 +417,7 @@ class _HomePageState extends State<HomePage> {
             );
           },
         ),
-      ),
-    );
+      );
   });
   }
 

@@ -22,6 +22,7 @@ dependencies:
   # mpv 对部分 HLS/TS 直播流黑屏（有声音无画面），AVPlayer 可正常解码，
   # 故直播页 iOS 使用 video_player 播放，其余平台仍走 media_kit(mpv)。
   video_player: ^2.9.2
+  screen_brightness: ^0.2.2
   connectivity_plus: 6.1.5  # 7.x 用了 iOS 26 SDK 的 API（NWPath.isUltraConstrained），macos-14 runner 是 Xcode 15-16 编译不过
   window_manager: ^0.4.0
   # url_launcher 已废弃：配置中心改用应用内 webview_flutter 替代
