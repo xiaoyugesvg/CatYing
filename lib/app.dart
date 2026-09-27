@@ -802,7 +802,7 @@ class _ContentViewState extends State<ContentView>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
+                  children: [
                     Text(
                       '使用本软件前，请仔细阅读以下免责声明。点击"同意"即表示您已阅读、理解并同意接受全部条款约束。',
                       style: TextStyle(

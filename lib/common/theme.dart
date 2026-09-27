@@ -120,13 +120,13 @@ class AppTheme {
     return ThemeData(
       brightness: Brightness.dark,
       scaffoldBackgroundColor: backgroundPrimary,
-      colorScheme: const ColorScheme.dark(
+      colorScheme: ColorScheme.dark(
         primary: accentColor,
         secondary: accentLightColor,
         surface: backgroundSecondary,
         error: Colors.red,
       ),
-      appBarTheme: const AppBarTheme(
+      appBarTheme: AppBarTheme(
         // 透明 + 无 elevation: 让全局背景层透出, 配合页面顶部形成玻璃观感;
         // 需要真实毛玻璃的页面 (detail 等) 自行用 GlassPanel/flexibleSpace
         backgroundColor: Colors.transparent,
@@ -151,19 +151,20 @@ class AppTheme {
       chipTheme: ChipThemeData(
         backgroundColor: backgroundTertiary,
         selectedColor: accentColor.withValues(alpha: 0.15),
-        labelStyle: const TextStyle(color: textSecondary, fontSize: fontSubhead),
+        labelStyle: TextStyle(color: textSecondary, fontSize: fontSubhead),
         side: BorderSide.none,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
         ),
       ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: Color(0xFF1C1C1E),
+      bottomNavigationBarTheme: BottomNavigationBarThemeData(
+        backgroundColor: const Color(0xFF1C1C1E),
         selectedItemColor: accentColor,
         unselectedItemColor: textTertiary,
         type: BottomNavigationBarType.fixed,
-        selectedLabelStyle: TextStyle(fontSize: 10, fontWeight: FontWeight.w500),
-        unselectedLabelStyle: TextStyle(fontSize: 10),
+        selectedLabelStyle:
+            const TextStyle(fontSize: 10, fontWeight: FontWeight.w500),
+        unselectedLabelStyle: const TextStyle(fontSize: 10),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
@@ -172,19 +173,23 @@ class AppTheme {
           borderRadius: BorderRadius.circular(radiusMD),
           borderSide: BorderSide.none,
         ),
-        hintStyle: const TextStyle(color: textTertiary, fontSize: fontSubhead),
+        hintStyle: TextStyle(color: textTertiary, fontSize: fontSubhead),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: spacingLG,
           vertical: spacingMD,
         ),
       ),
-      textTheme: const TextTheme(
+      textTheme: TextTheme(
         headlineLarge: TextStyle(
             color: textPrimary, fontSize: 48, fontWeight: FontWeight.w800),
         headlineMedium: TextStyle(
-            color: textPrimary, fontSize: fontTitle2, fontWeight: FontWeight.w700),
+            color: textPrimary,
+            fontSize: fontTitle2,
+            fontWeight: FontWeight.w700),
         headlineSmall: TextStyle(
-            color: textPrimary, fontSize: fontTitle3, fontWeight: FontWeight.w600),
+            color: textPrimary,
+            fontSize: fontTitle3,
+            fontWeight: FontWeight.w600),
         bodyLarge: TextStyle(color: textPrimary, fontSize: fontBody),
         bodyMedium: TextStyle(color: textSecondary, fontSize: fontSubhead),
         bodySmall: TextStyle(color: textTertiary, fontSize: fontFootnote),
