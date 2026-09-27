@@ -1388,6 +1388,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 padding: const EdgeInsets.only(left: 10, right: 6),
                 child: Text(
                   _resolutionText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 11,
@@ -1402,6 +1404,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 padding: const EdgeInsets.only(left: 2, right: 10),
                 child: Text(
                   _bitrateText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 11,

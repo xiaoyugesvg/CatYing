@@ -133,6 +133,28 @@ class _DetailPageState extends State<DetailPage> {
     }
   }
 
+  /// 手动点击刮削（无视自动开关，仍需配置 Key）
+  Future<void> _manualScrapeFromTmdb() async {
+    final tmdb = TmdbService.instance;
+    if (!tmdb.configured) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先在 设置 → 元数据 填写 TMDB API Key')),
+      );
+      return;
+    }
+    final info = _controller.vodInfo.value;
+    if (info == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('正在刮削 TMDB 元数据...')),
+    );
+    final ok = await tmdb.enrich(info);
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(ok ? '刮削完成，已更新海报/简介/演职员' : '未匹配到 TMDB 条目')),
+    );
+  }
+
   /// 冗余同步通道：WindowFullScreen 状态变化时同步 detail view 的 Rx
   /// （与 onFullScreenChanged 回调功能相同，作为兜底）
   void _onFullScreenActiveChanged() {
@@ -652,7 +674,9 @@ class _DetailPageState extends State<DetailPage> {
                 child: Container(
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: selected ? Colors.white.withValues(alpha: 0.10) : Colors.transparent,
+                    color: selected
+                        ? AppTheme.accentColor.withValues(alpha: 0.16)
+                        : Colors.transparent,
                     borderRadius: BorderRadius.circular(9),
                   ),
                   child: Text(
@@ -733,6 +757,25 @@ class _DetailPageState extends State<DetailPage> {
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: AppTheme.spacingSM),
+                    // 手动 TMDB 刮削
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: _manualScrapeFromTmdb,
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: AppTheme.backgroundTertiary,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: AppTheme.borderLight,
+                          ),
+                        ),
+                        child: const Icon(Icons.auto_fix_high,
+                            size: 18, color: AppTheme.accentColor),
                       ),
                     ),
                     const SizedBox(width: AppTheme.spacingSM),

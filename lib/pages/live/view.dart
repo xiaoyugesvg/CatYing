@@ -6,6 +6,7 @@ import 'package:media_kit_video/media_kit_video.dart'
 
 import '../../common/theme.dart';
 import '../../services/live_service.dart';
+import '../../widgets/video_player_pip.dart';
 import 'controller.dart';
 
 /// 直播主界面（对照参考图）
@@ -41,6 +42,57 @@ class _LivePageState extends State<LivePage> {
     _videoController ??= VideoController(_player!);
     _player!.open(Media(url));
     setState(() {});
+  }
+
+  Future<void> _togglePip() async {
+    final ch = _controller.currentChannel;
+    final url = ch?.playUrl ?? '';
+    if (url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先选择频道')),
+      );
+      return;
+    }
+    try {
+      final supported = await VideoPlayerPip.instance.isIosPipSupported();
+      if (!supported) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('当前设备不支持系统小窗（需真机 iOS）')),
+        );
+        return;
+      }
+      final pos = _player?.state.position ?? Duration.zero;
+      if (_player?.state.playing == true) {
+        _player?.pause();
+      }
+      final ok = await VideoPlayerPip.instance.enterIos(
+        url: url,
+        headers: null,
+        position: pos,
+        onStarted: () {
+          try {
+            _player?.pause();
+          } catch (_) {}
+        },
+        onStopped: () {
+          try {
+            _player?.play();
+          } catch (_) {}
+        },
+      );
+      if (!ok) {
+        try {
+          _player?.play();
+        } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('小窗启动失败')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('小窗失败：$e')),
+      );
+    }
   }
 
   @override
@@ -136,13 +188,7 @@ class _LivePageState extends State<LivePage> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 GestureDetector(
-                                  onTap: () {
-                                    // 小窗占位：系统 PiP 需 iOS 原生，这里提示
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                          content: Text('小窗播放：点播页支持系统画中画')),
-                                    );
-                                  },
+                                  onTap: () => _togglePip(),
                                   child: Icon(
                                       Icons.picture_in_picture_alt,
                                       color: AppTheme.textPrimary,

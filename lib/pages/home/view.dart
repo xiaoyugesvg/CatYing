@@ -612,10 +612,13 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
 
   @override
   Widget build(BuildContext context) {
+    // 展开宽度跟随屏幕，避免源名长/小屏溢出
+    final maxW = MediaQuery.of(context).size.width;
+    final expandedW = (maxW * 0.52).clamp(140.0, 220.0);
     return AnimatedContainer(
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
-      width: _expanded ? 220 : 40,
+      width: _expanded ? expandedW : 40,
       height: 36,
       decoration: BoxDecoration(
         color: AppTheme.backgroundTertiary,
