@@ -1362,6 +1362,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   Widget _buildHeaderBar() {
+    // v9: 普通模式（详情页内嵌）顶栏不带返回 —— 返回由外层 AppBar 提供，
+    // 避免"两个返回"；仅全屏/PiP 沉浸模式（无 AppBar）才显示顶栏返回。
+    final immersive = _isNativeFullscreen || widget.isPipMode || _isImmersive;
     return Positioned(
       top: 0,
       left: 0,
@@ -1369,8 +1372,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       child: _gradientTopContainer(
         child: Row(
           children: [
-            // 返回与功能按钮同一行
-            if (widget.onBack != null)
+            // 返回与功能按钮同一行（仅沉浸模式）
+            if (widget.onBack != null && immersive)
               _iconButton(
                 icon: Icons.arrow_back_ios_new,
                 size: 20,
@@ -2809,6 +2812,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     final immersive = _isNativeFullscreen || widget.isPipMode || _isImmersive;
     final mediaPadding =
         immersive ? MediaQuery.of(context).padding : EdgeInsets.zero;
+    // **v9 (2026-09-27)**：修复顶栏被刘海/AppBar 遮挡。
+    // 非沉浸（详情页内嵌，extendBodyBehindAppBar=true 内容延伸到 AppBar 下）时，
+    // 顶栏必须额外避开 AppBar(kToolbarHeight)+状态栏(padding.top)，否则第一排
+    // 按钮会被 AppBar 与刘海盖住；全屏/PiP 只需避状态栏。
+    final topSafe = immersive
+        ? mediaPadding.top
+        : MediaQuery.of(context).padding.top + kToolbarHeight;
     // **v8 (2026-09-27)**：恢复"最开始的播放器UI布局"(fd08e78)，
     // 顶栏按钮距底部 30 留白，与底栏间距拉开，不挤在一起。
     final bottomPad = 30.0;
@@ -2822,7 +2832,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       ),
       child: Padding(
         padding: EdgeInsets.only(
-          top: 18 + mediaPadding.top,
+          top: 18 + topSafe,
           left: 8 + mediaPadding.left,
           right: 8 + mediaPadding.right,
           bottom: bottomPad,

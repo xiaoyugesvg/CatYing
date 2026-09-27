@@ -12,51 +12,97 @@ class LiveService extends GetxService {
 
   final channels = <LiveChannel>[].obs;
   final groups = <LiveGroup>[].obs;
+  /// 多直播源列表（参考图：综合直播[刚刚更新]/虎牙[未下载]/斗鱼[未下载]...）
+  final sources = <LiveSource>[].obs;
+  /// 公告列表（任意源可携带 announcements / notice 字段）
+  final announcements = <String>[].obs;
   final isLoading = false.obs;
   final error = RxnString();
   final selectedGroup = 0.obs;
 
-  /// 从 tvbox JSON 的 lives 数组加载
+  /// 原始 lives 配置缓存（loadSource 切源时重解析）
+  List<Map<String, dynamic>>? _rawLives;
+
+  /// 从 tvbox JSON 的 lives 数组加载（多源：默认只加载第一个源，其余标记"未下载"）
   Future<void> loadFromLivesJson(List<dynamic> lives) async {
     isLoading.value = true;
     error.value = null;
     try {
-      final all = <LiveChannel>[];
-      for (final item in lives) {
-        if (item is! Map) continue;
-        final map = Map<String, dynamic>.from(item);
-        // 内嵌 channels
-        final embedded = (map['channels'] as List?) ?? const [];
-        for (final ch in embedded) {
-          if (ch is! Map) continue;
-          final name = (ch['name'] ?? '').toString();
-          final urls = (ch['urls'] as List?)?.map((e) => e.toString()).toList() ??
-              const <String>[];
-          if (name.isEmpty || urls.isEmpty) continue;
-          all.add(LiveChannel(
-            name: name,
-            urls: urls,
-            group: (ch['group'] ?? map['name'] ?? '未分组').toString(),
-            logo: ch['logo']?.toString(),
-          ));
+      _rawLives = lives
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      sources.value = [];
+      announcements.value = [];
+      for (var i = 0; i < _rawLives!.length; i++) {
+        final map = _rawLives![i];
+        final name = (map['name'] ?? '直播源${i + 1}').toString();
+        final notices = map['announcements'] ?? map['notice'];
+        if (notices is List) {
+          announcements.addAll(notices
+              .map((e) => e.toString())
+              .where((t) => t.trim().isNotEmpty));
         }
-        // 远程 m3u / txt
-        final url = map['url']?.toString() ?? '';
-        if (url.isNotEmpty) {
-          try {
-            final body = await _fetch(url, ua: map['ua']?.toString());
-            all.addAll(parseM3uOrTxt(body,
-                defaultGroup: map['name']?.toString() ?? '直播'));
-          } catch (e) {
-            print('[LiveService] 拉取直播列表失败 $url: $e');
-          }
-        }
+        sources.add(LiveSource(name: name, loaded: i == 0));
       }
-      channels.value = all;
-      _rebuildGroups();
+      if (_rawLives!.isNotEmpty) {
+        await _loadSourceLocked(0);
+      } else {
+        channels.value = [];
+        groups.value = [];
+      }
     } finally {
       isLoading.value = false;
     }
+  }
+
+  /// 切换直播源（索引对应 sources）
+  Future<void> loadSource(int index) async {
+    if (_rawLives == null || index < 0 || index >= _rawLives!.length) return;
+    isLoading.value = true;
+    error.value = null;
+    try {
+      await _loadSourceLocked(index);
+      final next = <LiveSource>[];
+      for (var i = 0; i < sources.length; i++) {
+        next.add(LiveSource(name: sources[i].name, loaded: i == index));
+      }
+      sources.value = next;
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  /// 按源索引解析并替换当前频道/分组
+  Future<void> _loadSourceLocked(int index) async {
+    final map = _rawLives![index];
+    final all = <LiveChannel>[];
+    final embedded = (map['channels'] as List?) ?? const [];
+    for (final ch in embedded) {
+      if (ch is! Map) continue;
+      final name = (ch['name'] ?? '').toString();
+      final urls = (ch['urls'] as List?)?.map((e) => e.toString()).toList() ??
+          const <String>[];
+      if (name.isEmpty || urls.isEmpty) continue;
+      all.add(LiveChannel(
+        name: name,
+        urls: urls,
+        group: (ch['group'] ?? map['name'] ?? '未分组').toString(),
+        logo: ch['logo']?.toString(),
+      ));
+    }
+    final url = map['url']?.toString() ?? '';
+    if (url.isNotEmpty) {
+      try {
+        final body = await _fetch(url, ua: map['ua']?.toString());
+        all.addAll(parseM3uOrTxt(body,
+            defaultGroup: map['name']?.toString() ?? '直播'));
+      } catch (e) {
+        print('[LiveService] 拉取直播列表失败 $url: $e');
+      }
+    }
+    channels.value = all;
+    _rebuildGroups();
   }
 
   /// 直接从 m3u/txt URL 加载
@@ -68,6 +114,8 @@ class LiveService extends GetxService {
       final list = parseM3uOrTxt(body);
       channels.value = list;
       _rebuildGroups();
+      _rawLives = null;
+      sources.value = [LiveSource(name: '自定义直播源', loaded: true)];
       if (list.isEmpty) {
         error.value = '未解析到频道';
       }
@@ -177,4 +225,11 @@ class LiveService extends GetxService {
     final i = selectedGroup.value.clamp(0, groups.length - 1);
     return groups[i].channels;
   }
+}
+
+/// 直播源条目（参考图：名称 + 刚刚更新/未下载 状态）
+class LiveSource {
+  final String name;
+  final bool loaded;
+  const LiveSource({required this.name, required this.loaded});
 }
