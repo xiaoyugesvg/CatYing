@@ -33,16 +33,19 @@ class TVBoxApp extends StatelessWidget {
     // 全局主 Tab 控制器: 底部悬浮导航选中项全局共享,
     // 详情页也能渲染同样的悬浮栏并切回对应 tab.
     Get.put(MainTabController(), permanent: true);
-    return GetMaterialApp(
-      title: '猫影',
-      theme: AppTheme.darkTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.dark,
-      // 把 NavigatorState 暴露给 VideoPlayerPip，让画中画能插入到顶层 Overlay
-      navigatorKey: VideoPlayerPip.navigatorKey,
-      home: const ContentView(),
-      getPages: AppPages.pages,
-      debugShowCheckedModeBanner: false,
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: ThemeModeStore.notifier,
+      builder: (context, themeMode, _) => GetMaterialApp(
+        title: '猫影',
+        theme: AppTheme.lightTheme,
+        darkTheme: AppTheme.darkTheme,
+        themeMode: themeMode,
+        // 把 NavigatorState 暴露给 VideoPlayerPip，让画中画能插入到顶层 Overlay
+        navigatorKey: VideoPlayerPip.navigatorKey,
+        home: const ContentView(),
+        getPages: AppPages.pages,
+        debugShowCheckedModeBanner: false,
+      ),
     );
   }
 }
@@ -83,6 +86,7 @@ class _ContentViewState extends State<ContentView>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    ThemeModeStore.load();
     _searchVM = Get.find<TvSearchController>();
     _settingsVM = Get.put(SettingsController());
     // 对应 Swift: .onChange(of: appState.pendingSearchKeyword)
@@ -1220,5 +1224,41 @@ class _CircularLogoProgress extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+
+/// 全局主题模式：dark / light / system（设置页可改）
+class ThemeModeStore {
+  static final ValueNotifier<ThemeMode> notifier =
+      ValueNotifier(ThemeMode.dark);
+
+  static ThemeMode get mode => notifier.value;
+
+  static Future<void> load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final v = prefs.getString('theme_mode') ?? 'dark';
+      notifier.value = switch (v) {
+        'light' => ThemeMode.light,
+        'system' => ThemeMode.system,
+        _ => ThemeMode.dark,
+      };
+    } catch (_) {}
+  }
+
+  static Future<void> set(ThemeMode m) async {
+    notifier.value = m;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        'theme_mode',
+        switch (m) {
+          ThemeMode.light => 'light',
+          ThemeMode.system => 'system',
+          _ => 'dark',
+        },
+      );
+    } catch (_) {}
   }
 }

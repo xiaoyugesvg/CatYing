@@ -239,6 +239,7 @@ class _DetailPageState extends State<DetailPage> {
                 // 普通模式: body 内容 + 底部悬浮导航栏
                 // (与根 ContentView 悬浮栏同款, 详情页也能一键切回主 tab)
                 : Stack(
+                    fit: StackFit.expand,
                     children: [
                       // extendBodyBehindAppBar 后 body 延伸到 AppBar 之后,
                       // 顶部补出 AppBar 高度 + 状态栏高度, 避免内容被毛玻璃盖住
@@ -249,6 +250,7 @@ class _DetailPageState extends State<DetailPage> {
                         ),
                         child: _buildBody(),
                       ),
+                      // expand + Positioned，悬浮栏相对屏幕底部定位，不随内容跑
                       _buildFloatingNavBar(context),
                     ],
                   ),

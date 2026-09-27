@@ -204,28 +204,125 @@ class _SearchPageState extends State<SearchPage> {
 
   // MARK: - 搜索结果布局
 
-  /// 搜索结果双栏布局 - 对应 Swift GeometryReader + HStack(siteListPanel + resultsPanel)
+  /// 搜索结果布局 - 对照参考图：顶部横向源芯片 + 全宽海报网格
   Widget _buildSearchResultsLayout() {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // 对应 Swift: min(max(geo.size.width * 0.28, 120), 220)
-        final siteListWidth =
-            (constraints.maxWidth * 0.28).clamp(120.0, 220.0);
-        return Row(
-          children: [
-            SizedBox(
-              width: siteListWidth,
-              child: _buildSiteListPanel(),
-            ),
-            Container(
-              width: 0.5,
-              color: AppTheme.borderLight,
-            ),
-            Expanded(child: _buildResultsPanel()),
-          ],
-        );
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 48,
+          child: _buildSourceChipsBar(),
+        ),
+        Expanded(child: _buildResultsPanel()),
+      ],
     );
+  }
+
+  /// 横向源筛选芯片（参考图：搜索中 / 卡卡影视 18 / 橘子影视 1 …）
+  Widget _buildSourceChipsBar() {
+    return Obx(() {
+      final sites = _searchController.activeSites;
+      if (sites.isEmpty) return const SizedBox.shrink();
+      final anySearching =
+          sites.any((s) => _searchController.searchingStatus[s.key] == true);
+      return ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppTheme.spacingMD, vertical: 6),
+        children: [
+          if (anySearching)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 1.5, color: AppTheme.accentColor),
+                    ),
+                    SizedBox(width: 6),
+                    Text('搜索中',
+                        style: TextStyle(
+                            color: AppTheme.textTertiary, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ),
+          ...sites.map((site) {
+            final selected =
+                _searchController.selectedSiteKey.value == site.key;
+            final count = _searchController.resultCount[site.key] ?? 0;
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _searchController.selectSite(site.key),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? AppTheme.accentColor.withValues(alpha: 0.22)
+                        : Colors.white.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: selected
+                          ? AppTheme.accentColor.withValues(alpha: 0.55)
+                          : Colors.white24,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        site.name,
+                        style: TextStyle(
+                          color:
+                              selected ? AppTheme.accentColor : Colors.white70,
+                          fontSize: 13,
+                          fontWeight:
+                              selected ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                      ),
+                      if (count > 0) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? AppTheme.accentColor
+                                : Colors.white24,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '$count',
+                            style: TextStyle(
+                              color: selected ? Colors.black : Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+        ],
+      );
+    });
   }
 
   // MARK: - 站点列表面板

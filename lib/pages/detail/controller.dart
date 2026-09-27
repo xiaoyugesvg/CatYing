@@ -72,23 +72,35 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   /// 详情页 tab 索引: 0=简介, 1=推荐, 2=快搜
   final detailTabIndex = 0.obs;
 
-  /// 加载推荐（同类型名称关键词在当前源搜索，失败静默）
+  /// 加载推荐（同类型/名称关键词在当前源搜索，失败回退用片名再搜一次）
   Future<void> loadRecommended() async {
     if (recommended.isNotEmpty || isRecommendLoading.value) return;
     final info = vodInfo.value;
     if (info == null) return;
     final source = ApiConfig.instance.getSource(info.sourceKey) ??
         ApiConfig.instance.homeSourceBean.value;
-    if (source == null) return;
+    if (source == null) {
+      isRecommendLoading.value = false;
+      return;
+    }
 
     isRecommendLoading.value = true;
     try {
-      final keyword = info.typeName.isNotEmpty ? info.typeName : info.name;
-      final results = await SourceService.instance.search(source, keyword);
-      recommended.value = results
-          .where((v) => v.id != info.id)
-          .take(30)
-          .toList();
+      final keywords = <String>[
+        if (info.typeName.isNotEmpty) info.typeName,
+        info.name,
+        if (info.actor.isNotEmpty)
+          ...info.actor.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).take(1),
+      ];
+      var collected = <Video>[];
+      for (final keyword in keywords) {
+        try {
+          final results = await SourceService.instance.search(source, keyword);
+          collected = results.where((v) => v.id != info.id).toList();
+          if (collected.isNotEmpty) break;
+        } catch (_) {}
+      }
+      recommended.value = collected.take(30).toList();
     } catch (_) {
       recommended.value = [];
     } finally {

@@ -81,6 +81,25 @@ class AppTheme {
   static const double fontTitle2 = 20;
 
   /// 暗色主题
+
+  /// 浅色主题（设置 → 深色/浅色/跟随系统）
+  static ThemeData get lightTheme {
+    final base = ThemeData.light(useMaterial3: true);
+    return base.copyWith(
+      scaffoldBackgroundColor: const Color(0xFFF6F6F7),
+      colorScheme: base.colorScheme.copyWith(
+        primary: accentColor,
+        surface: const Color(0xFFFFFFFF),
+        onSurface: const Color(0xFF1A1A1A),
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: Color(0xFF1A1A1A),
+      ),
+    );
+  }
+
   static ThemeData get darkTheme {
     return ThemeData(
       brightness: Brightness.dark,

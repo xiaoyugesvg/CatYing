@@ -53,9 +53,8 @@ class _HomePageState extends State<HomePage> {
             child: Column(
               children: [
                 _buildHeaderBar(),
-                _buildSearchBar(),
-                // **滚动收起分类栏**: AnimatedSize 让分类栏/过滤栏
-                // 下滚时平滑折叠 (高度→0), 上滚恢复, 扩大内容可视区
+                // 搜索已移到右上角图标；下方仅保留吸顶分类/筛选
+                // **吸顶分类**: 下滚后分类栏保持可见（半透明），上滚回顶
                 AnimatedSize(
                   duration: const Duration(milliseconds: 250),
                   curve: Curves.easeOutCubic,
@@ -150,43 +149,70 @@ class _HomePageState extends State<HomePage> {
   Widget _buildHeaderBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingXL, AppTheme.spacingLG, AppTheme.spacingXL, AppTheme.spacingSM),
+          AppTheme.spacingLG, AppTheme.spacingSM, AppTheme.spacingLG, AppTheme.spacingXS),
       child: Row(
         children: [
-          // 源切换 + 搜索（2026-09-26）：替代原 PopupMenuButton 简单菜单，
-          // 点击弹出 SourceSwitchSheet 底部弹窗：搜索框(搜索源...) +
-          // 单列/双排切换 + 可滚动源列表(带选中圈)，选中后刷新首页
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () async {
-              final changed =
-                  await SourceSwitchSheet.show(context);
-              if (changed && mounted) {
-                _controller.refresh();
-              }
-            },
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Obx(() => Text(
-                      ApiConfig.instance.homeSourceBean.value?.name ?? 'TVBox',
-                      style: const TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontHeadline,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    )),
-                const SizedBox(width: 4),
-                const Icon(Icons.keyboard_arrow_down,
-                    color: AppTheme.textTertiary, size: 16),
-              ],
+          // 左上：日期时间
+          const _HomeClockView(),
+          // 中间：源切换
+          Expanded(
+            child: Center(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () async {
+                  final changed = await SourceSwitchSheet.show(context);
+                  if (changed && mounted) {
+                    _controller.refresh();
+                  }
+                },
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Obx(() => Text(
+                            ApiConfig.instance.homeSourceBean.value?.name ??
+                                '选择源',
+                            style: const TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: AppTheme.fontHeadline,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          )),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.keyboard_arrow_down,
+                        color: AppTheme.textTertiary, size: 18),
+                  ],
+                ),
+              ),
             ),
           ),
-          const Spacer(),
-          // 时钟 - 对应 Swift HomeClockView
-          const _HomeClockView(),
+          // 右上：搜索入口
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              if (widget.onSearchTap != null) {
+                widget.onSearchTap!();
+              } else {
+                Get.toNamed('/search');
+              }
+            },
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: AppTheme.backgroundTertiary,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.08),
+                ),
+              ),
+              child: const Icon(Icons.search,
+                  color: AppTheme.textSecondary, size: 18),
+            ),
+          ),
         ],
       ),
     );

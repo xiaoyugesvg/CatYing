@@ -98,12 +98,20 @@ class SelectableChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        height: 32,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
           color: isSelected
-              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              ? AppTheme.accentColor.withValues(alpha: 0.14)
               : AppTheme.backgroundTertiary,
           borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected
+                ? AppTheme.accentColor.withValues(alpha: 0.45)
+                : Colors.white.withValues(alpha: 0.06),
+            width: isSelected ? 1 : 0.5,
+          ),
         ),
         child: Text(
           title,

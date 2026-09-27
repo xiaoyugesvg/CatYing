@@ -7,6 +7,7 @@ import '../../services/background_service.dart';
 import '../../models/source_bean.dart';
 import '../../models/player_engine.dart';
 import '../../widgets/common_widgets.dart';
+import '../../app.dart' show ThemeModeStore;
 import 'controller.dart';
 
 /// 设置页 - 对应 Swift SettingsView
@@ -77,8 +78,10 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: AppTheme.spacingXXL),
 
-                // 外观 - 自定义背景 (无主题切换, 始终深色)
+                // 外观 - 主题 + 自定义背景
                 const SectionHeader(title: '外观'),
+                const SizedBox(height: AppTheme.spacingSM),
+                _buildThemeModeSection(),
                 const SizedBox(height: AppTheme.spacingSM),
                 _buildAppearanceSection(),
                 const SizedBox(height: AppTheme.spacingXXL),
@@ -109,6 +112,82 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // 外观 - 主题模式
+  // ============================================================
+
+  Widget _buildThemeModeSection() {
+    final mode = ThemeModeStore.mode;
+    String label = switch (mode) {
+      ThemeMode.light => '浅色',
+      ThemeMode.system => '跟随系统',
+      _ => '深色',
+    };
+    return AppCard(
+      child: SettingsRow(
+        icon: Icons.brightness_6_outlined,
+        title: '外观模式',
+        value: label,
+        onTap: () async {
+          final selected = await showModalBottomSheet<String>(
+            context: context,
+            backgroundColor: const Color(0xFF1C1C1E),
+            builder: (ctx) => SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text('外观模式',
+                        style: TextStyle(color: Colors.white, fontSize: 15)),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.dark_mode_outlined,
+                        color: Colors.white70),
+                    title: const Text('深色',
+                        style: TextStyle(color: Colors.white70)),
+                    trailing: mode == ThemeMode.dark
+                        ? const Icon(Icons.check, color: AppTheme.accentColor)
+                        : null,
+                    onTap: () => Navigator.pop(ctx, 'dark'),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.light_mode_outlined,
+                        color: Colors.white70),
+                    title: const Text('浅色',
+                        style: TextStyle(color: Colors.white70)),
+                    trailing: mode == ThemeMode.light
+                        ? const Icon(Icons.check, color: AppTheme.accentColor)
+                        : null,
+                    onTap: () => Navigator.pop(ctx, 'light'),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.settings_suggest_outlined,
+                        color: Colors.white70),
+                    title: const Text('跟随系统',
+                        style: TextStyle(color: Colors.white70)),
+                    trailing: mode == ThemeMode.system
+                        ? const Icon(Icons.check, color: AppTheme.accentColor)
+                        : null,
+                    onTap: () => Navigator.pop(ctx, 'system'),
+                  ),
+                ],
+              ),
+            ),
+          );
+          if (selected == null) return;
+          final m = switch (selected) {
+            'light' => ThemeMode.light,
+            'system' => ThemeMode.system,
+            _ => ThemeMode.dark,
+          };
+          await ThemeModeStore.set(m);
+          if (mounted) setState(() {});
+        },
       ),
     );
   }
