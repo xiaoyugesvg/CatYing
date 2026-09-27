@@ -81,58 +81,64 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
                 child: Row(
                   children: [
-                    // 搜索框限制最大宽度，不再拉满整行
-                    Flexible(
-                      flex: 0,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 260),
-                        child: Container(
-                          height: 40,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          decoration: BoxDecoration(
-                            color: AppTheme.backgroundTertiary,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.search,
-                                  color: AppTheme.textTertiary, size: 18),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: TextField(
-                                  controller: _searchController,
-                                  style: TextStyle(
-                                      color: AppTheme.textPrimary,
+                    // 搜索胶囊：左侧输入，右侧搜索钮（参考图）
+                    Expanded(
+                      child: Container(
+                        height: 42,
+                        padding: const EdgeInsets.only(left: 16, right: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF2A2A2E),
+                          borderRadius: BorderRadius.circular(22),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _searchController,
+                                style: TextStyle(
+                                    color: AppTheme.textPrimary,
+                                    fontSize: 14),
+                                onChanged: (v) =>
+                                    setState(() => _keyword = v.trim()),
+                                decoration: InputDecoration(
+                                  hintText: '搜索源...',
+                                  hintStyle: TextStyle(
+                                      color: AppTheme.textTertiary,
                                       fontSize: 14),
-                                  onChanged: (v) =>
-                                      setState(() => _keyword = v.trim()),
-                                  decoration: InputDecoration(
-                                    hintText: '搜索源...',
-                                    hintStyle: TextStyle(
-                                        color: AppTheme.textTertiary,
-                                        fontSize: 14),
-                                    border: InputBorder.none,
-                                    isDense: true,
-                                    contentPadding:
-                                        EdgeInsets.symmetric(vertical: 10),
-                                  ),
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                  contentPadding:
+                                      const EdgeInsets.symmetric(vertical: 10),
                                 ),
                               ),
-                              if (_keyword.isNotEmpty)
-                                GestureDetector(
-                                  onTap: () {
-                                    _searchController.clear();
-                                    setState(() => _keyword = '');
-                                  },
+                            ),
+                            if (_keyword.isNotEmpty)
+                              GestureDetector(
+                                onTap: () {
+                                  _searchController.clear();
+                                  setState(() => _keyword = '');
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.all(6),
                                   child: Icon(Icons.close,
                                       color: AppTheme.textTertiary, size: 16),
                                 ),
-                            ],
-                          ),
+                              ),
+                            Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.12),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(Icons.search,
+                                  color: AppTheme.textSecondary, size: 18),
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                    const Spacer(),
+                    const SizedBox(width: 10),
                     // 单列/双排切换按钮
                     GestureDetector(
                       onTap: () => setState(() => _gridMode = !_gridMode),
@@ -258,14 +264,21 @@ class _SourceRow extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Icon(
-                selected
-                    ? Icons.check_circle
-                    : Icons.radio_button_unchecked,
-                size: 18,
-                color: selected
-                    ? AppTheme.accentColor
-                    : AppTheme.textTertiary,
+              // 猫爪风格源图标
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: selected
+                      ? AppTheme.accentColor
+                      : AppTheme.backgroundTertiary,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  Icons.pets,
+                  size: 15,
+                  color: selected ? Colors.white : AppTheme.textTertiary,
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(

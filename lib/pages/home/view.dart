@@ -122,7 +122,7 @@ class _HomePageState extends State<HomePage> {
           AppTheme.spacingLG, AppTheme.spacingSM, AppTheme.spacingLG, AppTheme.spacingXS),
       child: Row(
         children: [
-          // 左：软件 Logo + 源名（无下箭头，点击换源）
+          // 左：猫爪 Logo + 源名（点击换源）
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () async {
@@ -134,23 +134,10 @@ class _HomePageState extends State<HomePage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF6BDC9A), AppTheme.accentColor],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(Icons.live_tv_rounded,
-                      color: Colors.white, size: 18),
-                ),
+                const _CatPawLogo(),
                 const SizedBox(width: 8),
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 140),
+                  constraints: const BoxConstraints(maxWidth: 130),
                   child: Obx(() => Text(
                         ApiConfig.instance.homeSourceBean.value?.name ?? '选择源',
                         style: TextStyle(
@@ -166,69 +153,25 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           const Spacer(),
-          // 直播入口
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => Get.toNamed('/live'),
-            child: Container(
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              decoration: BoxDecoration(
-                color: AppTheme.accentColor.withValues(alpha: 0.16),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: AppTheme.accentColor.withValues(alpha: 0.4),
-                ),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.live_tv, color: AppTheme.accentColor, size: 14),
-                  SizedBox(width: 4),
-                  Text('直播',
-                      style: TextStyle(
-                          color: AppTheme.accentColor, fontSize: 12)),
-                ],
-              ),
-            ),
+          // 右：可伸长搜索（小框 → 展开输入）
+          _ExpandableSearch(
+            onSubmitted: (v) {
+              if (v.trim().isNotEmpty) {
+                Get.toNamed('/search', arguments: v.trim());
+              } else if (widget.onSearchTap != null) {
+                widget.onSearchTap!();
+              } else {
+                Get.toNamed('/search');
+              }
+            },
+            onOpenFull: () {
+              if (widget.onSearchTap != null) {
+                widget.onSearchTap!();
+              } else {
+                Get.toNamed('/search');
+              }
+            },
           ),
-          // 右：胶囊搜索栏 + 日期时间
-          Flexible(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                if (widget.onSearchTap != null) {
-                  widget.onSearchTap!();
-                } else {
-                  Get.toNamed('/search');
-                }
-              },
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                decoration: BoxDecoration(
-                  color: AppTheme.backgroundTertiary,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.08),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.search,
-                        color: AppTheme.textTertiary, size: 14),
-                    SizedBox(width: 4),
-                    Text('搜索',
-                        style: TextStyle(
-                            color: AppTheme.textTertiary, fontSize: 12)),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          const _HomeClockView(),
         ],
       ),
     );
@@ -608,6 +551,120 @@ class _HomeClockViewState extends State<_HomeClockView> {
           ),
         );
       },
+    );
+  }
+}
+
+
+/// 猫爪 Logo（品牌图标）
+class _CatPawLogo extends StatelessWidget {
+  const _CatPawLogo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF6BDC9A), AppTheme.accentColor],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.accentColor.withValues(alpha: 0.35),
+            blurRadius: 10,
+          ),
+        ],
+      ),
+      child: const Icon(Icons.pets, color: Colors.white, size: 20),
+    );
+  }
+}
+
+/// 可伸长搜索：小圆角框 → 点击展开成输入条
+class _ExpandableSearch extends StatefulWidget {
+  final ValueChanged<String> onSubmitted;
+  final VoidCallback onOpenFull;
+
+  const _ExpandableSearch({
+    required this.onSubmitted,
+    required this.onOpenFull,
+  });
+
+  @override
+  State<_ExpandableSearch> createState() => _ExpandableSearchState();
+}
+
+class _ExpandableSearchState extends State<_ExpandableSearch> {
+  bool _expanded = false;
+  final _ctrl = TextEditingController();
+  final _focus = FocusNode();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      width: _expanded ? 220 : 40,
+      height: 36,
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundTertiary,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: _expanded
+          ? Row(
+              children: [
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _ctrl,
+                    focusNode: _focus,
+                    autofocus: true,
+                    style: TextStyle(
+                        color: AppTheme.textPrimary, fontSize: 13),
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: widget.onSubmitted,
+                    decoration: InputDecoration(
+                      hintText: '搜索影片...',
+                      hintStyle: TextStyle(
+                          color: AppTheme.textTertiary, fontSize: 13),
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () {
+                    setState(() => _expanded = false);
+                    widget.onOpenFull();
+                  },
+                  child: Icon(Icons.search,
+                      color: AppTheme.accentColor, size: 18),
+                ),
+                const SizedBox(width: 8),
+              ],
+            )
+          : GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                setState(() => _expanded = true);
+                _focus.requestFocus();
+              },
+              child: Icon(Icons.search,
+                  color: AppTheme.textSecondary, size: 18),
+            ),
     );
   }
 }

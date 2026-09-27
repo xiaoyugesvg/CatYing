@@ -728,6 +728,7 @@ class _ContentViewState extends State<ContentView>
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
                     _navItem(Icons.home_outlined, Icons.home, '首页', 0),
+                    _navLiveItem(),
                     _navItem(
                         Icons.schedule_outlined, Icons.schedule, '历史', 1),
                     _navItem(
@@ -972,6 +973,37 @@ class _ContentViewState extends State<ContentView>
             ],
           );
         },
+      ),
+    );
+  }
+
+  /// 直播：独立路由入口（不占底部 Tab）
+  Widget _navLiveItem() {
+    return GestureDetector(
+      onTap: () => Get.toNamed('/live'),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppTheme.accentColor.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.live_tv, size: 18, color: AppTheme.accentColor),
+            const SizedBox(height: 3),
+            Text(
+              '直播',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+                color: AppTheme.accentColor,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

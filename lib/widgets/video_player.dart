@@ -628,7 +628,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           if (list.isNotEmpty) {
             _showMessage('弹幕已加载 ${list.length} 条');
           } else {
-            _showMessage('弹幕接口无数据（可换视频或检查 API）');
+            // 空结果：允许之后换集/重开再试
+            _danmuLoaded = false;
+            _showMessage('该片暂无弹幕（不是加载失败）');
           }
         }
       } else {
@@ -1367,9 +1369,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       child: _gradientTopContainer(
         child: Row(
           children: [
-            // **v7 (2026-09-27)**：顶栏极简 —— 不再显示视频名称/线路名，
-            // 右上角只保留 分辨率 + 网速 + 设置 三个元素（听剧/PiP/投屏
-            // 已移到底栏功能行，避免右上角堆满按钮）。
+            // 返回与功能按钮同一行
+            if (widget.onBack != null)
+              _iconButton(
+                icon: Icons.arrow_back_ios_new,
+                size: 20,
+                width: 40,
+                onTap: () {
+                  _scheduleHideControls();
+                  widget.onBack!();
+                },
+              ),
             const Spacer(),
 
             // 分辨率
@@ -1402,7 +1412,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
             if (_isNativeFullscreen) ...[const SizedBox(width: 4), _buildStatusBarInfo()],
 
-            // 小窗 / 听剧 / 投屏（放顶栏，方便一点就用）
+            // 竖屏/横屏切换
+            _iconButton(
+              icon: _isNativeFullscreen
+                  ? Icons.screen_lock_portrait
+                  : Icons.screen_rotation,
+              size: 20,
+              width: 40,
+              onTap: () {
+                _scheduleHideControls();
+                _toggleOrientation();
+              },
+            ),
+            // 听剧
             if (widget.showAudioModeButton)
               _iconButton(
                 icon: _audioMode ? Icons.headphones : Icons.headphones_outlined,
@@ -1413,6 +1435,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   _toggleAudioMode();
                 },
               ),
+            // 小窗
             _iconButton(
               icon: Icons.picture_in_picture_alt,
               size: 20,
@@ -1422,6 +1445,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 _togglePiP();
               },
             ),
+            // 投屏
             _iconButton(
               icon: Icons.cast,
               size: 20,
@@ -1432,7 +1456,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               },
             ),
 
-            // 设置（倍速/清晰度/裁剪都在这里）
+            // 设置
             _iconButton(
               icon: Icons.more_horiz,
               size: 22,
@@ -1445,6 +1469,32 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         ),
       ),
     );
+  }
+
+  void _toggleOrientation() {
+    if (_isNativeFullscreen) {
+      _onUserExitFullscreen();
+    } else {
+      _onUserToggleFullscreen();
+    }
+  }
+
+  /// PiP 结束后恢复主播放器（延时一点，等 AVPlayer 释放会话）
+  void _resumeAfterPip() {
+    if (!mounted) return;
+    final resume = VideoPlayerPip.instance.iosLastPosition;
+    Future<void>.delayed(const Duration(milliseconds: 120), () {
+      if (!mounted) return;
+      try {
+        if (resume > Duration.zero) {
+          _player.seek(resume);
+        }
+      } catch (_) {}
+      try {
+        _player.play();
+      } catch (_) {}
+      setState(() {});
+    });
   }
 
   // ============================================================
@@ -1537,7 +1587,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         setState(() => _showEpisodeSheet = true);
                       },
                     ),
-                  // 弹幕开关始终可见：未配置 API 时点击给出提示，避免入口「消失」
+                  // 弹幕开关始终可见
                   _iconButton(
                     icon: _danmuOn && _danmuApiUrl.isNotEmpty
                         ? Icons.subtitles
@@ -1554,37 +1604,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                       _persistDanmuOn();
                     },
                   ),
-                  if (widget.showAudioModeButton)
-                    _iconButton(
-                      icon: _audioMode
-                          ? Icons.headphones
-                          : Icons.headphones_outlined,
-                      size: 22,
-                      width: 36,
-                      onTap: () {
-                        _scheduleHideControls();
-                        _toggleAudioMode();
-                      },
-                    ),
-                  // 手动画中画：一点立刻进系统小窗
-                  _iconButton(
-                    icon: Icons.picture_in_picture_alt,
-                    size: 22,
-                    width: 36,
-                    onTap: () {
-                      _scheduleHideControls();
-                      _togglePiP();
-                    },
-                  ),
-                  _iconButton(
-                    icon: Icons.cast,
-                    size: 22,
-                    width: 36,
-                    onTap: () {
-                      _scheduleHideControls();
-                      _toggleCast();
-                    },
-                  ),
+                  // 底栏不放 小窗/听剧/投屏（顶栏已有，避免重复）
                   _iconButton(
                     icon: _isNativeFullscreen
                         ? Icons.fullscreen_exit
@@ -2626,16 +2646,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     // iOS 端：系统级画中画（双播放器方案）
     if (Platform.isIOS) {
       if (VideoPlayerPip.instance.isIosActive) {
-        final resume = VideoPlayerPip.instance.iosLastPosition;
         await VideoPlayerPip.instance.exitIos();
-        if (resume > Duration.zero) {
-          try {
-            _player.seek(resume);
-          } catch (_) {}
-        }
-        try {
-          _player.play();
-        } catch (_) {}
+        _resumeAfterPip();
         return;
       }
       final supported = await VideoPlayerPip.instance.isIosPipSupported();
@@ -2651,25 +2663,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         return;
       }
       final currentPos = _player.state.position;
-      // **手动 PiP v6 (2026-09-27)**：
-      // 1) 进入前**短暂暂停主播放器**（释放 AVAudioSession），
-      //    让原生 AVPlayer 能更快满足 isPictureInPicturePossible，
-      //    修复 iOS 前台手动启动"静默失败/点了没反应"（后台自动路径
-      //    不受影响，原生 didEnterBackground 直接启动）。
-      // 2) PiP 悬浮窗真实激活（onPipStarted）后保持主播放器暂停，
-      //    由系统 AVPlayer 无缝接管画面与声音，切换不断声、不黑屏。
-      // 3) 启动失败（含 possible 超时）→ 立即恢复主播放器播放。
-      try {
-        if (_player.state.playing) {
-          _player.pause();
-        }
-      } catch (_) {}
+      // 手动/自动共用同一条 enterIos 路径：
+      // 不在启动前强制 pause，避免「点了没反应还暂停」；
+      // onPipStarted 后才暂停主播放器；失败/退出一律 _resumeAfterPip。
       final entered = await VideoPlayerPip.instance.enterIos(
         url: playUrl,
         headers: widget.headers,
         position: currentPos,
         onStarted: () {
-          // PiP 真实激活 → 主播放器保持暂停，AVPlayer 已接管（无缝）
           if (!mounted) return;
           try {
             if (_player.state.playing) {
@@ -2678,23 +2679,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           } catch (_) {}
         },
         onStopped: () {
-          if (!mounted) return;
-          final resume = VideoPlayerPip.instance.iosLastPosition;
-          if (resume > Duration.zero) {
-            try {
-              _player.seek(resume);
-            } catch (_) {}
-          }
-          try {
-            _player.play();
-          } catch (_) {}
+          _resumeAfterPip();
         },
       );
       if (!entered) {
-        try {
-          _player.play();
-        } catch (_) {}
+        _resumeAfterPip();
         _showMessage('画中画启动失败，请稍后重试');
+      } else {
+        _showMessage('已进入小窗播放');
       }
       return;
     }
@@ -2736,15 +2728,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
     _autoPipInFlight = true;
     final currentPos = _player.state.position;
-    // **丝滑切换 v2 (2026-09-26)**：退后台自动进 PiP 同样不提前暂停主播放器，
-    // AVPlayer 无缝接管；悬浮窗真实激活后暂停主播放器，避免双路声音/无声。
+    // 自动小窗：与手动共用 enterIos；退出一律续播
     try {
       final entered = await VideoPlayerPip.instance.enterIos(
         url: playUrl,
         headers: widget.headers,
         position: currentPos,
         onStarted: () {
-          // PiP 真实激活 → 立即暂停主播放器，AVPlayer 已接管（无缝）
           if (!mounted) return;
           try {
             if (_player.state.playing) {
@@ -2753,22 +2743,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           } catch (_) {}
         },
         onStopped: () {
-          if (!mounted) return;
-          final resume = VideoPlayerPip.instance.iosLastPosition;
-          if (resume > Duration.zero) {
-            try {
-              _player.seek(resume);
-            } catch (_) {}
-          }
-          try {
-            _player.play();
-          } catch (_) {}
+          _resumeAfterPip();
         },
       );
       if (!entered) {
-        try {
-          _player.play();
-        } catch (_) {}
+        _resumeAfterPip();
       }
     } finally {
       _autoPipInFlight = false;

@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart' show VideoController, Video, AdaptiveVideoControls;
+import 'package:media_kit_video/media_kit_video.dart'
+    show VideoController, Video, AdaptiveVideoControls;
 
 import '../../common/theme.dart';
 import '../../services/live_service.dart';
 import 'controller.dart';
 
-/// 直播页：左分组 + 右频道列表 + 上方播放器
+/// 直播主界面（对照参考图）
+/// 上：视频区 + LIVE 角标 + 小窗/全屏
+/// 下：播放源下拉 + 频道列表（TV 图标 + 状态）
 class LivePage extends StatefulWidget {
   const LivePage({super.key});
 
@@ -19,16 +22,7 @@ class _LivePageState extends State<LivePage> {
   final _controller = Get.put(LiveController());
   Player? _player;
   VideoController? _videoController;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (LiveService.instance.channels.isEmpty) {
-        // 若配置里已有 lives 可在进页前 loadFromLivesJson
-      }
-    });
-  }
+  bool _fullscreen = false;
 
   @override
   void dispose() {
@@ -40,11 +34,11 @@ class _LivePageState extends State<LivePage> {
 
   void _playChannel(String url) {
     if (url.isEmpty) return;
-    _player?.dispose();
-    _player = Player(
+    // 复用同一 Player，切台只 open 新地址，避免黑屏/闪断
+    _player ??= Player(
       configuration: const PlayerConfiguration(title: '猫影直播'),
     );
-    _videoController = VideoController(_player!);
+    _videoController ??= VideoController(_player!);
     _player!.open(Media(url));
     setState(() {});
   }
@@ -52,193 +46,332 @@ class _LivePageState extends State<LivePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.chevron_left, color: Colors.white, size: 28),
-          onPressed: () => Get.back(),
-        ),
-        title: const Text('直播', style: TextStyle(color: Colors.white)),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
+      backgroundColor: AppTheme.backgroundPrimary,
       body: GetBuilder<LiveController>(
         builder: (c) {
           final groups = c.groups;
-          if (LiveService.instance.isLoading.value) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (groups.isEmpty) {
-            return _EmptyLive(onReload: () async {
-              // 无数据时提示配置 lives 或 m3u URL
-              final url = await _askUrl(context);
-              if (url != null && url.isNotEmpty) {
-                await c.reloadFromUrl(url);
-              }
-            });
-          }
           final channels = c.channels;
           final current = c.currentChannel;
-          return Column(
-            children: [
-              // 播放区
-              SizedBox(
-                height: 220,
-                child: Container(
-                  color: Colors.black,
-                  child: _videoController != null && current != null
-                      ? Video(
-                          controller: _videoController!,
-                          controls: AdaptiveVideoControls,
-                        )
-                      : const Center(
-                          child: Text('选择频道开始播放',
-                              style: TextStyle(color: Colors.white54)),
+          return SafeArea(
+            child: Column(
+              children: [
+                // 顶部：返回
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  child: Row(
+                    children: [
+                      GestureDetector(
+                        onTap: () => Get.back(),
+                        child: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: AppTheme.backgroundTertiary,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(Icons.arrow_back_ios_new,
+                              color: AppTheme.textSecondary, size: 16),
                         ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              // 搜索
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: TextField(
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
-                  decoration: InputDecoration(
-                    hintText: '搜索频道...',
-                    hintStyle: const TextStyle(color: Colors.white38),
-                    prefixIcon:
-                        const Icon(Icons.search, color: Colors.white38, size: 18),
-                    filled: true,
-                    fillColor: Colors.white.withValues(alpha: 0.06),
-                    contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(20),
-                      borderSide: BorderSide.none,
-                    ),
+                      ),
+                    ],
                   ),
-                  onChanged: (v) {
-                    c.searchKeyword.value = v;
-                    c.update();
-                  },
                 ),
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: Row(
-                  children: [
-                    // 分组
-                    SizedBox(
-                      width: 100,
-                      child: ListView.builder(
-                        itemCount: groups.length,
-                        itemBuilder: (_, i) {
-                          final selected = c.selectedGroup == i;
-                          return GestureDetector(
-                            onTap: () => c.selectGroup(i),
-                            child: Container(
-                              alignment: Alignment.center,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              decoration: BoxDecoration(
-                                color: selected
-                                    ? AppTheme.accentColor
-                                        .withValues(alpha: 0.16)
-                                    : Colors.transparent,
-                                border: Border(
-                                  left: BorderSide(
-                                    color: selected
-                                        ? AppTheme.accentColor
-                                        : Colors.transparent,
-                                    width: 3,
+                const SizedBox(height: 8),
+                // 视频区
+                AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: Container(
+                    color: Colors.black,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (_videoController != null && current != null)
+                          Video(
+                            controller: _videoController!,
+                            controls: AdaptiveVideoControls,
+                          )
+                        else
+                          Center(
+                            child: Icon(Icons.live_tv,
+                                color: AppTheme.textTertiary, size: 56),
+                          ),
+                        // LIVE 角标
+                        Positioned(
+                          left: 12,
+                          bottom: 12,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.55),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text('LIVE',
+                                    style: TextStyle(
+                                        color: AppTheme.textPrimary,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 1)),
+                                SizedBox(width: 6),
+                                _LiveDot(),
+                              ],
+                            ),
+                          ),
+                        ),
+                        // 小窗 / 全屏
+                        Positioned(
+                          right: 12,
+                          bottom: 12,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.45),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                GestureDetector(
+                                  onTap: () {
+                                    // 小窗占位：系统 PiP 需 iOS 原生，这里提示
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                          content: Text('小窗播放：点播页支持系统画中画')),
+                                    );
+                                  },
+                                  child: Icon(
+                                      Icons.picture_in_picture_alt,
+                                      color: AppTheme.textPrimary,
+                                      size: 20),
+                                ),
+                                const SizedBox(width: 14),
+                                GestureDetector(
+                                  onTap: () {
+                                    setState(() => _fullscreen = !_fullscreen);
+                                  },
+                                  child: Icon(
+                                    _fullscreen
+                                        ? Icons.fullscreen_exit
+                                        : Icons.fullscreen,
+                                    color: AppTheme.textPrimary,
+                                    size: 22,
                                   ),
                                 ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // 播放源下拉
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: [
+                      GestureDetector(
+                        onTap: () => _pickSource(context, c),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: AppTheme.backgroundTertiary,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                groups.isEmpty
+                                    ? '播放源'
+                                    : groups[c.selectedGroup].name,
+                                style: TextStyle(
+                                    color: AppTheme.textSecondary, fontSize: 13),
                               ),
-                              child: Text(
-                                groups[i].name,
-                                maxLines: 2,
-                                textAlign: TextAlign.center,
+                              const SizedBox(width: 4),
+                              Icon(Icons.keyboard_arrow_down,
+                                  color: AppTheme.textTertiary, size: 16),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // 加载错误提示
+                Obx(() {
+                  final err = LiveService.instance.error.value;
+                  if (err == null) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: Text(
+                      err,
+                      style: TextStyle(
+                          color: Colors.redAccent.withValues(alpha: 0.9),
+                          fontSize: 12),
+                    ),
+                  );
+                }),
+                // 频道列表
+                Expanded(
+                  child: groups.isEmpty
+                      ? _EmptyLive(onReload: () => _pickSource(context, c))
+                      : ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                          itemCount: channels.length,
+                          separatorBuilder: (_, __) => Divider(
+                              height: 1, color: AppTheme.borderLight),
+                          itemBuilder: (_, i) {
+                            final ch = channels[i];
+                            final selected =
+                                c.selectedChannelIndex.value == i;
+                            return ListTile(
+                              dense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              title: Text(
+                                ch.name,
                                 style: TextStyle(
                                   color: selected
                                       ? AppTheme.accentColor
-                                      : Colors.white70,
-                                  fontSize: 12,
+                                      : Colors.white,
+                                  fontSize: 15,
                                   fontWeight: selected
                                       ? FontWeight.w600
-                                      : FontWeight.normal,
+                                      : FontWeight.w500,
                                 ),
                               ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    VerticalDivider(color: Colors.white.withValues(alpha: 0.08)),
-                    // 频道
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: channels.length,
-                        itemBuilder: (_, i) {
-                          final ch = channels[i];
-                          final selected = c.selectedChannelIndex.value == i;
-                          return ListTile(
-                            dense: true,
-                            selected: selected,
-                            selectedTileColor:
-                                AppTheme.accentColor.withValues(alpha: 0.12),
-                            leading: const Icon(Icons.live_tv,
-                                color: Colors.white54, size: 18),
-                            title: Text(
-                              ch.name,
-                              style: TextStyle(
-                                color: selected
-                                    ? AppTheme.accentColor
-                                    : Colors.white,
-                                fontSize: 13,
+                              subtitle: Text(
+                                ch.urls.isNotEmpty ? '可播放' : '未下载',
+                                style: TextStyle(
+                                    color: AppTheme.textTertiary, fontSize: 11),
                               ),
-                            ),
-                            onTap: () {
-                              c.selectChannel(i);
-                              _playChannel(ch.playUrl);
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                  ],
+                              trailing: Icon(Icons.live_tv,
+                                  color: selected
+                                      ? AppTheme.accentColor
+                                      : Colors.white24,
+                                  size: 22),
+                              onTap: () {
+                                c.selectChannel(i);
+                                _playChannel(ch.playUrl);
+                              },
+                            );
+                          },
+                        ),
                 ),
-              ),
-            ],
+              ],
+            ),
           );
         },
       ),
     );
   }
 
-  Future<String?> _askUrl(BuildContext context) {
-    final ctrl = TextEditingController();
-    return showDialog<String>(
+  Future<void> _pickSource(BuildContext context, LiveController c) async {
+    final groups = c.groups;
+    if (groups.isEmpty) {
+      final url = await showDialog<String>(
+        context: context,
+        builder: (ctx) {
+          final ctrl = TextEditingController();
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1C1C1E),
+            title: Text('导入直播源',
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
+            content: TextField(
+              controller: ctrl,
+              style: TextStyle(color: AppTheme.textPrimary),
+              decoration: InputDecoration(
+                hintText: 'm3u / txt 地址',
+                hintStyle: TextStyle(color: AppTheme.textTertiary),
+              ),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('取消')),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                  child: const Text('加载')),
+            ],
+          );
+        },
+      );
+      if (url != null && url.isNotEmpty) {
+        await c.reloadFromUrl(url);
+      }
+      return;
+    }
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1C1E),
-        title: const Text('加载直播源',
-            style: TextStyle(color: Colors.white, fontSize: 15)),
-        content: TextField(
-          controller: ctrl,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: 'm3u / txt 地址',
-            hintStyle: TextStyle(color: Colors.white38),
-          ),
+      backgroundColor: const Color(0xFF1C1C1E),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('播放源',
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
+            ),
+            for (var i = 0; i < groups.length; i++)
+              ListTile(
+                title: Text(groups[i].name,
+                    style: TextStyle(color: AppTheme.textSecondary)),
+                subtitle: Text('${groups[i].channels.length} 个频道',
+                    style: TextStyle(
+                        color: AppTheme.textTertiary, fontSize: 11)),
+                trailing: c.selectedGroup == i
+                    ? const Icon(Icons.check, color: AppTheme.accentColor)
+                    : null,
+                onTap: () {
+                  c.selectGroup(i);
+                  Navigator.pop(ctx);
+                },
+              ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('加载'),
-          ),
-        ],
+      ),
+    );
+  }
+}
+
+class _LiveDot extends StatefulWidget {
+  const _LiveDot();
+  @override
+  State<_LiveDot> createState() => _LiveDotState();
+}
+
+class _LiveDotState extends State<_LiveDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: const Duration(seconds: 1))
+        ..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween(begin: 0.35, end: 1.0).animate(_c),
+      child: Container(
+        width: 8,
+        height: 8,
+        decoration: const BoxDecoration(
+          color: Colors.redAccent,
+          shape: BoxShape.circle,
+        ),
       ),
     );
   }
@@ -254,13 +387,13 @@ class _EmptyLive extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.live_tv, color: Colors.white24, size: 48),
+          Icon(Icons.live_tv, color: AppTheme.textTertiary, size: 48),
           const SizedBox(height: 12),
-          const Text('暂无直播频道',
-              style: TextStyle(color: Colors.white54, fontSize: 14)),
+          Text('暂无直播频道',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
           const SizedBox(height: 6),
-          const Text('在订阅 JSON 的 lives 里配置，或手动导入 m3u',
-              style: TextStyle(color: Colors.white38, fontSize: 12)),
+          Text('在订阅 JSON 的 lives 配置，或导入 m3u',
+              style: TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
           const SizedBox(height: 16),
           OutlinedButton(
             onPressed: onReload,

@@ -93,6 +93,19 @@ class _SettingsPageState extends State<SettingsPage> {
                 _buildDataSourceSection(),
                 const SizedBox(height: AppTheme.spacingXXL),
 
+                // 直播
+                const SectionHeader(title: '直播'),
+                const SizedBox(height: AppTheme.spacingSM),
+                AppCard(
+                  child: SettingsRow(
+                    icon: Icons.live_tv_outlined,
+                    title: '直播源管理',
+                    value: '全局 EPG、屏蔽分类',
+                    onTap: () => Get.toNamed('/live/settings'),
+                  ),
+                ),
+                const SizedBox(height: AppTheme.spacingXXL),
+
                 // 播放设置
                 const SectionHeader(title: '播放设置'),
                 const SizedBox(height: AppTheme.spacingSM),
@@ -473,6 +486,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final tmdb = TmdbService.instance;
     return AppCard(
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           SettingsRow(
             icon: Icons.movie_filter_outlined,
@@ -484,14 +498,13 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           Divider(color: AppTheme.borderLight, height: 1),
           Obx(() => SettingsRow(
-                icon: Icons.auto_awesome,
-                title: '自动刮削元数据',
-                value: tmdb.autoScrape.value ? '已开启' : '已关闭',
-                onTap: () async {
-                  await tmdb.setAutoScrape(!tmdb.autoScrape.value);
-                  if (mounted) setState(() {});
-                },
-              )),
+            icon: Icons.auto_awesome,
+            title: '自动刮削元数据',
+            value: tmdb.autoScrape.value ? '已开启' : '已关闭',
+            onTap: () async {
+              await tmdb.setAutoScrape(!tmdb.autoScrape.value);
+            },
+          )),
           Divider(color: AppTheme.borderLight, height: 1),
           SettingsRow(
             icon: Icons.info_outline,
@@ -545,20 +558,20 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildCacheSection() {
     return AppCard(
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // 源文件缓存开关
-          Obx(() => SettingsRow(
-                icon: Icons.offline_bolt_outlined,
-                title: '源文件缓存',
-                value: _sourceCacheEnabled ? '已开启' : '已关闭',
-                onTap: () async {
-                  _sourceCacheEnabled = !_sourceCacheEnabled;
-                  setState(() {});
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setBool(
-                      'source_cache_enabled', _sourceCacheEnabled);
-                },
-              )),
+          // 源文件缓存开关（普通 bool + setState，不能包 Obx）
+          SettingsRow(
+            icon: Icons.offline_bolt_outlined,
+            title: '源文件缓存',
+            value: _sourceCacheEnabled ? '已开启' : '已关闭',
+            onTap: () async {
+              setState(() => _sourceCacheEnabled = !_sourceCacheEnabled);
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setBool(
+                  'source_cache_enabled', _sourceCacheEnabled);
+            },
+          ),
           Divider(color: AppTheme.borderLight, height: 1),
           // 自动清理
           SettingsRow(
@@ -572,7 +585,7 @@ class _SettingsPageState extends State<SettingsPage> {
           SettingsRow(
             icon: Icons.cleaning_services_outlined,
             title: '清理源文件缓存',
-            value: '',
+            value: '源 JS',
             onTap: () => controller.clearSourceCache(),
           ),
           Divider(color: AppTheme.borderLight, height: 1),

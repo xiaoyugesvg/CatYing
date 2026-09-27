@@ -285,6 +285,32 @@ class _DetailPageState extends State<DetailPage> {
             children: [
               _floatingNavItem(
                 Icons.home_outlined, Icons.home, '首页', 0, current),
+              GestureDetector(
+                onTap: () => Get.toNamed('/live'),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOutCubic,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.accentColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.live_tv,
+                          size: 18, color: AppTheme.accentColor),
+                      SizedBox(height: 3),
+                      Text('直播',
+                          style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500,
+                              color: AppTheme.accentColor)),
+                    ],
+                  ),
+                ),
+              ),
               _floatingNavItem(
                 Icons.schedule_outlined, Icons.schedule, '历史', 1, current),
               _floatingNavItem(
