@@ -224,6 +224,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   Timer? _bitrateTimer;
   Timer? _indicatorTimer;
 
+  /// player.stream 订阅统一持有，dispose 时取消，避免外部注入 Player 时泄漏
+  final List<StreamSubscription<dynamic>> _playerSubs = [];
+
+  /// 播放进度 / 总时长：高频更新走 ValueNotifier，避免 position stream 触发整树 setState
+  final ValueNotifier<Duration> _positionVN = ValueNotifier(Duration.zero);
+  final ValueNotifier<Duration> _durationVN = ValueNotifier(Duration.zero);
+
+  /// 上次回调 onPositionChanged 的秒，节流上层（历史落盘等）
+  int _lastNotifiedPositionSec = -1;
+
   // ============================================================
   // 全屏状态栏 - 电量 + 时间
   // ============================================================
@@ -286,13 +296,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _isBuffering = _player.state.buffering;
     _position = _player.state.position;
     _duration = _player.state.duration;
+    _positionVN.value = _position;
+    _durationVN.value = _duration;
     _playbackSpeed = _player.state.rate;
 
-    _player.stream.error.listen((error) {
+    _playerSubs.add(_player.stream.error.listen((error) {
       if (error.isNotEmpty) widget.onError?.call();
-    });
+    }));
 
-    _player.stream.playing.listen((playing) {
+    _playerSubs.add(_player.stream.playing.listen((playing) {
       if (mounted) {
         setState(() {
           _isPlaying = playing;
@@ -314,26 +326,39 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           }
         }
       }
-    });
+    }));
 
-    _player.stream.buffering.listen((buffering) {
-      if (mounted) setState(() => _isBuffering = buffering);
-    });
+    _playerSubs.add(_player.stream.buffering.listen((buffering) {
+      if (mounted && buffering != _isBuffering) {
+        setState(() => _isBuffering = buffering);
+      }
+    }));
 
-    _player.stream.position.listen((position) {
-      if (mounted) {
-        setState(() => _position = position);
+    // 进度：只更新 ValueNotifier（进度条/时间局部重建），秒变化才 setState
+    // （跳过片头/片尾按钮依赖 _position.inSeconds）
+    _playerSubs.add(_player.stream.position.listen((position) {
+      if (!mounted) return;
+      _position = position;
+      _positionVN.value = position;
+      final sec = position.inSeconds;
+      if (sec != _lastNotifiedPositionSec) {
+        _lastNotifiedPositionSec = sec;
+        // 秒级变化时才重建依赖 position 的控制项（跳过按钮等）
+        setState(() {});
         widget.onPositionChanged?.call(position);
       }
-    });
+    }));
 
-    _player.stream.duration.listen((duration) {
-      if (mounted) setState(() => _duration = duration);
-    });
+    _playerSubs.add(_player.stream.duration.listen((duration) {
+      if (!mounted) return;
+      _duration = duration;
+      _durationVN.value = duration;
+      setState(() {});
+    }));
 
-    _player.stream.completed.listen((completed) {
+    _playerSubs.add(_player.stream.completed.listen((completed) {
       if (completed) widget.onEnded?.call();
-    });
+    }));
 
     _volume = _player.state.volume;
     if (_ownsPlayer) {
@@ -617,11 +642,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _bitrateTimer?.cancel();
     _bitrateTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
-      final stats = _player.state;
-      if (stats.playing) {
-        setState(() {
-          _updateResolutionFromTrack();
-        });
+      if (!_player.state.playing && _resolutionText.isEmpty) return;
+      final beforeRes = _resolutionText;
+      final beforeRate = _bitrateText;
+      _updateResolutionFromTrack();
+      if (_resolutionText != beforeRes || _bitrateText != beforeRate) {
+        setState(() {});
       }
     });
   }
@@ -634,11 +660,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     } else {
       _resolutionText = '';
     }
-    if (_isPlaying) {
-      _bitrateText = '2.0Mbps';
-    } else {
-      _bitrateText = '';
-    }
+    // 不写死假码率；media_kit 未暴露 estimated-bitrate 时保持空串
+    _bitrateText = '';
   }
 
   /// 唤醒控制条，并在空闲后自动隐藏
@@ -897,11 +920,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     WindowFullScreen.instance.activeNotifier.removeListener(
       _onWindowFullScreenChanged,
     );
+    for (final sub in _playerSubs) {
+      sub.cancel();
+    }
+    _playerSubs.clear();
     _hideTimer?.cancel();
     _bitrateTimer?.cancel();
     _indicatorTimer?.cancel();
     _timeTimer?.cancel();
     _batteryStateSub?.cancel();
+    _positionVN.dispose();
+    _durationVN.dispose();
     // iOS：离开播放页，释放原生 PiP 常驻实例
     if (Platform.isIOS) {
       VideoPlayerPip.instance.releaseIos();
@@ -1768,13 +1797,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   // ============================================================
 
   Widget _buildProgressBar() {
-    final totalMs = _duration.inMilliseconds.toDouble();
-    final currentMs = _isDragging
-        ? _dragValue
-        : _position.inMilliseconds.toDouble();
-    final progress = totalMs > 0 ? (currentMs / totalMs).clamp(0.0, 1.0) : 0.0;
+    // 进度条/时间只响应 position/duration 变化，不随整树 setState 重建
+    return ListenableBuilder(
+      listenable: Listenable.merge([_positionVN, _durationVN]),
+      builder: (context, _) {
+        final totalMs = _duration.inMilliseconds.toDouble();
+        final currentMs = _isDragging
+            ? _dragValue
+            : _position.inMilliseconds.toDouble();
+        final progress = totalMs > 0 ? (currentMs / totalMs).clamp(0.0, 1.0) : 0.0;
 
-    return Padding(
+        return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10),
       // 开始时间在进度条起点正下方, 结束时间在终点正下方
       child: Row(
@@ -1839,6 +1872,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           ),
         ],
       ),
+        );
+      },
     );
   }
 
@@ -1873,34 +1908,39 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   // ============================================================
 
   Widget _buildTimeView() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            _formatDuration(
-              _isDragging
-                  ? Duration(milliseconds: _dragValue.round())
-                  : _position,
-            ),
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 10,
-              fontFamily: 'monospace',
-            ),
+    return ListenableBuilder(
+      listenable: Listenable.merge([_positionVN, _durationVN]),
+      builder: (context, _) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _formatDuration(
+                  _isDragging
+                      ? Duration(milliseconds: _dragValue.round())
+                      : _position,
+                ),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              Text(
+                _duration > Duration.zero ? _formatDuration(_duration) : '--:--',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.82),
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
           ),
-          Text(
-            _duration > Duration.zero ? _formatDuration(_duration) : '--:--',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.82),
-              fontSize: 10,
-              fontFamily: 'monospace',
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -3129,11 +3169,14 @@ class _DanmuLayerState extends State<_DanmuLayer> {
     _timer = Timer.periodic(const Duration(milliseconds: 100), (_) {
       if (!mounted) return;
       final pos = widget.positionOf().inMilliseconds / 1000.0;
+      var spawned = false;
       while (_nextIndex < _sorted.length &&
           _sorted[_nextIndex].time <= pos + 0.25) {
         _spawn(_sorted[_nextIndex]);
         _nextIndex++;
+        spawned = true;
       }
+      if (_active.isEmpty && !spawned) return;
       for (final a in _active) {
         if (a.item.mode == 1) {
           a.x -= _speed * 0.1;
@@ -3141,19 +3184,24 @@ class _DanmuLayerState extends State<_DanmuLayer> {
           a.remaining -= 0.1;
         }
       }
+      final before = _active.length;
       _active.removeWhere(
           (a) => a.item.mode == 1 ? a.x + a.width < -16 : a.remaining <= 0);
-      setState(() {});
+      if (spawned || _active.isNotEmpty || before != _active.length) {
+        setState(() {});
+      }
     });
   }
 
   void _spawn(_DanmuItem item) {
+    // 宽度只在发射时测一次，build 里不再 TextPainter.layout
+    final width = _textWidth(item.text, 14);
     if (item.mode == 4) {
-      _active.add(_ActiveDanmu(item, topFixed: true));
+      _active.add(_ActiveDanmu(item, topFixed: true, width: width));
     } else if (item.mode == 5) {
-      _active.add(_ActiveDanmu(item, bottomFixed: true));
+      _active.add(_ActiveDanmu(item, bottomFixed: true, width: width));
     } else {
-      _active.add(_ActiveDanmu(item, track: _nextTrack));
+      _active.add(_ActiveDanmu(item, track: _nextTrack, width: width));
       _nextTrack = (_nextTrack + 1) % 4;
     }
   }
@@ -3182,10 +3230,10 @@ class _DanmuLayerState extends State<_DanmuLayer> {
         builder: (context, constraints) {
           final w = constraints.maxWidth;
           final h = constraints.maxHeight;
+          // 宽度已在 _spawn 缓存，这里只补滚动弹幕初始 x
           for (final a in _active) {
-            if (a.item.mode == 1) {
-              a.width = _textWidth(a.item.text, 14);
-              if (a.x == 0) a.x = w.toDouble();
+            if (a.item.mode == 1 && a.x == 0) {
+              a.x = w.toDouble();
             }
           }
           return Stack(

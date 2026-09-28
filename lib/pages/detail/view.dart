@@ -62,6 +62,8 @@ class _DetailPageState extends State<DetailPage> {
   VideoController? _videoController;
   String? _lastPlayerUrl;
   String? _lastPlayerHeadersKey;
+  /// 是否已排队 post-frame 重建 Player，防止 build 内重复 schedule
+  bool _playerRecreateScheduled = false;
   SharedPreferences? _prefs;
   int? _prefsPlayTypeVod;
 
@@ -194,19 +196,51 @@ class _DetailPageState extends State<DetailPage> {
   /// 模式，但 libmpv 端做更彻底 (根本不会经过 0 位置)。
   /// - 传 null / 0 → 从 0 开始（冷启动 / 切换集数）
   /// - 传 > 0 → 从该秒数开始（续播）
-  void _ensurePlayer(
+  /// 当前 Player 是否已绑定到目标 URL/headers
+  bool _playerMatches(String url, String headersKey) {
+    return _player != null &&
+        _lastPlayerUrl == url &&
+        _lastPlayerHeadersKey == headersKey;
+  }
+
+  String _headersKey(Map<String, String> headers) {
+    return headers.entries.map((e) => '${e.key}=${e.value}').join('&');
+  }
+
+  /// 确保 Player 指向 (url, headers)。
+  /// **禁止在 build 里直接 dispose/open**：副作用放到 post-frame，
+  /// 避免帧中途销毁/创建 native player。返回 true 表示 Player 已就绪。
+  bool _ensurePlayer(
     String url,
     Map<String, String> headers, {
     double? startPosition,
   }) {
-    final headersKey = headers.entries
-        .map((e) => '${e.key}=${e.value}')
-        .join('&');
-    if (_player != null &&
-        _lastPlayerUrl == url &&
-        _lastPlayerHeadersKey == headersKey) {
-      return;
+    final headersKey = _headersKey(headers);
+    if (_playerMatches(url, headersKey)) {
+      return true;
     }
+    if (_playerRecreateScheduled) {
+      return false;
+    }
+    _playerRecreateScheduled = true;
+    final start = (startPosition != null && startPosition > 0)
+        ? Duration(seconds: startPosition.toInt())
+        : null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _playerRecreateScheduled = false;
+      if (!mounted) return;
+      _disposeAndOpenPlayer(url, headers, headersKey, start);
+      setState(() {});
+    });
+    return false;
+  }
+
+  void _disposeAndOpenPlayer(
+    String url,
+    Map<String, String> headers,
+    String headersKey,
+    Duration? start,
+  ) {
     _player?.dispose();
     // mpv 磁盘缓存：点播视频缓存到应用 Cache 目录, 下次播放同 URL 直接复用,
     // 解决"每次打开都要重新下载"。缓存目录与设置页"清除缓存"统计目录一致。
@@ -215,9 +249,6 @@ class _DetailPageState extends State<DetailPage> {
     _videoController = VideoController(_player!);
     _lastPlayerUrl = url;
     _lastPlayerHeadersKey = headersKey;
-    final start = (startPosition != null && startPosition > 0)
-        ? Duration(seconds: startPosition.toInt())
-        : null;
     _player!.open(Media(url, httpHeaders: headers, start: start));
   }
 
@@ -505,8 +536,24 @@ class _DetailPageState extends State<DetailPage> {
     }
 
     // 把续播位置透传给 _ensurePlayer, 让 libmpv 通过 Media.start 参数
-    // 直接从续播位置开始解码, 避免 "先从 0 播几秒再回退" 的现象
-    _ensurePlayer(url, headers, startPosition: _controller.resumeSeconds.value);
+    // 直接从续播位置开始解码, 避免 "先从 0 播几秒再回退" 的现象。
+    // _ensurePlayer 内部把 dispose/open 放到 post-frame，这里不阻塞 build。
+    final playerReady = _ensurePlayer(
+      url,
+      headers,
+      startPosition: _controller.resumeSeconds.value,
+    );
+    if (!playerReady || _player == null || _videoController == null) {
+      return AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Container(
+          color: Colors.black,
+          child: const Center(
+            child: CircularProgressIndicator(color: Colors.white),
+          ),
+        ),
+      );
+    }
 
     final info = _controller.vodInfo.value;
     final episode = info?.currentEpisode;
