@@ -2572,12 +2572,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   Widget _gradientTopContainer({required Widget child}) {
-    final mediaPadding = MediaQuery.of(context).padding;
-    // 与详情页 AppBar 返回键同一水平线：
-    // AppBar leading 垂直中心 = 状态栏高 + kToolbarHeight/2（28）。
-    // 顶栏内容高度固定 40，故 top = 状态栏 + 8，使中心落在 28。
-    const contentH = 40.0;
-    final top = mediaPadding.top + (kToolbarHeight - contentH) / 2;
+    final pad = MediaQuery.of(context).padding;
+    // 与返回键同一高度：整行顶对齐（返回就在本 Row 左侧）
+    // top 仅避让状态栏，不再把功能键压到画面中部
+    final top = pad.top > 0 ? pad.top + 4.0 : 8.0;
     return DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -2587,12 +2585,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         ),
       ),
       child: Padding(
-        padding: EdgeInsets.only(
-          top: top,
-          left: 4 + mediaPadding.left,
-          right: 4 + mediaPadding.right,
-        ),
-        child: SizedBox(height: contentH, child: child),
+        padding: EdgeInsets.only(top: top, left: 4, right: 4),
+        child: SizedBox(height: 40, child: child),
       ),
     );
   }

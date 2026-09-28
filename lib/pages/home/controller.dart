@@ -25,9 +25,7 @@ class HomeController extends GetxController with WidgetsBindingObserver {
     return sorts.firstWhereOrNull((s) => s.id == sortId)?.filters ?? [];
   }
 
-  /// 当前显示的视频列表：
-  /// - 未选分类 = 首页推荐（homeVideos）
-  /// - 已选分类 = 该分类列表
+  /// 列表内容：跟分类/筛选走；未选分类时回退到首页推荐（保证有内容）
   List<Video> get displayVideos =>
       selectedSort.value == null ? homeVideos : categoryVideos;
 
@@ -166,8 +164,10 @@ class HomeController extends GetxController with WidgetsBindingObserver {
         );
       }
 
-      // 首页 = 推荐，不自动进入第一个分类
-      // 用户点分类后再加载对应列表
+      // 幻灯片始终用 homeVideos；列表默认进入第一个分类
+      if (selectedSort.value == null && sorts.isNotEmpty) {
+        selectSort(sorts.first);
+      }
     } catch (e) {
       errorMessage.value = _friendlyErrorMessage(e);
     }
@@ -175,7 +175,7 @@ class HomeController extends GetxController with WidgetsBindingObserver {
     isLoading.value = false;
   }
 
-  /// 回到首页推荐（清空分类选择）
+  /// 清空分类选择（列表回到空，幻灯片不受影响）
   void backToRecommend() {
     selectedSort.value = null;
     selectedFilters.clear();
@@ -190,14 +190,15 @@ class HomeController extends GetxController with WidgetsBindingObserver {
     categoryVideos.clear();
     currentPage.value = 1;
     hasMore.value = true;
-    // 切换分类时重置筛选
+    // 换分类时重置筛选，再按新分类拉列表
     selectedFilters.clear();
+    selectedFilters.refresh();
 
     _loadCategoryVideos(page: 1, sort: sort);
     update();
   }
 
-  /// 选中/清除筛选，并刷新当前分类
+  /// 选中/清除筛选，并刷新当前分类列表
   void selectFilter(String key, String value) {
     if (value.isEmpty) {
       selectedFilters.remove(key);
@@ -205,12 +206,14 @@ class HomeController extends GetxController with WidgetsBindingObserver {
       selectedFilters[key] = value;
     }
     selectedFilters.refresh();
+
     final sort = selectedSort.value;
     if (sort == null) return;
     categoryVideos.clear();
     currentPage.value = 1;
     hasMore.value = true;
     _loadCategoryVideos(page: 1, sort: sort);
+    update();
   }
 
   Future<void> _loadCategoryVideos({
