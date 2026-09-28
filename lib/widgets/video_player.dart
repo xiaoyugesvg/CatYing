@@ -144,6 +144,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// iOS 自动画中画进行中（防止退后台重复触发）
   bool _autoPipInFlight = false;
 
+  /// 系统画中画激活中（App 内显示「正在画中画」）
+  bool _pipActive = false;
+
   /// 听剧模式（点播页）：开启后隐藏视频画面、只保留音频输出，
   /// 可后台/息屏继续播放（Info.plist 已配置 UIBackgroundModes=audio）
   bool _audioMode = false;
@@ -333,8 +336,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }));
 
     _playerSubs.add(_player.stream.buffering.listen((buffering) {
-      if (mounted && buffering != _isBuffering) {
-        setState(() => _isBuffering = buffering);
+      if (!mounted) return;
+      // 播放中/已有进度时不要被 buffering 抖回转圈
+      final show = buffering && !_isPlaying && _position == Duration.zero;
+      if (show != _isBuffering) {
+        setState(() => _isBuffering = show);
       }
     }));
 
@@ -344,6 +350,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (!mounted) return;
       _position = position;
       _positionVN.value = position;
+      if (_isBuffering && position > Duration.zero) {
+        _isBuffering = false;
+      }
       final sec = position.inSeconds;
       if (sec != _lastNotifiedPositionSec) {
         _lastNotifiedPositionSec = sec;
@@ -1009,7 +1018,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         ),
 
         // 缓冲指示器
-        if (_isBuffering)
+        // 缓冲圈：真正卡住才显示；已在播/已有进度则隐藏
+        if (_isBuffering &&
+            !_isPlaying &&
+            _position == Duration.zero &&
+            !_audioMode)
           const Center(
             child: SizedBox(
               width: 36,
@@ -1039,8 +1052,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           ),
 
         // 顶部导航栏
-        // 顶栏常显：返回 + 功能键同一行（锁定时只留锁定钮）
-        if (!_isLocked) _buildHeaderBar(),
+        // 顶栏与进度条同步显隐
+        if (_showControls && !_isLocked) _buildHeaderBar(),
 
         // 锁定按钮
         if (_showControls || _isLocked) _buildLockButton(),
@@ -1067,12 +1080,52 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         // 设置弹窗
 
         // 听剧模式覆盖层（隐藏画面、保留音频）
-        // **关键修复**: 必须放在手势层之上(Stack 最顶层)。
-        // 之前放在手势层下面, 全屏手势层 Positioned.fill 会吞掉
-        // 覆盖层上"退出听剧模式"按钮的所有点击 —— 这就是听剧模式
-        // 退不出去的直接原因。
         if (_audioMode) _buildAudioModeOverlay(),
+        // 系统画中画进行中：App 内提示 + 一键回到 App 内播放
+        if (_pipActive) _buildPipActiveOverlay(),
       ],
+    );
+  }
+
+  /// 「正在画中画」覆盖层
+  Widget _buildPipActiveOverlay() {
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withValues(alpha: 0.55),
+        alignment: Alignment.center,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.picture_in_picture_alt,
+                color: Colors.white70, size: 40),
+            const SizedBox(height: 12),
+            const Text(
+              '正在画中画',
+              style: TextStyle(color: Colors.white, fontSize: 15),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '小窗播放中，回到 App 可继续控制',
+              style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.6), fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            GestureDetector(
+              onTap: _togglePiP,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: const Text('回到 App 内播放',
+                    style: TextStyle(color: Colors.white, fontSize: 13)),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1378,34 +1431,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               ),
             ),
             const Spacer(),
-
-            // 分辨率
-            if (_resolutionText.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  _resolutionText,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-              ),
-
-            // 网速
-            if (_bitrateText.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  _bitrateText,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-              ),
 
             // 听剧模式（仅点播页显示）
             if (widget.showAudioModeButton)
@@ -2402,6 +2427,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (VideoPlayerPip.instance.isIosActive) {
         final resume = VideoPlayerPip.instance.iosLastPosition;
         await VideoPlayerPip.instance.exitIos();
+        setState(() => _pipActive = false);
         if (resume > Duration.zero) {
           try {
             _player.seek(resume);
@@ -2425,17 +2451,23 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         return;
       }
       final currentPos = _player.state.position;
-      // **丝滑切换 (2026-09-26)**：进入系统 PiP 前不暂停主播放器，
-      // 由系统 AVPlayer 无缝接管画面与声音，切换过程不断声、不卡顿。
+      // MPV + AVPlayer 协调：
+      // - onStarted：AVPlayer 已出画 → 暂停 MPV，避免双声道
+      // - onStopped：小窗结束 → 从进度续播 MPV
       final entered = await VideoPlayerPip.instance.enterIos(
         url: playUrl,
         headers: widget.headers,
         position: currentPos,
         onStarted: () {
-          // 主播放器已暂停, 保留空实现兼容旧回调语义
+          if (!mounted) return;
+          setState(() => _pipActive = true);
+          try {
+            _player.pause();
+          } catch (_) {}
         },
         onStopped: () {
           if (!mounted) return;
+          setState(() => _pipActive = false);
           final resume = VideoPlayerPip.instance.iosLastPosition;
           if (resume > Duration.zero) {
             try {
@@ -2445,6 +2477,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           try {
             _player.play();
           } catch (_) {}
+          // 二次进入：重新预热 AVPlayer
+          if (Platform.isIOS) {
+            VideoPlayerPip.instance.prepareIos(
+              url: playUrl,
+              headers: widget.headers,
+            );
+          }
         },
       );
       if (!entered) {
@@ -2493,18 +2532,22 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
     _autoPipInFlight = true;
     final currentPos = _player.state.position;
-    // **丝滑切换 (2026-09-26)**：退后台自动进 PiP 同样不暂停主播放器，
-    // AVPlayer 无缝接管，切换过程中不断声、不卡顿。
+    // MPV + AVPlayer 协调：小窗起来后停 MPV，回 App 再续播
     try {
       final entered = await VideoPlayerPip.instance.enterIos(
         url: playUrl,
         headers: widget.headers,
         position: currentPos,
         onStarted: () {
-          // 主播放器已暂停, 保留空实现兼容旧回调语义
+          if (!mounted) return;
+          setState(() => _pipActive = true);
+          try {
+            _player.pause();
+          } catch (_) {}
         },
         onStopped: () {
           if (!mounted) return;
+          setState(() => _pipActive = false);
           final resume = VideoPlayerPip.instance.iosLastPosition;
           if (resume > Duration.zero) {
             try {
@@ -2514,9 +2557,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           try {
             _player.play();
           } catch (_) {}
+          if (Platform.isIOS) {
+            VideoPlayerPip.instance.prepareIos(
+              url: playUrl,
+              headers: widget.headers,
+            );
+          }
         },
       );
       if (!entered) {
+        setState(() => _pipActive = false);
         try {
           _player.play();
         } catch (_) {}

@@ -216,17 +216,24 @@ class HomeController extends GetxController with WidgetsBindingObserver {
     update();
   }
 
+  /// 列表请求序号：筛选/分类快速切换时丢弃过期响应
+  int _listRequestId = 0;
+
   Future<void> _loadCategoryVideos({
     required int page,
     required SortData sort,
   }) async {
     final source = ApiConfig.instance.homeSourceBean.value;
-    if (source == null || isLoading.value) return;
+    if (source == null) return;
 
-    final catCacheKey = 'cat_videos:${source.key}:${sort.id}';
+    // 不要用 isLoading 拦截：筛选切换时上一请求可能仍在飞，
+    // 否则点筛选会 return，列表一直不更新
+    final requestId = ++_listRequestId;
+    final filters = selectedFilters.isEmpty ? null : Map<String, String>.from(selectedFilters);
 
-    // 第一页先出缓存
-    if (page == 1 && categoryVideos.isEmpty) {
+    // 无筛选时才读缓存；带筛选的缓存 key 未区分条件，会塞回错误列表
+    if (page == 1 && filters == null && categoryVideos.isEmpty) {
+      final catCacheKey = 'cat_videos:${source.key}:${sort.id}';
       try {
         final cached = CacheStore.instance.getJsonListCache(
           catCacheKey,
@@ -244,7 +251,6 @@ class HomeController extends GetxController with WidgetsBindingObserver {
     isLoading.value = true;
 
     try {
-      final filters = selectedFilters.isEmpty ? null : selectedFilters;
       final videos = await SourceService.instance.getList(
         source,
         sort,
@@ -252,17 +258,17 @@ class HomeController extends GetxController with WidgetsBindingObserver {
         filters: filters,
       );
 
-      // 分类切换过程中，丢弃旧请求结果
-      if (selectedSort.value?.id != sort.id) {
-        isLoading.value = false;
+      // 过期响应 / 分类已切换 → 丢弃
+      if (requestId != _listRequestId || selectedSort.value?.id != sort.id) {
         return;
       }
 
       if (page == 1) {
         categoryVideos.value = videos;
+        // 只缓存「无筛选」的第一页
         if (videos.isNotEmpty && filters == null) {
           CacheStore.instance.setJsonCache(
-            catCacheKey,
+            'cat_videos:${source.key}:${sort.id}',
             videos.map((v) => v.toJson()).toList(),
           );
         }
@@ -271,13 +277,16 @@ class HomeController extends GetxController with WidgetsBindingObserver {
       }
       currentPage.value = page;
       hasMore.value = videos.isNotEmpty;
+      errorMessage.value = null;
     } catch (e) {
-      if (selectedSort.value?.id == sort.id) {
+      if (requestId == _listRequestId && selectedSort.value?.id == sort.id) {
         errorMessage.value = _friendlyErrorMessage(e);
       }
+    } finally {
+      if (requestId == _listRequestId) {
+        isLoading.value = false;
+      }
     }
-
-    isLoading.value = false;
   }
 
   Future<void> loadMore() async {

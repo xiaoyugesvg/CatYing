@@ -136,11 +136,15 @@ class VideoPlayerPip {
     VoidCallback? onStarted,
   }) async {
     if (!Platform.isIOS) return false;
+    // 真正激活中才视为已进入；若状态残留（onPipStopped 丢了）则强制复位后再进
     if (_iosActive) return true;
+
     _iosOnStopped = onStopped;
     _iosOnStarted = onStarted;
-    _iosLastPosition = 0;
+    // 不要清 _iosLastPosition：回退恢复进度还要用
     try {
+      // 二次进入前重新预热，避免 cleanup 后 preparedReady=false 导致 startPip 失败
+      await prepareIos(url: url, headers: headers);
       await _iosChannel.invokeMethod<void>('startPip', {
         'url': url,
         'headers': headers ?? const <String, String>{},
@@ -151,6 +155,7 @@ class VideoPlayerPip {
     } catch (e) {
       _iosOnStopped = null;
       _iosOnStarted = null;
+      _iosActive = false;
       final msg = (e is PlatformException) ? '${e.code}: ${e.message}' : e.toString();
       debugPrint('[VideoPlayerPip] iOS enter failed: $msg');
       return false;
@@ -159,11 +164,24 @@ class VideoPlayerPip {
 
   /// iOS：退出系统画中画
   Future<void> exitIos() async {
-    if (!Platform.isIOS || !_iosActive) return;
+    if (!Platform.isIOS) return;
     try {
       await _iosChannel.invokeMethod<void>('stopPip');
     } catch (_) {}
+    // 无论原生是否在 PiP，都清掉 Dart 状态，避免卡在 isIosActive=true
+    // 导致之后无法再进入小窗
     _iosActive = false;
+    final cb = _iosOnStopped;
+    _iosOnStopped = null;
+    _iosOnStarted = null;
+    cb?.call();
+  }
+
+  /// 强制复位（onPipStopped 丢失 / 二次进入失败时用）
+  void resetIosState() {
+    _iosActive = false;
+    _iosOnStopped = null;
+    _iosOnStarted = null;
   }
 
   // ========== 桌面端入口 API ==========
