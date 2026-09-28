@@ -285,6 +285,57 @@ class LiveService extends GetxService {
     }
   }
 
+  /// 更新直播源名称（可选同时改 URL）。设置页「编辑直播源」用。
+  Future<void> updateSourceMeta(
+    int index, {
+    String? name,
+    String? url,
+  }) async {
+    if (index < 0 || index >= sources.length) return;
+    final trimmedName = name?.trim();
+    final trimmedUrl = url?.trim();
+    if ((trimmedName == null || trimmedName.isEmpty) &&
+        (trimmedUrl == null || trimmedUrl.isEmpty)) {
+      return;
+    }
+    isLoading.value = true;
+    error.value = null;
+    try {
+      if (_rawLives != null && index < _rawLives!.length) {
+        if (trimmedName != null && trimmedName.isNotEmpty) {
+          _rawLives![index]['name'] = trimmedName;
+        }
+        if (trimmedUrl != null && trimmedUrl.isNotEmpty) {
+          _rawLives![index]['url'] = trimmedUrl;
+        }
+        await _persistLives();
+        // 名称变了刷新列表项；URL 变了则重载该源
+        if (trimmedUrl != null && trimmedUrl.isNotEmpty) {
+          await loadSource(index);
+        } else {
+          final list = <LiveSource>[];
+          for (var i = 0; i < _rawLives!.length; i++) {
+            final n = (_rawLives![i]['name']?.toString() ?? '').trim();
+            list.add(LiveSource(
+              name: n.isEmpty ? '直播源${i + 1}' : n,
+              loaded: sources[i].loaded,
+            ));
+          }
+          sources.value = list;
+        }
+      } else {
+        // 单源模式：只能改 URL（名称固定）
+        if (trimmedUrl != null && trimmedUrl.isNotEmpty) {
+          await loadFromUrl(trimmedUrl);
+        }
+      }
+    } catch (e) {
+      error.value = '更新失败：$e';
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
   /// 获取指定源的 URL（设置页编辑用）
   String? getSourceUrl(int index) {
     if (_rawLives != null && index < _rawLives!.length) {

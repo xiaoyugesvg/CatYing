@@ -239,40 +239,61 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             }
             setState(() {});
           } else if (v == 'edit') {
-            final url = await showDialog<String>(
+            final result = await showDialog<(String, String)>(
               context: context,
               builder: (ctx) {
+                final nameCtrl = TextEditingController(text: src.name);
                 final ctrl =
                     TextEditingController(text: sourceUrl ?? '');
                 return AlertDialog(
                   backgroundColor: const Color(0xFF1C1C1E),
                   title: const Text('编辑直播源',
                       style: TextStyle(color: Colors.white, fontSize: 15)),
-                  content: TextField(
-                    controller: ctrl,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      hintText: 'm3u / txt 地址',
-                      hintStyle: TextStyle(color: Colors.white38),
-                    ),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: nameCtrl,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          hintText: '源名称',
+                          hintStyle: TextStyle(color: Colors.white38),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: ctrl,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(
+                          hintText: 'm3u / txt 地址',
+                          hintStyle: TextStyle(color: Colors.white38),
+                        ),
+                      ),
+                    ],
                   ),
                   actions: [
                     TextButton(
                         onPressed: () => Navigator.pop(ctx),
                         child: const Text('取消')),
                     TextButton(
-                        onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                        onPressed: () => Navigator.pop(
+                            ctx, (nameCtrl.text.trim(), ctrl.text.trim())),
                         child: const Text('保存')),
                   ],
                 );
               },
             );
-            if (url != null && url.isNotEmpty) {
-              await svc.updateSourceUrl(index, url);
+            if (result != null &&
+                (result.$1.isNotEmpty || result.$2.isNotEmpty)) {
+              await svc.updateSourceMeta(
+                index,
+                name: result.$1,
+                url: result.$2,
+              );
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                     content: Text(svc.error.value == null
-                        ? '已更新 ${src.name}'
+                        ? '已更新 ${result.$1.isEmpty ? src.name : result.$1}'
                         : '更新失败：${svc.error.value}'),
                     duration: const Duration(seconds: 3)));
               }

@@ -760,123 +760,249 @@ class _SettingsPageState extends State<SettingsPage> {
   // API 编辑弹窗（点播接口）
   // ============================================================
 
+  /// 点播接口：支持多源切换（历史源一键切换 + 手动输入新地址）
   void _showApiEditDialog() {
-    final vodController = TextEditingController(text: controller.vodApiUrl.value);
+    final vodController =
+        TextEditingController(text: controller.vodApiUrl.value);
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.backgroundSecondary,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppTheme.radiusLG),
-        ),
-        title: Text(
-          '点播接口地址',
-          style: TextStyle(color: AppTheme.textPrimary),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 点播接口
-            TextField(
-              controller: vodController,
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: AppTheme.fontSubhead,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            final history = controller.apiHistory.toList();
+            return AlertDialog(
+              backgroundColor: AppTheme.backgroundSecondary,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusLG),
               ),
-              decoration: InputDecoration(
-                hintText: '输入点播接口地址',
-                hintStyle: TextStyle(
-                  color: AppTheme.textTertiary,
-                  fontSize: AppTheme.fontSubhead,
-                ),
-                filled: true,
-                fillColor: AppTheme.backgroundTertiary,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppTheme.radiusSM),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                isDense: true,
-                prefixIcon: Icon(Icons.movie_outlined,
-                    size: 18, color: AppTheme.textTertiary),
+              title: Text(
+                '点播接口地址',
+                style: TextStyle(color: AppTheme.textPrimary),
               ),
-            ),
-            // 加载状态
-            Obx(() {
-              if (controller.isLoadingConfig.value) {
-                return Padding(
-                  padding: const EdgeInsets.only(top: AppTheme.spacingSM),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppTheme.accentColor,
-                        ),
-                      ),
-                      const SizedBox(width: AppTheme.spacingSM),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (history.isNotEmpty) ...[
                       Text(
-                        '正在加载配置...',
+                        '切换数据源',
                         style: TextStyle(
                           color: AppTheme.textSecondary,
                           fontSize: AppTheme.fontCaption,
                         ),
                       ),
+                      const SizedBox(height: 8),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 180),
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: history.length,
+                          itemBuilder: (_, i) {
+                            final url = history[i];
+                            final selected =
+                                url == controller.vodApiUrl.value;
+                            return InkWell(
+                              borderRadius:
+                                  BorderRadius.circular(AppTheme.radiusSM),
+                              onTap: () {
+                                vodController.text = url;
+                                setDialogState(() {});
+                              },
+                              onLongPress: () async {
+                                final ok = await showDialog<bool>(
+                                  context: context,
+                                  builder: (c2) => AlertDialog(
+                                    backgroundColor:
+                                        AppTheme.backgroundSecondary,
+                                    title: Text('移除数据源',
+                                        style: TextStyle(
+                                            color: AppTheme.textPrimary)),
+                                    content: Text(
+                                      _truncateUrl(url),
+                                      style: TextStyle(
+                                          color: AppTheme.textSecondary,
+                                          fontSize: AppTheme.fontCaption),
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(c2, false),
+                                        child: Text('取消',
+                                            style: TextStyle(
+                                                color: AppTheme.textTertiary)),
+                                      ),
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(c2, true),
+                                        child: Text('移除',
+                                            style: TextStyle(
+                                                color: Colors.redAccent)),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (ok == true) {
+                                  await controller.removeApiHistory(url);
+                                  setDialogState(() {});
+                                }
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 6, horizontal: 4),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      selected
+                                          ? Icons.radio_button_checked
+                                          : Icons.radio_button_off,
+                                      size: 18,
+                                      color: selected
+                                          ? AppTheme.accentColor
+                                          : AppTheme.textTertiary,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        _truncateUrl(url),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: selected
+                                              ? AppTheme.accentColor
+                                              : AppTheme.textPrimary,
+                                          fontSize: AppTheme.fontSubhead,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Divider(color: AppTheme.borderLight, height: 1),
+                      const SizedBox(height: 12),
+                      Text(
+                        '手动输入 / 修改',
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: AppTheme.fontCaption,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                     ],
-                  ),
-                );
-              }
-              if (controller.configError.value != null) {
-                return Padding(
-                  padding: const EdgeInsets.only(top: AppTheme.spacingSM),
-                  child: Text(
-                    controller.configError.value!,
-                    style: const TextStyle(
-                        color: Colors.red, fontSize: AppTheme.fontCaption),
-                  ),
-                );
-              }
-              if (controller.configSuccess.value) {
-                return Padding(
-                  padding: const EdgeInsets.only(top: AppTheme.spacingSM),
-                  child: const Text(
-                    '配置加载成功',
-                    style: TextStyle(
-                        color: AppTheme.accentColor,
-                        fontSize: AppTheme.fontCaption),
-                  ),
-                );
-              }
-              return const SizedBox.shrink();
-            }),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('取消',
-                style: TextStyle(color: AppTheme.textTertiary)),
-          ),
-          Obx(() => TextButton(
-                onPressed: controller.isLoadingConfig.value
-                    ? null
-                    : () {
-                        controller.vodApiUrl.value =
-                            vodController.text.trim();
-                        controller.loadConfig();
-                      },
-                child: const Text('加载',
-                    style: TextStyle(color: AppTheme.accentColor)),
-              )),
-        ],
-      ),
+                    TextField(
+                      controller: vodController,
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontSubhead,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: '输入点播接口地址',
+                        hintStyle: TextStyle(
+                          color: AppTheme.textTertiary,
+                          fontSize: AppTheme.fontSubhead,
+                        ),
+                        filled: true,
+                        fillColor: AppTheme.backgroundTertiary,
+                        border: OutlineInputBorder(
+                          borderRadius:
+                              BorderRadius.circular(AppTheme.radiusSM),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        isDense: true,
+                        prefixIcon: Icon(Icons.movie_outlined,
+                            size: 18, color: AppTheme.textTertiary),
+                      ),
+                    ),
+                    Obx(() {
+                      if (controller.isLoadingConfig.value) {
+                        return Padding(
+                          padding:
+                              const EdgeInsets.only(top: AppTheme.spacingSM),
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppTheme.accentColor,
+                                ),
+                              ),
+                              const SizedBox(width: AppTheme.spacingSM),
+                              Text(
+                                '正在加载配置...',
+                                style: TextStyle(
+                                  color: AppTheme.textSecondary,
+                                  fontSize: AppTheme.fontCaption,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+                      if (controller.configError.value != null) {
+                        return Padding(
+                          padding:
+                              const EdgeInsets.only(top: AppTheme.spacingSM),
+                          child: Text(
+                            controller.configError.value!,
+                            style: const TextStyle(
+                                color: Colors.red,
+                                fontSize: AppTheme.fontCaption),
+                          ),
+                        );
+                      }
+                      if (controller.configSuccess.value) {
+                        return Padding(
+                          padding:
+                              const EdgeInsets.only(top: AppTheme.spacingSM),
+                          child: const Text(
+                            '配置加载成功',
+                            style: TextStyle(
+                                color: AppTheme.accentColor,
+                                fontSize: AppTheme.fontCaption),
+                          ),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    }),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text('取消',
+                      style: TextStyle(color: AppTheme.textTertiary)),
+                ),
+                Obx(() => TextButton(
+                      onPressed: controller.isLoadingConfig.value
+                          ? null
+                          : () {
+                              controller.vodApiUrl.value =
+                                  vodController.text.trim();
+                              controller.loadConfig();
+                              Navigator.pop(ctx);
+                            },
+                      child: const Text('加载',
+                          style: TextStyle(color: AppTheme.accentColor)),
+                    )),
+              ],
+            );
+          },
+        );
+      },
     );
   }
-
   // ============================================================
   // 主页数据源选择
   // ============================================================
