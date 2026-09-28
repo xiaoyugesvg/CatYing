@@ -27,7 +27,8 @@ class _HomePageState extends State<HomePage> {
   final HomeController _controller = Get.put(HomeController());
   bool _isReconnecting = false;
 
-  // 源切换行 + 分类/筛选行：滚动时保持显示（吸顶，不再折叠）
+  /// 筛选面板：默认隐藏，点分类时弹出
+  bool _showFilters = false;
 
   @override
   void initState() {
@@ -51,36 +52,10 @@ class _HomePageState extends State<HomePage> {
           SafeArea(
             child: Column(
               children: [
-                // 顶部源切换行 + 分类/筛选行：下滑保留（吸顶常驻）
+                // 顶部：源切换 + 搜索
                 _buildHeaderBar(),
-                // 分类 / 筛选：两张独立卡片（分类胶囊一张，筛选行一张）
-                Obx(() {
-                  final hasCat = _controller.sorts.isNotEmpty;
-                  final hasFilter = _controller.currentFilters.isNotEmpty;
-                  if (!hasCat && !hasFilter) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppTheme.spacingLG,
-                      AppTheme.spacingXS,
-                      AppTheme.spacingLG,
-                      AppTheme.spacingSM,
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (hasCat) ...[
-                          _buildCategoryTabBar(),
-                          if (hasFilter)
-                            const SizedBox(height: AppTheme.spacingSM),
-                        ],
-                        if (hasFilter) _buildFilterBar(),
-                      ],
-                    ),
-                  );
-                }),
-                Expanded(
-                  child: _buildContentArea(),
-                ),
+                // 主内容：大图幻灯片 → 分类 →（点分类弹出）筛选 → 片单/网格
+                Expanded(child: _buildContentArea()),
               ],
             ),
           ),
@@ -220,7 +195,15 @@ class _HomePageState extends State<HomePage> {
                 padding:
                     const EdgeInsets.only(right: AppTheme.spacingSM),
                 child: GestureDetector(
-                  onTap: () => _controller.selectSort(sort),
+                  onTap: () {
+                    final wasSelected =
+                        _controller.selectedSort.value?.id == sort.id;
+                    _controller.selectSort(sort);
+                    // 点分类弹出筛选；再点同一分类收起
+                    setState(() {
+                      _showFilters = wasSelected ? !_showFilters : true;
+                    });
+                  },
                   child: Container(
                     alignment: Alignment.center,
                     height: 32,
@@ -403,15 +386,49 @@ class _HomePageState extends State<HomePage> {
             return CustomScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
-                // 顶部横幅轮播
+                // 1. 大图幻灯片（紧接搜索栏，高度更大）
                 if (bannerItems.isNotEmpty)
                   SliverToBoxAdapter(
-                    child: _RecommendBanner(videos: bannerItems),
+                    child: Padding(
+                      padding: const EdgeInsets.only(
+                          top: AppTheme.spacingXS, bottom: 8),
+                      child: _RecommendBanner(videos: bannerItems),
+                    ),
                   ),
-                // 横滑片单 1
+                // 2. 分类胶囊（幻灯片下方）
+                if (_controller.sorts.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppTheme.spacingLG,
+                        AppTheme.spacingXS,
+                        AppTheme.spacingLG,
+                        AppTheme.spacingXS,
+                      ),
+                      child: _buildCategoryTabBar(),
+                    ),
+                  ),
+                // 3. 筛选：点分类时弹出，默认隐藏
+                if (_showFilters && _controller.currentFilters.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOut,
+                      alignment: Alignment.topCenter,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          AppTheme.spacingLG,
+                          0,
+                          AppTheme.spacingLG,
+                          AppTheme.spacingSM,
+                        ),
+                        child: _buildFilterBar(),
+                      ),
+                    ),
+                  ),
+                // 4. 横滑片单
                 if (shelf1.isNotEmpty)
                   _ShelfRow(title: '推荐热播', videos: shelf1),
-                // 横滑片单 2
                 if (shelf2.isNotEmpty)
                   _ShelfRow(title: '更多精彩', videos: shelf2),
                 // 分类网格
@@ -549,7 +566,7 @@ class _RecommendBannerState extends State<_RecommendBanner> {
     return Column(
       children: [
         SizedBox(
-          height: 160,
+          height: 220,
           child: PageView.builder(
             controller: _pageCtrl,
             itemCount: widget.videos.length,
@@ -559,9 +576,9 @@ class _RecommendBannerState extends State<_RecommendBanner> {
               return GestureDetector(
                 onTap: () => Get.toNamed('/detail', arguments: v),
                 child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(14),
                     color: AppTheme.backgroundSecondary,
                   ),
                   clipBehavior: Clip.antiAlias,
@@ -574,14 +591,14 @@ class _RecommendBannerState extends State<_RecommendBanner> {
                         right: 0,
                         bottom: 0,
                         child: Container(
-                          padding: const EdgeInsets.all(10),
+                          padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
                                 Colors.transparent,
-                                Colors.black.withValues(alpha: 0.75),
+                                Colors.black.withValues(alpha: 0.78),
                               ],
                             ),
                           ),
@@ -591,7 +608,7 @@ class _RecommendBannerState extends State<_RecommendBanner> {
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 14,
+                              fontSize: 16,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
