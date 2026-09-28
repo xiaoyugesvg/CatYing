@@ -51,17 +51,29 @@ class _HomePageState extends State<HomePage> {
               children: [
                 // 顶部源切换行 + 分类/筛选行：下滑保留（吸顶常驻）
                 _buildHeaderBar(),
-                // 分类/筛选：吸顶显示
+                // 分类 / 筛选：两张独立卡片（分类胶囊一张，筛选行一张）
                 Obx(() {
                   final hasCat = _controller.sorts.isNotEmpty;
                   final hasFilter = _controller.currentFilters.isNotEmpty;
                   if (!hasCat && !hasFilter) return const SizedBox.shrink();
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (hasCat) _buildCategoryTabBar(),
-                      if (hasFilter) _buildFilterBar(),
-                    ],
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppTheme.spacingLG,
+                      AppTheme.spacingXS,
+                      AppTheme.spacingLG,
+                      AppTheme.spacingSM,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (hasCat) ...[
+                          _buildCategoryTabBar(),
+                          if (hasFilter)
+                            const SizedBox(height: AppTheme.spacingSM),
+                        ],
+                        if (hasFilter) _buildFilterBar(),
+                      ],
+                    ),
                   );
                 }),
                 Expanded(
@@ -176,64 +188,90 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildCategoryTabBar() {
-    return SizedBox(
-      height: 44,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingLG),
-        itemCount: _controller.sorts.length,
-        itemBuilder: (context, index) {
-          final sort = _controller.sorts[index];
-          return Obx(() {
-            final isSelected = _controller.selectedSort.value?.id == sort.id;
-            return Padding(
-              padding: const EdgeInsets.only(right: AppTheme.spacingSM),
-              child: GestureDetector(
-                onTap: () => _controller.selectSort(sort),
-                child: Container(
-                  // alignment: center —— 修复分类胶囊"框和名字不居中"：
-                  // 原实现 Container 未设置 alignment，横向 ListView 交叉轴
-                  // 会拉伸 item 高度，文字默认顶对齐，视觉上胶囊框与名字偏上。
-                  alignment: Alignment.center,
-                  height: 32,
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? AppTheme.accentColor.withValues(alpha: 0.14)
-                        : AppTheme.backgroundTertiary,
-                    borderRadius: BorderRadius.circular(20),
-                    // 选中态加一圈细描边，让"框"更明确，整体更精致
-                    border: Border.all(
+    // 独立卡片：分类胶囊横向滚动
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundCard,
+        borderRadius: BorderRadius.circular(AppTheme.cardRadius),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.06),
+          width: 0.5,
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(
+        vertical: AppTheme.spacingSM,
+        horizontal: AppTheme.spacingXS,
+      ),
+      child: SizedBox(
+        height: 40,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          padding:
+              const EdgeInsets.symmetric(horizontal: AppTheme.spacingXS),
+          itemCount: _controller.sorts.length,
+          itemBuilder: (context, index) {
+            final sort = _controller.sorts[index];
+            return Obx(() {
+              final isSelected =
+                  _controller.selectedSort.value?.id == sort.id;
+              return Padding(
+                padding:
+                    const EdgeInsets.only(right: AppTheme.spacingSM),
+                child: GestureDetector(
+                  onTap: () => _controller.selectSort(sort),
+                  child: Container(
+                    alignment: Alignment.center,
+                    height: 32,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
                       color: isSelected
-                          ? AppTheme.accentColor.withValues(alpha: 0.45)
-                          : Colors.white.withValues(alpha: 0.06),
-                      width: isSelected ? 1 : 0.5,
+                          ? AppTheme.accentColor.withValues(alpha: 0.14)
+                          : AppTheme.backgroundTertiary,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: isSelected
+                            ? AppTheme.accentColor.withValues(alpha: 0.45)
+                            : Colors.white.withValues(alpha: 0.06),
+                        width: isSelected ? 1 : 0.5,
+                      ),
                     ),
-                  ),
-                  child: Text(
-                    sort.name,
-                    style: TextStyle(
-                      color: isSelected
-                          ? AppTheme.accentColor
-                          : AppTheme.textSecondary,
-                      fontSize: AppTheme.fontSubhead,
-                      fontWeight:
-                          isSelected ? FontWeight.w600 : FontWeight.normal,
+                    child: Text(
+                      sort.name,
+                      style: TextStyle(
+                        color: isSelected
+                            ? AppTheme.accentColor
+                            : AppTheme.textSecondary,
+                        fontSize: AppTheme.fontSubhead,
+                        fontWeight: isSelected
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            );
-          });
-        },
+              );
+            });
+          },
+        ),
       ),
     );
   }
 
   Widget _buildFilterBar() {
+    // 独立卡片：分类 / 地区 / 排序 / 年份 筛选行
     return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundCard,
+        borderRadius: BorderRadius.circular(AppTheme.cardRadius),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.06),
+          width: 0.5,
+        ),
+      ),
       padding: const EdgeInsets.symmetric(
-          horizontal: AppTheme.spacingLG, vertical: AppTheme.spacingXS),
+        horizontal: AppTheme.spacingMD,
+        vertical: AppTheme.spacingSM,
+      ),
       child: Column(
         children: _controller.currentFilters.map((filter) {
           return Padding(
