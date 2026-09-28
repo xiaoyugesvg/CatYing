@@ -34,11 +34,28 @@ class _LivePageState extends State<LivePage> {
   int _activeGroupIndex = 0;
 
   @override
+  void initState() {
+    super.initState();
+    // 进页后自动开播当前频道，否则画面区一直停在占位图标，
+    // 听剧 / 小窗也会因为“根本没有在播的流”而无效
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _autoplayCurrent();
+    });
+  }
+
+  @override
   void dispose() {
     _player?.dispose();
     _player = null;
     _videoController = null;
     super.dispose();
+  }
+
+  /// 播放当前选中频道；无地址则跳过
+  void _autoplayCurrent() {
+    final url = _controller.currentChannel?.playUrl ?? '';
+    if (url.isEmpty) return;
+    _playChannel(url);
   }
 
   void _playChannel(String url) {
@@ -49,6 +66,10 @@ class _LivePageState extends State<LivePage> {
     );
     _videoController ??= VideoController(_player!);
     _player!.open(Media(url));
+    // 预热原生 PiP，否则点小窗时 AVPlayer 冷启动易失败/黑屏
+    if (Platform.isIOS) {
+      VideoPlayerPip.instance.prepareIos(url: url);
+    }
     setState(() {});
   }
 
@@ -70,6 +91,8 @@ class _LivePageState extends State<LivePage> {
         return;
       }
       final pos = _player?.state.position ?? Duration.zero;
+      // 先预热原生 AVPlayer，再启动 PiP，降低“点了没小窗”的概率
+      await VideoPlayerPip.instance.prepareIos(url: url);
       if (_player?.state.playing == true) {
         _player?.pause();
       }
@@ -326,7 +349,10 @@ class _LivePageState extends State<LivePage> {
     );
     if (url != null && url.isNotEmpty) {
       await c.reloadFromUrl(url);
-      if (mounted) c.selectGroup(0);
+      if (mounted) {
+        c.selectGroup(0);
+        _autoplayCurrent();
+      }
     }
   }
 
@@ -350,6 +376,10 @@ class _LivePageState extends State<LivePage> {
   }
 
   void _toggleAudioMode() {
+    // 若尚未开播，先起播再进听剧，否则只有壳没有声音
+    if (!_audioMode && (_player == null || !_player!.state.playing)) {
+      _autoplayCurrent();
+    }
     setState(() => _audioMode = !_audioMode);
     // 进入听剧时保持播放（后台可续播由 UIBackgroundModes=audio 保证）
   }
@@ -365,18 +395,21 @@ class _LivePageState extends State<LivePage> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (_audioMode)
-            _buildAudioModeOverlay(c, current)
-          else if (_videoController != null && current != null)
-            Video(
-              controller: _videoController!,
-              controls: AdaptiveVideoControls,
+          // 视频层常驻（听剧时透明隐藏，不从树上摘掉，保证音轨不断、退出听剧能恢复画面）
+          if (_videoController != null && current != null)
+            Opacity(
+              opacity: _audioMode ? 0.0 : 1.0,
+              child: Video(
+                controller: _videoController!,
+                controls: AdaptiveVideoControls,
+              ),
             )
           else
             Center(
               child: Icon(Icons.live_tv,
                   color: AppTheme.textTertiary, size: 56),
             ),
+          if (_audioMode) _buildAudioModeOverlay(c, current),
           // 普通模式左上：LIVE 角标
           if (!_fullscreen)
             Positioned(
@@ -542,7 +575,9 @@ class _LivePageState extends State<LivePage> {
     // 刷新当前选中的源
     final index = c.selectedSourceIndex;
     if (index >= 0 && index < c.sources.length) {
-      c.selectSource(index);
+      c.selectSource(index).then((_) {
+        if (mounted) _autoplayCurrent();
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('正在刷新直播源...'),
@@ -635,6 +670,7 @@ class _LivePageState extends State<LivePage> {
                         onTap: () async {
                           Navigator.pop(ctx);
                           await c.selectSource(i);
+                          if (mounted) _autoplayCurrent();
                         },
                       );
                     },
@@ -705,6 +741,7 @@ class _LivePageState extends State<LivePage> {
                         Navigator.pop(ctx);
                         c.selectGroup(i);
                         setState(() => _activeGroupIndex = i);
+                        _autoplayCurrent();
                       },
                     );
                   },
