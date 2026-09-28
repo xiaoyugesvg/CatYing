@@ -88,19 +88,25 @@ class _LivePageState extends State<LivePage> {
       configuration: const PlayerConfiguration(title: '猫影直播'),
     );
     _videoController ??= VideoController(_player!);
-    // 直播流常见于 HLS/FLV/TS/RTMP/RTSP，统一带上 UA/Referer，
-    // 提升防盗链源与部分 CDN 的可播性
+    // HLS/FLV/TS/MP4/RTMP/RTSP：带全量请求头，提升 mp4 直链与 CDN 可播性
+    String origin = '';
     String referer = '';
     try {
       final u = Uri.parse(url);
       if (u.hasScheme && u.host.isNotEmpty) {
-        referer = '${u.scheme}://${u.host}${u.hasPort ? ':${u.port}' : ''}/';
+        final base = '${u.scheme}://${u.host}${u.hasPort ? ':${u.port}' : ''}';
+        origin = base;
+        referer = '$base/';
       }
     } catch (_) {}
     final headers = <String, String>{
       'User-Agent':
           'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+      'Accept': '*/*',
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'Connection': 'keep-alive',
       if (referer.isNotEmpty) 'Referer': referer,
+      if (origin.isNotEmpty) 'Origin': origin,
     };
     _player!.open(Media(url, httpHeaders: headers));
     // 预热原生 PiP，否则点小窗时 AVPlayer 冷启动易失败/黑屏
@@ -195,44 +201,42 @@ class _LivePageState extends State<LivePage> {
           //   被反复 attach/detach 时 media_kit 渲染层会黑屏）
           return LayoutBuilder(
             builder: (ctx, cons) {
+              final pad = MediaQuery.of(ctx).padding;
+              final topBar = _fullscreen ? 0.0 : (pad.top > 0 ? pad.top : 0.0);
               final videoHeight = _fullscreen
-                  ? cons.maxHeight
+                  ? cons.maxHeight - topBar
                   : cons.maxWidth * 9 / 16;
-              return Stack(
+              return Column(
                 children: [
-                  // 视频层（同一位置，尺寸随全屏变化）
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
+                  // 状态栏高度黑边：状态栏压在黑边上，不与画面重叠
+                  if (topBar > 0)
+                    SizedBox(height: topBar, child: const ColoredBox(color: Colors.black)),
+                  // 视频层（全屏时吃掉剩余高度）
+                  SizedBox(
                     height: videoHeight,
+                    width: double.infinity,
                     child: _buildVideoLayer(c, current),
                   ),
                   // 非全屏：内容层（选择器 + 频道列表）
                   if (!_fullscreen)
-                    Positioned(
-                      top: videoHeight,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: SafeArea(
-                        child: Column(
-                          children: [
-                            Obx(() {
-                              final err = LiveService.instance.error.value;
-                              if (err == null) return const SizedBox.shrink();
-                              return Padding(
-                                padding:
-                                    const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                                child: Text(
-                                  err,
-                                  style: TextStyle(
-                                      color: Colors.redAccent
-                                          .withValues(alpha: 0.9),
-                                      fontSize: 12),
-                                ),
-                              );
-                            }),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          Obx(() {
+                            final err = LiveService.instance.error.value;
+                            if (err == null) return const SizedBox.shrink();
+                            return Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                              child: Text(
+                                err,
+                                style: TextStyle(
+                                    color: Colors.redAccent
+                                        .withValues(alpha: 0.9),
+                                    fontSize: 12),
+                              ),
+                            );
+                          }),
                             const SizedBox(height: 8),
                             // 双层选择器：直播源 + 分组
                             Padding(
@@ -357,7 +361,6 @@ class _LivePageState extends State<LivePage> {
                           ],
                         ),
                       ),
-                    ),
                 ],
               );
             },
@@ -439,8 +442,8 @@ class _LivePageState extends State<LivePage> {
   /// 修复直播全屏后"有声音没画面"（同一 VideoController 反复 attach 黑屏）
   Widget _buildVideoLayer(LiveController c, LiveChannel? current) {
     final pad = MediaQuery.of(context).padding;
-    // 竖屏/横屏都要避开状态栏/刘海，否则功能键与系统状态栏重叠
-    final topInset = pad.top > 0 ? pad.top : 12.0;
+    // 画面已在状态栏黑边之下，控件只需少量上边距，不必再吃 safe-area
+    final topInset = _fullscreen ? (pad.top > 0 ? pad.top : 12.0) : 8.0;
     return Container(
       color: Colors.black,
       child: Stack(

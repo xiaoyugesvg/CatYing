@@ -39,7 +39,8 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      // 不透明底，避免路由切换时与下层设置页叠影
+      backgroundColor: AppTheme.backgroundPrimary,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new,
@@ -48,7 +49,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
         ),
         title: const Text('直播设置',
             style: TextStyle(color: Colors.white, fontSize: 17)),
-        backgroundColor: Colors.transparent,
+        backgroundColor: AppTheme.backgroundPrimary,
         elevation: 0,
       ),
       body: ListView(
