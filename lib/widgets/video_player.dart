@@ -1039,7 +1039,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           ),
 
         // 顶部导航栏
-        if (_showControls && !_isLocked) _buildHeaderBar(),
+        // 顶栏常显：返回 + 功能键同一行（锁定时只留锁定钮）
+        if (!_isLocked) _buildHeaderBar(),
 
         // 锁定按钮
         if (_showControls || _isLocked) _buildLockButton(),
@@ -1360,17 +1361,23 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       child: _gradientTopContainer(
         child: Row(
           children: [
-            if (_displayTitle.isNotEmpty)
-              Expanded(
-                child: Text(
-                  _displayTitle,
-                  style: const TextStyle(color: Colors.white, fontSize: 16),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+            // 返回与右侧功能键同一行
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.onBack ?? () => Navigator.of(context).maybePop(),
+              child: const SizedBox(
+                width: 40,
+                height: 40,
+                child: Center(
+                  child: Icon(
+                    Icons.arrow_back_ios_new,
+                    color: Colors.white,
+                    size: 20,
+                  ),
                 ),
-              )
-            else
-              const Spacer(),
+              ),
+            ),
+            const Spacer(),
 
             // 分辨率
             if (_resolutionText.isNotEmpty)

@@ -165,7 +165,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildCategoryTabBar() {
-    // 独立卡片：分类胶囊横向滚动
+    // 独立卡片：推荐 + 分类胶囊横向滚动
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.backgroundCard,
@@ -185,9 +185,26 @@ class _HomePageState extends State<HomePage> {
           scrollDirection: Axis.horizontal,
           padding:
               const EdgeInsets.symmetric(horizontal: AppTheme.spacingXS),
-          itemCount: _controller.sorts.length,
+          itemCount: _controller.sorts.length + 1,
           itemBuilder: (context, index) {
-            final sort = _controller.sorts[index];
+            // 0 = 推荐；1..n = 分类
+            if (index == 0) {
+              final isHome = _controller.selectedSort.value == null;
+              return Padding(
+                padding: const EdgeInsets.only(right: AppTheme.spacingSM),
+                child: GestureDetector(
+                  onTap: () {
+                    _controller.backToRecommend();
+                    setState(() => _showFilters = false);
+                  },
+                  child: _CategoryChip(
+                    label: '推荐',
+                    selected: isHome,
+                  ),
+                ),
+              );
+            }
+            final sort = _controller.sorts[index - 1];
             return Obx(() {
               final isSelected =
                   _controller.selectedSort.value?.id == sort.id;
@@ -198,40 +215,21 @@ class _HomePageState extends State<HomePage> {
                   onTap: () {
                     final wasSelected =
                         _controller.selectedSort.value?.id == sort.id;
+                    if (wasSelected) {
+                      // 再点同一分类：切换筛选显隐
+                      setState(() {
+                        _showFilters = !_showFilters;
+                      });
+                      return;
+                    }
                     _controller.selectSort(sort);
-                    // 点分类弹出筛选；再点同一分类收起
                     setState(() {
-                      _showFilters = wasSelected ? !_showFilters : true;
+                      _showFilters = true;
                     });
                   },
-                  child: Container(
-                    alignment: Alignment.center,
-                    height: 32,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? AppTheme.accentColor.withValues(alpha: 0.14)
-                          : AppTheme.backgroundTertiary,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: isSelected
-                            ? AppTheme.accentColor.withValues(alpha: 0.45)
-                            : Colors.white.withValues(alpha: 0.06),
-                        width: isSelected ? 1 : 0.5,
-                      ),
-                    ),
-                    child: Text(
-                      sort.name,
-                      style: TextStyle(
-                        color: isSelected
-                            ? AppTheme.accentColor
-                            : AppTheme.textSecondary,
-                        fontSize: AppTheme.fontSubhead,
-                        fontWeight: isSelected
-                            ? FontWeight.w600
-                            : FontWeight.normal,
-                      ),
-                    ),
+                  child: _CategoryChip(
+                    label: sort.name,
+                    selected: isSelected,
                   ),
                 ),
               );
@@ -409,7 +407,7 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                 // 3. 筛选：点分类时弹出，默认隐藏
-                if (_showFilters && _controller.currentFilters.isNotEmpty)
+                if (_showFilters &&\n                    _controller.selectedSort.value != null &&\n                    _controller.currentFilters.isNotEmpty)
                   SliverToBoxAdapter(
                     child: AnimatedSize(
                       duration: const Duration(milliseconds: 220),
@@ -693,6 +691,42 @@ class _ShelfRow extends StatelessWidget {
   }
 }
 
+
+/// 分类胶囊
+class _CategoryChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  const _CategoryChip({required this.label, required this.selected});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      alignment: Alignment.center,
+      height: 32,
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: selected
+            ? AppTheme.accentColor.withValues(alpha: 0.14)
+            : AppTheme.backgroundTertiary,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: selected
+              ? AppTheme.accentColor.withValues(alpha: 0.45)
+              : Colors.white.withValues(alpha: 0.06),
+          width: selected ? 1 : 0.5,
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: selected ? AppTheme.accentColor : AppTheme.textSecondary,
+          fontSize: AppTheme.fontSubhead,
+          fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+        ),
+      ),
+    );
+  }
+}
 /// 首页时钟 - 对应 Swift HomeClockView
 class _HomeClockView extends StatefulWidget {
   const _HomeClockView();

@@ -302,12 +302,9 @@ class _DetailPageState extends State<DetailPage> {
             appBar: immersive
                 ? null
                 : AppBar(
-                    leading: IconButton(
-                      icon: const Icon(Icons.chevron_left,
-                          color: Colors.white, size: 28),
-                      onPressed: () => Get.back(),
-                    ),
-                    // 返回行完全透明：盖在播放器上方，不挡播放器顶栏功能
+                    // 返回在播放器顶栏（与功能键同一行），这里不再放第二个返回
+                    automaticallyImplyLeading: false,
+                    leading: const SizedBox.shrink(),
                     backgroundColor: Colors.transparent,
                     elevation: 0,
                     surfaceTintColor: Colors.transparent,

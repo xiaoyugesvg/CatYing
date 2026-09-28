@@ -25,8 +25,11 @@ class HomeController extends GetxController with WidgetsBindingObserver {
     return sorts.firstWhereOrNull((s) => s.id == sortId)?.filters ?? [];
   }
 
-  /// 当前显示的视频列表：对应 Swift contentArea 中的 viewModel.categoryVideos
-  List<Video> get displayVideos => categoryVideos;
+  /// 当前显示的视频列表：
+  /// - 未选分类 = 首页推荐（homeVideos）
+  /// - 已选分类 = 该分类列表
+  List<Video> get displayVideos =>
+      selectedSort.value == null ? homeVideos : categoryVideos;
 
   /// Worker：监听 AppState.loadingPhase
   /// 用于后台/锁屏切回前台时，AppState.handleSceneActive 完成重连后
@@ -163,15 +166,22 @@ class HomeController extends GetxController with WidgetsBindingObserver {
         );
       }
 
-      // 对应 Swift HomeView.task: loadSorts 后自动选择第一个分类
-      if (selectedSort.value == null && sorts.isNotEmpty) {
-        selectSort(sorts.first);
-      }
+      // 首页 = 推荐，不自动进入第一个分类
+      // 用户点分类后再加载对应列表
     } catch (e) {
       errorMessage.value = _friendlyErrorMessage(e);
     }
 
     isLoading.value = false;
+  }
+
+  /// 回到首页推荐（清空分类选择）
+  void backToRecommend() {
+    selectedSort.value = null;
+    selectedFilters.clear();
+    categoryVideos.clear();
+    errorMessage.value = null;
+    update();
   }
 
   void selectSort(SortData sort) {
@@ -180,8 +190,26 @@ class HomeController extends GetxController with WidgetsBindingObserver {
     categoryVideos.clear();
     currentPage.value = 1;
     hasMore.value = true;
+    // 切换分类时重置筛选
     selectedFilters.clear();
 
+    _loadCategoryVideos(page: 1, sort: sort);
+    update();
+  }
+
+  /// 选中/清除筛选，并刷新当前分类
+  void selectFilter(String key, String value) {
+    if (value.isEmpty) {
+      selectedFilters.remove(key);
+    } else {
+      selectedFilters[key] = value;
+    }
+    selectedFilters.refresh();
+    final sort = selectedSort.value;
+    if (sort == null) return;
+    categoryVideos.clear();
+    currentPage.value = 1;
+    hasMore.value = true;
     _loadCategoryVideos(page: 1, sort: sort);
   }
 
@@ -269,43 +297,26 @@ class HomeController extends GetxController with WidgetsBindingObserver {
     _loadCategoryVideos(page: nextPage, sort: sort);
   }
 
-  void selectFilter(String key, String value) {
-    if (value.isEmpty) {
-      selectedFilters.remove(key);
-    } else {
-      selectedFilters[key] = value;
-    }
-
-    categoryVideos.clear();
-    currentPage.value = 1;
-    hasMore.value = true;
-
-    final sort = selectedSort.value;
-    if (sort != null) {
-      _loadCategoryVideos(page: 1, sort: sort);
-    }
-  }
-
   Future<void> refresh() async {
     currentPage.value = 1;
     hasMore.value = true;
     categoryVideos.clear();
     errorMessage.value = null;
-    // 对应 Swift: 不重置 selectedSort，保留之前选中的分类
+    // 保留当前分类；未选分类则停留在推荐
     await loadSorts();
 
-    // 对应 Swift: loadSorts 后，尝试找到之前选中的分类并重新加载
     final sort = selectedSort.value;
     if (sort != null) {
       final matchedSort = sorts.firstWhereOrNull((s) => s.id == sort.id);
       if (matchedSort != null) {
         selectedSort.value = matchedSort;
         await _loadCategoryVideos(page: 1, sort: matchedSort);
-      } else if (sorts.isNotEmpty) {
-        selectSort(sorts.first);
+      } else {
+        // 原分类没了 → 回推荐
+        selectedSort.value = null;
+        selectedFilters.clear();
+        update();
       }
-    } else if (sorts.isNotEmpty) {
-      selectSort(sorts.first);
     }
   }
 
