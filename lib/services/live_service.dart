@@ -11,6 +11,9 @@ import '../models/live_models.dart';
 class LiveService extends GetxService {
   static LiveService get instance => Get.find<LiveService>();
 
+  /// 由直播页注册；点播/其它页面打开时调用，避免「点播在播、直播还有声」
+  static void Function()? pauseLivePlayer;
+
   /// 屏蔽的分组名（持久化：直播页隐藏对应分类）
   final blockedGroups = <String>[].obs;
 
@@ -74,6 +77,14 @@ class LiveService extends GetxService {
   final groups = <LiveGroup>[].obs;
   /// 多直播源列表（参考图：综合直播[刚刚更新]/虎牙[未下载]/斗鱼[未下载]...）
   final sources = <LiveSource>[].obs;
+  /// 供 Obx 依赖的版本号：改名/换源后 +1，保证列表 UI 必刷
+  final sourcesTick = 0.obs;
+
+  void _notifySources(List<LiveSource> next) {
+    sources.assignAll(next);
+    sources.refresh();
+    sourcesTick.value = sourcesTick.value + 1;
+  }
   /// 当前选中的直播源索引
   final selectedSourceIndex = 0.obs;
   /// 公告列表（任意源可携带 announcements / notice 字段）
@@ -103,8 +114,9 @@ class LiveService extends GetxService {
           .whereType<Map>()
           .map((e) => Map<String, dynamic>.from(e))
           .toList();
-      sources.value = [];
+      _notifySources(const []);
       announcements.value = [];
+      final built = <LiveSource>[];
       for (var i = 0; i < _rawLives!.length; i++) {
         final map = _rawLives![i];
         final name = (map['name'] ?? '直播源${i + 1}').toString();
@@ -114,8 +126,9 @@ class LiveService extends GetxService {
               .map((e) => e.toString())
               .where((t) => t.trim().isNotEmpty));
         }
-        sources.add(LiveSource(name: name, loaded: i == 0));
+        built.add(LiveSource(name: name, loaded: i == 0));
       }
+      _notifySources(built);
       if (_rawLives!.isNotEmpty) {
         await _loadSourceLocked(0);
         selectedSourceIndex.value = 0;
@@ -136,11 +149,16 @@ class LiveService extends GetxService {
     error.value = null;
     try {
       await _loadSourceLocked(index);
+      // 名称以 _rawLives 为准，避免改名后仍显示旧 sources[i].name
       final next = <LiveSource>[];
-      for (var i = 0; i < sources.length; i++) {
-        next.add(LiveSource(name: sources[i].name, loaded: i == index));
+      for (var i = 0; i < _rawLives!.length; i++) {
+        final n = (_rawLives![i]['name']?.toString() ?? '').trim();
+        next.add(LiveSource(
+          name: n.isEmpty ? '直播源${i + 1}' : n,
+          loaded: i == index,
+        ));
       }
-      sources.value = next;
+      _notifySources(next);
       selectedSourceIndex.value = index;
     } finally {
       isLoading.value = false;
@@ -189,7 +207,7 @@ class LiveService extends GetxService {
       channels.value = list;
       _rebuildGroups();
       _rawLives = null;
-      sources.value = [LiveSource(name: displayName, loaded: true)];
+      _notifySources([LiveSource(name: displayName, loaded: true)]);
       selectedSourceIndex.value = 0;
       if (list.isEmpty) {
         error.value = '未解析到频道';
@@ -255,7 +273,10 @@ class LiveService extends GetxService {
       } else {
         // 多源模式：直接追加
         _rawLives!.add(newItem);
-        sources.add(LiveSource(name: newItem['name'] as String, loaded: false));
+        _notifySources([
+          ...sources,
+          LiveSource(name: newItem['name'] as String, loaded: false),
+        ]);
         await _persistLives();
         // 加载新增的源
         final newIndex = _rawLives!.length - 1;
@@ -315,29 +336,28 @@ class LiveService extends GetxService {
           _rawLives![index]['url'] = trimmedUrl;
         }
         await _persistLives();
-        // 名称变了刷新列表项；URL 变了则重载该源
+        // 先按 _rawLives 刷名称，再（可选）重载 URL —— 即使重载失败名称也要生效
+        final list = <LiveSource>[];
+        for (var i = 0; i < _rawLives!.length; i++) {
+          final n = (_rawLives![i]['name']?.toString() ?? '').trim();
+          list.add(LiveSource(
+            name: n.isEmpty ? '直播源${i + 1}' : n,
+            loaded: sources.length > i ? sources[i].loaded : false,
+          ));
+        }
+        _notifySources(list);
         if (trimmedUrl != null && trimmedUrl.isNotEmpty) {
           await loadSource(index);
-        } else {
-          final list = <LiveSource>[];
-          for (var i = 0; i < _rawLives!.length; i++) {
-            final n = (_rawLives![i]['name']?.toString() ?? '').trim();
-            list.add(LiveSource(
-              name: n.isEmpty ? '直播源${i + 1}' : n,
-              loaded: sources[i].loaded,
-            ));
-          }
-          sources.value = list;
         }
       } else {
         // 单源模式：名称与 URL 都可改，名称持久化到 live_name
         if (trimmedName != null && trimmedName.isNotEmpty) {
           await _persistName(trimmedName);
         }
+        // 立刻把名称刷进列表，不依赖 loadFromUrl 是否成功
+        _notifySources([LiveSource(name: displayName, loaded: true)]);
         if (trimmedUrl != null && trimmedUrl.isNotEmpty) {
           await loadFromUrl(trimmedUrl);
-        } else {
-          sources.value = [LiveSource(name: displayName, loaded: true)];
         }
       }
     } catch (e) {
@@ -506,7 +526,7 @@ class LiveService extends GetxService {
     _persistedName = null;
     channels.value = [];
     groups.value = [];
-    sources.value = [];
+    _notifySources(const []);
     selectedSourceIndex.value = 0;
     selectedGroup.value = 0;
     announcements.value = [];

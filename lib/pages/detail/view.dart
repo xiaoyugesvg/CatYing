@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import '../../services/live_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
 import 'package:media_kit/media_kit.dart';
@@ -86,6 +87,8 @@ class _DetailPageState extends State<DetailPage> {
   @override
   void initState() {
     super.initState();
+    // 打开点播时停掉直播，避免双路声音
+    LiveService.pauseLivePlayer?.call();
     _loadPrefs();
     _loadDetailIfNeeded();
     // 监听 PiP 状态变化，确保退出 PiP 时退出全屏（互斥）

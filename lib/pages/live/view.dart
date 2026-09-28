@@ -35,6 +35,7 @@ class _LivePageState extends State<LivePage> {
   int _activeGroupIndex = 0;
   String? _playError;
   StreamSubscription<dynamic>? _errSub;
+  Worker? _tabWorker;
 
   @override
   void initState() {
@@ -44,10 +45,27 @@ class _LivePageState extends State<LivePage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _autoplayCurrent();
     });
+    // IndexedStack 会保留直播页：离开直播 tab 时必须暂停，
+    // 否则点播在播、直播还有声音
+    _tabWorker = ever(MainTabController.instance.selectedTab, (tab) {
+      if (tab != 4) {
+        try {
+          _player?.pause();
+        } catch (_) {}
+      }
+    });
+    // 点播详情打开时也会强制暂停直播
+    LiveService.pauseLivePlayer = () {
+      try {
+        _player?.pause();
+      } catch (_) {}
+    };
   }
 
   @override
   void dispose() {
+    LiveService.pauseLivePlayer = null;
+    _tabWorker?.dispose();
     _errSub?.cancel();
     _player?.dispose();
     _player = null;

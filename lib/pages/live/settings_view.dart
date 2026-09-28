@@ -66,7 +66,9 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               borderRadius: BorderRadius.circular(14),
             ),
             child: Obx(() {
-              final srcs = LiveService.instance.sources;
+              // 依赖 sourcesTick，改名/增删后强制重建
+              final _ = LiveService.instance.sourcesTick.value;
+              final srcs = LiveService.instance.sources.toList();
               final items = srcs.isEmpty
                   ? <Widget>[
                       const _EmptyRow(),
