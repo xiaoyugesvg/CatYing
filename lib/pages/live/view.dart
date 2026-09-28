@@ -70,10 +70,24 @@ class _LivePageState extends State<LivePage> {
       configuration: const PlayerConfiguration(title: '猫影直播'),
     );
     _videoController ??= VideoController(_player!);
-    _player!.open(Media(url));
+    // 直播流常见于 HLS/FLV/TS/RTMP/RTSP，统一带上 UA/Referer，
+    // 提升防盗链源与部分 CDN 的可播性
+    String referer = '';
+    try {
+      final u = Uri.parse(url);
+      if (u.hasScheme && u.host.isNotEmpty) {
+        referer = '${u.scheme}://${u.host}${u.hasPort ? ':${u.port}' : ''}/';
+      }
+    } catch (_) {}
+    final headers = <String, String>{
+      'User-Agent':
+          'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+      if (referer.isNotEmpty) 'Referer': referer,
+    };
+    _player!.open(Media(url, httpHeaders: headers));
     // 预热原生 PiP，否则点小窗时 AVPlayer 冷启动易失败/黑屏
     if (Platform.isIOS) {
-      VideoPlayerPip.instance.prepareIos(url: url);
+      VideoPlayerPip.instance.prepareIos(url: url, headers: headers);
     }
     // 订阅播放错误，避免一直转圈无提示
     _errSub?.cancel();
@@ -105,13 +119,18 @@ class _LivePageState extends State<LivePage> {
       }
       final pos = _player?.state.position ?? Duration.zero;
       // 先预热原生 AVPlayer，再启动 PiP，降低“点了没小窗”的概率
-      await VideoPlayerPip.instance.prepareIos(url: url);
+      final pipHeaders = <String, String>{
+        'User-Agent':
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+      };
+      await VideoPlayerPip.instance
+          .prepareIos(url: url, headers: pipHeaders);
       if (_player?.state.playing == true) {
         _player?.pause();
       }
       final ok = await VideoPlayerPip.instance.enterIos(
         url: url,
-        headers: null,
+        headers: pipHeaders,
         position: pos,
         onStarted: () {
           try {

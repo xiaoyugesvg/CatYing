@@ -37,6 +37,7 @@ class LiveService extends GetxService {
         }
       }
       // 没有多源配置，尝试恢复单源 URL（自动加载，避免直播页空白）
+      _persistedName = prefs.getString('live_name');
       final url = prefs.getString('live_url') ?? '';
       if (url.isNotEmpty) {
         _persistedUrl = url;
@@ -87,6 +88,11 @@ class LiveService extends GetxService {
   /// 最近一次成功加载的 m3u/txt URL（持久化到本地，重启自动恢复）
   String? _persistedUrl;
   String? get currentUrl => _persistedUrl;
+
+  /// 单源模式的自定义名称（持久化 live_name，默认「自定义直播源」）
+  String? _persistedName;
+  static const String _defaultSingleName = '自定义直播源';
+  String get displayName => _persistedName ?? _defaultSingleName;
 
   /// 从 tvbox JSON 的 lives 数组加载（多源：默认只加载第一个源，其余标记"未下载"）
   Future<void> loadFromLivesJson(List<dynamic> lives) async {
@@ -183,7 +189,7 @@ class LiveService extends GetxService {
       channels.value = list;
       _rebuildGroups();
       _rawLives = null;
-      sources.value = [LiveSource(name: '自定义直播源', loaded: true)];
+      sources.value = [LiveSource(name: displayName, loaded: true)];
       selectedSourceIndex.value = 0;
       if (list.isEmpty) {
         error.value = '未解析到频道';
@@ -238,7 +244,7 @@ class LiveService extends GetxService {
         // 单源模式 → 先把当前的转成多源第一项，再追加新源
         if (_persistedUrl != null && _persistedUrl!.isNotEmpty) {
           _rawLives = [
-            {'name': '自定义直播源', 'url': _persistedUrl},
+            {'name': displayName, 'url': _persistedUrl},
             newItem,
           ];
         } else {
@@ -324,9 +330,14 @@ class LiveService extends GetxService {
           sources.value = list;
         }
       } else {
-        // 单源模式：只能改 URL（名称固定）
+        // 单源模式：名称与 URL 都可改，名称持久化到 live_name
+        if (trimmedName != null && trimmedName.isNotEmpty) {
+          await _persistName(trimmedName);
+        }
         if (trimmedUrl != null && trimmedUrl.isNotEmpty) {
           await loadFromUrl(trimmedUrl);
+        } else {
+          sources.value = [LiveSource(name: displayName, loaded: true)];
         }
       }
     } catch (e) {
@@ -412,14 +423,28 @@ class LiveService extends GetxService {
   }
 
   bool _looksLikeStream(String u) {
-    final s = u.toLowerCase();
-    return s.startsWith('http') ||
-        s.startsWith('rtmp') ||
-        s.startsWith('rtsp') ||
-        s.startsWith('p3p') ||
-        s.contains('.m3u8') ||
-        s.contains('.flv') ||
-        s.contains('.ts');
+    final s = u.toLowerCase().trim();
+    if (s.isEmpty) return false;
+    // 协议：http(s)/rtmp/rtsp/rtp/udp/p3p/mms/mmsh
+    if (s.startsWith('http://') ||
+        s.startsWith('https://') ||
+        s.startsWith('rtmp://') ||
+        s.startsWith('rtmps://') ||
+        s.startsWith('rtsp://') ||
+        s.startsWith('rtsps://') ||
+        s.startsWith('rtp://') ||
+        s.startsWith('udp://') ||
+        s.startsWith('p3p://') ||
+        s.startsWith('mms://') ||
+        s.startsWith('mmsh://')) {
+      return true;
+    }
+    // 常见流媒体封装/播放列表后缀
+    const exts = [
+      '.m3u8', '.m3u', '.flv', '.ts', '.mp4', '.mkv', '.mpd',
+      '.mp3', '.aac', '.m4a', '.ism', '.isml',
+    ];
+    return exts.any(s.contains);
   }
 
   String? _extinfName(String line) {
@@ -461,14 +486,24 @@ class LiveService extends GetxService {
     } catch (_) {}
   }
 
+  Future<void> _persistName(String name) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('live_name', name);
+      _persistedName = name;
+    } catch (_) {}
+  }
+
   /// 清空全部直播数据（删除直播源）
   Future<void> clearAll() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('live_url');
       await prefs.remove('live_lives');
+      await prefs.remove('live_name');
     } catch (_) {}
     _persistedUrl = null;
+    _persistedName = null;
     channels.value = [];
     groups.value = [];
     sources.value = [];
