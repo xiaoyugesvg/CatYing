@@ -78,14 +78,25 @@ class _SetupPageState extends State<SetupPage> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_configUrlKey, url);
 
-    // 监听加载阶段变化
+    // 监听加载阶段变化（下载/校验等阶段静默，不显示技术文案）
     Worker? phaseWorker;
     phaseWorker = ever(appState.loadingPhase, (LoadingPhase phase) {
-      if (mounted && phase.isLoading) {
-        setState(() {
-          _loadingPhaseText = phase.description;
-        });
-      }
+      if (!mounted) return;
+      final silent = switch (phase) {
+        LoadingPhase.downloadingSource ||
+        LoadingPhase.verifyingMD5 ||
+        LoadingPhase.loadingSource ||
+        LoadingPhase.startingNodeJS ||
+        LoadingPhase.waitingSpiderPort ||
+        LoadingPhase.fetchingSpiderConfig ||
+        LoadingPhase.initializingSpider ||
+        LoadingPhase.loadingConfig =>
+          true,
+        _ => false,
+      };
+      setState(() {
+        _loadingPhaseText = silent ? '' : phase.description;
+      });
     });
 
     try {
@@ -267,15 +278,16 @@ class _SetupPageState extends State<SetupPage> {
                                     color: Colors.white,
                                   ),
                                 ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  _loadingPhaseText.isNotEmpty
-                                      ? _loadingPhaseText
-                                      : '正在解析配置...',
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16),
-                                ),
+                                // 源下载等阶段静默：只留转圈，不显示文案
+                                if (_loadingPhaseText.isNotEmpty) ...[
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    _loadingPhaseText,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16),
+                                  ),
+                                ],
                               ],
                             )
                           : const Text(

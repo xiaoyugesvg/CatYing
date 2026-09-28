@@ -266,13 +266,14 @@ class _ContentViewState extends State<ContentView>
             }
             final indeterminate = phase.isLoading;
             final failed = phase.isFailed;
-            // 内部阶段（等 Spider 端口/配置等）不展示技术文案，只留 Logo + 转圈
+            // 内部阶段（等 Spider 端口/配置/下载源等）不展示技术文案，只留 Logo + 转圈
             final hideCaption = switch (phase) {
               LoadingPhase.waitingSpiderPort ||
               LoadingPhase.fetchingSpiderConfig ||
               LoadingPhase.initializingSpider ||
               LoadingPhase.loadingSource ||
               LoadingPhase.verifyingMD5 ||
+              LoadingPhase.downloadingSource ||
               LoadingPhase.startingNodeJS ||
               LoadingPhase.loadingConfig =>
                 true,

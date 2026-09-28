@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../common/theme.dart';
@@ -518,11 +520,12 @@ class _RecommendBanner extends StatefulWidget {
 class _RecommendBannerState extends State<_RecommendBanner> {
   final _pageCtrl = PageController(viewportFraction: 0.92);
   int _index = 0;
+  Timer? _autoTimer;
 
   @override
   void initState() {
     super.initState();
-    Future.periodic(const Duration(seconds: 5), (_) {
+    _autoTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!mounted || widget.videos.isEmpty || !_pageCtrl.hasClients) return;
       final next = (_index + 1) % widget.videos.length;
       _pageCtrl.animateToPage(
@@ -535,6 +538,7 @@ class _RecommendBannerState extends State<_RecommendBanner> {
 
   @override
   void dispose() {
+    _autoTimer?.cancel();
     _pageCtrl.dispose();
     super.dispose();
   }
