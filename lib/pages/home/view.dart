@@ -377,89 +377,102 @@ class _HomePageState extends State<HomePage> {
         onRefresh: () => _controller.refresh(),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            // 自适应网格 - 对应 Swift adaptive(minimum: 120, maximum: 160)
             final cardMinWidth = 120.0;
             final crossAxisCount =
                 (constraints.maxWidth / (cardMinWidth + AppTheme.cardSpacing))
                     .floor()
                     .clamp(2, 6);
             final cardWidth =
-                (constraints.maxWidth - AppTheme.cardSpacing * (crossAxisCount - 1)) /
+                (constraints.maxWidth -
+                        AppTheme.cardSpacing * (crossAxisCount - 1)) /
                     crossAxisCount;
 
-            return GridView.builder(
-              padding: const EdgeInsets.fromLTRB(
-                AppTheme.spacingXL,
-                AppTheme.spacingMD,
-                AppTheme.spacingXL,
-                80, // 底部间距对应 Swift .padding(.bottom, 80)
-              ),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: crossAxisCount,
-                childAspectRatio: (cardWidth) / (cardWidth / 0.65 + 50),
-                crossAxisSpacing: AppTheme.cardSpacing,
-                mainAxisSpacing: AppTheme.cardSpacing,
-              ),
-              itemCount: videos.length + (_controller.hasMore.value && _controller.selectedSort.value != null ? 1 : 0),
-              itemBuilder: (context, index) {
-                if (index >= videos.length) {
-                  // 对应 Swift: 使用 addPostFrameCallback 避免在 build 阶段触发 setState
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _controller.loadMore();
-                  });
-                  return const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(8.0),
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: AppTheme.accentColor),
-                      ),
+            final homeList = _controller.homeVideos;
+            final categoryList = _controller.displayVideos;
+            final bannerItems =
+                homeList.length > 6 ? homeList.sublist(0, 6) : homeList;
+            final shelf1 = homeList.length > 6
+                ? homeList.sublist(6, homeList.length > 18 ? 18 : homeList.length)
+                : <Video>[];
+            final shelf2 = homeList.length > 18
+                ? homeList.sublist(18, homeList.length > 32 ? 32 : homeList.length)
+                : <Video>[];
+
+            return CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                // 顶部横幅轮播
+                if (bannerItems.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: _RecommendBanner(videos: bannerItems),
+                  ),
+                // 横滑片单 1
+                if (shelf1.isNotEmpty)
+                  _ShelfRow(title: '推荐热播', videos: shelf1),
+                // 横滑片单 2
+                if (shelf2.isNotEmpty)
+                  _ShelfRow(title: '更多精彩', videos: shelf2),
+                // 分类网格
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppTheme.spacingXL,
+                    AppTheme.spacingMD,
+                    AppTheme.spacingXL,
+                    80,
+                  ),
+                  sliver: SliverGrid(
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: crossAxisCount,
+                      childAspectRatio:
+                          (cardWidth) / (cardWidth / 0.65 + 50),
+                      crossAxisSpacing: AppTheme.cardSpacing,
+                      mainAxisSpacing: AppTheme.cardSpacing,
                     ),
-                  );
-                }
-
-                final video = videos[index];
-                final source = ApiConfig.instance.homeSourceBean.value;
-
-                // 索引站点 - 对应 Swift isIndexSite: 跳转搜索
-                if (source != null && source.isIndexSite) {
-                  return VodCard(
-                    video: video,
-                    onTap: () {
-                      // 对应 Swift navigateToSearch(with: video.name)
-                      // 使用 pendingSearchKeyword 触发搜索 overlay，匹配 Swift 行为
-                      Get.find<AppState>().pendingSearchKeyword.value =
-                          video.name;
-                    },
-                  );
-                }
-
-                // 配置中心 - 对应 Swift isConfigCenter: 打开 URL
-                if (source != null && source.isConfigCenter) {
-                  return VodCard(
-                    video: video,
-                    onTap: () => _openConfigCenterUrl(video),
-                  );
-                }
-
-                // 普通源 - 对应 Swift NavigationLink
-                return VodCard(
-                  video: video,
-                  onTap: () {
-                    Get.toNamed('/detail', arguments: video);
-                  },
-                );
-              },
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        if (index >= categoryList.length) {
+                          if (_controller.hasMore.value &&
+                              _controller.selectedSort.value != null) {
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              _controller.loadMore();
+                            });
+                            return const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(8.0),
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppTheme.accentColor),
+                                ),
+                              ),
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        }
+                        final vid = categoryList[index];
+                        return VodCard(
+                          video: vid,
+                          onTap: () =>
+                              Get.toNamed('/detail', arguments: vid),
+                        );
+                      },
+                      childCount: categoryList.length +
+                          ((_controller.hasMore.value &&
+                                  _controller.selectedSort.value != null)
+                              ? 1
+                              : 0),
+                    ),
+                  ),
+                ),
+              ],
             );
           },
         ),
       );
-  });
+    });
   }
-
-  /// 配置中心 URL 解析 - 对应 Swift openConfigCenterUrl
   void _openConfigCenterUrl(Video video) {
     String? openUrl;
     if (video.pic.startsWith('http')) {
@@ -495,7 +508,173 @@ class _HomePageState extends State<HomePage> {
 
 /// 首页时钟 - 对应 Swift HomeClockView
 class _HomeClockView extends StatefulWidget {
-  const _HomeClockView();
+  
+/// 首页顶部推荐横幅（自动轮播）
+class _RecommendBanner extends StatefulWidget {
+  final List<Video> videos;
+  const _RecommendBanner({required this.videos});
+
+  @override
+  State<_RecommendBanner> createState() => _RecommendBannerState();
+}
+
+class _RecommendBannerState extends State<_RecommendBanner> {
+  final _pageCtrl = PageController(viewportFraction: 0.92);
+  int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted || widget.videos.isEmpty || !_pageCtrl.hasClients) return;
+      final next = (_index + 1) % widget.videos.length;
+      _pageCtrl.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.videos.isEmpty) return const SizedBox.shrink();
+    return Column(
+      children: [
+        SizedBox(
+          height: 160,
+          child: PageView.builder(
+            controller: _pageCtrl,
+            itemCount: widget.videos.length,
+            onPageChanged: (i) => setState(() => _index = i),
+            itemBuilder: (_, i) {
+              final v = widget.videos[i];
+              return GestureDetector(
+                onTap: () => Get.toNamed('/detail', arguments: v),
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    color: AppTheme.backgroundSecondary,
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      VodCard(video: v, onTap: null),
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.transparent,
+                                Colors.black.withValues(alpha: 0.75),
+                              ],
+                            ),
+                          ),
+                          child: Text(
+                            v.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(widget.videos.length, (i) {
+            final active = i == _index;
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              margin: const EdgeInsets.symmetric(horizontal: 3),
+              width: active ? 16 : 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: active ? AppTheme.accentColor : Colors.white24,
+                borderRadius: BorderRadius.circular(3),
+              ),
+            );
+          }),
+        ),
+      ],
+    );
+  }
+}
+
+/// 横滑片单（标题 + 横向海报列表）
+class _ShelfRow extends StatelessWidget {
+  final String title;
+  final List<Video> videos;
+  const _ShelfRow({required this.title, required this.videos});
+
+  @override
+  Widget build(BuildContext context) {
+    return SliverToBoxAdapter(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppTheme.spacingXL, AppTheme.spacingMD, AppTheme.spacingXL, 8),
+            child: Text(
+              title,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          SizedBox(
+            height: 190,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: AppTheme.spacingXL),
+              itemCount: videos.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (_, i) {
+                final v = videos[i];
+                return SizedBox(
+                  width: 110,
+                  child: VodCard(
+                    video: v,
+                    onTap: () => Get.toNamed('/detail', arguments: v),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+const _HomeClockView();
 
   @override
   State<_HomeClockView> createState() => _HomeClockViewState();

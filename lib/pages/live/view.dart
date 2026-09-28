@@ -237,6 +237,20 @@ class _LivePageState extends State<LivePage> {
                               ),
                             );
                           }),
+                          // 加载中细进度条（缓存已出列表时也能看到在刷新）
+                          Obx(() {
+                            if (!LiveService.instance.isLoading.value) {
+                              return const SizedBox(height: 2);
+                            }
+                            return const Padding(
+                              padding: EdgeInsets.fromLTRB(12, 4, 12, 0),
+                              child: LinearProgressIndicator(
+                                minHeight: 2,
+                                color: AppTheme.accentColor,
+                                backgroundColor: Colors.white12,
+                              ),
+                            );
+                          }),
                             const SizedBox(height: 8),
                             // 双层选择器：直播源 + 分组
                             Padding(

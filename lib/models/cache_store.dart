@@ -373,6 +373,52 @@ class CacheStore {
     return item?.value;
   }
 
+  /// 带 TTL 的缓存读取：过期返回 null
+  String? getCacheItemFresh(String key, {Duration ttl = const Duration(hours: 6)}) {
+    final items = _loadCacheItems();
+    final item = items.firstWhereOrNull((item) => item.key == key);
+    if (item == null) return null;
+    if (DateTime.now().difference(item.updateTime) > ttl) return null;
+    return item.value;
+  }
+
+  /// JSON 对象缓存（列表/配置通用）
+  Future<void> setJsonCache(String key, Object? json) async {
+    try {
+      await setCacheItem(key, jsonEncode(json));
+    } catch (_) {}
+  }
+
+  Map<String, dynamic>? getJsonCache(
+    String key, {
+    Duration ttl = const Duration(hours: 6),
+  }) {
+    try {
+      final raw = getCacheItemFresh(key, ttl: ttl);
+      if (raw == null || raw.isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  List<dynamic>? getJsonListCache(
+    String key, {
+    Duration ttl = const Duration(hours: 6),
+  }) {
+    try {
+      final raw = getCacheItemFresh(key, ttl: ttl);
+      if (raw == null || raw.isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      return decoded is List ? decoded : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> removeCacheItem(String key) async {
     final items = _loadCacheItems();
     items.removeWhere((item) => item.key == key);

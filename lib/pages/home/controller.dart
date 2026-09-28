@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
+import '../../models/cache_store.dart';
 import '../../models/movie.dart';
 import '../../models/movie_sort.dart';
 import '../../services/api_config.dart';
@@ -135,6 +136,18 @@ class HomeController extends GetxController with WidgetsBindingObserver {
     final source = ApiConfig.instance.homeSourceBean.value;
     if (source == null) return;
 
+    // 缓存优先：首页推荐立刻出片
+    final cacheKey = 'home_videos:${source.key}';
+    try {
+      final cached = CacheStore.instance.getJsonListCache(cacheKey, ttl: const Duration(hours: 12));
+      if (cached != null && cached.isNotEmpty) {
+        homeVideos.value = cached
+            .whereType<Map>()
+            .map((e) => Video.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
+      }
+    } catch (_) {}
+
     isLoading.value = true;
     errorMessage.value = null;
 
@@ -142,6 +155,13 @@ class HomeController extends GetxController with WidgetsBindingObserver {
       final result = await SourceService.instance.getSort(source);
       sorts.value = result.$1;
       homeVideos.value = result.$2;
+      if (result.$2.isNotEmpty) {
+        // 异步写缓存，不阻塞首页
+        CacheStore.instance.setJsonCache(
+          cacheKey,
+          result.$2.map((v) => v.toJson()).toList(),
+        );
+      }
 
       // 对应 Swift HomeView.task: loadSorts 后自动选择第一个分类
       if (selectedSort.value == null && sorts.isNotEmpty) {
@@ -172,6 +192,24 @@ class HomeController extends GetxController with WidgetsBindingObserver {
     final source = ApiConfig.instance.homeSourceBean.value;
     if (source == null || isLoading.value) return;
 
+    final catCacheKey = 'cat_videos:${source.key}:${sort.id}';
+
+    // 第一页先出缓存
+    if (page == 1 && categoryVideos.isEmpty) {
+      try {
+        final cached = CacheStore.instance.getJsonListCache(
+          catCacheKey,
+          ttl: const Duration(hours: 6),
+        );
+        if (cached != null && cached.isNotEmpty) {
+          categoryVideos.value = cached
+              .whereType<Map>()
+              .map((e) => Video.fromJson(Map<String, dynamic>.from(e)))
+              .toList();
+        }
+      } catch (_) {}
+    }
+
     isLoading.value = true;
 
     try {
@@ -191,6 +229,12 @@ class HomeController extends GetxController with WidgetsBindingObserver {
 
       if (page == 1) {
         categoryVideos.value = videos;
+        if (videos.isNotEmpty && filters == null) {
+          CacheStore.instance.setJsonCache(
+            catCacheKey,
+            videos.map((v) => v.toJson()).toList(),
+          );
+        }
       } else {
         categoryVideos.addAll(videos);
       }

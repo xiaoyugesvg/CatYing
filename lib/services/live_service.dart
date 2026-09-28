@@ -183,14 +183,29 @@ class LiveService extends GetxService {
         logo: ch['logo']?.toString(),
       ));
     }
+    // 先出缓存，列表立刻可见，不阻塞在网络
+    final cacheId = 'src_$index:${map['url'] ?? map['name'] ?? index}';
+    final cached = await _readChannelCache(cacheId);
+    if (cached != null && cached.isNotEmpty) {
+      channels.value = [...all, ...cached];
+      _rebuildGroups();
+    }
     final url = map['url']?.toString() ?? '';
     if (url.isNotEmpty) {
       try {
         final body = await _fetch(url, ua: map['ua']?.toString());
-        all.addAll(parseM3uOrTxt(body,
-            defaultGroup: map['name']?.toString() ?? '直播'));
+        final parsed = parseM3uOrTxt(body,
+            defaultGroup: map['name']?.toString() ?? '直播');
+        all.addAll(parsed);
+        if (parsed.isNotEmpty) {
+          await _saveChannelCache(cacheId, parsed);
+        }
       } catch (e) {
         print('[LiveService] 拉取直播列表失败 $url: $e');
+        // 网络失败时，若上面已有缓存则保持现状
+        if (cached == null && all.isEmpty) {
+          error.value = '直播源加载失败，请检查网络';
+        }
       }
     }
     channels.value = all;
@@ -202,8 +217,20 @@ class LiveService extends GetxService {
     isLoading.value = true;
     error.value = null;
     try {
+      // 缓存优先：立刻恢复上次频道，避免长时间空白
+      final cached = await _readChannelCache('url:$url');
+      if (cached != null && cached.isNotEmpty) {
+        channels.value = cached;
+        _rebuildGroups();
+        _rawLives = null;
+        _notifySources([LiveSource(name: displayName, loaded: true)]);
+        selectedSourceIndex.value = 0;
+      }
       final body = await _fetch(url);
       final list = parseM3uOrTxt(body);
+      if (list.isNotEmpty) {
+        await _saveChannelCache('url:$url', list);
+      }
       channels.value = list;
       _rebuildGroups();
       _rawLives = null;
@@ -386,8 +413,9 @@ class LiveService extends GetxService {
 
   Future<String> _fetch(String url, {String? ua}) async {
     final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 20),
+      // 收紧超时：慢源不要卡住整个直播页 20s
+      connectTimeout: const Duration(seconds: 8),
+      receiveTimeout: const Duration(seconds: 12),
       headers: {
         if (ua != null && ua.isNotEmpty) HttpHeaders.userAgentHeader: ua,
         if (ua == null || ua.isEmpty)
@@ -396,6 +424,61 @@ class LiveService extends GetxService {
     ));
     final res = await dio.get<String>(url);
     return res.data ?? '';
+  }
+
+  // ============================================================
+  // 频道列表本地缓存：先展示缓存，网络返回后再覆盖
+  // ============================================================
+
+  static const String _channelCacheKey = 'live_channel_cache_v1';
+
+  String _cacheKeyFor(String id) => '$_channelCacheKey|$id';
+
+  Future<void> _saveChannelCache(String id, List<LiveChannel> list) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final payload = jsonEncode({
+        'ts': DateTime.now().millisecondsSinceEpoch,
+        'channels': list
+            .map((c) => {
+                  'name': c.name,
+                  'urls': c.urls,
+                  'group': c.group,
+                  if (c.logo != null) 'logo': c.logo,
+                })
+            .toList(),
+      });
+      await prefs.setString(_cacheKeyFor(id), payload);
+    } catch (_) {}
+  }
+
+  Future<List<LiveChannel>?> _readChannelCache(String id) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_cacheKeyFor(id));
+      if (raw == null || raw.isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      final list = decoded['channels'];
+      if (list is! List) return null;
+      final result = <LiveChannel>[];
+      for (final item in list) {
+        if (item is! Map) continue;
+        final name = (item['name'] ?? '').toString();
+        final urls = (item['urls'] as List?)?.map((e) => e.toString()).toList() ??
+            const <String>[];
+        if (name.isEmpty || urls.isEmpty) continue;
+        result.add(LiveChannel(
+          name: name,
+          urls: urls,
+          group: (item['group'] ?? '未分组').toString(),
+          logo: item['logo']?.toString(),
+        ));
+      }
+      return result.isEmpty ? null : result;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 解析 m3u(#EXTINF) 或简单 txt（名称,url）
