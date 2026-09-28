@@ -506,9 +506,6 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// 首页时钟 - 对应 Swift HomeClockView
-class _HomeClockView extends StatefulWidget {
-  
 /// 首页顶部推荐横幅（自动轮播）
 class _RecommendBanner extends StatefulWidget {
   final List<Video> videos;
@@ -674,7 +671,10 @@ class _ShelfRow extends StatelessWidget {
     );
   }
 }
-const _HomeClockView();
+
+/// 首页时钟 - 对应 Swift HomeClockView
+class _HomeClockView extends StatefulWidget {
+  const _HomeClockView();
 
   @override
   State<_HomeClockView> createState() => _HomeClockViewState();
