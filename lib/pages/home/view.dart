@@ -407,7 +407,9 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                 // 3. 筛选：点分类时弹出，默认隐藏
-                if (_showFilters &&\n                    _controller.selectedSort.value != null &&\n                    _controller.currentFilters.isNotEmpty)
+                if (_showFilters &&
+                    _controller.selectedSort.value != null &&
+                    _controller.currentFilters.isNotEmpty)
                   SliverToBoxAdapter(
                     child: AnimatedSize(
                       duration: const Duration(milliseconds: 220),
