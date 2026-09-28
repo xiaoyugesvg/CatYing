@@ -309,8 +309,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         setState(() {
           _isPlaying = playing;
           _isBuffering = false;
+          // 暂停时常显控制条；开播后再按空闲隐藏
+          if (!playing) {
+            _showControls = true;
+          }
         });
         if (playing) {
+          _scheduleHideControls();
           widget.onPlaying?.call();
           _applyPendingResumeSeek();
           // iOS：前台预热原生 AVPlayer（静音预缓冲常驻），退后台/点 PiP 时
@@ -501,9 +506,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   @override
   void didUpdateWidget(VideoPlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.player != widget.player) {
-      // 不做热切换：避免与外部管理冲突
-    }
+    // Player 实例变化时 State 不支持热切换（_player 为 late final）。
+    // 调用方请用 ObjectKey(player) 驱动 remount；这里仅处理 URL/续播参数。
     if (oldWidget.url != widget.url) {
       if (_isLongPressSpeedLocked || _isLongPressingFast) {
         setState(() {
@@ -518,6 +522,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (_ownsPlayer) {
         _openMedia();
       } else {
+        // 外部 Player：换源由父级 open() 完成，这里只做续播兜底
         _persisted.resumeApplied = true;
         _scheduleResumeSeek();
       }
@@ -675,6 +680,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (!mounted) return;
       if (_isDragging || _showEpisodeSheet || _showSettingsSheet) {
         _scheduleHideControls();
+        return;
+      }
+      // 暂停/缓冲中保持控制条可见，避免只剩纹理灰屏、看起来像「播放器坏了」
+      if (!_isPlaying || _isBuffering) {
         return;
       }
       setState(() => _showControls = false);
@@ -977,14 +986,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 视频画面
+        // 视频画面 — 外层强制黑底，纹理未就绪时不会露出系统灰/页面背景
         Positioned.fill(
-          child: Video(
-            key: ValueKey('video_$_videoRebuildKey'),
-            controller: _controller,
-            controls: null,
-            fit: _videoFit.boxFit,
-            aspectRatio: _videoFit.aspectRatio,
+          child: ColoredBox(
+            color: Colors.black,
+            child: Video(
+              key: ValueKey('video_$_videoRebuildKey'),
+              controller: _controller,
+              controls: null,
+              fit: _videoFit.boxFit,
+              aspectRatio: _videoFit.aspectRatio,
+            ),
           ),
         ),
 

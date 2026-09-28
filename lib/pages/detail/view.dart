@@ -207,41 +207,62 @@ class _DetailPageState extends State<DetailPage> {
     return headers.entries.map((e) => '${e.key}=${e.value}').join('&');
   }
 
-  /// 确保 Player 指向 (url, headers)。
-  /// **禁止在 build 里直接 dispose/open**：副作用放到 post-frame，
-  /// 避免帧中途销毁/创建 native player。返回 true 表示 Player 已就绪。
+  /// 确保 Player 可用并指向 (url, headers)。
+  ///
+  /// **复用同一个 Player**（与直播页一致）：换集/换清晰度只 `open` 新媒体，
+  /// 不 dispose 重建 —— 否则 VideoPlayerWidget 同 key 复用 State 时仍绑着
+  /// 已销毁的旧 Player，画面灰屏/黑屏（截图里播放器空白的根因）。
+  /// 仅首次创建时走 post-frame，避免在 build 里构造 native Player。
   bool _ensurePlayer(
     String url,
     Map<String, String> headers, {
     double? startPosition,
   }) {
     final headersKey = _headersKey(headers);
-    if (_playerMatches(url, headersKey)) {
+    final start = (startPosition != null && startPosition > 0)
+        ? Duration(seconds: startPosition.toInt())
+        : null;
+
+    // 已有 Player 且 URL/headers 未变 → 直接就绪
+    if (_player != null && _playerMatches(url, headersKey)) {
       return true;
     }
+
+    // 已有 Player，只是换了源 → 在同一个 Player 上 open 新媒体
+    if (_player != null && _videoController != null) {
+      _lastPlayerUrl = url;
+      _lastPlayerHeadersKey = headersKey;
+      _player!.open(Media(url, httpHeaders: headers, start: start));
+      return true;
+    }
+
+    // 首次创建：副作用放到 post-frame
     if (_playerRecreateScheduled) {
       return false;
     }
     _playerRecreateScheduled = true;
-    final start = (startPosition != null && startPosition > 0)
-        ? Duration(seconds: startPosition.toInt())
-        : null;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _playerRecreateScheduled = false;
       if (!mounted) return;
-      _disposeAndOpenPlayer(url, headers, headersKey, start);
+      _createPlayerAndOpen(url, headers, headersKey, start);
       setState(() {});
     });
     return false;
   }
 
-  void _disposeAndOpenPlayer(
+  void _createPlayerAndOpen(
     String url,
     Map<String, String> headers,
     String headersKey,
     Duration? start,
   ) {
-    _player?.dispose();
+    if (_player != null) {
+      // 并发兜底：期间已被创建则只换源
+      _lastPlayerUrl = url;
+      _lastPlayerHeadersKey = headersKey;
+      _player!.open(Media(url, httpHeaders: headers, start: start));
+      return;
+    }
     // mpv 磁盘缓存：点播视频缓存到应用 Cache 目录, 下次播放同 URL 直接复用,
     // 解决"每次打开都要重新下载"。缓存目录与设置页"清除缓存"统计目录一致。
     _player = Player(configuration: const PlayerConfiguration(title: 'TVBox'));
@@ -544,8 +565,9 @@ class _DetailPageState extends State<DetailPage> {
       startPosition: _controller.resumeSeconds.value,
     );
     if (!playerReady || _player == null || _videoController == null) {
+      // 与正常播放器同高（4:3），避免加载态与出画后高度跳动
       return AspectRatio(
-        aspectRatio: 16 / 9,
+        aspectRatio: 4 / 3,
         child: Container(
           color: Colors.black,
           child: const Center(
@@ -558,7 +580,9 @@ class _DetailPageState extends State<DetailPage> {
     final info = _controller.vodInfo.value;
     final episode = info?.currentEpisode;
     final widget = VideoPlayerWidget(
-      key: const ValueKey('detail_player'),
+      // ObjectKey 跟随 Player 实例：万一重建 Player，State 会整体 remount，
+      // 不会残留绑在已 dispose Player 上的 controller/纹理（灰屏）
+      key: ObjectKey(_player),
       player: _player,
       controller: _videoController, // 跨全屏/普通模式共享同一个 controller
       initialVideoFit: VideoFitType.contain, // 4:3 容器 + 黑框适配: 画面按原始比例完整显示, 上下黑边
