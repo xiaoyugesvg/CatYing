@@ -1,4 +1,4 @@
-name: tvbox
+﻿name: tvbox
 description: 跨平台 TVBox 视频播放器（iOS 巨魔 / Android / Windows）。基于 Flutter + Node.js 远程源 + media_kit 视频播放。
 publish_to: 'none'
 version: 1.0.0+1

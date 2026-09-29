@@ -6,14 +6,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import '../services/app_log.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+import 'app_player.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart' show DragToMoveArea;
 import '../common/theme.dart';
 import 'video_player_pip.dart';
 import 'window_fullscreen.dart';
 import 'danmaku.dart';
+part 'video_player_helpers.dart';
 
 /// 视频画面比例 - 对应 Swift VideoFitType
 enum VideoFitType {
@@ -47,10 +47,10 @@ enum VideoFitType {
 /// 基于 media_kit + libmpv 实现，自定义控制覆盖层
 class VideoPlayerWidget extends StatefulWidget {
   /// 外部注入的 Player 实例
-  final Player? player;
+  final AppPlayer? player;
 
   /// 外部注入的 VideoController 实例（与 [player] 配套使用）。
-  final VideoController? controller;
+  final AppPlayer? controller; // 兼容旧参数，已由 [player] 承载
 
   final String url;
   final Map<String, String>? headers;
@@ -134,8 +134,8 @@ class VideoPlayerWidget extends StatefulWidget {
 
 class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     with WidgetsBindingObserver {
-  late final Player _player;
-  late final VideoController _controller;
+  late final AppPlayer _player;
+  late final AppPlayer _controller; // 与 _player 同一实例
   bool _ownsPlayer = false; // 是否自己创建并需要释放
 
   /// 跨 widget rebuild 持久化的状态缓存（按 widget.key 区分）。
@@ -178,6 +178,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   int _danmuLoadGen = 0;
   double _danmuFontSize = 14;
   double _danmuOpacity = 1;
+  double _danmuSpeed = 150;
+  int _danmuTracks = 4;
   late VideoFitType _videoFit;
   double _volume = 1.0;
   // 应用内亮度遮罩：1.0 = 不遮（系统亮度）。默认不要半黑。
@@ -293,16 +295,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _player = widget.player!;
       _ownsPlayer = false;
     } else {
-      _player = Player(
-        configuration: const PlayerConfiguration(title: 'TVBox'),
-      );
+      _player = AppPlayer(config: const AppConfig(title: 'TVBox'));
       _ownsPlayer = true;
     }
-    if (widget.controller != null) {
-      _controller = widget.controller!;
-    } else {
-      _controller = VideoController(_player);
-    }
+    _controller = _player;
 
     // 同步读取 player 真实状态，避免全屏/普通模式切换时新实例显示"转圈"假象
     _isPlaying = _player.state.playing;
@@ -392,7 +388,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _openMedia();
     } else {
       // 外部注入 player（detail view 的常规路径）：build 期间 _ensurePlayer
-      // 已经调过 `_player.open(Media(url, httpHeaders: headers, start: ...))`，
+      // 已经调过 `_player.open(AppMedia(url, httpHeaders: headers, start: ...))`，
       // libmpv 会直接从续播位置开始解码。这里 _scheduleResumeSeek 只作
       // safety net：如果 Media.start 失效，state.playing listener 会兜底 seek
       if (_persisted.resumeApplied) {
@@ -461,7 +457,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         final lvl = await battery.batteryLevel;
         if (!mounted) return;
         setState(() => _batteryLevel = lvl);
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
       _batteryStateSub = battery.onBatteryStateChanged.listen((state) async {
         if (!mounted) return;
         setState(() => _batteryState = state);
@@ -469,7 +467,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           final lvl = await battery.batteryLevel;
           if (!mounted) return;
           setState(() => _batteryLevel = lvl);
-        } catch (e) { /* ignore */ }
+        } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
       });
     } catch (e) {
       AppLog.instance.log('=== _initBatteryMonitor: 失败: $e ===');
@@ -542,7 +542,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         });
         try {
           _player.setRate(_playbackSpeed);
-        } catch (e) { /* ignore */ }
+        } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
       }
       // 换集/换源：清掉上一集的进度与缓冲态，避免进度条/转圈残留
       _pendingResumeSeconds = null;
@@ -582,7 +584,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         ? Duration(seconds: widget.resumeSeconds!.toInt())
         : null;
     _persisted.resumeApplied = true;
-    _player.open(Media(widget.url, httpHeaders: headers, start: start));
+    _player.open(AppMedia(widget.url, httpHeaders: headers, start: start));
     _scheduleResumeSeek();
   }
 
@@ -599,7 +601,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         _pendingResumeSeconds = null;
         return;
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
     _pendingResumeSeconds = resume;
     try {
       _player.seek(target);
@@ -630,7 +634,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         _pendingResumeSeconds = null;
         return;
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
     _pendingResumeSeconds = null;
     try {
       _player.seek(target);
@@ -648,11 +654,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _danmuOn = prefs.getBool('danmu_enabled') ?? true;
       _danmuFontSize = (prefs.getDouble('danmu_font_size') ?? 14).clamp(10.0, 28.0);
       _danmuOpacity = (prefs.getDouble('danmu_opacity') ?? 1).clamp(0.2, 1.0);
+      _danmuSpeed = (prefs.getDouble('danmu_speed') ?? 150).clamp(80.0, 240.0);
+      _danmuTracks = (prefs.getInt('danmu_tracks') ?? 4).clamp(2, 8);
       if (mounted) setState(() {});
       if (_danmuApiUrl.isNotEmpty) {
         _ensureDanmuLoaded();
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
   }
 
   /// 通过视频 URL 直接匹配弹幕（Logvr-danmu 的 /api/v2/comment?url= 接口）
@@ -704,7 +714,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('danmu_enabled', _danmuOn);
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
   }
 
   void _startBitrateTimer() {
@@ -853,7 +865,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (!_player.state.playing) {
         await _player.play();
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
   }
 
   /// 调 WindowFullScreen 退出全屏
@@ -887,7 +901,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (!_player.state.playing) {
         await _player.play();
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
   }
 
   void _seekTo(Duration position) {
@@ -1054,10 +1070,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         Positioned.fill(
           child: ColoredBox(
             color: Colors.black,
-            child: Video(
+            child: AppVideoView(
               key: ValueKey('video_$_videoRebuildKey'),
-              controller: _controller,
-              controls: null,
+              player: _player,
               fit: _videoFit.boxFit,
               aspectRatio: _videoFit.aspectRatio,
             ),
@@ -1192,6 +1207,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       positionOf: () => _player.state.position,
       fontSize: _danmuFontSize,
       opacity: _danmuOpacity,
+      speed: _danmuSpeed,
+      trackCount: _danmuTracks,
     );
   }
 
@@ -2496,11 +2513,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         if (resume > Duration.zero) {
           try {
             _player.seek(resume);
-          } catch (e) { /* ignore */ }
+          } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
         }
         try {
           _player.play();
-        } catch (e) { /* ignore */ }
+        } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
         return;
       }
       final supported = await VideoPlayerPip.instance.isIosPipSupported();
@@ -2516,9 +2537,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         return;
       }
       final currentPos = _player.state.position;
-      // MPV + AVPlayer 协调：
-      // - onStarted：AVPlayer 已出画 → 暂停 MPV，避免双声道
-      // - onStopped：小窗结束 → 从进度续播 MPV
+      // 主播放器已是 AVPlayer(video_player)，与 PiP 原生 AVPlayer 会抢
+      // AVAudioSession。必须在 startPip **之前** pause 主播放器，释放
+      // session；onStarted 仅作兑底再 pause 一次。
+      // - onStopped：小窗结束 → 从进度续播主播放器
+      try {
+        await _player.pause();
+      } catch (e) {
+        AppLog.instance.log('[video_player] pre-pip pause failed: $e');
+      }
       final entered = await VideoPlayerPip.instance.enterIos(
         url: playUrl,
         headers: widget.headers,
@@ -2528,7 +2555,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           setState(() => _pipActive = true);
           try {
             _player.pause();
-          } catch (e) { /* ignore */ }
+          } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
         },
         onStopped: () {
           if (!mounted) return;
@@ -2537,11 +2566,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           if (resume > Duration.zero) {
             try {
               _player.seek(resume);
-            } catch (e) { /* ignore */ }
+            } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
           }
           try {
             _player.play();
-          } catch (e) { /* ignore */ }
+          } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
           // 二次进入：重新预热 AVPlayer
           if (Platform.isIOS) {
             VideoPlayerPip.instance.prepareIos(
@@ -2554,7 +2587,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (!entered) {
         try {
           _player.play();
-        } catch (e) { /* ignore */ }
+        } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
         _showMessage('画中画启动失败，请稍后重试');
       }
       return;
@@ -2597,7 +2632,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
     _autoPipInFlight = true;
     final currentPos = _player.state.position;
-    // MPV + AVPlayer 协调：小窗起来后停 MPV，回 App 再续播
+    // 主播放器 AVPlayer 与 PiP 原生 AVPlayer 争 session：启动前先 pause
+    try {
+      await _player.pause();
+    } catch (e) {
+      AppLog.instance.log('[video_player] auto-pip pre-pause failed: $e');
+    }
     try {
       final entered = await VideoPlayerPip.instance.enterIos(
         url: playUrl,
@@ -2608,7 +2648,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           setState(() => _pipActive = true);
           try {
             _player.pause();
-          } catch (e) { /* ignore */ }
+          } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
         },
         onStopped: () {
           if (!mounted) return;
@@ -2617,11 +2659,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           if (resume > Duration.zero) {
             try {
               _player.seek(resume);
-            } catch (e) { /* ignore */ }
+            } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
           }
           try {
             _player.play();
-          } catch (e) { /* ignore */ }
+          } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
           if (Platform.isIOS) {
             VideoPlayerPip.instance.prepareIos(
               url: playUrl,
@@ -2634,7 +2680,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         setState(() => _pipActive = false);
         try {
           _player.play();
-        } catch (e) { /* ignore */ }
+        } catch (e) {
+        AppLog.instance.log('[video_player] swallowed: $e');
+      }
       }
     } finally {
       _autoPipInFlight = false;
@@ -2760,449 +2808,3 @@ enum PanAxis { horizontal, vertical }
 // 进度条拖动手势
 // ============================================================
 
-class _ProgressBarGesture extends StatelessWidget {
-  final double progress;
-  final void Function(double ratio) onSeekToRatio;
-  final void Function(double ratio) onDrag;
-  final VoidCallback onDragEnd;
-
-  const _ProgressBarGesture({
-    required this.progress,
-    required this.onSeekToRatio,
-    required this.onDrag,
-    required this.onDragEnd,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final w = constraints.maxWidth;
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (details) {
-            final ratio = (details.localPosition.dx / w).clamp(0.0, 1.0);
-            onDrag(ratio);
-            onSeekToRatio(ratio);
-          },
-          onHorizontalDragStart: (details) {
-            final ratio = (details.localPosition.dx / w).clamp(0.0, 1.0);
-            onDrag(ratio);
-          },
-          onHorizontalDragUpdate: (details) {
-            final ratio = (details.localPosition.dx / w).clamp(0.0, 1.0);
-            onDrag(ratio);
-          },
-          onHorizontalDragEnd: (_) => onDragEnd(),
-          child: CustomPaint(
-            size: Size(w, 20),
-            painter: _ProgressBarPainter(progress: progress),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _ProgressBarPainter extends CustomPainter {
-  final double progress;
-  _ProgressBarPainter({required this.progress});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final centerY = size.height / 2;
-    const trackHeight = 3.5;
-    const thumbRadius = 7.0;
-
-    final trackRect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(0, centerY - trackHeight / 2, size.width, trackHeight),
-      Radius.circular(trackHeight / 2),
-    );
-    canvas.drawRRect(
-      trackRect,
-      Paint()..color = Colors.white.withValues(alpha: 0.2),
-    );
-
-    if (progress > 0) {
-      final progressRect = RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          0,
-          centerY - trackHeight / 2,
-          size.width * progress,
-          trackHeight,
-        ),
-        Radius.circular(trackHeight / 2),
-      );
-      canvas.drawRRect(progressRect, Paint()..color = Colors.white);
-    }
-
-    final thumbX = (size.width * progress).clamp(
-      thumbRadius,
-      size.width - thumbRadius,
-    );
-    canvas.drawCircle(
-      Offset(thumbX, centerY),
-      thumbRadius,
-      Paint()..color = Colors.white,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_ProgressBarPainter oldDelegate) =>
-      oldDelegate.progress != progress;
-}
-
-// ============================================================
-// 通用 UI 组件
-// ============================================================
-
-class _IndicatorBadge extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  const _IndicatorBadge({required this.icon, required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(40),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: Colors.white, size: 28),
-          const SizedBox(height: 6),
-          Text(
-            text,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 13,
-              fontFamily: 'monospace',
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _GestureHintBubble extends StatelessWidget {
-  final String text;
-  const _GestureHintBubble({required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 13,
-          fontFamily: 'monospace',
-        ),
-      ),
-    );
-  }
-}
-
-/// 跨 widget rebuild 持久化的 player 状态（静态缓存的值对象）
-class _PersistedPlayerState {
-  bool isNativeFullscreen = false;
-  bool isImmersive = false;
-  /// 续播是否已应用：跨 widget Element 重建持久化。
-  bool resumeApplied = false;
-}
-
-class _SettingsRowLabel extends StatelessWidget {
-  final String text;
-  const _SettingsRowLabel(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(
-        color: Colors.white,
-        fontSize: 13,
-        fontWeight: FontWeight.w500,
-      ),
-    );
-  }
-}
-
-/// 跳过片头/片尾时间编辑器
-class _SkipSecondsEditor extends StatefulWidget {
-  final String label;
-  final int value;
-  final ValueChanged<int> onChange;
-  final List<int> presets;
-  final int maxSeconds;
-
-  const _SkipSecondsEditor({
-    required this.label,
-    required this.value,
-    required this.onChange,
-    required this.presets,
-    required this.maxSeconds,
-  });
-
-  @override
-  State<_SkipSecondsEditor> createState() => _SkipSecondsEditorState();
-}
-
-class _SkipSecondsEditorState extends State<_SkipSecondsEditor> {
-  late final TextEditingController _controller;
-  late final FocusNode _focusNode;
-  String? _errorText;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.value.toString());
-    _focusNode = FocusNode();
-    _focusNode.addListener(() {
-      if (!_focusNode.hasFocus) {
-        _submit();
-      }
-    });
-  }
-
-  @override
-  void didUpdateWidget(covariant _SkipSecondsEditor oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.value != widget.value && !_focusNode.hasFocus) {
-      _controller.text = widget.value.toString();
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final text = _controller.text.trim();
-    if (text.isEmpty) {
-      _controller.text = widget.value.toString();
-      setState(() => _errorText = null);
-      return;
-    }
-    final n = int.tryParse(text);
-    if (n == null) {
-      setState(() => _errorText = '请输入数字');
-      return;
-    }
-    if (n < 0) {
-      setState(() => _errorText = '不能小于 0');
-      return;
-    }
-    if (n > widget.maxSeconds) {
-      setState(() => _errorText = '不能超过 ${widget.maxSeconds} 秒');
-      return;
-    }
-    setState(() => _errorText = null);
-    if (n != widget.value) {
-      widget.onChange(n);
-    }
-  }
-
-  void _applyPreset(int s) {
-    _controller.text = s.toString();
-    setState(() => _errorText = null);
-    widget.onChange(s);
-    _focusNode.unfocus();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: _errorText != null
-                        ? Colors.red
-                        : Colors.white.withValues(alpha: 0.1),
-                    width: 1,
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 12),
-                      child: Icon(
-                        Icons.timer_outlined,
-                        color: Colors.white70,
-                        size: 16,
-                      ),
-                    ),
-                    Expanded(
-                      child: TextField(
-                        controller: _controller,
-                        focusNode: _focusNode,
-                        keyboardType: TextInputType.number,
-                        textInputAction: TextInputAction.done,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                        ),
-                        cursorColor: AppTheme.accentColor,
-                        decoration: const InputDecoration(
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.symmetric(vertical: 10),
-                          isDense: true,
-                          hintText: '秒',
-                          hintStyle: TextStyle(
-                            color: Colors.white24,
-                            fontSize: 14,
-                          ),
-                        ),
-                        onSubmitted: (_) {
-                          _submit();
-                          _focusNode.unfocus();
-                        },
-                      ),
-                    ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 8),
-                      child: Text(
-                        '秒',
-                        style: TextStyle(
-                          color: Colors.white54,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                _submit();
-                _focusNode.unfocus();
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: AppTheme.accentColor,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text(
-                  '应用',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        if (_errorText != null) ...[const SizedBox(height: 4), Text(_errorText!, style: const TextStyle(color: Colors.red, fontSize: 11))],
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 6,
-          children: widget.presets.map((s) {
-            final selected = widget.value == s;
-            return GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => _applyPreset(s),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 5,
-                ),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? AppTheme.accentColor
-                      : Colors.white.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Text(
-                  s == 0 ? '关闭' : '${s}秒',
-                  style: TextStyle(
-                    color: selected ? Colors.white : Colors.white70,
-                    fontSize: 12,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-      ],
-    );
-  }
-}
-
-/// 听剧模式旋转音乐图标（装饰动画）
-class _PipAudioModeMusicIcon extends StatefulWidget {
-  final double size;
-  final Color color;
-
-  const _PipAudioModeMusicIcon({
-    required this.size,
-    required this.color,
-  });
-
-  @override
-  State<_PipAudioModeMusicIcon> createState() => _PipAudioModeMusicIconState();
-}
-
-class _PipAudioModeMusicIconState extends State<_PipAudioModeMusicIcon>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return RotationTransition(
-      turns: _controller,
-      child: Icon(
-        Icons.graphic_eq,
-        size: widget.size,
-        color: widget.color,
-      ),
-    );
-  }
-}
-
-// ============================================================
-// 弹幕（Logvr-danmu / 弹弹play / B站 XML 兼容解析与渲染）

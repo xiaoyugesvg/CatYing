@@ -2,33 +2,39 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import '../common/theme.dart';
 import '../models/movie.dart';
+import '../services/api_config.dart';
 
-/// 视频卡片组件 - 对应 Swift VodCardView
+/// 视频卡片：海报 + 右下「源|备注」半透明黑标 + 居中标题
 class VodCard extends StatelessWidget {
   final Video video;
   final VoidCallback? onTap;
 
   const VodCard({super.key, required this.video, this.onTap});
 
+  /// 「奇优影院 | 7.0」风格角标文案
+  static String badgeText(Video video) {
+    final sourceName = _sourceName(video);
+    final note = video.note.trim();
+    if (sourceName.isNotEmpty && note.isNotEmpty) return '$sourceName | $note';
+    if (note.isNotEmpty) return note;
+    return sourceName;
+  }
+
+  static String _sourceName(Video video) {
+    try {
+      return ApiConfig.instance.getSource(video.sourceKey)?.name.trim() ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final badge = badgeText(video);
     return GestureDetector(
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          // iOS 27 Liquid Glass 深色玻璃卡:
-          // 半透明深色底 + 顶部镜面高光渐变 + 亮描边
-          // 列表内高频卡片不开 blur (BackdropFilter), 保证滚动性能
-          gradient: const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0x33FFFFFF), // white 20% 顶部高光
-              Color(0x16181A1F), // 深色半透明
-              Color(0x16181A1F),
-            ],
-            stops: [0.0, 0.25, 1.0],
-          ),
           borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
           border: Border.all(
             color: AppTheme.glassBorderSoft,
@@ -37,69 +43,37 @@ class VodCard extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 海报 + Note 徽章
+            // 海报 + 右下半透明黑标
             Expanded(
               child: Stack(
                 fit: StackFit.expand,
                 children: [
                   _buildPoster(),
-                  if (video.note.isNotEmpty)
+                  if (badge.isNotEmpty)
                     Positioned(
-                      right: AppTheme.spacingXS,
-                      bottom: AppTheme.spacingXS,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppTheme.accentColor.withValues(alpha: 0.85),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          video.note,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
+                      right: 6,
+                      bottom: 6,
+                      child: _BadgePill(text: badge),
                     ),
                 ],
               ),
             ),
-            // 名称 + 元数据
+            // 标题居中
             Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppTheme.spacingXS + 2,
-                vertical: AppTheme.spacingXS + 2,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    video.name,
-                    style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: AppTheme.fontFootnote,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (_metaText.isNotEmpty)
-                    Text(
-                      _metaText,
-                      style: TextStyle(
-                        color: AppTheme.textTertiary,
-                        fontSize: AppTheme.fontCaption - 1,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                ],
+              padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+              child: Text(
+                video.name,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontFootnote,
+                  fontWeight: FontWeight.w500,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
@@ -108,49 +82,57 @@ class VodCard extends StatelessWidget {
     );
   }
 
-  String get _metaText {
-    final parts = [video.type, video.year].where((s) => s.isNotEmpty).toList();
-    return parts.join(' · ');
-  }
-
   Widget _buildPoster() {
     final picUrl = video.pic.trim();
     if (picUrl.isEmpty || !picUrl.startsWith('http')) {
       return ColoredBox(
         color: AppTheme.backgroundTertiary,
         child: Center(
-          child: Icon(Icons.movie, color: AppTheme.textTertiary, size: 24),
+          child: Icon(
+            Icons.movie_outlined,
+            color: AppTheme.textTertiary,
+            size: 28,
+          ),
         ),
       );
     }
-
-    var url = picUrl;
-    if (url.startsWith('//')) url = 'https:$url';
-
     return CachedNetworkImage(
-      imageUrl: url,
+      imageUrl: picUrl,
       fit: BoxFit.cover,
-      httpHeaders: {
-        'User-Agent': 'Mozilla/5.0',
-        'Referer': 'https://${Uri.parse(url).host}/',
-      },
-      placeholder: (context, url) => ColoredBox(
+      placeholder: (_, __) => ColoredBox(color: AppTheme.backgroundTertiary),
+      errorWidget: (_, __, ___) => ColoredBox(
         color: AppTheme.backgroundTertiary,
-        child: const Center(
-          child: SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: AppTheme.accentColor,
-            ),
-          ),
-        ),
+        child: Icon(Icons.broken_image_outlined, color: AppTheme.textTertiary),
       ),
-      errorBuilder: (context, url, error) => ColoredBox(
-        color: AppTheme.backgroundTertiary,
-        child: Center(
-          child: Icon(Icons.movie, color: AppTheme.textTertiary, size: 24),
+    );
+  }
+}
+
+/// 半透明黑角标（跟外观：浅色更深一点以保可读）
+class _BadgePill extends StatelessWidget {
+  final String text;
+  const _BadgePill({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = AppBrightness.isLight.value
+        ? Colors.black.withValues(alpha: 0.62)
+        : Colors.black.withValues(alpha: 0.55);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w500,
+          letterSpacing: 0.2,
         ),
       ),
     );

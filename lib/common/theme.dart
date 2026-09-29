@@ -34,22 +34,28 @@ class AppTheme {
       : const Color(0xCC1C1C1E);
 
   // ===== iOS 27 Liquid Glass 玻璃体系 =====
-  // 玻璃底色: 白 10% tint, 叠加在全局背景层/页面内容上形成磨砂观感
-  static const Color glassTint = Color(0x1AFFFFFF);
+  // 玻璃底色: 跟随明暗，避免浅色模式下玻璃过脏
+  static Color get glassTint =>
+      AppBrightness.isLight.value ? const Color(0x14000000) : const Color(0x1AFFFFFF);
   // 深色玻璃底: 供列表内高频卡片模拟玻璃 (不开 blur 保性能)
-  static const Color glassTintDeep = Color(0x18181A1F);
-  /// 浅玻璃底（悬浮栏用）：alpha≈4%，比 glassTintDeep 更透，
-  /// 让全局渐变背景透出，悬浮导航栏看起来更"轻"。
-  static const Color glassTintLight = Color(0x0A0F1013);
-  /// 超浅玻璃底（沉浸式底栏用）：alpha≈2%，几乎全透明只留模糊+描边，
-  /// 底栏不再遮挡内容，真正"沉浸式"（2026-09-26 新增）。
-  static const Color glassTintClear = Color(0x050F1013);
-  // 高光层: 顶部镜面高光 (iOS 27 更亮的 specular highlight)
-  static const Color glassHighlightTop = Color(0x2EFFFFFF); // white 18%
-  static const Color glassHighlightMid = Color(0x0FFFFFFF); // white 6%
+  static Color get glassTintDeep =>
+      AppBrightness.isLight.value ? const Color(0x0F0F1013) : const Color(0x18181A1F);
+  /// 浅玻璃底（悬浮栏用）：alpha≈4%
+  static Color get glassTintLight =>
+      AppBrightness.isLight.value ? const Color(0x08000000) : const Color(0x0A0F1013);
+  /// 超浅玻璃底（沉浸式底栏用）：alpha≈2%
+  static Color get glassTintClear =>
+      AppBrightness.isLight.value ? const Color(0x04000000) : const Color(0x050F1013);
+  // 高光层: 顶部镜面高光
+  static Color get glassHighlightTop =>
+      AppBrightness.isLight.value ? const Color(0x33000000) : const Color(0x2EFFFFFF);
+  static Color get glassHighlightMid =>
+      AppBrightness.isLight.value ? const Color(0x14000000) : const Color(0x0FFFFFFF);
   // 描边: 亮描边增强边缘分离感
-  static const Color glassBorder = Color(0x2EFFFFFF); // white 18%
-  static const Color glassBorderSoft = Color(0x1FFFFFFF); // white 12%
+  static Color get glassBorder =>
+      AppBrightness.isLight.value ? const Color(0x14000000) : const Color(0x2EFFFFFF);
+  static Color get glassBorderSoft =>
+      AppBrightness.isLight.value ? const Color(0x0F000000) : const Color(0x1FFFFFFF);
   // 玻璃圆角
   static const double glassRadius = 24; // 面板/弹窗大圆角
   static const double glassRadiusCard = 16; // 卡片圆角

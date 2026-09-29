@@ -346,7 +346,9 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
           if (md5Response.statusCode == 200 && md5Response.data != null) {
             md5Data = md5Response.data!.trim();
           }
-        } on DioException catch (e) { /* ignore */ }
+        } on DioException catch (e) {
+        AppLog.instance.log('[nodejs_platform_ios] swallowed: $e');
+      }
 
         List<int>? configData;
         try {
@@ -360,7 +362,9 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
               configResponse.data != null) {
             configData = configResponse.data!;
           }
-        } on DioException catch (e) { /* ignore */ }
+        } on DioException catch (e) {
+        AppLog.instance.log('[nodejs_platform_ios] swallowed: $e');
+      }
 
         if (md5Data != null && md5Data.isNotEmpty) {
           final actualMd5 = md5.convert(jsData).toString();
@@ -498,7 +502,9 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
             configResponse.data != null) {
           await File(configJSPath).writeAsBytes(configResponse.data!);
         }
-      } on DioException catch (e) { /* ignore */ }
+      } on DioException catch (e) {
+        AppLog.instance.log('[nodejs_platform_ios] swallowed: $e');
+      }
       AppLog.instance.log('[IOSNodeJS] 后台源更新完成');
     } catch (e) {
       AppLog.instance.log('[IOSNodeJS] 后台源刷新异常: $e');

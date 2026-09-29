@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../services/app_log.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
+import 'app_player.dart';
 import 'package:window_manager/window_manager.dart';
 
 /// 画中画管理器
@@ -47,13 +47,13 @@ class VideoPlayerPip {
   // ========== 桌面端状态 ==========
   bool _isActive = false;
   Rect? _savedBounds;
-  Player? _attachedPlayer;
+  AppPlayer? _attachedPlayer;
   /// 当前是否处于画中画模式（桌面端悬浮窗）
   bool get isActive => _isActive;
   /// 监听 PiP 状态变化（用于 detail 页同步隐藏 AppBar 等 UI）
   final ValueNotifier<bool> activeNotifier = ValueNotifier<bool>(false);
-  /// 当前已附加的 Player（用于上层构建 PiP 预览视图）
-  Player? get attachedPlayer => _attachedPlayer;
+  /// 当前已附加的 AppPlayer（用于上层构建 PiP 预览视图）
+  AppPlayer? get attachedPlayer => _attachedPlayer;
 
   // ========== iOS 系统 PiP 状态 ==========
   bool _iosActive = false;
@@ -186,8 +186,8 @@ class VideoPlayerPip {
   }
 
   // ========== 桌面端入口 API ==========
-  /// 附加播放器到 PiP 模块（不创建新 Player，复用已有实例）
-  void attachPlayer(Player player) {
+  /// 附加播放器到 PiP 模块（不创建新 AppPlayer，复用已有实例）
+  void attachPlayer(AppPlayer player) {
     _attachedPlayer = player;
   }
 
@@ -200,7 +200,7 @@ class VideoPlayerPip {
   Future<void> enter() async {
     if (_isActive) return;
     if (_attachedPlayer == null) {
-      AppLog.instance.log('[VideoPlayerPip] enter: no player attached');
+      AppLog.instance.log('[VideoPlayerPip] enter: no AppPlayer attached');
       return;
     }
     if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {

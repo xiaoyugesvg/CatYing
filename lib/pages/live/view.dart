@@ -40,18 +40,25 @@ class _LivePageState extends State<LivePage> {
   @override
   void initState() {
     super.initState();
-    // 进页后自动开播当前频道，否则画面区一直停在占位图标，
-    // 听剧 / 小窗也会因为“根本没有在播的流”而无效
+    // IndexedStack 会在 App 启动时构建所有 tab（含直播页）。
+    // 只有当前选中「直播」tab 才自动开播，避免一打开软件就在播直播。
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _autoplayCurrent();
+      if (!mounted) return;
+      if (MainTabController.instance.selectedTab.value == 4) {
+        _autoplayCurrent();
+      }
     });
-    // IndexedStack 会保留直播页：离开直播 tab 时必须暂停，
-    // 否则点播在播、直播还有声音
+    // 离开直播 tab 时暂停；切回直播 tab 时若未在播则自动开播
     _tabWorker = ever(MainTabController.instance.selectedTab, (tab) {
       if (tab != 4) {
         try {
           _player?.pause();
         } catch (e) { /* ignore */ }
+      } else {
+        final playing = _player?.state.playing ?? false;
+        if (!playing) {
+          _autoplayCurrent();
+        }
       }
     });
     // 点播详情打开时也会强制暂停直播

@@ -291,6 +291,10 @@ class SettingsRow extends StatelessWidget {
   final VoidCallback? onTap;
   final Color? iconColor;
   final Color? titleColor;
+  /// 右侧开关（与 onTap 互斥优先显示开关）
+  final bool trailingSwitch;
+  final bool switchValue;
+  final ValueChanged<bool>? onSwitchChanged;
 
   const SettingsRow({
     super.key,
@@ -300,6 +304,9 @@ class SettingsRow extends StatelessWidget {
     this.onTap,
     this.iconColor,
     this.titleColor,
+    this.trailingSwitch = false,
+    this.switchValue = false,
+    this.onSwitchChanged,
   });
 
   @override
@@ -333,7 +340,14 @@ class SettingsRow extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-          if (onTap != null) ...[
+          if (trailingSwitch) ...[
+            const SizedBox(width: AppTheme.spacingSM),
+            Switch(
+              value: switchValue,
+              onChanged: onSwitchChanged,
+              activeColor: AppTheme.accentColor,
+            ),
+          ] else if (onTap != null) ...[
             const SizedBox(width: AppTheme.spacingXS),
             Icon(
               Icons.chevron_right,

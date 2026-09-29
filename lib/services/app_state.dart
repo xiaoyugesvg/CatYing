@@ -6,8 +6,6 @@ import 'app_log.dart';
 import 'nodejs_manager.dart';
 import 'scene_recovery.dart';
 import 'spider_service.dart';
-import 'network_manager.dart';
-import '../models/source_bean.dart';
 
 /// 加载阶段 - 对应 Swift LoadingPhase
 enum LoadingPhase {
@@ -126,7 +124,7 @@ class AppState extends GetxController {
   // 配置加载主流程 - 对应 Swift loadConfig
   // ============================================================
 
-  /// 加载配置 - 对应 Swift loadConfig(url:)
+  /// 加载配置 - 对应 Swift loadConfig(url:）
   Future<void> loadConfig({required String vodUrl}) async {
     final trimmedVod = vodUrl.trim();
     if (trimmedVod.isEmpty) return;
@@ -144,6 +142,11 @@ class AppState extends GetxController {
       configLoadError.value = e.toString();
       loadingPhase.value = LoadingPhase.failed;
     }
+  }
+
+  /// 兼容入口：setup 页调用。直播 lives 已在 ApiConfig.loadConfigs 内交给 LiveService。
+  Future<void> loadConfigWithLive({required String vodUrl}) async {
+    await loadConfig(vodUrl: vodUrl);
   }
 
   /// 应用已加载的配置状态 - 对应 Swift applyLoadedConfigState
@@ -289,7 +292,9 @@ class AppState extends GetxController {
         try {
           await SpiderService.instance.initSpider(
             firstSource.key, firstSource.type, apiBase);
-        } catch (e) { /* ignore */ }
+        } catch (e) {
+        AppLog.instance.log('[app_state] swallowed: $e');
+      }
       }
     } catch (e) {
       loadingPhase.value = LoadingPhase.failed;

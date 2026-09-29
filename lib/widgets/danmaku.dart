@@ -169,12 +169,16 @@ class DanmuLayer extends StatefulWidget {
   final Duration Function() positionOf;
   final double fontSize;
   final double opacity;
+  final double speed; // px/s
+  final int trackCount;
   const DanmuLayer({
     super.key,
     required this.danmus,
     required this.positionOf,
     this.fontSize = 14,
     this.opacity = 1,
+    this.speed = 150,
+    this.trackCount = 4,
   });
 
   @override
@@ -186,10 +190,11 @@ class DanmuLayerState extends State<DanmuLayer> {
   final List<_ActiveDanmu> _active = [];
   int _nextIndex = 0;
   Timer? _timer;
-  static const double _speed = 150.0; // px/s
-  static const int _trackCount = 4;
   /// Minimum gap between two scrolling danmaku on the same track (px).
   static const double _trackGap = 24.0;
+
+  double get _speed => widget.speed;
+  int get _trackCount => widget.trackCount.clamp(2, 8);
 
   /// Previous tick position in seconds; used to detect seek jumps.
   double? _lastPosSec;

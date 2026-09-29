@@ -54,8 +54,13 @@ class ThemeModeStore {
 
   /// 跟随系统时调用（View 平台亮度变化）
   static void syncFromPlatform(bool platformLight) {
-    if (notifier.value == ThemeMode.system) {
-      AppBrightness.isLight.value = platformLight;
-    }
+    if (notifier.value != ThemeMode.system) return;
+    if (AppBrightness.isLight.value == platformLight) return;
+    AppBrightness.isLight.value = platformLight;
+    // 触发 ValueListenableBuilder / 外观相关重建
+    notifier.value = ThemeMode.system;
   }
+
+  /// 外观亮度监听（App 外层包一层，浅/深色 getter 变更后整体重建）
+  static ValueNotifier<bool> get brightnessListenable => AppBrightness.isLight;
 }

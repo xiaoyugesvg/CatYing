@@ -4,11 +4,7 @@ import 'package:get/get.dart';
 import '../../services/live_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
-import 'package:media_kit/media_kit.dart';
 import '../../common/constants.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:media_kit_video/media_kit_video.dart' hide Video;
-import 'dart:ui' show ImageFilter;
 import '../../common/theme.dart';
 import '../../models/movie.dart';
 import '../../models/vod_info.dart';
@@ -20,9 +16,12 @@ import '../../models/cache_store.dart';
 import '../../services/background_service.dart';
 import '../../services/tmdb_service.dart';
 import '../../services/player_fullscreen_controller.dart';
+import '../../services/player_prefs.dart';
 import '../../services/main_tab_controller.dart';
 import '../../widgets/glass.dart';
 import '../../widgets/common_widgets.dart';
+import '../../widgets/app_player.dart';
+import '../../widgets/mpv_app_player.dart';
 import '../../widgets/video_player.dart';
 import '../../widgets/video_player_pip.dart';
 import '../../widgets/window_fullscreen.dart';
@@ -57,16 +56,30 @@ class _DetailPageState extends State<DetailPage> {
   double _lastPersistedProgress = 0;
 
   /// 持有 Player 实例，全屏/普通模式之间复用同一实例，避免状态丢失
-  Player? _player;
+  AppPlayer? _player;
   /// 持有 VideoController 实例，与上面 _player 配套使用，跨全屏/普通模式共享，
   /// 保证 ANGLE surface / texture 通道在 OS 全屏切换时不被重建。
-  VideoController? _videoController;
+  
   String? _lastPlayerUrl;
   String? _lastPlayerHeadersKey;
   /// 是否已排队 post-frame 重建 Player，防止 build 内重复 schedule
   bool _playerRecreateScheduled = false;
   SharedPreferences? _prefs;
   int? _prefsPlayTypeVod;
+  Worker? _engineWorker;
+  Worker? _decodeWorker;
+  Worker? _bufferWorker;
+
+  /// MPV 选项变更时热更新当前实例
+  void _applyMpvOptions() {
+    final p = _player;
+    if (p is MpvAppPlayer) {
+      p.applyOptions(
+        decode: PlayerPrefs.instance.decodeMode.value,
+        buffer: PlayerPrefs.instance.bufferMode.value,
+      );
+    }
+  }
 
   /// VideoPlayerWidget 状态变化回调（mpv native fullscreen 状态变化时）
   /// true=进入 native 全屏，false=退出 native 全屏
@@ -96,14 +109,33 @@ class _DetailPageState extends State<DetailPage> {
     // 监听 WindowFullScreen 状态变化：作为冗余同步通道，
     // 保证 WindowFullScreen.toggle 后 isFullScreen Rx 一定被同步
     WindowFullScreen.instance.activeNotifier.addListener(_onFullScreenActiveChanged);
+    // 设置切换内核：立刻换播放器
+    _engineWorker = ever(PlayerPrefs.instance.vodEngine, (_) => _onEngineChanged());
+    _decodeWorker = ever(PlayerPrefs.instance.decodeMode, (_) => _applyMpvOptions());
+    _bufferWorker = ever(PlayerPrefs.instance.bufferMode, (_) => _applyMpvOptions());
   }
 
   Future<void> _loadPrefs() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       _prefs = prefs;
-      _prefsPlayTypeVod = prefs.getInt(AppConstants.playTypeVod);
+      await PlayerPrefs.instance.load();
+      _prefsPlayTypeVod =
+          PlayerPrefs.instance.vodEngine.value.value;
     } catch (e) { /* ignore */ }
+  }
+
+  /// 设置里切换内核 → 立刻换播放器（丢弃旧实例重建）
+  void _onEngineChanged() {
+    if (!mounted) return;
+    final e = PlayerPrefs.instance.vodEngine.value;
+    _prefsPlayTypeVod = e.value;
+    final old = _player;
+    _player = null;
+    _lastPlayerUrl = '';
+    _lastPlayerHeadersKey = '';
+    old?.dispose();
+    setState(() {});
   }
 
   void _loadDetailIfNeeded() {
@@ -176,6 +208,9 @@ class _DetailPageState extends State<DetailPage> {
     try {
       _persistHistoryIfNeeded(force: true);
     } catch (_) {}
+    _engineWorker?.dispose();
+    _decodeWorker?.dispose();
+    _bufferWorker?.dispose();
     VideoPlayerPip.instance.activeNotifier.removeListener(_onPipChanged);
     WindowFullScreen.instance.activeNotifier.removeListener(_onFullScreenActiveChanged);
     // 退出页面时关闭 PiP，恢复窗口
@@ -189,7 +224,7 @@ class _DetailPageState extends State<DetailPage> {
     VideoPlayerPip.instance.detachPlayer();
     _player?.dispose();
     _player = null;
-    _videoController = null;
+    
     super.dispose();
   }
 
@@ -279,17 +314,24 @@ class _DetailPageState extends State<DetailPage> {
       // 并发兜底：期间已被创建则只换源
       _lastPlayerUrl = url;
       _lastPlayerHeadersKey = headersKey;
-      _player!.open(Media(url, httpHeaders: headers, start: start));
+      _player!.open(AppMedia(url, httpHeaders: headers, start: start));
       return;
     }
-    // mpv 磁盘缓存：点播视频缓存到应用 Cache 目录, 下次播放同 URL 直接复用,
-    // 解决"每次打开都要重新下载"。缓存目录与设置页"清除缓存"统计目录一致。
-    _player = Player(configuration: const PlayerConfiguration(title: 'TVBox'));
-    // 同步创建 VideoController，确保 player 与 controller 一一对应
-    _videoController = VideoController(_player!);
+    // 按引擎创建：AVPlayer（默认）/ MPV 备用，并套用各内核选项
+    final engine = PlayerPrefs.instance.vodEngine.value;
+    if (engine == PlayerEngine.mpv) {
+      final mpv = MpvAppPlayer(config: const AppConfig(title: 'TVBox'));
+      mpv.applyOptions(
+        decode: PlayerPrefs.instance.decodeMode.value,
+        buffer: PlayerPrefs.instance.bufferMode.value,
+      );
+      _player = mpv;
+    } else {
+      _player = AppPlayer(config: const AppConfig(title: 'TVBox'));
+    }
     _lastPlayerUrl = url;
     _lastPlayerHeadersKey = headersKey;
-    _player!.open(Media(url, httpHeaders: headers, start: start));
+    _player!.open(AppMedia(url, httpHeaders: headers, start: start));
   }
 
   @override
@@ -567,12 +609,8 @@ class _DetailPageState extends State<DetailPage> {
         ? Map<String, String>.from(_controller.playHeaders)
         : const <String, String>{};
 
-    // **播放内核 (2026-09-27)**：核心只保留 MPV / KSPlayer / UPlayer / Webview。
-    // AVPlayer(video_player) 内核已移除。设置中选 Webview 引擎时直接走网页播放页；
-    // KSPlayer/UPlayer 由对应原生内核播放（未完成桥接时兜底回 MPV，见 _ensurePlayer）。
-    final engine = Platform.isIOS
-        ? PlayerEngine.fromStoredValue(_prefsPlayTypeVod ?? 0)
-        : PlayerEngine.mpv;
+    // 播放内核：AVPlayer 为主，MPV 备用，Webview 管网页播放页。
+    final engine = PlayerPrefs.instance.vodEngine.value;
     if (engine == PlayerEngine.webview) {
       // 同上: 内嵌模式
       return WebviewPlayerPage(
@@ -590,7 +628,7 @@ class _DetailPageState extends State<DetailPage> {
       headers,
       startPosition: _controller.resumeSeconds.value,
     );
-    if (!playerReady || _player == null || _videoController == null) {
+    if (!playerReady || _player == null || _player == null) {
       // 与正常播放器同高（4:3），避免加载态与出画后高度跳动
       return AspectRatio(
         aspectRatio: 4 / 3,
@@ -610,7 +648,7 @@ class _DetailPageState extends State<DetailPage> {
       // 不会残留绑在已 dispose Player 上的 controller/纹理（灰屏）
       key: ObjectKey(_player),
       player: _player,
-      controller: _videoController, // 跨全屏/普通模式共享同一个 controller
+       // 跨全屏/普通模式共享同一个 controller
       initialVideoFit: VideoFitType.contain, // 4:3 容器 + 黑框适配: 画面按原始比例完整显示, 上下黑边
       url: url,
       headers: headers.isEmpty ? null : headers,
@@ -626,7 +664,7 @@ class _DetailPageState extends State<DetailPage> {
       canPlayPrevious: _controller.selectedEpisodeIndex.value > 0,
       isPipMode: isPip,
       showAudioModeButton: true,
-      topBarTopPadding: 24.0, // 详情页顶栏往下挪一点，离状态栏稍远
+      topBarTopPadding: 8.0,
       skipIntroSeconds: _controller.skipIntroSeconds.value,
       skipOutroSeconds: _controller.skipOutroSeconds.value,
       onPlayNext: () => _playNextEpisode(),
@@ -637,7 +675,14 @@ class _DetailPageState extends State<DetailPage> {
       },
       onPositionChanged: (pos) =>
           _handlePlaybackProgress(pos.inSeconds.toDouble()),
-      onEnded: () => _playNextEpisode(),
+      onEnded: () {
+        // AVPlayer 内核可关「自动下一集」；手动点下一集不受限
+        if (PlayerPrefs.instance.vodEngine.value == PlayerEngine.avplayer &&
+            !PlayerPrefs.instance.avAutoNext.value) {
+          return;
+        }
+        _playNextEpisode();
+      },
       // native fullscreen 状态变化回调：同步 detail view 的 immersive 模式
       onFullScreenChanged: _onFullScreenChanged,
       onBack: () {

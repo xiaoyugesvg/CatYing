@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../common/theme.dart';
 import '../../models/source_bean.dart';
-import '../../models/movie.dart';
 import '../../widgets/vod_card.dart';
 import '../../widgets/common_widgets.dart';
 import 'controller.dart';

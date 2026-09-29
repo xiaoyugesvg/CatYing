@@ -1,17 +1,16 @@
 /// 播放器引擎类型 - 对应 Swift PlayerEngine
-/// 核心只保留 2 个真内核：MPV(media_kit)、Webview(WKWebView)
-/// KSPlayer / UPlayer / AVPlayer 均已移除（2026-09-27）：
-///  - KSPlayer Core 层耦合 FFmpeg/MEPlayer 无法剥离，集成成本过高
-///  - UPlayer 无 tag/pod 源不可靠、要求 iOS16+
-///  - AVPlayer(video_player) 内核已删除
-/// 统一以 MPV 为主播放内核，网页源走 Webview。
+/// - avplayer：iOS 主内核（video_player / 系统 AVPlayer）
+/// - mpv：备用内核（media_kit / libmpv），兼容桌面与部分流
+/// - webview：网页播放页（WKWebView）
 
 /// 播放器引擎类型
 enum PlayerEngine {
-  /// MPV 内核（基于 media_kit + libmpv），功能最全（倍速/硬解/画中画/弹幕）
-  mpv(0, 'MPV播放器'),
+  /// AVPlayer 内核（video_player），iOS 默认主路径
+  avplayer(0, 'AVPlayer播放器'),
+  /// MPV 内核（media_kit + libmpv），保留备用
+  mpv(1, 'MPV播放器'),
   /// Webview 内核（webview_flutter + WKWebView），用于网页播放页面
-  webview(1, 'Webview播放器');
+  webview(2, 'Webview播放器');
 
   final int value;
   final String title;
@@ -20,10 +19,10 @@ enum PlayerEngine {
 
   /// 从持久化值恢复播放器选项，并自动兜底到可用引擎
   static PlayerEngine fromStoredValue(int rawValue) {
-    final engine = PlayerEngine.values.where((e) => e.value == rawValue).firstOrNull;
-    if (engine == null) {
-      return PlayerEngine.mpv;
-    }
+    // 兼容旧值：0 曾表示 mpv，现在默认 avplayer
+    final engine =
+        PlayerEngine.values.where((e) => e.value == rawValue).firstOrNull;
+    if (engine == null) return PlayerEngine.avplayer;
     return engine;
   }
 
@@ -31,13 +30,10 @@ enum PlayerEngine {
   static List<PlayerEngine> get availableEngines => PlayerEngine.values;
 }
 
-/// 视频解码模式
+/// 视频解码模式（仅 mpv 内核生效）
 enum VideoDecodeMode {
-  /// 自动策略，优先硬解，失败时用户可切换
   auto(0, '自动'),
-  /// 强制硬解
   hardware(1, '硬解码'),
-  /// 强制软解
   software(2, '软解码');
 
   final int value;
@@ -46,13 +42,10 @@ enum VideoDecodeMode {
   const VideoDecodeMode(this.value, this.title);
 
   static VideoDecodeMode fromStoredValue(int rawValue) {
-    return VideoDecodeMode.values
-            .where((e) => e.value == rawValue)
-            .firstOrNull ??
+    return VideoDecodeMode.values.where((e) => e.value == rawValue).firstOrNull ??
         VideoDecodeMode.auto;
   }
 
-  /// MPV 媒体 hwdec 选项
   String? get mpvHardwareDecodeOption {
     switch (this) {
       case VideoDecodeMode.auto:
@@ -65,13 +58,10 @@ enum VideoDecodeMode {
   }
 }
 
-/// MPV 缓冲策略
+/// MPV 缓冲策略（仅 mpv 内核生效）
 enum VLCBufferMode {
-  /// 低延迟优先，适合直播但容错较低
   lowLatency(0, '低延迟'),
-  /// 兼顾延迟与稳定性，作为默认策略
   balanced(1, '均衡'),
-  /// 稳定流畅优先，允许更高缓冲
   smooth(2, '流畅优先');
 
   final int value;
@@ -82,15 +72,12 @@ enum VLCBufferMode {
   static VLCBufferMode get defaultMode => VLCBufferMode.balanced;
 
   static VLCBufferMode fromStoredValue(int rawValue) {
-    return VLCBufferMode.values
-            .where((e) => e.value == rawValue)
-            .firstOrNull ??
+    return VLCBufferMode.values.where((e) => e.value == rawValue).firstOrNull ??
         defaultMode;
   }
 
   bool get enableFrameDrop => this == VLCBufferMode.lowLatency;
 
-  /// 根据直播/点播场景输出三类缓存值（单位毫秒）
   ({int network, int live, int file}) cacheConfig({required bool isLive}) {
     switch (this) {
       case VLCBufferMode.lowLatency:

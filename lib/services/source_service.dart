@@ -1,5 +1,4 @@
 import 'app_log.dart';
-import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import '../models/movie.dart';
 import '../models/vod_info.dart';
@@ -118,7 +117,9 @@ class SourceService {
         if (fallback.isNotEmpty) {
           result = (result.$1, fallback);
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        AppLog.instance.log('[source_service] swallowed: $e');
+      }
     }
 
     return result;
@@ -157,7 +158,9 @@ class SourceService {
         // 解析首页推荐视频
         homeVideos = _parseVideoListFromJson(
             json['list'], sourceBean.key);
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        AppLog.instance.log('[source_service] swallowed: $e');
+      }
     }
 
     return (sorts, homeVideos);
@@ -301,7 +304,9 @@ class SourceService {
     try {
       final json = jsonDecode(jsonStr) as Map<String, dynamic>;
       videos.addAll(_parseVideoListFromJson(json['list'], sourceKey));
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        AppLog.instance.log('[source_service] swallowed: $e');
+      }
 
     return videos;
   }
@@ -332,7 +337,9 @@ class SourceService {
           dt: video.dt,
         );
         videos.add(video);
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        AppLog.instance.log('[source_service] swallowed: $e');
+      }
     }
     return videos;
   }
@@ -710,7 +717,9 @@ class SourceService {
     // 初始化 Spider - 对应 Swift: try await spider.initSpider()
     try {
       await spider.initSpider(key, sourceBean.type, apiBase);
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        AppLog.instance.log('[source_service] swallowed: $e');
+      }
 
     // 获取首页内容
     final result = await spider.getHomeContent(key, sourceBean.type, apiBase);

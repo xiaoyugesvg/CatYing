@@ -5,10 +5,10 @@ import '../../common/theme.dart';
 import '../../services/api_config.dart';
 import '../../services/tmdb_service.dart';
 import '../../services/background_service.dart';
-import '../../models/source_bean.dart';
 import '../../models/player_engine.dart';
 import '../../widgets/common_widgets.dart';
 import '../../common/theme_mode_store.dart';
+import '../../services/player_prefs.dart';
 import 'controller.dart';
 
 /// 设置页 - 对应 Swift SettingsView
@@ -24,13 +24,17 @@ class _SettingsPageState extends State<SettingsPage> {
 
   /// 弹幕 API 地址（Logvr-danmu / 弹弹play 兼容），播放器按视频 URL 匹配弹幕
   String _danmuApiUrl = '';
+  double _danmuFontSize = 14;
+  double _danmuOpacity = 1;
+  int _danmuTracks = 4;
+  double _danmuSpeed = 150;
   bool _sourceCacheEnabled = true;
   int _autoCleanIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    _loadDanmuApiUrl();
+    _loadDanmuPrefs();
     _loadCachePrefs();
   }
 
@@ -43,11 +47,18 @@ class _SettingsPageState extends State<SettingsPage> {
     });
   }
 
-  Future<void> _loadDanmuApiUrl() async {
+  Future<void> _loadDanmuPrefs() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final url = (prefs.getString('danmu_api_url') ?? '').trim();
-      if (mounted) setState(() => _danmuApiUrl = url);
+      if (!mounted) return;
+      setState(() {
+        _danmuApiUrl = url;
+        _danmuFontSize = (prefs.getDouble('danmu_font_size') ?? 14).clamp(10.0, 28.0);
+        _danmuOpacity = (prefs.getDouble('danmu_opacity') ?? 1).clamp(0.2, 1.0);
+        _danmuTracks = (prefs.getInt('danmu_tracks') ?? 4).clamp(2, 8);
+        _danmuSpeed = (prefs.getDouble('danmu_speed') ?? 150).clamp(80.0, 240.0);
+      });
     } catch (e) { /* ignore */ }
   }
 
@@ -416,7 +427,6 @@ class _SettingsPageState extends State<SettingsPage> {
     return AppCard(
       child: Column(
         children: [
-          // 点播播放器
           Obx(() => SettingsRow(
                 icon: Icons.play_circle_outline,
                 title: '点播播放器',
@@ -429,58 +439,101 @@ class _SettingsPageState extends State<SettingsPage> {
                   onSelect: (e) => controller.setVodPlayerEngine(e),
                 ),
               )),
+          // 按内核显示专有设置（真实可点、写入 PlayerPrefs 并被播放器读取）
+          Obx(() {
+            final engine = controller.vodPlayerEngine.value;
+            if (engine == PlayerEngine.mpv) {
+              return Column(
+                children: [
+                  Divider(color: AppTheme.borderLight, height: 1),
+                  SettingsRow(
+                    icon: Icons.memory,
+                    title: '视频解码（MPV）',
+                    value: controller.decodeMode.value.title,
+                    onTap: () => _showEnumSelector<VideoDecodeMode>(
+                      title: '视频解码',
+                      options: VideoDecodeMode.values,
+                      selected: controller.decodeMode.value,
+                      labelBuilder: (e) => e.title,
+                      onSelect: (e) => controller.setDecodeMode(e),
+                    ),
+                  ),
+                  Divider(color: AppTheme.borderLight, height: 1),
+                  SettingsRow(
+                    icon: Icons.storage_outlined,
+                    title: 'MPV缓冲',
+                    value: controller.vlcBufferMode.value.title,
+                    onTap: () => _showEnumSelector<VLCBufferMode>(
+                      title: 'MPV缓冲',
+                      options: VLCBufferMode.values,
+                      selected: controller.vlcBufferMode.value,
+                      labelBuilder: (e) => e.title,
+                      onSelect: (e) => controller.setVLCBufferMode(e),
+                    ),
+                  ),
+                ],
+              );
+            }
+            if (engine == PlayerEngine.webview) {
+              return Column(
+                children: [
+                  Divider(color: AppTheme.borderLight, height: 1),
+                  Obx(() => SettingsRow(
+                        icon: Icons.javascript,
+                        title: '网页 JS',
+                        value: PlayerPrefs.instance.webviewEnableJs.value
+                            ? '已开启'
+                            : '已关闭',
+                        trailingSwitch: true,
+                        switchValue: PlayerPrefs.instance.webviewEnableJs.value,
+                        onSwitchChanged: (v) =>
+                            PlayerPrefs.instance.setWebviewEnableJs(v),
+                      )),
+                  Divider(color: AppTheme.borderLight, height: 1),
+                  Obx(() => SettingsRow(
+                        icon: Icons.screen_rotation,
+                        title: '强制横屏',
+                        value: PlayerPrefs
+                                .instance.webviewForceLandscape.value
+                            ? '已开启'
+                            : '已关闭',
+                        trailingSwitch: true,
+                        switchValue:
+                            PlayerPrefs.instance.webviewForceLandscape.value,
+                        onSwitchChanged: (v) =>
+                            PlayerPrefs.instance.setWebviewForceLandscape(v),
+                      )),
+                ],
+              );
+            }
+            return Column(
+              children: [
+                Divider(color: AppTheme.borderLight, height: 1),
+                Obx(() => SettingsRow(
+                      icon: Icons.skip_next,
+                      title: '自动下一集',
+                      value: PlayerPrefs.instance.avAutoNext.value
+                          ? '已开启'
+                          : '已关闭',
+                      trailingSwitch: true,
+                      switchValue: PlayerPrefs.instance.avAutoNext.value,
+                      onSwitchChanged: (v) =>
+                          PlayerPrefs.instance.setAvAutoNext(v),
+                    )),
+              ],
+            );
+          }),
           Divider(color: AppTheme.borderLight, height: 1),
-          // 视频解码
-          Obx(() => SettingsRow(
-                icon: Icons.memory,
-                title: '视频解码',
-                value: controller.decodeMode.value.title,
-                onTap: () => _showEnumSelector<VideoDecodeMode>(
-                  title: '视频解码',
-                  options: VideoDecodeMode.values,
-                  selected: controller.decodeMode.value,
-                  labelBuilder: (e) => e.title,
-                  onSelect: (e) => controller.setDecodeMode(e),
-                ),
-              )),
-          // MPV缓冲（始终显示）
-          Divider(color: AppTheme.borderLight, height: 1),
-          Obx(() => SettingsRow(
-                icon: Icons.storage_outlined,
-                title: 'MPV缓冲',
-                value: controller.vlcBufferMode.value.title,
-                onTap: () => _showEnumSelector<VLCBufferMode>(
-                  title: 'MPV缓冲',
-                  options: VLCBufferMode.values,
-                  selected: controller.vlcBufferMode.value,
-                  labelBuilder: (e) => e.title,
-                  onSelect: (e) => controller.setVLCBufferMode(e),
-                ),
-              )),
-          Divider(color: AppTheme.borderLight, height: 1),
-          // 快进步长
           Obx(() => SettingsRow(
                 icon: Icons.fast_forward,
                 title: '快进步长',
                 value: '${controller.playTimeStep.value}秒',
                 onTap: () => _showTimeStepSelector(),
               )),
-          Divider(color: AppTheme.borderLight, height: 1),
-          // 弹幕 API（Logvr-danmu / 弹弹play 兼容）
-          SettingsRow(
-            icon: Icons.subtitles,
-            title: '弹幕 API',
-            value: _danmuApiUrl.isEmpty ? '未配置' : _danmuApiUrl,
-            onTap: _showDanmuApiEditDialog,
-          ),
         ],
       ),
     );
   }
-
-  // ============================================================
-  // TMDB 智能刮削
-  // ============================================================
 
   Widget _buildTmdbSection() {
     final tmdb = TmdbService.instance;
@@ -753,6 +806,106 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ],
       ),
+    );
+  }
+
+  /// 弹幕字号 / 透明度 / 密度 / 速度
+  void _showDanmuStyleDialog() {
+    var fontSize = _danmuFontSize;
+    var opacity = _danmuOpacity;
+    var tracks = _danmuTracks;
+    var speed = _danmuSpeed;
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              backgroundColor: AppTheme.backgroundSecondary,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+              ),
+              title: Text(
+                '弹幕样式',
+                style: TextStyle(color: AppTheme.textPrimary),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('字号 ${fontSize.round()}',
+                      style: TextStyle(color: AppTheme.textSecondary)),
+                  Slider(
+                    value: fontSize,
+                    min: 10,
+                    max: 28,
+                    divisions: 18,
+                    onChanged: (v) => setDialogState(() => fontSize = v),
+                  ),
+                  Text('透明度 ${(opacity * 100).round()}%',
+                      style: TextStyle(color: AppTheme.textSecondary)),
+                  Slider(
+                    value: opacity,
+                    min: 0.2,
+                    max: 1,
+                    divisions: 8,
+                    onChanged: (v) => setDialogState(() => opacity = v),
+                  ),
+                  Text('轨道密度 $tracks 条',
+                      style: TextStyle(color: AppTheme.textSecondary)),
+                  Slider(
+                    value: tracks.toDouble(),
+                    min: 2,
+                    max: 8,
+                    divisions: 6,
+                    onChanged: (v) =>
+                        setDialogState(() => tracks = v.round()),
+                  ),
+                  Text('滚动速度 ${speed.round()} px/s',
+                      style: TextStyle(color: AppTheme.textSecondary)),
+                  Slider(
+                    value: speed,
+                    min: 80,
+                    max: 240,
+                    divisions: 16,
+                    onChanged: (v) => setDialogState(() => speed = v),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: Text('取消',
+                      style: TextStyle(color: AppTheme.textSecondary)),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    try {
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setDouble('danmu_font_size', fontSize);
+                      await prefs.setDouble('danmu_opacity', opacity);
+                      await prefs.setInt('danmu_tracks', tracks);
+                      await prefs.setDouble('danmu_speed', speed);
+                    } catch (_) {}
+                    if (ctx.mounted) {
+                      Navigator.of(ctx).pop();
+                      if (mounted) {
+                        setState(() {
+                          _danmuFontSize = fontSize;
+                          _danmuOpacity = opacity;
+                          _danmuTracks = tracks;
+                          _danmuSpeed = speed;
+                        });
+                      }
+                    }
+                  },
+                  child: const Text('保存',
+                      style: TextStyle(color: AppTheme.accentColor)),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 

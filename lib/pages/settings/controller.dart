@@ -1,12 +1,12 @@
 import 'dart:io';
 import 'package:cached_network_image_ce/cached_network_image.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:get/get.dart';
 import '../../services/app_log.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/player_engine.dart';
+import '../../services/player_prefs.dart';
 import '../../services/api_config.dart';
 import '../../services/app_state.dart';
 import '../../services/nodejs_manager.dart';
@@ -35,7 +35,7 @@ class SettingsController extends GetxController {
   final configSuccess = false.obs;
   final pendingMultiRepoSelection = Rx<PendingMultiRepoSelection?>(null);
   final apiHistory = <String>[].obs;
-  final vodPlayerEngine = PlayerEngine.mpv.obs;
+  final vodPlayerEngine = PlayerEngine.avplayer.obs;
   final decodeMode = VideoDecodeMode.auto.obs;
   final vlcBufferMode = VLCBufferMode.balanced.obs;
   final playTimeStep = 10.obs;
@@ -73,21 +73,11 @@ class SettingsController extends GetxController {
       );
     }
 
-    // 迁移旧内核值（2026-09-27）：AVPlayer(1) 已移除，旧值 1 → 兜底回 MPV(0)
-    final storedEngineRaw = prefs.getInt(AppConstants.playTypeVod) ?? 0;
-    final migratedRaw =
-        storedEngineRaw == 1 ? PlayerEngine.mpv.value : storedEngineRaw;
-    if (migratedRaw != storedEngineRaw) {
-      await prefs.setInt(AppConstants.playTypeVod, migratedRaw);
-    }
-
-    vodPlayerEngine.value = PlayerEngine.fromStoredValue(migratedRaw);
-    decodeMode.value = VideoDecodeMode.fromStoredValue(
-      prefs.getInt('play_decode_mode') ?? 0,
-    );
-    vlcBufferMode.value = VLCBufferMode.fromStoredValue(
-      prefs.getInt('play_vlc_buffer_mode') ?? 0,
-    );
+    // 播放内核/选项统一走 PlayerPrefs（详情页实时监听）
+    await PlayerPrefs.instance.load();
+    vodPlayerEngine.value = PlayerPrefs.instance.vodEngine.value;
+    decodeMode.value = PlayerPrefs.instance.decodeMode.value;
+    vlcBufferMode.value = PlayerPrefs.instance.bufferMode.value;
 
     final savedStep = prefs.getInt('play_time_step') ?? 0;
     playTimeStep.value = savedStep > 0 ? savedStep : 10;
@@ -313,22 +303,19 @@ class SettingsController extends GetxController {
   Future<void> setVodPlayerEngine(PlayerEngine engine) async {
     if (!playerEngineOptions.contains(engine)) return;
     vodPlayerEngine.value = engine;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(AppConstants.playTypeVod, engine.value);
+    await PlayerPrefs.instance.setEngine(engine);
   }
 
   Future<void> setDecodeMode(VideoDecodeMode mode) async {
     if (!decodeModeOptions.contains(mode)) return;
     decodeMode.value = mode;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('play_decode_mode', mode.value);
+    await PlayerPrefs.instance.setDecodeMode(mode);
   }
 
   Future<void> setVLCBufferMode(VLCBufferMode mode) async {
     if (!vlcBufferModeOptions.contains(mode)) return;
     vlcBufferMode.value = mode;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('play_vlc_buffer_mode', mode.value);
+    await PlayerPrefs.instance.setBufferMode(mode);
   }
 
   /// 重新计算并刷新"缓存大小"显示

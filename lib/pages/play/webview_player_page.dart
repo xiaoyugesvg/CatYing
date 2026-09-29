@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/app_log.dart';
+import '../../services/player_prefs.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -36,7 +37,7 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
   void initState() {
     super.initState();
     // 网页播放页强制横屏（仅全屏页；内嵌模式保持竖屏布局）
-    if (!widget.embedded) {
+    if (!widget.embedded && PlayerPrefs.instance.webviewForceLandscape.value) {
       SystemChrome.setPreferredOrientations(const [
         DeviceOrientation.landscapeLeft,
         DeviceOrientation.landscapeRight,
@@ -46,9 +47,14 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
   }
 
   void _initController(String url) {
+    final enableJs = PlayerPrefs.instance.webviewEnableJs.value;
     _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setJavaScriptMode(
+          enableJs ? JavaScriptMode.unrestricted : JavaScriptMode.disabled)
       ..setBackgroundColor(const Color(0x00000000))
+      // 移动端 UA，部分解析站按 UA 下发 HTML5 播放器
+      ..setUserAgent(
+          'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1')
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (progress) {
@@ -80,12 +86,18 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     super.didUpdateWidget(oldWidget);
     // 换集 / 换清晰度 / 换线路时 URL 变化 → 重新加载
     if (oldWidget.url != widget.url) {
+      _loadingProgress = 0;
       _controller.loadRequest(Uri.parse(widget.url));
     }
   }
 
   @override
   void dispose() {
+    // 停掉页面媒体，避免 WebView 被销毁后声音残留
+    try {
+      _controller.runJavaScript(
+          'try{document.querySelectorAll("video,audio").forEach(function(m){m.pause&&m.pause();});}catch(e){}');
+    } catch (_) {}
     // 恢复允许竖屏 + 横屏（仅全屏页改过方向）
     if (!widget.embedded) {
       SystemChrome.setPreferredOrientations(const [

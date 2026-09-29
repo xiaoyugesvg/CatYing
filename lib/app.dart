@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart' show CupertinoActivityIndicator;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -8,7 +7,6 @@ import 'common/constants.dart';
 import 'services/app_state.dart';
 import 'services/app_log.dart';
 import 'services/background_service.dart';
-import 'services/nodejs_manager.dart';
 import 'pages/home/view.dart';
 import 'pages/history/view.dart';
 import 'pages/favorites/view.dart';
@@ -21,8 +19,6 @@ import 'router/app_pages.dart';
 import 'services/player_fullscreen_controller.dart';
 import 'widgets/video_player_pip.dart';
 import 'widgets/glass.dart';
-import 'widgets/circular_logo_progress.dart';
-import 'widgets/disclaimer_text.dart';
 import 'widgets/disclaimer_dialog.dart';
 import 'widgets/app_loading_view.dart';
 import 'common/theme_mode_store.dart';
@@ -47,16 +43,22 @@ class TVBoxApp extends StatelessWidget {
             View.of(context).platformDispatcher.platformBrightness ==
                 Brightness.light;
         ThemeModeStore.syncFromPlatform(platformLight);
-        return GetMaterialApp(
-          title: '猫影',
-          theme: AppTheme.lightTheme,
-          darkTheme: AppTheme.darkTheme,
-          themeMode: themeMode,
-          // 把 NavigatorState 暴露给 VideoPlayerPip，让画中画能插入到顶层 Overlay
-          navigatorKey: VideoPlayerPip.navigatorKey,
-          home: const ContentView(),
-          getPages: AppPages.pages,
-          debugShowCheckedModeBanner: false,
+        // AppTheme 玻璃色等随 isLight 变化，必须监听后整体重建
+        return ValueListenableBuilder<bool>(
+          valueListenable: ThemeModeStore.brightnessListenable,
+          builder: (context, _, __) {
+            return GetMaterialApp(
+              title: '猫影',
+              theme: AppTheme.lightTheme,
+              darkTheme: AppTheme.darkTheme,
+              themeMode: themeMode,
+              // 把 NavigatorState 暴露给 VideoPlayerPip，让画中画能插入到顶层 Overlay
+              navigatorKey: VideoPlayerPip.navigatorKey,
+              home: const ContentView(),
+              getPages: AppPages.pages,
+              debugShowCheckedModeBanner: false,
+            );
+          },
         );
       },
     );

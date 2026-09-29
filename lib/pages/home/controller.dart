@@ -1,11 +1,9 @@
-import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
+import '../../services/app_log.dart';
 import '../../models/cache_store.dart';
 import '../../models/movie.dart';
 import '../../models/movie_sort.dart';
 import '../../services/api_config.dart';
-import '../../services/app_log.dart';
-import '../../services/app_state.dart';
 import '../../services/source_service.dart';
 
 class HomeController extends GetxController {
@@ -45,6 +43,7 @@ class HomeController extends GetxController {
 
     // 缓存优先：首页轮播立刻出片
     final cacheKey = 'home_videos:${source.key}';
+    var hasHomeCache = false;
     try {
       final cached = CacheStore.instance.getJsonListCache(cacheKey, ttl: const Duration(hours: 12));
       if (cached != null && cached.isNotEmpty) {
@@ -52,10 +51,16 @@ class HomeController extends GetxController {
             .whereType<Map>()
             .map((e) => Video.fromJson(Map<String, dynamic>.from(e)))
             .toList();
+        hasHomeCache = true;
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        AppLog.instance.log('[controller] swallowed: $e');
+      }
 
-    isLoading.value = true;
+    // 已有内容/缓存时后台刷新，不闪 Loading
+    if (!hasHomeCache || videos.isEmpty) {
+      isLoading.value = true;
+    }
     errorMessage.value = null;
 
     try {
@@ -89,7 +94,7 @@ class HomeController extends GetxController {
     if (selectedSort.value?.id == sort.id) return;
     selectedSort.value = sort;
     errorMessage.value = null;
-    videos.clear();
+    // 不要 clear：保留旧列表直到缓存/网络回来，避免整页 Loading 闪一下
     currentPage.value = 1;
     hasMore.value = true;
     selectedFilters.clear();
@@ -109,13 +114,12 @@ class HomeController extends GetxController {
 
     final sort = selectedSort.value;
     if (sort == null) return;
-    videos.clear();
     currentPage.value = 1;
     hasMore.value = true;
     _loadCategoryVideos(page: 1, sort: sort);
   }
 
-/// 列表请求序号：筛选/分类快速切换时丢弃过期响应
+  /// 列表请求序号：筛选/分类快速切换时丢弃过期响应
   int _listRequestId = 0;
 
   /// 缓存 key 必须带上筛选条件，否则会塞回错误列表
@@ -143,23 +147,33 @@ class HomeController extends GetxController {
         : Map<String, String>.from(selectedFilters);
     final cacheKey = _catCacheKey(source.key, sort.id, filters);
 
-    // 仅第一页读缓存（含筛选组合）
-    if (page == 1 && videos.isEmpty) {
+    // 第一页优先读缓存：立刻出片，网络刷新静默
+    var cacheHit = false;
+    if (page == 1) {
       try {
         final cached = CacheStore.instance.getJsonListCache(
           cacheKey,
           ttl: const Duration(hours: 6),
         );
         if (cached != null && cached.isNotEmpty) {
-          videos.value = cached
+          final list = cached
               .whereType<Map>()
               .map((e) => Video.fromJson(Map<String, dynamic>.from(e)))
               .toList();
+          if (requestId == _listRequestId) {
+            videos.value = list;
+            cacheHit = true;
+          }
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        AppLog.instance.log('[controller] swallowed: $e');
+      }
     }
 
-    isLoading.value = true;
+    // 有缓存时只做后台刷新；无缓存才显示 Loading
+    if (!cacheHit) {
+      isLoading.value = true;
+    }
 
     try {
       final videoList = await SourceService.instance.getList(
@@ -175,8 +189,10 @@ class HomeController extends GetxController {
       }
 
       if (page == 1) {
-        videos.value = videoList;
-        // 第一页落盘（key 已区分筛选组合）
+        // 与缓存相同则不闪一下
+        if (!cacheHit || !_sameVideoIds(videos, videoList)) {
+          videos.value = videoList;
+        }
         if (videoList.isNotEmpty) {
           CacheStore.instance.setJsonCache(
             cacheKey,
@@ -191,13 +207,24 @@ class HomeController extends GetxController {
       errorMessage.value = null;
     } catch (e) {
       if (requestId == _listRequestId && selectedSort.value?.id == sort.id) {
-        errorMessage.value = _friendlyErrorMessage(e);
+        // 缓存已有内容时，网络失败不打断浏览
+        if (!cacheHit) {
+          errorMessage.value = _friendlyErrorMessage(e);
+        }
       }
     } finally {
       if (requestId == _listRequestId) {
         isLoading.value = false;
       }
     }
+  }
+
+  bool _sameVideoIds(List<Video> a, List<Video> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id) return false;
+    }
+    return true;
   }
 
   Future<void> loadMore() async {

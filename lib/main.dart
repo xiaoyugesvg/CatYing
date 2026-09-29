@@ -11,6 +11,7 @@ import 'services/app_log.dart';
 import 'services/app_state.dart';
 import 'services/background_service.dart';
 import 'services/live_service.dart';
+import 'services/player_prefs.dart';
 import 'services/tmdb_service.dart';
 import 'pages/search/controller.dart';
 
@@ -21,12 +22,15 @@ void main() async {
   // 关键事件写不进 <Documents>/nodejs-project/runtime/app.log
   await AppLog.instance.init();
 
-  // 初始化 media_kit（mpv 磁盘缓存选项在 Player 级注入, 见 video_player.dart）
+  // 初始化 media_kit（备用 MPV 内核；AVPlayer 为主时也需 init，设置里可切换）
   MediaKit.ensureInitialized();
 
   // 初始化 Hive 数据目录
   final appDir = await getApplicationDocumentsDirectory();
   Hive.init(appDir.path);
+
+  // 播放内核与选项
+  await PlayerPrefs.instance.load();
 
 
 

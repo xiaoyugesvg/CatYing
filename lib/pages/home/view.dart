@@ -4,8 +4,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../common/theme.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import '../../services/api_config.dart';
-import '../../services/app_state.dart';
 import '../../models/movie.dart';
 import '../../widgets/vod_card.dart';
 import '../../widgets/common_widgets.dart';
@@ -476,7 +476,7 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// 首页顶部推荐横幅（自动轮播）
+/// 首页顶部推荐横幅（自动轮播）：横版大图 + 左下标题 + 右下源角标
 class _RecommendBanner extends StatefulWidget {
   final List<Video> videos;
   const _RecommendBanner({required this.videos});
@@ -517,54 +517,94 @@ class _RecommendBannerState extends State<_RecommendBanner> {
     return Column(
       children: [
         SizedBox(
-          height: 220,
+          // 横版 16:9 观感（高度按宽度估算，PageView 内再 AspectRatio）
+          height: 196,
           child: PageView.builder(
             controller: _pageCtrl,
             itemCount: widget.videos.length,
             onPageChanged: (i) => setState(() => _index = i),
             itemBuilder: (_, i) {
               final v = widget.videos[i];
+              final badge = VodCard.badgeText(v);
               return GestureDetector(
                 onTap: () => Get.toNamed('/detail', arguments: v),
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 8),
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(18),
                     color: AppTheme.backgroundSecondary,
+                    border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      VodCard(video: v, onTap: null),
+                      // 横版铺满（海报 cover，优先展示画面主体）
+                      _BannerImage(url: v.pic),
+                      // 底部渐变（只放标题，不重复叠名）
                       Positioned(
                         left: 0,
                         right: 0,
                         bottom: 0,
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
+                        height: 72,
+                        child: DecoratedBox(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
                                 Colors.transparent,
-                                Colors.black.withValues(alpha: 0.78),
+                                Colors.black.withValues(alpha: 0.72),
                               ],
-                            ),
-                          ),
-                          child: Text(
-                            v.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ),
                       ),
+                      // 左下标题
+                      Positioned(
+                        left: 14,
+                        bottom: 12,
+                        right: 120,
+                        child: Text(
+                          v.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            shadows: [
+                              Shadow(blurRadius: 8, color: Colors.black54),
+                            ],
+                          ),
+                        ),
+                      ),
+                      // 右下半透明黑角标
+                      if (badge.isNotEmpty)
+                        Positioned(
+                          right: 12,
+                          bottom: 12,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: AppBrightness.isLight.value
+                                  ? Colors.black.withValues(alpha: 0.62)
+                                  : Colors.black.withValues(alpha: 0.55),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              badge,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -572,7 +612,7 @@ class _RecommendBannerState extends State<_RecommendBanner> {
             },
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: List.generate(widget.videos.length, (i) {
@@ -580,16 +620,48 @@ class _RecommendBannerState extends State<_RecommendBanner> {
             return AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               margin: const EdgeInsets.symmetric(horizontal: 3),
-              width: active ? 16 : 6,
+              width: active ? 18 : 6,
               height: 6,
               decoration: BoxDecoration(
-                color: active ? AppTheme.accentColor : Colors.white24,
+                color: active
+                    ? AppTheme.accentColor
+                    : AppTheme.textTertiary.withValues(alpha: 0.4),
                 borderRadius: BorderRadius.circular(3),
               ),
             );
           }),
         ),
       ],
+    );
+  }
+}
+
+class _BannerImage extends StatelessWidget {
+  final String url;
+  const _BannerImage({required this.url});
+
+  @override
+  Widget build(BuildContext context) {
+    final pic = url.trim();
+    if (pic.isEmpty || !pic.startsWith('http')) {
+      return ColoredBox(
+        color: AppTheme.backgroundTertiary,
+        child: Center(
+          child: Icon(Icons.movie_filter_outlined,
+              color: AppTheme.textTertiary, size: 40),
+        ),
+      );
+    }
+    return CachedNetworkImage(
+      imageUrl: pic,
+      fit: BoxFit.cover,
+      // 横版裁切：海报中间偏上更好看
+      alignment: Alignment(0, -0.15),
+      placeholder: (_, __) => ColoredBox(color: AppTheme.backgroundTertiary),
+      errorWidget: (_, __, ___) => ColoredBox(
+        color: AppTheme.backgroundTertiary,
+        child: Icon(Icons.broken_image_outlined, color: AppTheme.textTertiary),
+      ),
     );
   }
 }

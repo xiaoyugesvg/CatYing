@@ -1,5 +1,4 @@
 import 'package:get/get.dart';
-import '../../models/movie.dart';
 import '../../models/cache_store.dart';
 
 /// 收藏控制器
