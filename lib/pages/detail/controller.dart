@@ -293,7 +293,11 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   }
 
   void selectEpisode(int index) {
-    if (selectedEpisodeIndex.value == index && isPlaying.value) return;
+    final episodes = currentEpisodes;
+    if (index < 0 || index >= episodes.length) return;
+    // 同一集且已在播才忽略；换集永远要触发
+    final sameEp = selectedEpisodeIndex.value == index && isPlaying.value;
+    if (sameEp) return;
 
     isPlaying.value = false;
     playUrl.value = null;

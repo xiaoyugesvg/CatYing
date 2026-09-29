@@ -26,9 +26,14 @@ class HomeController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    // 监听主页源变化，自动重新加载
+    // 监听主页源变化：立刻清掉旧源数据，避免幻灯片/列表还是上一个源
     ever(ApiConfig.instance.homeSourceBean, (source) {
       if (source != null) {
+        homeVideos.clear();
+        videos.clear();
+        sorts.clear();
+        selectedSort.value = null;
+        selectedFilters.clear();
         refresh();
       }
     });

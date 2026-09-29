@@ -565,12 +565,15 @@ class _DetailPageState extends State<DetailPage> {
   /// PiP 互斥由 widget 内部的 _togglePiP / _onUserToggleFullscreen 处理。
 
   Widget _buildPlayerArea() {
-    // 关键：isFull/isPip/playUrl 都在同一个 Obx 内读取，
-    // 任何一个变化都会触发 rebuild，_buildPlayerWidget 内能拿到最新值
+    // 关键：相关 Rx 都在 Obx 内读取，选集/换源/全屏才能触发 rebuild
     return Obx(() {
       final isFull = _controller.isFullScreen.value;
       final isPip = VideoPlayerPip.instance.activeNotifier.value;
       final url = _controller.playUrl.value;
+      // 选集变化也要重建（角标/标题/切集参数）
+      final _ = _controller.selectedEpisodeIndex.value;
+      final __ = _controller.playbackSessionId.value;
+      final ___ = _controller.selectedFlag.value;
       if (url != null && url.isNotEmpty) {
         return _buildPlayerWidget(isFull: isFull, isPip: isPip);
       } else {

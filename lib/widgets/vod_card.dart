@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import '../common/theme.dart';
 import '../models/movie.dart';
-import '../services/api_config.dart';
 
 /// 视频卡片：海报 + 右下「源|备注」半透明黑标 + 居中标题
 class VodCard extends StatelessWidget {
@@ -11,21 +10,20 @@ class VodCard extends StatelessWidget {
 
   const VodCard({super.key, required this.video, this.onTap});
 
-  /// 「奇优影院 | 7.0」风格角标文案
+  /// 角标只显示备注/评分，**不带源名**（避免「奇优影院|奇优影院|7.0」）
   static String badgeText(Video video) {
-    final sourceName = _sourceName(video);
-    final note = video.note.trim();
-    if (sourceName.isNotEmpty && note.isNotEmpty) return '$sourceName | $note';
-    if (note.isNotEmpty) return note;
-    return sourceName;
-  }
-
-  static String _sourceName(Video video) {
-    try {
-      return ApiConfig.instance.getSource(video.sourceKey)?.name.trim() ?? '';
-    } catch (_) {
-      return '';
+    var note = video.note.trim();
+    // 去掉备注里可能自带的「源名 |」前缀
+    final sep = note.indexOf('|');
+    if (sep > 0 && sep < note.length - 1) {
+      final head = note.substring(0, sep).trim();
+      final tail = note.substring(sep + 1).trim();
+      // 前半段像站名（含中文且不含数字评分）时只留后半段
+      if (head.isNotEmpty && tail.isNotEmpty && !RegExp(r'\d').hasMatch(head)) {
+        note = tail;
+      }
     }
+    return note;
   }
 
   @override

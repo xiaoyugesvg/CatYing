@@ -1481,6 +1481,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
   }
 
+  /// 顶栏按钮统一入口：避免 AVPlayer 路径异常把点击吞掉
+  void _safeTap(FutureOr<void> Function() action) {
+    _scheduleHideControls();
+    Future<void>(() async {
+      try {
+        await action();
+      } catch (e, st) {
+        AppLog.instance.log('[video_player] tap failed: $e\n$st');
+      }
+    });
+  }
+
   Widget _buildHeaderBar() {
     return Positioned(
       top: 0,
@@ -1513,10 +1525,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 icon: _audioMode ? Icons.headphones : Icons.headphones_outlined,
                 size: 20,
                 width: 36,
-                onTap: () {
-                  _scheduleHideControls();
-                  _toggleAudioMode();
-                },
+                onTap: () => _safeTap(_toggleAudioMode),
               ),
 
             // 弹幕开关（设置里配置弹幕 API 后显示）
@@ -1525,11 +1534,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 icon: _danmuOn ? Icons.subtitles : Icons.subtitles_off,
                 size: 20,
                 width: 36,
-                onTap: () {
-                  _scheduleHideControls();
+                onTap: () => _safeTap(() async {
                   setState(() => _danmuOn = !_danmuOn);
-                  _persistDanmuOn();
-                },
+                  await _persistDanmuOn();
+                }),
               ),
 
             // 画中画
@@ -1537,10 +1545,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               icon: Icons.picture_in_picture_alt,
               size: 20,
               width: 36,
-              onTap: () {
-                _scheduleHideControls();
-                _togglePiP();
-              },
+              onTap: () => _safeTap(_togglePiP),
             ),
 
             // 投屏（AirPlay / DLNA 入口）
@@ -1548,10 +1553,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               icon: Icons.cast,
               size: 20,
               width: 36,
-              onTap: () {
-                _scheduleHideControls();
-                _toggleCast();
-              },
+              onTap: () => _safeTap(_toggleCast),
             ),
 
             if (_isNativeFullscreen) ...[const SizedBox(width: 4), _buildStatusBarInfo()],
@@ -1561,7 +1563,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               icon: Icons.more_horiz,
               size: 22,
               width: 40,
-              onTap: _openSettingsSheet,
+              onTap: () => _safeTap(_openSettingsSheet),
             ),
           ],
         ),
@@ -1607,7 +1609,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Widget _buildBottomControls() {
     return Positioned(
-      bottom: 0,
+      // 控件区整体下移一点，避免贴死画面底边
+      bottom: 10,
       left: 0,
       right: 0,
       child: _gradientBottomContainer(
@@ -1616,7 +1619,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           children: [
             _buildProgressBar(),
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
               child: Row(
                 children: [
                   if (widget.canPlayPrevious)
@@ -2503,6 +2506,31 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   // 画中画
   // ============================================================
 
+  /// 小窗关闭后回到 App：seek 到小窗进度并续播（AVPlayer 需 await）
+  Future<void> _resumeAfterPip(Duration resume, String playUrl) async {
+    if (!mounted) return;
+    setState(() => _pipActive = false);
+    try {
+      if (resume > Duration.zero) {
+        await _player.seek(resume);
+      }
+      // 系统 PiP 刚停，audio session 可能还在切换，稍候再 play
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await _player.play();
+    } catch (e) {
+      AppLog.instance.log('[video_player] resume after pip failed: $e');
+      try {
+        await _player.play();
+      } catch (_) {}
+    }
+    if (Platform.isIOS && playUrl.isNotEmpty) {
+      VideoPlayerPip.instance.prepareIos(
+        url: playUrl,
+        headers: widget.headers,
+      );
+    }
+  }
+
   Future<void> _togglePiP() async {
     // iOS 端：系统级画中画（双播放器方案）
     if (Platform.isIOS) {
@@ -2560,28 +2588,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       }
         },
         onStopped: () {
-          if (!mounted) return;
-          setState(() => _pipActive = false);
           final resume = VideoPlayerPip.instance.iosLastPosition;
-          if (resume > Duration.zero) {
-            try {
-              _player.seek(resume);
-            } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
-          }
-          try {
-            _player.play();
-          } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
-          // 二次进入：重新预热 AVPlayer
-          if (Platform.isIOS) {
-            VideoPlayerPip.instance.prepareIos(
-              url: playUrl,
-              headers: widget.headers,
-            );
-          }
+          _resumeAfterPip(resume, playUrl);
         },
       );
       if (!entered) {
@@ -2653,27 +2661,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       }
         },
         onStopped: () {
-          if (!mounted) return;
-          setState(() => _pipActive = false);
           final resume = VideoPlayerPip.instance.iosLastPosition;
-          if (resume > Duration.zero) {
-            try {
-              _player.seek(resume);
-            } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
-          }
-          try {
-            _player.play();
-          } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
-          if (Platform.isIOS) {
-            VideoPlayerPip.instance.prepareIos(
-              url: playUrl,
-              headers: widget.headers,
-            );
-          }
+          _resumeAfterPip(resume, playUrl);
         },
       );
       if (!entered) {
