@@ -78,6 +78,9 @@ class VideoPlayerWidget extends StatefulWidget {
   /// 跳过片尾秒数（0 表示关闭），对应 Swift skipOutroSeconds
   final int skipOutroSeconds;
 
+  /// 顶部按钮栏距顶部的额外间距（默认 8，详情页可传大一点让按钮往下挪）
+  final double topBarTopPadding;
+
   final VoidCallback? onPlaying;
   final ValueChanged<Duration>? onPositionChanged;
   final VoidCallback? onEnded;
@@ -110,6 +113,7 @@ class VideoPlayerWidget extends StatefulWidget {
     this.initialVideoFit,
     this.skipIntroSeconds = 0,
     this.skipOutroSeconds = 0,
+    this.topBarTopPadding = 8.0,
     this.onPlaying,
     this.onPositionChanged,
     this.onEnded,
@@ -2629,9 +2633,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Widget _gradientTopContainer({required Widget child}) {
     final pad = MediaQuery.of(context).padding;
-    // 与直播页顶栏一致：按钮 38 高，顶部间距 8（已在状态栏黑边/安全区之下）
+    // 与直播页顶栏一致：按钮 38 高，顶部间距由 topBarTopPadding 控制
     const contentH = 38.0;
-    final top = 8.0;
+    final top = widget.topBarTopPadding;
     return DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(

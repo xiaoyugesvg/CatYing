@@ -33,13 +33,6 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    // 监听重连状态
-    ever(ApiConfig.instance.isLoaded, (loaded) {
-      if (loaded && _isReconnecting) {
-        setState(() => _isReconnecting = false);
-        _controller.refresh();
-      }
-    });
   }
 
   @override
@@ -165,7 +158,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildCategoryTabBar() {
-    // 独立卡片：推荐 + 分类胶囊横向滚动
+    // 分类胶囊横向滚动
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.backgroundCard,
@@ -181,63 +174,42 @@ class _HomePageState extends State<HomePage> {
       ),
       child: SizedBox(
         height: 40,
-        child: ListView.builder(
+        child: Obx(() => ListView.builder(
           scrollDirection: Axis.horizontal,
           padding:
               const EdgeInsets.symmetric(horizontal: AppTheme.spacingXS),
-          itemCount: _controller.sorts.length + 1,
+          itemCount: _controller.sorts.length,
           itemBuilder: (context, index) {
-            // 0 = 推荐；1..n = 分类
-            if (index == 0) {
-              return Obx(() {
-              final isHome = _controller.selectedSort.value == null;
-              return Padding(
-                padding: const EdgeInsets.only(right: AppTheme.spacingSM),
-                child: GestureDetector(
-                  onTap: () {
-                    _controller.backToRecommend();
-                    setState(() => _showFilters = false);
-                  },
-                  child: _CategoryChip(
-                    label: '推荐',
-                    selected: isHome,
-                  ),
-                ),
-              );
-              });
-            }
-            final sort = _controller.sorts[index - 1];
-            return Obx(() {
-              final isSelected =
-                  _controller.selectedSort.value?.id == sort.id;
-              return Padding(
-                padding:
-                    const EdgeInsets.only(right: AppTheme.spacingSM),
-                child: GestureDetector(
-                  onTap: () {
-                    final wasSelected =
-                        _controller.selectedSort.value?.id == sort.id;
-                    if (wasSelected) {
-                      // 再点同一分类：切换筛选显隐
-                      setState(() {
-                        _showFilters = !_showFilters;
-                      });
-                      return;
-                    }
-                    _controller.selectSort(sort);
+            final sort = _controller.sorts[index];
+            final isSelected =
+                _controller.selectedSort.value?.id == sort.id;
+            return Padding(
+              padding:
+                  const EdgeInsets.only(right: AppTheme.spacingSM),
+              child: GestureDetector(
+                onTap: () {
+                  final wasSelected =
+                      _controller.selectedSort.value?.id == sort.id;
+                  if (wasSelected) {
+                    // 再点同一分类：切换筛选显隐
                     setState(() {
-                      _showFilters = true;
+                      _showFilters = !_showFilters;
                     });
-                  },
-                  child: _CategoryChip(
-                    label: sort.name,
-                    selected: isSelected,
-                  ),
+                    return;
+                  }
+                  _controller.selectSort(sort);
+                  setState(() {
+                    _showFilters = true;
+                  });
+                },
+                child: _CategoryChip(
+                  label: sort.name,
+                  selected: isSelected,
                 ),
-              );
-            });
+              ),
+            );
           },
-        ),
+        )),
       ),
     );
   }
@@ -315,12 +287,10 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildContentArea() {
     return Obx(() {
-      // ✅ 全部 Rx 在 Obx 闭包顶部读取，LayoutBuilder 内不再访问 Rx
-      // 否则 categoryVideos 赋值不会触发重建，分类切换后列表不更新
+      // 全部 Rx 在 Obx 闭包顶部读取，LayoutBuilder 内不再访问 Rx
       final isLoading = _controller.isLoading.value;
       final errorMsg = _controller.errorMessage.value;
-      final homeVideos = _controller.homeVideos.toList();
-      final displayVideos = _controller.displayVideos.toList();
+      final videos = _controller.videos.toList();
       final sorts = _controller.sorts.toList();
       final selectedSortId = _controller.selectedSort.value?.id;
       final hasMore = _controller.hasMore.value;
@@ -330,11 +300,11 @@ class _HomePageState extends State<HomePage> {
       final showFilters = _showFilters;
       final source = ApiConfig.instance.homeSourceBean.value;
 
-      if (isLoading && displayVideos.isEmpty && homeVideos.isEmpty) {
+      if (isLoading && videos.isEmpty) {
         return const AppLoading();
       }
 
-      if (errorMsg != null && displayVideos.isEmpty && homeVideos.isEmpty) {
+      if (errorMsg != null && videos.isEmpty) {
         return Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -368,7 +338,6 @@ class _HomePageState extends State<HomePage> {
         onRefresh: () => _controller.refresh(),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            // 只用局部变量，不访问 Rx
             final cardMinWidth = 120.0;
             final crossAxisCount =
                 (constraints.maxWidth / (cardMinWidth + AppTheme.cardSpacing))
@@ -379,31 +348,9 @@ class _HomePageState extends State<HomePage> {
                         AppTheme.cardSpacing * (crossAxisCount - 1)) /
                     crossAxisCount;
 
-            final homeList = homeVideos;
-            final categoryList = displayVideos;
-            final bannerItems = homeList.length > 6
-                ? homeList.sublist(0, 6)
-                : List<Video>.from(homeList);
-            final shelf1 = homeList.length > 6
-                ? homeList.sublist(
-                    6, homeList.length > 18 ? 18 : homeList.length)
-                : <Video>[];
-            final shelf2 = homeList.length > 18
-                ? homeList.sublist(
-                    18, homeList.length > 32 ? 32 : homeList.length)
-                : <Video>[];
-
             return CustomScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
-                if (bannerItems.isNotEmpty)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.only(
-                          top: AppTheme.spacingXS, bottom: 8),
-                      child: _RecommendBanner(videos: bannerItems),
-                    ),
-                  ),
                 if (sorts.isNotEmpty)
                   SliverToBoxAdapter(
                     child: Padding(
@@ -430,10 +377,6 @@ class _HomePageState extends State<HomePage> {
                       child: _buildFilterBar(),
                     ),
                   ),
-                if (shelf1.isNotEmpty)
-                  _ShelfRow(title: '推荐热播', videos: shelf1),
-                if (shelf2.isNotEmpty)
-                  _ShelfRow(title: '更多精彩', videos: shelf2),
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(
                     AppTheme.spacingXL,
@@ -451,7 +394,7 @@ class _HomePageState extends State<HomePage> {
                     ),
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {
-                        if (index >= categoryList.length) {
+                        if (index >= videos.length) {
                           if (hasMore && selectedSortId != null) {
                             WidgetsBinding.instance.addPostFrameCallback((_) {
                               _controller.loadMore();
@@ -471,13 +414,13 @@ class _HomePageState extends State<HomePage> {
                           }
                           return const SizedBox.shrink();
                         }
-                        final vid = categoryList[index];
+                        final vid = videos[index];
                         return VodCard(
                           video: vid,
                           onTap: () => Get.toNamed('/detail', arguments: vid),
                         );
                       },
-                      childCount: categoryList.length +
+                      childCount: videos.length +
                           ((hasMore && selectedSortId != null) ? 1 : 0),
                     ),
                   ),
