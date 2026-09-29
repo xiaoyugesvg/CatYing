@@ -48,6 +48,19 @@ class NodeJSManager {
   // HTTP server 状态（跨端统一）
   HttpServer? _httpServer;
   int _nativeServerPort = 0;
+
+  /// 本地回环 HTTP 复用 Dio，避免每次 verify/reload 新建
+  late final Dio _localHttpDio = Dio(BaseOptions(
+    connectTimeout: const Duration(seconds: 2),
+    sendTimeout: const Duration(seconds: 2),
+    receiveTimeout: const Duration(seconds: 2),
+  ));
+
+  /// 本地回环通知鉴权 token（Node 启动时通过 argv 传入，请求需携带）
+  final String _localAuthToken =
+      DateTime.now().microsecondsSinceEpoch.toRadixString(36) +
+          (1000 + DateTime.now().millisecond).toRadixString(36);
+  String get localAuthToken => _localAuthToken;
   int get nativeServerPort => _nativeServerPort;
 
   // HTTP server 层 → 平台实现的桥接
@@ -57,13 +70,16 @@ class NodeJSManager {
 
   NodeJSManager._internal() {
     if (!Platform.isIOS) {
-      throw UnsupportedError('Node.js 集成仅支持 iOS: ${Platform.operatingSystem}');
+      // 非 iOS：不支持嵌入 Node，延迟报错到 startNodeJS，构造不崩溃
+      AppLog.instance.nodejs('unsupported_platform',
+          fields: {'os': Platform.operatingSystem});
     }
     final ios = IOSNodeJSPlatform(
       onNodeReadyChanged: _nodeReadyBridge,
       onManagementPortChanged: _managementPortBridge,
       onSpiderPortChanged: _spiderPortBridge,
     );
+    ios.authToken = _localAuthToken;
     ios.initialize();
     _platform = ios;
   }
@@ -220,11 +236,7 @@ class NodeJSManager {
     final url = 'http://127.0.0.1:$managementPort/source/status';
     AppLog.instance.http('GET', url, port: managementPort,
         caller: 'verifySourceLoaded');
-    final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 2),
-      sendTimeout: const Duration(seconds: 2),
-      receiveTimeout: const Duration(seconds: 2),
-    ));
+    final dio = _localHttpDio;
     try {
       final resp = await dio.get<String>(
         url,
@@ -242,9 +254,14 @@ class NodeJSManager {
       }
       final body = resp.data ?? '';
       // main.js /source/status 返回 { sourceLoaded: sourceModule !== null, ... }
-      // 必须 sourceLoaded=true 才算 Node.js 源真的已加载
-      final loaded = body.contains('"sourceLoaded":true') ||
-          body.contains('"sourceLoaded": true');
+      var loaded = false;
+      try {
+        final decoded = jsonDecode(body) as Map<String, dynamic>;
+        loaded = decoded['sourceLoaded'] == true;
+      } catch (_) {
+        // 兼容异常格式，失败则视为未加载
+        loaded = false;
+      }
       AppLog.instance.http('GET', url, port: managementPort,
           statusCode: resp.statusCode, elapsedMs: elapsed, ok: true,
           caller: 'verifySourceLoaded');
@@ -281,11 +298,7 @@ class NodeJSManager {
     final url = 'http://127.0.0.1:$port/check';
     AppLog.instance.http('GET', url, port: port,
         caller: 'verifyManagementPort');
-    final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 2),
-      sendTimeout: const Duration(seconds: 2),
-      receiveTimeout: const Duration(seconds: 2),
-    ));
+    final dio = _localHttpDio;
     try {
       final resp = await dio.get<String>(
         url,
@@ -337,11 +350,7 @@ class NodeJSManager {
       final sourcePath = await getDocumentsSourcePath();
       AppLog.instance.reload('start', port: port,
           fields: {'sourcePath': sourcePath, 'url': url});
-      final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 5),
-        sendTimeout: const Duration(seconds: 5),
-        receiveTimeout: const Duration(seconds: 5),
-      ));
+      final dio = _localHttpDio;
       final resp = await dio.post(
         url,
         data: {'path': sourcePath},
@@ -400,7 +409,7 @@ class NodeJSManager {
           DateTime.now().difference(startAt).inMilliseconds, fields: {
         'port': _nativeServerPort,
       });
-      print('[NodeJSManager] 本地通知服务器已启动，端口: $_nativeServerPort');
+      AppLog.instance.nodejs('see_details');
 
       _httpServer!.listen((HttpRequest request) {
         _handleRequest(request);
@@ -410,7 +419,7 @@ class NodeJSManager {
       AppLog.instance.nodejs('http_server_fail',
           elapsedMs: DateTime.now().difference(startAt).inMilliseconds,
           ok: false, error: e.toString());
-      print('[NodeJSManager] 本地 Web 服务器启动失败: $e');
+      AppLog.instance.nodejs('see_details');
       return false;
     }
   }
@@ -433,6 +442,20 @@ class NodeJSManager {
   void _handleRequest(HttpRequest request) {
     final path = request.uri.path;
     final query = request.uri.queryParameters;
+    // 本地回环鉴权：防止其它进程伪造通知
+    final token = query['token'] ??
+        request.headers.value('x-auth-token') ??
+        '';
+    if (token != _localAuthToken) {
+      AppLog.instance.ports('http_request_rejected', ok: false, fields: {
+        'path': path,
+        'reason': 'bad_token',
+      });
+      request.response
+        ..statusCode = HttpStatus.forbidden
+        ..close();
+      return;
+    }
     final remotePort = request.connectionInfo?.remotePort ?? 0;
     final receivedAt = DateTime.now();
 
@@ -493,7 +516,7 @@ class NodeJSManager {
             } catch (e) {
               AppLog.instance.ports('onMessage_parse_fail',
                   ok: false, error: e.toString());
-              print('[NodeJSManager] 解析消息失败: $e');
+              AppLog.instance.nodejs('see_details');
             }
             request.response
               ..write('OK')
@@ -502,7 +525,7 @@ class NodeJSManager {
           onError: (e) {
             AppLog.instance.ports('onMessage_read_fail',
                 ok: false, error: e.toString());
-            print('[NodeJSManager] 读取消息失败: $e');
+            AppLog.instance.nodejs('see_details');
             request.response
               ..statusCode = HttpStatus.badRequest
               ..close();

@@ -98,7 +98,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
           final results = await SourceService.instance.search(source, keyword);
           collected = results.where((v) => v.id != info.id).toList();
           if (collected.isNotEmpty) break;
-        } catch (_) {}
+        } catch (e) { /* ignore */ }
       }
       recommended.value = collected.take(30).toList();
     } catch (_) {

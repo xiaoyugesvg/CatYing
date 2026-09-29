@@ -103,7 +103,7 @@ class _DetailPageState extends State<DetailPage> {
       final prefs = await SharedPreferences.getInstance();
       _prefs = prefs;
       _prefsPlayTypeVod = prefs.getInt(AppConstants.playTypeVod);
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   void _loadDetailIfNeeded() {

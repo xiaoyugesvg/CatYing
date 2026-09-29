@@ -189,6 +189,7 @@ class _HomePageState extends State<HomePage> {
           itemBuilder: (context, index) {
             // 0 = 推荐；1..n = 分类
             if (index == 0) {
+              return Obx(() {
               final isHome = _controller.selectedSort.value == null;
               return Padding(
                 padding: const EdgeInsets.only(right: AppTheme.spacingSM),
@@ -203,6 +204,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
               );
+              });
             }
             final sort = _controller.sorts[index - 1];
             return Obx(() {
@@ -313,28 +315,37 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildContentArea() {
     return Obx(() {
-      if (_controller.isLoading.value &&
-          _controller.categoryVideos.isEmpty &&
-          _controller.homeVideos.isEmpty) {
+      // ✅ 全部 Rx 在 Obx 闭包顶部读取，LayoutBuilder 内不再访问 Rx
+      // 否则 categoryVideos 赋值不会触发重建，分类切换后列表不更新
+      final isLoading = _controller.isLoading.value;
+      final errorMsg = _controller.errorMessage.value;
+      final homeVideos = _controller.homeVideos.toList();
+      final displayVideos = _controller.displayVideos.toList();
+      final sorts = _controller.sorts.toList();
+      final selectedSortId = _controller.selectedSort.value?.id;
+      final hasMore = _controller.hasMore.value;
+      final selectedFilters =
+          Map<String, String>.from(_controller.selectedFilters);
+      final currentFilters = _controller.currentFilters.toList();
+      final showFilters = _showFilters;
+      final source = ApiConfig.instance.homeSourceBean.value;
+
+      if (isLoading && displayVideos.isEmpty && homeVideos.isEmpty) {
         return const AppLoading();
       }
 
-      if (_controller.errorMessage.value != null &&
-          _controller.categoryVideos.isEmpty) {
-        final source = ApiConfig.instance.homeSourceBean.value;
+      if (errorMsg != null && displayVideos.isEmpty && homeVideos.isEmpty) {
         return Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 索引服务特殊提示 - 对应 Swift isIndexSite 错误处理
               if (source != null && source.isIndexSite)
                 const AppError(message: '该线路为索引服务，请点击影视跳转搜索')
               else
                 AppError(
-                  message: _controller.errorMessage.value!,
+                  message: errorMsg,
                   onRetry: () => _controller.refresh(),
                 ),
-              // 不支持的源类型提示 - 对应 Swift !isSupportedInSwift
               if (source != null && !source.isSupportedInSwift)
                 Padding(
                   padding: const EdgeInsets.only(top: AppTheme.spacingSM),
@@ -351,15 +362,13 @@ class _HomePageState extends State<HomePage> {
         );
       }
 
-      // 对应 Swift: 选中分类时显示 categoryVideos，否则显示 homeVideos
-      final videos = _controller.displayVideos;
-
       return RefreshIndicator(
         color: AppTheme.accentColor,
         backgroundColor: AppTheme.backgroundSecondary,
         onRefresh: () => _controller.refresh(),
         child: LayoutBuilder(
           builder: (context, constraints) {
+            // 只用局部变量，不访问 Rx
             final cardMinWidth = 120.0;
             final crossAxisCount =
                 (constraints.maxWidth / (cardMinWidth + AppTheme.cardSpacing))
@@ -370,21 +379,23 @@ class _HomePageState extends State<HomePage> {
                         AppTheme.cardSpacing * (crossAxisCount - 1)) /
                     crossAxisCount;
 
-            final homeList = _controller.homeVideos;
-            final categoryList = _controller.displayVideos;
-            final bannerItems =
-                homeList.length > 6 ? homeList.sublist(0, 6) : homeList;
+            final homeList = homeVideos;
+            final categoryList = displayVideos;
+            final bannerItems = homeList.length > 6
+                ? homeList.sublist(0, 6)
+                : List<Video>.from(homeList);
             final shelf1 = homeList.length > 6
-                ? homeList.sublist(6, homeList.length > 18 ? 18 : homeList.length)
+                ? homeList.sublist(
+                    6, homeList.length > 18 ? 18 : homeList.length)
                 : <Video>[];
             final shelf2 = homeList.length > 18
-                ? homeList.sublist(18, homeList.length > 32 ? 32 : homeList.length)
+                ? homeList.sublist(
+                    18, homeList.length > 32 ? 32 : homeList.length)
                 : <Video>[];
 
             return CustomScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
-                // 1. 大图幻灯片（紧接搜索栏，高度更大）
                 if (bannerItems.isNotEmpty)
                   SliverToBoxAdapter(
                     child: Padding(
@@ -393,8 +404,7 @@ class _HomePageState extends State<HomePage> {
                       child: _RecommendBanner(videos: bannerItems),
                     ),
                   ),
-                // 2. 分类胶囊（幻灯片下方）
-                if (_controller.sorts.isNotEmpty)
+                if (sorts.isNotEmpty)
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(
@@ -406,32 +416,24 @@ class _HomePageState extends State<HomePage> {
                       child: _buildCategoryTabBar(),
                     ),
                   ),
-                // 3. 筛选：点分类时弹出，默认隐藏
-                if (_showFilters &&
-                    _controller.selectedSort.value != null &&
-                    _controller.currentFilters.isNotEmpty)
+                if (showFilters &&
+                    selectedSortId != null &&
+                    currentFilters.isNotEmpty)
                   SliverToBoxAdapter(
-                    child: AnimatedSize(
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOut,
-                      alignment: Alignment.topCenter,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          AppTheme.spacingLG,
-                          0,
-                          AppTheme.spacingLG,
-                          AppTheme.spacingSM,
-                        ),
-                        child: _buildFilterBar(),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppTheme.spacingLG,
+                        0,
+                        AppTheme.spacingLG,
+                        AppTheme.spacingSM,
                       ),
+                      child: _buildFilterBar(),
                     ),
                   ),
-                // 4. 横滑片单
                 if (shelf1.isNotEmpty)
                   _ShelfRow(title: '推荐热播', videos: shelf1),
                 if (shelf2.isNotEmpty)
                   _ShelfRow(title: '更多精彩', videos: shelf2),
-                // 分类网格
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(
                     AppTheme.spacingXL,
@@ -450,8 +452,7 @@ class _HomePageState extends State<HomePage> {
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {
                         if (index >= categoryList.length) {
-                          if (_controller.hasMore.value &&
-                              _controller.selectedSort.value != null) {
+                          if (hasMore && selectedSortId != null) {
                             WidgetsBinding.instance.addPostFrameCallback((_) {
                               _controller.loadMore();
                             });
@@ -473,15 +474,11 @@ class _HomePageState extends State<HomePage> {
                         final vid = categoryList[index];
                         return VodCard(
                           video: vid,
-                          onTap: () =>
-                              Get.toNamed('/detail', arguments: vid),
+                          onTap: () => Get.toNamed('/detail', arguments: vid),
                         );
                       },
                       childCount: categoryList.length +
-                          ((_controller.hasMore.value &&
-                                  _controller.selectedSort.value != null)
-                              ? 1
-                              : 0),
+                          ((hasMore && selectedSortId != null) ? 1 : 0),
                     ),
                   ),
                 ),
@@ -506,7 +503,7 @@ class _HomePageState extends State<HomePage> {
             if (decoded.startsWith('http')) {
               openUrl = decoded;
             }
-          } catch (_) {}
+          } catch (e) { /* ignore */ }
         }
       }
     }

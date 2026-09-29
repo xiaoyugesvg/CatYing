@@ -93,14 +93,14 @@ class SpiderService {
               // 某些 Spider 响应可能返回数组，包装为对象
               return {'list': decoded};
             }
-            print('[SpiderService] 响应不是JSON对象: $url, body类型=${decoded.runtimeType}');
+            AppLog.instance.log('[SpiderService] 响应不是JSON对象: $url, body类型=${decoded.runtimeType}');
             return null;
           } catch (e) {
-            print('[SpiderService] JSON解析失败: $url, 错误=$e, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}');
+            AppLog.instance.log('[SpiderService] JSON解析失败: $url, 错误=$e, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}');
             return null;
           }
         } else {
-          print('[SpiderService] HTTP错误 $statusCode: $url, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}');
+          AppLog.instance.log('[SpiderService] HTTP错误 $statusCode: $url, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}');
           return null;
         }
       } on DioException catch (e) {
@@ -112,21 +112,21 @@ class SpiderService {
             e.type == DioExceptionType.receiveTimeout ||
             e.type == DioExceptionType.unknown;
         if (attempt < _maxPostRetries && isRetriable) {
-          print('[SpiderService] POST $url 第 ${attempt + 1} 次失败，${_postRetryDelay.inMilliseconds}ms 后重试: ${e.type}/${e.message}');
+          AppLog.instance.log('[SpiderService] POST $url 第 ${attempt + 1} 次失败，${_postRetryDelay.inMilliseconds}ms 后重试: ${e.type}/${e.message}');
           await Future.delayed(_postRetryDelay);
           // 重试前重建 dio（确保新 socket）
           try {
             _dio.close(force: true);
-          } catch (_) {}
+          } catch (e) { /* ignore */ }
           _dio = _buildDio();
           continue;
         }
         final code = e.response?.statusCode ?? 0;
         final respBody = e.response?.data?.toString() ?? '';
-        print('[SpiderService] POST $url 失败: code=$code, type=${e.type}, message=${e.message}, body=${respBody.length > 500 ? respBody.substring(0, 500) : respBody}');
+        AppLog.instance.log('[SpiderService] POST $url 失败: code=$code, type=${e.type}, message=${e.message}, body=${respBody.length > 500 ? respBody.substring(0, 500) : respBody}');
         return null;
       } catch (e) {
-        print('[SpiderService] POST $url 未知错误: $e');
+        AppLog.instance.log('[SpiderService] POST $url 未知错误: $e');
         return null;
       }
     }
@@ -143,7 +143,7 @@ class SpiderService {
     if (!isSpiderReady) return null;
 
     final url = 'http://127.0.0.1:$_spiderPort/config';
-    print('[SpiderService] getCatConfig: $url');
+    AppLog.instance.log('[SpiderService] getCatConfig: $url');
 
     try {
       final response = await _dio.get<String>(
@@ -160,18 +160,18 @@ class SpiderService {
           if (decoded is Map<String, dynamic>) {
             return decoded;
           }
-          print('[SpiderService] getCatConfig 响应不是JSON对象: body类型=${decoded.runtimeType}');
+          AppLog.instance.log('[SpiderService] getCatConfig 响应不是JSON对象: body类型=${decoded.runtimeType}');
           return null;
         } catch (e) {
-          print('[SpiderService] getCatConfig JSON解析失败: 错误=$e, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}');
+          AppLog.instance.log('[SpiderService] getCatConfig JSON解析失败: 错误=$e, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}');
           return null;
         }
       } else {
-        print('[SpiderService] getCatConfig HTTP错误 $statusCode: body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}');
+        AppLog.instance.log('[SpiderService] getCatConfig HTTP错误 $statusCode: body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}');
         return null;
       }
     } on DioException catch (e) {
-      print('[SpiderService] getCatConfig 失败: ${e.type}, ${e.message}');
+      AppLog.instance.log('[SpiderService] getCatConfig 失败: ${e.type}, ${e.message}');
       return null;
     }
   }
@@ -181,7 +181,7 @@ class SpiderService {
     if (!isSpiderReady) return null;
 
     final url = _buildSpiderUrl(key, type, apiBase, 'init');
-    print('[SpiderService] initSpider: $url');
+    AppLog.instance.log('[SpiderService] initSpider: $url');
 
     return _postJSON(url, <String, dynamic>{});
   }
@@ -191,7 +191,7 @@ class SpiderService {
     if (!isSpiderReady) return null;
 
     final url = _buildSpiderUrl(key, type, apiBase, 'home');
-    print('[SpiderService] getHomeContent: $url');
+    AppLog.instance.log('[SpiderService] getHomeContent: $url');
 
     return _postJSON(url, <String, dynamic>{});
   }
@@ -206,7 +206,7 @@ class SpiderService {
     if (!isSpiderReady) return null;
 
     final url = _buildSpiderUrl(key, type, apiBase, 'category');
-    print('[SpiderService] getCategoryContent: $url, id=$id, page=$page');
+    AppLog.instance.log('[SpiderService] getCategoryContent: $url, id=$id, page=$page');
 
     final body = <String, dynamic>{
       'id': id,
@@ -223,7 +223,7 @@ class SpiderService {
     if (!isSpiderReady) return null;
 
     final url = _buildSpiderUrl(key, type, apiBase, 'detail');
-    print('[SpiderService] getDetail: $url, id=$id');
+    AppLog.instance.log('[SpiderService] getDetail: $url, id=$id');
 
     return _postJSON(url, {'id': id});
   }
@@ -234,7 +234,7 @@ class SpiderService {
     if (!isSpiderReady) return null;
 
     final url = _buildSpiderUrl(key, type, apiBase, 'play');
-    print('[SpiderService] getPlayUrl: $url, flag=$flag, id=$id');
+    AppLog.instance.log('[SpiderService] getPlayUrl: $url, flag=$flag, id=$id');
 
     return _postJSON(url, {'flag': flag, 'id': id});
   }
@@ -245,7 +245,7 @@ class SpiderService {
     if (!isSpiderReady) return null;
 
     final url = _buildSpiderUrl(key, type, apiBase, 'search');
-    print('[SpiderService] search: $url, keyword=$keyword, page=$page');
+    AppLog.instance.log('[SpiderService] search: $url, keyword=$keyword, page=$page');
 
     return _postJSON(url, {'wd': keyword, 'page': page});
   }
@@ -269,7 +269,7 @@ class SpiderService {
     // 对应 Swift: 先 init（忽略错误），再 search
     try {
       await initSpider(spiderKey, spiderType, apiBase);
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
 
     return search(spiderKey, spiderType, apiBase, keyword, page: page);
   }
@@ -279,18 +279,15 @@ class SpiderService {
   // 用于非并发场景（如首页加载、详情页）
   // ============================================================
 
-  String? _currentKey;
-  int? _currentType;
-  String? _currentApiBase;
+  /// 当前 Spider 会话（原子替换，避免多字段读到不一致组合）
+  ({String key, int type, String apiBase})? _currentSpider;
 
   /// 设置当前 Spider 信息 - 对应 Swift setCurrentSpider
   /// 仅用于非并发场景
   void setCurrentSpider(String key, int type, String? apiBase,
       {String? ext, String? jar}) {
-    _currentKey = key;
-    _currentType = type;
-    _currentApiBase = apiBase;
-    print('[SpiderService] setCurrentSpider: key=$key, type=$type, apiBase=$apiBase');
+    _currentSpider = (key: key, type: type, apiBase: apiBase ?? '');
+    AppLog.instance.log('[SpiderService] setCurrentSpider: key=$key, type=$type, apiBase=$apiBase');
   }
 
   /// 获取当前 Spider 的 key/type/apiBase
@@ -300,19 +297,18 @@ class SpiderService {
   /// `_currentKey` 为 null，强解包抛空安全异常 → App 崩溃"像重启一样"。
   /// 改为空安全返回：未设置时返回 ('', 0, '')，调用方自行降级。
   (String, int, String) getCurrentSpiderInfo() {
-    return (_currentKey ?? '', _currentType ?? 0, _currentApiBase ?? '');
+    final s = _currentSpider;
+    return (s?.key ?? '', s?.type ?? 0, s?.apiBase ?? '');
   }
 
   /// 使当前 Spider 会话失效 - 对应 Swift invalidateSession
   /// 关键：必须同时关闭并重建 dio，否则 iOS 后台/锁屏后切回前台时
   /// dio 复用的 socket 已被系统断开，所有请求会静默失败
   void invalidateSession() {
-    _currentKey = null;
-    _currentType = null;
-    _currentApiBase = null;
+    _currentSpider = null;
     try {
       _dio.close(force: true);
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
     _dio = _buildDio();
   }
 }

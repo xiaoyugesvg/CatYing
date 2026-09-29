@@ -46,7 +46,7 @@ class LiveService extends GetxService {
         _persistedUrl = url;
         await loadFromUrl(url);
       }
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   Future<void> _restoreBlocked() async {
@@ -54,14 +54,14 @@ class LiveService extends GetxService {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getStringList('blocked_groups') ?? const [];
       blockedGroups.value = saved;
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   Future<void> _persistBlocked() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setStringList('blocked_groups', blockedGroups.toList());
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   void toggleBlockedGroup(String name) {
@@ -201,7 +201,7 @@ class LiveService extends GetxService {
           await _saveChannelCache(cacheId, parsed);
         }
       } catch (e) {
-        print('[LiveService] 拉取直播列表失败 $url: $e');
+        debugPrint('[LiveService] 拉取直播列表失败 $url: $e');
         // 网络失败时，若上面已有缓存则保持现状
         if (cached == null && all.isEmpty) {
           error.value = '直播源加载失败，请检查网络';
@@ -408,7 +408,7 @@ class LiveService extends GetxService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('live_lives', jsonEncode(_rawLives));
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   Future<String> _fetch(String url, {String? ua}) async {
@@ -449,7 +449,7 @@ class LiveService extends GetxService {
             .toList(),
       });
       await prefs.setString(_cacheKeyFor(id), payload);
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   Future<List<LiveChannel>?> _readChannelCache(String id) async {
@@ -586,7 +586,7 @@ class LiveService extends GetxService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('live_url', url);
       _persistedUrl = url;
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   Future<void> _persistName(String name) async {
@@ -594,7 +594,7 @@ class LiveService extends GetxService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('live_name', name);
       _persistedName = name;
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   /// 清空全部直播数据（删除直播源）
@@ -604,7 +604,7 @@ class LiveService extends GetxService {
       await prefs.remove('live_url');
       await prefs.remove('live_lives');
       await prefs.remove('live_name');
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
     _persistedUrl = null;
     _persistedName = null;
     channels.value = [];

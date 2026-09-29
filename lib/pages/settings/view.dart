@@ -8,7 +8,7 @@ import '../../services/background_service.dart';
 import '../../models/source_bean.dart';
 import '../../models/player_engine.dart';
 import '../../widgets/common_widgets.dart';
-import '../../app.dart' show ThemeModeStore;
+import '../../common/theme_mode_store.dart';
 import 'controller.dart';
 
 /// 设置页 - 对应 Swift SettingsView
@@ -48,7 +48,7 @@ class _SettingsPageState extends State<SettingsPage> {
       final prefs = await SharedPreferences.getInstance();
       final url = (prefs.getString('danmu_api_url') ?? '').trim();
       if (mounted) setState(() => _danmuApiUrl = url);
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   @override
@@ -740,7 +740,7 @@ class _SettingsPageState extends State<SettingsPage> {
               try {
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.setString('danmu_api_url', url);
-              } catch (_) {}
+              } catch (e) { /* ignore */ }
               if (ctx.mounted) {
                 Navigator.of(ctx).pop();
                 if (mounted) setState(() => _danmuApiUrl = url);

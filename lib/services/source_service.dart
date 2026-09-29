@@ -116,7 +116,7 @@ class SourceService {
         if (fallback.isNotEmpty) {
           result = (result.$1, fallback);
         }
-      } catch (_) {}
+      } catch (e) { /* ignore */ }
     }
 
     return result;
@@ -155,7 +155,7 @@ class SourceService {
         // 解析首页推荐视频
         homeVideos = _parseVideoListFromJson(
             json['list'], sourceBean.key);
-      } catch (_) {}
+      } catch (e) { /* ignore */ }
     }
 
     return (sorts, homeVideos);
@@ -299,7 +299,7 @@ class SourceService {
     try {
       final json = jsonDecode(jsonStr) as Map<String, dynamic>;
       videos.addAll(_parseVideoListFromJson(json['list'], sourceKey));
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
 
     return videos;
   }
@@ -330,7 +330,7 @@ class SourceService {
           dt: video.dt,
         );
         videos.add(video);
-      } catch (_) {}
+      } catch (e) { /* ignore */ }
     }
     return videos;
   }
@@ -708,7 +708,7 @@ class SourceService {
     // 初始化 Spider - 对应 Swift: try await spider.initSpider()
     try {
       await spider.initSpider(key, sourceBean.type, apiBase);
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
 
     // 获取首页内容
     final result = await spider.getHomeContent(key, sourceBean.type, apiBase);
@@ -837,7 +837,7 @@ class SourceService {
     final apiBase =
         sourceBean.api.startsWith('http') ? '' : sourceBean.api;
 
-    print('[SourceService] _spiderSearch: key=$key, type=${sourceBean.type}, apiBase=$apiBase, keyword=$keyword');
+    debugPrint('[SourceService] _spiderSearch: key=$key, type=${sourceBean.type}, apiBase=$apiBase, keyword=$keyword');
 
     // 对应 Swift searchWithSpider: 原子操作，先 init 再 search
     // 不依赖全局状态，避免并发搜索时竞态条件
@@ -848,12 +848,12 @@ class SourceService {
       keyword: keyword,
     );
     if (result == null) {
-      print('[SourceService] _spiderSearch: searchWithSpider 返回 null');
+      debugPrint('[SourceService] _spiderSearch: searchWithSpider 返回 null');
       return [];
     }
 
     final list = result['list'];
-    print('[SourceService] _spiderSearch: 返回 list=${list is List ? list.length : list.runtimeType} items');
+    debugPrint('[SourceService] _spiderSearch: 返回 list=${list is List ? list.length : list.runtimeType} items');
     return _parseVideoListFromJson(list, sourceBean.key);
   }
 }

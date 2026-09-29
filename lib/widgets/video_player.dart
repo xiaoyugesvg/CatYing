@@ -337,10 +337,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
     _playerSubs.add(_player.stream.buffering.listen((buffering) {
       if (!mounted) return;
-      // 播放中/已有进度时不要被 buffering 抖回转圈
-      final show = buffering && !_isPlaying && _position == Duration.zero;
-      if (show != _isBuffering) {
-        setState(() => _isBuffering = show);
+      // 换集后 buffering=true 时必须能显示转圈，不能被旧的 _isPlaying/_position 挡住
+      if (buffering != _isBuffering) {
+        setState(() => _isBuffering = buffering);
       }
     }));
 
@@ -443,7 +442,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         final lvl = await battery.batteryLevel;
         if (!mounted) return;
         setState(() => _batteryLevel = lvl);
-      } catch (_) {}
+      } catch (e) { /* ignore */ }
       _batteryStateSub = battery.onBatteryStateChanged.listen((state) async {
         if (!mounted) return;
         setState(() => _batteryState = state);
@@ -451,7 +450,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           final lvl = await battery.batteryLevel;
           if (!mounted) return;
           setState(() => _batteryLevel = lvl);
-        } catch (_) {}
+        } catch (e) { /* ignore */ }
       });
     } catch (e) {
       debugPrint('=== _initBatteryMonitor: 失败: $e ===');
@@ -524,14 +523,23 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         });
         try {
           _player.setRate(_playbackSpeed);
-        } catch (_) {}
+        } catch (e) { /* ignore */ }
       }
-      _persisted.resumeApplied = false;
+      // 换集/换源：清掉上一集的进度与缓冲态，避免进度条/转圈残留
+      _pendingResumeSeconds = null;
+      _lastNotifiedPositionSec = -1;
+      setState(() {
+        _position = Duration.zero;
+        _duration = Duration.zero;
+        _positionVN.value = Duration.zero;
+        _durationVN.value = Duration.zero;
+        _isBuffering = true;
+      });
       if (_ownsPlayer) {
         _openMedia();
       } else {
-        // 外部 Player：换源由父级 open() 完成，这里只做续播兜底
-        _persisted.resumeApplied = true;
+        // 外部 Player：父级已 open()，这里重置续播标记后再兜底 seek
+        _persisted.resumeApplied = false;
         _scheduleResumeSeek();
       }
     } else if ((oldWidget.resumeSeconds ?? -1) !=
@@ -565,7 +573,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         _pendingResumeSeconds = null;
         return;
       }
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
     _pendingResumeSeconds = resume;
     try {
       _player.seek(target);
@@ -596,7 +604,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         _pendingResumeSeconds = null;
         return;
       }
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
     _pendingResumeSeconds = null;
     try {
       _player.seek(target);
@@ -615,7 +623,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (mounted && _danmuApiUrl.isNotEmpty) {
         _ensureDanmuLoaded();
       }
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   /// 通过视频 URL 直接匹配弹幕（Logvr-danmu 的 /api/v2/comment?url= 接口）
@@ -640,7 +648,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           setState(() => _danmus = list);
         }
       }
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   /// 持久化弹幕开关
@@ -648,7 +656,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('danmu_enabled', _danmuOn);
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   void _startBitrateTimer() {
@@ -797,7 +805,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (!_player.state.playing) {
         await _player.play();
       }
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   /// 调 WindowFullScreen 退出全屏
@@ -831,7 +839,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (!_player.state.playing) {
         await _player.play();
       }
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   void _seekTo(Duration position) {
@@ -1018,11 +1026,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         ),
 
         // 缓冲指示器
-        // 缓冲圈：真正卡住才显示；已在播/已有进度则隐藏
-        if (_isBuffering &&
-            !_isPlaying &&
-            _position == Duration.zero &&
-            !_audioMode)
+        // 缓冲圈：buffering 时显示（换集后旧状态不再挡转圈）
+        if (_isBuffering && !_audioMode)
           const Center(
             child: SizedBox(
               width: 36,
@@ -1414,13 +1419,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       child: _gradientTopContainer(
         child: Row(
           children: [
-            // 返回与右侧功能键同一行
+            // 返回与右侧功能键同一行（尺寸对齐直播页 38×38）
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: widget.onBack ?? () => Navigator.of(context).maybePop(),
               child: const SizedBox(
-                width: 40,
-                height: 40,
+                width: 38,
+                height: 38,
                 child: Center(
                   child: Icon(
                     Icons.arrow_back_ios_new,
@@ -2431,11 +2436,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         if (resume > Duration.zero) {
           try {
             _player.seek(resume);
-          } catch (_) {}
+          } catch (e) { /* ignore */ }
         }
         try {
           _player.play();
-        } catch (_) {}
+        } catch (e) { /* ignore */ }
         return;
       }
       final supported = await VideoPlayerPip.instance.isIosPipSupported();
@@ -2463,7 +2468,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           setState(() => _pipActive = true);
           try {
             _player.pause();
-          } catch (_) {}
+          } catch (e) { /* ignore */ }
         },
         onStopped: () {
           if (!mounted) return;
@@ -2472,11 +2477,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           if (resume > Duration.zero) {
             try {
               _player.seek(resume);
-            } catch (_) {}
+            } catch (e) { /* ignore */ }
           }
           try {
             _player.play();
-          } catch (_) {}
+          } catch (e) { /* ignore */ }
           // 二次进入：重新预热 AVPlayer
           if (Platform.isIOS) {
             VideoPlayerPip.instance.prepareIos(
@@ -2489,7 +2494,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (!entered) {
         try {
           _player.play();
-        } catch (_) {}
+        } catch (e) { /* ignore */ }
         _showMessage('画中画启动失败，请稍后重试');
       }
       return;
@@ -2543,7 +2548,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           setState(() => _pipActive = true);
           try {
             _player.pause();
-          } catch (_) {}
+          } catch (e) { /* ignore */ }
         },
         onStopped: () {
           if (!mounted) return;
@@ -2552,11 +2557,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           if (resume > Duration.zero) {
             try {
               _player.seek(resume);
-            } catch (_) {}
+            } catch (e) { /* ignore */ }
           }
           try {
             _player.play();
-          } catch (_) {}
+          } catch (e) { /* ignore */ }
           if (Platform.isIOS) {
             VideoPlayerPip.instance.prepareIos(
               url: playUrl,
@@ -2569,7 +2574,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         setState(() => _pipActive = false);
         try {
           _player.play();
-        } catch (_) {}
+        } catch (e) { /* ignore */ }
       }
     } finally {
       _autoPipInFlight = false;
@@ -2623,9 +2628,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Widget _gradientTopContainer({required Widget child}) {
     final pad = MediaQuery.of(context).padding;
-    // 与返回键同一高度：整行顶对齐（返回就在本 Row 左侧）
-    // top 仅避让状态栏，不再把功能键压到画面中部
-    final top = pad.top > 0 ? pad.top + 4.0 : 8.0;
+    // 与直播页顶栏一致：按钮 38 高，顶部间距 8（已在状态栏黑边/安全区之下）
+    const contentH = 38.0;
+    final top = 8.0;
     return DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -2635,8 +2640,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         ),
       ),
       child: Padding(
-        padding: EdgeInsets.only(top: top, left: 4, right: 4),
-        child: SizedBox(height: 40, child: child),
+        padding: EdgeInsets.only(
+          top: top + (pad.top > 0 ? 0 : 8),
+          left: 4 + pad.left,
+          right: 4 + pad.right,
+          bottom: 8,
+        ),
+        child: SizedBox(height: contentH, child: child),
       ),
     );
   }
@@ -2665,17 +2675,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   Widget _iconButton({
     required IconData icon,
     required double size,
-    double width = 36,
-    double height = 30,
+    double width = 38,
+    double height = 38,
     required VoidCallback onTap,
   }) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: SizedBox(
-        width: width,
-        // 与顶栏 40 高对齐，保证和返回键同一行
-        height: height < 40 ? 40 : height,
+        // 与直播页 _VideoTopIcon 一致：38×38，图标 20
+        width: width < 38 ? 38 : width,
+        height: 38,
         child: Center(
           child: Icon(icon, color: Colors.white, size: size),
         ),
@@ -3215,7 +3225,7 @@ List<_DanmuItem> parseDanmuBody(String body) {
         if (t != null) items.add(_DanmuItem(t, m.group(2)!, Color(color), mode));
       }
     }
-  } catch (_) {}
+  } catch (e) { /* ignore */ }
   return items;
 }
 

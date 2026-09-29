@@ -119,7 +119,7 @@ class VideoPlayerPip {
     if (!Platform.isIOS) return;
     try {
       await _iosChannel.invokeMethod<void>('releasePip');
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   /// iOS：进入系统画中画
@@ -167,7 +167,7 @@ class VideoPlayerPip {
     if (!Platform.isIOS) return;
     try {
       await _iosChannel.invokeMethod<void>('stopPip');
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
     // 无论原生是否在 PiP，都清掉 Dart 状态，避免卡在 isIosActive=true
     // 导致之后无法再进入小窗
     _iosActive = false;

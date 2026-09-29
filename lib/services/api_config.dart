@@ -120,7 +120,7 @@ class ApiConfig extends GetxController {
     Map<String, dynamic>? decoded;
     try {
       decoded = jsonDecode(cleanedJson) as Map<String, dynamic>?;
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
 
     if (decoded != null) {
       final config = AppConfigData.fromJson(decoded);
@@ -165,7 +165,7 @@ class ApiConfig extends GetxController {
     final result = sourceBeanList
         .where((s) => s.isSearchable && s.key != 'douban' && s.key != 'baseset')
         .toList();
-    print('[ApiConfig] getSearchableSources: 总源数=${sourceBeanList.length}, 可搜索源数=${result.length}');
+    debugPrint('[ApiConfig] getSearchableSources: 总源数=${sourceBeanList.length}, 可搜索源数=${result.length}');
     return result;
   }
 
@@ -184,7 +184,7 @@ class ApiConfig extends GetxController {
     final video = config['video'] as Map<String, dynamic>?;
     final sites = video?['sites'] as List<dynamic>?;
     if (video == null || sites == null) {
-      print('[ApiConfig] Spider /config 响应中没有 video.sites');
+      debugPrint('[ApiConfig] Spider /config 响应中没有 video.sites');
       return;
     }
 
@@ -219,7 +219,7 @@ class ApiConfig extends GetxController {
     }
 
     if (newSources.isEmpty) {
-      print('[ApiConfig] Spider /config 返回的 sites 为空');
+      debugPrint('[ApiConfig] Spider /config 返回的 sites 为空');
       return;
     }
 
@@ -251,7 +251,7 @@ class ApiConfig extends GetxController {
           newSources.firstOrNull;
     }
 
-    print('[ApiConfig] 从 Spider /config 更新了 ${newSources.length} 个线路，默认 homeSourceBean=${homeSourceBean.value?.key}');
+    debugPrint('[ApiConfig] 从 Spider /config 更新了 ${newSources.length} 个线路，默认 homeSourceBean=${homeSourceBean.value?.key}');
   }
 
   // ============================================================
@@ -293,7 +293,7 @@ class ApiConfig extends GetxController {
     Map<String, dynamic>? decoded;
     try {
       decoded = jsonDecode(cleanedJson) as Map<String, dynamic>?;
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
 
     // 尝试作为正常配置解析
     if (decoded != null) {
@@ -366,7 +366,7 @@ class ApiConfig extends GetxController {
     throw ConfigError.parseError.message('配置格式不受支持');
   }
 
-  /// 读取配置文本并做短时缓存
+  /// 读取配置文本并做短时缓存（LRU：访问会刷新 lastAccess）
   Future<String> _fetchConfigText(String normalizedUrl) async {
     final key = normalizedUrl.toLowerCase();
     final now = DateTime.now();
@@ -374,6 +374,7 @@ class ApiConfig extends GetxController {
     if (_rawConfigCache.containsKey(key)) {
       final entry = _rawConfigCache[key]!;
       if (now.difference(entry.fetchedAt).inSeconds <= _rawConfigCacheTTL) {
+        entry.touch(now);
         return entry.content;
       }
       _rawConfigCache.remove(key);
@@ -388,9 +389,9 @@ class ApiConfig extends GetxController {
   void _trimRawConfigCacheIfNeeded() {
     if (_rawConfigCache.length <= _maxRawConfigCacheEntries) return;
     final overflow = _rawConfigCache.length - _maxRawConfigCacheEntries;
-    final staleKeys = _rawConfigCache.entries
-        .toList()
-      ..sort((a, b) => a.value.fetchedAt.compareTo(b.value.fetchedAt));
+    // LRU：优先淘汰最久未访问
+    final staleKeys = _rawConfigCache.entries.toList()
+      ..sort((a, b) => a.value.lastAccess.compareTo(b.value.lastAccess));
     for (var i = 0; i < overflow && i < staleKeys.length; i++) {
       _rawConfigCache.remove(staleKeys[i].key);
     }
@@ -452,7 +453,7 @@ class ApiConfig extends GetxController {
           await LiveService.instance.loadFromLivesJson(raw);
         }
       } catch (e) {
-        print('[ApiConfig] lives 解析失败: $e');
+        debugPrint('[ApiConfig] lives 解析失败: $e');
       }
 
       // 关键修复：如果当前解析结果包含 Spider 源（type=3），
@@ -464,7 +465,7 @@ class ApiConfig extends GetxController {
       // 在 _fetchSpiderConfig 完成后用真实 sites 列表重置 homeSourceBean。
       final hasSpiderSource = sources.any((s) => s.isSpiderSource);
       if (hasSpiderSource) {
-        print('[ApiConfig] 当前 config 含 Spider 源，homeSourceBean 等待 getCatConfig 完成后设置');
+        debugPrint('[ApiConfig] 当前 config 含 Spider 源，homeSourceBean 等待 getCatConfig 完成后设置');
       } else {
         // 普通源：按优先级选第一个
         await _restoreHomeSource(sources);
@@ -513,7 +514,7 @@ class ApiConfig extends GetxController {
           return;
         }
       }
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   // ============================================================
@@ -648,7 +649,9 @@ class ApiConfig extends GetxController {
 
   /// 去除 JSON 中的 // 行注释，兼容 TVBox 配置文件格式
   static String stripJsonComments(String json) {
-    final lines = json.split('\n');
+    // 先去掉 /* */ 块注释（跨行），再处理 // 行注释
+    var text = json.replaceAll(RegExp(r'/\*[\s\S]*?\*/'), '');
+    final lines = text.split('\n');
     final result = <String>[];
 
     for (final line in lines) {
@@ -822,10 +825,16 @@ class ApiConfig extends GetxController {
   }
 }
 
-/// 原始配置缓存条目
+/// 原始配置缓存条目（LRU）
 class _RawConfigCacheEntry {
   final String content;
   final DateTime fetchedAt;
+  DateTime lastAccess;
 
-  _RawConfigCacheEntry({required this.content, required this.fetchedAt});
+  _RawConfigCacheEntry({required this.content, required this.fetchedAt})
+      : lastAccess = fetchedAt;
+
+  void touch(DateTime now) {
+    lastAccess = now;
+  }
 }

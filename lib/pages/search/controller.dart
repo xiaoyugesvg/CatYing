@@ -69,9 +69,9 @@ class TvSearchController extends GetxController {
     }
 
     // 并发搜索
-    print('[SearchController] 开始搜索: "$trimmed", 可用源数=${validSources.length}');
+    debugPrint('[SearchController] 开始搜索: "$trimmed", 可用源数=${validSources.length}');
     for (final s in validSources) {
-      print('[SearchController] 源: key=${s.key}, type=${s.type}, api=${s.api}, isSpider=${s.isSpiderSource}');
+      debugPrint('[SearchController] 源: key=${s.key}, type=${s.type}, api=${s.api}, isSpider=${s.isSpiderSource}');
     }
 
     final futures = <Future<void>>[];
@@ -88,14 +88,14 @@ class TvSearchController extends GetxController {
   Future<void> _searchInSourceAndNotify(
       SourceBean source, String kw, String requestId) async {
     try {
-      print('[SearchController] 搜索源 ${source.key}: 开始搜索 "$kw"');
+      debugPrint('[SearchController] 搜索源 ${source.key}: 开始搜索 "$kw"');
       final videos = await SourceService.instance.search(source, kw);
-      print('[SearchController] 搜索源 ${source.key}: 返回 ${videos.length} 条结果');
+      debugPrint('[SearchController] 搜索源 ${source.key}: 返回 ${videos.length} 条结果');
       if (_latestSearchRequestId != requestId) return;
       resultsBySite[source.key] = videos;
       resultCount[source.key] = videos.length;
     } catch (e) {
-      print('[SearchController] 搜索源 ${source.key}: 搜索失败 $e');
+      debugPrint('[SearchController] 搜索源 ${source.key}: 搜索失败 $e');
       if (_latestSearchRequestId != requestId) return;
       resultsBySite[source.key] = [];
       resultCount[source.key] = 0;

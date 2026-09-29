@@ -42,8 +42,9 @@ class BackgroundAudio {
 
     private init() {}
 
-    /// 启动 silent audio playback. 在 app 启动早期 (didFinishLaunching) 调.
-    /// 可以重复调, 第二次起 no-op.
+    /// 启动 silent audio playback.
+    /// **按需保活**：仅在 Node 已启动 / 需要后台运行时调用，
+    /// 避免始终占用 audio session、与其它播放器冲突、空耗电。
     func start() {
         queue.sync {
             if isStarted {

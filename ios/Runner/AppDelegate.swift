@@ -19,7 +19,7 @@ import AVFoundation
     // 见 BackgroundAudio.swift 详细说明.
     // 必须在 Flutter 引擎启动**之前**调, 否则 iOS 在 Flutter 启动过程中
     // 可能已经判定 app 进入 inactive.
-    BackgroundAudio.shared.start()
+    // 按需保活：不再启动就常驻静音音频；Node 启动后再开，见 NodeJSBridge
 
     // 监听 lifecycle 事件, 在进入后台前重新激活 audio session
     NotificationCenter.default.addObserver(

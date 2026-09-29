@@ -147,7 +147,7 @@ class HomeController extends GetxController with WidgetsBindingObserver {
             .map((e) => Video.fromJson(Map<String, dynamic>.from(e)))
             .toList();
       }
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
 
     isLoading.value = true;
     errorMessage.value = null;
@@ -245,7 +245,7 @@ class HomeController extends GetxController with WidgetsBindingObserver {
               .map((e) => Video.fromJson(Map<String, dynamic>.from(e)))
               .toList();
         }
-      } catch (_) {}
+      } catch (e) { /* ignore */ }
     }
 
     isLoading.value = true;

@@ -27,7 +27,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString('epg_url') ?? '';
       if (mounted) _epgCtrl.text = saved;
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   @override
@@ -138,7 +138,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                         try {
                           final prefs = await SharedPreferences.getInstance();
                           await prefs.setString('epg_url', v);
-                        } catch (_) {}
+                        } catch (e) { /* ignore */ }
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                               content:

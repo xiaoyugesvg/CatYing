@@ -185,14 +185,14 @@ class AppState extends GetxController {
         } else {
           loadingPhase.value = LoadingPhase.failed;
           configLoadError.value = 'Node.js 启动失败';
-          print('[AppState] Node.js 启动失败');
+          AppLog.instance.log('[AppState] Node.js 启动失败');
           AppLog.instance.log('Node.js 启动失败');
         }
       } catch (e, st) {
         AppLog.instance.log('startNodeJS 异常: $e\n$st');
         loadingPhase.value = LoadingPhase.failed;
         configLoadError.value = 'Node.js 启动异常: $e';
-        print('[AppState] Node.js 启动异常: $e');
+        AppLog.instance.log('[AppState] Node.js 启动异常: $e');
       }
     } else {
       await _loadSpiderSource();
@@ -208,7 +208,7 @@ class AppState extends GetxController {
     // **会话级复用**: 本次启动已成功加载过源, 直接复用,
     // 不再显示"正在下载源文件..."、不再发 MD5/下载请求
     if (_sourceLoadedThisSession) {
-      print('[AppState] 源已在本次会话加载, 跳过下载阶段');
+      AppLog.instance.log('[AppState] 源已在本次会话加载, 跳过下载阶段');
       loadingPhase.value = LoadingPhase.waitingSpiderPort;
       final portReady = await NodeJSManager.instance.waitForSpiderPort();
       if (!portReady) {
@@ -227,10 +227,10 @@ class AppState extends GetxController {
     if (!loadSuccess) {
       loadingPhase.value = LoadingPhase.failed;
       configLoadError.value = 'Spider 源加载失败';
-      print('[AppState] Spider 源加载失败: ${loadMessage ?? "未知错误"}');
+      AppLog.instance.log('[AppState] Spider 源加载失败: ${loadMessage ?? "未知错误"}');
       return;
     }
-    print('[AppState] Spider 源加载成功');
+    AppLog.instance.log('[AppState] Spider 源加载成功');
     _sourceLoadedThisSession = true;
 
     loadingPhase.value = LoadingPhase.waitingSpiderPort;
@@ -238,7 +238,7 @@ class AppState extends GetxController {
     if (!portReady) {
       loadingPhase.value = LoadingPhase.failed;
       configLoadError.value = '等待 Spider 服务超时';
-      print('[AppState] 等待 spiderPort 超时');
+      AppLog.instance.log('[AppState] 等待 spiderPort 超时');
       return;
     }
 
@@ -251,7 +251,7 @@ class AppState extends GetxController {
     if (spiderPort <= 0) {
       loadingPhase.value = LoadingPhase.failed;
       configLoadError.value = 'Spider 端口为 0';
-      print('[AppState] spiderPort 为 0，无法获取线路配置');
+      AppLog.instance.log('[AppState] spiderPort 为 0，无法获取线路配置');
       return;
     }
 
@@ -288,12 +288,12 @@ class AppState extends GetxController {
         try {
           await SpiderService.instance.initSpider(
             firstSource.key, firstSource.type, apiBase);
-        } catch (_) {}
+        } catch (e) { /* ignore */ }
       }
     } catch (e) {
       loadingPhase.value = LoadingPhase.failed;
       configLoadError.value = '获取线路配置失败';
-      print('[AppState] 获取 Spider 配置失败: $e');
+      AppLog.instance.log('[AppState] 获取 Spider 配置失败: $e');
     }
   }
 

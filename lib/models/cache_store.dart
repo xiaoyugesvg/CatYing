@@ -386,7 +386,7 @@ class CacheStore {
   Future<void> setJsonCache(String key, Object? json) async {
     try {
       await setCacheItem(key, jsonEncode(json));
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   Map<String, dynamic>? getJsonCache(

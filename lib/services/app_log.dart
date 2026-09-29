@@ -3,7 +3,7 @@
 // Dart 端应用日志 — 双写 <Documents>/nodejs-project/runtime/
 // -----------------------------------------------------------------------------
 // **为什么需要文件日志**：
-// - iOS release 模式下 print() 走 OSLog，连接 Console 才能看，但用户通常没 Mac
+// - iOS release 模式下 AppLog.instance.log() 走 OSLog，连接 Console 才能看，但用户通常没 Mac
 // - 用户可以通过 iPhone Files app → "文件" (On My iPhone) → TVBox
 //   → nodejs-project/runtime/ 拿到日志
 //
@@ -179,7 +179,7 @@ class AppLog {
     } catch (e) {
       _initialized = true;
       // ignore: avoid_print
-      print('[AppLog] init 失败: $e');
+      AppLog.instance.log('[AppLog] init 失败: $e');
     }
   }
 
@@ -191,7 +191,7 @@ class AppLog {
     final json = e.formatJson();
     // 同步 print, OSLog 一定能看
     // ignore: avoid_print
-    print(human);
+    AppLog.instance.log(human);
     if (!_initialized) return;
     _writeBoth(human, json);
   }
@@ -440,7 +440,7 @@ class AppLog {
   Future<void> flush() async {
     try {
       await _writeChain;
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
   }
 
   /// 读取 app.log 最近 N 行
@@ -504,7 +504,7 @@ class AppLog {
             mode: FileMode.append, flush: true);
         await _jsonlFile?.writeAsString('$json\n',
             mode: FileMode.append, flush: true);
-      } catch (_) {}
+      } catch (e) { /* ignore */ }
     });
     await _writeChain;
   }

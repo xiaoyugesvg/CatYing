@@ -93,7 +93,7 @@ class TmdbService extends GetxService {
       _apply(info, best.$1, detail);
       return true;
     } catch (e) {
-      print('[TmdbService] enrich 失败: $e');
+      debugPrint('[TmdbService] enrich 失败: $e');
       return false;
     } finally {
       isWorking.value = false;

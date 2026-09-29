@@ -92,10 +92,10 @@
 			<key>CFBundleURLName</key>
 			<string>com.newtvbox.app</string>
 			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>http</string>
-				<string>https</string>
-			</array>
+	<array>
+		<string>newtv</string>
+		<string>catbox</string>
+	</array>
 		</dict>
 	</array>
 		<key>UIBackgroundModes</key>

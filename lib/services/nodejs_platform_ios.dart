@@ -50,6 +50,9 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   // 状态（Dart 端自己维护，HTTP server 收通知时更新）
   bool _isRunning = false;
   bool _isNodeReady = false;
+
+  /// 本地通知鉴权 token（由 NodeJSManager 注入）
+  String authToken = '';
   int _nativeServerPort = 0;
   int _managementPort = 0;
   int _spiderPort = 0;
@@ -79,7 +82,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
             final code = call.arguments is int
                 ? call.arguments as int
                 : (call.arguments is Map ? call.arguments['code'] as int? : null);
-            print('[IOSNodeJS] Swift 通知: Node.js 退出，code=$code');
+            AppLog.instance.log('[IOSNodeJS] Swift 通知: Node.js 退出，code=$code');
             // **关键**：iOS 后台/锁屏过久 embed library 会被系统回收,
             // 此时必须清掉旧端口, 否则 AppState.handleSceneActive 拿旧
             // spiderPort/managementPort 去探测, connection refused 但
@@ -93,7 +96,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
             onSpiderPortChanged.value = 0;
             return null;
           case 'onNodeReady':
-            print('[IOSNodeJS] Swift 通知: Node.js ready');
+            AppLog.instance.log('[IOSNodeJS] Swift 通知: Node.js ready');
             AppLog.instance.log('IOSNodeJS onNodeReady 回调');
             _isNodeReady = true;
             onNodeReadyChanged.value = true;
@@ -102,14 +105,14 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
             final msg = call.arguments is String
                 ? call.arguments
                 : call.arguments.toString();
-            print('[IOSNodeJS] Swift 错误: $msg');
+            AppLog.instance.log('[IOSNodeJS] Swift 错误: $msg');
             return null;
           default:
-            print('[IOSNodeJS] 未知 method call from Swift: ${call.method}');
+            AppLog.instance.log('[IOSNodeJS] 未知 method call from Swift: ${call.method}');
             return null;
         }
       } catch (e, st) {
-        print('[IOSNodeJS] 处理 Swift callback 异常: $e\n$st');
+        AppLog.instance.log('[IOSNodeJS] 处理 Swift callback 异常: $e\n$st');
         return null;
       }
     });
@@ -154,7 +157,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
 
     AppLog.instance.log(
         'IOSNodeJS 调 Swift 启动 Node.js, nativePort=$nativePort, sourcePath=$sourcePath');
-    print('[IOSNodeJS] 调 Swift 启动 Node.js, nativePort=$nativePort, '
+    AppLog.instance.log('[IOSNodeJS] 调 Swift 启动 Node.js, nativePort=$nativePort, '
         'sourcePath=$sourcePath');
 
     try {
@@ -168,25 +171,26 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       final result = await _channel.invokeMethod<bool>('startNodeJS', {
         'nativePort': nativePort,
         'sourcePath': sourcePath,
+        'authToken': authToken,
       });
       AppLog.instance.log('IOSNodeJS Swift invokeMethod 返回: $result');
       if (result == true) {
         _isRunning = true;
-        print('[IOSNodeJS] Swift 启动成功');
+        AppLog.instance.log('[IOSNodeJS] Swift 启动成功');
         AppLog.instance.log('IOSNodeJS Swift 启动成功, 等 waitForNodeReady');
         final ready = await waitForNodeReady();
         AppLog.instance.log('IOSNodeJS waitForNodeReady 返回: $ready');
         return ready;
       }
-      print('[IOSNodeJS] Swift 启动失败');
+      AppLog.instance.log('[IOSNodeJS] Swift 启动失败');
       AppLog.instance.log('IOSNodeJS Swift 启动失败');
       return false;
     } on PlatformException catch (e) {
-      print('[IOSNodeJS] startNodeJS PlatformException: ${e.code}/${e.message}');
+      AppLog.instance.log('[IOSNodeJS] startNodeJS PlatformException: ${e.code}/${e.message}');
       AppLog.instance.log('IOSNodeJS startNodeJS PlatformException: ${e.code}/${e.message}');
       return false;
     } catch (e, st) {
-      print('[IOSNodeJS] startNodeJS 异常: $e');
+      AppLog.instance.log('[IOSNodeJS] startNodeJS 异常: $e');
       AppLog.instance.log('IOSNodeJS startNodeJS 异常: $e\n$st');
       return false;
     }
@@ -205,10 +209,10 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     onSpiderPortChanged.value = 0;
 
     _channel.invokeMethod('stopNodeJS').catchError((e) {
-      print('[IOSNodeJS] stopNodeJS 异常: $e');
+      AppLog.instance.log('[IOSNodeJS] stopNodeJS 异常: $e');
       return null;
     });
-    print('[IOSNodeJS] Node.js 已停止');
+    AppLog.instance.log('[IOSNodeJS] Node.js 已停止');
   }
 
   @override
@@ -221,7 +225,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     onNodeReadyChanged.value = false;
     onManagementPortChanged.value = 0;
     onSpiderPortChanged.value = 0;
-    print('[IOSNodeJS] 强制重置运行状态');
+    AppLog.instance.log('[IOSNodeJS] 强制重置运行状态');
   }
 
   // ============================================================
@@ -230,7 +234,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
 
   /// HTTP server 收到 Node.js 的 `/onCatPawOpenPort?port=&type=` 时调用
   void onPortReceived(int port, String type) {
-    print('[IOSNodeJS] 收到端口通知: $port, 类型: $type');
+    AppLog.instance.log('[IOSNodeJS] 收到端口通知: $port, 类型: $type');
     AppLog.instance.log('IOSNodeJS onPortReceived: port=$port, type=$type');
     if (type == 'management') {
       _managementPort = port;
@@ -238,7 +242,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       // **iOS SIGKILL 修复**: 同步 mgmt port 给 Swift,
       // Swift 在 app 回前台时主动 ping /check 确认 Node.js 是否被 SIGKILL
       _channel.invokeMethod('setManagementPort', {'port': port}).catchError((e) {
-        print('[IOSNodeJS] setManagementPort 异常: $e');
+        AppLog.instance.log('[IOSNodeJS] setManagementPort 异常: $e');
         return null;
       });
     } else {
@@ -249,7 +253,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
 
   /// HTTP server 收到 Node.js 的 `/onMessage` 时调用
   void onMessage(String message) {
-    print('[IOSNodeJS] 收到 Node.js 消息: $message');
+    AppLog.instance.log('[IOSNodeJS] 收到 Node.js 消息: $message');
     if (message == 'ready') {
       _isNodeReady = true;
       onNodeReadyChanged.value = true;
@@ -269,7 +273,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       if (_isNodeReady) return true;
       await Future.delayed(const Duration(milliseconds: 200));
     }
-    print('[IOSNodeJS] 等待 Node.js 就绪超时');
+    AppLog.instance.log('[IOSNodeJS] 等待 Node.js 就绪超时');
     return _isNodeReady;
   }
 
@@ -281,7 +285,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       if (_spiderPort > 0) return true;
       await Future.delayed(const Duration(milliseconds: 200));
     }
-    print('[IOSNodeJS] 等待 Spider 端口超时');
+    AppLog.instance.log('[IOSNodeJS] 等待 Spider 端口超时');
     return _spiderPort > 0;
   }
 
@@ -297,7 +301,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     var normalizedUrl = urlString;
     if (normalizedUrl.endsWith('.js.md5')) {
       normalizedUrl = normalizedUrl.substring(0, normalizedUrl.length - 4);
-      print('[IOSNodeJS] 规范化 URL（移除 .md5 后缀）: $normalizedUrl');
+      AppLog.instance.log('[IOSNodeJS] 规范化 URL（移除 .md5 后缀）: $normalizedUrl');
     }
 
     final uri = Uri.tryParse(normalizedUrl);
@@ -310,14 +314,14 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
 
     final localJSExists = await File(indexJSPath).exists();
     final localMd5Exists = await File(indexMd5Path).exists();
-    print('[IOSNodeJS] 缓存检查: index.js 存在=$localJSExists, '
+    AppLog.instance.log('[IOSNodeJS] 缓存检查: index.js 存在=$localJSExists, '
         'index.js.md5 存在=$localMd5Exists');
 
     if (localJSExists) {
       // **本地缓存优先 (2026-09-27)**：源文件已存在就直接使用, 不等远程 MD5
       // 请求（避免每次启动都显示"正在下载源文件..."）。远程 MD5 校验改为
       // 后台异步执行：若发现源已更新, 后台重新下载并替换。
-      print('[IOSNodeJS] 本地缓存源存在, 直接使用（后台异步校验更新）');
+      AppLog.instance.log('[IOSNodeJS] 本地缓存源存在, 直接使用（后台异步校验更新）');
       _refreshSourceInBackground(normalizedUrl, sourcePath);
       return await _sendLoadCommandToNodeJS(sourcePath);
     }
@@ -329,7 +333,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       );
       if (jsResponse.statusCode == 200 && jsResponse.data != null) {
         final jsData = jsResponse.data!;
-        print('[IOSNodeJS] 主源文件已下载，大小: ${jsData.length} 字节');
+        AppLog.instance.log('[IOSNodeJS] 主源文件已下载，大小: ${jsData.length} 字节');
 
         String? md5Data;
         try {
@@ -340,7 +344,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
           if (md5Response.statusCode == 200 && md5Response.data != null) {
             md5Data = md5Response.data!.trim();
           }
-        } on DioException catch (_) {}
+        } on DioException catch (e) { /* ignore */ }
 
         List<int>? configData;
         try {
@@ -354,7 +358,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
               configResponse.data != null) {
             configData = configResponse.data!;
           }
-        } on DioException catch (_) {}
+        } on DioException catch (e) { /* ignore */ }
 
         if (md5Data != null && md5Data.isNotEmpty) {
           final actualMd5 = md5.convert(jsData).toString();
@@ -447,7 +451,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
           remoteMd5 = response.data!.trim();
         }
       } on DioException catch (e) {
-        print('[IOSNodeJS] 后台 MD5 获取失败: ${e.message}');
+        AppLog.instance.log('[IOSNodeJS] 后台 MD5 获取失败: ${e.message}');
         return;
       }
       if (remoteMd5 == null || remoteMd5.isEmpty) return;
@@ -458,12 +462,12 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       } else {
         final localMd5 = (await File(indexMd5Path).readAsString()).trim();
         if (localMd5 == remoteMd5) {
-          print('[IOSNodeJS] 后台 MD5 匹配, 源无需更新');
+          AppLog.instance.log('[IOSNodeJS] 后台 MD5 匹配, 源无需更新');
           return;
         }
       }
 
-      print('[IOSNodeJS] 后台检测到源已更新, 重新下载...');
+      AppLog.instance.log('[IOSNodeJS] 后台检测到源已更新, 重新下载...');
       final jsResponse = await _dio.get<List<int>>(
         normalizedUrl,
         options: Options(responseType: ResponseType.bytes),
@@ -474,7 +478,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       // 校验下载内容 MD5
       final actualMd5 = md5.convert(jsData).toString();
       if (actualMd5 != remoteMd5) {
-        print('[IOSNodeJS] 后台下载 MD5 校验失败, 丢弃');
+        AppLog.instance.log('[IOSNodeJS] 后台下载 MD5 校验失败, 丢弃');
         return;
       }
 
@@ -492,10 +496,10 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
             configResponse.data != null) {
           await File(configJSPath).writeAsBytes(configResponse.data!);
         }
-      } on DioException catch (_) {}
-      print('[IOSNodeJS] 后台源更新完成');
+      } on DioException catch (e) { /* ignore */ }
+      AppLog.instance.log('[IOSNodeJS] 后台源更新完成');
     } catch (e) {
-      print('[IOSNodeJS] 后台源刷新异常: $e');
+      AppLog.instance.log('[IOSNodeJS] 后台源刷新异常: $e');
     }
   }
 

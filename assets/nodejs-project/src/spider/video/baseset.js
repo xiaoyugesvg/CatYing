@@ -52,10 +52,22 @@ async function detail(e, t) {
 }
 
 async function proxy(inReq, outResp) {
-  const img = inReq.params.img;
-  const text = base64Decode(img)
-  const buffer = await qr.toBuffer(text, {width: 120, height: 120, margin: 15});
-  outResp.send(buffer);
+  try {
+    const img = inReq.params.img;
+    if (!img || typeof img !== 'string' || img.length > 2048) {
+      outResp.code(400).send({ error: 'invalid img param' });
+      return;
+    }
+    const text = base64Decode(img);
+    if (!text || typeof text !== 'string' || text.length > 1024) {
+      outResp.code(400).send({ error: 'invalid decoded payload' });
+      return;
+    }
+    const buffer = await qr.toBuffer(text, {width: 120, height: 120, margin: 15});
+    outResp.send(buffer);
+  } catch (e) {
+    outResp.code(500).send({ error: 'proxy failed' });
+  }
 }
 
 export default {

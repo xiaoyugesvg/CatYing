@@ -54,7 +54,7 @@ class BackgroundService extends GetxService {
       );
     }
     customPath.value = prefs.getString(_customPathKey);
-    print('[BackgroundService] 已加载: choice=${choice.value}, '
+    debugPrint('[BackgroundService] 已加载: choice=${choice.value}, '
         'customPath=${customPath.value}');
   }
 
@@ -63,7 +63,7 @@ class BackgroundService extends GetxService {
     choice.value = c;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_choiceKey, c.name);
-    print('[BackgroundService] setBuiltin: $c');
+    debugPrint('[BackgroundService] setBuiltin: $c');
   }
 
   /// 设置自定义背景 - 复制到应用文档目录并保存路径
@@ -85,7 +85,7 @@ class BackgroundService extends GetxService {
         try {
           final f = File(oldPath);
           if (f.existsSync()) f.deleteSync();
-        } catch (_) {}
+        } catch (e) { /* ignore */ }
       }
 
       customPath.value = destPath;
@@ -93,10 +93,10 @@ class BackgroundService extends GetxService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_choiceKey, BackgroundChoice.custom.name);
       await prefs.setString(_customPathKey, destPath);
-      print('[BackgroundService] setCustomImage: $destPath');
+      debugPrint('[BackgroundService] setCustomImage: $destPath');
       return true;
     } catch (e) {
-      print('[BackgroundService] setCustomImage 失败: $e');
+      debugPrint('[BackgroundService] setCustomImage 失败: $e');
       return false;
     }
   }
@@ -108,7 +108,7 @@ class BackgroundService extends GetxService {
       try {
         final f = File(oldPath);
         if (f.existsSync()) f.deleteSync();
-      } catch (_) {}
+      } catch (e) { /* ignore */ }
     }
     customPath.value = null;
     await setBuiltin(BackgroundChoice.builtin1);
@@ -126,7 +126,7 @@ class BackgroundService extends GetxService {
       if (picked == null) return false;
       return await setCustomImage(picked.path);
     } catch (e) {
-      print('[BackgroundService] pickFromGallery 失败: $e');
+      debugPrint('[BackgroundService] pickFromGallery 失败: $e');
       return false;
     }
   }

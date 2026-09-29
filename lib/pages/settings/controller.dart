@@ -132,7 +132,7 @@ class SettingsController extends GetxController {
         final appState = Get.find<AppState>();
         await appState.ensureNodeJSAndLoadSource();
         appState.applyLoadedConfigState();
-      } catch (_) {}
+      } catch (e) { /* ignore */ }
     } catch (e) {
       configError.value = e.toString();
     }
@@ -297,7 +297,7 @@ class SettingsController extends GetxController {
     // 下次进 setupView 输入新 URL 时会重新下载
     try {
       await NodeJSManager.instance.deleteSource();
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
 
     return true;
   }
@@ -342,7 +342,7 @@ class SettingsController extends GetxController {
     try {
       final imageCache = PaintingBinding.instance.imageCache;
       total += imageCache.currentSizeBytes;
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
 
     // 2) getTemporaryDirectory() —— Flutter / dio / webview 临时文件
     try {
@@ -373,7 +373,7 @@ class SettingsController extends GetxController {
         if (entity is File) {
           try {
             total += await entity.length();
-          } catch (_) {}
+          } catch (e) { /* ignore */ }
         }
       }
     } catch (e) {

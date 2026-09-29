@@ -51,14 +51,14 @@ class _LivePageState extends State<LivePage> {
       if (tab != 4) {
         try {
           _player?.pause();
-        } catch (_) {}
+        } catch (e) { /* ignore */ }
       }
     });
     // 点播详情打开时也会强制暂停直播
     LiveService.pauseLivePlayer = () {
       try {
         _player?.pause();
-      } catch (_) {}
+      } catch (e) { /* ignore */ }
     };
   }
 
@@ -98,7 +98,7 @@ class _LivePageState extends State<LivePage> {
         origin = base;
         referer = '$base/';
       }
-    } catch (_) {}
+    } catch (e) { /* ignore */ }
     final headers = <String, String>{
       'User-Agent':
           'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
@@ -159,18 +159,18 @@ class _LivePageState extends State<LivePage> {
         onStarted: () {
           try {
             _player?.pause();
-          } catch (_) {}
+          } catch (e) { /* ignore */ }
         },
         onStopped: () {
           try {
             _player?.play();
-          } catch (_) {}
+          } catch (e) { /* ignore */ }
         },
       );
       if (!ok) {
         try {
           _player?.play();
-        } catch (_) {}
+        } catch (e) { /* ignore */ }
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('小窗启动失败')),
         );

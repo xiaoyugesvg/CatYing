@@ -134,7 +134,8 @@ import UIKit
                 ))
                 return
             }
-            let ok = startNodeJS(nativePort: nativePort, sourcePath: sourcePath)
+            let authToken = args["authToken"] as? String ?? ""
+            let ok = startNodeJS(nativePort: nativePort, sourcePath: sourcePath, authToken: authToken)
             result(ok)
         case "stopNodeJS":
             stopNodeJS()
@@ -165,10 +166,10 @@ import UIKit
     ///
     /// 1. 在 mainBundle 找 main.js
     /// 2. 设置 NODE_PATH 环境变量
-    /// 3. 构造 argv: [node, --security-revert=CVE-2023-46809, main.js, --native-port, port]
+    /// 3. 构造 argv: [node, main.js, --native-port, port]  （不使用 --security-revert）
     /// 4. dispatch_async 到 work queue，调 `node_start(argc, argv)`
     /// 5. node_start 阻塞直到 Node.js 退出
-    private func startNodeJS(nativePort: Int, sourcePath: String) -> Bool {
+    private func startNodeJS(nativePort: Int, sourcePath: String, authToken: String = "") -> Bool {
         if isRunning {
             print("[NodeJSBridge] 已经在运行中")
             return true
@@ -206,15 +207,18 @@ import UIKit
         //    node_start 的 argc 是 Int32 (即 C int)；
         //    argv 是 char** (CChar)；
         //    Swift 数组下标需要 Int，所以同时保留 Int 版本供循环用
-        let args: [String] = [
+        var args: [String] = [
             "node",
-            "--security-revert=CVE-2023-46809",
             scriptPath,
             "--native-port",
             String(nativePort),
             "--node-log-path",
             nodeLogPath,
         ]
+        if !authToken.isEmpty {
+            args.append("--native-token")
+            args.append(authToken)
+        }
         let argcCount = args.count           // Int, 用于 Swift 数组下标
         let argc: Int32 = Int32(argcCount)   // Int32, 用于 node_start API
         let argv = UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>.allocate(
@@ -227,6 +231,7 @@ import UIKit
         argv[argcCount] = nil
 
         isRunning = true
+        BackgroundAudio.shared.start()
 
         // 4. 异步启动 Node.js
         workQueue.async { [weak self] in
@@ -245,6 +250,7 @@ import UIKit
 
             DispatchQueue.main.async {
                 self.isRunning = false
+                BackgroundAudio.shared.stop()
                 self.notifyDart(method: "onNodeExit", arguments: 0)
             }
         }
