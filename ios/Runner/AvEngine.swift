@@ -1,4 +1,5 @@
-import AVFoundation
+﻿import AVFoundation
+import AVKit
 import Flutter
 import UIKit
 
@@ -27,7 +28,7 @@ final class AvEngine: NSObject {
       forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
       queue: .main
     ) { [weak self] t in
-      guard let self else { return }
+      guard let self = self else { return }
       self.position = t.seconds
       self.channel?.invokeMethod("onPosition", arguments: t.seconds)
     }
@@ -36,7 +37,7 @@ final class AvEngine: NSObject {
   func register(messenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(name: "av_engine", binaryMessenger: messenger)
     channel?.setMethodCallHandler { [weak self] call, result in
-      guard let self else {
+      guard let self = self else {
         result(FlutterError(code: "nil", message: "AvEngine gone", details: nil))
         return
       }
@@ -93,7 +94,7 @@ final class AvEngine: NSObject {
   }
 
   func open(url: String, headers: [String: String], positionMs: Double) {
-    guard let u = URL(string: url), !url.isEmpty else { return }
+    guard !url.isEmpty, let u = URL(string: url) else { return }
     var options: [String: Any] = [:]
     if !headers.isEmpty {
       options["AVURLAssetHTTPHeaderFieldsKey"] = headers
@@ -105,6 +106,7 @@ final class AvEngine: NSObject {
       NotificationCenter.default.removeObserver(oldEnd)
     }
     statusObserver?.invalidate()
+    statusObserver = nil
 
     duration = 0
     position = positionMs / 1000.0
@@ -118,7 +120,7 @@ final class AvEngine: NSObject {
     }
 
     statusObserver = item.observe(\.status, options: [.new]) { [weak self] it, _ in
-      guard let self else { return }
+      guard let self = self else { return }
       if it.status == .readyToPlay {
         let d = it.duration.seconds
         if d.isFinite && d > 0 {
@@ -138,9 +140,10 @@ final class AvEngine: NSObject {
       object: item,
       queue: .main
     ) { [weak self] _ in
-      self?.isPlaying = false
-      self?.channel?.invokeMethod("onCompleted", arguments: true)
-      self?.channel?.invokeMethod("onPlaying", arguments: false)
+      guard let self = self else { return }
+      self.isPlaying = false
+      self.channel?.invokeMethod("onCompleted", arguments: true)
+      self.channel?.invokeMethod("onPlaying", arguments: false)
     }
     player.play()
     isPlaying = true
@@ -148,5 +151,5 @@ final class AvEngine: NSObject {
   }
 
   /// 当前播放用的 AVPlayer（PiP 与预览共用）
-  var avPlayer: AVPlayer { player }
+  var avPlayer: AVPlayer { return player }
 }
