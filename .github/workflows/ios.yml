@@ -177,7 +177,7 @@ jobs:
           cd ios
           ruby scripts/add_nodemobile.rb \
             --xcframework Frameworks/NodeMobile.xcframework \
-            --extra-swift NodeJSBridge.swift,BackgroundAudio.swift,PipManager.swift
+            --extra-swift NodeJSBridge.swift,BackgroundAudio.swift,PipManager.swift,AvEngine.swift,AvPlayerViewFactory.swift
           echo "=== pbxproj 改动 diff ==="
           git diff --stat Runner.xcodeproj/project.pbxproj || true
 

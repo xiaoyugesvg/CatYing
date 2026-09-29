@@ -26,10 +26,14 @@ require 'pathname'
 options = {
   xcframework: nil,
   pbxproj: 'Runner.xcodeproj/project.pbxproj',
-  # 默认注册 NodeJSBridge.swift + BackgroundAudio.swift (2026-07-08 方案 A
-  # Background Audio 启动器). 其它 Swift bridge 在需要时通过
-  # --extra-swift 显式传入.
-  extra_swift_files: %w[NodeJSBridge.swift BackgroundAudio.swift],
+  # 默认注册全部 Runner 原生 Swift bridge（缺文件会跳过）
+  extra_swift_files: %w[
+    NodeJSBridge.swift
+    BackgroundAudio.swift
+    PipManager.swift
+    AvEngine.swift
+    AvPlayerViewFactory.swift
+  ],
 }
 
 OptionParser.new do |opts|
