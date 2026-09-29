@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:get/get.dart';
 import 'package:hive_ce/hive.dart';
+import '../services/app_log.dart';
 import 'movie.dart';
 
 String makeVodBusinessKey(String vodId, String sourceKey) {
@@ -187,37 +188,45 @@ class CacheStore {
     _initialized = true;
   }
 
+  /// 单条写入（key = bizKey），避免全量 clear+put
+  Future<void> _putBoxItem<T>(Box<dynamic> box, String key, T item) async {
+    try {
+      await box.put(key, (item as dynamic).toJson());
+    } catch (e) {
+      AppLog.instance.log('cache put fail: ' + e.toString());
+    }
+  }
+
+  Future<void> _deleteBoxItem(Box<dynamic> box, String key) async {
+    try {
+      await box.delete(key);
+    } catch (e) {
+      AppLog.instance.log('cache del fail: ' + e.toString());
+    }
+  }
+
+  T _fromJson<T>(Map<String, dynamic> json) {
+    if (T == VodCollect) return VodCollect.fromJson(json) as T;
+    if (T == VodRecord) return VodRecord.fromJson(json) as T;
+    throw UnsupportedError('unsupported type ' + T.toString());
+  }
+
   List<T> _loadFromBox<T>(Box<dynamic> box) {
-    final items = <T>[];
-    for (var i = 0; i < box.length; i++) {
-      final raw = box.getAt(i);
-      if (raw != null && raw is Map) {
-        final map = Map<String, dynamic>.from(raw);
-        if (T == VodCollect) {
-          items.add(VodCollect.fromJson(map) as T);
-        } else if (T == VodRecord) {
-          items.add(VodRecord.fromJson(map) as T);
+    final out = <T>[];
+    for (final key in box.keys) {
+      final raw = box.get(key);
+      if (raw is Map) {
+        try {
+          // ignore: avoid_dynamic_calls
+          out.add(_fromJson<T>(Map<String, dynamic>.from(raw)));
+        } catch (e) {
+          AppLog.instance.log('cache parse fail: ' + e.toString());
         }
       }
     }
-    return items;
+    return out;
   }
 
-  Future<void> _saveToBox<T>(List<T> items, Box<dynamic> box) async {
-    await box.clear();
-    for (int i = 0; i < items.length; i++) {
-      final item = items[i];
-      Map<String, dynamic> json;
-      if (item is VodCollect) {
-        json = item.toJson();
-      } else if (item is VodRecord) {
-        json = item.toJson();
-      } else {
-        continue;
-      }
-      await box.put(i, json);
-    }
-  }
 
   Future<void> addCollect(Video video) async {
     final vodId = video.id;
@@ -256,7 +265,7 @@ class CacheStore {
     }
 
     favorites.value = items;
-    await _saveToBox(items, _collectsBox!);
+    await _putBoxItem(_collectsBox!, bizKey, items.firstWhere((e) => e.bizKey == bizKey || (e.vodId == vodId && e.sourceKey == sourceKey)));
   }
 
   Future<void> removeCollect(String vodId, String sourceKey) async {
@@ -266,7 +275,7 @@ class CacheStore {
         (item.bizKey.isEmpty &&
             item.vodId == vodId &&
             item.sourceKey == sourceKey));
-    await _saveToBox(favorites.toList(), _collectsBox!);
+    await _deleteBoxItem(_collectsBox!, bizKey);
   }
 
   bool isCollected(String vodId, String sourceKey) {
@@ -326,7 +335,7 @@ class CacheStore {
     }
 
     records.value = items;
-    await _saveToBox(items, _recordsBox!);
+    await _putBoxItem(_recordsBox!, bizKey, items.firstWhere((e) => e.bizKey == bizKey || (e.vodId == vodId && e.sourceKey == sourceKey)));
   }
 
   VodPlaybackState? getPlaybackState(String vodId, String sourceKey) {
@@ -342,7 +351,7 @@ class CacheStore {
 
   Future<void> clearHistory() async {
     records.value = [];
-    await _saveToBox(<VodRecord>[], _recordsBox!);
+    await _recordsBox!.clear();
   }
 
   Future<void> removeRecord(String vodId, String sourceKey) async {
@@ -352,25 +361,43 @@ class CacheStore {
         (item.bizKey.isEmpty &&
             item.vodId == vodId &&
             item.sourceKey == sourceKey));
-    await _saveToBox(records.toList(), _recordsBox!);
+    await _deleteBoxItem(_recordsBox!, bizKey);
   }
 
+  static const int _maxCacheItems = 200;
+
   Future<void> setCacheItem(String key, String value) async {
-    final items = _loadCacheItems();
-    final index = items.indexWhere((item) => item.key == key);
-    if (index >= 0) {
-      items[index].value = value;
-      items[index].updateTime = DateTime.now();
-    } else {
-      items.add(CacheItem(key: key, value: value));
+    final box = _cacheItemsBox!;
+    final item = CacheItem(key: key, value: value);
+    await box.put(key, item.toJson());
+    // 容量上限 + LRU 淘汰
+    if (box.length > _maxCacheItems) {
+      final keys = box.keys.toList();
+      final entries = <String, DateTime>{};
+      for (final k in keys) {
+        final raw = box.get(k);
+        if (raw is Map) {
+          final ts = raw['updateTime'];
+          entries[k.toString()] = ts != null
+              ? DateTime.tryParse(ts.toString()) ?? DateTime.fromMillisecondsSinceEpoch(0)
+              : DateTime.fromMillisecondsSinceEpoch(0);
+        }
+      }
+      final sorted = entries.keys.toList()
+        ..sort((a, b) => entries[a]!.compareTo(entries[b]!));
+      final overflow = box.length - _maxCacheItems;
+      for (var i = 0; i < overflow && i < sorted.length; i++) {
+        await box.delete(sorted[i]);
+      }
     }
-    await _saveCacheItems(items);
   }
 
   String? getCacheItem(String key) {
-    final items = _loadCacheItems();
-    final item = items.firstWhereOrNull((item) => item.key == key);
-    return item?.value;
+    final raw = _cacheItemsBox!.get(key);
+    if (raw is Map) {
+      return raw['value'] as String?;
+    }
+    return null;
   }
 
   /// 带 TTL 的缓存读取：过期返回 null
@@ -420,9 +447,7 @@ class CacheStore {
   }
 
   Future<void> removeCacheItem(String key) async {
-    final items = _loadCacheItems();
-    items.removeWhere((item) => item.key == key);
-    await _saveCacheItems(items);
+    await _cacheItemsBox!.delete(key);
   }
 
   List<CacheItem> _loadCacheItems() {

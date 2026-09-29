@@ -1414,7 +1414,7 @@ class _DetailPageState extends State<DetailPage> {
     final progress = (currentProgress ?? _controller.currentPlaybackSeconds()).clamp(0.0, double.infinity).toDouble();
     if (!progress.isFinite) return;
 
-    if (!force && (progress - _lastPersistedProgress).abs() < 20) {
+    if (!force && (progress - _lastPersistedProgress).abs() < 30) {
       return;
     }
 

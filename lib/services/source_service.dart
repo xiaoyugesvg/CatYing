@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import '../models/movie.dart';
 import '../models/vod_info.dart';

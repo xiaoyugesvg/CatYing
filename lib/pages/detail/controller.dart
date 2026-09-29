@@ -22,6 +22,16 @@ class PlaybackQualityOption {
     required this.url,
   });
 
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'url': url};
+
+  factory PlaybackQualityOption.fromJson(Map<String, dynamic> json) {
+    return PlaybackQualityOption(
+      id: json['id'] as String? ?? autoIdentifier,
+      name: json['name'] as String? ?? '',
+      url: json['url'] as String? ?? '',
+    );
+  }
+
   bool get isAuto => id == autoIdentifier;
 
   static PlaybackQualityOption auto(String url) {
@@ -497,6 +507,24 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       return;
     }
 
+    // 磁盘缓存：同一视频二次进入秒出清晰度
+    final diskKey = 'quality:${trimmedEpisodeURL.hashCode}';
+    try {
+      final disk = CacheStore.instance.getJsonListCache(
+        diskKey,
+        ttl: const Duration(days: 7),
+      );
+      if (disk != null && disk.isNotEmpty) {
+        final cached = disk
+            .whereType<Map>()
+            .map((e) => PlaybackQualityOption.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
+        _qualityOptionCache[trimmedEpisodeURL] = cached;
+        qualityOptions.value = cached;
+        return;
+      }
+    } catch (_) {}
+
     final token = _newUuid();
     _qualityResolveToken = token;
 
@@ -509,6 +537,12 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       if (resolved.isEmpty) return;
 
       _qualityOptionCache[trimmedEpisodeURL] = resolved;
+      try {
+        await CacheStore.instance.setJsonCache(
+          'quality:${trimmedEpisodeURL.hashCode}',
+          resolved.map((e) => e.toJson()).toList(),
+        );
+      } catch (_) {}
       qualityOptions.value = resolved;
 
       if (resetSelection) {

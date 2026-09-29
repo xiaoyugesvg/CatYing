@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:get/get.dart';
+import '../models/cache_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/vod_info.dart';
@@ -80,6 +81,18 @@ class TmdbService extends GetxService {
       final title = cleanTitle(info.name);
       if (title.isEmpty) return false;
       final year = extractYear(info.note, info.year);
+      final ck = cacheKey(info.name, year);
+
+      // 磁盘缓存：详情刮削 30 天
+      final cached = CacheStore.instance.getJsonCache(
+        'tmdb:$ck',
+        ttl: const Duration(days: 30),
+      );
+      if (cached != null && cached.isNotEmpty) {
+        final type = cached['__type'] as String? ?? 'movie';
+        _apply(info, type, cached);
+        return true;
+      }
 
       final movie = await _searchBest(mediaType: 'movie', query: title, year: year);
       final tv = await _searchBest(mediaType: 'tv', query: title, year: year);
@@ -91,6 +104,12 @@ class TmdbService extends GetxService {
       final detail = await _fetchDetail(best.$1, best.$2);
       if (detail == null) return false;
       _apply(info, best.$1, detail);
+      try {
+        await CacheStore.instance.setJsonCache('tmdb:$ck', {
+          ...detail,
+          '__type': best.$1,
+        });
+      } catch (_) {}
       return true;
     } catch (e) {
       debugPrint('[TmdbService] enrich 失败: $e');
