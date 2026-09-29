@@ -173,6 +173,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   bool _danmuOn = true;
   bool _danmuLoaded = false;
   String _danmuApiUrl = '';
+  /// 弹幕拉取代次：换集时递增，过期响应直接丢弃
+  int _danmuLoadGen = 0;
   late VideoFitType _videoFit;
   double _volume = 1.0;
   double _brightness = 0.5;
@@ -533,6 +535,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       // 换集/换源：清掉上一集的进度与缓冲态，避免进度条/转圈残留
       _pendingResumeSeconds = null;
       _lastNotifiedPositionSec = -1;
+      // 弹幕跟随剧集：清空并重新按新 URL 拉取（否则 _danmuLoaded 卡住永远不换）
+      _danmuLoaded = false;
+      _danmuLoadGen++;
+      _danmus = [];
       setState(() {
         _position = Duration.zero;
         _duration = Duration.zero;
@@ -540,6 +546,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         _durationVN.value = Duration.zero;
         _isBuffering = true;
       });
+      if (_danmuApiUrl.isNotEmpty) {
+        _ensureDanmuLoaded();
+      }
       if (_ownsPlayer) {
         _openMedia();
       } else {
@@ -635,6 +644,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   Future<void> _ensureDanmuLoaded() async {
     if (_danmuLoaded || _danmuApiUrl.isEmpty) return;
     _danmuLoaded = true;
+    final loadGen = ++_danmuLoadGen;
     final url = _player.state.playlist.medias.isNotEmpty
         ? _player.state.playlist.medias.last.uri
         : widget.url;
@@ -649,7 +659,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (res.statusCode == 200) {
         final body = await res.transform(utf8.decoder).join();
         final list = parseDanmuBody(body);
-        if (mounted && list.isNotEmpty) {
+        // 代次校验：快速换集时丢弃过期响应，避免旧集弹幕盖到新集上
+        if (mounted && list.isNotEmpty && loadGen == _danmuLoadGen) {
           setState(() => _danmus = list);
         }
       }
@@ -1216,7 +1227,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               if (_isLocked) return;
               _gestureInitialVolume = _volume;
               _gestureInitialBrightness = _brightness;
-              _gestureSeekTemp = _position.inMilliseconds.toDouble();
+              _gestureSeekStartMs = _position.inMilliseconds.toDouble();
+              _gestureSeekTemp = _gestureSeekStartMs;
               _gesturePanStartPosition = details.localPosition;
               _gesturePanAxis = null;
               _scheduleHideControls();
@@ -1237,10 +1249,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   final totalMs = _duration.inMilliseconds.toDouble();
                   final scale = totalMs * 0.3;
                   final deltaMs = (dx / width) * scale;
-                  _gestureSeekTemp = (_gestureSeekTemp + deltaMs).clamp(
-                    0.0,
-                    totalMs,
-                  );
+                  // 目标 = 起点 + 本次累计位移；dx 已是从起点的累计值
+                  _gestureSeekTemp =
+                      (_gestureSeekStartMs + deltaMs).clamp(0.0, totalMs);
                   final newPos = Duration(
                     milliseconds: _gestureSeekTemp.round(),
                   );
@@ -1300,6 +1311,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Offset _gesturePanStartPosition = Offset.zero;
   PanAxis? _gesturePanAxis;
+  /// 水平拖动 seek：手势起点的进度（ms）。拖动中目标 = 本值 + 累计位移换算，
+  /// 不能对 _gestureSeekTemp 逐帧累加累计 delta（会变成平方漂移）。
+  double _gestureSeekStartMs = 0;
 
   void _seekBy(int seconds, {required bool isLeft}) {
     if (_isLocked) return;
@@ -3237,11 +3251,14 @@ List<_DanmuItem> parseDanmuBody(String body) {
 class _ActiveDanmu {
   final _DanmuItem item;
   int track;
-  double x; // 滚动弹幕当前 x
+  double x; // scrolling danmaku current x
   double width;
   bool topFixed;
   bool bottomFixed;
-  double remaining; // 顶部/底部固定显示剩余秒
+  double remaining; // top/bottom fixed remaining seconds
+  /// Whether initial x has been written. Do NOT use x==0 as sentinel:
+  /// a scrolling item's x can land exactly on 0 mid-flight.
+  bool positioned;
   _ActiveDanmu(
     this.item, {
     this.track = 0,
@@ -3250,10 +3267,11 @@ class _ActiveDanmu {
     this.topFixed = false,
     this.bottomFixed = false,
     this.remaining = 4.0,
+    this.positioned = false,
   });
 }
 
-/// 弹幕渲染层：按当前播放位置发射弹幕, 滚动/顶部/底部
+/// Danmaku layer: emit by playback position; scroll / top / bottom.
 class _DanmuLayer extends StatefulWidget {
   final List<_DanmuItem> danmus;
   final Duration Function() positionOf;
@@ -3270,41 +3288,94 @@ class _DanmuLayerState extends State<_DanmuLayer> {
   int _nextTrack = 0;
   Timer? _timer;
   static const double _speed = 150.0; // px/s
+  /// Previous tick position in seconds; used to detect seek jumps.
+  double? _lastPosSec;
 
   @override
   void initState() {
     super.initState();
-    _sorted = List<_DanmuItem>.of(widget.danmus)
+    _sorted = _sortedOf(widget.danmus);
+    _timer = Timer.periodic(const Duration(milliseconds: 100), _onTick);
+  }
+
+  @override
+  void didUpdateWidget(covariant _DanmuLayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Episode / reload changed the list: rebuild index and clear screen.
+    if (!identical(oldWidget.danmus, widget.danmus)) {
+      final oldLen = _sorted.length;
+      final oldHead = oldLen > 0 ? _sorted.first : null;
+      final newSorted = _sortedOf(widget.danmus);
+      final newHead = newSorted.isNotEmpty ? newSorted.first : null;
+      final contentChanged = oldLen != newSorted.length ||
+          oldHead?.text != newHead?.text ||
+          oldHead?.time != newHead?.time;
+      if (contentChanged) {
+        _sorted = newSorted;
+        _active.clear();
+        _nextIndex = 0;
+        _nextTrack = 0;
+        _lastPosSec = null;
+      }
+    }
+  }
+
+  List<_DanmuItem> _sortedOf(List<_DanmuItem> source) {
+    return List<_DanmuItem>.of(source)
       ..sort((a, b) => a.time.compareTo(b.time));
-    _timer = Timer.periodic(const Duration(milliseconds: 100), (_) {
-      if (!mounted) return;
-      final pos = widget.positionOf().inMilliseconds / 1000.0;
-      var spawned = false;
-      while (_nextIndex < _sorted.length &&
-          _sorted[_nextIndex].time <= pos + 0.25) {
+  }
+
+  void _onTick(Timer _) {
+    if (!mounted) return;
+    final pos = widget.positionOf().inMilliseconds / 1000.0;
+
+    // Seek jump: position moved more than one tick can travel -> reset.
+    final last = _lastPosSec;
+    if (last != null && (pos - last).abs() > 1.5) {
+      _resetToPosition(pos);
+    }
+    _lastPosSec = pos;
+
+    var spawned = false;
+    // Emit [prev, now+preview]. After seek, _nextIndex is already correct.
+    while (_nextIndex < _sorted.length &&
+        _sorted[_nextIndex].time <= pos + 0.25) {
+      // Skip items already well in the past (avoid flooding after forward seek)
+      if (_sorted[_nextIndex].time >= pos - 0.6) {
         _spawn(_sorted[_nextIndex]);
-        _nextIndex++;
         spawned = true;
       }
-      if (_active.isEmpty && !spawned) return;
-      for (final a in _active) {
-        if (a.item.mode == 1) {
-          a.x -= _speed * 0.1;
-        } else {
-          a.remaining -= 0.1;
-        }
+      _nextIndex++;
+    }
+    if (_active.isEmpty && !spawned) return;
+    for (final a in _active) {
+      if (a.item.mode == 1) {
+        a.x -= _speed * 0.1;
+      } else {
+        a.remaining -= 0.1;
       }
-      final before = _active.length;
-      _active.removeWhere(
-          (a) => a.item.mode == 1 ? a.x + a.width < -16 : a.remaining <= 0);
-      if (spawned || _active.isNotEmpty || before != _active.length) {
-        setState(() {});
-      }
-    });
+    }
+    final before = _active.length;
+    _active.removeWhere(
+        (a) => a.item.mode == 1 ? a.x + a.width < -16 : a.remaining <= 0);
+    if (spawned || _active.isNotEmpty || before != _active.length) {
+      setState(() {});
+    }
+  }
+
+  /// After a seek, move the emit cursor to the current time.
+  void _resetToPosition(double pos) {
+    _active.clear();
+    _nextTrack = 0;
+    var i = 0;
+    while (i < _sorted.length && _sorted[i].time <= pos) {
+      i++;
+    }
+    _nextIndex = i;
   }
 
   void _spawn(_DanmuItem item) {
-    // 宽度只在发射时测一次，build 里不再 TextPainter.layout
+    // Measure width once at spawn; avoid TextPainter.layout in build.
     final width = _textWidth(item.text, 14);
     if (item.mode == 4) {
       _active.add(_ActiveDanmu(item, topFixed: true, width: width));
@@ -3340,10 +3411,11 @@ class _DanmuLayerState extends State<_DanmuLayer> {
         builder: (context, constraints) {
           final w = constraints.maxWidth;
           final h = constraints.maxHeight;
-          // 宽度已在 _spawn 缓存，这里只补滚动弹幕初始 x
+          // Seed initial x once width is known (not x==0 sentinel).
           for (final a in _active) {
-            if (a.item.mode == 1 && a.x == 0) {
+            if (a.item.mode == 1 && !a.positioned) {
               a.x = w.toDouble();
+              a.positioned = true;
             }
           }
           return Stack(
