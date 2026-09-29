@@ -290,6 +290,7 @@ class _HomePageState extends State<HomePage> {
       // 全部 Rx 在 Obx 闭包顶部读取，LayoutBuilder 内不再访问 Rx
       final isLoading = _controller.isLoading.value;
       final errorMsg = _controller.errorMessage.value;
+      final homeVideos = _controller.homeVideos.toList();
       final videos = _controller.videos.toList();
       final sorts = _controller.sorts.toList();
       final selectedSortId = _controller.selectedSort.value?.id;
@@ -351,6 +352,16 @@ class _HomePageState extends State<HomePage> {
             return CustomScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
+                if (homeVideos.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(
+                          top: AppTheme.spacingXS, bottom: 8),
+                      child: _RecommendBanner(videos: homeVideos.length > 6
+                          ? homeVideos.sublist(0, 6)
+                          : List<Video>.from(homeVideos)),
+                    ),
+                  ),
                 if (sorts.isNotEmpty)
                   SliverToBoxAdapter(
                     child: Padding(

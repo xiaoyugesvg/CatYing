@@ -11,6 +11,7 @@ import '../../services/source_service.dart';
 class HomeController extends GetxController {
   final sorts = <SortData>[].obs;
   final selectedSort = Rx<SortData?>(null);
+  final homeVideos = <Video>[].obs; // 轮播图用
   final videos = <Video>[].obs;
   final isLoading = false.obs;
   final currentPage = 1.obs;
@@ -42,12 +43,32 @@ class HomeController extends GetxController {
     final source = ApiConfig.instance.homeSourceBean.value;
     if (source == null) return;
 
+    // 缓存优先：首页轮播立刻出片
+    final cacheKey = 'home_videos:${source.key}';
+    try {
+      final cached = CacheStore.instance.getJsonListCache(cacheKey, ttl: const Duration(hours: 12));
+      if (cached != null && cached.isNotEmpty) {
+        homeVideos.value = cached
+            .whereType<Map>()
+            .map((e) => Video.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
+      }
+    } catch (e) { /* ignore */ }
+
     isLoading.value = true;
     errorMessage.value = null;
 
     try {
       final result = await SourceService.instance.getSort(source);
       sorts.value = result.$1;
+      homeVideos.value = result.$2;
+      if (result.$2.isNotEmpty) {
+        // 异步写缓存，不阻塞
+        CacheStore.instance.setJsonCache(
+          cacheKey,
+          result.$2.map((v) => v.toJson()).toList(),
+        );
+      }
 
       // 默认选中第一个分类
       if (sorts.isNotEmpty) {
