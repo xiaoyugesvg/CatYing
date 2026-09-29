@@ -3,7 +3,7 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:get/get.dart';
-import 'app_log.dart';
+import '../../services/app_log.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/player_engine.dart';

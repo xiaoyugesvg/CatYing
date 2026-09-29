@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:dlna_dart/dlna.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'app_log.dart';
+import '../../services/app_log.dart';
 
 /// DLNA 投屏 page
 ///

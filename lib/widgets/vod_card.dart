@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
-import 'tvbox_cache_manager.dart';
 import '../common/theme.dart';
 import '../models/movie.dart';
 
@@ -129,7 +128,6 @@ class VodCard extends StatelessWidget {
     if (url.startsWith('//')) url = 'https:$url';
 
     return CachedNetworkImage(
-        cacheManager: TVBoxCacheManager(),
       imageUrl: url,
       fit: BoxFit.cover,
       httpHeaders: {

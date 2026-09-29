@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
-import 'app_log.dart';
+import '../../services/app_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/movie.dart';
 import '../../models/source_bean.dart';
