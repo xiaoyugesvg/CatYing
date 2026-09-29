@@ -1,4 +1,4 @@
-﻿import AVFoundation
+import AVFoundation
 import AVKit
 import Flutter
 import UIKit
@@ -148,6 +148,28 @@ final class AvEngine: NSObject {
     player.play()
     isPlaying = true
     channel?.invokeMethod("onPlaying", arguments: true)
+  }
+
+  /// 应用内预览（UiKitView 的 AVPlayerLayer，layerClass 方式）
+  weak var displayContainer: UIView?
+  weak var displayLayer: AVPlayerLayer?
+
+  /// PiP / 预览共用的画面层
+  func currentDisplayLayer() -> AVPlayerLayer {
+    return displayLayer ?? playerLayer
+  }
+
+  /// 关小窗后确保 player 仍挂在预览 layer 上
+  func restoreLayerToDisplay() {
+    guard let pl = displayLayer else {
+      playerLayer.player = player
+      return
+    }
+    pl.player = player
+    pl.videoGravity = .resizeAspect
+    if let host = displayContainer {
+      pl.frame = host.bounds
+    }
   }
 
   /// 当前播放用的 AVPlayer（PiP 与预览共用）

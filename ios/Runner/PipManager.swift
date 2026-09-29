@@ -397,16 +397,16 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
     pipController = nil
     pipPlayer = nil
     pipLayer = nil
-    // 仅移除我们临时插入的 container；若 layer 挂在 UiKitView 上则保留
+    // 仅移除临时 container；**必须把共享 layer 归还预览**，否则 App 内黑屏
     if let c = containerView {
-      // container 只是我们为 PiP 临时加的透明层；layer 可能已被系统交还
       c.removeFromSuperview()
       containerView = nil
     }
+    AvEngine.shared.restoreLayerToDisplay()
     setPhase(.idle)
     preparedReady = false
     preparedURL = ""
-    NSLog("[PipManager] cleanup (shared player untouched)")
+    NSLog("[PipManager] cleanup (shared player untouched, layer restored)")
   }
 
   // MARK: - 退后台自动启动 PiP
