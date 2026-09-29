@@ -368,18 +368,19 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
     if isActive {
       lastPositionSeconds = pipPlayer?.currentTime().seconds ?? 0
       pipController?.stopPictureInPicture()
-      // didStop delegate 里会 notify + cleanup，这里只触发停止
+      // didStop 里只解绑 PiP 控制器，**不**暂停共享播放器
       return
     }
     if pendingStart {
-      // 启动门闩未完成时被要求退出：直接放弃启动
       startResult?(nil)
       startResult = nil
     }
-    // 常驻实例未在 PiP：暂停保持待命（不销毁，下次可快路径启动）
-    pipPlayer?.pause()
+    // 未在 PiP：绝不能 pause 共享播放器（AvEngine），否则主画面跟着停
   }
 
+  /// 只解绑 PiP 控制器。
+  /// **禁止** pause AvEngine.shared.player，**禁止** removeFromSuperlayer
+  /// 共享 playerLayer（否则 UiKitView 黑屏、主播放器停住）。
   private func cleanup() {
     itemStatusObserver?.invalidate()
     itemStatusObserver = nil
@@ -391,16 +392,21 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
       startResult?(nil)
       startResult = nil
     }
-    pipPlayer?.pause()
-    pipPlayer = nil
-    pipLayer?.removeFromSuperlayer()
-    pipLayer = nil
-    containerView?.removeFromSuperview()
-    containerView = nil
+    // 不碰 pipPlayer（= AvEngine.shared.player）播放状态
+    pipController?.delegate = nil
     pipController = nil
+    pipPlayer = nil
+    pipLayer = nil
+    // 仅移除我们临时插入的 container；若 layer 挂在 UiKitView 上则保留
+    if let c = containerView {
+      // container 只是我们为 PiP 临时加的透明层；layer 可能已被系统交还
+      c.removeFromSuperview()
+      containerView = nil
+    }
     setPhase(.idle)
     preparedReady = false
     preparedURL = ""
+    NSLog("[PipManager] cleanup (shared player untouched)")
   }
 
   // MARK: - 退后台自动启动 PiP
@@ -447,7 +453,7 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
     activateAudioSession()
     pipPlayer?.volume = 1.0
     pipPlayer?.play()
-    // 通知 Dart：PiP 真实激活，主播放器可以暂停了（避免双路声音）
+    // 通知 Dart：PiP 真实激活（单实例：**不要**暂停主播放器）
     notifyFlutter("onPipStarted", position: 0)
   }
 
