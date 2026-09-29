@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:get/get.dart';
+import 'app_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_config.dart';
 import '../models/source_bean.dart';
@@ -165,7 +166,7 @@ class ApiConfig extends GetxController {
     final result = sourceBeanList
         .where((s) => s.isSearchable && s.key != 'douban' && s.key != 'baseset')
         .toList();
-    debugPrint('[ApiConfig] getSearchableSources: 总源数=${sourceBeanList.length}, 可搜索源数=${result.length}');
+    AppLog.instance.log('[ApiConfig] getSearchableSources: 总源数=${sourceBeanList.length}, 可搜索源数=${result.length}');
     return result;
   }
 
@@ -184,7 +185,7 @@ class ApiConfig extends GetxController {
     final video = config['video'] as Map<String, dynamic>?;
     final sites = video?['sites'] as List<dynamic>?;
     if (video == null || sites == null) {
-      debugPrint('[ApiConfig] Spider /config 响应中没有 video.sites');
+      AppLog.instance.log('[ApiConfig] Spider /config 响应中没有 video.sites');
       return;
     }
 
@@ -219,7 +220,7 @@ class ApiConfig extends GetxController {
     }
 
     if (newSources.isEmpty) {
-      debugPrint('[ApiConfig] Spider /config 返回的 sites 为空');
+      AppLog.instance.log('[ApiConfig] Spider /config 返回的 sites 为空');
       return;
     }
 
@@ -251,7 +252,7 @@ class ApiConfig extends GetxController {
           newSources.firstOrNull;
     }
 
-    debugPrint('[ApiConfig] 从 Spider /config 更新了 ${newSources.length} 个线路，默认 homeSourceBean=${homeSourceBean.value?.key}');
+    AppLog.instance.log('[ApiConfig] 从 Spider /config 更新了 ${newSources.length} 个线路，默认 homeSourceBean=${homeSourceBean.value?.key}');
   }
 
   // ============================================================
@@ -453,7 +454,7 @@ class ApiConfig extends GetxController {
           await LiveService.instance.loadFromLivesJson(raw);
         }
       } catch (e) {
-        debugPrint('[ApiConfig] lives 解析失败: $e');
+        AppLog.instance.log('[ApiConfig] lives 解析失败: $e');
       }
 
       // 关键修复：如果当前解析结果包含 Spider 源（type=3），
@@ -465,7 +466,7 @@ class ApiConfig extends GetxController {
       // 在 _fetchSpiderConfig 完成后用真实 sites 列表重置 homeSourceBean。
       final hasSpiderSource = sources.any((s) => s.isSpiderSource);
       if (hasSpiderSource) {
-        debugPrint('[ApiConfig] 当前 config 含 Spider 源，homeSourceBean 等待 getCatConfig 完成后设置');
+        AppLog.instance.log('[ApiConfig] 当前 config 含 Spider 源，homeSourceBean 等待 getCatConfig 完成后设置');
       } else {
         // 普通源：按优先级选第一个
         await _restoreHomeSource(sources);

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/app_log.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -66,7 +67,7 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
           },
           onWebResourceError: (error) {
             // 仅打印错误，不弹 dialog（避免遮挡；用户在加载条上能看到失败）
-            debugPrint(
+            AppLog.instance.log(
                 '[WebviewPlayer] 资源错误: ${error.errorCode} ${error.description} url=${error.url}');
           },
         ),

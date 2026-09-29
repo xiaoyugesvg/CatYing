@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'app_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -54,7 +55,7 @@ class BackgroundService extends GetxService {
       );
     }
     customPath.value = prefs.getString(_customPathKey);
-    debugPrint('[BackgroundService] 已加载: choice=${choice.value}, '
+    AppLog.instance.log('[BackgroundService] 已加载: choice=${choice.value}, '
         'customPath=${customPath.value}');
   }
 
@@ -63,7 +64,7 @@ class BackgroundService extends GetxService {
     choice.value = c;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_choiceKey, c.name);
-    debugPrint('[BackgroundService] setBuiltin: $c');
+    AppLog.instance.log('[BackgroundService] setBuiltin: $c');
   }
 
   /// 设置自定义背景 - 复制到应用文档目录并保存路径
@@ -93,10 +94,10 @@ class BackgroundService extends GetxService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_choiceKey, BackgroundChoice.custom.name);
       await prefs.setString(_customPathKey, destPath);
-      debugPrint('[BackgroundService] setCustomImage: $destPath');
+      AppLog.instance.log('[BackgroundService] setCustomImage: $destPath');
       return true;
     } catch (e) {
-      debugPrint('[BackgroundService] setCustomImage 失败: $e');
+      AppLog.instance.log('[BackgroundService] setCustomImage 失败: $e');
       return false;
     }
   }
@@ -126,7 +127,7 @@ class BackgroundService extends GetxService {
       if (picked == null) return false;
       return await setCustomImage(picked.path);
     } catch (e) {
-      debugPrint('[BackgroundService] pickFromGallery 失败: $e');
+      AppLog.instance.log('[BackgroundService] pickFromGallery 失败: $e');
       return false;
     }
   }

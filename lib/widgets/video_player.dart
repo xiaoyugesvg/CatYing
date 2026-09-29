@@ -5,6 +5,7 @@ import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'app_log.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -381,7 +382,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       // libmpv 会直接从续播位置开始解码。这里 _scheduleResumeSeek 只作
       // safety net：如果 Media.start 失效，state.playing listener 会兜底 seek
       if (_persisted.resumeApplied) {
-        debugPrint('=== initState: 续播已应用 (widget 重建), 跳过 ===');
+        AppLog.instance.log('=== initState: 续播已应用 (widget 重建), 跳过 ===');
         _pendingResumeSeconds = null; // 防御清空, 防止 listener 误触发
       } else {
         _persisted.resumeApplied = true; // 先标记, 防重建 race 重复触发
@@ -453,7 +454,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         } catch (e) { /* ignore */ }
       });
     } catch (e) {
-      debugPrint('=== _initBatteryMonitor: 失败: $e ===');
+      AppLog.instance.log('=== _initBatteryMonitor: 失败: $e ===');
     }
   }
 
@@ -568,7 +569,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     try {
       final cur = _player.state.position;
       if (cur > target) {
-        debugPrint(
+        AppLog.instance.log(
             '=== _scheduleResumeSeek: cur=$cur > target=$target, 用户已观看, 跳过 ===');
         _pendingResumeSeconds = null;
         return;
@@ -577,9 +578,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _pendingResumeSeconds = resume;
     try {
       _player.seek(target);
-      debugPrint('=== _scheduleResumeSeek: 立即 seek 到 ${resume}s ===');
+      AppLog.instance.log('=== _scheduleResumeSeek: 立即 seek 到 ${resume}s ===');
     } catch (e) {
-      debugPrint('=== _scheduleResumeSeek: 立即 seek 失败: $e ===');
+      AppLog.instance.log('=== _scheduleResumeSeek: 立即 seek 失败: $e ===');
     }
     if (_player.state.playing) {
       _applyPendingResumeSeek();
@@ -594,13 +595,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     try {
       final cur = _player.state.position;
       if (cur > target) {
-        debugPrint(
+        AppLog.instance.log(
             '=== _applyPendingResumeSeek: cur=$cur > target=$target, 用户已观看, 跳过 ===');
         _pendingResumeSeconds = null;
         return;
       }
       if ((cur - target).abs() < const Duration(seconds: 2)) {
-        debugPrint('=== _applyPendingResumeSeek: 已在 $pending 附近, 跳过 ===');
+        AppLog.instance.log('=== _applyPendingResumeSeek: 已在 $pending 附近, 跳过 ===');
         _pendingResumeSeconds = null;
         return;
       }
@@ -608,9 +609,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _pendingResumeSeconds = null;
     try {
       _player.seek(target);
-      debugPrint('=== _applyPendingResumeSeek: 兜底 seek 到 ${pending}s ===');
+      AppLog.instance.log('=== _applyPendingResumeSeek: 兜底 seek 到 ${pending}s ===');
     } catch (e) {
-      debugPrint('=== _applyPendingResumeSeek: 兜底 seek 失败: $e ===');
+      AppLog.instance.log('=== _applyPendingResumeSeek: 兜底 seek 失败: $e ===');
     }
   }
 
@@ -745,7 +746,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Future<void> _onUserToggleFullscreen() async {
     final currentlyFull = WindowFullScreen.instance.isActive || _isImmersive;
-    debugPrint(
+    AppLog.instance.log(
       '=== _onUserToggleFullscreen: currentlyFull=$currentlyFull '
       'isActive=${WindowFullScreen.instance.isActive} '
       '_isImmersive=$_isImmersive ===',
@@ -762,7 +763,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   Future<void> _onUserExitFullscreen() async {
-    debugPrint(
+    AppLog.instance.log(
       '=== _onUserExitFullscreen: _isNativeFullscreen=$_isNativeFullscreen, isPip=${VideoPlayerPip.instance.isActive} ===',
     );
     if (_isNativeFullscreen) {
@@ -779,10 +780,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// 调 WindowFullScreen 进入全屏
   Future<void> _enterFullScreen() async {
     if (WindowFullScreen.instance.isActive || _isImmersive) {
-      debugPrint('=== _enterFullScreen: skip (已处于全屏) ===');
+      AppLog.instance.log('=== _enterFullScreen: skip (已处于全屏) ===');
       return;
     }
-    debugPrint('=== _enterFullScreen: start ===');
+    AppLog.instance.log('=== _enterFullScreen: start ===');
     if (Platform.isIOS) {
       await SystemChrome.setPreferredOrientations(const [
         DeviceOrientation.landscapeLeft,
@@ -796,9 +797,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     widget.onFullScreenChanged?.call(true);
     try {
       await WindowFullScreen.instance.enter();
-      debugPrint('=== _enterFullScreen: WindowFullScreen enter OK ===');
+      AppLog.instance.log('=== _enterFullScreen: WindowFullScreen enter OK ===');
     } catch (e) {
-      debugPrint('=== _enterFullScreen: WindowFullScreen enter failed: $e ===');
+      AppLog.instance.log('=== _enterFullScreen: WindowFullScreen enter failed: $e ===');
     }
     if (mounted) _onWindowFullScreenChanged();
     try {
@@ -811,10 +812,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// 调 WindowFullScreen 退出全屏
   Future<void> _exitFullScreen() async {
     if (!WindowFullScreen.instance.isActive && !_isImmersive) {
-      debugPrint('=== _exitFullScreen: skip (不在全屏) ===');
+      AppLog.instance.log('=== _exitFullScreen: skip (不在全屏) ===');
       return;
     }
-    debugPrint('=== _exitFullScreen: start ===');
+    AppLog.instance.log('=== _exitFullScreen: start ===');
     _isImmersive = false;
     _isNativeFullscreen = false;
     _persisted.isImmersive = false;
@@ -822,9 +823,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     widget.onFullScreenChanged?.call(false);
     try {
       await WindowFullScreen.instance.exit();
-      debugPrint('=== _exitFullScreen: WindowFullScreen exit OK ===');
+      AppLog.instance.log('=== _exitFullScreen: WindowFullScreen exit OK ===');
     } catch (e) {
-      debugPrint('=== _exitFullScreen: WindowFullScreen exit failed: $e ===');
+      AppLog.instance.log('=== _exitFullScreen: WindowFullScreen exit failed: $e ===');
     }
     if (Platform.isIOS) {
       await SystemChrome.setPreferredOrientations(const [

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
+import 'app_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/movie.dart';
 import '../../models/source_bean.dart';
@@ -70,9 +71,9 @@ class TvSearchController extends GetxController {
     }
 
     // 并发搜索
-    debugPrint('[SearchController] 开始搜索: "$trimmed", 可用源数=${validSources.length}');
+    AppLog.instance.log('[SearchController] 开始搜索: "$trimmed", 可用源数=${validSources.length}');
     for (final s in validSources) {
-      debugPrint('[SearchController] 源: key=${s.key}, type=${s.type}, api=${s.api}, isSpider=${s.isSpiderSource}');
+      AppLog.instance.log('[SearchController] 源: key=${s.key}, type=${s.type}, api=${s.api}, isSpider=${s.isSpiderSource}');
     }
 
     final futures = <Future<void>>[];
@@ -89,14 +90,14 @@ class TvSearchController extends GetxController {
   Future<void> _searchInSourceAndNotify(
       SourceBean source, String kw, String requestId) async {
     try {
-      debugPrint('[SearchController] 搜索源 ${source.key}: 开始搜索 "$kw"');
+      AppLog.instance.log('[SearchController] 搜索源 ${source.key}: 开始搜索 "$kw"');
       final videos = await SourceService.instance.search(source, kw);
-      debugPrint('[SearchController] 搜索源 ${source.key}: 返回 ${videos.length} 条结果');
+      AppLog.instance.log('[SearchController] 搜索源 ${source.key}: 返回 ${videos.length} 条结果');
       if (_latestSearchRequestId != requestId) return;
       resultsBySite[source.key] = videos;
       resultCount[source.key] = videos.length;
     } catch (e) {
-      debugPrint('[SearchController] 搜索源 ${source.key}: 搜索失败 $e');
+      AppLog.instance.log('[SearchController] 搜索源 ${source.key}: 搜索失败 $e');
       if (_latestSearchRequestId != requestId) return;
       resultsBySite[source.key] = [];
       resultCount[source.key] = 0;

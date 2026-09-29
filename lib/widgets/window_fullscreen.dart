@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../services/app_log.dart';
 import 'package:window_manager/window_manager.dart';
 
 /// 窗口级全屏管理器 - 桌面端通过 `window_manager.setFullScreen(true)` 实现 OS 全屏
@@ -62,26 +63,26 @@ class WindowFullScreen {
           for (int i = 0; i < 30; i++) {
             final isMax = await windowManager.isMaximized();
             final isMin = await windowManager.isMinimized();
-            debugPrint(
+            AppLog.instance.log(
                 '[WindowFullScreen] enter: poll[$i] isMax=$isMax isMin=$isMin');
             if (!isMax && !isMin) break;
             await Future<void>.delayed(const Duration(milliseconds: 50));
           }
         }
       } catch (e) {
-        debugPrint('[WindowFullScreen] enter: restore failed: $e');
+        AppLog.instance.log('[WindowFullScreen] enter: restore failed: $e');
       }
 
       // 1) 保存当前窗口状态（仅大小/位置）
       _savedBounds = await windowManager.getBounds();
-      debugPrint('[WindowFullScreen] enter: saved bounds = $_savedBounds');
+      AppLog.instance.log('[WindowFullScreen] enter: saved bounds = $_savedBounds');
 
       // 2) 进入全屏 - window_manager 内部用 SetWindowLongPtr 加 WS_POPUP
       // + SetWindowPos 调到 (0, 0, SM_CXSCREEN, SM_CYSCREEN)
       // - WS_POPUP 风格不受 work area 限制，直接覆盖 taskbar
       // - setFullScreen 内部会保存原 style 和 bounds，exit 时恢复
       await windowManager.setFullScreen(true);
-      debugPrint(
+      AppLog.instance.log(
           '[WindowFullScreen] enter: setFullScreen done, current bounds = ${await windowManager.getBounds()}');
 
       // **关键**：翻转 _isActive 必须在 setFullScreen 完成之后
@@ -89,9 +90,9 @@ class WindowFullScreen {
       // 避免"窗口还没全屏但 icon 已经切换"或反过来的时序错位
       _isActive = true;
       activeNotifier.value = true;
-      debugPrint('[WindowFullScreen] enter: fullscreen active');
+      AppLog.instance.log('[WindowFullScreen] enter: fullscreen active');
     } catch (e, st) {
-      debugPrint('[WindowFullScreen] enter failed: $e\n$st');
+      AppLog.instance.log('[WindowFullScreen] enter failed: $e\n$st');
       _isActive = false;
       activeNotifier.value = false;
     }
@@ -105,15 +106,15 @@ class WindowFullScreen {
     try {
       // setFullScreen(false) 内部会恢复原 WS_OVERLAPPEDWINDOW style + saved bounds
       await windowManager.setFullScreen(false);
-      debugPrint(
+      AppLog.instance.log(
           '[WindowFullScreen] exit: setFullScreen(false) done, current bounds = ${await windowManager.getBounds()}');
     } catch (e, st) {
-      debugPrint('[WindowFullScreen] exit failed: $e\n$st');
+      AppLog.instance.log('[WindowFullScreen] exit failed: $e\n$st');
     } finally {
       _isActive = false;
       _savedBounds = null;
       activeNotifier.value = false;
-      debugPrint('[WindowFullScreen] exit: fullscreen inactive');
+      AppLog.instance.log('[WindowFullScreen] exit: fullscreen inactive');
     }
   }
 

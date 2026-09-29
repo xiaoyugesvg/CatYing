@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:get/get.dart';
+import 'app_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/live_models.dart';
@@ -201,7 +202,7 @@ class LiveService extends GetxService {
           await _saveChannelCache(cacheId, parsed);
         }
       } catch (e) {
-        debugPrint('[LiveService] 拉取直播列表失败 $url: $e');
+        AppLog.instance.log('[LiveService] 拉取直播列表失败 $url: $e');
         // 网络失败时，若上面已有缓存则保持现状
         if (cached == null && all.isEmpty) {
           error.value = '直播源加载失败，请检查网络';

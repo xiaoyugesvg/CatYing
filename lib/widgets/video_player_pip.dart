@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../services/app_log.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
@@ -110,7 +111,7 @@ class VideoPlayerPip {
         'headers': headers ?? const <String, String>{},
       });
     } catch (e) {
-      debugPrint('[VideoPlayerPip] prepare failed: $e');
+      AppLog.instance.log('[VideoPlayerPip] prepare failed: $e');
     }
   }
 
@@ -157,7 +158,7 @@ class VideoPlayerPip {
       _iosOnStarted = null;
       _iosActive = false;
       final msg = (e is PlatformException) ? '${e.code}: ${e.message}' : e.toString();
-      debugPrint('[VideoPlayerPip] iOS enter failed: $msg');
+      AppLog.instance.log('[VideoPlayerPip] iOS enter failed: $msg');
       return false;
     }
   }
@@ -199,13 +200,13 @@ class VideoPlayerPip {
   Future<void> enter() async {
     if (_isActive) return;
     if (_attachedPlayer == null) {
-      debugPrint('[VideoPlayerPip] enter: no player attached');
+      AppLog.instance.log('[VideoPlayerPip] enter: no player attached');
       return;
     }
     if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
       // 移动端平台：不支持桌面级 PiP 浮动窗口；
       // iOS 请走 enterIos（系统画中画），Android 暂未实现
-      debugPrint('[VideoPlayerPip] enter: unsupported platform');
+      AppLog.instance.log('[VideoPlayerPip] enter: unsupported platform');
       return;
     }
     try {
@@ -233,9 +234,9 @@ class VideoPlayerPip {
       await windowManager.setAlwaysOnTop(true);
       _isActive = true;
       activeNotifier.value = true;
-      debugPrint('[VideoPlayerPip] enter: PiP active');
+      AppLog.instance.log('[VideoPlayerPip] enter: PiP active');
     } catch (e, st) {
-      debugPrint('[VideoPlayerPip] enter failed: $e\n$st');
+      AppLog.instance.log('[VideoPlayerPip] enter failed: $e\n$st');
       _isActive = false;
       activeNotifier.value = false;
     }
@@ -256,12 +257,12 @@ class VideoPlayerPip {
         // 不再恢复 OS 全屏 —— 见 enter() 注释
       }
     } catch (e, st) {
-      debugPrint('[VideoPlayerPip] exit failed: $e\n$st');
+      AppLog.instance.log('[VideoPlayerPip] exit failed: $e\n$st');
     } finally {
       _isActive = false;
       _savedBounds = null;
       activeNotifier.value = false;
-      debugPrint('[VideoPlayerPip] exit: PiP inactive');
+      AppLog.instance.log('[VideoPlayerPip] exit: PiP inactive');
     }
   }
 

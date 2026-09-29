@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/app_log.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 /// 应用内 WebView 页面
@@ -51,7 +52,7 @@ class _InAppWebViewPageState extends State<InAppWebViewPage> {
           },
           onWebResourceError: (error) {
             // 仅打印错误，不弹 dialog（避免遮挡；用户在加载条上能看到失败）
-            debugPrint(
+            AppLog.instance.log(
                 '[InAppWebView] 资源错误: ${error.errorCode} ${error.description} url=${error.url}');
           },
         ),

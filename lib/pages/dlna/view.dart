@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dlna_dart/dlna.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'app_log.dart';
 
 /// DLNA 投屏 page
 ///
@@ -84,7 +85,7 @@ class _DLNAPageState extends State<DLNAPage> {
         }
       });
     } catch (e) {
-      debugPrint('DLNA start failed: $e');
+      AppLog.instance.log('DLNA start failed: $e');
       if (mounted) setState(() => _isSearching = false);
     }
   }
@@ -327,7 +328,7 @@ class _DLNAPageState extends State<DLNAPage> {
         colorText: Colors.white,
       );
     } catch (e) {
-      debugPrint('DLNA cast failed: $e');
+      AppLog.instance.log('DLNA cast failed: $e');
       if (!mounted) return;
       Get.snackbar('投屏失败', '$e',
           snackPosition: SnackPosition.BOTTOM,
@@ -352,7 +353,7 @@ class _DLNAPageState extends State<DLNAPage> {
         if (mounted) setState(() => _isPlaying = true);
       }
     } catch (e) {
-      debugPrint('DLNA control failed: $e');
+      AppLog.instance.log('DLNA control failed: $e');
       if (mounted) {
         Get.snackbar(
           '操作失败',
@@ -388,7 +389,7 @@ class _DLNAPageState extends State<DLNAPage> {
         );
       }
     } catch (e) {
-      debugPrint('DLNA stop failed: $e');
+      AppLog.instance.log('DLNA stop failed: $e');
       // 停止失败也强制清除本地状态，避免UI卡死
       if (mounted) {
         setState(() {

@@ -3,6 +3,7 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:get/get.dart';
+import 'app_log.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/player_engine.dart';
@@ -222,15 +223,15 @@ class SettingsController extends GetxController {
       imageCache.clear();
       imageCache.clearLiveImages();
     } catch (e) {
-      debugPrint('=== clearCache: imageCache.clear failed: $e ===');
+      AppLog.instance.log('=== clearCache: imageCache.clear failed: $e ===');
     }
 
     // 2) cached_network_image_ce 磁盘缓存
     try {
       await DefaultCacheManager().emptyCache();
-      debugPrint('=== clearCache: DefaultCacheManager.emptyCache OK ===');
+      AppLog.instance.log('=== clearCache: DefaultCacheManager.emptyCache OK ===');
     } catch (e) {
-      debugPrint('=== clearCache: DefaultCacheManager.emptyCache failed: $e ===');
+      AppLog.instance.log('=== clearCache: DefaultCacheManager.emptyCache failed: $e ===');
     }
 
     // 3) getTemporaryDirectory()
@@ -238,7 +239,7 @@ class SettingsController extends GetxController {
       final tmpDir = await getTemporaryDirectory();
       await _deleteDirContents(tmpDir);
     } catch (e) {
-      debugPrint('=== clearCache: tmp dir clear failed: $e ===');
+      AppLog.instance.log('=== clearCache: tmp dir clear failed: $e ===');
     }
 
     // 4) getApplicationCacheDirectory()
@@ -246,7 +247,7 @@ class SettingsController extends GetxController {
       final appCacheDir = await getApplicationCacheDirectory();
       await _deleteDirContents(appCacheDir);
     } catch (e) {
-      debugPrint('=== clearCache: app cache dir clear failed: $e ===');
+      AppLog.instance.log('=== clearCache: app cache dir clear failed: $e ===');
     }
 
     // 5) 给用户反馈 + 刷新显示
@@ -349,7 +350,7 @@ class SettingsController extends GetxController {
       final tmpDir = await getTemporaryDirectory();
       total += await _dirSize(tmpDir);
     } catch (e) {
-      debugPrint('=== refreshCacheSize: tmp dir size failed: $e ===');
+      AppLog.instance.log('=== refreshCacheSize: tmp dir size failed: $e ===');
     }
 
     // 3) getApplicationCacheDirectory() —— 包含 cached_network_image 磁盘缓存
@@ -357,7 +358,7 @@ class SettingsController extends GetxController {
       final appCacheDir = await getApplicationCacheDirectory();
       total += await _dirSize(appCacheDir);
     } catch (e) {
-      debugPrint('=== refreshCacheSize: app cache dir size failed: $e ===');
+      AppLog.instance.log('=== refreshCacheSize: app cache dir size failed: $e ===');
     }
 
     cacheSizeString.value = _formatSize(bytes: total);
@@ -377,7 +378,7 @@ class SettingsController extends GetxController {
         }
       }
     } catch (e) {
-      debugPrint('=== _dirSize: ${dir.path} failed: $e ===');
+      AppLog.instance.log('=== _dirSize: ${dir.path} failed: $e ===');
     }
     return total;
   }
@@ -395,12 +396,12 @@ class SettingsController extends GetxController {
             await entity.delete(recursive: true);
           }
         } catch (e) {
-          debugPrint(
+          AppLog.instance.log(
               '=== _deleteDirContents: ${entity.path} failed: $e ===');
         }
       }
     } catch (e) {
-      debugPrint('=== _deleteDirContents: ${dir.path} failed: $e ===');
+      AppLog.instance.log('=== _deleteDirContents: ${dir.path} failed: $e ===');
     }
   }
 

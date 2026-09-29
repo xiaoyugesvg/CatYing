@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:get/get.dart';
+import 'app_log.dart';
 import '../models/cache_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -81,7 +82,7 @@ class TmdbService extends GetxService {
       final title = cleanTitle(info.name);
       if (title.isEmpty) return false;
       final year = extractYear(info.note, info.year);
-      final ck = cacheKey(info.name, year);
+      final ck = cacheKey(info.name, year?.toString() ?? '');
 
       // 磁盘缓存：详情刮削 30 天
       final cached = CacheStore.instance.getJsonCache(
@@ -112,7 +113,7 @@ class TmdbService extends GetxService {
       } catch (_) {}
       return true;
     } catch (e) {
-      debugPrint('[TmdbService] enrich 失败: $e');
+      AppLog.instance.log('[TmdbService] enrich 失败: $e');
       return false;
     } finally {
       isWorking.value = false;

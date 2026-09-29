@@ -1,3 +1,4 @@
+import 'app_log.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import '../models/movie.dart';
@@ -838,7 +839,7 @@ class SourceService {
     final apiBase =
         sourceBean.api.startsWith('http') ? '' : sourceBean.api;
 
-    debugPrint('[SourceService] _spiderSearch: key=$key, type=${sourceBean.type}, apiBase=$apiBase, keyword=$keyword');
+    AppLog.instance.log('[SourceService] _spiderSearch: key=$key, type=${sourceBean.type}, apiBase=$apiBase, keyword=$keyword');
 
     // 对应 Swift searchWithSpider: 原子操作，先 init 再 search
     // 不依赖全局状态，避免并发搜索时竞态条件
@@ -849,12 +850,12 @@ class SourceService {
       keyword: keyword,
     );
     if (result == null) {
-      debugPrint('[SourceService] _spiderSearch: searchWithSpider 返回 null');
+      AppLog.instance.log('[SourceService] _spiderSearch: searchWithSpider 返回 null');
       return [];
     }
 
     final list = result['list'];
-    debugPrint('[SourceService] _spiderSearch: 返回 list=${list is List ? list.length : list.runtimeType} items');
+    AppLog.instance.log('[SourceService] _spiderSearch: 返回 list=${list is List ? list.length : list.runtimeType} items');
     return _parseVideoListFromJson(list, sourceBean.key);
   }
 }
