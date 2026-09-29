@@ -600,7 +600,7 @@ class _DetailPageState extends State<DetailPage> {
       canPlayPrevious: _controller.selectedEpisodeIndex.value > 0,
       isPipMode: isPip,
       showAudioModeButton: true,
-      topBarTopPadding: 14.0, // 详情页顶栏往下挪一点，离状态栏稍远
+      topBarTopPadding: 18.0, // 详情页顶栏往下挪一点，离状态栏稍远
       skipIntroSeconds: _controller.skipIntroSeconds.value,
       skipOutroSeconds: _controller.skipOutroSeconds.value,
       onPlayNext: () => _playNextEpisode(),
