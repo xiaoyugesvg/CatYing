@@ -175,7 +175,7 @@ class _EpisodeListViewState extends State<EpisodeListView> {
   }
 
   /// 分页 tab 行：1-10 / 11-20 ...（超过 10 集才显示）
-  Widget _buildGridPager() {
+  Widget _buildGridPager({void Function(int page)? onPageChanged}) {
     final total = widget.episodeNames.length;
     if (total <= 10) return const SizedBox.shrink();
     final pageCount = (total / 10).ceil();
@@ -192,7 +192,14 @@ class _EpisodeListViewState extends State<EpisodeListView> {
           final end = ((p + 1) * 10).clamp(0, total);
           final label = '$start-$end';
           return GestureDetector(
-            onTap: () => setState(() => _gridPage = p),
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              if (onPageChanged != null) {
+                onPageChanged(p);
+              } else {
+                setState(() => _gridPage = p);
+              }
+            },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14),
               alignment: Alignment.center,
@@ -229,7 +236,8 @@ class _EpisodeListViewState extends State<EpisodeListView> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => DraggableScrollableSheet(
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => DraggableScrollableSheet(
         initialChildSize: 0.62,
         minChildSize: 0.4,
         maxChildSize: 0.92,
@@ -288,7 +296,10 @@ class _EpisodeListViewState extends State<EpisodeListView> {
                 ),
               ),
               // 分页 tab（1-10 / 11-20 ...）
-              _buildGridPager(),
+              _buildGridPager(onPageChanged: (p) {
+                setSheetState(() => _gridPage = p);
+                setState(() => _gridPage = p);
+              }),
               const SizedBox(height: 8),
               // 网格剧集（当前页切片）
               Expanded(
@@ -346,6 +357,7 @@ class _EpisodeListViewState extends State<EpisodeListView> {
             ],
           ),
         ),
+      ),
       ),
     );
   }

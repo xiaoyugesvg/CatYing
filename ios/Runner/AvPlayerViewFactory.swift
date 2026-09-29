@@ -20,22 +20,19 @@ final class AvPlayerViewFactory: NSObject, FlutterPlatformViewFactory {
   }
 }
 
-/// 触摸穿透到 Flutter（顶栏/底栏可点）
-private final class AvPassthroughView: UIView {
-  override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-    return nil
-  }
-}
-
-/// 关键：layerClass 必须是 AVPlayerLayer（而不是把 AVPlayerLayer 当 sublayer）。
-/// Flutter UiKitView 里 sublayer 方式经常「有声无画」；layerClass 方式渲染稳定。
-private final class AvPlayerHostView: AvPassthroughView {
+/// 应用内预览：layerClass=AVPlayerLayer（稳定出画）+ 触摸穿透到 Flutter。
+/// 注意：不要把 AVPlayerLayer 当 sublayer，也不要从 final 类再继承。
+private final class AvPlayerHostView: UIView {
   override class var layerClass: AnyClass {
     return AVPlayerLayer.self
   }
 
   var playerLayer: AVPlayerLayer {
     return self.layer as! AVPlayerLayer
+  }
+
+  override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    return nil
   }
 }
 

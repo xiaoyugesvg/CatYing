@@ -167,16 +167,17 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
 
   // MARK: - 与主播放器共用 AvEngine.shared.player（单实例，进出小窗不中断）
 
-  /// 确保 PiP 控制器挂在全局唯一 AVPlayerLayer 上
+  /// 确保 PiP 控制器挂在应用内预览的 AVPlayerLayer（layerClass）上
   private func ensurePipController() {
+    let player = AvEngine.shared.player
+    // 优先用 UiKitView 的 displayLayer，否则退回引擎默认 layer
+    let layer = AvEngine.shared.currentDisplayLayer()
+    pipPlayer = player
+    pipLayer = layer
     if pipController != nil {
-      pipPlayer = AvEngine.shared.player
-      pipLayer = AvEngine.shared.playerLayer
       return
     }
-    let layer = AvEngine.shared.playerLayer
-    let player = AvEngine.shared.player
-    // layer 必须在 window 层级；应用内 UiKitView 已挂则复用
+    // 仅当 layer 尚无宿主时才临时挂到 window（正常应已在 UiKitView 上）
     if layer.superlayer == nil {
       guard let window = Self.keyWindow() else { return }
       let container = UIView(frame: window.bounds)
@@ -194,10 +195,8 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
     }
     controller.delegate = self
     pipController = controller
-    pipPlayer = player
-    pipLayer = layer
     preparedReady = true
-    NSLog("[PipManager] PiP bound to shared AVPlayer")
+    NSLog("[PipManager] PiP bound to shared AVPlayer (displayLayer)")
   }
 
   /// 前台调用：只绑定共用播放器，不再另建静音 AVPlayer
@@ -430,13 +429,20 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
   /// （黑屏/loading），AVPlayer 缓冲完成后画面自然呈现，避免"退后台只有声音没有小窗"。
   @objc private func appDidEnterBackground() {
     NSLog("[PipManager] appDidEnterBackground (preparedReady=\(preparedReady), isActive=\(isActive), startingPip=\(startingPip))")
-    guard !isActive, !startingPip, let controller = pipController else { return }
+    guard !isActive, !startingPip else { return }
+    // cleanup()/releasePip() 后 controller 可能为 nil：切后台前重建，否则自动小窗失效
+    if pipController == nil {
+      ensurePipController()
+    }
+    guard let controller = pipController else {
+      NSLog("[PipManager] auto PiP skipped: no controller")
+      return
+    }
     activateAudioSession()
     pipPlayer?.volume = 1.0
     pipPlayer?.play()
     setPhase(.starting)
     controller.startPictureInPicture()
-    // 真实激活由 didStart 回调确认并通知 Dart
     NSLog("[PipManager] auto startPictureInPicture on background (preparedReady=\(preparedReady))")
   }
 
