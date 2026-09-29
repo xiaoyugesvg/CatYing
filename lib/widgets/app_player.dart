@@ -111,8 +111,14 @@ class AppPlayer {
   late final AppPlayerStateView _defaultState = _DefaultPlayerStateView(this);
   AppPlayerStateView get state => _defaultState;
 
+  /// 是否为 iOS 共享 AVPlayer（与系统小窗同一实例）
+  bool get isSharedIosAv => false;
+
   /// mpv 后端可注入自定义画面构建器；AVPlayer 为 null
   Widget Function({BoxFit fit, double? aspectRatio})? mpvVideoBuilder;
+
+  /// iOS UiKitView 等平台画面
+  Widget Function({BoxFit fit, double? aspectRatio})? platformViewBuilder;
   bool _disposed = false;
   bool _completedNotified = false;
   bool _ownsController = true;
@@ -281,11 +287,15 @@ class AppVideoView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // mpv 后端：由 mpv_app_player 注入的 [mpvVideoBuilder] 渲染
+    // mpv 后端
     final mpvBuilder = player.mpvVideoBuilder;
     if (mpvBuilder != null) {
-      final w = mpvBuilder(fit: fit, aspectRatio: aspectRatio);
-      return w;
+      return mpvBuilder(fit: fit, aspectRatio: aspectRatio);
+    }
+    // iOS 共享 AVPlayer：UiKitView（与小窗同一 layer）
+    final platformBuilder = player.platformViewBuilder;
+    if (platformBuilder != null) {
+      return platformBuilder(fit: fit, aspectRatio: aspectRatio);
     }
     final vc = player.controller;
     if (vc == null) {

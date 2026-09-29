@@ -9,6 +9,7 @@ import '../../models/player_engine.dart';
 import '../../widgets/common_widgets.dart';
 import '../../common/theme_mode_store.dart';
 import '../../services/player_prefs.dart';
+import '../../services/app_log.dart';
 import 'controller.dart';
 
 /// 设置页 - 对应 Swift SettingsView
@@ -530,8 +531,61 @@ class _SettingsPageState extends State<SettingsPage> {
                 value: '${controller.playTimeStep.value}秒',
                 onTap: () => _showTimeStepSelector(),
               )),
+          Divider(color: AppTheme.borderLight, height: 1),
+          SettingsRow(
+            icon: Icons.bug_report_outlined,
+            title: '调试日志',
+            value: '查看 / 清空',
+            onTap: _showDebugLogDialog,
+          ),
         ],
       ),
+    );
+  }
+
+  /// 调试日志：最近若干行 + 一键清空
+  Future<void> _showDebugLogDialog() async {
+    final text = await AppLog.instance.readRecentLines(lines: 120);
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: AppTheme.backgroundSecondary,
+          title: Text('调试日志（最近）',
+              style: TextStyle(color: AppTheme.textPrimary)),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 320,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text.isEmpty ? '（暂无日志，先操作几步再打开）' : text,
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                try {
+                  await AppLog.instance.clear();
+                } catch (_) {}
+                if (ctx.mounted) Navigator.of(ctx).pop();
+              },
+              child: Text('清空', style: TextStyle(color: AppTheme.textTertiary)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text('关闭',
+                  style: TextStyle(color: AppTheme.accentColor)),
+            ),
+          ],
+        );
+      },
     );
   }
 

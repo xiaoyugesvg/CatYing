@@ -2506,23 +2506,24 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   // 画中画
   // ============================================================
 
-  /// 小窗关闭后回到 App：seek 到小窗进度并续播（AVPlayer 需 await）
+  /// 小窗关闭后回到 App：共用同一 AVPlayer，一般只需收起浮层。
+  /// 仅当播放器不是 iOS 共享实例（如 MPV）时才 seek/续播。
   Future<void> _resumeAfterPip(Duration resume, String playUrl) async {
     if (!mounted) return;
     setState(() => _pipActive = false);
-    try {
-      if (resume > Duration.zero) {
-        await _player.seek(resume);
-      }
-      // 系统 PiP 刚停，audio session 可能还在切换，稍候再 play
-      await Future<void>.delayed(const Duration(milliseconds: 120));
-      await _player.play();
-    } catch (e) {
-      AppLog.instance.log('[video_player] resume after pip failed: $e');
+    final isSharedIos = _player.isSharedIosAv;
+    if (!isSharedIos) {
       try {
+        if (resume > Duration.zero) {
+          await _player.seek(resume);
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 120));
         await _player.play();
-      } catch (_) {}
+      } catch (e) {
+        AppLog.instance.log('[video_player] resume after pip failed: $e');
+      }
     }
+    // 为下次进小窗保持 layer 就绪
     if (Platform.isIOS && playUrl.isNotEmpty) {
       VideoPlayerPip.instance.prepareIos(
         url: playUrl,
@@ -2565,14 +2566,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         return;
       }
       final currentPos = _player.state.position;
-      // 主播放器已是 AVPlayer(video_player)，与 PiP 原生 AVPlayer 会抢
-      // AVAudioSession。必须在 startPip **之前** pause 主播放器，释放
-      // session；onStarted 仅作兑底再 pause 一次。
-      // - onStopped：小窗结束 → 从进度续播主播放器
-      try {
-        await _player.pause();
-      } catch (e) {
-        AppLog.instance.log('[video_player] pre-pip pause failed: $e');
+      // 单实例 AVPlayer：进小窗不暂停，画面交给系统 PiP，视频连续
+      if (Platform.isIOS && !_player.isSharedIosAv) {
+        _showMessage('请把点播内核切换为「AVPlayer」后再使用小窗');
+        return;
       }
       final entered = await VideoPlayerPip.instance.enterIos(
         url: playUrl,
@@ -2580,12 +2577,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         position: currentPos,
         onStarted: () {
           if (!mounted) return;
+          // 单实例：不暂停，画面由系统小窗接管
           setState(() => _pipActive = true);
-          try {
-            _player.pause();
-          } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
         },
         onStopped: () {
           final resume = VideoPlayerPip.instance.iosLastPosition;
@@ -2640,11 +2633,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
     _autoPipInFlight = true;
     final currentPos = _player.state.position;
-    // 主播放器 AVPlayer 与 PiP 原生 AVPlayer 争 session：启动前先 pause
-    try {
-      await _player.pause();
-    } catch (e) {
-      AppLog.instance.log('[video_player] auto-pip pre-pause failed: $e');
+    // 单实例：进小窗不暂停，与手动 PiP 相同
+    if (!_player.isSharedIosAv) {
+      _autoPipInFlight = false;
+      return;
     }
     try {
       final entered = await VideoPlayerPip.instance.enterIos(
@@ -2653,12 +2645,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         position: currentPos,
         onStarted: () {
           if (!mounted) return;
+          // 单实例：不暂停，画面由系统小窗接管
           setState(() => _pipActive = true);
-          try {
-            _player.pause();
-          } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
         },
         onStopped: () {
           final resume = VideoPlayerPip.instance.iosLastPosition;

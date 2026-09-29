@@ -127,7 +127,7 @@ class AppLog {
   ///
   /// 调试问题时改成 true, 重新构建, 看 log 即可. 默认 false 是因为调试期已
   /// 结束, 长期写文件会占用 Documents 缓存 (Files app 用户可见).
-  static const bool kLogEnabled = false;
+  static const bool kLogEnabled = true;
 
   File? _logFile; // app.log
   File? _jsonlFile; // app.jsonl
@@ -189,9 +189,9 @@ class AppLog {
     if (!kLogEnabled) return;
     final human = e.formatHuman();
     final json = e.formatJson();
-    // 同步 print, OSLog 一定能看
+    // 同步 print（**不要**再调 AppLog.log()，那会 entry→log→entry 无限递归）
     // ignore: avoid_print
-    AppLog.instance.log(human);
+    print(human);
     if (!_initialized) return;
     _writeBoth(human, json);
   }
@@ -455,6 +455,15 @@ class AppLog {
     } catch (_) {
       return '';
     }
+  }
+
+  /// 清空 app.log / app.jsonl
+  Future<void> clear() async {
+    try {
+      await _writeChain;
+      await _logFile?.writeAsString('');
+      await _jsonlFile?.writeAsString('');
+    } catch (_) {}
   }
 
   /// 读取 app.jsonl 最近 N 行 (JSON 格式, 给程序分析用)

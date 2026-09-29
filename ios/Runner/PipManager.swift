@@ -5,25 +5,15 @@ import UIKit
 
 /// iOS 系统画中画（PiP）管理器
 ///
-/// 背景：
-///   NewTv 主播放器是 media_kit（libmpv 渲染到 Flutter 纹理），
-///   系统级画中画（悬浮小窗 + 切后台继续播放）只支持 AVPlayerLayer，
-///   libmpv 纹理无法直接进入系统 PiP。
+/// **单播放器方案（当前）**：
+///   AvEngine.shared.player 为全局唯一 AVPlayer。
+///   - 应用内 UiKitView 挂同一 AVPlayerLayer 显示画面
+///   - PiP 把**同一 layer** 交给系统悬浮窗
+///   - 进/出小窗不暂停、不换播放器，视频连续、音画同步
 ///
-/// 方案（双播放器 PiP 通道）：
-///   1. 用户点 PiP / 退后台自动 → Dart 收集 url / headers / 当前进度 → startPip
-///   2. 本类创建 AVPlayer + AVPlayerLayer（透明容器插到 window 最底层，
-///      不遮挡 Flutter 画面），seek 到当前进度，startPictureInPicture()
-///      启动系统悬浮窗
-///   3. 主播放器（media_kit）由 Dart 侧在收到 onPipStarted（系统 PiP 真正出现）
-///      后暂停，避免双路声音 / 解码
-///   4. PiP 结束（用户关闭窗口 / 点"返回App" / 手动退出）→
-///      delegate 回调 → channel 通知 Dart → 主播放器 seek 续播
-///
-/// 前置条件（NewTv 已具备）：
-///   - Info.plist UIBackgroundModes 含 audio ✅（已有）
-///   - AVAudioSession .playback（BackgroundAudio.swift 已激活）✅
-///   - 无需特殊 entitlement（TrollStore 侧载可用）✅
+/// 前置条件：
+///   - Info.plist UIBackgroundModes 含 audio
+///   - AVAudioSession .playback
 ///
 /// 稳定性修复 v4（2026-09-26）：
 ///   旧版根因导致"画中画时灵时不灵"：
@@ -175,196 +165,104 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
     NSLog("[PipManager] channel registered")
   }
 
-  // MARK: - 前台预热（常驻待命）
+  // MARK: - 与主播放器共用 AvEngine.shared.player（单实例，进出小窗不中断）
 
-  /// 前台播放时预热：创建 AVPlayer 静音预缓冲，readyToPlay 后常驻待命。
-  /// 同一 URL 已就绪则直接复用；换源时重建。
-  private func preparePip(url: String, headers: [String: String]) {
-    guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
-    // 同一 URL 已预热就绪：直接复用
-    if preparedReady, preparedURL == url { return }
-    // 换源 / 首次：重建常驻实例
-    if pipController != nil { cleanup() }
-    guard let videoURL = URL(string: url) else { return }
-
-    var options: [String: Any] = [:]
-    if !headers.isEmpty {
-      // AVURLAssetHTTPHeaderFieldsKey 在新版 iOS SDK 中已不可见（deprecated 后移除），
-      // 其值即字符串字面量 "AVURLAssetHTTPHeaderFieldsKey"，直接使用等价。
-      options["AVURLAssetHTTPHeaderFieldsKey"] = headers
-    }
-    let asset = AVURLAsset(url: videoURL, options: options)
-    let playerItem = AVPlayerItem(asset: asset)
-    let player = AVPlayer(playerItem: playerItem)
-    let layer = AVPlayerLayer(player: player)
-
-    // AVPlayerLayer 必须挂到 window 层级才能启动 PiP。
-    // 用全屏透明容器插到 window 最底层，不遮挡 Flutter 画面。
-    guard let window = Self.keyWindow() else { return }
-    let container = UIView(frame: window.bounds)
-    container.backgroundColor = .clear
-    container.isUserInteractionEnabled = false
-    window.insertSubview(container, at: 0)
-    layer.frame = container.bounds
-    layer.videoGravity = .resizeAspect
-    container.layer.addSublayer(layer)
-
-    guard let controller = AVPictureInPictureController(playerLayer: layer) else {
-      container.removeFromSuperview()
+  /// 确保 PiP 控制器挂在全局唯一 AVPlayerLayer 上
+  private func ensurePipController() {
+    if pipController != nil {
+      pipPlayer = AvEngine.shared.player
+      pipLayer = AvEngine.shared.playerLayer
       return
     }
-
+    let layer = AvEngine.shared.playerLayer
+    let player = AvEngine.shared.player
+    // layer 必须在 window 层级；应用内 UiKitView 已挂则复用
+    if layer.superlayer == nil {
+      guard let window = Self.keyWindow() else { return }
+      let container = UIView(frame: window.bounds)
+      container.backgroundColor = .clear
+      container.isUserInteractionEnabled = false
+      window.insertSubview(container, at: 0)
+      layer.frame = container.bounds
+      layer.videoGravity = .resizeAspect
+      container.layer.addSublayer(layer)
+      containerView = container
+    }
+    guard let controller = AVPictureInPictureController(playerLayer: layer) else {
+      NSLog("[PipManager] PiP controller init failed")
+      return
+    }
     controller.delegate = self
     pipController = controller
     pipPlayer = player
     pipLayer = layer
-    containerView = container
+    preparedReady = true
+    NSLog("[PipManager] PiP bound to shared AVPlayer")
+  }
+
+  /// 前台调用：只绑定共用播放器，不再另建静音 AVPlayer
+  private func preparePip(url: String, headers: [String: String]) {
+    guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
     preparedURL = url
-    preparedReady = false
-
-    // 监听 readyToPlay：就绪后置 preparedReady，等待退后台/手动启动
-    itemStatusObserver = playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
-      DispatchQueue.main.async {
-        guard let self = self else { return }
-        if item.status == .readyToPlay {
-          self.preparedReady = true
-          NSLog("[PipManager] prepared ready: \(url)")
-        } else if item.status == .failed {
-          NSLog("[PipManager] prepare failed: \(item.error?.localizedDescription ?? "未知")")
-          // 预热失败：释放实例（下次播放状态变化会重新预热）
-          self.cleanup()
-        }
-      }
-    }
-
-    // 静音预缓冲：避免与主播放器双路声音
-    player.volume = 0
-    player.play()
-    NSLog("[PipManager] preparePip (prewarm): \(url)")
+    ensurePipController()
   }
 
-  /// 离开播放页：释放常驻实例
+  /// 离开播放页：释放 PiP 控制器（**不**销毁 AvEngine 播放器）
   func releasePip() {
-    NSLog("[PipManager] releasePip")
-    cleanup()
+    NSLog("[PipManager] releasePip (keep shared player)")
+    if let c = pipController, c.isPictureInPictureActive {
+      c.stopPictureInPicture()
+    }
+    pipController?.delegate = nil
+    pipController = nil
+    // 不要 pause AvEngine.player —— 避免误杀主画面
+    if let c = containerView {
+      c.removeFromSuperview()
+      containerView = nil
+    }
+    pipLayer = nil
+    pipPlayer = nil
     preparedURL = ""
+    setPhase(.idle)
   }
 
-  // MARK: - 启动 PiP
+  // MARK: - 启动 PiP（同一播放器接管到系统小窗）
 
   private func startPip(url: String, headers: [String: String], positionMs: Double, result: @escaping FlutterResult) {
     guard AVPictureInPictureController.isPictureInPictureSupported() else {
       result(FlutterError(code: "unsupported", message: "当前设备不支持画中画", details: nil))
       return
     }
-    guard URL(string: url) != nil else {
-      result(FlutterError(code: "bad_url", message: "播放地址无效", details: nil))
-      return
-    }
-
-    // ---- 复用路径：存在常驻实例（同 URL，无论是否就绪）→ 立即启动 ----
-    if let controller = pipController, preparedURL == url {
-      // 实例正处启动中（退后台自动触发 / 上一步手动发起，didStart 未回调）：
-      // 不重复启动、不销毁，直接回传成功，消除双路径竞态。
-      if isBusy {
-        result(nil)
-        return
-      }
-      NSLog("[PipManager] startPip (reuse, preparedReady=\(preparedReady))")
-      activateAudioSession()
-      if positionMs > 0 {
-        pipPlayer?.seek(to: CMTime(seconds: positionMs / 1000.0, preferredTimescale: 600))
-      }
-      pipPlayer?.volume = 1.0 // 恢复音量（PiP 悬浮窗需要声音）
-      pipPlayer?.play()
-      setPhase(.starting)
-      // **v6 修复手动 PiP 静默失败**：iOS 前台手动启动前必须确认
-      // isPictureInPicturePossible == true，否则 startPictureInPicture()
-      // 会被系统静默忽略（不回调 didStart、不报错）→"点了没反应"。
-      // 轮询直到 possible（audio session / layer 就绪），超时明确报错返回。
-      waitForPipPossible(controller, timeoutSeconds: 4, result: result) { [weak self] in
-        guard let self = self else { return }
-        if self.isBusy {
-          // 轮询期间被后台自动路径抢先激活：直接回传成功
-          result(nil)
-          return
-        }
-        self.setPhase(.starting)
-        controller.startPictureInPicture()
-        NSLog("[PipManager] startPictureInPicture() (reuse, after possible)")
-        result(nil)
-      }
-      return
-    }
-
-    // ---- 慢路径：无同 URL 常驻实例（懒加载 + 门闩，兜底）----
-    // 已有不同源实例 / 待启动请求先清理
-    if pipController != nil || pendingStart { cleanup() }
-    guard let videoURL = URL(string: url) else {
-      result(FlutterError(code: "bad_url", message: "播放地址无效", details: nil))
-      return
-    }
-
-    var options: [String: Any] = [:]
-    if !headers.isEmpty {
-      options["AVURLAssetHTTPHeaderFieldsKey"] = headers
-    }
-    let asset = AVURLAsset(url: videoURL, options: options)
-    let playerItem = AVPlayerItem(asset: asset)
-    let player = AVPlayer(playerItem: playerItem)
-    let layer = AVPlayerLayer(player: player)
-
-    guard let window = Self.keyWindow() else {
-      result(FlutterError(code: "no_window", message: "无法获取窗口", details: nil))
-      return
-    }
-    let container = UIView(frame: window.bounds)
-    container.backgroundColor = .clear
-    container.isUserInteractionEnabled = false
-    window.insertSubview(container, at: 0)
-    layer.frame = container.bounds
-    layer.videoGravity = .resizeAspect
-    container.layer.addSublayer(layer)
-
-    guard let controller = AVPictureInPictureController(playerLayer: layer) else {
-      container.removeFromSuperview()
+    ensurePipController()
+    guard let controller = pipController else {
       result(FlutterError(code: "pip_init_failed", message: "画中画控制器创建失败", details: nil))
       return
     }
+    if isBusy {
+      result(nil)
+      return
+    }
 
-    controller.delegate = self
-    pipController = controller
-    pipPlayer = player
-    pipLayer = layer
-    containerView = container
     preparedURL = url
-
     activateAudioSession()
-    // 从当前进度续播
-    if positionMs > 0 {
-      player.seek(to: CMTime(seconds: positionMs / 1000.0, preferredTimescale: 600))
-    }
-
-    // ---- 启动门闩：等 item 就绪再进系统 PiP ----
-    startResult = result
-    setPhase(.pendingStart)
-    preparedReady = false
-
-    itemStatusObserver = playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
-      guard let self = self else { return }
-      DispatchQueue.main.async { self.handleItemStatus(item.status) }
-    }
-
-    // 15s 兜底：源加载慢 / 网络异常时不能一直挂着
-    let timeout = DispatchWorkItem { [weak self] in
-      self?.failStart("画中画启动超时（源加载慢）")
-    }
-    startTimeoutWork = timeout
-    DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: timeout)
-
+    // 同一播放器已在播则不要 seek（避免跳动）；换源由 AvEngine.open 处理
+    let player = AvEngine.shared.player
     player.volume = 1.0
-    player.play() // 预缓冲（先出声音，进 PiP 后无感切换）
-    NSLog("[PipManager] startPip(slow path, await-ready): \(url)")
+    if player.timeControlStatus != .playing {
+      player.play()
+    }
+    setPhase(.starting)
+    waitForPipPossible(controller, timeoutSeconds: 4, result: result) { [weak self] in
+      guard let self = self else { return }
+      if self.isBusy {
+        result(nil)
+        return
+      }
+      self.setPhase(.starting)
+      controller.startPictureInPicture()
+      NSLog("[PipManager] startPictureInPicture() on shared player")
+      result(nil)
+    }
   }
 
   /// item 状态变化处理（懒加载路径）

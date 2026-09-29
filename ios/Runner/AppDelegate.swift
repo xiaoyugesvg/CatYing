@@ -71,5 +71,16 @@ import AVFoundation
     } else {
       print("[AppDelegate] ❌ 无法获取 PipManager 的 registrar")
     }
+
+    // 注册全局唯一 AVPlayer（应用内画面 + PiP 共用）
+    if let avRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "AvEngine") {
+      AvEngine.shared.register(messenger: avRegistrar.messenger())
+      avRegistrar.register(
+        AvPlayerViewFactory(messenger: avRegistrar.messenger()),
+        withId: "av_player_view"
+      )
+    } else {
+      print("[AppDelegate] ❌ 无法获取 AvEngine 的 registrar")
+    }
   }
 }
