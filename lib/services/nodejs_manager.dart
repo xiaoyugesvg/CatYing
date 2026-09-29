@@ -110,7 +110,19 @@ class NodeJSManager {
     return await _platform.startNodeJS();
   }
 
+  /// 解绑 Node.js（**不会**真正杀掉 iOS 上的 embed Node 进程）。
+  ///
+  /// NodeMobile 只导出 `node_start`，没有 `node_exit`；Swift 侧 `stopNodeJS`
+  /// 只能把 isRunning / 端口清掉。App 进程退出时 Node 会随宿主一起被回收。
+  /// 调用方不要把它当成「进程已退出」，只是本端不再认为 Node 可用。
   void stopNodeJS() {
+    final spider = _platform.spiderPort;
+    final mgmt = _platform.managementPort;
+    AppLog.instance.nodejs('stopNodeJS_detach', fields: {
+      'spiderPort': spider,
+      'managementPort': mgmt,
+      'note': 'iOS NodeMobile cannot be killed; detach only',
+    });
     _platform.stopNodeJS();
     _stopHttpServer();
   }
@@ -442,9 +454,9 @@ class NodeJSManager {
   void _handleRequest(HttpRequest request) {
     final path = request.uri.path;
     final query = request.uri.queryParameters;
-    // 本地回环鉴权：防止其它进程伪造通知
-    final token = query['token'] ??
-        request.headers.value('x-auth-token') ??
+    // 本地回环鉴权：优先 header，query 兼容旧版（勿把 token 打进日志）
+    final token = request.headers.value('x-auth-token') ??
+        query['token'] ??
         '';
     if (token != _localAuthToken) {
       AppLog.instance.ports('http_request_rejected', ok: false, fields: {
@@ -458,11 +470,12 @@ class NodeJSManager {
     }
     final remotePort = request.connectionInfo?.remotePort ?? 0;
     final receivedAt = DateTime.now();
+    final safeQuery = Map<String, String>.from(query)..remove('token');
 
     AppLog.instance.ports('http_request_in', fields: {
       'method': request.method,
       'path': path,
-      'query': query.toString(),
+      'query': safeQuery.toString(),
       'remotePort': remotePort,
       'remoteAddress': request.connectionInfo?.remoteAddress.address,
     });

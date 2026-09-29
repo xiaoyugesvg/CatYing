@@ -74,12 +74,17 @@ try {
 const nativePortIdx = process.argv.indexOf('--native-port');
 if (nativePortIdx !== -1 && process.argv[nativePortIdx + 1]) {
     nativeServerPort = parseInt(process.argv[nativePortIdx + 1], 10);
+}
 const tokenIdx = process.argv.indexOf('--native-token');
 if (tokenIdx !== -1 && process.argv[tokenIdx + 1]) {
     nativeToken = process.argv[tokenIdx + 1];
 }
-}
 console.log('=== main.js nativeServerPort resolved: ' + nativeServerPort + ' ===');
+
+// token goes in header, never in URL query (queries land in logs)
+function nativeNotifyHeaders() {
+    return nativeToken ? { 'x-auth-token': nativeToken } : {};
+}
 
 globalThis.catServerFactory = (handle) => {
     let port = 0;
@@ -90,7 +95,7 @@ globalThis.catServerFactory = (handle) => {
         port = server.address().port;
         spiderPort = port;
         if (nativeServerPort > 0) {
-            axios.get(`http://127.0.0.1:${nativeServerPort}/onCatPawOpenPort?port=${port}&type=spider&token=${encodeURIComponent(nativeToken)}`).catch(() => {});
+            axios.get(`http://127.0.0.1:${nativeServerPort}/onCatPawOpenPort?port=${port}&type=spider`, { headers: nativeNotifyHeaders() }).catch(() => {});
         }
         console.log('Spider server running on ' + port);
     });
@@ -152,7 +157,7 @@ function sendMessageToNative(message) {
         } catch (e) {}
     }
     if (nativeServerPort > 0) {
-        axios.post(`http://127.0.0.1:${nativeServerPort}/onMessage?token=${encodeURIComponent(nativeToken)}`, { message: message }).catch(() => {});
+        axios.post(`http://127.0.0.1:${nativeServerPort}/onMessage`, { message: message }, { headers: nativeNotifyHeaders() }).catch(() => {});
     }
 }
 
@@ -274,7 +279,7 @@ mgmtServer.listen(0, '127.0.0.1', () => {
     managementPort = mgmtServer.address().port;
     console.log('=== mgmtServer listening on port ' + managementPort + ', nativeServerPort=' + nativeServerPort + ' ===');
     if (nativeServerPort > 0) {
-        axios.get(`http://127.0.0.1:${nativeServerPort}/onCatPawOpenPort?port=${managementPort}&type=management&token=${encodeURIComponent(nativeToken)}`)
+        axios.get(`http://127.0.0.1:${nativeServerPort}/onCatPawOpenPort?port=${managementPort}&type=management`, { headers: nativeNotifyHeaders() })
             .then(() => console.log('=== onCatPawOpenPort(mgmt) sent OK ==='))
             .catch((e) => console.error('=== onCatPawOpenPort(mgmt) FAIL: ' + (e && e.message ? e.message : e) + ' ==='));
     }

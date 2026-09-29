@@ -172,6 +172,10 @@ class _DetailPageState extends State<DetailPage> {
 
   @override
   void dispose() {
+    // 退出页先落一次进度，避免暂停中返回丢进度（_persistHistoryIfNeeded 只在播放中写）
+    try {
+      _persistHistoryIfNeeded(force: true);
+    } catch (_) {}
     VideoPlayerPip.instance.activeNotifier.removeListener(_onPipChanged);
     WindowFullScreen.instance.activeNotifier.removeListener(_onFullScreenActiveChanged);
     // 退出页面时关闭 PiP，恢复窗口
@@ -215,7 +219,14 @@ class _DetailPageState extends State<DetailPage> {
   /// **复用同一个 Player**（与直播页一致）：换集/换清晰度只 `open` 新媒体，
   /// 不 dispose 重建 —— 否则 VideoPlayerWidget 同 key 复用 State 时仍绑着
   /// 已销毁的旧 Player，画面灰屏/黑屏（截图里播放器空白的根因）。
-  /// 仅首次创建时走 post-frame，避免在 build 里构造 native Player。
+  /// open/创建一律走 post-frame，避免在 build 里动 native Player。
+  ///
+  /// 排队中的 open 参数（build 内不直接调 Player.open）
+  String _pendingOpenUrl = '';
+  Map<String, String> _pendingOpenHeaders = const {};
+  Duration? _pendingOpenStart;
+  String _pendingOpenHeadersKey = '';
+
   bool _ensurePlayer(
     String url,
     Map<String, String> headers, {
@@ -231,26 +242,31 @@ class _DetailPageState extends State<DetailPage> {
       return true;
     }
 
-    // 已有 Player，只是换了源 → 在同一个 Player 上 open 新媒体
-    if (_player != null && _videoController != null) {
-      _lastPlayerUrl = url;
-      _lastPlayerHeadersKey = headersKey;
-      _player!.open(Media(url, httpHeaders: headers, start: start));
-      return true;
-    }
+    // 记下最新要播的媒体；真正的 open/创建放到 post-frame
+    // 不要提前写 _lastPlayerUrl，否则 _playerMatches 会误判「已就绪」
+    _pendingOpenUrl = url;
+    _pendingOpenHeaders = headers;
+    _pendingOpenStart = start;
+    _pendingOpenHeadersKey = headersKey;
 
-    // 首次创建：副作用放到 post-frame
-    if (_playerRecreateScheduled) {
-      return false;
+    if (!_playerRecreateScheduled) {
+      _playerRecreateScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _playerRecreateScheduled = false;
+        if (!mounted) return;
+        final u = _pendingOpenUrl;
+        if (u.isEmpty) return;
+        _createPlayerAndOpen(
+          u,
+          _pendingOpenHeaders,
+          _pendingOpenHeadersKey,
+          _pendingOpenStart,
+        );
+        setState(() {});
+      });
     }
-    _playerRecreateScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _playerRecreateScheduled = false;
-      if (!mounted) return;
-      _createPlayerAndOpen(url, headers, headersKey, start);
-      setState(() {});
-    });
-    return false;
+    // 排队中：若目标尚未绑定则视为未就绪（UI 显示 loading）
+    return _player != null && _playerMatches(url, headersKey);
   }
 
   void _createPlayerAndOpen(
@@ -459,7 +475,10 @@ class _DetailPageState extends State<DetailPage> {
 
       // 悬浮导航栏占位高度: 滚动内容底部少量留白, 让最后一项
       // (选集/简介) 滚动到底时能完全滚出悬浮栏上方 (真悬浮, 非全局预留)
-      final bottomInset = MediaQuery.of(context).padding.bottom;
+      final mediaPad = MediaQuery.of(context).padding;
+      final bottomInset = mediaPad.bottom;
+      // 与直播页一致：状态栏高度黑边，状态栏压在黑边上，不与画面重叠
+      final topBar = mediaPad.top > 0 ? mediaPad.top : 0.0;
       const navFloatGap = 8.0;
       const navBarHeight = 51.0;
       final navReserve = bottomInset + navFloatGap + navBarHeight + 22.0;
@@ -469,6 +488,13 @@ class _DetailPageState extends State<DetailPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // 0. 状态栏高度黑边（与直播播放器上方一致）
+            if (topBar > 0)
+              SizedBox(
+                height: topBar,
+                child: const ColoredBox(color: Colors.black),
+              ),
+
             // 1. 播放器 - 对应 Swift PlayerView
             // **进详情即显示播放界面**：不依赖 isPlaying，只要 vodInfo 就绪
             // 就渲染播放器容器；URL 未就绪时 _buildPlayerArea 内部显示
@@ -1411,7 +1437,8 @@ class _DetailPageState extends State<DetailPage> {
 
   /// 对应 Swift persistHistoryIfNeeded
   void _persistHistoryIfNeeded({required bool force, double? currentProgress}) {
-    if (!_controller.isPlaying.value) return;
+    // force（退出页）时即便暂停也要写，否则暂停返回会丢进度
+    if (!force && !_controller.isPlaying.value) return;
     final progress = (currentProgress ?? _controller.currentPlaybackSeconds()).clamp(0.0, double.infinity).toDouble();
     if (!progress.isFinite) return;
 

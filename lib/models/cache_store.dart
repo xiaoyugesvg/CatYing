@@ -265,7 +265,11 @@ class CacheStore {
     }
 
     favorites.value = items;
-    await _putBoxItem(_collectsBox!, bizKey, items.firstWhere((e) => e.bizKey == bizKey || (e.vodId == vodId && e.sourceKey == sourceKey)));
+    final toSave = items.firstWhereOrNull(
+        (e) => e.bizKey == bizKey || (e.vodId == vodId && e.sourceKey == sourceKey));
+    if (toSave != null) {
+      await _putBoxItem(_collectsBox!, bizKey, toSave);
+    }
   }
 
   Future<void> removeCollect(String vodId, String sourceKey) async {
@@ -335,7 +339,11 @@ class CacheStore {
     }
 
     records.value = items;
-    await _putBoxItem(_recordsBox!, bizKey, items.firstWhere((e) => e.bizKey == bizKey || (e.vodId == vodId && e.sourceKey == sourceKey)));
+    final toSave = items.firstWhereOrNull(
+        (e) => e.bizKey == bizKey || (e.vodId == vodId && e.sourceKey == sourceKey));
+    if (toSave != null) {
+      await _putBoxItem(_recordsBox!, bizKey, toSave);
+    }
   }
 
   VodPlaybackState? getPlaybackState(String vodId, String sourceKey) {

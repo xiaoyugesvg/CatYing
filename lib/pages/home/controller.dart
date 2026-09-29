@@ -115,8 +115,20 @@ class HomeController extends GetxController {
     _loadCategoryVideos(page: 1, sort: sort);
   }
 
-  /// 列表请求序号：筛选/分类快速切换时丢弃过期响应
+/// 列表请求序号：筛选/分类快速切换时丢弃过期响应
   int _listRequestId = 0;
+
+  /// 缓存 key 必须带上筛选条件，否则会塞回错误列表
+  String _catCacheKey(
+      String sourceKey, String sortId, Map<String, String>? filters) {
+    if (filters == null || filters.isEmpty) {
+      return 'cat_videos:$sourceKey:$sortId';
+    }
+    final parts = filters.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    final filterKey = parts.map((e) => '${e.key}=${e.value}').join('&');
+    return 'cat_videos:$sourceKey:$sortId:$filterKey';
+  }
 
   Future<void> _loadCategoryVideos({
     required int page,
@@ -126,14 +138,16 @@ class HomeController extends GetxController {
     if (source == null) return;
 
     final requestId = ++_listRequestId;
-    final filters = selectedFilters.isEmpty ? null : Map<String, String>.from(selectedFilters);
+    final filters = selectedFilters.isEmpty
+        ? null
+        : Map<String, String>.from(selectedFilters);
+    final cacheKey = _catCacheKey(source.key, sort.id, filters);
 
-    // 无筛选时才读缓存；带筛选的缓存 key 未区分条件，会塞回错误列表
-    if (page == 1 && filters == null && videos.isEmpty) {
-      final catCacheKey = 'cat_videos:${source.key}:${sort.id}';
+    // 仅第一页读缓存（含筛选组合）
+    if (page == 1 && videos.isEmpty) {
       try {
         final cached = CacheStore.instance.getJsonListCache(
-          catCacheKey,
+          cacheKey,
           ttl: const Duration(hours: 6),
         );
         if (cached != null && cached.isNotEmpty) {
@@ -162,10 +176,10 @@ class HomeController extends GetxController {
 
       if (page == 1) {
         videos.value = videoList;
-        // 只缓存「无筛选」的第一页
-        if (videoList.isNotEmpty && filters == null) {
+        // 第一页落盘（key 已区分筛选组合）
+        if (videoList.isNotEmpty) {
           CacheStore.instance.setJsonCache(
-            'cat_videos:${source.key}:${sort.id}',
+            cacheKey,
             videoList.map((v) => v.toJson()).toList(),
           );
         }
@@ -207,11 +221,46 @@ class HomeController extends GetxController {
   }
 
   Future<void> refresh() async {
-    currentPage.value = 1;
-    hasMore.value = true;
-    videos.clear();
+    // 保留当前分类/筛选，下拉刷新只拉数据，不重置用户选择
+    final keepSort = selectedSort.value;
+    final keepFilters = Map<String, String>.from(selectedFilters);
     errorMessage.value = null;
-    await loadSorts();
+    final source = ApiConfig.instance.homeSourceBean.value;
+    if (source == null) return;
+
+    isLoading.value = true;
+    try {
+      final result = await SourceService.instance.getSort(source);
+      sorts.value = result.$1;
+      homeVideos.value = result.$2;
+      if (result.$2.isNotEmpty) {
+        CacheStore.instance.setJsonCache(
+          'home_videos:${source.key}',
+          result.$2.map((v) => v.toJson()).toList(),
+        );
+      }
+
+      final sort = (keepSort != null &&
+              sorts.any((s) => s.id == keepSort.id))
+          ? keepSort
+          : (sorts.isNotEmpty ? sorts.first : null);
+      if (sort == null) {
+        isLoading.value = false;
+        return;
+      }
+      selectedSort.value = sort;
+      selectedFilters
+        ..clear()
+        ..addAll(keepFilters);
+      selectedFilters.refresh();
+      currentPage.value = 1;
+      hasMore.value = true;
+      // 不清空旧列表：请求回来再替换，避免刷新时白屏
+      await _loadCategoryVideos(page: 1, sort: sort);
+    } catch (e) {
+      errorMessage.value = _friendlyErrorMessage(e);
+    }
+    isLoading.value = false;
   }
 
   String _friendlyErrorMessage(Object error) {

@@ -13,6 +13,7 @@ import 'package:window_manager/window_manager.dart' show DragToMoveArea;
 import '../common/theme.dart';
 import 'video_player_pip.dart';
 import 'window_fullscreen.dart';
+import 'danmaku.dart';
 
 /// 视频画面比例 - 对应 Swift VideoFitType
 enum VideoFitType {
@@ -169,15 +170,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   bool _showEpisodeSheet = false;
 
   // 弹幕（Logvr-danmu / 弹弹play 兼容）
-  List<_DanmuItem> _danmus = [];
+  List<DanmuItem> _danmus = [];
   bool _danmuOn = true;
   bool _danmuLoaded = false;
   String _danmuApiUrl = '';
   /// 弹幕拉取代次：换集时递增，过期响应直接丢弃
   int _danmuLoadGen = 0;
+  double _danmuFontSize = 14;
+  double _danmuOpacity = 1;
   late VideoFitType _videoFit;
   double _volume = 1.0;
-  double _brightness = 0.5;
+  // 应用内亮度遮罩：1.0 = 不遮（系统亮度）。默认不要半黑。
+  double _brightness = 1.0;
 
   /// 内部追踪 native fullscreen 状态（与 mpv / OS 窗口同步）
   bool _isNativeFullscreen = false;
@@ -350,8 +354,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       }
     }));
 
-    // 进度：只更新 ValueNotifier（进度条/时间局部重建），秒变化才 setState
-    // （跳过片头/片尾按钮依赖 _position.inSeconds）
+    // 进度：只更新 ValueNotifier（进度条/时间局部重建），
+    // 仅在跳过片头/片尾按钮可见性变化时才整树 setState
     _playerSubs.add(_player.stream.position.listen((position) {
       if (!mounted) return;
       _position = position;
@@ -361,9 +365,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       }
       final sec = position.inSeconds;
       if (sec != _lastNotifiedPositionSec) {
+        final prevSkip = _skipVisibilityFor(
+            _lastNotifiedPositionSec < 0 ? -1 : _lastNotifiedPositionSec);
+        final nextSkip = _skipVisibilityFor(sec);
         _lastNotifiedPositionSec = sec;
-        // 秒级变化时才重建依赖 position 的控制项（跳过按钮等）
-        setState(() {});
+        if (prevSkip != nextSkip) {
+          setState(() {});
+        }
         widget.onPositionChanged?.call(position);
       }
     }));
@@ -419,11 +427,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
   }
 
-  /// 延迟多次重建 Video widget，绕过 ANGLE surface 重建竞态
+  /// 延迟重建 Video widget，绕过 ANGLE surface 重建竞态。
+  /// 用代次丢弃过期回调，避免多次切换叠多轮 rebuild。
+  int _delayedRebuildGen = 0;
+
   void _scheduleDelayedRebuild() {
-    for (final delayMs in const [100, 300, 600]) {
+    final gen = ++_delayedRebuildGen;
+    for (final delayMs in const [80, 250]) {
       Future<void>.delayed(Duration(milliseconds: delayMs), () {
-        if (!mounted) return;
+        if (!mounted || gen != _delayedRebuildGen) return;
         setState(() {
           _videoRebuildKey++;
         });
@@ -634,7 +646,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       final prefs = await SharedPreferences.getInstance();
       _danmuApiUrl = (prefs.getString('danmu_api_url') ?? '').trim();
       _danmuOn = prefs.getBool('danmu_enabled') ?? true;
-      if (mounted && _danmuApiUrl.isNotEmpty) {
+      _danmuFontSize = (prefs.getDouble('danmu_font_size') ?? 14).clamp(10.0, 28.0);
+      _danmuOpacity = (prefs.getDouble('danmu_opacity') ?? 1).clamp(0.2, 1.0);
+      if (mounted) setState(() {});
+      if (_danmuApiUrl.isNotEmpty) {
         _ensureDanmuLoaded();
       }
     } catch (e) { /* ignore */ }
@@ -649,22 +664,39 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         ? _player.state.playlist.medias.last.uri
         : widget.url;
     if (url.isEmpty) return;
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 8);
     try {
       final base = _danmuApiUrl.replaceAll(RegExp(r'/+$'), '');
       final api =
           '$base/api/v2/comment?url=${Uri.encodeQueryComponent(url)}&format=json';
-      final http = await HttpClient().getUrl(Uri.parse(api));
+      final http = await client
+          .getUrl(Uri.parse(api))
+          .timeout(const Duration(seconds: 12));
       http.headers.set('User-Agent', 'NewTv/1.0');
-      final res = await http.close();
+      final res =
+          await http.close().timeout(const Duration(seconds: 12));
       if (res.statusCode == 200) {
-        final body = await res.transform(utf8.decoder).join();
+        final body = await res
+            .transform(utf8.decoder)
+            .join()
+            .timeout(const Duration(seconds: 12));
         final list = parseDanmuBody(body);
         // 代次校验：快速换集时丢弃过期响应，避免旧集弹幕盖到新集上
         if (mounted && list.isNotEmpty && loadGen == _danmuLoadGen) {
           setState(() => _danmus = list);
         }
+      } else if (loadGen == _danmuLoadGen) {
+        // 失败允许下次换集重试
+        _danmuLoaded = false;
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      if (loadGen == _danmuLoadGen) {
+        _danmuLoaded = false;
+      }
+    } finally {
+      client.close(force: true);
+    }
   }
 
   /// 持久化弹幕开关
@@ -1155,9 +1187,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   // ============================================================
 
   Widget _buildDanmuLayer() {
-    return _DanmuLayer(
+    return DanmuLayer(
       danmus: _danmus,
       positionOf: () => _player.state.position,
+      fontSize: _danmuFontSize,
+      opacity: _danmuOpacity,
     );
   }
 
@@ -1632,15 +1666,22 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   // 跳过片头/片尾按钮
   // ============================================================
 
-  Widget _buildSkipButtons() {
-    final showIntro =
-        widget.skipIntroSeconds > 0 &&
-        _position.inSeconds > 0 &&
-        _position.inSeconds < widget.skipIntroSeconds;
-    final showOutro =
-        widget.skipOutroSeconds > 0 &&
+  /// 跳过按钮可见性（0=无，1=片头，2=片尾，3=两者）
+  int _skipVisibilityFor(int posSec) {
+    if (posSec < 0) return 0;
+    final showIntro = widget.skipIntroSeconds > 0 &&
+        posSec > 0 &&
+        posSec < widget.skipIntroSeconds;
+    final showOutro = widget.skipOutroSeconds > 0 &&
         _duration > Duration.zero &&
-        _position.inSeconds > _duration.inSeconds - widget.skipOutroSeconds;
+        posSec > _duration.inSeconds - widget.skipOutroSeconds;
+    return (showIntro ? 1 : 0) | (showOutro ? 2 : 0);
+  }
+
+  Widget _buildSkipButtons() {
+    final vis = _skipVisibilityFor(_position.inSeconds);
+    final showIntro = vis & 1 != 0;
+    final showOutro = vis & 2 != 0;
 
     if (!showIntro && !showOutro) return const SizedBox.shrink();
 
@@ -3165,286 +3206,3 @@ class _PipAudioModeMusicIconState extends State<_PipAudioModeMusicIcon>
 
 // ============================================================
 // 弹幕（Logvr-danmu / 弹弹play / B站 XML 兼容解析与渲染）
-// ============================================================
-
-class _DanmuItem {
-  final double time; // 秒
-  final String text;
-  final Color color;
-  final int mode; // 1 滚动, 4 顶部, 5 底部
-  _DanmuItem(this.time, this.text, this.color, this.mode);
-}
-
-/// 解析弹幕响应体：兼容
-/// - Logvr-danmu / 弹弹play JSON（data 数组, 元素含 p/m 或 time/text 或 timepoint/ct/content 或 progress/mode/content）
-/// - B站 XML（<d p="...">text</d>）
-List<_DanmuItem> parseDanmuBody(String body) {
-  final items = <_DanmuItem>[];
-  try {
-    final trimmed = body.trim();
-    if (trimmed.isEmpty) return items;
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      final decoded = jsonDecode(trimmed);
-      List<dynamic> arr = [];
-      if (decoded is List) {
-        arr = decoded;
-      } else if (decoded is Map) {
-        if (decoded['data'] is List) arr = decoded['data'] as List;
-        else if (decoded['comments'] is List) arr = decoded['comments'] as List;
-        else if (decoded['danmaku'] is List) arr = decoded['danmaku'] as List;
-      }
-      for (final e in arr) {
-        if (e is! Map) continue;
-        double? t;
-        String? text;
-        var color = 0xFFFFFFFF;
-        var mode = 1;
-        // 新格式 progress/mode/content
-        if (e['progress'] is num) t = (e['progress'] as num) / 1000.0;
-        // DPlayer time/text
-        if (e['time'] is num) t = (e['time'] as num).toDouble();
-        if (e['time'] is String) t = double.tryParse(e['time'] as String);
-        // 弹弹play t（毫秒）/ timepoint
-        if (e['t'] is num) t = (e['t'] as num).toDouble();
-        if (e['timepoint'] is num) t = (e['timepoint'] as num).toDouble();
-        // p 属性（弹弹play: 时间,模式,颜色,...）
-        final p = e['p'];
-        if (p is String) {
-          final parts = p.split(',');
-          if (parts.isNotEmpty) {
-            final pt = double.tryParse(parts[0].trim());
-            if (pt != null) t = pt;
-          }
-          if (parts.length > 1) mode = int.tryParse(parts[1].trim()) ?? mode;
-          if (parts.length > 2) {
-            final c = int.tryParse(parts[2].trim());
-            if (c != null) color = c | 0xFF000000;
-          }
-        }
-        if (e['mode'] is num) mode = (e['mode'] as num).toInt();
-        if (e['ct'] is num) mode = (e['ct'] as num).toInt();
-        if (e['color'] is num) color = ((e['color'] as num).toInt() & 0xFFFFFF) | 0xFF000000;
-        text = e['text']?.toString() ?? e['m']?.toString() ?? e['content']?.toString() ?? e['c']?.toString();
-        if (t != null && text != null && text.isNotEmpty) {
-          items.add(_DanmuItem(t, text, Color(color), mode));
-        }
-      }
-    } else if (trimmed.startsWith('<')) {
-      // B站 XML
-      final re = RegExp(r'<d p="([^"]+)">([^<]+)</d>');
-      for (final m in re.allMatches(trimmed)) {
-        final parts = m.group(1)!.split(',');
-        final t = double.tryParse(parts[0]);
-        final mode = parts.length > 1 ? (int.tryParse(parts[1]) ?? 1) : 1;
-        var color = 0xFFFFFFFF;
-        if (parts.length > 3) {
-          final c = int.tryParse(parts[3]);
-          if (c != null) color = c | 0xFF000000;
-        }
-        if (t != null) items.add(_DanmuItem(t, m.group(2)!, Color(color), mode));
-      }
-    }
-  } catch (e) { /* ignore */ }
-  return items;
-}
-
-class _ActiveDanmu {
-  final _DanmuItem item;
-  int track;
-  double x; // scrolling danmaku current x
-  double width;
-  bool topFixed;
-  bool bottomFixed;
-  double remaining; // top/bottom fixed remaining seconds
-  /// Whether initial x has been written. Do NOT use x==0 as sentinel:
-  /// a scrolling item's x can land exactly on 0 mid-flight.
-  bool positioned;
-  _ActiveDanmu(
-    this.item, {
-    this.track = 0,
-    this.x = 0,
-    this.width = 0,
-    this.topFixed = false,
-    this.bottomFixed = false,
-    this.remaining = 4.0,
-    this.positioned = false,
-  });
-}
-
-/// Danmaku layer: emit by playback position; scroll / top / bottom.
-class _DanmuLayer extends StatefulWidget {
-  final List<_DanmuItem> danmus;
-  final Duration Function() positionOf;
-  const _DanmuLayer({required this.danmus, required this.positionOf});
-
-  @override
-  State<_DanmuLayer> createState() => _DanmuLayerState();
-}
-
-class _DanmuLayerState extends State<_DanmuLayer> {
-  late List<_DanmuItem> _sorted;
-  final List<_ActiveDanmu> _active = [];
-  int _nextIndex = 0;
-  int _nextTrack = 0;
-  Timer? _timer;
-  static const double _speed = 150.0; // px/s
-  /// Previous tick position in seconds; used to detect seek jumps.
-  double? _lastPosSec;
-
-  @override
-  void initState() {
-    super.initState();
-    _sorted = _sortedOf(widget.danmus);
-    _timer = Timer.periodic(const Duration(milliseconds: 100), _onTick);
-  }
-
-  @override
-  void didUpdateWidget(covariant _DanmuLayer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // Episode / reload changed the list: rebuild index and clear screen.
-    if (!identical(oldWidget.danmus, widget.danmus)) {
-      final oldLen = _sorted.length;
-      final oldHead = oldLen > 0 ? _sorted.first : null;
-      final newSorted = _sortedOf(widget.danmus);
-      final newHead = newSorted.isNotEmpty ? newSorted.first : null;
-      final contentChanged = oldLen != newSorted.length ||
-          oldHead?.text != newHead?.text ||
-          oldHead?.time != newHead?.time;
-      if (contentChanged) {
-        _sorted = newSorted;
-        _active.clear();
-        _nextIndex = 0;
-        _nextTrack = 0;
-        _lastPosSec = null;
-      }
-    }
-  }
-
-  List<_DanmuItem> _sortedOf(List<_DanmuItem> source) {
-    return List<_DanmuItem>.of(source)
-      ..sort((a, b) => a.time.compareTo(b.time));
-  }
-
-  void _onTick(Timer _) {
-    if (!mounted) return;
-    final pos = widget.positionOf().inMilliseconds / 1000.0;
-
-    // Seek jump: position moved more than one tick can travel -> reset.
-    final last = _lastPosSec;
-    if (last != null && (pos - last).abs() > 1.5) {
-      _resetToPosition(pos);
-    }
-    _lastPosSec = pos;
-
-    var spawned = false;
-    // Emit [prev, now+preview]. After seek, _nextIndex is already correct.
-    while (_nextIndex < _sorted.length &&
-        _sorted[_nextIndex].time <= pos + 0.25) {
-      // Skip items already well in the past (avoid flooding after forward seek)
-      if (_sorted[_nextIndex].time >= pos - 0.6) {
-        _spawn(_sorted[_nextIndex]);
-        spawned = true;
-      }
-      _nextIndex++;
-    }
-    if (_active.isEmpty && !spawned) return;
-    for (final a in _active) {
-      if (a.item.mode == 1) {
-        a.x -= _speed * 0.1;
-      } else {
-        a.remaining -= 0.1;
-      }
-    }
-    final before = _active.length;
-    _active.removeWhere(
-        (a) => a.item.mode == 1 ? a.x + a.width < -16 : a.remaining <= 0);
-    if (spawned || _active.isNotEmpty || before != _active.length) {
-      setState(() {});
-    }
-  }
-
-  /// After a seek, move the emit cursor to the current time.
-  void _resetToPosition(double pos) {
-    _active.clear();
-    _nextTrack = 0;
-    var i = 0;
-    while (i < _sorted.length && _sorted[i].time <= pos) {
-      i++;
-    }
-    _nextIndex = i;
-  }
-
-  void _spawn(_DanmuItem item) {
-    // Measure width once at spawn; avoid TextPainter.layout in build.
-    final width = _textWidth(item.text, 14);
-    if (item.mode == 4) {
-      _active.add(_ActiveDanmu(item, topFixed: true, width: width));
-    } else if (item.mode == 5) {
-      _active.add(_ActiveDanmu(item, bottomFixed: true, width: width));
-    } else {
-      _active.add(_ActiveDanmu(item, track: _nextTrack, width: width));
-      _nextTrack = (_nextTrack + 1) % 4;
-    }
-  }
-
-  double _textWidth(String text, double fontSize) {
-    final tp = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w500),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    return tp.width;
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final w = constraints.maxWidth;
-          final h = constraints.maxHeight;
-          // Seed initial x once width is known (not x==0 sentinel).
-          for (final a in _active) {
-            if (a.item.mode == 1 && !a.positioned) {
-              a.x = w.toDouble();
-              a.positioned = true;
-            }
-          }
-          return Stack(
-            clipBehavior: Clip.none,
-            children: [
-              for (final a in _active)
-                Positioned(
-                  left: a.item.mode == 1 ? a.x : 0,
-                  top: a.item.mode == 1
-                      ? 12.0 + a.track * 28.0
-                      : (a.topFixed ? 12.0 : h - 34.0),
-                  child: Text(
-                    a.item.text,
-                    style: TextStyle(
-                      color: a.item.color,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      shadows: const [
-                        Shadow(blurRadius: 2, color: Colors.black87),
-                      ],
-                    ),
-                    maxLines: 1,
-                    softWrap: false,
-                  ),
-                ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}

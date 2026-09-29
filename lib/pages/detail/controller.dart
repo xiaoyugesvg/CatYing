@@ -1,12 +1,17 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 import '../../models/movie.dart';
 import '../../models/vod_info.dart';
 import '../../models/cache_store.dart';
 import '../../services/api_config.dart';
 import '../../services/source_service.dart';
 import '../../services/spider_service.dart';
+import '../../services/app_log.dart';
 import '../../services/network_manager.dart';
 
 class PlaybackQualityOption {
@@ -169,6 +174,8 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      // 作废后台期间可能仍在飞的详情请求
+      _detailLoadToken++;
       isLoading.value = false;
       final info = vodInfo.value;
       // 如果之前已经加载过详情但因为 dio 死连接而 vodInfo 是 null 或 playUrl 是 null，
@@ -202,16 +209,21 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     return ApiConfig.instance.getSource(sourceKey)?.isSpiderSource ?? false;
   }
 
+  /// 详情加载代次：切页/切片时递增，过期响应直接丢弃
+  int _detailLoadToken = 0;
+
   Future<void> loadDetail(Video video) async {
     final source = ApiConfig.instance.getSource(video.sourceKey) ??
         ApiConfig.instance.homeSourceBean.value;
     if (source == null) return;
 
+    final token = ++_detailLoadToken;
     isLoading.value = true;
     errorMessage.value = null;
 
     try {
       final info = await SourceService.instance.getDetail(source, video.id);
+      if (token != _detailLoadToken || isClosed) return;
       if (info != null) {
         vodInfo.value = info;
         selectedFlag.value = info.playFlag;
@@ -227,15 +239,21 @@ class DetailController extends GetxController with WidgetsBindingObserver {
         }
       }
     } catch (e) {
-      errorMessage.value = e.toString();
+      if (token == _detailLoadToken) {
+        errorMessage.value = e.toString();
+      }
     }
 
-    isLoading.value = false;
+    if (token == _detailLoadToken) {
+      isLoading.value = false;
+    }
   }
 
   void selectFlag(String flag) {
     if (selectedFlag.value == flag) return;
     final currentIndex = selectedEpisodeIndex.value;
+    // 记住切换前是否在播：切线路后按同一集续播，而不是停在死分支
+    final wasPlaying = isPlaying.value;
 
     isPlaying.value = false;
     playUrl.value = null;
@@ -260,13 +278,15 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     final episodeURL = episodes[targetIndex].url;
     updateQualityOptions(episodeURL, resetSelection: true);
 
-    if (isPlaying.value) {
-      if (isSpiderSource) {
-        _resolveSpiderPlayUrl(flag: flag, id: episodeURL);
-      } else {
-        playUrl.value = _selectedPlayableURL(fallback: episodeURL);
-        playbackSessionId.value = _newUuid();
-      }
+    if (!wasPlaying) return;
+
+    if (isSpiderSource) {
+      _resolveSpiderPlayUrl(flag: flag, id: episodeURL);
+    } else {
+      playUrl.value = _selectedPlayableURL(fallback: episodeURL);
+      playHeaders.clear();
+      playbackSessionId.value = _newUuid();
+      isPlaying.value = true;
     }
   }
 
@@ -396,6 +416,14 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     // Spider 服务（路径会是非法 / /type/play），而是降级为把
     // 集数 URL 当作直链直接播放，避免进入详情页崩溃/黑屏。
     if (spiderInfo.$1.isEmpty) {
+      final looksLikeUrl =
+          id.startsWith('http://') || id.startsWith('https://');
+      if (!looksLikeUrl) {
+        // 不是直链，播了也是黑屏：给出可操作的提示，而不是静默失败
+        errorMessage.value = 'Spider 上下文缺失，无法解析播放地址（请从首页重新进入该源）';
+        isPlaying.value = false;
+        return;
+      }
       playUrl.value = id;
       playHeaders.value = <String, String>{};
       playbackSessionId.value = _newUuid();
@@ -508,7 +536,8 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     }
 
     // 磁盘缓存：同一视频二次进入秒出清晰度
-    final diskKey = 'quality:${trimmedEpisodeURL.hashCode}';
+    // key 用 md5，避免 String.hashCode 碰撞串到别的视频
+    final diskKey = 'quality:${_qualityCacheKey(trimmedEpisodeURL)}';
     try {
       final disk = CacheStore.instance.getJsonListCache(
         diskKey,
@@ -539,10 +568,12 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       _qualityOptionCache[trimmedEpisodeURL] = resolved;
       try {
         await CacheStore.instance.setJsonCache(
-          'quality:${trimmedEpisodeURL.hashCode}',
+          'quality:${_qualityCacheKey(trimmedEpisodeURL)}',
           resolved.map((e) => e.toJson()).toList(),
         );
-      } catch (_) {}
+      } catch (e) {
+        AppLog.instance.log('[Detail] quality disk cache read fail: $e');
+      }
       qualityOptions.value = resolved;
 
       if (resetSelection) {
@@ -564,7 +595,8 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       final playlist =
           await NetworkManager.instance.getString(episodeURL);
       return _parseMasterPlaylist(playlist, masterURL: episodeURL);
-    } catch (_) {
+    } catch (e) {
+      AppLog.instance.log('[Detail] resolve quality options fail: $e');
       return [];
     }
   }
@@ -762,8 +794,8 @@ class DetailController extends GetxController with WidgetsBindingObserver {
 
   void saveRecord() {
     final info = vodInfo.value;
-    if (info == null || !isPlaying.value) return;
-
+    if (info == null) return;
+    // 暂停时也要能落进度，否则「暂停 → 返回」会丢观看记录
     final progress = currentPlaybackSeconds();
     final episode = currentEpisodes.isNotEmpty &&
             selectedEpisodeIndex.value < currentEpisodes.length
@@ -790,8 +822,15 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     );
   }
 
+  static const _uuid = Uuid();
+
   String _newUuid() {
-    return '${DateTime.now().microsecondsSinceEpoch}_${Object.hash(DateTime.now(), _qualityResolveToken)}';
+    return _uuid.v4();
+  }
+
+  /// 清晰度磁盘缓存 key：对 URL 做 md5，避免 hashCode 碰撞
+  static String _qualityCacheKey(String episodeURL) {
+    return md5.convert(utf8.encode(episodeURL)).toString();
   }
 }
 

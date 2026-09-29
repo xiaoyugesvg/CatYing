@@ -212,7 +212,9 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       AppLog.instance.log('[IOSNodeJS] stopNodeJS 异常: $e');
       return null;
     });
-    AppLog.instance.log('[IOSNodeJS] Node.js 已停止');
+    // 诚实日志：Swift 只清标志位，NodeMobile 无 node_exit，进程可能仍在
+    AppLog.instance.log(
+        '[IOSNodeJS] 已解绑 Node.js 状态（embed 进程未必退出，仅本端认为不可用）');
   }
 
   @override
