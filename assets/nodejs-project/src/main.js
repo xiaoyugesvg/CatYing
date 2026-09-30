@@ -192,9 +192,11 @@ if (addon && addon.registerCallback) {
 }
 
 const mgmtServer = createServer((req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // 安全：禁止任意源 CORS；本机控制面不需要跨域
+    res.setHeader('Access-Control-Allow-Origin', 'null');
+    res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-auth-token');
 
     if (req.method === 'OPTIONS') {
         res.writeHead(200);
@@ -203,6 +205,20 @@ const mgmtServer = createServer((req, res) => {
     }
 
     const url = new URL(req.url, `http://127.0.0.1`);
+    // 鉴权：header 优先，兼容 query（勿记入访问日志）
+    const reqToken = (req.headers['x-auth-token'] || url.searchParams.get('token') || '').toString();
+    const authorized = !nativeToken || reqToken === nativeToken;
+
+    function reject() {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'forbidden' }));
+    }
+
+    // 所有管理端点均需 token（含 /check，避免被本机其它进程探测）
+    if (!authorized) {
+        reject();
+        return;
+    }
 
     if (req.method === 'GET' && url.pathname === '/check') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -231,6 +247,22 @@ const mgmtServer = createServer((req, res) => {
                 if (!sourcePath) {
                     res.writeHead(400, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({ error: 'path is required' }));
+                    return;
+                }
+                // 路径白名单：仅允许 App 文档/临时目录下的源，禁止任意 require
+                const path = require('path');
+                const allowedRoots = [
+                    process.env.HOME + '/Documents',
+                    process.env.HOME + '/Library',
+                    process.env.TMPDIR || '/tmp',
+                    process.cwd(),
+                ].filter(Boolean).map((r) => path.resolve(r));
+                const resolved = path.resolve(sourcePath);
+                const okPath = allowedRoots.some((root) => resolved === root || resolved.startsWith(root + path.sep));
+                if (!okPath) {
+                    console.error('loadPath rejected outside allowlist:', resolved);
+                    res.writeHead(403, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'path not allowed' }));
                     return;
                 }
 

@@ -5,6 +5,14 @@ import '../../router/app_pages.dart';
 
 /// 历史记录控制器
 class HistoryController extends GetxController {
+  static const pageSize = 50;
+  final shown = 50.obs;
+
+  void showMore() {
+    shown.value += pageSize;
+    update();
+  }
+
   List<VodRecord> get historyList => CacheStore.instance.records.toList();
 
   /// 点击历史记录 → 跳到详情页，让 detail 自己去读 playNote + VodPlaybackState 续播

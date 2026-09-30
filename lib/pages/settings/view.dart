@@ -29,6 +29,7 @@ class _SettingsPageState extends State<SettingsPage> {
   double _danmuOpacity = 1;
   int _danmuTracks = 4;
   double _danmuSpeed = 150;
+  List<String> _danmuBlockWords = [];
   bool _sourceCacheEnabled = true;
   int _autoCleanIndex = 0;
 
@@ -37,6 +38,7 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _loadDanmuPrefs();
     _loadCachePrefs();
+    controller.runAutoCacheCleanIfNeeded();
   }
 
   Future<void> _loadCachePrefs() async {
@@ -59,6 +61,8 @@ class _SettingsPageState extends State<SettingsPage> {
         _danmuOpacity = (prefs.getDouble('danmu_opacity') ?? 1).clamp(0.2, 1.0);
         _danmuTracks = (prefs.getInt('danmu_tracks') ?? 4).clamp(2, 8);
         _danmuSpeed = (prefs.getDouble('danmu_speed') ?? 150).clamp(80.0, 240.0);
+        _danmuBlockWords =
+            prefs.getStringList('danmu_block_words') ?? const [];
       });
     } catch (e) { /* ignore */ }
   }
@@ -122,6 +126,12 @@ class _SettingsPageState extends State<SettingsPage> {
                 const SectionHeader(title: '播放设置'),
                 const SizedBox(height: AppTheme.spacingSM),
                 _buildPlayerSettingsSection(),
+                const SizedBox(height: AppTheme.spacingXXL),
+
+                // 弹幕
+                const SectionHeader(title: '弹幕'),
+                const SizedBox(height: AppTheme.spacingSM),
+                _buildDanmuSection(),
                 const SizedBox(height: AppTheme.spacingXXL),
 
                 // TMDB 智能刮削
@@ -532,6 +542,18 @@ class _SettingsPageState extends State<SettingsPage> {
                 onTap: () => _showTimeStepSelector(),
               )),
           Divider(color: AppTheme.borderLight, height: 1),
+          Obx(() => SettingsRow(
+                icon: Icons.battery_saver,
+                title: '静音后台保活',
+                value: PlayerPrefs.instance.silentKeepAlive.value
+                    ? '已开启'
+                    : '已关闭',
+                trailingSwitch: true,
+                switchValue: PlayerPrefs.instance.silentKeepAlive.value,
+                onSwitchChanged: (v) =>
+                    PlayerPrefs.instance.setSilentKeepAlive(v),
+              )),
+          Divider(color: AppTheme.borderLight, height: 1),
           SettingsRow(
             icon: Icons.bug_report_outlined,
             title: '调试日志',
@@ -586,6 +608,87 @@ class _SettingsPageState extends State<SettingsPage> {
           ],
         );
       },
+    );
+  }
+
+  Widget _buildDanmuSection() {
+    return AppCard(
+      child: Column(
+        children: [
+          SettingsRow(
+            icon: Icons.subtitles,
+            title: '弹幕 API',
+            value: _danmuApiUrl.isEmpty ? '未配置' : _danmuApiUrl,
+            onTap: _showDanmuApiEditDialog,
+          ),
+          Divider(color: AppTheme.borderLight, height: 1),
+          SettingsRow(
+            icon: Icons.format_size,
+            title: '弹幕样式',
+            value: '$_danmuFontSize号 · ${(_danmuOpacity * 100).round()}%',
+            onTap: _showDanmuStyleDialog,
+          ),
+          Divider(color: AppTheme.borderLight, height: 1),
+          SettingsRow(
+            icon: Icons.block,
+            title: '屏蔽关键词',
+            value: _danmuBlockWords.isEmpty ? '无' : _danmuBlockWords.join('、'),
+            onTap: _showDanmuBlockWordsDialog,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showDanmuBlockWordsDialog() async {
+    final ctrl = TextEditingController(text: _danmuBlockWords.join('\n'));
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        title: Text('屏蔽关键词', style: TextStyle(color: AppTheme.textPrimary)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: TextField(
+            controller: ctrl,
+            maxLines: 6,
+            style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+            decoration: InputDecoration(
+              hintText: '每行一个关键词，命中的弹幕不显示',
+              hintStyle: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
+              filled: true,
+              fillColor: AppTheme.backgroundTertiary,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppTheme.radiusSM),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('取消', style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () async {
+              final words = ctrl.text
+                  .split(RegExp(r'[\n,，、]'))
+                  .map((e) => e.trim())
+                  .where((e) => e.isNotEmpty)
+                  .toList();
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setStringList('danmu_block_words', words);
+              if (mounted) {
+                setState(() => _danmuBlockWords = words);
+              }
+              if (ctx.mounted) Navigator.of(ctx).pop();
+            },
+            child: Text('保存', style: TextStyle(color: AppTheme.accentColor)),
+          ),
+        ],
+      ),
     );
   }
 

@@ -74,7 +74,10 @@ class HistoryPage extends StatelessWidget {
 
   Widget _buildContent(HistoryController controller) {
     return Obx(() {
-      final records = CacheStore.instance.records;
+      final all = CacheStore.instance.records;
+      final shown = controller.shown.value;
+      final records =
+          all.length > shown ? all.sublist(0, shown) : all;
       if (records.isEmpty) {
         return const EmptyState(
           title: '暂无历史记录',
@@ -86,9 +89,15 @@ class HistoryPage extends StatelessWidget {
       return ListView.separated(
         padding: const EdgeInsets.fromLTRB(
             AppTheme.spacingLG, 0, AppTheme.spacingLG, 100),
-        itemCount: records.length,
+        itemCount: records.length + (all.length > shown ? 1 : 0),
         separatorBuilder: (_, __) => const SizedBox(height: AppTheme.spacingSM),
         itemBuilder: (context, index) {
+          if (index >= records.length) {
+            return TextButton(
+              onPressed: controller.showMore,
+              child: Text('加载更多（剩余 ${all.length - shown}）'),
+            );
+          }
           final item = records[index];
           return _HistoryListItem(
             record: item,

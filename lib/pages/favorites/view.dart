@@ -51,7 +51,31 @@ class FavoritesPage extends StatelessWidget {
             if (CacheStore.instance.favorites.isEmpty) {
               return const SizedBox.shrink();
             }
-            return TextButton(
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextButton(
+                  onPressed: () {
+                    final m = controller.favSortMode.value;
+                    controller.favSortMode.value = switch (m) {
+                      FavSort.timeDesc => FavSort.timeAsc,
+                      FavSort.timeAsc => FavSort.nameAsc,
+                      FavSort.nameAsc => FavSort.timeDesc,
+                    };
+                    controller.update();
+                  },
+                  child: Text(
+                    switch (controller.favSortMode.value) {
+                      FavSort.timeDesc => '时间↓',
+                      FavSort.timeAsc => '时间↑',
+                      FavSort.nameAsc => '名称A-Z',
+                    },
+                    style: TextStyle(
+                        color: AppTheme.accentColor,
+                        fontSize: AppTheme.fontCaption),
+                  ),
+                ),
+                TextButton(
               onPressed: () => _showClearConfirmDialog(Get.context!, controller),
               child: Text(
                 '清空',
@@ -59,6 +83,8 @@ class FavoritesPage extends StatelessWidget {
                     color: AppTheme.textTertiary,
                     fontSize: AppTheme.fontCaption),
               ),
+                ),
+              ],
             );
           }),
         ],
@@ -68,7 +94,7 @@ class FavoritesPage extends StatelessWidget {
 
   Widget _buildContent(FavoritesController controller) {
     return Obx(() {
-      final favorites = CacheStore.instance.favorites;
+      final favorites = controller.favoritesList;
       if (favorites.isEmpty) {
         return const EmptyState(
           title: '暂无收藏',

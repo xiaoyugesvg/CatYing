@@ -199,7 +199,7 @@ class _HomePageState extends State<HomePage> {
                   }
                   _controller.selectSort(sort);
                   setState(() {
-                    _showFilters = true;
+                    // 默认收起，避免遮住列表；用户可手动展开
                   });
                 },
                 child: _CategoryChip(
@@ -352,16 +352,17 @@ class _HomePageState extends State<HomePage> {
             return CustomScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
-                if (homeVideos.isNotEmpty)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.only(
-                          top: AppTheme.spacingXS, bottom: 8),
-                      child: _RecommendBanner(videos: homeVideos.length > 6
-                          ? homeVideos.sublist(0, 6)
-                          : List<Video>.from(homeVideos)),
-                    ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(
+                        top: AppTheme.spacingXS, bottom: 8),
+                    child: homeVideos.isEmpty
+                        ? const _BannerPlaceholder()
+                        : _RecommendBanner(videos: homeVideos.length > 6
+                            ? homeVideos.sublist(0, 6)
+                            : List<Video>.from(homeVideos)),
                   ),
+                ),
                 if (sorts.isNotEmpty)
                   SliverToBoxAdapter(
                     child: Padding(
@@ -961,6 +962,35 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
               child: Icon(Icons.search,
                   color: AppTheme.textSecondary, size: 18),
             ),
+    );
+  }
+}
+
+
+/// 轮播占位：无缓存首启时避免顶部空一块
+class _BannerPlaceholder extends StatelessWidget {
+  const _BannerPlaceholder();
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 196,
+      margin: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: AppTheme.backgroundTertiary,
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.movie_filter_outlined,
+                color: AppTheme.textTertiary, size: 36),
+            const SizedBox(height: 8),
+            Text('正在加载推荐…',
+                style: TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
+          ],
+        ),
+      ),
     );
   }
 }

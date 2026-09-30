@@ -171,6 +171,61 @@ class _DetailPageState extends State<DetailPage> {
     }
   }
 
+  /// 手动从 TMDB 候选中选择（解决同名剧匹配错）
+  Future<void> _showTmdbPickDialog() async {
+    final tmdb = TmdbService.instance;
+    final info = _controller.vodInfo.value;
+    if (info == null) return;
+    if (!tmdb.configured) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先在 设置 → 元数据 填写 TMDB API Key')),
+      );
+      return;
+    }
+    final title = TmdbService.cleanTitle(info.name);
+    final year = TmdbService.extractYear(info.note, info.year);
+    final cands = await tmdb.searchCandidates(title, year);
+    if (!mounted) return;
+    if (cands.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('TMDB 无匹配结果')),
+      );
+      return;
+    }
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.backgroundPrimary,
+      builder: (ctx) => ListView(
+        padding: const EdgeInsets.all(12),
+        children: [
+          const Text('选择刮削结果',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          ...cands.map((c) {
+            final it = c.$2;
+            final name = (it['title'] ?? it['name'] ?? '').toString();
+            final date = (it['release_date'] ?? it['first_air_date'] ?? '')
+                .toString();
+            final typeLabel = c.$1 == 'movie' ? '电影' : '剧集';
+            return ListTile(
+              title: Text(name, style: const TextStyle(color: Colors.white)),
+              subtitle: Text('$typeLabel · $date',
+                  style: TextStyle(color: AppTheme.textTertiary)),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final ok = await tmdb.applyCandidate(info, c.$1, it);
+                if (ok && mounted) setState(() {});
+              },
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
   /// 手动点击刮削（无视自动开关，仍需配置 Key）
   Future<void> _manualScrapeFromTmdb() async {
     final tmdb = TmdbService.instance;
@@ -754,6 +809,28 @@ class _DetailPageState extends State<DetailPage> {
       children: [
         // 顶部 tab 栏：简介 / 推荐 / 快搜
         _buildDetailTabBar(),
+        // 刮削中提示
+        Obx(() {
+          if (!TmdbService.instance.isWorking.value) {
+            return const SizedBox.shrink();
+          }
+          return Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              children: [
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 8),
+                Text('正在刮削元数据…',
+                    style: TextStyle(
+                        color: AppTheme.textTertiary, fontSize: 12)),
+              ],
+            ),
+          );
+        }),
         const SizedBox(height: AppTheme.spacingMD),
         Obx(() {
           switch (_controller.detailTabIndex.value) {
@@ -1493,7 +1570,7 @@ class _DetailPageState extends State<DetailPage> {
     final progress = (currentProgress ?? _controller.currentPlaybackSeconds()).clamp(0.0, double.infinity).toDouble();
     if (!progress.isFinite) return;
 
-    if (!force && (progress - _lastPersistedProgress).abs() < 30) {
+    if (!force && (progress - _lastPersistedProgress).abs() < 5) {
       return;
     }
 

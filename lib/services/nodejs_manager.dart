@@ -49,18 +49,27 @@ class NodeJSManager {
   HttpServer? _httpServer;
   int _nativeServerPort = 0;
 
-  /// 本地回环 HTTP 复用 Dio，避免每次 verify/reload 新建
-  late final Dio _localHttpDio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 2),
-    sendTimeout: const Duration(seconds: 2),
-    receiveTimeout: const Duration(seconds: 2),
-  ));
-
   /// 本地回环通知鉴权 token（Node 启动时通过 argv 传入，请求需携带）
   final String _localAuthToken =
       DateTime.now().microsecondsSinceEpoch.toRadixString(36) +
           (1000 + DateTime.now().millisecond).toRadixString(36);
   String get localAuthToken => _localAuthToken;
+
+  late final Dio _localHttpDio = () {
+    final d = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 2),
+      sendTimeout: const Duration(seconds: 2),
+      receiveTimeout: const Duration(seconds: 2),
+    ));
+    // 管理端口校验 x-auth-token（与 main.js mgmtServer 一致）
+    d.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) {
+        options.headers['x-auth-token'] = _localAuthToken;
+        handler.next(options);
+      },
+    ));
+    return d;
+  }();
   int get nativeServerPort => _nativeServerPort;
 
   // HTTP server 层 → 平台实现的桥接

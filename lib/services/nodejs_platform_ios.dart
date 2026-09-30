@@ -27,6 +27,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'app_log.dart';
+import 'player_prefs.dart';
 import 'nodejs_platform.dart';
 
 class IOSNodeJSPlatform implements NodeJSPlatform {
@@ -172,6 +173,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
         'nativePort': nativePort,
         'sourcePath': sourcePath,
         'authToken': authToken,
+        'keepAlive': PlayerPrefs.instance.silentKeepAlive.value,
       });
       AppLog.instance.log('IOSNodeJS Swift invokeMethod 返回: $result');
       if (result == true) {
@@ -308,6 +310,14 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
 
     final uri = Uri.tryParse(normalizedUrl);
     if (uri == null) return (false, '无效的 URL');
+    // 远程源安全：优先 HTTPS；http 明文可被中间人替换 JS（MD5 同通道也能被改）
+    // http 源仍可用（很多自建/局域网源是 http），仅告警不拦截
+    if (uri.scheme == 'http') {
+      AppLog.instance.log('[IOSNodeJS] 警告：http 明文源（建议 https）$normalizedUrl');
+    }
+    if (uri.scheme != 'https' && uri.scheme != 'http' && uri.scheme != 'file') {
+      return (false, '仅支持 http(s) / 本地路径');
+    }
 
     final sourcePath = await getDocumentsSourcePath();
     final indexJSPath = '$sourcePath/index.js';

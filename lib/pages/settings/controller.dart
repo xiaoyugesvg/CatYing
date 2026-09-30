@@ -323,6 +323,31 @@ class SettingsController extends GetxController {
   /// 实际意义 = imageCache 内存估算 + temp 目录 + app cache 目录
   /// （cached_network_image_ce 的磁盘缓存在 app cache 下面的
   /// `libCachedImageData/` 子目录，递归算 app cache 时已包含）
+  /// 按设置周期自动清缓存（启动设置页时调用）
+  Future<void> runAutoCacheCleanIfNeeded() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final mode = prefs.getInt('source_cache_auto_clean') ?? 0; // 0 off 1 day 2 week 3 month
+      if (mode == 0) return;
+      final last =
+          DateTime.fromMillisecondsSinceEpoch(prefs.getInt('cache_last_clean') ?? 0);
+      final now = DateTime.now();
+      final days = switch (mode) { 1 => 1, 2 => 7, 3 => 30, _ => 0 };
+      if (days == 0) return;
+      if (now.difference(last).inDays < days) return;
+      // 清临时目录与图片缓存
+      try {
+        PaintingBinding.instance.imageCache.clear();
+      } catch (_) {}
+      final tmp = await getTemporaryDirectory();
+      await _deleteDirContents(tmp);
+      await prefs.setInt('cache_last_clean', now.millisecondsSinceEpoch);
+      AppLog.instance.log('[Settings] auto cache clean mode=$mode');
+    } catch (e) {
+      AppLog.instance.log('[Settings] auto cache clean fail: $e');
+    }
+  }
+
   Future<void> refreshCacheSize() async {
     int total = 0;
 

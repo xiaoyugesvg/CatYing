@@ -231,7 +231,13 @@ import UIKit
         argv[argcCount] = nil
 
         isRunning = true
-        BackgroundAudio.shared.start()
+        // 静音保活可关：关闭后锁屏不显示「播放中」，但 Node 可能被系统冻结
+        let keepAlive = (args["keepAlive"] as? Bool) ?? true
+        if keepAlive {
+            BackgroundAudio.shared.start()
+        } else {
+            NSLog("[NodeJSBridge] silent keepalive disabled")
+        }
 
         // 4. 异步启动 Node.js
         workQueue.async { [weak self] in

@@ -10,9 +10,12 @@ import 'package:media_kit_video/media_kit_video.dart'
 
 import '../../common/theme.dart';
 import '../../models/live_models.dart';
+import '../../services/epg_service.dart';
 import '../../services/live_service.dart';
 import '../../services/main_tab_controller.dart';
 import '../../services/player_fullscreen_controller.dart';
+import '../../widgets/app_player.dart';
+import '../../widgets/ios_av_player.dart';
 import '../../widgets/video_player_pip.dart';
 import 'controller.dart';
 
@@ -30,6 +33,8 @@ class _LivePageState extends State<LivePage> {
   final _controller = Get.put(LiveController());
   Player? _player;
   VideoController? _videoController;
+  /// iOS：与点播共用 IosAvPlayer（AvEngine）
+  IosAvPlayer? _avPlayer;
   bool _fullscreen = false;
   bool _audioMode = false;
   int _activeGroupIndex = 0;
@@ -76,6 +81,8 @@ class _LivePageState extends State<LivePage> {
     _errSub?.cancel();
     _player?.dispose();
     _player = null;
+    _avPlayer?.dispose();
+    _avPlayer = null;
     _videoController = null;
     super.dispose();
   }
@@ -115,7 +122,13 @@ class _LivePageState extends State<LivePage> {
       if (referer.isNotEmpty) 'Referer': referer,
       if (origin.isNotEmpty) 'Origin': origin,
     };
-    _player!.open(Media(url, httpHeaders: headers));
+    if (Platform.isIOS) {
+      // 与点播同一 AVPlayer 内核，进出小窗/手势一致
+      _avPlayer ??= IosAvPlayer(config: const AppConfig(title: '猫影直播'));
+      _avPlayer!.open(AppMedia(url, httpHeaders: headers));
+    } else {
+      _player!.open(Media(url, httpHeaders: headers));
+    }
     // 预热原生 PiP，否则点小窗时 AVPlayer 冷启动易失败/黑屏
     if (Platform.isIOS) {
       VideoPlayerPip.instance.prepareIos(url: url, headers: headers);
@@ -156,28 +169,20 @@ class _LivePageState extends State<LivePage> {
       };
       await VideoPlayerPip.instance
           .prepareIos(url: url, headers: pipHeaders);
-      if (_player?.state.playing == true) {
-        _player?.pause();
-      }
+      // 单实例 AVPlayer：进/出小窗都不要 pause，否则小窗冻结/回 App 停播
       final ok = await VideoPlayerPip.instance.enterIos(
         url: url,
         headers: pipHeaders,
         position: pos,
         onStarted: () {
-          try {
-            _player?.pause();
-          } catch (e) { /* ignore */ }
+          // 系统接管同一 layer，无需暂停
         },
         onStopped: () {
-          try {
-            _player?.play();
-          } catch (e) { /* ignore */ }
+          // 同一播放器继续播，只收 UI
+          if (mounted) setState(() {});
         },
       );
       if (!ok) {
-        try {
-          _player?.play();
-        } catch (e) { /* ignore */ }
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('小窗启动失败')),
         );
@@ -189,7 +194,6 @@ class _LivePageState extends State<LivePage> {
     }
   }
 
-  @override
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -371,6 +375,90 @@ class _LivePageState extends State<LivePage> {
                               ),
                             ),
                             const SizedBox(height: 10),
+                            // 跨组搜索 + 只看收藏
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    onChanged: (v) {
+                                      c.searchKeyword.value = v;
+                                      c.update();
+                                    },
+                                    style: TextStyle(
+                                        color: AppTheme.textPrimary,
+                                        fontSize: 13),
+                                    decoration: InputDecoration(
+                                      isDense: true,
+                                      hintText: '搜索频道（跨分组）',
+                                      hintStyle: TextStyle(
+                                          color: AppTheme.textTertiary,
+                                          fontSize: 12),
+                                      prefixIcon: Icon(Icons.search,
+                                          size: 18,
+                                          color: AppTheme.textTertiary),
+                                      filled: true,
+                                      fillColor: AppTheme.backgroundTertiary,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                              horizontal: 10, vertical: 8),
+                                      border: OutlineInputBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(12),
+                                        borderSide: BorderSide.none,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                GestureDetector(
+                                  onTap: () => _showEpgSheet(context, c),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 10),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.backgroundTertiary,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Icon(Icons.schedule,
+                                        size: 18,
+                                        color: AppTheme.textSecondary),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Obx(() {
+                                  final onlyFav =
+                                      c.showOnlyFavorites.value;
+                                  return GestureDetector(
+                                    onTap: () {
+                                      c.showOnlyFavorites.value = !onlyFav;
+                                      c.update();
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 10),
+                                      decoration: BoxDecoration(
+                                        color: onlyFav
+                                            ? AppTheme.accentColor
+                                                .withValues(alpha: 0.2)
+                                            : AppTheme.backgroundTertiary,
+                                        borderRadius:
+                                            BorderRadius.circular(12),
+                                      ),
+                                      child: Icon(
+                                        onlyFav
+                                            ? Icons.star
+                                            : Icons.star_border,
+                                        size: 18,
+                                        color: onlyFav
+                                            ? AppTheme.accentColor
+                                            : AppTheme.textSecondary,
+                                      ),
+                                    ),
+                                  );
+                                }),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
                             // 频道列表（占满宽度）
                             Expanded(
                               child: groups.isEmpty
@@ -471,13 +559,16 @@ class _LivePageState extends State<LivePage> {
         fit: StackFit.expand,
         children: [
           // 视频层常驻（听剧时透明隐藏，不从树上摘掉，保证音轨不断、退出听剧能恢复画面）
-          if (_videoController != null && current != null)
+          if ((Platform.isIOS && _avPlayer != null) ||
+              (_videoController != null && current != null))
             Opacity(
               opacity: _audioMode ? 0.0 : 1.0,
-              child: Video(
-                controller: _videoController!,
-                controls: AdaptiveVideoControls,
-              ),
+              child: (Platform.isIOS && _avPlayer != null)
+                  ? AppVideoView(player: _avPlayer!)
+                  : Video(
+                      controller: _videoController!,
+                      controls: AdaptiveVideoControls,
+                    ),
             )
           else
             Center(
@@ -972,6 +1063,92 @@ class _LivePageState extends State<LivePage> {
     }
   }
 
+  Future<void> _showEpgSheet(BuildContext context, LiveController c) async {
+    final ch = c.currentChannel;
+    if (ch == null) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.backgroundPrimary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SizedBox(
+          height: MediaQuery.of(ctx).size.height * 0.5,
+          child: FutureBuilder<List<EpgProgram>>(
+            future: EpgService.instance.programsFor(ch.name),
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final list = snap.data ?? const <EpgProgram>[];
+              if (list.isEmpty) {
+                return Center(
+                  child: Text(
+                    '暂无节目单\n请在 直播设置 里配置 EPG 地址',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppTheme.textSecondary),
+                  ),
+                );
+              }
+              final now = DateTime.now();
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Text(
+                      '节目单 · ${ch.name}',
+                      style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.only(bottom: 24),
+                      itemCount: list.length,
+                      itemBuilder: (_, i) {
+                        final p = list[i];
+                        final playing = p.start != null &&
+                            p.stop != null &&
+                            now.isAfter(p.start!) &&
+                            now.isBefore(p.stop!);
+                        return ListTile(
+                          dense: true,
+                          title: Text(
+                            p.title,
+                            style: TextStyle(
+                              color: playing
+                                  ? AppTheme.accentColor
+                                  : AppTheme.textPrimary,
+                              fontWeight:
+                                  playing ? FontWeight.w600 : FontWeight.w400,
+                            ),
+                          ),
+                          trailing: Text(
+                            EpgService.instance.formatTime(p.start),
+                            style: TextStyle(
+                              color: playing
+                                  ? AppTheme.accentColor
+                                  : AppTheme.textTertiary,
+                              fontSize: 12,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildChannelList(LiveController c, List<LiveChannel> channels) {
     if (channels.isEmpty) {
       return Center(
@@ -996,6 +1173,7 @@ class _LivePageState extends State<LivePage> {
       itemBuilder: (_, i) {
         final ch = channels[i];
         final selected = c.selectedChannelIndex.value == i;
+        final fav = c.isFavorite(ch);
         return ListTile(
           dense: true,
           contentPadding:
@@ -1006,12 +1184,31 @@ class _LivePageState extends State<LivePage> {
                 fontSize: 15,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
               )),
-          subtitle: Text(ch.urls.isNotEmpty ? '可播放' : '未下载',
+          subtitle: Text(
+              ch.urls.isNotEmpty ? (ch.group) : '未下载',
               style:
                   TextStyle(color: AppTheme.textTertiary, fontSize: 11)),
-          trailing: Icon(Icons.play_circle_fill,
-              color: selected ? AppTheme.accentColor : Colors.white24,
-              size: 22),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => c.toggleFavorite(ch),
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Icon(
+                    fav ? Icons.star : Icons.star_border,
+                    color: fav ? AppTheme.accentColor : Colors.white38,
+                    size: 20,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.play_circle_fill,
+                  color: selected ? AppTheme.accentColor : Colors.white24,
+                  size: 22),
+            ],
+          ),
           onTap: () {
             c.selectChannel(i);
             _playChannel(ch.playUrl);

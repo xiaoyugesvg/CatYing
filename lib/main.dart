@@ -10,6 +10,7 @@ import 'services/api_config.dart';
 import 'services/app_log.dart';
 import 'services/app_state.dart';
 import 'services/background_service.dart';
+import 'services/epg_service.dart';
 import 'services/live_service.dart';
 import 'services/player_prefs.dart';
 import 'services/tmdb_service.dart';
@@ -53,6 +54,7 @@ void main() async {
 
   // 直播源服务（解析 lives / m3u）
   Get.put<LiveService>(LiveService(), permanent: true);
+  Get.put<EpgService>(EpgService(), permanent: true);
 
   // TMDB 智能刮削
   Get.put<TmdbService>(TmdbService(), permanent: true);

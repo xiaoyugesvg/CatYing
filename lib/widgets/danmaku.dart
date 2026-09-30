@@ -61,9 +61,18 @@ List<DanmuItem> parseDanmuBody(String body) {
         // DPlayer time/text
         if (e['time'] is num) t = (e['time'] as num).toDouble();
         if (e['time'] is String) t = double.tryParse(e['time'] as String);
-        // 弹弹play t（毫秒）/ timepoint
-        if (e['t'] is num) t = (e['t'] as num).toDouble();
-        if (e['timepoint'] is num) t = (e['timepoint'] as num).toDouble();
+        // 弹弹play t / timepoint：注释与文档均为**毫秒**，必须 /1000 成秒
+        // 否则 t=125000 会当成 125000 秒，弹幕永不出现
+        if (e['t'] is num) {
+          final tv = (e['t'] as num).toDouble();
+          // 弹弹play 为毫秒；部分源为秒 —— >10000 视为毫秒
+          t = tv > 10000 ? tv / 1000.0 : tv;
+        }
+        if (e['timepoint'] is num) {
+          final tp = (e['timepoint'] as num).toDouble();
+          // 部分源 timepoint 已是秒；>10000 视为毫秒
+          t = tp > 10000 ? tp / 1000.0 : tp;
+        }
         // p 属性（弹弹play: 时间,模式,颜色,...）——权威字段
         final p = e['p'];
         if (p is String) {
@@ -251,7 +260,7 @@ class DanmuLayerState extends State<DanmuLayer> {
 
     // Seek jump -> reset cursor and clear on-screen items.
     final last = _lastPosSec;
-    if (last != null && (pos - last).abs() > 1.5) {
+    if (last != null && (pos - last).abs() > 0.4) {
       _resetToPosition(pos);
     }
     _lastPosSec = pos;

@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:battery_plus/battery_plus.dart';
@@ -180,6 +180,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   double _danmuOpacity = 1;
   double _danmuSpeed = 150;
   int _danmuTracks = 4;
+  List<String> _danmuBlockWords = [];
   late VideoFitType _videoFit;
   double _volume = 1.0;
   // 应用内亮度遮罩：1.0 = 不遮（系统亮度）。默认不要半黑。
@@ -327,6 +328,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           _scheduleHideControls();
           widget.onPlaying?.call();
           _applyPendingResumeSeek();
+          // Spider 异步解析 URL 后才可匹配弹幕：开播时再试一次
+          if (!_danmuLoaded && _danmuApiUrl.isNotEmpty) {
+            _ensureDanmuLoaded();
+          }
           // iOS：前台预热原生 AVPlayer（静音预缓冲常驻），退后台/点 PiP 时
           // 原生立即启动系统悬浮窗，避免"后台等缓冲"导致 PiP 时灵时不灵
           if (Platform.isIOS) {
@@ -656,6 +661,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _danmuOpacity = (prefs.getDouble('danmu_opacity') ?? 1).clamp(0.2, 1.0);
       _danmuSpeed = (prefs.getDouble('danmu_speed') ?? 150).clamp(80.0, 240.0);
       _danmuTracks = (prefs.getInt('danmu_tracks') ?? 4).clamp(2, 8);
+      _danmuBlockWords =
+          prefs.getStringList('danmu_block_words') ?? const [];
       if (mounted) setState(() {});
       if (_danmuApiUrl.isNotEmpty) {
         _ensureDanmuLoaded();
@@ -666,6 +673,20 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   /// 通过视频 URL 直接匹配弹幕（Logvr-danmu 的 /api/v2/comment?url= 接口）
+
+  /// Logvr-danmu 基址归一化：
+  /// 支持 `host` / `host/{TOKEN}` / `host/{TOKEN}/api/v2`，最终用于拼 `/api/v2/...`
+  String _danmuApiBase() {
+    var b = _danmuApiUrl.trim();
+    while (b.endsWith('/')) {
+      b = b.substring(0, b.length - 1);
+    }
+    if (b.endsWith('/api/v2')) {
+      b = b.substring(0, b.length - '/api/v2'.length);
+    }
+    return b;
+  }
+
   Future<void> _ensureDanmuLoaded() async {
     if (_danmuLoaded || _danmuApiUrl.isEmpty) return;
     _danmuLoaded = true;
@@ -677,7 +698,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 8);
     try {
-      final base = _danmuApiUrl.replaceAll(RegExp(r'/+$'), '');
+      final base = _danmuApiBase();
       final api =
           '$base/api/v2/comment?url=${Uri.encodeQueryComponent(url)}&format=json';
       final http = await client
@@ -691,7 +712,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             .transform(utf8.decoder)
             .join()
             .timeout(const Duration(seconds: 12));
-        final list = parseDanmuBody(body);
+        var list = parseDanmuBody(body);
+        if (_danmuBlockWords.isNotEmpty) {
+          list = list
+              .where((d) => !_danmuBlockWords
+                  .any((w) => w.isNotEmpty && d.text.contains(w)))
+              .toList();
+        }
         // 代次校验：快速换集时丢弃过期响应，避免旧集弹幕盖到新集上
         if (mounted && list.isNotEmpty && loadGen == _danmuLoadGen) {
           setState(() => _danmus = list);
@@ -710,6 +737,127 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   /// 持久化弹幕开关
+  Future<void> _persistDanmuStyle() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble('danmu_font_size', _danmuFontSize);
+      await prefs.setDouble('danmu_opacity', _danmuOpacity);
+      await prefs.setInt('danmu_tracks', _danmuTracks);
+      await prefs.setDouble('danmu_speed', _danmuSpeed);
+    } catch (e) {
+      AppLog.instance.log('[video_player] persist danmu style: $e');
+    }
+  }
+
+  /// 发送弹幕到配置的 API（Logvr-danmu / 自定义 POST）
+  Future<void> _showSendDanmuDialog() async {
+    if (_danmuApiUrl.isEmpty) {
+      _showMessage('请先在设置里配置弹幕 API');
+      return;
+    }
+    final ctrl = TextEditingController();
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text('发送弹幕', style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLength: 40,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: '输入弹幕内容…',
+            hintStyle: TextStyle(color: Colors.white38),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消', style: TextStyle(color: Colors.white70)),
+          ),
+          TextButton(
+            onPressed: () async {
+              final text = ctrl.text.trim();
+              Navigator.pop(ctx);
+              if (text.isEmpty) return;
+              await _sendDanmu(text);
+            },
+            child: const Text('发送',
+                style: TextStyle(color: AppTheme.accentColor)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _sendDanmu(String text) async {
+    try {
+      final base = _danmuApiBase();
+      final videoUrl = _player.state.playlist.medias.isNotEmpty
+          ? _player.state.playlist.medias.last.uri
+          : widget.url;
+      final t = _player.state.position.inMilliseconds / 1000.0;
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+      // Logvr-danmu / 同类服务：字段名不一，一次带上常用别名
+      final payload = <String, dynamic>{
+        'url': videoUrl,
+        'video_url': videoUrl,
+        'uri': videoUrl,
+        'text': text,
+        'content': text,
+        'm': text,
+        'time': t,
+        't': (t * 1000).round(),
+        'progress': (t * 1000).round(),
+        'mode': 1,
+        'color': 0xFFFFFF,
+        'p': '$t,1,16777215,${DateTime.now().millisecondsSinceEpoch}',
+      };
+      final endpoints = <String>[
+        '$base/api/v2/comment',
+        '$base/api/comment',
+        '$base/api/v2/send',
+      ];
+      int? code;
+      String lastBody = '';
+      for (final ep in endpoints) {
+        try {
+          final req = await client
+              .postUrl(Uri.parse(ep))
+              .timeout(const Duration(seconds: 8));
+          req.headers.contentType = ContentType.json;
+          req.headers.set('User-Agent', 'NewTv/1.0');
+          req.write(jsonEncode(payload));
+          final res = await req.close().timeout(const Duration(seconds: 8));
+          lastBody = await res.transform(utf8.decoder).join();
+          code = res.statusCode;
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            break;
+          }
+        } catch (e) {
+          AppLog.instance.log('[video_player] send try $ep: $e');
+        }
+      }
+      client.close(force: true);
+      if (code != null && code >= 200 && code < 300) {
+        _showMessage('弹幕已发送');
+        setState(() {
+          _danmus = [
+            ..._danmus,
+            DanmuItem(t, text, const Color(0xFFFFFFFF), 1),
+          ];
+        });
+      } else {
+        _showMessage('发送失败 ${code ?? '-'} ${lastBody.length > 80 ? lastBody.substring(0, 80) : lastBody}');
+      }
+    } catch (e) {
+      AppLog.instance.log('[video_player] send danmu fail: $e');
+      _showMessage('发送失败');
+    }
+  }
+
   Future<void> _persistDanmuOn() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -1610,7 +1758,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   Widget _buildBottomControls() {
     return Positioned(
       // 控件区整体下移一点，避免贴死画面底边
-      bottom: 10,
+      bottom: 2,
       left: 0,
       right: 0,
       child: _gradientBottomContainer(
@@ -1619,7 +1767,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           children: [
             _buildProgressBar(),
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 5),
               child: Row(
                 children: [
                   if (widget.canPlayPrevious)
@@ -2366,6 +2514,75 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                 ),
                               ],
                             ),
+                            if (_danmuOn) ...[
+                              const SizedBox(height: 4),
+                              _DanmuSliderRow(
+                                label: '字号 ${_danmuFontSize.round()}',
+                                value: _danmuFontSize,
+                                min: 10,
+                                max: 28,
+                                onChanged: (v) {
+                                  refresh(() => _danmuFontSize = v);
+                                  _persistDanmuStyle();
+                                },
+                              ),
+                              _DanmuSliderRow(
+                                label:
+                                    '透明度 ${(_danmuOpacity * 100).round()}%',
+                                value: _danmuOpacity,
+                                min: 0.2,
+                                max: 1,
+                                onChanged: (v) {
+                                  refresh(() => _danmuOpacity = v);
+                                  _persistDanmuStyle();
+                                },
+                              ),
+                              _DanmuSliderRow(
+                                label: '密度 ${_danmuTracks} 轨',
+                                value: _danmuTracks.toDouble(),
+                                min: 2,
+                                max: 8,
+                                divisions: 6,
+                                onChanged: (v) {
+                                  refresh(() => _danmuTracks = v.round());
+                                  _persistDanmuStyle();
+                                },
+                              ),
+                              _DanmuSliderRow(
+                                label:
+                                    '速度 ${_danmuSpeed.round()} px/s',
+                                value: _danmuSpeed,
+                                min: 80,
+                                max: 240,
+                                divisions: 16,
+                                onChanged: (v) {
+                                  refresh(() => _danmuSpeed = v);
+                                  _persistDanmuStyle();
+                                },
+                              ),
+                            ],
+                            if (_danmuApiUrl.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => _showSendDanmuDialog(),
+                                child: Container(
+                                  width: double.infinity,
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 10),
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.accentColor
+                                        .withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Text('发送弹幕',
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600)),
+                                ),
+                              ),
+                            ],
                             const Divider(color: Colors.white12, height: 16),
                             const _SettingsRowLabel('倍速'),
                             const SizedBox(height: 8),
@@ -2785,3 +3002,42 @@ enum PanAxis { horizontal, vertical }
 // 进度条拖动手势
 // ============================================================
 
+
+
+/// 设置面板里的弹幕样式滑条
+class _DanmuSliderRow extends StatelessWidget {
+  final String label;
+  final double value;
+  final double min;
+  final double max;
+  final int? divisions;
+  final ValueChanged<double> onChanged;
+
+  const _DanmuSliderRow({
+    required this.label,
+    required this.value,
+    required this.min,
+    required this.max,
+    this.divisions,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 8),
+        _SettingsRowLabel(label),
+        Slider(
+          value: value.clamp(min, max),
+          min: min,
+          max: max,
+          divisions: divisions,
+          activeColor: AppTheme.accentColor,
+          onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+}

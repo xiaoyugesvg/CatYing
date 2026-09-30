@@ -20,7 +20,15 @@ class TmdbService extends GetxService {
   final autoScrape = true.obs;
   final isWorking = false.obs;
 
-  Dio get _dio => Dio(BaseOptions(
+  Dio? _dioInstance;
+  String _dioApiKey = '';
+
+  /// 懒加载单例：apiKey 变化才重建（避免每次刮削新建连接池）
+  Dio get _dio {
+    if (_dioInstance == null || _dioApiKey != apiKey.value) {
+      _dioApiKey = apiKey.value;
+      _dioInstance?.close(force: true);
+      _dioInstance = Dio(BaseOptions(
         connectTimeout: const Duration(seconds: 12),
         receiveTimeout: const Duration(seconds: 15),
         queryParameters: {
@@ -28,6 +36,9 @@ class TmdbService extends GetxService {
           'language': 'zh-CN',
         },
       ));
+    }
+    return _dioInstance!;
+  }
 
   Future<void> loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
@@ -74,6 +85,51 @@ class TmdbService extends GetxService {
   }
 
   /// 对 VodInfo 做智能刮削并回填（失败静默，返回是否成功）
+  /// 手动匹配：返回 movie/tv 各前 5 条候选
+  Future<List<(String type, Map<String, dynamic> item)>> searchCandidates(
+      String title, int? year) async {
+    final out = <(String, Map<String, dynamic>)>[];
+    if (!configured) return out;
+    for (final type in ['movie', 'tv']) {
+      try {
+        final qp = <String, dynamic>{'query': title};
+        if (year != null) {
+          qp[type == 'movie' ? 'year' : 'first_air_date_year'] = '$year';
+        }
+        final res = await _dio.get('$_base/search/$type', queryParameters: qp);
+        final results = (res.data['results'] as List?) ?? const [];
+        for (final r in results.take(5)) {
+          out.add((type, Map<String, dynamic>.from(r as Map)));
+        }
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  /// 手动应用某条候选到 VodInfo
+  Future<bool> applyCandidate(
+      VodInfo info, String type, Map<String, dynamic> item) async {
+    final id = item['id'];
+    if (id == null) return false;
+    isWorking.value = true;
+    try {
+      final detail = await _fetchDetail(type, id.toString());
+      if (detail == null) return false;
+      _apply(info, type, detail);
+      final ck = cacheKey(info.name, '');
+      await CacheStore.instance.setJsonCache('tmdb:$ck', {
+        ...detail,
+        '__type': type,
+      });
+      return true;
+    } catch (e) {
+      AppLog.instance.log('[TmdbService] applyCandidate fail: $e');
+      return false;
+    } finally {
+      isWorking.value = false;
+    }
+  }
+
   Future<bool> enrich(VodInfo info) async {
     if (!configured) return false;
     isWorking.value = true;
@@ -130,19 +186,34 @@ class TmdbService extends GetxService {
         qp[mediaType == 'movie' ? 'year' : 'first_air_date_year'] = '$year';
       }
       final res = await _dio.get('$_base/search/$mediaType', queryParameters: qp);
-      final results = (res.data['results'] as List?) ?? const [];
-      if (results.isEmpty) {
+      var results = (res.data['results'] as List?) ?? const [];
+      if (results.isEmpty && year != null) {
         // 放宽：去掉年份再搜一次
-        if (year != null) {
-          final res2 = await _dio
-              .get('$_base/search/$mediaType', queryParameters: {'query': query});
-          final r2 = (res2.data['results'] as List?) ?? const [];
-          if (r2.isEmpty) return null;
-          return Map<String, dynamic>.from(r2.first);
-        }
-        return null;
+        final res2 = await _dio
+            .get('$_base/search/$mediaType', queryParameters: {'query': query});
+        results = (res2.data['results'] as List?) ?? const [];
       }
-      return Map<String, dynamic>.from(results.first);
+      if (results.isEmpty) return null;
+      // 每种类型取前 3 条打分，降低「第一条不是最佳」的误匹配
+      final top = results.take(3).toList();
+      Map<String, dynamic>? best;
+      var bestScore = -1e9;
+      for (final item in top) {
+        final m = Map<String, dynamic>.from(item as Map);
+        var sc = 0.0;
+        final t = (m['title'] ?? m['name'] ?? '').toString();
+        if (t.toLowerCase() == query.toLowerCase()) sc += 5;
+        if (t.toLowerCase().contains(query.toLowerCase())) sc += 2;
+        final date = (m['release_date'] ?? m['first_air_date'] ?? '').toString();
+        if (year != null && date.startsWith('$year')) sc += 4;
+        final pop = (m['popularity'] as num?)?.toDouble() ?? 0;
+        sc += (pop / 100.0).clamp(0, 1.5);
+        if (sc > bestScore) {
+          bestScore = sc;
+          best = m;
+        }
+      }
+      return best;
     } catch (_) {
       return null;
     }

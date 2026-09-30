@@ -111,13 +111,40 @@ class AppTheme {
       scaffoldBackgroundColor: const Color(0xFFF6F6F7),
       colorScheme: base.colorScheme.copyWith(
         primary: accentColor,
+        secondary: accentColor,
         surface: const Color(0xFFFFFFFF),
         onSurface: const Color(0xFF1A1A1A),
+        surfaceContainerHighest: const Color(0xFFECECEF),
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: Colors.transparent,
         elevation: 0,
         foregroundColor: Color(0xFF1A1A1A),
+      ),
+      cardTheme: base.cardTheme.copyWith(
+        color: const Color(0xFFFFFFFF),
+        elevation: 0,
+      ),
+      dialogTheme: base.dialogTheme.copyWith(
+        backgroundColor: const Color(0xFFFFFFFF),
+      ),
+      bottomSheetTheme: base.bottomSheetTheme.copyWith(
+        backgroundColor: const Color(0xFFFFFFFF),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: const Color(0xFFEFEFF2),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(radiusSM),
+          borderSide: BorderSide.none,
+        ),
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.all(accentColor),
+      ),
+      dividerTheme: const DividerThemeData(
+        color: Color(0x14000000),
+        thickness: 1,
       ),
     );
   }

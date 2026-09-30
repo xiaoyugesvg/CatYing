@@ -27,6 +27,9 @@ class PlayerPrefs {
   /// Webview：允许页面 JS（解析站需要）
   final webviewEnableJs = true.obs;
 
+  /// 静音后台保活 Node（关掉更省电、锁屏无「播放中」，但 Node 可能被冻结）
+  final silentKeepAlive = true.obs;
+
   /// 快进步长（秒）
   final playTimeStep = 10.obs;
 
@@ -63,6 +66,7 @@ class PlayerPrefs {
     webviewEnableJs.value = prefs.getBool('webview_enable_js') ?? true;
     final step = prefs.getInt('play_time_step') ?? 0;
     playTimeStep.value = step > 0 ? step : 10;
+    silentKeepAlive.value = prefs.getBool('silent_keepalive') ?? true;
   }
 
   Future<void> setEngine(PlayerEngine e) async {
@@ -99,6 +103,12 @@ class PlayerPrefs {
     webviewEnableJs.value = v;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('webview_enable_js', v);
+  }
+
+  Future<void> setSilentKeepAlive(bool v) async {
+    silentKeepAlive.value = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('silent_keepalive', v);
   }
 
   Future<void> setPlayTimeStep(int s) async {
