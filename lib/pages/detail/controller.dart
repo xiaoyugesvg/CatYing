@@ -256,6 +256,11 @@ class DetailController extends GetxController with WidgetsBindingObserver {
 
   void selectFlag(String flag) {
     if (selectedFlag.value == flag) return;
+
+    // 先记住当前进度：切线路/换源的语义是「换条线路接着看这一集」，
+    // 不是从头开始。与 selectQuality 用同一套进度快照（currentPlaybackSeconds）。
+    final progress = currentPlaybackSeconds();
+    final keepSeconds = progress > 0 ? progress : 0.0;
     final currentIndex = selectedEpisodeIndex.value;
 
     isPlaying.value = false;
@@ -264,8 +269,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
 
     selectedFlag.value = flag;
     vodInfo.value?.playFlag = flag;
-    resumeSeconds.value = 0;
-    _realtimeProgressSeconds = 0;
+    // 恢复到刚才的位置，而不是清零
+    resumeSeconds.value = keepSeconds;
+    _realtimeProgressSeconds = keepSeconds;
 
     final episodes = vodInfo.value?.playUrlMap[flag] ?? [];
     if (episodes.isEmpty) {
@@ -284,7 +290,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     // ⚠️ 这里**不能**按「切换前是否在播」提前 return。
     // 旧实现在暂停状态下切线路会直接返回：playUrl 停在 null → 播放区永远转圈，
     // 15 秒后被超时兜底报成「播放地址获取超时」。而用户点另一条线路的语义就是
-    // 「换条线路播这一集」，所以与 selectEpisode 保持一致：解析到地址就开播。
+    // 「换条线路接着看」，所以与 selectEpisode 保持一致：解析到地址就开播。
     if (isSpiderSource) {
       _resolveSpiderPlayUrl(flag: flag, id: episodeURL);
     } else {
