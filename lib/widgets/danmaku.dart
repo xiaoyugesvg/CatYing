@@ -407,6 +407,9 @@ class DanmuLayerState extends State<DanmuLayer> {
                           : h - 34.0 - a.track * 28.0),
                   child: Text(
                     a.item.text,
+                    // 弹幕字号由用户单独设置，豁免全局字号缩放，
+                    // 避免 textScaler 放大后与实际渲染宽度不一致
+                    textScaler: TextScaler.noScaling,
                     style: TextStyle(
                       color: a.item.color.withValues(alpha: widget.opacity),
                       fontSize: widget.fontSize,

@@ -10,6 +10,7 @@ import '../../models/movie.dart';
 import '../../models/vod_info.dart';
 import '../../models/player_engine.dart';
 import '../../services/api_config.dart';
+import '../../services/spider_service.dart';
 import '../../widgets/vod_card.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import '../../models/cache_store.dart';
@@ -245,6 +246,95 @@ class _DetailPageState extends State<DetailPage> {
     setState(() {});
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(ok ? '刮削完成，已更新海报/简介/演职员' : '未匹配到 TMDB 条目')),
+    );
+  }
+
+  /// Spider 源手动换源/选择正确结果：
+  /// 用当前片名在当前 Spider 源内重新搜索，列出候选（同名剧/不同年份），
+  /// 选中后重新加载详情（修复"Spider 源详情直接取第一个结果、匹配错无法手动选"）
+  Future<void> _showSpiderPickDialog() async {
+    final info = _controller.vodInfo.value;
+    if (info == null) return;
+    final spiderInfo = SpiderService.instance.getCurrentSpiderInfo();
+    if (spiderInfo.$1.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('当前源不是 Spider 源，无法搜索候选')),
+      );
+      return;
+    }
+    // 用片名在当前源搜索（search 不修改当前 Spider 上下文，只发请求）
+    final res = await SpiderService.instance
+        .search(spiderInfo.$1, spiderInfo.$2, spiderInfo.$3, info.name);
+    if (!mounted) return;
+    if (res == null || res['list'] is! List) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('搜索候选失败，请重试')),
+      );
+      return;
+    }
+    final List<Video> cands = [];
+    for (final e in (res['list'] as List)) {
+      if (e is! Map) continue;
+      try {
+        final v = Video.fromJson(Map<String, dynamic>.from(e));
+        // spider 搜索结果通常没有 sourceKey，补上当前源
+        cands.add(Video(
+          id: v.id,
+          name: v.name,
+          pic: v.pic,
+          note: v.note,
+          year: v.year,
+          area: v.area,
+          director: v.director,
+          actor: v.actor,
+          des: v.des,
+          sourceKey: info.sourceKey,
+        ));
+      } catch (_) {/* 单条解析失败跳过 */}
+    }
+    // 排除当前正在看的条目
+    cands.removeWhere((v) => v.id == info.id);
+    if (cands.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('当前源没有其他候选结果')),
+      );
+      return;
+    }
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.backgroundPrimary,
+      builder: (ctx) => ListView(
+        padding: const EdgeInsets.all(12),
+        children: [
+          const Text('选择正确结果',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Text('当前源：${info.name} 的候选（同名剧/不同版本）',
+              style: TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
+          const SizedBox(height: 4),
+          ...cands.map((c) {
+            final extra = <String>[
+              if (c.year.isNotEmpty) c.year,
+              if (c.note.isNotEmpty) c.note,
+            ].join(' · ');
+            return ListTile(
+              title: Text(c.name, style: const TextStyle(color: Colors.white)),
+              subtitle: extra.isNotEmpty
+                  ? Text(extra, style: TextStyle(color: AppTheme.textTertiary))
+                  : null,
+              onTap: () async {
+                Navigator.pop(ctx);
+                await _controller.loadDetail(c);
+                if (mounted) setState(() {});
+                _saveHistoryForCurrentEpisode();
+              },
+            );
+          }),
+        ],
+      ),
     );
   }
 
@@ -966,6 +1056,30 @@ class _DetailPageState extends State<DetailPage> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    const SizedBox(width: AppTheme.spacingSM),
+                    // Spider 源：手动换源/选择正确结果（同名剧匹配错时）
+                    Obx(() {
+                      if (!_controller.isSpiderSource) {
+                        return const SizedBox.shrink();
+                      }
+                      return GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _showSpiderPickDialog,
+                        child: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: AppTheme.backgroundTertiary,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: AppTheme.borderLight,
+                            ),
+                          ),
+                          child: const Icon(Icons.swap_horiz,
+                              size: 18, color: AppTheme.accentColor),
+                        ),
+                      );
+                    }),
                     const SizedBox(width: AppTheme.spacingSM),
                     // 手动 TMDB 刮削
                     GestureDetector(

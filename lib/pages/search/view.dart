@@ -6,6 +6,13 @@ import '../../widgets/vod_card.dart';
 import '../../widgets/common_widgets.dart';
 import 'controller.dart';
 
+/// 热门搜索词（静态兜底列表，点击直达搜索）
+const List<String> _hotKeywords = [
+  '海贼王', '火影忍者', '斗罗大陆', '庆余年', '狂飙',
+  '三体', '流浪地球', '甄嬛传', '西游记', '灌篮高手',
+  '名侦探柯南', '奥特曼', '熊出没', '爱情公寓', '白夜追凶',
+];
+
 /// 搜索页 - 对应 Swift SearchView
 class SearchPage extends StatefulWidget {
   /// 可选的初始搜索关键词，从其他页面传入时自动搜索
@@ -529,7 +536,33 @@ class _SearchPageState extends State<SearchPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 热门搜索：始终显示（无历史时也有内容可点）
+          Text(
+            '热门搜索',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: AppTheme.fontHeadline,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: AppTheme.spacingLG),
+          Wrap(
+            spacing: AppTheme.spacingSM,
+            runSpacing: AppTheme.spacingSM,
+            children: _hotKeywords.map((keyword) {
+              return SelectableChip(
+                title: keyword,
+                isSelected: false,
+                onTap: () {
+                  _inputController.text = keyword;
+                  _searchController.keyword.value = keyword;
+                  _searchController.search();
+                },
+              );
+            }).toList(),
+          ),
           if (_searchController.searchHistory.isNotEmpty) ...[
+            const SizedBox(height: AppTheme.spacingXL),
             Row(
               children: [
                 Text(

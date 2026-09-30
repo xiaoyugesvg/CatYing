@@ -13,6 +13,7 @@ import '../../services/source_service.dart';
 import '../../services/spider_service.dart';
 import '../../services/app_log.dart';
 import '../../services/network_manager.dart';
+import '../../services/player_prefs.dart';
 
 class PlaybackQualityOption {
   static const String autoIdentifier = 'auto';
@@ -101,9 +102,10 @@ class DetailController extends GetxController with WidgetsBindingObserver {
 
     isRecommendLoading.value = true;
     try {
+      // 片名命中率最高，优先；类型/演员仅在片名无结果时兜底
       final keywords = <String>[
-        if (info.typeName.isNotEmpty) info.typeName,
         info.name,
+        if (info.typeName.isNotEmpty) info.typeName,
         if (info.actor.isNotEmpty)
           ...info.actor.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).take(1),
       ];
@@ -583,7 +585,15 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       qualityOptions.value = resolved;
 
       if (resetSelection) {
-        selectedQualityId.value = PlaybackQualityOption.autoIdentifier;
+        // 全局默认画质：设置为"最高"时选首个非自动档
+        // （_parseMasterPlaylist 按 高度/带宽 降序，第 1 个非 auto 即最高）
+        if (PlayerPrefs.instance.defaultQuality.value == 1) {
+          final top = resolved.firstWhereOrNull((o) => !o.isAuto);
+          selectedQualityId.value =
+              top?.id ?? PlaybackQualityOption.autoIdentifier;
+        } else {
+          selectedQualityId.value = PlaybackQualityOption.autoIdentifier;
+        }
       } else if (resolved.any((o) => o.id == selectedQualityId.value)) {
         // 当前选择仍有效，保持不变
       } else if (resolved.any((o) => o.id == previousSelected)) {

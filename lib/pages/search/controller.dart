@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:get/get.dart';
 import '../../services/app_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,6 +9,27 @@ import '../../services/source_service.dart';
 import '../../common/constants.dart';
 
 class TvSearchController extends GetxController {
+  Timer? _debounce;
+  final Map<String, List<Video>> _searchCache = {};
+
+  /// 输入防抖 400ms，避免逐字发请求
+  void onKeywordChanged(String kw, Future<void> Function(String) run) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), () {
+      if (kw.trim().isEmpty) return;
+      run(kw.trim());
+    });
+  }
+
+  List<Video>? cachedSearch(String kw) => _searchCache[kw.trim()];
+
+  void rememberSearch(String kw, List<Video> list) {
+    final k = kw.trim();
+    if (k.isEmpty) return;
+    if (_searchCache.length > 50) _searchCache.clear();
+    _searchCache[k] = list;
+  }
+
   final keyword = ''.obs;
   final searchHistory = <String>[].obs;
   final resultsBySite = <String, List<Video>>{}.obs;

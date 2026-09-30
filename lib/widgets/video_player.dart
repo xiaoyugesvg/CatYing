@@ -850,7 +850,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           ];
         });
       } else {
-        _showMessage('发送失败 ${code ?? '-'} ${lastBody.length > 80 ? lastBody.substring(0, 80) : lastBody}');
+        // Logvr-danmu / danmu_api 均为只读弹幕服务（只有 /api/v2/comment 获取接口，
+        // 无发送接口）。明确提示"不支持发送"，而不是报 404/500 让用户误以为网络问题。
+        _showMessage('当前弹幕服务不支持发送弹幕（仅支持获取）');
       }
     } catch (e) {
       AppLog.instance.log('[video_player] send danmu fail: $e');

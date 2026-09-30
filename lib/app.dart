@@ -7,6 +7,7 @@ import 'common/constants.dart';
 import 'services/app_state.dart';
 import 'services/app_log.dart';
 import 'services/background_service.dart';
+import 'services/player_prefs.dart';
 import 'pages/home/view.dart';
 import 'pages/history/view.dart';
 import 'pages/favorites/view.dart';
@@ -47,17 +48,31 @@ class TVBoxApp extends StatelessWidget {
         return ValueListenableBuilder<bool>(
           valueListenable: ThemeModeStore.brightnessListenable,
           builder: (context, _, __) {
-            return GetMaterialApp(
-              title: '猫影',
-              theme: AppTheme.lightTheme,
-              darkTheme: AppTheme.darkTheme,
-              themeMode: themeMode,
-              // 把 NavigatorState 暴露给 VideoPlayerPip，让画中画能插入到顶层 Overlay
-              navigatorKey: VideoPlayerPip.navigatorKey,
-              home: const ContentView(),
-              getPages: AppPages.pages,
-              debugShowCheckedModeBanner: false,
-            );
+            // 全局字号缩放（设置 → 外观 → 界面字号），用 Obx 监听
+            return Obx(() {
+              final scale = PlayerPrefs.instance.fontScale.value;
+              return GetMaterialApp(
+                title: '猫影',
+                theme: AppTheme.lightTheme,
+                darkTheme: AppTheme.darkTheme,
+                themeMode: themeMode,
+                // 把 NavigatorState 暴露给 VideoPlayerPip，让画中画能插入到顶层 Overlay
+                navigatorKey: VideoPlayerPip.navigatorKey,
+                home: const ContentView(),
+                getPages: AppPages.pages,
+                debugShowCheckedModeBanner: false,
+                builder: (context, child) {
+                  if (scale <= 0 || (scale - 1.0).abs() < 0.001) {
+                    return child!;
+                  }
+                  return MediaQuery(
+                    data: MediaQuery.of(context)
+                        .copyWith(textScaler: TextScaler.linear(scale)),
+                    child: child!,
+                  );
+                },
+              );
+            });
           },
         );
       },

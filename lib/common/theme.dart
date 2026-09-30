@@ -8,6 +8,11 @@ class AppBrightness {
 
 /// 主题配置 - 匹配 tvbox-Swift 设计系统 + iOS 27 Liquid Glass 玻璃体系
 class AppTheme {
+  /// 全局字号缩放（设置可调，默认 1.0）
+  static final ValueNotifier<double> fontScale = ValueNotifier(1.0);
+
+  static double fs(double base) => (base * fontScale.value).clamp(9.0, 40.0);
+
   // 颜色（getter 跟随外观模式）
   static const Color accentColor = Color(0xFF5CB67B);
   static const Color accentLightColor = Color(0xFF7DCEA0);

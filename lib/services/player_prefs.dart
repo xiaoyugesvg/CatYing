@@ -33,6 +33,12 @@ class PlayerPrefs {
   /// 快进步长（秒）
   final playTimeStep = 10.obs;
 
+  /// 默认画质：0=自动（默认），1=最高清晰度
+  final defaultQuality = 0.obs;
+
+  /// 全局界面字号缩放（0.85 ~ 1.30，1.0 = 标准）
+  final fontScale = 1.0.obs;
+
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -67,6 +73,12 @@ class PlayerPrefs {
     final step = prefs.getInt('play_time_step') ?? 0;
     playTimeStep.value = step > 0 ? step : 10;
     silentKeepAlive.value = prefs.getBool('silent_keepalive') ?? true;
+
+    final q = prefs.getInt('play_default_quality') ?? 0;
+    defaultQuality.value = q == 1 ? 1 : 0;
+    final fs = prefs.getDouble('ui_font_scale') ?? 0;
+    fontScale.value =
+        (fs >= 0.85 && fs <= 1.30) ? fs : 1.0;
   }
 
   Future<void> setEngine(PlayerEngine e) async {
@@ -116,5 +128,20 @@ class PlayerPrefs {
     playTimeStep.value = s;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('play_time_step', s);
+  }
+
+  /// 设置默认画质：0=自动，1=最高
+  Future<void> setDefaultQuality(int q) async {
+    defaultQuality.value = q == 1 ? 1 : 0;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('play_default_quality', defaultQuality.value);
+  }
+
+  /// 设置全局字号缩放
+  Future<void> setFontScale(double s) async {
+    final v = s.clamp(0.85, 1.30);
+    fontScale.value = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('ui_font_scale', v);
   }
 }

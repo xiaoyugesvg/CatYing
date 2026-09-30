@@ -32,13 +32,25 @@ class _SettingsPageState extends State<SettingsPage> {
   List<String> _danmuBlockWords = [];
   bool _sourceCacheEnabled = true;
   int _autoCleanIndex = 0;
+  int _skipIntro = 0;
+  int _skipOutro = 0;
 
   @override
   void initState() {
     super.initState();
     _loadDanmuPrefs();
     _loadCachePrefs();
+    _loadPlaybackDefaults();
     controller.runAutoCacheCleanIfNeeded();
+  }
+
+  Future<void> _loadPlaybackDefaults() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _skipIntro = prefs.getInt('skip_intro_seconds') ?? 0;
+      _skipOutro = prefs.getInt('skip_outro_seconds') ?? 0;
+    });
   }
 
   Future<void> _loadCachePrefs() async {
@@ -101,6 +113,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 _buildThemeModeSection(),
                 const SizedBox(height: AppTheme.spacingSM),
                 _buildAppearanceSection(),
+                const SizedBox(height: AppTheme.spacingSM),
+                _buildFontScaleSection(),
                 const SizedBox(height: AppTheme.spacingXXL),
 
                 // 数据源
@@ -249,6 +263,75 @@ class _SettingsPageState extends State<SettingsPage> {
                 : bg.currentDisplayName,
             onTap: () => _showBackgroundPicker(bg),
           )),
+    );
+  }
+
+  /// 界面字号（全局 textScaler，弹幕字号单独设置不受影响）
+  Widget _buildFontScaleSection() {
+    return Obx(() => AppCard(
+          child: SettingsRow(
+            icon: Icons.text_fields,
+            title: '界面字号',
+            value: '${(PlayerPrefs.instance.fontScale.value * 100).round()}%',
+            onTap: () => _showFontScaleDialog(),
+          ),
+        ));
+  }
+
+  void _showFontScaleDialog() {
+    var v = PlayerPrefs.instance.fontScale.value;
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          return AlertDialog(
+            backgroundColor: AppTheme.backgroundSecondary,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+            ),
+            title: Text('界面字号',
+                style: TextStyle(color: AppTheme.textPrimary)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('${(v * 100).round()}%',
+                    style: TextStyle(color: AppTheme.textSecondary)),
+                Slider(
+                  value: v,
+                  min: 0.85,
+                  max: 1.30,
+                  divisions: 9,
+                  label: '${(v * 100).round()}%',
+                  onChanged: (nv) => setDialogState(() => v = nv),
+                ),
+                const SizedBox(height: AppTheme.spacingSM),
+                Text(
+                  '作用于全部界面文字（弹幕字号单独设置不受影响）',
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: Text('取消',
+                    style: TextStyle(color: AppTheme.textSecondary)),
+              ),
+              TextButton(
+                onPressed: () async {
+                  await PlayerPrefs.instance.setFontScale(v);
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+                },
+                child: Text('保存',
+                    style: TextStyle(color: AppTheme.accentColor)),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -555,6 +638,36 @@ class _SettingsPageState extends State<SettingsPage> {
               )),
           Divider(color: AppTheme.borderLight, height: 1),
           SettingsRow(
+            icon: Icons.hourglass_top,
+            title: '默认跳过片头',
+            value: _skipIntro > 0 ? '$_skipIntro秒' : '关闭',
+            onTap: () => _pickSkipSeconds(intro: true),
+          ),
+          Divider(color: AppTheme.borderLight, height: 1),
+          SettingsRow(
+            icon: Icons.hourglass_bottom,
+            title: '默认跳过片尾',
+            value: _skipOutro > 0 ? '$_skipOutro秒' : '关闭',
+            onTap: () => _pickSkipSeconds(intro: false),
+          ),
+          Divider(color: AppTheme.borderLight, height: 1),
+          Obx(() => SettingsRow(
+                icon: Icons.high_quality_outlined,
+                title: '默认画质',
+                value: PlayerPrefs.instance.defaultQuality.value == 1
+                    ? '最高'
+                    : '自动',
+                onTap: () => _showEnumSelector<int>(
+                  title: '默认画质',
+                  options: const [0, 1],
+                  selected: PlayerPrefs.instance.defaultQuality.value,
+                  labelBuilder: (q) => q == 1 ? '最高清晰度' : '自动',
+                  onSelect: (q) =>
+                      PlayerPrefs.instance.setDefaultQuality(q),
+                ),
+              )),
+          Divider(color: AppTheme.borderLight, height: 1),
+          SettingsRow(
             icon: Icons.bug_report_outlined,
             title: '调试日志',
             value: '查看 / 清空',
@@ -803,7 +916,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: Icons.delete_outline,
                 title: '清除应用缓存',
                 value: controller.cacheSizeString.value,
-                onTap: () => controller.clearCache(),
+                onTap: () => _confirmClearCache(),
               )),
         ],
       ),
@@ -841,6 +954,94 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() => _autoCleanIndex = selected);
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('source_cache_auto_clean', selected);
+    }
+  }
+
+  /// 选择默认跳过片头/片尾秒数（与详情页播放器内设置共用同一 key）
+  Future<void> _pickSkipSeconds({required bool intro}) async {
+    const options = [0, 5, 10, 15, 20, 30, 60, 90, 120];
+    final key = intro ? 'skip_intro_seconds' : 'skip_outro_seconds';
+    final title = intro ? '默认跳过片头' : '默认跳过片尾';
+    final current = intro ? _skipIntro : _skipOutro;
+    final selected = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: const Color(0xFF1C1C1E),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(title,
+                  style: const TextStyle(color: Colors.white, fontSize: 15)),
+            ),
+            for (final s in options)
+              ListTile(
+                dense: true,
+                title: Text(s == 0 ? '关闭' : '$s秒',
+                    style: const TextStyle(color: Colors.white70)),
+                trailing: current == s
+                    ? const Icon(Icons.check, color: AppTheme.accentColor)
+                    : null,
+                onTap: () => Navigator.pop(ctx, s),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (selected == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(key, selected);
+    if (mounted) {
+      setState(() {
+        if (intro) {
+          _skipIntro = selected;
+        } else {
+          _skipOutro = selected;
+        }
+      });
+    }
+  }
+
+  /// 清除应用缓存前确认：分项说明清理范围，避免用户担心误清历史/收藏
+  Future<void> _confirmClearCache() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+        ),
+        title: Text('清除应用缓存',
+            style: TextStyle(color: AppTheme.textPrimary)),
+        content: Text(
+          '将清除：\n'
+          '· 图片缓存（内存 + 磁盘）\n'
+          '· 视频切片与临时文件\n'
+          '· 应用缓存目录\n\n'
+          '不会清除：观看历史、收藏、源文件 JS、播放设置',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: AppTheme.fontSubhead,
+            height: 1.5,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('取消',
+                style: TextStyle(color: AppTheme.textTertiary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('清除',
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await controller.clearCache();
     }
   }
 
