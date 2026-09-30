@@ -148,6 +148,14 @@ class _SearchPageState extends State<SearchPage> {
                           _searchController.search();
                         }
                       },
+                      // 输入防抖（400ms）：控制器里的 onKeywordChanged 之前
+                      // 零调用点，属于「写了但没接上」的死代码。这里接上后
+                      // 停止输入即自动搜索，不必再按回车/点按钮。
+                      onChanged: (value) {
+                        _searchController.onKeywordChanged(value, (kw) async {
+                          await _searchController.searchFromDebounce(kw);
+                        });
+                      },
                     ),
                   ),
                   // 清除按钮 - 对应 Swift xmark.circle.fill

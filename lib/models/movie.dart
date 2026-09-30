@@ -76,7 +76,7 @@ class Video {
     this.tid = '',
     this.last = '',
     this.dt = '',
-  }) : id = id ?? const Uuid().v4();
+  }) : id = (id == null || id.trim().isEmpty) ? const Uuid().v4() : id;
 
   factory Video.fromJson(Map<String, dynamic> json) {
     return Video(

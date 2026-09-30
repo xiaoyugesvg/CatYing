@@ -59,6 +59,9 @@ class _DetailPageState extends State<DetailPage> {
 
   /// 持有 Player 实例，全屏/普通模式之间复用同一实例，避免状态丢失
   AppPlayer? _player;
+
+  /// 播放地址解析超时：URL 一直拿不到时给出提示，避免无限转圈
+  Timer? _playerErrorTimer;
   /// 持有 VideoController 实例，与上面 _player 配套使用，跨全屏/普通模式共享，
   /// 保证 ANGLE surface / texture 通道在 OS 全屏切换时不被重建。
   
@@ -368,6 +371,8 @@ class _DetailPageState extends State<DetailPage> {
       WindowFullScreen.instance.exit();
     }
     VideoPlayerPip.instance.detachPlayer();
+    _playerErrorTimer?.cancel();
+    _playerErrorTimer = null;
     _player?.dispose();
     _player = null;
     
@@ -723,9 +728,33 @@ class _DetailPageState extends State<DetailPage> {
       final __ = _controller.playbackSessionId.value;
       final ___ = _controller.selectedFlag.value;
       if (url != null && url.isNotEmpty) {
+        _playerErrorTimer?.cancel();
+        _playerErrorTimer = null;
         return _buildPlayerWidget(isFull: isFull, isPip: isPip);
+      } else if (_controller.errorMessage.value != null) {
+        // 解析失败（Spider 地址解析失败 / 上下文缺失等）：必须给出可见提示，
+        // 旧逻辑在这里只渲染转圈 → 用户看到无限 loading，既无文案也无重试入口。
+        _playerErrorTimer?.cancel();
+        _playerErrorTimer = null;
+        return AspectRatio(
+          aspectRatio: 4 / 3,
+          child: Container(
+            color: Colors.black,
+            child: AppError(
+              message: _controller.errorMessage.value!,
+              onRetry: () => _controller.retryCurrentEpisode(),
+            ),
+          ),
+        );
       } else {
-        // 正在播放但 URL 尚未就绪
+        // 正在播放但 URL 尚未就绪：超时后置错误，避免永久转圈
+        _playerErrorTimer ??= Timer(const Duration(seconds: 15), () {
+          _playerErrorTimer = null;
+          if (!mounted) return;
+          if ((_controller.playUrl.value ?? '').isEmpty) {
+            _controller.setPlaybackError('播放地址获取超时，请点重试或切换其他线路');
+          }
+        });
         // 4:3 容器: 比 16:9 更高, 上下控制条间距拉开, 视频画面不再被压成细缝
         return AspectRatio(
           aspectRatio: 4 / 3,
@@ -846,6 +875,9 @@ class _DetailPageState extends State<DetailPage> {
       },
       onSetSkipIntro: (s) => _controller.setSkipIntroSeconds(s),
       onSetSkipOutro: (s) => _controller.setSkipOutroSeconds(s),
+      // 播放器错误（原生 onError / 加载失败）以前无处可去，只表现为白转圈；
+      // 这里接进控制器的错误态，详情页即可显示文案 + 重试。
+      onError: () => _controller.setPlaybackError('播放失败，请点重试或切换其他线路'),
     );
 
     // immersive 模式（native 全屏 / PiP）：视频填满父容器
@@ -1468,46 +1500,7 @@ class _DetailPageState extends State<DetailPage> {
     });
   }
 
-  // MARK: - 线路选择
-
-  /// 线路选择 - 对应 Swift flagSelector (AppCard)
-  Widget _buildFlagSelector() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingLG, AppTheme.spacingMD, AppTheme.spacingLG, 0),
-      child: AppCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SectionHeader(title: '播放线路', icon: Icons.settings_input_antenna),
-            const SizedBox(height: AppTheme.spacingSM),
-            Obx(() => SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: _controller.flags.map((flag) {
-                      final isSelected =
-                          _controller.selectedFlag.value == flag;
-                      return Padding(
-                        padding: const EdgeInsets.only(right: AppTheme.spacingSM),
-                        child: _PillChip(
-                          title: flag,
-                          isSelected: isSelected,
-                          onTap: () {
-                            _controller.selectFlag(flag);
-                            if (_controller.isPlaying.value) {
-                              _saveHistoryForCurrentEpisode();
-                            }
-                          },
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                )),
-          ],
-        ),
-      ),
-    );
-  }
+  // MARK: - 播放线路 / 清晰度 / 选集（统一在 _buildPlaybackCard 内渲染）
 
   /// 播放线路 + 清晰度 + 选集播放 —— 合并成一张独立卡片（三段式底部）
   Widget _buildPlaybackCard() {
@@ -1551,6 +1544,37 @@ class _DetailPageState extends State<DetailPage> {
                     ),
                   )),
             ],
+            // 清晰度：三段式卡片之前把 hasQuality 算出来了却没渲染，
+            // 导致 qualityOptions（HLS master 解析出的多档码率）用户完全点不到。
+            if (hasQuality) ...[
+              const SizedBox(height: AppTheme.spacingMD),
+              Divider(height: 1, color: AppTheme.borderLight),
+              const SizedBox(height: AppTheme.spacingMD),
+              const SectionHeader(title: '清晰度', icon: Icons.auto_awesome),
+              const SizedBox(height: AppTheme.spacingSM),
+              Obx(() => SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: _controller.qualityOptions.map((option) {
+                        final isSelected =
+                            _controller.selectedQualityId.value == option.id;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: AppTheme.spacingSM),
+                          child: _PillChip(
+                            title: option.name,
+                            isSelected: isSelected,
+                            onTap: () {
+                              _controller.selectQuality(option);
+                              if (_controller.isPlaying.value) {
+                                _saveHistoryForCurrentEpisode();
+                              }
+                            },
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  )),
+            ],
             if (hasEpisodes) ...[
               const SizedBox(height: AppTheme.spacingMD),
               Divider(height: 1, color: AppTheme.borderLight),
@@ -1570,75 +1594,6 @@ class _DetailPageState extends State<DetailPage> {
             ],
           ],
         ),
-      ),
-    );
-  }
-
-  // MARK: - 清晰度选择
-
-  /// 清晰度选择 - 对应 Swift qualitySelector (AppCard)
-  Widget _buildQualitySelector() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingLG, AppTheme.spacingMD, AppTheme.spacingLG, 0),
-      child: AppCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SectionHeader(title: '视频清晰度', icon: Icons.auto_awesome),
-            const SizedBox(height: AppTheme.spacingSM),
-            Obx(() => SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children:
-                        _controller.qualityOptions.map((option) {
-                      final isSelected =
-                          _controller.selectedQualityId.value == option.id;
-                      return Padding(
-                        padding: const EdgeInsets.only(right: AppTheme.spacingSM),
-                        child: _PillChip(
-                          title: option.name,
-                          isSelected: isSelected,
-                          onTap: () {
-                            _controller.selectQuality(option);
-                            if (_controller.isPlaying.value) {
-                              _saveHistoryForCurrentEpisode();
-                            }
-                          },
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                )),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // MARK: - 选集播放
-
-  /// 选集播放 - 对应 Swift episodeSection
-  Widget _buildEpisodeList() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingLG, AppTheme.spacingMD, AppTheme.spacingLG, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionHeader(title: '选集播放', icon: Icons.list),
-          const SizedBox(height: AppTheme.spacingSM),
-          Obx(() => EpisodeListView(
-                episodeNames: _controller.currentEpisodes
-                    .map((e) => e.name)
-                    .toList(),
-                selectedIndex: _controller.selectedEpisodeIndex.value,
-                onEpisodeTap: (index) {
-                  _controller.selectEpisode(index);
-                  _saveHistoryForCurrentEpisode();
-                },
-              )),
-        ],
       ),
     );
   }

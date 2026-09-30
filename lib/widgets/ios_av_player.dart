@@ -14,8 +14,28 @@ class IosAvPlayer extends AppPlayer {
   static const _channel = MethodChannel('av_engine');
   static final ValueNotifier<bool> needsPlatformView = ValueNotifier(true);
 
+  /// MethodChannel 的处理器**全进程只能有一个**。
+  ///
+  /// 旧写法在构造函数里 `_channel.setMethodCallHandler(_onNativeCall)`：
+  /// 直播页与详情页各自 `??=` 创建一个 IosAvPlayer，后创建的那个会把处理器
+  /// 覆盖掉，先创建者从此收不到 onPosition/onError/onCompleted。
+  /// 而原生 AvEngine 是全局单例，事件本身就是"共享播放器的事件"，
+  /// 只应投递给当前真正在驱动它的那个实例。
+  static IosAvPlayer? _activeInstance;
+  static bool _handlerInstalled = false;
+
+  static void _ensureHandlerInstalled() {
+    if (_handlerInstalled) return;
+    _handlerInstalled = true;
+    _channel.setMethodCallHandler((MethodCall call) async {
+      return _activeInstance?._onNativeCall(call);
+    });
+  }
+
   IosAvPlayer({super.config}) {
-    _channel.setMethodCallHandler(_onNativeCall);
+    _ensureHandlerInstalled();
+    // 抢占"活跃"身份：最近一次 open() 的实例才是共享播放器的当前主人
+    _activeInstance = this;
     platformViewBuilder = ({BoxFit fit = BoxFit.contain, double? aspectRatio}) {
       return IosAvPlayerView(
         player: this,
@@ -69,6 +89,8 @@ class IosAvPlayer extends AppPlayer {
 
   @override
   Future<void> open(AppMedia media, {bool play = true}) async {
+    // 谁最后 open，谁就是共享 AvEngine 播放器的当前主人 → 事件归它
+    _activeInstance = this;
     _url = media.url;
     _buffering = true;
     stream.addBuffering(true);
@@ -122,6 +144,10 @@ class IosAvPlayer extends AppPlayer {
     try {
       await _channel.invokeMethod('pause');
     } catch (_) {}
+    // 只有自己还是活跃实例时才让位，避免把别人的身份清掉
+    if (identical(_activeInstance, this)) {
+      _activeInstance = null;
+    }
     await super.dispose();
   }
 }

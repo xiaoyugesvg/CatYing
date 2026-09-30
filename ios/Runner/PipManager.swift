@@ -168,15 +168,30 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
   // MARK: - 与主播放器共用 AvEngine.shared.player（单实例，进出小窗不中断）
 
   /// 确保 PiP 控制器挂在应用内预览的 AVPlayerLayer（layerClass）上
+  ///
+  /// ⚠️ UiKitView 会重建（换集、全屏切换、路由返回），每次重建都会让
+  /// `AvEngine.shared.displayLayer` 指向**新的** AVPlayerLayer。若这里发现
+  /// 绑定的 layer 已变，**必须重建 controller**：旧版 `if pipController != nil
+  /// { return }` 会永久留在旧 layer 上，表现为 PiP 弹出后黑屏（画面其实还在
+  /// 已离开视图树的旧 layer 上）。
   private func ensurePipController() {
     let player = AvEngine.shared.player
     // 优先用 UiKitView 的 displayLayer，否则退回引擎默认 layer
     let layer = AvEngine.shared.currentDisplayLayer()
-    pipPlayer = player
-    pipLayer = layer
-    if pipController != nil {
+
+    // layer 未变且已有 controller → 复用（保留已配置的 delegate 与状态）
+    if pipController != nil && pipLayer === layer {
       return
     }
+    // layer 变了：拆掉旧 controller，避免它继续持有废弃 layer
+    if pipController != nil {
+      NSLog("[PipManager] displayLayer changed → rebind PiP controller")
+      pipController?.delegate = nil
+      pipController = nil
+    }
+
+    pipPlayer = player
+    pipLayer = layer
     // 仅当 layer 尚无宿主时才临时挂到 window（正常应已在 UiKitView 上）
     if layer.superlayer == nil {
       guard let window = Self.keyWindow() else { return }
@@ -222,6 +237,9 @@ class PipManager: NSObject, AVPictureInPictureControllerDelegate {
     pipLayer = nil
     pipPlayer = nil
     preparedURL = ""
+    // 必须一起清 preparedReady：否则离开播放页后它仍是 true，
+    // appDidEnterBackground 会重建 controller 并自动弹出小窗 —— 而用户早已退出播放页。
+    preparedReady = false
     setPhase(.idle)
   }
 

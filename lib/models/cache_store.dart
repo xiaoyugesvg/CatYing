@@ -205,6 +205,36 @@ class CacheStore {
     }
   }
 
+  /// 按 (vodId, sourceKey) 删除所有历史遗留箱内条目
+  ///
+  /// 老版本写入时 bizKey 可能为空串（箱键就是空串）或用旧格式，此时用新算出的
+  /// `bizKey` 调 box.delete 删不掉 → 该条目残留在磁盘上，下次启动 _loadFromBox
+  /// 又把它读回内存，表现为「用户删掉的收藏/历史自己复活了」。
+  /// 这里按箱内实际内容匹配 (vodId, sourceKey) 一并删除。
+  Future<void> _deleteBoxItemsByVodKey(
+    Box<dynamic> box,
+    String vodId,
+    String sourceKey,
+  ) async {
+    try {
+      final stale = <dynamic>[];
+      for (final k in box.keys) {
+        final raw = box.get(k);
+        if (raw is! Map) continue;
+        final itemVodId = raw['vodId']?.toString() ?? '';
+        final itemSourceKey = raw['sourceKey']?.toString() ?? '';
+        if (itemVodId == vodId && itemSourceKey == sourceKey) {
+          stale.add(k);
+        }
+      }
+      for (final k in stale) {
+        await box.delete(k);
+      }
+    } catch (e) {
+      AppLog.instance.log('cache del-by-vod fail: ' + e.toString());
+    }
+  }
+
   T _fromJson<T>(Map<String, dynamic> json) {
     if (T == VodCollect) return VodCollect.fromJson(json) as T;
     if (T == VodRecord) return VodRecord.fromJson(json) as T;
@@ -280,6 +310,8 @@ class CacheStore {
             item.vodId == vodId &&
             item.sourceKey == sourceKey));
     await _deleteBoxItem(_collectsBox!, bizKey);
+    // 清掉旧键/空键遗留的同一条目，否则重启后会从箱里读回来（"删除后复活"）
+    await _deleteBoxItemsByVodKey(_collectsBox!, vodId, sourceKey);
   }
 
   bool isCollected(String vodId, String sourceKey) {
@@ -370,6 +402,8 @@ class CacheStore {
             item.vodId == vodId &&
             item.sourceKey == sourceKey));
     await _deleteBoxItem(_recordsBox!, bizKey);
+    // 同 removeCollect：清理旧键/空键遗留条目，避免重启后历史复活
+    await _deleteBoxItemsByVodKey(_recordsBox!, vodId, sourceKey);
   }
 
   static const int _maxCacheItems = 200;

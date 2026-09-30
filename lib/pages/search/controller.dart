@@ -12,6 +12,11 @@ class TvSearchController extends GetxController {
   Timer? _debounce;
   final Map<String, List<Video>> _searchCache = {};
 
+  /// 同时在跑的搜索轮次数。
+  /// 旧写法只在 `_latestSearchRequestId == requestId` 时复位 isSearching，
+  /// 连续两次搜索时前一轮的 requestId 已过期 → 永远不复位 → UI 卡在"搜索中"。
+  int _activeSearches = 0;
+
   /// 输入防抖 400ms，避免逐字发请求
   void onKeywordChanged(String kw, Future<void> Function(String) run) {
     _debounce?.cancel();
@@ -19,6 +24,14 @@ class TvSearchController extends GetxController {
       if (kw.trim().isEmpty) return;
       run(kw.trim());
     });
+  }
+
+  @override
+  void onClose() {
+    _debounce?.cancel();
+    _debounce = null;
+    _searchCache.clear();
+    super.onClose();
   }
 
   List<Video>? cachedSearch(String kw) => _searchCache[kw.trim()];
@@ -40,6 +53,18 @@ class TvSearchController extends GetxController {
   final isSearching = false.obs;
 
   String _latestSearchRequestId = '';
+
+  /// 最近一次真正发起搜索的关键词，供防抖去重（避免回车 + 防抖各搜一遍）
+  String _lastSearchedKeyword = '';
+
+  /// 防抖路径调用：与已搜过的关键词相同则跳过
+  Future<void> searchFromDebounce(String kw) async {
+    final trimmed = kw.trim();
+    if (trimmed.isEmpty) return;
+    if (trimmed == _lastSearchedKeyword) return;
+    keyword.value = trimmed;
+    await search();
+  }
 
   @override
   void onInit() {
@@ -65,6 +90,11 @@ class TvSearchController extends GetxController {
 
     final requestId = '${DateTime.now().microsecondsSinceEpoch}';
     _latestSearchRequestId = requestId;
+    _lastSearchedKeyword = trimmed;
+
+    // 并发计数：连续搜索时不能靠 requestId 复位，否则 isSearching 卡 true
+    _activeSearches++;
+    isSearching.value = true;
 
     addToHistory(trimmed);
 
@@ -74,7 +104,6 @@ class TvSearchController extends GetxController {
             s.isSupportedInSwift && s.key != 'douban' && s.key != 'baseset')
         .toList();
 
-    isSearching.value = true;
     resultsBySite.clear();
     searchingStatus.clear();
     resultCount.clear();
@@ -101,10 +130,16 @@ class TvSearchController extends GetxController {
     for (final source in validSources) {
       futures.add(_searchInSourceAndNotify(source, trimmed, requestId));
     }
-    await Future.wait(futures);
-
-    if (_latestSearchRequestId == requestId) {
-      isSearching.value = false;
+    try {
+      await Future.wait(futures);
+    } finally {
+      // 计数归零才熄"搜索中"：连续搜索时旧 requestId 已过期，
+      // 若只按 requestId 复位，isSearching 会永久卡在 true。
+      _activeSearches--;
+      if (_activeSearches <= 0) {
+        _activeSearches = 0;
+        isSearching.value = false;
+      }
     }
   }
 

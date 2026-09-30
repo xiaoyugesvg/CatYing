@@ -76,7 +76,12 @@ class FavoritesPage extends StatelessWidget {
                   ),
                 ),
                 TextButton(
-              onPressed: () => _showClearConfirmDialog(Get.context!, controller),
+              // 不要用 Get.context! 强解包：该 context 为空时会直接崩。
+              onPressed: () {
+                final ctx = Get.context;
+                if (ctx == null) return;
+                _showClearConfirmDialog(ctx, controller);
+              },
               child: Text(
                 '清空',
                 style: TextStyle(

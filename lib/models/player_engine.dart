@@ -3,6 +3,8 @@
 /// - mpv：备用内核（media_kit / libmpv），兼容桌面与部分流
 /// - webview：网页播放页（WKWebView）
 
+import 'dart:io';
+
 /// 播放器引擎类型
 enum PlayerEngine {
   /// AVPlayer 内核（video_player），iOS 默认主路径
@@ -27,7 +29,21 @@ enum PlayerEngine {
   }
 
   /// 实际可供用户选择的播放器列表
-  static List<PlayerEngine> get availableEngines => PlayerEngine.values;
+  ///
+  /// 按「本仓库真正支持的目标平台」过滤，避免 iOS 上出现选了就不可用的内核：
+  /// - Apple（iOS / macOS）：avplayer 为默认主内核（与系统小窗共用同一 AVPlayer），
+  ///   webview 用于网页播放页；mpv 在本仓库无 iOS/macOS 原生库，不列出。
+  /// - Android：mpv + webview（无 AVPlayer）。
+  /// - 桌面（Windows / Linux）：mpv（window_manager 小窗路径）。
+  static List<PlayerEngine> get availableEngines {
+    if (Platform.isIOS || Platform.isMacOS) {
+      return const [PlayerEngine.avplayer, PlayerEngine.webview];
+    }
+    if (Platform.isAndroid) {
+      return const [PlayerEngine.mpv, PlayerEngine.webview];
+    }
+    return const [PlayerEngine.mpv];
+  }
 }
 
 /// 视频解码模式（仅 mpv 内核生效）

@@ -120,13 +120,14 @@ class AppLog {
   static AppLog get instance => _instance;
   AppLog._internal();
 
-  /// **总开关** - 临时关闭所有日志写入
+  /// **总开关**
   ///
   /// false: 关闭所有日志 (不写文件, 不 print, 不创建目录)
-  /// true:  恢复日志 (写 <Documents>/nodejs-project/runtime/app.{log,jsonl})
+  /// true:  写 <Documents>/nodejs-project/runtime/app.{log,jsonl}
   ///
-  /// 调试问题时改成 true, 重新构建, 看 log 即可. 默认 false 是因为调试期已
-  /// 结束, 长期写文件会占用 Documents 缓存 (Files app 用户可见).
+  /// ⚠️ 注意当前值是 **true（开启）**：日志会持续写入 Documents，用户在
+  /// 「文件」App 里可见。若长期不需要现场日志，可改为 false 省磁盘与 I/O。
+  /// 敏感信息（URL 里的 api_key/token）已由 [redactUrl] 脱敏。
   static const bool kLogEnabled = true;
 
   File? _logFile; // app.log
@@ -384,6 +385,8 @@ class AppLog {
   }
 
   /// 记录通用 HTTP 请求 (dio 内部用)
+  ///
+  /// URL 会先经 [redactUrl] 脱敏（api_key / token 等替换为 ***）再落盘。
   void http(
     String method,
     String url, {
@@ -396,7 +399,8 @@ class AppLog {
   }) {
     final fields = <String, Object?>{
       'method': method,
-      'url': url,
+      // 脱敏后再落盘：完整 URL 可能带 api_key / token 等凭据
+      'url': redactUrl(url),
       if (port != null) 'port': port,
       if (statusCode != null) 'statusCode': statusCode,
       if (elapsedMs != null) 'ms': elapsedMs,
@@ -463,6 +467,15 @@ class AppLog {
       await _writeChain;
       await _logFile?.writeAsString('');
       await _jsonlFile?.writeAsString('');
+      // 滚动备份必须一起删：内容可能含 API key 等敏感 query，
+      // 只清空主文件会让「已清除」的旧日志仍留在盘上（Files App 可见）。
+      for (final f in [_logFile, _jsonlFile]) {
+        if (f == null) continue;
+        final backup = File('${f.path}.1');
+        try {
+          if (await backup.exists()) await backup.delete();
+        } catch (_) {}
+      }
     } catch (_) {}
   }
 

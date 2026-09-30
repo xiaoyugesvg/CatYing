@@ -64,7 +64,9 @@ class SettingsController extends GetxController {
     // 兼容老版本单一播放器字段到新字段
     final hasLegacyPlayer = prefs.containsKey(AppConstants.playType);
     final legacyPlayerRaw = prefs.getInt(AppConstants.playType) ?? 0;
-    final defaultRaw = PlayerEngine.mpv.value;
+    // 默认内核必须与 PlayerPrefs.load() 的兜底一致（avplayer），
+    // 否则全新安装会被写成 mpv → OS 上 isSharedIosAv=false → 小窗不可用。
+    final defaultRaw = PlayerEngine.avplayer.value;
 
     if (!prefs.containsKey(AppConstants.playTypeVod)) {
       await prefs.setInt(

@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:battery_plus/battery_plus.dart';
@@ -330,7 +330,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           _applyPendingResumeSeek();
           // Spider 异步解析 URL 后才可匹配弹幕：开播时再试一次
           if (!_danmuLoaded && _danmuApiUrl.isNotEmpty) {
-            _ensureDanmuLoaded();
+            _ensureDanmuLoaded(urlOverride: widget.url);
           }
           // iOS：前台预热原生 AVPlayer（静音预缓冲常驻），退后台/点 PiP 时
           // 原生立即启动系统悬浮窗，避免"后台等缓冲"导致 PiP 时灵时不灵
@@ -566,7 +566,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         _isBuffering = true;
       });
       if (_danmuApiUrl.isNotEmpty) {
-        _ensureDanmuLoaded();
+        // 传新集地址：此处 _openMedia() 还没执行，播放器里仍是上一集 URL
+        _ensureDanmuLoaded(urlOverride: widget.url);
       }
       if (_ownsPlayer) {
         _openMedia();
@@ -687,14 +688,20 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     return b;
   }
 
-  Future<void> _ensureDanmuLoaded() async {
+  Future<void> _ensureDanmuLoaded({String? urlOverride}) async {
     if (_danmuLoaded || _danmuApiUrl.isEmpty) return;
-    _danmuLoaded = true;
     final loadGen = ++_danmuLoadGen;
-    final url = _player.state.playlist.medias.isNotEmpty
-        ? _player.state.playlist.medias.last.uri
-        : widget.url;
+    // ⚠️ 必须优先用调用方传入的新地址：
+    // 换集分支里 _ensureDanmuLoaded() 在 _openMedia() **之前**执行，此时
+    // _player.state.playlist 仍是上一集的 URL → 会把上一集的弹幕贴到新一集上。
+    final url = (urlOverride != null && urlOverride.isNotEmpty)
+        ? urlOverride
+        : (_player.state.playlist.medias.isNotEmpty
+            ? _player.state.playlist.medias.last.uri
+            : widget.url);
+    // 地址为空时不要置位 _danmuLoaded，否则该播放会话弹幕永久卡死
     if (url.isEmpty) return;
+    _danmuLoaded = true;
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 8);
     try {
@@ -749,114 +756,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
   }
 
-  /// 发送弹幕到配置的 API（Logvr-danmu / 自定义 POST）
-  Future<void> _showSendDanmuDialog() async {
-    if (_danmuApiUrl.isEmpty) {
-      _showMessage('请先在设置里配置弹幕 API');
-      return;
-    }
-    final ctrl = TextEditingController();
-    if (!mounted) return;
-    await showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: const Text('发送弹幕', style: TextStyle(color: Colors.white)),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          maxLength: 40,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: '输入弹幕内容…',
-            hintStyle: TextStyle(color: Colors.white38),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消', style: TextStyle(color: Colors.white70)),
-          ),
-          TextButton(
-            onPressed: () async {
-              final text = ctrl.text.trim();
-              Navigator.pop(ctx);
-              if (text.isEmpty) return;
-              await _sendDanmu(text);
-            },
-            child: const Text('发送',
-                style: TextStyle(color: AppTheme.accentColor)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _sendDanmu(String text) async {
-    try {
-      final base = _danmuApiBase();
-      final videoUrl = _player.state.playlist.medias.isNotEmpty
-          ? _player.state.playlist.medias.last.uri
-          : widget.url;
-      final t = _player.state.position.inMilliseconds / 1000.0;
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
-      // Logvr-danmu / 同类服务：字段名不一，一次带上常用别名
-      final payload = <String, dynamic>{
-        'url': videoUrl,
-        'video_url': videoUrl,
-        'uri': videoUrl,
-        'text': text,
-        'content': text,
-        'm': text,
-        'time': t,
-        't': (t * 1000).round(),
-        'progress': (t * 1000).round(),
-        'mode': 1,
-        'color': 0xFFFFFF,
-        'p': '$t,1,16777215,${DateTime.now().millisecondsSinceEpoch}',
-      };
-      final endpoints = <String>[
-        '$base/api/v2/comment',
-        '$base/api/comment',
-        '$base/api/v2/send',
-      ];
-      int? code;
-      for (final ep in endpoints) {
-        try {
-          final req = await client
-              .postUrl(Uri.parse(ep))
-              .timeout(const Duration(seconds: 8));
-          req.headers.contentType = ContentType.json;
-          req.headers.set('User-Agent', 'NewTv/1.0');
-          req.write(jsonEncode(payload));
-          final res = await req.close().timeout(const Duration(seconds: 8));
-          code = res.statusCode;
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            break;
-          }
-        } catch (e) {
-          AppLog.instance.log('[video_player] send try $ep: $e');
-        }
-      }
-      client.close(force: true);
-      if (code != null && code >= 200 && code < 300) {
-        _showMessage('弹幕已发送');
-        setState(() {
-          _danmus = [
-            ..._danmus,
-            DanmuItem(t, text, const Color(0xFFFFFFFF), 1),
-          ];
-        });
-      } else {
-        // Logvr-danmu / danmu_api 均为只读弹幕服务（只有 /api/v2/comment 获取接口，
-        // 无发送接口）。明确提示"不支持发送"，而不是报 404/500 让用户误以为网络问题。
-        _showMessage('当前弹幕服务不支持发送弹幕（仅支持获取）');
-      }
-    } catch (e) {
-      AppLog.instance.log('[video_player] send danmu fail: $e');
-      _showMessage('发送失败');
-    }
-  }
+  // 弹幕发送功能已移除（2026-09-30）：Logvr-danmu / danmu_api 均为只读弹幕服务，
+  // 只有 GET /api/v2/comment 获取接口，没有"发送单条弹幕"的 POST 端点，
+  // 原 _showSendDanmuDialog / _sendDanmu 的 3 个候选端点必然 404/405，
+  // 用户点一次只会收到失败提示，故整体下线（设置面板里的按钮也已移除）。
 
   Future<void> _persistDanmuOn() async {
     try {
@@ -2561,28 +2464,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                 },
                               ),
                             ],
-                            if (_danmuApiUrl.isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onTap: () => _showSendDanmuDialog(),
-                                child: Container(
-                                  width: double.infinity,
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 10),
-                                  alignment: Alignment.center,
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.accentColor
-                                        .withValues(alpha: 0.2),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Text('发送弹幕',
-                                      style: TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.w600)),
-                                ),
-                              ),
-                            ],
+                            // 「发送弹幕」按钮已移除：所用弹幕服务（Logvr-danmu /
+                            // danmu_api）只有 GET /api/v2/comment 获取接口，
+                            // 没有发送单条弹幕的 POST 端点，原实现必然 404/405。
                             const Divider(color: Colors.white12, height: 16),
                             const _SettingsRowLabel('倍速'),
                             const SizedBox(height: 8),

@@ -135,7 +135,13 @@ import UIKit
                 return
             }
             let authToken = args["authToken"] as? String ?? ""
-            let ok = startNodeJS(nativePort: nativePort, sourcePath: sourcePath, authToken: authToken)
+            let keepAlive = args["keepAlive"] as? Bool ?? true
+            let ok = startNodeJS(
+                nativePort: nativePort,
+                sourcePath: sourcePath,
+                authToken: authToken,
+                keepAlive: keepAlive
+            )
             result(ok)
         case "stopNodeJS":
             stopNodeJS()
@@ -169,7 +175,12 @@ import UIKit
     /// 3. 构造 argv: [node, main.js, --native-port, port]  （不使用 --security-revert）
     /// 4. dispatch_async 到 work queue，调 `node_start(argc, argv)`
     /// 5. node_start 阻塞直到 Node.js 退出
-    private func startNodeJS(nativePort: Int, sourcePath: String, authToken: String = "") -> Bool {
+    private func startNodeJS(
+        nativePort: Int,
+        sourcePath: String,
+        authToken: String = "",
+        keepAlive: Bool = true
+    ) -> Bool {
         if isRunning {
             print("[NodeJSBridge] 已经在运行中")
             return true
@@ -232,10 +243,12 @@ import UIKit
 
         isRunning = true
         // 静音保活可关：关闭后锁屏不显示「播放中」，但 Node 可能被系统冻结
-        let keepAlive = (args["keepAlive"] as? Bool) ?? true
         if keepAlive {
             BackgroundAudio.shared.start()
         } else {
+            // 必须调用 stop(): BackgroundAudio.start() 是 isStarted 幂等的,
+            // 只记日志的话「先开过再关」的场景静音音频仍在后台播放, 开关等于无效。
+            BackgroundAudio.shared.stop()
             NSLog("[NodeJSBridge] silent keepalive disabled")
         }
 

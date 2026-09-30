@@ -204,11 +204,21 @@ class BackgroundService extends GetxService {
           return Stack(
             fit: StackFit.expand,
             children: [
-              Image.file(
-                file,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _buildGradientFallback(
-                    overlayAlpha: overlayAlpha),
+              // 用 LayoutBuilder 取实际可用宽度做解码降采样：
+              // 选图时允许 4096×4096（约 64MB 位图），按原尺寸常驻内存叠加
+              // 视频播放器在 iOS 上有 OOM 风险。
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final dpr = MediaQuery.maybeOf(context)?.devicePixelRatio ?? 1.0;
+                  final budget = (constraints.maxWidth * dpr).round();
+                  return Image.file(
+                    file,
+                    fit: BoxFit.cover,
+                    cacheWidth: budget > 0 ? budget : null,
+                    errorBuilder: (_, __, ___) => _buildGradientFallback(
+                        overlayAlpha: overlayAlpha),
+                  );
+                },
               ),
               if (overlayAlpha > 0)
                 Container(color: Colors.black.withValues(alpha: overlayAlpha)),

@@ -394,6 +394,50 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     }
   }
 
+  /// 播放器侧上报的错误（原生 onError / 播放失败 / 地址解析超时）
+  ///
+  /// 播放器错误以前只走到 DetailView 的空回调，用户看到的是白转圈。
+  /// 这里统一落进 errorMessage，由详情页错误态渲染。
+  void setPlaybackError(String message) {
+    errorMessage.value = message;
+    isPlaying.value = false;
+  }
+
+  /// 播放/解析失败后用户点「重试」：重新解析当前集的播放地址。
+  ///
+  /// 与「重新加载详情」不同 —— 详情通常已经加载成功（vodInfo 非空），
+  /// 失败只发生在拿到播放地址这一步，所以这里只重解地址，不重拉详情。
+  void retryCurrentEpisode() {
+    final info = vodInfo.value;
+    if (info == null) {
+      isLoading.value = false;
+      return;
+    }
+    errorMessage.value = null;
+    playUrl.value = null;
+    isPlaying.value = false;
+
+    final flag = selectedFlag.value;
+    final episodes = info.playUrlMap[flag] ?? [];
+    final index = selectedEpisodeIndex.value;
+    if (index < 0 || index >= episodes.length) {
+      errorMessage.value = '当前线路没有可播放的剧集';
+      return;
+    }
+    final episode = episodes[index];
+    if (episode.url.isEmpty) {
+      errorMessage.value = '当前剧集地址为空，请切换其他线路';
+      return;
+    }
+    if (episode.url.startsWith('/')) {
+      _resolveSpiderPlayUrl(flag: flag, id: episode.url);
+    } else {
+      playUrl.value = _selectedPlayableURL(fallback: episode.url);
+      playbackSessionId.value = _newUuid();
+      isPlaying.value = true;
+    }
+  }
+
   bool playNext() {
     final info = vodInfo.value;
     if (info == null) return false;

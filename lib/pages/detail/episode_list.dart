@@ -27,6 +27,15 @@ class _EpisodeListViewState extends State<EpisodeListView> {
   int _gridPage = 0;
 
   @override
+  void didUpdateWidget(EpisodeListView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 换剧/换源后剧集列表变了 → 回到第一页，避免停留在越界页（配合 _pagedNames 的 clamp 双保险）
+    if (oldWidget.episodeNames.length != widget.episodeNames.length) {
+      _gridPage = 0;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     if (widget.episodeNames.isEmpty) return const SizedBox.shrink();
 
@@ -168,9 +177,14 @@ class _EpisodeListViewState extends State<EpisodeListView> {
   }
 
   /// 当前页的剧集切片（每页 10 集）
+  ///
+  /// ⚠️ start 必须 clamp：State 在换剧/换源时会被复用（_gridPage 不重置），
+  /// 40 集翻到第 3 页后切到 10 集短剧 → 旧 start=30 会让 sublist(30,10) 抛
+  /// RangeError。clamp 后再算 end，保证 start <= end <= length。
   List<String> get _pagedNames {
-    final start = _gridPage * 10;
-    final end = (start + 10).clamp(0, widget.episodeNames.length);
+    final total = widget.episodeNames.length;
+    final start = (_gridPage * 10).clamp(0, total);
+    final end = (start + 10).clamp(start, total);
     return widget.episodeNames.sublist(start, end);
   }
 
