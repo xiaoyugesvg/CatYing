@@ -666,7 +666,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           prefs.getStringList('danmu_block_words') ?? const [];
       if (mounted) setState(() {});
       if (_danmuApiUrl.isNotEmpty) {
-        _ensureDanmuLoaded();
+        // 显式传 widget.url：此方法是异步的，回来时播放器可能已经 open 了
+        // 真实播放地址；不传的话依赖 playlist 取值，时序不稳定。
+        _ensureDanmuLoaded(urlOverride: widget.url);
       }
     } catch (e) {
         AppLog.instance.log('[video_player] swallowed: $e');
@@ -708,6 +710,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       final base = _danmuApiBase();
       final api =
           '$base/api/v2/comment?url=${Uri.encodeQueryComponent(url)}&format=json';
+      // 无条件记录实际请求（含被匹配的视频地址）：
+      // 该弹幕服务只支持 commentId / url 两种匹配，没有按片名的搜索端点，
+      // 因此「查不到弹幕」时唯一能核对的证据就是这条请求 URL。
+      AppLog.instance.log('[video_player] danmu request: $api');
       final http = await client
           .getUrl(Uri.parse(api))
           .timeout(const Duration(seconds: 12));
@@ -726,11 +732,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   .any((w) => w.isNotEmpty && d.text.contains(w)))
               .toList();
         }
+        // 诊断：弹幕"没自动加载"时，需要区分是接口没配、请求失败、
+        // 还是接口返回 0 条。之前失败路径完全静默，无从判断。
+        AppLog.instance.log(
+            '[video_player] danmu loaded: ${list.length} 条 (url=$url)');
         // 代次校验：快速换集时丢弃过期响应，避免旧集弹幕盖到新集上
         if (mounted && list.isNotEmpty && loadGen == _danmuLoadGen) {
           setState(() => _danmus = list);
         }
       } else if (loadGen == _danmuLoadGen) {
+        AppLog.instance.log(
+            '[video_player] danmu HTTP ${res.statusCode} (api=$api)');
         // 失败允许下次换集重试
         _danmuLoaded = false;
       }
