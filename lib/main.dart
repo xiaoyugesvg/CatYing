@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:hive_ce/hive.dart';
@@ -5,8 +7,12 @@ import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'app.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'common/constants.dart';
 import 'models/cache_store.dart';
+import 'models/subscription.dart';
 import 'services/api_config.dart';
+import 'services/nav_feature_service.dart';
 import 'services/app_log.dart';
 import 'services/app_state.dart';
 import 'services/background_service.dart';
@@ -53,6 +59,14 @@ void main() async {
   // 注册 TvSearchController 为永久实例 - 避免在 SearchPage 中 Get.put 创建新实例替换
   Get.put<TvSearchController>(TvSearchController(), permanent: true);
 
+  // 首页导航栏功能开关与顺序（设置 → 主页页面）
+  await NavFeatureService.instance.load();
+
+  // 多订阅管理（订阅列表 / 激活切换 / 上锁）
+  // 必须在 ApiConfig 首次加载前就绪：启动时要按"已激活的订阅"决定加载哪个地址。
+  final subSvc = SubscriptionService.instance;
+  await subSvc.load();
+
   // 直播源服务（解析 lives / m3u）
   Get.put<LiveService>(LiveService(), permanent: true);
   Get.put<EpgService>(EpgService(), permanent: true);
@@ -87,6 +101,29 @@ void main() async {
 
   // 初始化缓存
   await CacheStore.instance.init();
+
+  // 启动时按「已激活的订阅」校正接口地址：
+  // 用户上次可能切过订阅，而 AppConstants.apiUrl 里存的是当时写入的值。
+  // 两边不一致时以订阅为准（订阅是"地址簿"，是唯一事实来源）。
+  try {
+    final active = subSvc.active;
+    if (active != null && active.url.isNotEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString(AppConstants.apiUrl) ?? '';
+      if (saved != active.url) {
+        await prefs.setString(AppConstants.apiUrl, active.url);
+        AppLog.instance.log('[Subscription] 启动校正接口地址 → ${active.name}');
+      }
+    }
+  } catch (e) {
+    AppLog.instance.log('[Subscription] 启动校正失败: $e');
+  }
+
+  // 「随启动自动同步」：只对勾了自动更新的订阅生效。
+  //
+  // **故意不 await** —— 同步要走网络（可能好几秒），绝不能卡住启动画面。
+  // 内部自带节流（6 小时）与内容指纹比对，重复启动不会反复拉。
+  unawaited(subSvc.autoSyncOnLaunch());
 
   runApp(const TVBoxApp());
 }

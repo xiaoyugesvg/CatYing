@@ -22,6 +22,7 @@ import '../../services/tmdb_service.dart';
 import '../../services/player_fullscreen_controller.dart';
 import '../../services/player_prefs.dart';
 import '../../services/main_tab_controller.dart';
+import '../shelf/controller.dart';
 import '../../widgets/glass.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/app_player.dart';
@@ -111,10 +112,22 @@ class _DetailPageState extends State<DetailPage> {
     final p = _player;
     if (p is MpvAppPlayer) {
       p.applyOptions(
-        decode: PlayerPrefs.instance.decodeMode.value,
+        decode: _effectiveDecodeMode,
         buffer: PlayerPrefs.instance.bufferMode.value,
       );
     }
+  }
+
+  /// 实际生效的解码模式。
+  ///
+  /// 「播放器 → 硬件加速」是一个更直观的总开关：关掉它就是软解，
+  /// 优先级高于细分的「视频解码（MPV）」。两者取更"软"的那个，
+  /// 避免出现"关了硬件加速却还在硬解"的矛盾状态。
+  VideoDecodeMode get _effectiveDecodeMode {
+    if (!PlayerPrefs.instance.hardwareAccel.value) {
+      return VideoDecodeMode.software;
+    }
+    return PlayerPrefs.instance.decodeMode.value;
   }
 
   /// VideoPlayerWidget 状态变化回调（mpv native fullscreen 状态变化时）
@@ -149,6 +162,7 @@ class _DetailPageState extends State<DetailPage> {
     _engineWorker = ever(PlayerPrefs.instance.vodEngine, (_) => _onEngineChanged());
     _decodeWorker = ever(PlayerPrefs.instance.decodeMode, (_) => _applyMpvOptions());
     _bufferWorker = ever(PlayerPrefs.instance.bufferMode, (_) => _applyMpvOptions());
+    // 「硬件加速」总开关变化时同样热更新
     // 设置页切换「详情页样式」后立即生效（Obx 里只读值不建立依赖，
     // 不监听的话必须退出重进详情页才会换布局）
     _layoutWorker = ever(
@@ -536,7 +550,7 @@ class _DetailPageState extends State<DetailPage> {
     if (engine == PlayerEngine.mpv) {
       final mpv = MpvAppPlayer(config: const AppConfig(title: 'TVBox'));
       mpv.applyOptions(
-        decode: PlayerPrefs.instance.decodeMode.value,
+        decode: _effectiveDecodeMode,
         buffer: PlayerPrefs.instance.bufferMode.value,
       );
       _player = mpv;
@@ -635,10 +649,9 @@ class _DetailPageState extends State<DetailPage> {
               // 直播：第 5 个 tab（选中联动高亮，修复详情页直播写死高亮）
               _floatingNavItem(
                 Icons.live_tv, Icons.live_tv, '直播', 4, current),
+              // 「史藏」= 历史 + 收藏（原两项合并）
               _floatingNavItem(
-                Icons.schedule_outlined, Icons.schedule, '历史', 1, current),
-              _floatingNavItem(
-                Icons.favorite_border, Icons.favorite, '收藏', 2, current),
+                Icons.schedule_outlined, Icons.schedule, '史藏', 1, current),
               _floatingNavItem(
                 Icons.settings_outlined, Icons.settings, '设置', 3, current),
             ],
@@ -796,7 +809,12 @@ class _DetailPageState extends State<DetailPage> {
     final navReserve =
         mediaPad.bottom + navFloatGap + navBarHeight + 22.0;
 
-    final heroUrl = info.pic.trim();
+    // 头图：按「海报展示样式」在候选池里挑（固定 / 随机 / 轮播）。
+    // 未刮削到多张海报时回落原图，不会显示空白。
+    final baseHero = info.pic.trim();
+    final heroUrl = baseHero.isEmpty
+        ? baseHero
+        : TmdbService.instance.pickPoster(info.id, baseHero);
     final year = info.year.trim();
     final typeName = info.typeName.trim();
     final runtime = info.runtime;

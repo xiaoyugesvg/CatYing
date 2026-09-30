@@ -9,7 +9,8 @@ import 'services/app_log.dart';
 import 'services/background_service.dart';
 import 'services/player_prefs.dart';
 import 'pages/home/view.dart';
-import 'pages/history/view.dart';
+import 'pages/shelf/view.dart';
+import 'services/nav_feature_service.dart';
 import 'pages/favorites/view.dart';
 import 'pages/live/view.dart';
 import 'pages/settings/view.dart';
@@ -632,8 +633,9 @@ class _ContentViewState extends State<ContentView>
 
   final List<Widget> _tabPages = [
     const HomePage(),
-    const HistoryPage(),
-    const FavoritesPage(),
+    // 「史藏」= 播放历史 + 我的收藏（合并为一个入口，内部顶部 tab 切换）
+    const ShelfPage(),
+    const ShelfPage(), // 占位：索引 2 不再单独使用（保留结构避免下标错乱）
     const SettingsPage(),
     // 直播作为第 5 个 tab（选中才高亮，修复"首页+直播同时高亮"）
     const LivePage(),
@@ -723,25 +725,47 @@ class _ContentViewState extends State<ContentView>
                 shadow: true,
                 padding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _navItem(Icons.home_outlined, Icons.home, '首页', 0),
-                    _navLiveItem(),
-                    _navItem(
-                        Icons.schedule_outlined, Icons.schedule, '历史', 1),
-                    _navItem(
-                        Icons.favorite_border, Icons.favorite, '收藏', 2),
-                    _navItem(
-                        Icons.settings_outlined, Icons.settings, '设置', 3),
-                  ],
-                ),
+                // 底栏项目由「设置 → 主页页面」控制（开关 + 拖动排序）。
+                // Obx 监听，改完设置立刻生效，不必重启。
+                child: Obx(() {
+                  final features = NavFeatureService.instance.enabled;
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      for (final f in features) _navItemFor(f),
+                    ],
+                  );
+                }),
               );
             }),
           ),
         ],
       ),
     );
+  }
+
+  /// 把一个 NavFeature 渲染成底栏按钮（图标/文案/对应 IndexedStack 下标）
+  Widget _navItemFor(NavFeature f) {
+    switch (f) {
+      case NavFeature.home:
+        return _navItem(Icons.home_outlined, Icons.home, f.label, 0);
+      case NavFeature.live:
+        return _navItem(Icons.live_tv, Icons.live_tv, f.label, 4);
+      case NavFeature.shelf:
+        return _navItem(
+            Icons.schedule_outlined, Icons.schedule, f.label, 1);
+      case NavFeature.settings:
+        return _navItem(
+            Icons.settings_outlined, Icons.settings, f.label, 3);
+      // 以下功能暂未落到独立 tab 页，先复用最接近的入口，避免点了没反应
+      case NavFeature.search:
+        return _navItem(Icons.search, Icons.search, f.label, 0);
+      case NavFeature.mediaServer:
+      case NavFeature.calendar:
+      case NavFeature.download:
+        return _navItem(
+            Icons.widgets_outlined, Icons.widgets, f.label, 0);
+    }
   }
 
   /// 处理 showAboutOnLaunch - 启动时显示免责声明
@@ -766,9 +790,6 @@ class _ContentViewState extends State<ContentView>
 
 
   /// 直播：第 5 个底部 tab（选中才高亮，修复"首页+直播同时高亮"）
-  Widget _navLiveItem() {
-    return _navItem(Icons.live_tv, Icons.live_tv, '直播', 4);
-  }
 
   /// 导航栏项 - 对应 Swift navBarItem
   Widget _navItem(

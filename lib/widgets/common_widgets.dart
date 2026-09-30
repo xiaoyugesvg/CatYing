@@ -249,6 +249,12 @@ class AppCard extends StatelessWidget {
   /// 列表看起来又高又空。设置类列表统一 dense，密度接近 iOS 设置页。
   final bool dense;
 
+  /// 是否投影。
+  ///
+  /// 设置类列表**不开**（保持 iOS 设置页的扁平观感）；
+  /// 首页/详情等需要"浮起来"的卡片可开，视觉层次更清楚。
+  final bool shadow;
+
   const AppCard({
     super.key,
     required this.child,
@@ -256,6 +262,7 @@ class AppCard extends StatelessWidget {
     this.padding,
     this.blur = false,
     this.dense = false,
+    this.shadow = false,
   });
 
   @override
@@ -267,7 +274,7 @@ class AppCard extends StatelessWidget {
       borderColor: AppTheme.glassBorderSoft,
       borderWidth: 0.8,
       highlightStrength: blur ? 0.8 : 0.5,
-      shadow: false,
+      shadow: shadow,
       padding: padding ??
           (dense
               ? const EdgeInsets.symmetric(
@@ -295,6 +302,12 @@ class MetadataPill extends StatelessWidget {
 }
 
 /// 设置行 - 对应 Swift SettingsRow
+///
+/// 统一样式（对齐参考图）：**图标放进强调色圆角容器**、标题 + 可选副标题、
+/// 右侧「值 + 箭头」或开关。
+///
+/// 这一处升级会同时美化**所有**设置页 —— 之前各页自己实现 `_switchRow`，
+/// 样式不一致且难维护，现在都收敛到这里。
 class SettingsRow extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -302,52 +315,92 @@ class SettingsRow extends StatelessWidget {
   final VoidCallback? onTap;
   final Color? iconColor;
   final Color? titleColor;
+
+  /// 副标题（可选）：标题下方的小字说明，对应参考图两行样式
+  final String? subtitle;
+
   /// 右侧开关（与 onTap 互斥优先显示开关）
   final bool trailingSwitch;
   final bool switchValue;
   final ValueChanged<bool>? onSwitchChanged;
 
+  /// 开关是否可交互（false 时置灰，用于必需页面）
+  final bool switchEnabled;
+
   const SettingsRow({
     super.key,
     required this.icon,
     required this.title,
-    required this.value,
+    this.value = '',
     this.onTap,
     this.iconColor,
     this.titleColor,
+    this.subtitle,
     this.trailingSwitch = false,
     this.switchValue = false,
     this.onSwitchChanged,
+    this.switchEnabled = true,
   });
 
   @override
   Widget build(BuildContext context) {
-    // 精细化行内间距：图标 18、图标↔文字 10、纵向 9（行高约 38）
+    final accent = iconColor ?? AppTheme.accentColor;
     final child = Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: AppTheme.spacingXS,
-        vertical: 9,
+        vertical: 8,
       ),
       child: Row(
         children: [
-          Icon(icon, size: 18, color: iconColor ?? AppTheme.accentColor),
-          const SizedBox(width: 10),
+          // 图标容器：32×32 圆角 9 + 强调色 14% 底 + 细描边（参考图样式）
+          Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(9),
+              border:
+                  Border.all(color: accent.withValues(alpha: 0.22), width: 0.5),
+            ),
+            child: Icon(icon, size: 17, color: accent),
+          ),
+          const SizedBox(width: 12),
           Expanded(
-            child: Text(
-              title,
-              style: TextStyle(
-                color: titleColor ?? AppTheme.textPrimary,
-                fontSize: AppTheme.fontBody,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: titleColor ?? AppTheme.textPrimary,
+                    fontSize: AppTheme.fontSubhead + 0.5,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle!,
+                    style: TextStyle(
+                      color: AppTheme.textTertiary,
+                      fontSize: AppTheme.fontCaption,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
           if (value.isNotEmpty)
             Flexible(
               child: Text(
                 value,
+                textAlign: TextAlign.right,
                 style: TextStyle(
                   color: AppTheme.textTertiary,
-                  fontSize: AppTheme.fontCaption + 0.5,
+                  fontSize: AppTheme.fontSubhead,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -358,13 +411,13 @@ class SettingsRow extends StatelessWidget {
               scale: 0.85, // 开关略收，避免撑高行
               child: Switch(
                 value: switchValue,
-                onChanged: onSwitchChanged,
+                onChanged: switchEnabled ? onSwitchChanged : null,
                 activeColor: AppTheme.accentColor,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ),
           ] else if (onTap != null) ...[
-            const SizedBox(width: 2),
+            const SizedBox(width: 4),
             Icon(
               Icons.chevron_right,
               size: 17,

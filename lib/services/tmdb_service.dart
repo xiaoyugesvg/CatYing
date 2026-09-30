@@ -1,4 +1,6 @@
 
+import 'dart:math';
+
 import 'package:dio/dio.dart';
 import 'package:get/get.dart';
 import 'app_log.dart';
@@ -16,11 +18,35 @@ class TmdbService extends GetxService {
   static const _keyAuto = 'tmdb_auto_scrape';
   static const _keyShowCast = 'tmdb_show_cast';
   static const _keyShowSimilar = 'tmdb_show_similar';
+  static const _keyEnabled = 'tmdb_enabled';
+  static const _keyPosterStyle = 'tmdb_poster_style';
+  static const _keyApiProxy = 'tmdb_api_proxy';
+  static const _keyImgProxy = 'tmdb_img_proxy';
   static const _base = 'https://api.themoviedb.org/3';
   static const _img = 'https://image.tmdb.org/t/p';
 
+  /// 总开关（关掉后完全不走 TMDB）
+  final enabled = true.obs;
+
+  /// 海报展示样式：fixed=固定 / random=随机 / rotate=轮播
+  final posterStyle = 'fixed'.obs;
+
+  /// API 代理地址（留空用官方 api.themoviedb.org）
+  final apiProxy = ''.obs;
+
+  /// 图片代理地址（留空用官方 image.tmdb.org/t/p）
+  final imgProxy = ''.obs;
+
   final apiKey = ''.obs;
   final autoScrape = true.obs;
+
+  /// 实际生效的 API base（代理优先）
+  String get effectiveApiBase =>
+      apiProxy.value.trim().isNotEmpty ? apiProxy.value.trim() : _base;
+
+  /// 实际生效的图片 base（代理优先）
+  String get effectiveImgBase =>
+      imgProxy.value.trim().isNotEmpty ? imgProxy.value.trim() : _img;
 
   /// 详情页是否展示「演职人员」区（默认开）
   final showCast = true.obs;
@@ -56,6 +82,87 @@ class TmdbService extends GetxService {
     autoScrape.value = prefs.getBool(_keyAuto) ?? true;
     showCast.value = prefs.getBool(_keyShowCast) ?? true;
     showSimilar.value = prefs.getBool(_keyShowSimilar) ?? true;
+    enabled.value = prefs.getBool(_keyEnabled) ?? true;
+    posterStyle.value = prefs.getString(_keyPosterStyle) ?? 'fixed';
+    apiProxy.value = (prefs.getString(_keyApiProxy) ?? '').trim();
+    imgProxy.value = (prefs.getString(_keyImgProxy) ?? '').trim();
+  }
+
+  Future<void> setEnabled(bool v) async {
+    enabled.value = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyEnabled, v);
+  }
+
+  /// 海报展示样式：fixed / random / rotate
+  Future<void> setPosterStyle(String v) async {
+    posterStyle.value = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyPosterStyle, v);
+  }
+
+  Future<void> setApiProxy(String v) async {
+    apiProxy.value = v.trim();
+    _dioInstance?.close(force: true);
+    _dioInstance = null; // 代理变了必须重建连接
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyApiProxy, apiProxy.value);
+  }
+
+  Future<void> setImgProxy(String v) async {
+    imgProxy.value = v.trim();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyImgProxy, imgProxy.value);
+  }
+
+  /// 断开连接：清空 Key（代理地址保留，用户可能只是换 Key）
+  Future<void> disconnect() async {
+    apiKey.value = '';
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyApiKey);
+  }
+
+  /// 测试 API 代理是否可用（发一个最轻的请求）
+  Future<({bool ok, String message})> testApiProxy() async {
+    final base = effectiveApiBase;
+    try {
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 12),
+      ));
+      final r = await dio.get('$base/configuration',
+          queryParameters: {'api_key': apiKey.value});
+      final code = r.statusCode ?? 0;
+      if (code == 200) return (ok: true, message: 'API 代理可用（HTTP 200）');
+      return (ok: false, message: '返回 HTTP $code');
+    } on DioException catch (e) {
+      return (ok: false, message: '连接失败：${e.type.name}');
+    } catch (e) {
+      return (ok: false, message: '连接失败：$e');
+    }
+  }
+
+  /// 测试图片代理是否可用（取一张已知存在的极小图）
+  Future<({bool ok, String message})> testImgProxy() async {
+    final base = effectiveImgBase;
+    try {
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 12),
+      ));
+      final r = await dio.get('$base/w92/2u7zbn8EudG6kLlBzUYqP8RyFU4.jpg',
+          options: Options(responseType: ResponseType.bytes));
+      final code = r.statusCode ?? 0;
+      if (code == 200) {
+        final n = r.data?.length ?? 0;
+        return (ok: true, message: '图片代理可用（$n 字节）');
+      }
+      return (ok: false, message: '返回 HTTP $code');
+    } on DioException catch (e) {
+      return (ok: false, message: '连接失败：${e.type.name}');
+    } catch (e) {
+      return (ok: false, message: '连接失败：$e');
+    }
   }
 
   Future<void> saveApiKey(String key) async {
@@ -120,7 +227,7 @@ class TmdbService extends GetxService {
         if (year != null) {
           qp[type == 'movie' ? 'year' : 'first_air_date_year'] = '$year';
         }
-        final res = await _dio.get('$_base/search/$type', queryParameters: qp);
+        final res = await _dio.get('${effectiveApiBase}/search/$type', queryParameters: qp);
         final results = (res.data['results'] as List?) ?? const [];
         for (final r in results.take(5)) {
           out.add((type, Map<String, dynamic>.from(r as Map)));
@@ -235,12 +342,12 @@ class TmdbService extends GetxService {
       if (year != null) {
         qp[mediaType == 'movie' ? 'year' : 'first_air_date_year'] = '$year';
       }
-      final res = await _dio.get('$_base/search/$mediaType', queryParameters: qp);
+      final res = await _dio.get('${effectiveApiBase}/search/$mediaType', queryParameters: qp);
       var results = (res.data['results'] as List?) ?? const [];
       if (results.isEmpty && year != null) {
         // 放宽：去掉年份再搜一次
-        final res2 = await _dio
-            .get('$_base/search/$mediaType', queryParameters: {'query': query});
+        final res2 = await _dio.get('${effectiveApiBase}/search/$mediaType',
+            queryParameters: {'query': query});
         results = (res2.data['results'] as List?) ?? const [];
       }
       if (results.isEmpty) return null;
@@ -300,9 +407,13 @@ class TmdbService extends GetxService {
 
   Future<Map<String, dynamic>?> _fetchDetail(String type, String id) async {
     try {
-      final res = await _dio.get('$_base/$type/$id', queryParameters: {
-        // 演职员 + 类似作品/推荐 一次拿全，避免多轮请求
-        'append_to_response': 'credits,similar,recommendations',
+      final res = await _dio.get('${effectiveApiBase}/$type/$id', queryParameters: {
+        // 演职员 + 类似作品/推荐 一次拿全，避免多轮请求。
+        // images 只在「随机 / 轮播」时才带上 —— 固定模式不需要候选海报，
+        // 多带会显著增大响应体（一部热门片可能有几十张海报）。
+        'append_to_response': posterStyle.value == 'fixed'
+            ? 'credits,similar,recommendations'
+            : 'credits,similar,recommendations,images',
       });
       return Map<String, dynamic>.from(res.data as Map);
     } catch (_) {
@@ -342,11 +453,123 @@ class TmdbService extends GetxService {
     return out.take(12).toList();
   }
 
+  /// 多张候选海报（来自 TMDB images 接口，或热门作品的 posters 列表）。
+  /// key = vodId，避免不同影片互相覆盖。
+  final _posterPool = <String, List<String>>{};
+
+  /// 轮播用的下标
+  final _posterCursor = <String, int>{};
+
+  /// 记录某部影片的多张海报，供「随机 / 轮播」挑选
+  void setPosterPool(String vodId, List<String> urls) {
+    final cleaned = urls
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
+    if (cleaned.isEmpty) return;
+    _posterPool[vodId] = cleaned;
+    _posterCursor[vodId] = 0;
+  }
+
+  /// 按「海报展示样式」挑一张海报。
+  ///
+  /// - fixed  ：固定，返回原海报
+  /// - random ：随机一张（每次调用都可能不同 → 每次进详情页换一张）
+  /// - rotate ：轮播，每次调用顺延到下一张
+  ///
+  /// 没有候选池（未刮削到多图）时一律回落到原海报，不会显示空白。
+  String pickPoster(String vodId, String fallback) {
+    final pool = _posterPool[vodId];
+    if (pool == null || pool.length < 2) return fallback;
+    switch (posterStyle.value) {
+      case 'random':
+        return pool[_rand.nextInt(pool.length)];
+      case 'rotate':
+        final i = (_posterCursor[vodId] ?? 0) % pool.length;
+        _posterCursor[vodId] = (i + 1) % pool.length;
+        return pool[i];
+      default:
+        return fallback;
+    }
+  }
+
+  static final _rand = Random();
+
+  /// 从详情响应里收集候选海报，喂给「随机 / 轮播」。
+  ///
+  /// TMDB 详情默认**不含** images 字段，但如果带了就顺手用上；
+  /// 另外把 backdrop 也作为一个候选（有些影片的横图更好看）。
+  void _collectPosterPool(
+    String vodId,
+    Map<String, dynamic> d, {
+    String? primary,
+  }) {
+    final urls = <String>[];
+    if (primary != null && primary.isNotEmpty) {
+      urls.add('${effectiveImgBase}/w500$primary');
+    }
+    // images.posters → [{file_path: ...}, ...]
+    final images = d['images'];
+    if (images is Map) {
+      final posters = images['posters'];
+      if (posters is List) {
+        for (final p in posters) {
+          if (p is Map) {
+            final fp = p['file_path']?.toString();
+            if (fp != null && fp.isNotEmpty) {
+              urls.add('${effectiveImgBase}/w500$fp');
+            }
+          }
+        }
+      }
+    }
+    final backdrop = d['backdrop_path']?.toString();
+    if (backdrop != null && backdrop.isNotEmpty) {
+      urls.add('${effectiveImgBase}/w780$backdrop');
+    }
+    if (urls.length > 1) setPosterPool(vodId, urls);
+  }
+
+  /// 补拉 TMDB images 接口，把候选海报填进池子。
+  ///
+  /// 只在「随机 / 轮播」模式下调用 —— 固定模式没必要多打一次网络。
+  Future<void> ensurePosterPool(
+    String vodId,
+    String type,
+    int tmdbId,
+  ) async {
+    if (posterStyle.value == 'fixed') return;
+    final exist = _posterPool[vodId];
+    if (exist != null && exist.length > 1) return;
+    try {
+      final res = await _dio.get('$effectiveApiBase/$type/$tmdbId/images');
+      final posters = res.data['posters'];
+      if (posters is List) {
+        final urls = <String>[];
+        for (final p in posters) {
+          if (p is Map) {
+            final fp = p['file_path']?.toString();
+            if (fp != null && fp.isNotEmpty) {
+              urls.add('${effectiveImgBase}/w500$fp');
+            }
+          }
+        }
+        if (urls.length > 1) setPosterPool(vodId, urls);
+      }
+    } catch (e) {
+      AppLog.instance.log('[TmdbService] 拉取候选海报失败: $e');
+    }
+  }
+
   void _apply(VodInfo info, String type, Map<String, dynamic> d) {
     final poster = d['poster_path']?.toString();
     if (poster != null && poster.isNotEmpty) {
-      info.pic = '$_img/w500$poster';
+      info.pic = '${effectiveImgBase}/w500$poster';
     }
+    // 收集候选海报：详情里若已带 images.posters 就直接用，
+    // 保证「随机 / 轮播」有图可换且不必额外请求。
+    _collectPosterPool(info.id, d, primary: poster);
     final overview = (d['overview'] ?? '').toString().trim();
     if (overview.isNotEmpty) {
       info.des = overview;

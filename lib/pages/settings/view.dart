@@ -9,6 +9,7 @@ import 'sub/appearance_settings_page.dart';
 import 'sub/cache_settings_page.dart';
 import 'sub/danmu_settings_page.dart';
 import 'sub/data_source_settings_page.dart';
+import 'sub/home_pages_settings_page.dart';
 import 'sub/metadata_settings_page.dart';
 import 'sub/playback_settings_page.dart';
 
@@ -73,6 +74,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 title: '外观与壁纸',
                 subtitle: '外观模式、壁纸背景、界面字号、首页主题',
                 onTap: () => Get.to(() => const AppearanceSettingsPage()),
+              ),
+              const SizedBox(height: AppTheme.spacingSM),
+              _categoryTile(
+                icon: Icons.dashboard_customize_outlined,
+                title: '主页页面',
+                subtitle: '底栏功能的开关与顺序（长按拖动调整）',
+                onTap: () => Get.to(() => const HomePagesSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingXXL),
 

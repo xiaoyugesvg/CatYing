@@ -258,3 +258,27 @@ class SettingsGroup extends StatelessWidget {
     );
   }
 }
+
+
+/// 统一的「图标 + 标题 + 可选副标题 + 开关」行。
+///
+/// 之前 playback / danmu 两页各自实现了一份 `_switchRow` / `_switchTile`，
+/// 样式与间距容易走偏。现在收敛到这里，所有设置页共用同一种观感。
+Widget unifiedSwitchRow({
+  required IconData icon,
+  required String title,
+  String? subtitle,
+  required bool value,
+  required ValueChanged<bool> onChanged,
+  bool enabled = true,
+}) {
+  return SettingsRow(
+    icon: icon,
+    title: title,
+    subtitle: subtitle,
+    trailingSwitch: true,
+    switchValue: value,
+    switchEnabled: enabled,
+    onSwitchChanged: onChanged,
+  );
+}

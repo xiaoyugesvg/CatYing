@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../../../common/theme.dart';
+import '../../../models/subscription.dart';
 import '../../../services/api_config.dart';
+import '../../subscription/view.dart';
 import '../../../widgets/common_widgets.dart';
 import '../controller.dart';
 import 'settings_shared.dart';
@@ -30,10 +32,29 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
       title: '数据源',
       children: [
         SettingsGroup(
+          title: '订阅',
+          children: [
+            Obx(() {
+              final svc = SubscriptionService.instance;
+              final a = svc.active;
+              return SettingsRow(
+                icon: Icons.rss_feed,
+                title: '订阅管理',
+                // 显示当前激活的订阅名 + 条数，一眼知道在用哪个
+                value: a == null
+                    ? '未添加'
+                    : '${a.name}（${svc.subscriptions.length} 个）',
+                onTap: () => Get.to(() => const SubscriptionPage()),
+              );
+            }),
+          ],
+        ),
+        SettingsGroup(
           children: [
             Obx(() => SettingsRow(
                   icon: Icons.movie_outlined,
                   title: '点播接口地址',
+                  subtitle: '当前生效的接口（由激活的订阅决定）',
                   value: controller.vodApiUrl.value.isEmpty
                       ? '未配置'
                       : _truncateUrl(controller.vodApiUrl.value),
@@ -42,6 +63,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             Obx(() => SettingsRow(
                   icon: Icons.dns_outlined,
                   title: '主页数据源',
+                  subtitle: '首页列表使用哪个源',
                   value:
                       ApiConfig.instance.homeSourceBean.value?.name ?? '未选择',
                   onTap: _showSourcePicker,
@@ -51,11 +73,11 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
               iconColor: Colors.redAccent,
               title: '重置配置',
               titleColor: Colors.redAccent,
-              value: '回到初始设置',
+              subtitle: '清空接口地址与主页源选择',
+              value: '回到初始',
               onTap: _showResetConfigDialog,
             ),
           ],
-          hint: '订阅地址里若带 user:pass@ 凭据，会转换成 Authorization 头下载，无需手动处理。',
         ),
       ],
     );

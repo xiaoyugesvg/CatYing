@@ -33,6 +33,49 @@ class PlayerPrefs {
   /// 快进步长（秒）
   final playTimeStep = 10.obs;
 
+  // ============================================================
+  // 播放器高级选项（对齐参考图的「播放器」设置页）
+  // ============================================================
+
+  /// 硬件加速（关闭后软解：更兼容但更耗电）
+  final hardwareAccel = true.obs;
+
+  /// 画面填充：0=原比例 / 1=裁剪铺满 / 2=拉伸铺满
+  final videoFillMode = 0.obs;
+
+  /// 默认倍速（0.5 ~ 3.0）
+  final defaultSpeed = 1.0.obs;
+
+  /// 长按倍速（1.5 ~ 5.0）
+  final longPressSpeed = 3.0.obs;
+
+  /// 长按滑动可调节倍速（关闭则长按只用固定倍速）
+  final longPressAdjustable = true.obs;
+
+  /// 优先横屏
+  final preferLandscape = false.obs;
+
+  /// 进度条显示总时长（关闭则显示剩余时长）
+  final showTotalDuration = true.obs;
+
+  /// 隐藏中央快进快退（双击时不再显示中央动画）
+  final hideCenterSeek = false.obs;
+
+  /// 进入后台暂停
+  final pauseOnBackground = false.obs;
+
+  /// 跳过提示（跳过片头片尾时显示横幅与轻提示）
+  final skipHint = false.obs;
+
+  /// 切集提示（切集时显示「正在切换至 第X集」轻提示）
+  final switchEpisodeHint = false.obs;
+
+  /// 显示帧率与编码（影响观影性能）
+  final showFpsCodec = false.obs;
+
+  /// 始终显示网速（无需开启信息栏即可看到下载速度）
+  final alwaysShowSpeed = true.obs;
+
   /// 默认画质：0=自动（默认），1=最高清晰度
   final defaultQuality = 0.obs;
 
@@ -118,6 +161,105 @@ class PlayerPrefs {
     favGridColumns.value = (fc >= 2 && fc <= 6) ? fc : 4;
     final hc = prefs.getInt('history_grid_columns') ?? 4;
     historyGridColumns.value = (hc >= 2 && hc <= 6) ? hc : 4;
+
+    // 播放器高级选项
+    hardwareAccel.value = prefs.getBool('play_hardware_accel') ?? true;
+    videoFillMode.value = (prefs.getInt('play_video_fill') ?? 0).clamp(0, 2);
+    defaultSpeed.value =
+        (prefs.getDouble('play_default_speed') ?? 1.0).clamp(0.5, 3.0);
+    longPressSpeed.value =
+        (prefs.getDouble('play_longpress_speed') ?? 3.0).clamp(1.5, 5.0);
+    longPressAdjustable.value =
+        prefs.getBool('play_longpress_adjustable') ?? true;
+    preferLandscape.value = prefs.getBool('play_prefer_landscape') ?? false;
+    showTotalDuration.value = prefs.getBool('play_show_total') ?? true;
+    hideCenterSeek.value = prefs.getBool('play_hide_center_seek') ?? false;
+    pauseOnBackground.value = prefs.getBool('play_pause_background') ?? false;
+    skipHint.value = prefs.getBool('play_skip_hint') ?? false;
+    switchEpisodeHint.value =
+        prefs.getBool('play_switch_episode_hint') ?? false;
+    showFpsCodec.value = prefs.getBool('play_show_fps_codec') ?? false;
+    alwaysShowSpeed.value = prefs.getBool('play_always_show_speed') ?? true;
+  }
+
+  // ---- 播放器高级选项 setter ----
+
+  Future<void> setHardwareAccel(bool v) async {
+    hardwareAccel.value = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('play_hardware_accel', v);
+  }
+
+  Future<void> setVideoFillMode(int v) async {
+    videoFillMode.value = v.clamp(0, 2);
+    final p = await SharedPreferences.getInstance();
+    await p.setInt('play_video_fill', videoFillMode.value);
+  }
+
+  Future<void> setDefaultSpeed(double v) async {
+    defaultSpeed.value = v.clamp(0.5, 3.0);
+    final p = await SharedPreferences.getInstance();
+    await p.setDouble('play_default_speed', defaultSpeed.value);
+  }
+
+  Future<void> setLongPressSpeed(double v) async {
+    longPressSpeed.value = v.clamp(1.5, 5.0);
+    final p = await SharedPreferences.getInstance();
+    await p.setDouble('play_longpress_speed', longPressSpeed.value);
+  }
+
+  Future<void> setLongPressAdjustable(bool v) async {
+    longPressAdjustable.value = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('play_longpress_adjustable', v);
+  }
+
+  Future<void> setPreferLandscape(bool v) async {
+    preferLandscape.value = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('play_prefer_landscape', v);
+  }
+
+  Future<void> setShowTotalDuration(bool v) async {
+    showTotalDuration.value = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('play_show_total', v);
+  }
+
+  Future<void> setHideCenterSeek(bool v) async {
+    hideCenterSeek.value = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('play_hide_center_seek', v);
+  }
+
+  Future<void> setPauseOnBackground(bool v) async {
+    pauseOnBackground.value = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('play_pause_background', v);
+  }
+
+  Future<void> setSkipHint(bool v) async {
+    skipHint.value = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('play_skip_hint', v);
+  }
+
+  Future<void> setSwitchEpisodeHint(bool v) async {
+    switchEpisodeHint.value = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('play_switch_episode_hint', v);
+  }
+
+  Future<void> setShowFpsCodec(bool v) async {
+    showFpsCodec.value = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('play_show_fps_codec', v);
+  }
+
+  Future<void> setAlwaysShowSpeed(bool v) async {
+    alwaysShowSpeed.value = v;
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('play_always_show_speed', v);
   }
 
   Future<void> setFavGridColumns(int n) async {

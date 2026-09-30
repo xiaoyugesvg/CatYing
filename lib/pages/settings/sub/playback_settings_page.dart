@@ -49,149 +49,233 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
   @override
   Widget build(BuildContext context) {
     return SettingsSubPage(
-      title: '播放设置',
+      title: '播放器',
       children: [
-        // ---------- 播放内核 ----------
+        // ---------- 硬件加速（顶部独立卡片）----------
+        Obx(() => AppCard(
+              dense: true,
+              child: unifiedSwitchRow(
+                icon: Icons.memory,
+                title: '硬件加速',
+                subtitle: '关闭后使用软解（更兼容但更耗电）',
+                value: PlayerPrefs.instance.hardwareAccel.value,
+                onChanged: PlayerPrefs.instance.setHardwareAccel,
+              ),
+            )),
+        const SizedBox(height: AppTheme.spacingLG),
+
+        // ---------- 画面与内核 ----------
         SettingsGroup(
-          title: '播放内核',
+          title: '画面与内核',
           children: [
             Obx(() => SettingsRow(
-                  icon: Icons.play_circle_outline,
-                  title: '点播播放器',
+                  icon: Icons.video_settings,
+                  title: '播放内核',
                   value: controller.vodPlayerEngine.value.title,
-                  onTap: () => _pickEngine(),
+                  onTap: _pickEngine,
                 )),
-            // 随内核显隐的专有设置
-            Obx(() {
-              final engine = controller.vodPlayerEngine.value;
-              if (engine == PlayerEngine.mpv) {
-                return Column(
-                  children: [
-                    Divider(color: AppTheme.borderLight, height: 1),
-                    SettingsRow(
-                      icon: Icons.memory,
-                      title: '视频解码（MPV）',
-                      value: controller.decodeMode.value.title,
-                      onTap: () => _pickDecodeMode(),
-                    ),
-                    Divider(color: AppTheme.borderLight, height: 1),
-                    SettingsRow(
-                      icon: Icons.storage_outlined,
-                      title: 'MPV缓冲',
-                      value: controller.vlcBufferMode.value.title,
-                      onTap: () => _pickBufferMode(),
-                    ),
-                  ],
-                );
-              }
-              if (engine == PlayerEngine.webview) {
-                return Column(
-                  children: [
-                    Divider(color: AppTheme.borderLight, height: 1),
-                    Obx(() => SettingsRow(
-                          icon: Icons.javascript,
-                          title: '网页 JS',
-                          value: PlayerPrefs.instance.webviewEnableJs.value
-                              ? '已开启'
-                              : '已关闭',
-                          trailingSwitch: true,
-                          switchValue:
-                              PlayerPrefs.instance.webviewEnableJs.value,
-                          onSwitchChanged: (v) =>
-                              PlayerPrefs.instance.setWebviewEnableJs(v),
-                        )),
-                    Divider(color: AppTheme.borderLight, height: 1),
-                    Obx(() => SettingsRow(
-                          icon: Icons.screen_rotation,
-                          title: '强制横屏',
-                          value: PlayerPrefs
-                                  .instance.webviewForceLandscape.value
-                              ? '已开启'
-                              : '已关闭',
-                          trailingSwitch: true,
-                          switchValue: PlayerPrefs
-                              .instance.webviewForceLandscape.value,
-                          onSwitchChanged: (v) => PlayerPrefs.instance
-                              .setWebviewForceLandscape(v),
-                        )),
-                  ],
-                );
-              }
-              return Column(
-                children: [
-                  Divider(color: AppTheme.borderLight, height: 1),
-                  Obx(() => SettingsRow(
-                        icon: Icons.skip_next,
-                        title: '自动下一集',
-                        value: PlayerPrefs.instance.avAutoNext.value
-                            ? '已开启'
-                            : '已关闭',
-                        trailingSwitch: true,
-                        switchValue: PlayerPrefs.instance.avAutoNext.value,
-                        onSwitchChanged: (v) =>
-                            PlayerPrefs.instance.setAvAutoNext(v),
-                      )),
-                ],
-              );
-            }),
+            Obx(() => SettingsRow(
+                  icon: Icons.aspect_ratio,
+                  title: '画面填充',
+                  value: _fillModeText(PlayerPrefs.instance.videoFillMode.value),
+                  onTap: _pickFillMode,
+                )),
+            // 随内核显隐的专有项
+            Obx(() => controller.vodPlayerEngine.value == PlayerEngine.mpv
+                ? SettingsRow(
+                    icon: Icons.memory,
+                    title: '视频解码（MPV）',
+                    value: controller.decodeMode.value.title,
+                    onTap: _pickDecodeMode,
+                  )
+                : const SizedBox.shrink()),
+            Obx(() => controller.vodPlayerEngine.value == PlayerEngine.mpv
+                ? SettingsRow(
+                    icon: Icons.sd_card_outlined,
+                    title: 'MPV 缓冲',
+                    value: controller.vlcBufferMode.value.title,
+                    onTap: _pickBufferMode,
+                  )
+                : const SizedBox.shrink()),
+            Obx(() => controller.vodPlayerEngine.value == PlayerEngine.webview
+                ? SettingsRow(
+                    icon: Icons.javascript,
+                    title: '网页 JS',
+                    value: PlayerPrefs.instance.webviewEnableJs.value
+                        ? '已开启'
+                        : '已关闭',
+                    onTap: () => PlayerPrefs.instance.setWebviewEnableJs(
+                        !PlayerPrefs.instance.webviewEnableJs.value),
+                  )
+                : const SizedBox.shrink()),
           ],
         ),
+        const SizedBox(height: AppTheme.spacingLG),
 
-        // ---------- 通用播放项 ----------
+        // ---------- 播放 ----------
         SettingsGroup(
-          title: '播放行为',
+          title: '播放',
+          children: [
+            Obx(() => _stepperRow(
+                  icon: Icons.speed,
+                  title: '默认倍速',
+                  value: PlayerPrefs.instance.defaultSpeed.value,
+                  text:
+                      '${PlayerPrefs.instance.defaultSpeed.value.toStringAsFixed(1)}',
+                  min: 0.5,
+                  max: 3.0,
+                  step: 0.5,
+                  onChanged: PlayerPrefs.instance.setDefaultSpeed,
+                )),
+            Obx(() => _stepperRow(
+                  icon: Icons.fast_forward,
+                  title: '快进快退秒数',
+                  value: controller.playTimeStep.value.toDouble(),
+                  text: '${controller.playTimeStep.value}',
+                  min: 5,
+                  max: 60,
+                  step: 5,
+                  onChanged: (v) =>
+                      controller.setPlayTimeStep(v.round()),
+                )),
+            Obx(() => _stepperRow(
+                  icon: Icons.touch_app,
+                  title: '长按倍速',
+                  value: PlayerPrefs.instance.longPressSpeed.value,
+                  text:
+                      '${PlayerPrefs.instance.longPressSpeed.value.toStringAsFixed(1)}',
+                  min: 1.5,
+                  max: 5.0,
+                  step: 0.5,
+                  onChanged: PlayerPrefs.instance.setLongPressSpeed,
+                )),
+            Obx(() => unifiedSwitchRow(
+                  icon: Icons.swipe,
+                  title: '长按滑动调节倍速',
+                  subtitle: '关闭后长按仅使用固定倍速',
+                  value: PlayerPrefs.instance.longPressAdjustable.value,
+                  onChanged: PlayerPrefs.instance.setLongPressAdjustable,
+                )),
+            Obx(() => unifiedSwitchRow(
+                  icon: Icons.screen_rotation,
+                  title: '优先横屏',
+                  value: PlayerPrefs.instance.preferLandscape.value,
+                  onChanged: PlayerPrefs.instance.setPreferLandscape,
+                )),
+            Obx(() => unifiedSwitchRow(
+                  icon: Icons.timer_outlined,
+                  title: '进度条显示总时长',
+                  subtitle: '关闭则显示剩余时长',
+                  value: PlayerPrefs.instance.showTotalDuration.value,
+                  onChanged: PlayerPrefs.instance.setShowTotalDuration,
+                )),
+            Obx(() => unifiedSwitchRow(
+                  icon: Icons.hide_source,
+                  title: '隐藏中央快进快退',
+                  value: PlayerPrefs.instance.hideCenterSeek.value,
+                  onChanged: PlayerPrefs.instance.setHideCenterSeek,
+                )),
+            Obx(() => unifiedSwitchRow(
+                  icon: Icons.pause_circle_outline,
+                  title: '进入后台暂停',
+                  value: PlayerPrefs.instance.pauseOnBackground.value,
+                  onChanged: PlayerPrefs.instance.setPauseOnBackground,
+                )),
+            Obx(() => unifiedSwitchRow(
+                  icon: Icons.notifications_none,
+                  title: '跳过提示',
+                  subtitle: '跳过片头片尾时显示横幅与轻提示',
+                  value: PlayerPrefs.instance.skipHint.value,
+                  onChanged: PlayerPrefs.instance.setSkipHint,
+                )),
+            Obx(() => unifiedSwitchRow(
+                  icon: Icons.switch_video,
+                  title: '切集提示',
+                  subtitle: '切集时显示「正在切换至 第X集」轻提示',
+                  value: PlayerPrefs.instance.switchEpisodeHint.value,
+                  onChanged: PlayerPrefs.instance.setSwitchEpisodeHint,
+                )),
+          ],
+        ),
+        const SizedBox(height: AppTheme.spacingLG),
+
+        // ---------- 信息显示 ----------
+        SettingsGroup(
+          title: '信息显示',
+          children: [
+            Obx(() => unifiedSwitchRow(
+                  icon: Icons.bar_chart,
+                  title: '显示帧率与编码',
+                  subtitle: '影响观影性能',
+                  value: PlayerPrefs.instance.showFpsCodec.value,
+                  onChanged: PlayerPrefs.instance.setShowFpsCodec,
+                )),
+            Obx(() => unifiedSwitchRow(
+                  icon: Icons.speed,
+                  title: '始终显示网速',
+                  subtitle: '无需开启上方信息栏即可看到下载速度',
+                  value: PlayerPrefs.instance.alwaysShowSpeed.value,
+                  onChanged: PlayerPrefs.instance.setAlwaysShowSpeed,
+                )),
+          ],
+        ),
+        const SizedBox(height: AppTheme.spacingLG),
+
+        // ---------- 其他（原有项，保留）----------
+        SettingsGroup(
+          title: '其他',
           children: [
             Obx(() => SettingsRow(
-                  icon: Icons.fast_forward,
-                  title: '快进步长',
-                  value: '${controller.playTimeStep.value}秒',
-                  onTap: () => _pickTimeStep(),
+                  icon: Icons.skip_next_outlined,
+                  title: '自动下一集',
+                  value: PlayerPrefs.instance.avAutoNext.value ? '已开启' : '已关闭',
+                  onTap: () => PlayerPrefs.instance
+                      .setAvAutoNext(!PlayerPrefs.instance.avAutoNext.value),
                 )),
             Obx(() => SettingsRow(
-                  icon: Icons.battery_saver,
+                  icon: Icons.screen_lock_landscape_outlined,
+                  title: '强制横屏（网页）',
+                  value: PlayerPrefs.instance.webviewForceLandscape.value
+                      ? '已开启'
+                      : '已关闭',
+                  onTap: () => PlayerPrefs.instance.setWebviewForceLandscape(
+                      !PlayerPrefs.instance.webviewForceLandscape.value),
+                )),
+            Obx(() => SettingsRow(
+                  icon: Icons.volume_off_outlined,
                   title: '静音后台保活',
                   value: PlayerPrefs.instance.silentKeepAlive.value
                       ? '已开启'
                       : '已关闭',
-                  trailingSwitch: true,
-                  switchValue: PlayerPrefs.instance.silentKeepAlive.value,
-                  onSwitchChanged: (v) =>
-                      PlayerPrefs.instance.setSilentKeepAlive(v),
+                  onTap: () => PlayerPrefs.instance.setSilentKeepAlive(
+                      !PlayerPrefs.instance.silentKeepAlive.value),
                 )),
             SettingsRow(
-              icon: Icons.hourglass_top,
+              icon: Icons.skip_previous_outlined,
               title: '默认跳过片头',
-              value: _skipIntro > 0 ? '$_skipIntro秒' : '关闭',
+              value: _skipIntro == 0 ? '关闭' : '$_skipIntro秒',
               onTap: () => _pickSkipSeconds(intro: true),
             ),
             SettingsRow(
-              icon: Icons.hourglass_bottom,
+              icon: Icons.skip_next_outlined,
               title: '默认跳过片尾',
-              value: _skipOutro > 0 ? '$_skipOutro秒' : '关闭',
+              value: _skipOutro == 0 ? '关闭' : '$_skipOutro秒',
               onTap: () => _pickSkipSeconds(intro: false),
             ),
             Obx(() => SettingsRow(
                   icon: Icons.high_quality_outlined,
                   title: '默认画质',
-                  value:
-                      PlayerPrefs.instance.defaultQuality.value == 1
-                          ? '最高'
-                          : '自动',
+                  value: PlayerPrefs.instance.defaultQuality.value == 1
+                      ? '最高清晰度'
+                      : '自动',
                   onTap: () async {
-                    final q = await SettingsDialogs.pick<int>(
-                      context: context,
-                      title: '默认画质',
-                      options: const [0, 1],
-                      selected: PlayerPrefs.instance.defaultQuality.value,
-                      labelBuilder: (v) => v == 1 ? '最高清晰度' : '自动',
-                    );
-                    if (q != null) {
-                      await PlayerPrefs.instance.setDefaultQuality(q);
-                    }
+                    final cur = PlayerPrefs.instance.defaultQuality.value;
+                    await PlayerPrefs.instance.setDefaultQuality(cur == 1 ? 0 : 1);
                   },
                 )),
           ],
         ),
+        const SizedBox(height: AppTheme.spacingLG),
 
         // ---------- 诊断 ----------
         SettingsGroup(
@@ -200,16 +284,115 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
             SettingsRow(
               icon: Icons.bug_report_outlined,
               title: '调试日志',
-              value: '查看 / 清空',
+              value: '查看最近记录',
               onTap: _showDebugLogDialog,
             ),
           ],
-          hint: '播放异常时可先看日志；日志位于应用文档目录，包含源加载、刮削、弹幕等关键流程。',
         ),
       ],
     );
   }
 
+  // ============================================================
+  // 组件
+  // ============================================================
+
+  String _fillModeText(int v) => switch (v) {
+        1 => '裁剪铺满',
+        2 => '拉伸铺满',
+        _ => '原比例',
+      };
+
+  Future<void> _pickFillMode() async {
+    final v = await SettingsDialogs.pick<int>(
+      context: context,
+      title: '画面填充',
+      options: const [0, 1, 2],
+      selected: PlayerPrefs.instance.videoFillMode.value,
+      labelBuilder: _fillModeText,
+    );
+    if (v != null) await PlayerPrefs.instance.setVideoFillMode(v);
+  }
+
+  /// 数值步进行（− 值 ＋），对应参考图的默认倍速/快进秒数/长按倍速
+  Widget _stepperRow({
+    required IconData icon,
+    required String title,
+    required double value,
+    required String text,
+    required double min,
+    required double max,
+    required double step,
+    required ValueChanged<double> onChanged,
+  }) {
+    final canMinus = value > min + 1e-6;
+    final canPlus = value < max - 1e-6;
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppTheme.spacingXS, vertical: 6),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AppTheme.accentColor.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Icon(icon, size: 17, color: AppTheme.accentColor),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(title,
+                style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontSubhead + 0.5,
+                    fontWeight: FontWeight.w500)),
+          ),
+          _stepButton(Icons.remove, canMinus, () {
+            final v = (value - step);
+            onChanged(v < min ? min : v);
+          }),
+          SizedBox(
+            width: 54,
+            child: Text(text,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontSubhead + 0.5,
+                    fontWeight: FontWeight.w600)),
+          ),
+          _stepButton(Icons.add, canPlus, () {
+            final v = (value + step);
+            onChanged(v > max ? max : v);
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _stepButton(IconData icon, bool enabled, VoidCallback onTap) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: enabled ? onTap : null,
+      child: Container(
+        width: 28,
+        height: 28,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AppTheme.accentColor
+              .withValues(alpha: enabled ? 0.18 : 0.06),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon,
+            size: 16,
+            color: enabled
+                ? AppTheme.accentColor
+                : AppTheme.textTertiary.withValues(alpha: 0.5)),
+      ),
+    );
+  }
   // ============================================================
   // 选择器
   // ============================================================
@@ -247,16 +430,6 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
     if (m != null) await controller.setVLCBufferMode(m);
   }
 
-  Future<void> _pickTimeStep() async {
-    final step = await SettingsDialogs.pick<int>(
-      context: context,
-      title: '快进步长',
-      options: controller.playTimeStepOptions,
-      selected: controller.playTimeStep.value,
-      labelBuilder: (s) => '$s秒',
-    );
-    if (step != null) await controller.setPlayTimeStep(step);
-  }
 
   /// 选择默认跳过片头/片尾秒数（与详情页播放器内设置共用同一 key）
   Future<void> _pickSkipSeconds({required bool intro}) async {

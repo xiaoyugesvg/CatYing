@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../common/theme.dart';
 import '../../services/player_prefs.dart';
+import '../shelf/controller.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:rfw/rfw.dart' show DynamicMap;
 import '../../services/api_config.dart';
@@ -977,11 +978,15 @@ class _HomePageState extends State<HomePage> {
         break;
 
       case 'openHistory':
+        // 「史藏」合并页：切到该 tab 并选中内部「播放历史」
+        ShelfController.instance.tab.value = 0;
         MainTabController.instance.select(1);
         break;
 
       case 'openFavorite':
-        MainTabController.instance.select(2);
+        // 「史藏」合并页：切到该 tab 并选中内部「我的收藏」
+        ShelfController.instance.tab.value = 1;
+        MainTabController.instance.select(1);
         break;
 
       case 'openPush':

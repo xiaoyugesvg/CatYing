@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import '../../common/theme.dart';
+import '../../models/movie.dart';
 import '../../models/source_bean.dart';
+import '../../services/api_config.dart';
 import '../../widgets/vod_card.dart';
 import '../../widgets/common_widgets.dart';
 import 'controller.dart';
@@ -31,6 +34,9 @@ class _SearchPageState extends State<SearchPage> {
   final _searchController = Get.find<TvSearchController>();
   final _inputController = TextEditingController();
   final _focusNode = FocusNode();
+
+  /// 结果展示：false = 网格（海报墙），true = 列表（带标题/来源）
+  final _listMode = false.obs;
 
   @override
   void initState() {
@@ -62,82 +68,179 @@ class _SearchPageState extends State<SearchPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // AppBar 与背景同色，标题居中；右侧放「搜源」与「列表/网格」切换
+      appBar: AppBar(
+        backgroundColor: AppTheme.backgroundPrimary,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        centerTitle: true,
+        iconTheme: IconThemeData(color: AppTheme.textPrimary),
+        title: Text('搜索',
+            style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 17,
+                fontWeight: FontWeight.w600)),
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_ios_new,
+              size: 18, color: AppTheme.textPrimary),
+          onPressed: () {
+            if (widget.onClose != null) {
+              widget.onClose!();
+            } else {
+              Navigator.of(context).maybePop();
+            }
+          },
+        ),
+        actions: [
+          // 跳到源列表（搜索历史区没有源面板时可用来选源）
+          IconButton(
+            icon: Icon(Icons.manage_search,
+                size: 22, color: AppTheme.accentColor),
+            tooltip: '选择搜索源',
+            onPressed: _openSourcePicker,
+          ),
+          // 网格 / 列表切换
+          Obx(() => IconButton(
+                icon: Icon(
+                  _listMode.value
+                      ? Icons.view_list_rounded
+                      : Icons.grid_view_rounded,
+                  size: 22,
+                  color: AppTheme.accentColor,
+                ),
+                tooltip: _listMode.value ? '网格显示' : '列表显示',
+                onPressed: () => _listMode.value = !_listMode.value,
+              )),
+        ],
+      ),
       body: Container(
         color: AppTheme.backgroundPrimary,
-        child: SafeArea(
-          child: Column(
-            children: [
-              _buildSearchBar(),
-              Expanded(
-                child: Obx(() {
-                  // 对应 Swift: if viewModel.activeSites.isEmpty && !viewModel.isSearching
-                  if (_searchController.activeSites.isEmpty &&
-                      !_searchController.isSearching.value) {
-                    return _buildSearchHistorySection();
-                  }
-                  // 对应 Swift: GeometryReader + HStack(siteListPanel + resultsPanel)
-                  return _buildSearchResultsLayout();
-                }),
-              ),
-            ],
-          ),
+        child: Column(
+          children: [
+            _buildSearchBar(),
+            Expanded(
+              child: Obx(() {
+                // 对应 Swift: if viewModel.activeSites.isEmpty && !viewModel.isSearching
+                if (_searchController.activeSites.isEmpty &&
+                    !_searchController.isSearching.value) {
+                  return _buildSearchHistorySection();
+                }
+                // 对应 Swift: GeometryReader + HStack(siteListPanel + resultsPanel)
+                return _buildSearchResultsLayout();
+              }),
+            ),
+          ],
         ),
       ),
     );
   }
 
+  /// 「选择搜索源」：底部弹窗列出可用源，选中即对该源单独搜索
+  Future<void> _openSourcePicker() async {
+    final sites = _searchController.activeSites.isNotEmpty
+        ? _searchController.activeSites
+        : ApiConfig.instance.getSearchableSources();
+    if (sites.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('当前源没有可搜索的站点')));
+      return;
+    }
+    final picked = await showModalBottomSheet<SourceBean>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Row(
+                children: [
+                  Text('选择搜索源',
+                      style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  Text('点选即搜索',
+                      style: TextStyle(
+                          color: AppTheme.textTertiary,
+                          fontSize: AppTheme.fontCaption)),
+                ],
+              ),
+            ),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: sites.length,
+                itemBuilder: (c, i) => ListTile(
+                  leading: Icon(Icons.dns_outlined,
+                      size: 18, color: AppTheme.accentColor),
+                  title: Text(sites[i].name,
+                      style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontSubhead)),
+                  onTap: () => Navigator.pop(ctx, sites[i]),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    final kw = _inputController.text.trim();
+    if (kw.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请先输入搜索内容')));
+      return;
+    }
+    _searchController.keyword.value = kw;
+    await _searchController.searchInSource(picked);
+  }
+
   // MARK: - 搜索栏
 
-  /// 搜索栏 - 对应 Swift searchBar (含独立搜索按钮 + 渐变)
+  /// 搜索栏（AppBar 下面一行）：圆角输入框 + 内嵌放大镜 + 右侧实心「搜索」按钮
   Widget _buildSearchBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingSM, AppTheme.spacingXL, AppTheme.spacingXL, AppTheme.spacingMD),
+          AppTheme.spacingLG, AppTheme.spacingXS, AppTheme.spacingLG, AppTheme.spacingMD),
       child: Row(
         children: [
-          // 返回按钮 - 对应 Swift .sheet dismiss
-          IconButton(
-            icon: Icon(Icons.arrow_back,
-                color: AppTheme.textPrimary, size: 22),
-            onPressed: () {
-              if (widget.onClose != null) {
-                widget.onClose!();
-              } else {
-                Navigator.of(context).maybePop();
-              }
-            },
-            padding: const EdgeInsets.only(right: AppTheme.spacingSM),
-            constraints: const BoxConstraints(),
-          ),
           Expanded(
             child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppTheme.spacingLG, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              height: 44,
               decoration: BoxDecoration(
-                color: AppTheme.backgroundSecondary,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.05),
-                ),
+                color: AppTheme.backgroundTertiary,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: AppTheme.glassBorder, width: 0.8),
               ),
               child: Row(
                 children: [
                   Icon(Icons.search,
-                      color: AppTheme.textSecondary, size: 18),
-                  const SizedBox(width: AppTheme.spacingSM + AppTheme.spacingXS),
+                      color: AppTheme.textTertiary, size: 18),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: TextField(
                       controller: _inputController,
                       focusNode: _focusNode,
+                      cursorColor: AppTheme.accentColor,
+                      cursorWidth: 2,
                       style: TextStyle(
                         color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontHeadline,
+                        fontSize: AppTheme.fontSubhead + 1,
                       ),
                       decoration: InputDecoration(
-                        hintText: '搜索影片...',
+                        hintText: '搜索影视...',
                         hintStyle: TextStyle(
                             color: AppTheme.textTertiary,
-                            fontSize: AppTheme.fontHeadline),
+                            fontSize: AppTheme.fontSubhead + 1),
                         border: InputBorder.none,
                         isDense: true,
                         contentPadding: EdgeInsets.zero,
@@ -148,9 +251,7 @@ class _SearchPageState extends State<SearchPage> {
                           _searchController.search();
                         }
                       },
-                      // 输入防抖（400ms）：控制器里的 onKeywordChanged 之前
-                      // 零调用点，属于「写了但没接上」的死代码。这里接上后
-                      // 停止输入即自动搜索，不必再按回车/点按钮。
+                      // 输入防抖（400ms）：停止输入即自动搜索
                       onChanged: (value) {
                         _searchController.onKeywordChanged(value, (kw) async {
                           await _searchController.searchFromDebounce(kw);
@@ -158,13 +259,12 @@ class _SearchPageState extends State<SearchPage> {
                       },
                     ),
                   ),
-                  // 清除按钮 - 对应 Swift xmark.circle.fill
+                  // 清除按钮
                   Obx(() => _searchController.keyword.value.isNotEmpty
                       ? GestureDetector(
                           onTap: () {
                             _inputController.clear();
                             _focusNode.unfocus();
-                            // 对应 Swift: 清空所有搜索状态
                             _searchController.keyword.value = '';
                             _searchController.resultsBySite.clear();
                             _searchController.searchingStatus.clear();
@@ -182,7 +282,7 @@ class _SearchPageState extends State<SearchPage> {
             ),
           ),
           const SizedBox(width: AppTheme.spacingSM),
-          // 搜索按钮 - iOS 风格圆形图标按钮 (不喧宾夺主)
+          // 「搜索」实心按钮（参考图样式）
           GestureDetector(
             onTap: () {
               final text = _inputController.text.trim();
@@ -192,24 +292,18 @@ class _SearchPageState extends State<SearchPage> {
               }
             },
             child: Container(
-              width: 40,
-              height: 40,
+              height: 44,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: AppTheme.accentColor,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.accentColor.withValues(alpha: 0.35),
-                    blurRadius: 10,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
+                borderRadius: BorderRadius.circular(22),
               ),
-              child: const Icon(
-                Icons.search,
-                color: Colors.white,
-                size: 20,
-              ),
+              child: const Text('搜索',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600)),
             ),
           ),
         ],
@@ -233,6 +327,95 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
+  /// 列表模式的一行（小海报 + 片名 + 备注/来源）
+  Widget _resultListRow(Video v) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => Get.toNamed('/detail', arguments: v),
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundCard,
+          borderRadius: BorderRadius.circular(AppTheme.glassRadiusSmall),
+          border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
+        ),
+        child: Row(
+          children: [
+            // 小海报
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 62,
+                height: 84,
+                child: (v.pic.trim().isEmpty || !v.pic.startsWith('http'))
+                    ? ColoredBox(
+                        color: AppTheme.backgroundTertiary,
+                        child: Icon(Icons.movie_outlined,
+                            size: 22, color: AppTheme.textTertiary),
+                      )
+                    : CachedNetworkImage(
+                        imageUrl: v.pic,
+                        fit: BoxFit.fill,
+                        placeholder: (_, __) =>
+                            ColoredBox(color: AppTheme.backgroundTertiary),
+                        errorWidget: (_, __, ___) => ColoredBox(
+                          color: AppTheme.backgroundTertiary,
+                          child: Icon(Icons.broken_image_outlined,
+                              size: 20, color: AppTheme.textTertiary),
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    v.name,
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontSubhead + 1,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (v.note.trim().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      v.note.trim(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: AppTheme.textTertiary,
+                          fontSize: AppTheme.fontCaption),
+                    ),
+                  ],
+                  if (v.sourceKey.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      v.sourceKey,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: AppTheme.accentColor.withValues(alpha: 0.8),
+                          fontSize: AppTheme.fontCaption),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right,
+                size: 17, color: AppTheme.textTertiary.withValues(alpha: 0.7)),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// 横向源筛选芯片（参考图：搜索中 / 卡卡影视 18 / 橘子影视 1 …）
   Widget _buildSourceChipsBar() {
     return Obx(() {
@@ -252,7 +435,7 @@ class _SearchPageState extends State<SearchPage> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.06),
+                  color: AppTheme.backgroundTertiary,
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
@@ -340,95 +523,6 @@ class _SearchPageState extends State<SearchPage> {
     });
   }
 
-  // MARK: - 站点列表面板
-
-  /// 站点列表面板 - iOS 风格分组列表
-  Widget _buildSiteListPanel() {
-    return Container(
-      color: Colors.transparent,
-      child: Obx(() => ListView.builder(
-            padding: const EdgeInsets.symmetric(vertical: AppTheme.spacingSM),
-            itemCount: _searchController.activeSites.length,
-            itemBuilder: (context, index) {
-              final site = _searchController.activeSites[index];
-              return _buildSiteRow(site);
-            },
-          )),
-    );
-  }
-
-  /// 站点行 - 对应 Swift siteRow
-  Widget _buildSiteRow(SourceBean site) {
-    return Obx(() {
-      final isSelected = _searchController.selectedSiteKey.value == site.key;
-      final isSearching = _searchController.searchingStatus[site.key] ?? false;
-      final count = _searchController.resultCount[site.key] ?? 0;
-
-      return GestureDetector(
-        onTap: () => _searchController.selectSite(site.key),
-        child: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppTheme.spacingSM,
-            vertical: AppTheme.spacingSM + AppTheme.spacingXS,
-          ),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? AppTheme.accentColor.withValues(alpha: 0.1)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(AppTheme.radiusSM),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                site.name,
-                style: TextStyle(
-                  color: isSelected
-                      ? AppTheme.accentColor
-                      : AppTheme.textSecondary,
-                  fontSize: AppTheme.fontSubhead,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: AppTheme.spacingXS),
-              Row(
-                children: [
-                  if (isSearching) ...[
-                    SizedBox(
-                      width: 10,
-                      height: 10,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 1.5,
-                        color: AppTheme.textTertiary,
-                      ),
-                    ),
-                    const SizedBox(width: AppTheme.spacingXS),
-                    Text(
-                      '搜索中...',
-                      style: TextStyle(
-                        color: AppTheme.textTertiary,
-                        fontSize: AppTheme.fontCaption,
-                      ),
-                    ),
-                  ] else
-                    Text(
-                      '$count 条结果',
-                      style: TextStyle(
-                        color: AppTheme.textTertiary,
-                        fontSize: AppTheme.fontCaption,
-                      ),
-                    ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      );
-    });
-  }
-
   // MARK: - 结果面板
 
   /// 结果面板 - 对应 Swift resultsPanel
@@ -496,6 +590,21 @@ class _SearchPageState extends State<SearchPage> {
 
       final results = _searchController.currentResults;
 
+      // 列表模式：横向卡片（小海报 + 标题 + 来源），信息量更大
+      if (_listMode.value) {
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(
+            AppTheme.spacingLG,
+            AppTheme.spacingMD,
+            AppTheme.spacingLG,
+            80,
+          ),
+          itemCount: results.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemBuilder: (context, i) => _resultListRow(results[i]),
+        );
+      }
+
       // 对应 Swift: LazyVGrid(columns: adaptive)
       return LayoutBuilder(
         builder: (context, constraints) {
@@ -537,90 +646,158 @@ class _SearchPageState extends State<SearchPage> {
 
   // MARK: - 搜索历史
 
-  /// 搜索历史区 - 对应 Swift searchHistorySection
+  /// 搜索历史区（参考图样式）
+  ///
+  /// - 热门搜索：**通栏圆角行**，文字居中
+  /// - 搜索历史：**胶囊标签**换行排列，右上角垃圾桶清空
   Widget _buildSearchHistorySection() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(AppTheme.spacingXL),
+      padding: const EdgeInsets.fromLTRB(
+          AppTheme.spacingLG, AppTheme.spacingSM, AppTheme.spacingLG, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 热门搜索：始终显示（无历史时也有内容可点）
-          Text(
-            '热门搜索',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: AppTheme.fontHeadline,
-              fontWeight: FontWeight.bold,
+          // ---------- 热门搜索 ----------
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 12),
+            child: Text(
+              '热门搜索',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
-          const SizedBox(height: AppTheme.spacingLG),
-          Wrap(
-            spacing: AppTheme.spacingSM,
-            runSpacing: AppTheme.spacingSM,
-            children: _hotKeywords.map((keyword) {
-              return SelectableChip(
-                title: keyword,
-                isSelected: false,
-                onTap: () {
-                  _inputController.text = keyword;
-                  _searchController.keyword.value = keyword;
-                  _searchController.search();
-                },
-              );
-            }).toList(),
-          ),
+          for (final kw in _hotKeywords) ...[
+            _hotRow(kw),
+            const SizedBox(height: 10),
+          ],
+
+          // ---------- 搜索历史 ----------
           if (_searchController.searchHistory.isNotEmpty) ...[
-            const SizedBox(height: AppTheme.spacingXL),
-            Row(
-              children: [
-                Text(
-                  '搜索历史',
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: AppTheme.fontHeadline,
-                    fontWeight: FontWeight.bold,
+            const SizedBox(height: 22),
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 12),
+              child: Row(
+                children: [
+                  Text(
+                    '搜索历史',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-                const Spacer(),
-                GestureDetector(
-                  onTap: () => _searchController.clearHistory(),
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete_outline,
-                          color: AppTheme.textTertiary, size: 14),
-                      const SizedBox(width: AppTheme.spacingXS),
-                      Text(
-                        '清空',
-                        style: TextStyle(
-                          color: AppTheme.textTertiary,
-                          fontSize: AppTheme.fontCaption,
-                        ),
-                      ),
-                    ],
+                  const Spacer(),
+                  // 垃圾桶图标清空（参考图样式）
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _confirmClearHistory(),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(Icons.delete_sweep_outlined,
+                          color: AppTheme.textTertiary, size: 20),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-            const SizedBox(height: AppTheme.spacingLG),
-            // 对应 Swift FlowLayout / LazyVGrid
+            // 胶囊标签换行排列
             Wrap(
-              spacing: AppTheme.spacingSM,
-              runSpacing: AppTheme.spacingSM,
+              spacing: 10,
+              runSpacing: 10,
               children: _searchController.searchHistory.map((keyword) {
-                return SelectableChip(
-                  title: keyword,
-                  isSelected: false,
-                  onTap: () {
-                    _inputController.text = keyword;
-                    _searchController.keyword.value = keyword;
-                    _searchController.search();
-                  },
-                );
+                return _historyPill(keyword);
               }).toList(),
             ),
           ],
         ],
       ),
     );
+  }
+
+  /// 热门搜索行：通栏圆角 + 文字居中（对应参考图）
+  Widget _hotRow(String keyword) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _runSearch(keyword),
+      child: Container(
+        height: 46,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundCard,
+          borderRadius: BorderRadius.circular(23),
+          border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
+        ),
+        child: Text(
+          keyword,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontSubhead + 1,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 搜索历史胶囊
+  Widget _historyPill(String keyword) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _runSearch(keyword),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
+        ),
+        child: Text(
+          keyword,
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: AppTheme.fontSubhead,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 统一的「点词即搜索」
+  void _runSearch(String keyword) {
+    _inputController.text = keyword;
+    _searchController.keyword.value = keyword;
+    _searchController.search();
+  }
+
+  /// 清空搜索历史前确认（避免误触把记录清掉）
+  Future<void> _confirmClearHistory() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppTheme.glassRadius)),
+        title:
+            Text('清空搜索历史', style: TextStyle(color: AppTheme.textPrimary)),
+        content: Text('将删除全部搜索历史记录，确定？',
+            style: TextStyle(color: AppTheme.textSecondary)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('取消',
+                style: TextStyle(color: AppTheme.textTertiary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('清空', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) await _searchController.clearHistory();
   }
 }

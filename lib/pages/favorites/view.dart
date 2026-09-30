@@ -6,7 +6,33 @@ import '../../widgets/common_widgets.dart';
 import '../../models/cache_store.dart';
 import '../../models/movie.dart';
 import '../../services/player_prefs.dart';
+import '../shelf/controller.dart';
 import 'controller.dart';
+
+/// 「史藏」父页用它做「全选」：当前搜索过滤后可见项的 key 列表
+List<String> favoritesVisibleKeys() {
+  final kw = PlayerPrefs.instance.favKeyword.value.trim().toLowerCase();
+  final all = CacheStore.instance.favorites;
+  final list = kw.isEmpty
+      ? all
+      : all.where((e) => e.vodName.toLowerCase().contains(kw)).toList();
+  return list.map((e) => ShelfController.keyOf('fav', e.vodId)).toList();
+}
+
+/// 取消收藏（供「史藏」编辑模式批量删除调用）。
+///
+/// 按 vodId 回查原始条目拿 sourceKey —— removeCollect 需要两者，
+/// 而 key 是 `fav|<vodId>`；vodId 本身可能含 `|`，回查更稳。
+Future<void> deleteFavoriteItems(List<String> keys) async {
+  final ids =
+      keys.map((k) => k.startsWith('fav|') ? k.substring(4) : k).toSet();
+  final targets = CacheStore.instance.favorites
+      .where((f) => ids.contains(f.vodId))
+      .toList();
+  for (final f in targets) {
+    await CacheStore.instance.removeCollect(f.vodId, f.sourceKey);
+  }
+}
 
 /// 收藏页 - 对应 Swift FavoritesView
 class FavoritesPage extends StatefulWidget {
@@ -51,7 +77,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
         child: SafeArea(
           child: Column(
             children: [
-              _buildHeader(controller),
+              _buildToolbar(controller),
               // 搜索栏（点击放大镜展开）
               if (_searching) _buildSearchField(),
               Expanded(child: _buildContent(controller)),
@@ -168,22 +194,15 @@ class _FavoritesPageState extends State<FavoritesPage> {
     );
   }
 
-  Widget _buildHeader(FavoritesController controller) {
+  /// 工具栏：搜索 + 布局切换 + 排序 + 清空
+  ///（标题「我的收藏」与「编辑/全选」由父页「史藏」统一提供）
+  Widget _buildToolbar(FavoritesController controller) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingXL, AppTheme.spacingLG, AppTheme.spacingXL, AppTheme.spacingSM),
+          AppTheme.spacingXL, AppTheme.spacingSM, AppTheme.spacingXL, AppTheme.spacingSM),
       child: Row(
         children: [
-          Text(
-            '我的收藏',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: AppTheme.fontTitle3,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const Spacer(),
-          // 搜索（展开输入框）与 布局切换
+          // 搜索（展开输入框）
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: _toggleSearch,
@@ -198,6 +217,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
               ),
             ),
           ),
+          // 布局切换
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: _openLayoutSheet,
@@ -210,6 +230,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
               ),
             ),
           ),
+          const Spacer(),
           Obx(() {
             if (CacheStore.instance.favorites.isEmpty) {
               return const SizedBox.shrink();
@@ -239,18 +260,18 @@ class _FavoritesPageState extends State<FavoritesPage> {
                   ),
                 ),
                 TextButton(
-              // 不要用 Get.context! 强解包：该 context 为空时会直接崩。
-              onPressed: () {
-                final ctx = Get.context;
-                if (ctx == null) return;
-                _showClearConfirmDialog(ctx, controller);
-              },
-              child: Text(
-                '清空',
-                style: TextStyle(
-                    color: AppTheme.textTertiary,
-                    fontSize: AppTheme.fontCaption),
-              ),
+                  // 不要用 Get.context! 强解包：该 context 为空时会直接崩。
+                  onPressed: () {
+                    final ctx = Get.context;
+                    if (ctx == null) return;
+                    _showClearConfirmDialog(ctx, controller);
+                  },
+                  child: Text(
+                    '清空',
+                    style: TextStyle(
+                        color: AppTheme.textTertiary,
+                        fontSize: AppTheme.fontCaption),
+                  ),
                 ),
               ],
             );
@@ -259,7 +280,6 @@ class _FavoritesPageState extends State<FavoritesPage> {
       ),
     );
   }
-
   Widget _buildContent(FavoritesController controller) {
     return Obx(() {
       final all = controller.favoritesList;
@@ -326,19 +346,40 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 pic: item.vodPic,
                 sourceKey: item.sourceKey,
               );
-              return VodCard(
-                video: video,
-                // 图片区约 1.5 倍高（与上面的 childAspectRatio 配套）
-                posterHeightRatio: 1.015,
-                onTap: () => Get.toNamed('/detail', arguments: video),
-                onLongPress: () =>
-                    _showUnfavoriteDialog(context, controller, item),
-              );
+              final shelf = ShelfController.instance;
+              final key = ShelfController.keyOf('fav', item.vodId);
+              return Obx(() {
+                final editing = shelf.editing.value;
+                return VodCard(
+                  video: video,
+                  // 图片区约 1.5 倍高（与上面的 childAspectRatio 配套）
+                  posterHeightRatio: 1.015,
+                  editMode: editing,
+                  selected: shelf.isSelected(key),
+                  onToggleSelect: () => shelf.toggleSelect(key),
+                  onDelete: () => _removeOne(controller, item),
+                  // 编辑模式下点卡片 = 切换选中，而不是进详情
+                  onTap: editing
+                      ? () => shelf.toggleSelect(key)
+                      : () => Get.toNamed('/detail', arguments: video),
+                  onLongPress: editing
+                      ? null
+                      : () => _showUnfavoriteDialog(context, controller, item),
+                );
+              });
             },
           );
         },
       );
     });
+  }
+
+  /// 编辑模式右上角 ✕：立即取消收藏
+  ///（不弹二次确认 —— 进入编辑模式本身已是显式操作）
+  Future<void> _removeOne(
+      FavoritesController controller, VodCollect item) async {
+    // CacheStore.favorites 是 RxList，删除后 Obx 会自动重建列表
+    await controller.removeItem(item);
   }
 
   void _showUnfavoriteDialog(

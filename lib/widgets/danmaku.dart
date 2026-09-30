@@ -190,6 +190,18 @@ class DanmuLayer extends StatefulWidget {
   /// 由外层用 FractionallySizedBox 限制高度，这里只用于轨道数推算。
   final double areaRatio;
 
+  /// 行间距系数（1.0 ~ 3.0）：轨道间距 = 字号 × 本系数 + 基础间距
+  final double lineSpacing;
+
+  /// 描边宽度（0 ~ 3）：用 4 向投影模拟描边，0 时不描边
+  final double strokeWidth;
+
+  /// 字体粗细（w400 / w500 / w600 / w700）
+  final FontWeight fontWeight;
+
+  /// 弹幕延迟（秒）：正数 = 弹幕比画面晚出现，负数 = 提前
+  final double delaySeconds;
+
   const DanmuLayer({
     super.key,
     required this.danmus,
@@ -202,6 +214,10 @@ class DanmuLayer extends StatefulWidget {
     this.blockTop = false,
     this.blockBottom = false,
     this.areaRatio = 1.0,
+    this.lineSpacing = 1.6,
+    this.strokeWidth = 1.5,
+    this.fontWeight = FontWeight.w500,
+    this.delaySeconds = 0.0,
   });
 
   @override
@@ -433,6 +449,28 @@ class DanmuLayerState extends State<DanmuLayer> {
     super.dispose();
   }
 
+  /// 轨道纵向步长：字号 × 行间距系数（下限 22，避免小字号挤在一起）
+  double get _trackStep {
+    final v = widget.fontSize * widget.lineSpacing;
+    return v < 22 ? 22 : v;
+  }
+
+  /// 用 4 向投影模拟描边（Flutter 的 TextStyle 没有 stroke 属性）。
+  /// strokeWidth 为 0 时退化为一点柔和阴影，保证暗色画面下仍可读。
+  List<Shadow> _strokeShadows() {
+    final w = widget.strokeWidth;
+    if (w <= 0.01) {
+      return const [Shadow(blurRadius: 2, color: Colors.black87)];
+    }
+    // 偏移量越大显得描边越粗；blurRadius 保持 0 才是实边
+    return [
+      Shadow(offset: Offset(-w, 0), color: Colors.black),
+      Shadow(offset: Offset(w, 0), color: Colors.black),
+      Shadow(offset: Offset(0, -w), color: Colors.black),
+      Shadow(offset: Offset(0, w), color: Colors.black),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     return IgnorePointer(
@@ -455,10 +493,10 @@ class DanmuLayerState extends State<DanmuLayer> {
                 Positioned(
                   left: a.item.mode == 1 ? a.x : 0,
                   top: a.item.mode == 1
-                      ? 12.0 + a.track * 28.0
+                      ? 12.0 + a.track * _trackStep
                       : (a.topFixed
-                          ? 12.0 + a.track * 28.0
-                          : h - 34.0 - a.track * 28.0),
+                          ? 12.0 + a.track * _trackStep
+                          : h - 34.0 - a.track * _trackStep),
                   child: Text(
                     a.item.text,
                     // 弹幕字号由用户单独设置，豁免全局字号缩放，
@@ -467,10 +505,8 @@ class DanmuLayerState extends State<DanmuLayer> {
                     style: TextStyle(
                       color: a.item.color.withValues(alpha: widget.opacity),
                       fontSize: widget.fontSize,
-                      fontWeight: FontWeight.w500,
-                      shadows: const [
-                        Shadow(blurRadius: 2, color: Colors.black87),
-                      ],
+                      fontWeight: widget.fontWeight,
+                      shadows: _strokeShadows(),
                     ),
                     maxLines: 1,
                     softWrap: false,

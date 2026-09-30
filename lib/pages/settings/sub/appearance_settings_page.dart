@@ -116,6 +116,7 @@ class _AppearanceSettingsPageState extends State<AppearanceSettingsPage> {
             SettingsRow(
               icon: Icons.brightness_6_outlined,
               title: '外观模式',
+              subtitle: '决定文字明暗，并自动切换到该模式的背景',
               value: switch (ThemeModeStore.mode) {
                 ThemeMode.light => '浅色',
                 ThemeMode.system => '跟随系统',
@@ -126,11 +127,11 @@ class _AppearanceSettingsPageState extends State<AppearanceSettingsPage> {
             Obx(() => SettingsRow(
                   icon: Icons.wallpaper_outlined,
                   title: '壁纸与背景',
+                  subtitle: '浅色/深色各有一套独立背景',
                   value: bg.wallpaperDisplayName,
                   onTap: () => Get.to(() => const WallpaperSettingsPage()),
                 )),
           ],
-          hint: '选浅色壁纸（如皎月白）会自动改用深色文字，避免白字白底看不清。',
         ),
         SettingsGroup(
           title: '文字与首页',
@@ -138,6 +139,7 @@ class _AppearanceSettingsPageState extends State<AppearanceSettingsPage> {
             Obx(() => SettingsRow(
                   icon: Icons.text_fields,
                   title: '界面字号',
+                  subtitle: '作用于全部界面文字（弹幕字号单独设置）',
                   value:
                       '${(PlayerPrefs.instance.fontScale.value * 100).round()}%',
                   onTap: _pickFontScale,
@@ -145,6 +147,7 @@ class _AppearanceSettingsPageState extends State<AppearanceSettingsPage> {
             Obx(() => SettingsRow(
                   icon: Icons.dashboard_customize_outlined,
                   title: '首页主题',
+                  subtitle: '用 .rfwtxt 自定义首页布局',
                   value: rfw.enabled.value
                       ? (rfw.currentThemeId.value.isEmpty
                           ? '未选择主题'

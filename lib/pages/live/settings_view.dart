@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../common/theme.dart';
+import 'blocked_categories_page.dart';
 import '../../services/live_service.dart';
 
 /// 设置 → 直播：直播源管理 + 全局 EPG + 屏蔽分类
@@ -154,47 +155,40 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             ),
           ),
           SizedBox(height: 24),
-          Text('屏蔽分类',
+          Text('屏蔽分类管理',
               style: TextStyle(
                   color: AppTheme.textSecondary,
                   fontSize: 13,
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
+          // 改为跳转独立管理页（可手动输入分类名，也能从当前源里挑）
           Container(
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.06),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Obx(() {
-              final svc = LiveService.instance;
-              // 屏蔽列表显示全部分组（含已屏蔽），勾选状态实时反映
-              final groups = svc.groups;
-              return Column(
-                children: [
-                  if (groups.isEmpty)
-                    const _EmptyRow()
-                  else
-                    for (final g in groups)
-                      CheckboxListTile(
-                        value: !svc.blockedGroups.contains(g.name),
-                        onChanged: (_) => svc.toggleBlockedGroup(g.name),
-                        title: Text(g.name,
-                            style:
-                                TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
-                        subtitle: Text('${g.channels.length} 个频道',
-                            style: TextStyle(
-                                color: AppTheme.textTertiary, fontSize: 11)),
-                        controlAffinity: ListTileControlAffinity.leading,
-                        activeColor: AppTheme.accentColor,
-                      ),
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: Text(
-                      '关闭后隐藏对应分类的频道',
-                      style: TextStyle(color: AppTheme.textTertiary, fontSize: 11),
-                    ),
-                  ),
-                ],
+              final blocked = LiveService.instance.blockedGroups;
+              return ListTile(
+                leading: Icon(Icons.block,
+                    size: 20, color: AppTheme.textSecondary),
+                title: Text('屏蔽分类',
+                    style: TextStyle(
+                        color: AppTheme.textPrimary, fontSize: 14)),
+                subtitle: Text(
+                  blocked.isEmpty
+                      ? '屏蔽后隐藏对应分类的频道'
+                      : '已屏蔽 ${blocked.length} 个：${blocked.take(3).join("、")}'
+                          '${blocked.length > 3 ? "…" : ""}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: AppTheme.textTertiary, fontSize: 11),
+                ),
+                trailing: Icon(Icons.chevron_right,
+                    size: 18, color: AppTheme.textTertiary),
+                onTap: () =>
+                    Get.to(() => const BlockedCategoriesPage()),
               );
             }),
           ),

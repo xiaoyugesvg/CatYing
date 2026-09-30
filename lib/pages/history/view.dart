@@ -6,7 +6,38 @@ import '../../services/player_prefs.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/vod_card.dart';
 import '../../models/cache_store.dart';
+import '../shelf/controller.dart';
 import 'controller.dart';
+
+/// 「史藏」父页用它做「全选」：当前搜索过滤后可见项的 key 列表。
+///
+/// 必须是**过滤后**的列表 —— 否则全选会选中被搜索隐藏的项，
+/// 用户点删除时删掉看不见的东西。
+List<String> historyVisibleKeys() {
+  final kw = PlayerPrefs.instance.historyKeyword.value.trim().toLowerCase();
+  final all = CacheStore.instance.records;
+  final list = kw.isEmpty
+      ? all
+      : all.where((e) => e.vodName.toLowerCase().contains(kw)).toList();
+  return list.map((e) => ShelfController.keyOf('history', e.vodId)).toList();
+}
+
+/// 删除历史（供「史藏」编辑模式批量删除调用）。
+///
+/// 按 vodId 回查原始记录拿 sourceKey —— removeRecord 需要两者，
+/// 而我们的 key 是 `history|<vodId>`；vodId 本身可能含 `|`，
+/// 所以不能简单 split，回查更稳。
+Future<void> deleteHistoryItems(List<String> keys) async {
+  final ids = keys
+      .map((k) => k.startsWith('history|') ? k.substring(8) : k)
+      .toSet();
+  final targets = CacheStore.instance.records
+      .where((r) => ids.contains(r.vodId))
+      .toList();
+  for (final r in targets) {
+    await CacheStore.instance.removeRecord(r.vodId, r.sourceKey);
+  }
+}
 
 /// 历史页 - 对应 Swift HistoryView
 ///
@@ -59,7 +90,7 @@ class _HistoryPageState extends State<HistoryPage> {
         child: SafeArea(
           child: Column(
             children: [
-              _buildHeader(controller),
+              _buildToolbar(controller),
               // 搜索栏（点击放大镜展开）
               if (_searching) _buildSearchField(),
               Expanded(child: _buildContent(controller)),
@@ -176,22 +207,15 @@ class _HistoryPageState extends State<HistoryPage> {
     );
   }
 
-  Widget _buildHeader(HistoryController controller) {
+  /// 工具栏：搜索 + 布局切换 + 清空
+  ///（标题「播放历史」与「编辑/全选」由父页「史藏」统一提供）
+  Widget _buildToolbar(HistoryController controller) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingXL, AppTheme.spacingLG, AppTheme.spacingXL, AppTheme.spacingSM),
+          AppTheme.spacingXL, AppTheme.spacingSM, AppTheme.spacingXL, AppTheme.spacingSM),
       child: Row(
         children: [
-          Text(
-            '历史记录',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: AppTheme.fontTitle3,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const Spacer(),
-          // 搜索（展开输入框）与 布局切换
+          // 搜索（展开输入框）
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: _toggleSearch,
@@ -206,6 +230,7 @@ class _HistoryPageState extends State<HistoryPage> {
               ),
             ),
           ),
+          // 布局切换
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: _openLayoutSheet,
@@ -218,8 +243,11 @@ class _HistoryPageState extends State<HistoryPage> {
               ),
             ),
           ),
+          const Spacer(),
           Obx(() {
-            if (CacheStore.instance.records.isEmpty) return const SizedBox.shrink();
+            if (CacheStore.instance.records.isEmpty) {
+              return const SizedBox.shrink();
+            }
             return TextButton(
               // 不要用 Get.context! 强解包：该 context 为空时会直接崩。
               onPressed: () {
@@ -239,7 +267,6 @@ class _HistoryPageState extends State<HistoryPage> {
       ),
     );
   }
-
   Widget _buildContent(HistoryController controller) {
     return Obx(() {
       final allRecords = CacheStore.instance.records;
@@ -329,22 +356,35 @@ class _HistoryPageState extends State<HistoryPage> {
                 );
               }
               final item = records[index];
-              return VodCard(
-                video: Video(
-                  id: item.vodId,
-                  name: item.vodName,
-                  pic: item.vodPic,
-                  sourceKey: item.sourceKey,
-                  // 备注里放集数/进度，让角标显示"第01集 00:20"
-                  //（与首页/收藏角标同款外观）
-                  note: item.playNote,
-                ),
-                // 图片区约 1.5 倍高（与上面的 aspect 配套）
-                posterHeightRatio: 1.015,
-                onTap: () => controller.openHistory(item),
-                onLongPress: () =>
-                    _showDeleteConfirmDialog(context, controller, item),
-              );
+              final shelf = ShelfController.instance;
+              final key = ShelfController.keyOf('history', item.vodId);
+              return Obx(() {
+                final editing = shelf.editing.value;
+                return VodCard(
+                  video: Video(
+                    id: item.vodId,
+                    name: item.vodName,
+                    pic: item.vodPic,
+                    sourceKey: item.sourceKey,
+                    // 备注里放集数/进度，让角标显示"第01集 00:20"
+                    //（与首页/收藏角标同款外观）
+                    note: item.playNote,
+                  ),
+                  // 图片区约 1.5 倍高（与上面的 aspect 配套）
+                  posterHeightRatio: 1.015,
+                  editMode: editing,
+                  selected: shelf.isSelected(key),
+                  onToggleSelect: () => shelf.toggleSelect(key),
+                  onDelete: () => controller.deleteItem(item),
+                  // 编辑模式下点卡片 = 切换选中，而不是继续播放
+                  onTap: editing
+                      ? () => shelf.toggleSelect(key)
+                      : () => controller.openHistory(item),
+                  onLongPress: editing
+                      ? null
+                      : () => _showDeleteConfirmDialog(context, controller, item),
+                );
+              });
             },
           );
         },

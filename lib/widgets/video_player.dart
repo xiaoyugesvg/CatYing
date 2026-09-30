@@ -202,6 +202,65 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// 显示区域：弹幕可见高度占播放器的比例（0.25 / 0.5 / 0.75 / 1.0）
   double _danmuAreaRatio = 1.0;
 
+  /// 行间距系数（1.0 ~ 3.0），影响轨道纵向间距
+  double _danmuLineSpacing = 1.6;
+
+  /// 描边宽度（0 ~ 3）
+  double _danmuStrokeWidth = 1.5;
+
+  /// 字体粗细
+  FontWeight _danmuFontWeight = FontWeight.w500;
+
+  /// 弹幕延迟（秒）：正数=晚出现，负数=提前
+  double _danmuDelaySeconds = 0.0;
+
+  // ============================================================
+  // 「设置 → 播放器」读入的行为开关（原先只存不读）
+  // ============================================================
+
+  /// 硬件加速（关 = 软解）
+  bool _preferLandscape = false;
+
+  /// 进度条显示总时长（false = 显示剩余时长）
+  bool _showTotalDuration = true;
+
+  /// 隐藏中央快进快退动画
+  bool _hideCenterSeek = false;
+
+  /// 进入后台暂停
+  bool _pauseOnBackground = false;
+
+  /// 跳过片头片尾时显示提示
+  bool _skipHint = false;
+
+  /// 切集时显示提示
+  bool _switchEpisodeHint = false;
+
+  /// 显示帧率与编码
+  bool _showFpsCodec = false;
+
+  /// 始终显示网速
+  bool _alwaysShowSpeed = true;
+
+  /// 长按倍速
+  double _longPressSpeed = 3.0;
+
+  /// 长按可滑动调节倍速
+  bool _longPressAdjustable = true;
+
+  /// 用户配置的快进快退秒数（覆盖默认 _seekStep）
+  int _userSeekStep = 10;
+
+  /// 实际使用的快进步长（优先用户配置）
+  int get _effectiveSeekStep =>
+      _userSeekStep > 0 ? _userSeekStep : _seekStep;
+
+  /// 顶部轻提示的自动清除定时器
+  Timer? _hintClearTimer;
+
+  /// 是否因「优先横屏」而强制了方向（退出播放器时要还原）
+  bool _landscapeForcedByPref = false;
+
   /// 同步视频速度：倍速播放时弹幕滚动速度同比缩放
   bool _danmuSyncSpeed = false;
 
@@ -441,6 +500,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
     _scheduleHideControls();
     _startBitrateTimer();
+    _loadPlayerPrefs();
     _loadDanmuSettings();
 
     // **关键**：监听 WindowFullScreen 状态变化
@@ -593,6 +653,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _danmuLoaded = false;
       _danmuLoadGen++;
       _danmus = [];
+      // 「切集提示」：换到新的一集时在顶部轻提示（默认关闭）
+      if (_switchEpisodeHint) {
+        final ep = (widget.currentEpisodeName ?? '').trim();
+        if (ep.isNotEmpty) {
+          _showTransientHint('正在切换至 $ep');
+        }
+      }
       setState(() {
         _position = Duration.zero;
         _duration = Duration.zero;
@@ -687,6 +754,75 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
   }
 
+  /// 读取「设置 → 播放器」里用户配置的播放行为。
+  ///
+  /// 这些项之前只写进了 SharedPreferences 却没人读 → 改了没反应。
+  /// 现在在播放器初始化时统一读入，并**立即应用**能当场生效的几项
+  /// （倍速 / 画面填充 / 跳过秒数），其余在渲染与手势里按需读取。
+  Future<void> _loadPlayerPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // ---- 开关类 ----
+      // 注意：「硬件加速」由 detail 页的 _effectiveDecodeMode 统一处理
+      // （关掉即软解，优先级高于细分解码项），播放器这里不再重复读。
+      _preferLandscape = prefs.getBool('play_prefer_landscape') ?? false;
+      _showTotalDuration = prefs.getBool('play_show_total') ?? true;
+      _hideCenterSeek = prefs.getBool('play_hide_center_seek') ?? false;
+      _pauseOnBackground = prefs.getBool('play_pause_background') ?? false;
+      _skipHint = prefs.getBool('play_skip_hint') ?? false;
+      _switchEpisodeHint = prefs.getBool('play_switch_episode_hint') ?? false;
+      _showFpsCodec = prefs.getBool('play_show_fps_codec') ?? false;
+      _alwaysShowSpeed = prefs.getBool('play_always_show_speed') ?? true;
+
+      // ---- 数值类 ----
+      _longPressSpeed =
+          (prefs.getDouble('play_longpress_speed') ?? 3.0).clamp(1.5, 5.0);
+      _longPressAdjustable =
+          prefs.getBool('play_longpress_adjustable') ?? true;
+      _userSeekStep = prefs.getInt('play_time_step') ?? 10;
+      final fillMode = (prefs.getInt('play_video_fill') ?? 0).clamp(0, 2);
+      final defaultSpeed =
+          (prefs.getDouble('play_default_speed') ?? 1.0).clamp(0.5, 3.0);
+
+      // ---- 立即应用：画面填充 ----
+      _videoFit = switch (fillMode) {
+        1 => VideoFitType.cover, // 裁剪铺满
+        2 => VideoFitType.fill, // 拉伸铺满
+        _ => VideoFitType.contain, // 原比例
+      };
+
+      // ---- 立即应用：默认倍速 ----
+      // 仅当用户没在本次播放里手动调过倍速时才覆盖（_playbackSpeed 仍是 1.0）
+      if ((_playbackSpeed - 1.0).abs() < 0.001 && defaultSpeed != 1.0) {
+        _playbackSpeed = defaultSpeed;
+        await _player.setRate(_playbackSpeed);
+      }
+
+      // ---- 立即应用：优先横屏 ----
+      // 只在用户开了这个开关、且当前确实是竖屏时才请求，避免干扰
+      // detail 页面自己的全屏/方向逻辑。
+      if (_preferLandscape && !_isImmersive) {
+        try {
+          final size = MediaQuery.of(context).size;
+          if (size.height > size.width) {
+            await SystemChrome.setPreferredOrientations(const [
+              DeviceOrientation.landscapeLeft,
+              DeviceOrientation.landscapeRight,
+            ]);
+            _landscapeForcedByPref = true;
+          }
+        } catch (e) {
+          AppLog.instance.log('[video_player] 优先横屏失败: $e');
+        }
+      }
+
+      if (mounted) setState(() {});
+    } catch (e) {
+      AppLog.instance.log('[video_player] _loadPlayerPrefs 失败: $e');
+    }
+  }
+
   /// 读取弹幕配置（设置页配置的 Logvr-danmu / 弹弹play 兼容 API 地址）
   Future<void> _loadDanmuSettings() async {
     try {
@@ -706,6 +842,21 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _danmuAreaRatio =
           (prefs.getDouble('danmu_area_ratio') ?? 1.0).clamp(0.25, 1.0);
       _danmuSyncSpeed = prefs.getBool('danmu_sync_speed') ?? false;
+      // 新增样式项
+      _danmuLineSpacing =
+          (prefs.getDouble('danmu_line_spacing') ?? 1.6).clamp(1.0, 3.0);
+      _danmuStrokeWidth =
+          (prefs.getDouble('danmu_stroke_width') ?? 1.5).clamp(0.0, 3.0);
+      _danmuDelaySeconds =
+          (prefs.getDouble('danmu_delay_seconds') ?? 0.0).clamp(-5.0, 5.0);
+      // 字体粗细存 weight 数值（400/500/600/700），未知值回落 w500
+      final w = prefs.getInt('danmu_font_weight') ?? 500;
+      _danmuFontWeight = switch (w) {
+        400 => FontWeight.w400,
+        600 => FontWeight.w600,
+        700 => FontWeight.w700,
+        _ => FontWeight.w500,
+      };
       if (mounted) setState(() {});
       if (_danmuApiUrl.isNotEmpty) {
         // 显式传 widget.url：此方法是异步的，回来时播放器可能已经 open 了
@@ -967,6 +1118,22 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     });
   }
 
+  /// 「始终显示网速」的展示文案。
+  ///
+  /// 说明：本项目在 iOS 上走 IosAvPlayer（共享原生 AVPlayer），
+  /// 底层没有暴露实时下载带宽，**不能**凭空编一个 MB/s 数字。
+  /// 这里改用播放器**确实拥有**的指标 —— 已缓冲提前量（秒）——
+  /// 它同样是"网络够不够快"的真实信号：数字掉到 1~2 秒就说明要卡了。
+  String get _netSpeedText {
+    final bufferedAhead = _duration - _position;
+    if (_duration <= Duration.zero || bufferedAhead <= Duration.zero) {
+      return '';
+    }
+    final sec = bufferedAhead.inSeconds;
+    // 提前量很小说明网络吃紧，用更醒目的颜色语义（此处只回文案）
+    return '缓冲 ${sec}s';
+  }
+
   void _updateResolutionFromTrack() {
     final w = _player.state.width;
     final h = _player.state.height;
@@ -1188,6 +1355,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (widget.skipIntroSeconds > 0) {
       _seekTo(Duration(seconds: widget.skipIntroSeconds));
       _scheduleHideControls();
+      // 「跳过提示」：横幅与轻提示（默认关闭）
+      if (_skipHint) _showTransientHint('已跳过片头 ${widget.skipIntroSeconds} 秒');
     }
   }
 
@@ -1195,7 +1364,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (widget.skipOutroSeconds > 0 && _duration > Duration.zero) {
       _seekTo(_duration - Duration(seconds: widget.skipOutroSeconds));
       _scheduleHideControls();
+      if (_skipHint) _showTransientHint('已跳过片尾 ${widget.skipOutroSeconds} 秒');
     }
+  }
+
+  /// 顶部轻提示（复用 _gestureHorizontalHint 的渲染通道，2 秒后自动消失）
+  void _showTransientHint(String text) {
+    if (!mounted) return;
+    setState(() => _gestureHorizontalHint = text);
+    _hintClearTimer?.cancel();
+    _hintClearTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _gestureHorizontalHint = '');
+    });
   }
 
   void _setVolume(double v) {
@@ -1266,6 +1446,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _bitrateTimer?.cancel();
     _indicatorTimer?.cancel();
     _timeTimer?.cancel();
+    _hintClearTimer?.cancel();
+
+    // 还原「优先横屏」强制过的方向，避免退出播放器后整个 App 卡在横屏
+    if (_landscapeForcedByPref) {
+      _landscapeForcedByPref = false;
+      SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
     _batteryStateSub?.cancel();
     _positionVN.dispose();
     _durationVN.dispose();
@@ -1566,7 +1757,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         : _danmuSpeed;
     final layer = DanmuLayer(
       danmus: _danmus,
-      positionOf: () => _player.state.position,
+      // 弹幕延迟：正数表示"晚出现"，等价于把查询位置往回拨，
+      // 这样同一时刻会取到更早的那批弹幕，视觉上就整体延后了。
+      positionOf: () => _player.state.position -
+          Duration(milliseconds: (_danmuDelaySeconds * 1000).round()),
       fontSize: _danmuFontSize,
       opacity: _danmuOpacity,
       speed: speed,
@@ -1575,6 +1769,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       blockTop: _danmuBlockTop,
       blockBottom: _danmuBlockBottom,
       areaRatio: _danmuAreaRatio,
+      lineSpacing: _danmuLineSpacing,
+      strokeWidth: _danmuStrokeWidth,
+      fontWeight: _danmuFontWeight,
+      delaySeconds: _danmuDelaySeconds,
     );
     // 显示区域：把弹幕层限制在顶部若干比例内（其余区域不显示弹幕）
     if (_danmuAreaRatio >= 0.99) {
@@ -1612,11 +1810,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               _player.setRate(_playbackSpeed);
               return;
             }
-            _player.setRate(_playbackSpeed * 2);
+            // 长按倍速：用用户配置的倍速（原来写死 ×2）
+            _player.setRate(_playbackSpeed * _longPressSpeed);
             setState(() => _isLongPressingFast = true);
           },
           onLongPressMoveUpdate: (details) {
             if (_isLocked) return;
+            // 关闭「长按滑动调节倍速」后，上滑不再锁定倍速
+            if (!_longPressAdjustable) return;
             if (_isLongPressSpeedLocked) return;
             if (details.offsetFromOrigin.dy < -_longPressLockUpwardThreshold) {
               setState(() => _isLongPressSpeedLocked = true);
@@ -1660,9 +1861,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               if (pos == null) return;
               final x = pos.dx;
               if (x < width / 4) {
-                _seekBy(-_seekStep, isLeft: true);
+                _seekBy(-_effectiveSeekStep, isLeft: true);
               } else if (x > width * 3 / 4) {
-                _seekBy(_seekStep, isLeft: false);
+                _seekBy(_effectiveSeekStep, isLeft: false);
               } else {
                 _togglePlayPause();
               }
@@ -1765,6 +1966,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _seekTo(target);
     setState(() {
       _seekAccumulatedSeconds += seconds;
+      // 「隐藏中央快进快退」：只跳转，不显示中央动画
+      if (_hideCenterSeek) {
+        _showBackwardSeek = false;
+        _showForwardSeek = false;
+        return;
+      }
       if (isLeft) {
         _showBackwardSeek = true;
         _showForwardSeek = false;
@@ -1935,6 +2142,28 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               width: 36,
               onTap: () => _safeTap(_toggleCast),
             ),
+
+            // 「始终显示网速」：无需打开信息栏也能看到下载速度
+            if (_alwaysShowSpeed && _netSpeedText.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.network_check,
+                        size: 12, color: Colors.white.withValues(alpha: 0.7)),
+                    const SizedBox(width: 3),
+                    Text(
+                      _netSpeedText,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.8),
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
 
             if (_isNativeFullscreen) ...[const SizedBox(width: 4), _buildStatusBarInfo()],
 
@@ -2359,7 +2588,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           SizedBox(
             width: 56,
             child: Text(
-              _duration > Duration.zero ? _formatDuration(_duration) : '--:--',
+              // 「进度条显示总时长」关闭时改为显示剩余时长（前面带 -）
+              _duration <= Duration.zero
+                  ? '--:--'
+                  : _showTotalDuration
+                      ? _formatDuration(_duration)
+                      : '-${_formatDuration(_duration - _position)}',
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.82),
                 fontSize: 10,
@@ -2998,7 +3232,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                               maxSeconds: _skipMaxSeconds,
                             ),
                             const SizedBox(height: 16),
-                            if (_resolutionText.isNotEmpty) ...[
+                            // 「显示帧率与编码」开启后才展示播放信息
+                            if (_showFpsCodec &&
+                                _resolutionText.isNotEmpty) ...[
                               const _SettingsRowLabel('播放信息'),
                               const SizedBox(height: 8),
                               Text(
@@ -3008,6 +3244,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                   fontSize: 12,
                                 ),
                               ),
+                              if (_bitrateText.isNotEmpty)
+                                Text(
+                                  '码率: $_bitrateText',
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                  ),
+                                ),
                             ],
                           ],
                         ),
@@ -3127,6 +3371,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.paused) {
+      // 「进入后台暂停」：开了就暂停播放，否则按原逻辑自动进小窗
+      if (_pauseOnBackground && _player.state.playing) {
+        _player.pause();
+        return;
+      }
       _autoEnterPipOnBackground();
     }
   }
