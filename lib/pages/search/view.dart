@@ -292,7 +292,7 @@ class _SearchPageState extends State<SearchPage> {
                     border: Border.all(
                       color: selected
                           ? AppTheme.accentColor.withValues(alpha: 0.55)
-                          : Colors.white24,
+                          : AppTheme.textTertiary.withValues(alpha: 0.22),
                     ),
                   ),
                   child: Row(
@@ -302,7 +302,7 @@ class _SearchPageState extends State<SearchPage> {
                         site.name,
                         style: TextStyle(
                           color:
-                              selected ? AppTheme.accentColor : Colors.white70,
+                              selected ? AppTheme.accentColor : AppTheme.textSecondary,
                           fontSize: 13,
                           fontWeight:
                               selected ? FontWeight.w600 : FontWeight.normal,
@@ -316,13 +316,13 @@ class _SearchPageState extends State<SearchPage> {
                           decoration: BoxDecoration(
                             color: selected
                                 ? AppTheme.accentColor
-                                : Colors.white24,
+                                : AppTheme.textTertiary.withValues(alpha: 0.22),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
                             '$count',
                             style: TextStyle(
-                              color: selected ? Colors.black : Colors.white,
+                              color: selected ? Colors.white : AppTheme.textPrimary,
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
                             ),
@@ -438,21 +438,21 @@ class _SearchPageState extends State<SearchPage> {
       if (_searchController.selectedSiteKey.value == null) {
         return Center(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
+            padding: EdgeInsets.symmetric(horizontal: 32),
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              children: const [
-                Icon(Icons.touch_app, size: 48, color: Colors.white24),
+              children: [
+                Icon(Icons.touch_app,size: 48,color: AppTheme.textTertiary.withValues(alpha: 0.5)),
                 SizedBox(height: 16),
                 Text(
                   '选择左侧站点查看搜索结果',
-                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
                   textAlign: TextAlign.center,
                 ),
                 SizedBox(height: 8),
                 Text(
                   '已完成全部站点搜索，点击站点名称查看对应结果',
-                  style: TextStyle(color: Colors.white38, fontSize: 12),
+                  style: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -473,20 +473,20 @@ class _SearchPageState extends State<SearchPage> {
       if (_searchController.currentResults.isEmpty) {
         return Center(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
+            padding: EdgeInsets.symmetric(horizontal: 32),
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              children: const [
-                Icon(Icons.search_off, size: 48, color: Colors.white24),
+              children: [
+                Icon(Icons.search_off,size: 48,color: AppTheme.textTertiary.withValues(alpha: 0.5)),
                 SizedBox(height: 16),
                 Text(
                   '该站点暂无搜索结果',
-                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
                 ),
                 SizedBox(height: 8),
                 Text(
                   '试试左侧其他站点',
-                  style: TextStyle(color: Colors.white38, fontSize: 12),
+                  style: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
                 ),
               ],
             ),

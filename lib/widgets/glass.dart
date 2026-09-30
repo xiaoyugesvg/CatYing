@@ -100,7 +100,29 @@ class GlassPanel extends StatelessWidget {
       ),
       child: Stack(
         children: [
-          // 顶部镜面高光层（iOS 27 更亮的 specular highlight）
+          // ---- 内侧双色边缘（Liquid Glass 的"玻璃厚度"）----
+          // 顶部亮、底部暗。只有外侧一圈描边时面板像"贴纸"，
+          // 补上内侧这两条才有折射出来的厚度感。
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(radiusValue - 1),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      AppTheme.glassInnerTop,
+                      Colors.transparent,
+                      AppTheme.glassInnerBottom,
+                    ],
+                    stops: const [0.0, 0.5, 1.0],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // 顶部镜面高光层（大面积柔光）
           if (highlightStrength > 0)
             Positioned.fill(
               child: IgnorePointer(
@@ -116,6 +138,31 @@ class GlassPanel extends StatelessWidget {
                         Colors.white.withValues(alpha: 0.0),
                       ],
                       stops: const [0.0, 0.35, 0.6],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          // ---- 顶部镜面弧线（窄，模拟折射光带）----
+          // 高 1.5，贴在顶边内 1px，左右淡出到透明。
+          if (highlightStrength > 0)
+            Positioned(
+              top: 1,
+              left: radiusValue * 0.5,
+              right: radiusValue * 0.5,
+              child: IgnorePointer(
+                child: Container(
+                  height: 1.5,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(1),
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.transparent,
+                        AppTheme.glassSpecular
+                            .withValues(alpha: 0.9 * highlightStrength),
+                        Colors.transparent,
+                      ],
+                      stops: const [0.0, 0.5, 1.0],
                     ),
                   ),
                 ),
@@ -220,6 +267,66 @@ class GlassDivider extends StatelessWidget {
               Colors.white.withValues(alpha: 0.02),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+
+/// Liquid Glass 按压反馈
+///
+/// iOS 26+ 的玻璃控件按下时会轻微缩小并加深，松手弹回 ——
+/// 这是"玻璃有实体感"的关键，纯 Material 水波纹已不属于这套语言。
+class GlassPress extends StatefulWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+
+  /// 按下时缩到多小。0.97 是列表/卡片的常见幅度；
+  /// 小控件或网格卡片可用更小的值让反馈更明显。
+  final double pressedScale;
+
+  const GlassPress({
+    super.key,
+    required this.child,
+    this.onTap,
+    this.onLongPress,
+    this.pressedScale = 0.97,
+  });
+
+  @override
+  State<GlassPress> createState() => _GlassPressState();
+}
+
+class _GlassPressState extends State<GlassPress> {
+  bool _down = false;
+
+  void _set(bool v) {
+    if (_down == v) return;
+    setState(() => _down = v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onTap != null || widget.onLongPress != null;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onTap,
+      onLongPress: widget.onLongPress,
+      onTapDown: enabled ? (_) => _set(true) : null,
+      onTapUp: enabled ? (_) => _set(false) : null,
+      onTapCancel: enabled ? () => _set(false) : null,
+      child: AnimatedScale(
+        scale: _down ? widget.pressedScale : 1.0,
+        duration: AppTheme.motionFast,
+        curve: AppTheme.motionCurve,
+        child: AnimatedOpacity(
+          // 按下同时轻微压暗，强化"被按进去"的感觉
+          opacity: _down ? 0.82 : 1.0,
+          duration: AppTheme.motionFast,
+          curve: AppTheme.motionCurve,
+          child: widget.child,
         ),
       ),
     );

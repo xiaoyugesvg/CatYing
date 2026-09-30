@@ -110,12 +110,8 @@ class FavoritesPage extends StatelessWidget {
 
       return LayoutBuilder(
         builder: (context, constraints) {
-          // 自适应网格（与首页保持一致）
-          final cardMinWidth = 120.0;
-          final crossAxisCount =
-              (constraints.maxWidth / (cardMinWidth + AppTheme.cardSpacing))
-                  .floor()
-                  .clamp(2, 6);
+          // 固定 4 列（用户要求"一排 4 个"）
+          const crossAxisCount = 4;
           final cardWidth =
               (constraints.maxWidth - AppTheme.cardSpacing * (crossAxisCount - 1)) /
                   crossAxisCount;
@@ -129,7 +125,13 @@ class FavoritesPage extends StatelessWidget {
             ),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: crossAxisCount,
-              childAspectRatio: (cardWidth) / (cardWidth / 0.65 + 50),
+              // 卡片高度 = 原高度的 3/4。
+              //
+              // 原式：cardWidth / 0.65 + 50（海报区 + 50 文字区）
+              // 海报区 × 0.75 → (cardWidth/0.65)×0.75 = cardWidth × 1.1538
+              // 即分母写法 cardWidth × 0.4875 + 50
+              // （文字区 50 保持不变，否则标题会被压扁）
+              childAspectRatio: cardWidth / (cardWidth * 0.4875 + 50),
               crossAxisSpacing: AppTheme.cardSpacing,
               mainAxisSpacing: AppTheme.cardSpacing,
             ),
@@ -142,15 +144,11 @@ class FavoritesPage extends StatelessWidget {
                 pic: item.vodPic,
                 sourceKey: item.sourceKey,
               );
-              return GestureDetector(
-                onSecondaryTap: () =>
-                    _showUnfavoriteDialog(context, controller, item),
+              return VodCard(
+                video: video,
+                onTap: () => Get.toNamed('/detail', arguments: video),
                 onLongPress: () =>
                     _showUnfavoriteDialog(context, controller, item),
-                child: VodCard(
-                  video: video,
-                  onTap: () => Get.toNamed('/detail', arguments: video),
-                ),
               );
             },
           );

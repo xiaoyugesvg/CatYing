@@ -236,15 +236,69 @@ class _LivePageState extends State<LivePage> {
                           Obx(() {
                             final err = LiveService.instance.error.value;
                             if (err == null) return const SizedBox.shrink();
+                            final loading =
+                                LiveService.instance.isLoading.value;
                             return Padding(
                               padding:
                                   const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                              child: Text(
-                                err,
-                                style: TextStyle(
-                                    color: Colors.redAccent
-                                        .withValues(alpha: 0.9),
-                                    fontSize: 12),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.error_outline,
+                                      size: 15,
+                                      color: Colors.redAccent
+                                          .withValues(alpha: 0.9)),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      err,
+                                      style: TextStyle(
+                                          color: Colors.redAccent
+                                              .withValues(alpha: 0.9),
+                                          fontSize: 12,
+                                          height: 1.4),
+                                    ),
+                                  ),
+                                  // 一键重试：失败时不必去找左上角刷新图标
+                                  const SizedBox(width: 8),
+                                  GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: loading
+                                        ? null
+                                        : () =>
+                                            LiveService.instance.retryLast(),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 5),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.accentColor
+                                            .withValues(alpha: 0.16),
+                                        borderRadius:
+                                            BorderRadius.circular(14),
+                                        border: Border.all(
+                                            color: AppTheme.accentColor
+                                                .withValues(alpha: 0.45),
+                                            width: 0.8),
+                                      ),
+                                      child: loading
+                                          ? const SizedBox(
+                                              width: 12,
+                                              height: 12,
+                                              child:
+                                                  CircularProgressIndicator(
+                                                      strokeWidth: 1.6,
+                                                      color: AppTheme
+                                                          .accentColor),
+                                            )
+                                          : Text('重试',
+                                              style: TextStyle(
+                                                  color:
+                                                      AppTheme.accentColor,
+                                                  fontSize: 12,
+                                                  fontWeight:
+                                                      FontWeight.w600)),
+                                    ),
+                                  ),
+                                ],
                               ),
                             );
                           }),

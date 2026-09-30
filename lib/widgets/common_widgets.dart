@@ -243,12 +243,19 @@ class AppCard extends StatelessWidget {
   final EdgeInsetsGeometry? padding;
   final bool blur;
 
+  /// 紧凑模式：纵向内边距收到 4，配合更紧的 SettingsRow（行高 38）。
+  ///
+  /// 默认四周 16 的卡片里放一个设置行 = 行 40 + 卡片 32 = 72px 高，
+  /// 列表看起来又高又空。设置类列表统一 dense，密度接近 iOS 设置页。
+  final bool dense;
+
   const AppCard({
     super.key,
     required this.child,
     this.cornerRadius = AppTheme.glassRadiusCard,
     this.padding,
     this.blur = false,
+    this.dense = false,
   });
 
   @override
@@ -261,8 +268,12 @@ class AppCard extends StatelessWidget {
       borderWidth: 0.8,
       highlightStrength: blur ? 0.8 : 0.5,
       shadow: false,
-      padding:
-          padding ?? const EdgeInsets.all(AppTheme.spacingLG),
+      padding: padding ??
+          (dense
+              ? const EdgeInsets.symmetric(
+                  horizontal: AppTheme.spacingMD,
+                  vertical: AppTheme.spacingXS)
+              : const EdgeInsets.all(AppTheme.spacingLG)),
       child: child,
     );
   }
@@ -311,15 +322,16 @@ class SettingsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 精细化行内间距：图标 18、图标↔文字 10、纵向 9（行高约 38）
     final child = Padding(
       padding: const EdgeInsets.symmetric(
-        horizontal: AppTheme.spacingSM,
-        vertical: AppTheme.spacingSM,
+        horizontal: AppTheme.spacingXS,
+        vertical: 9,
       ),
       child: Row(
         children: [
-          Icon(icon, size: AppTheme.fontHeadline, color: iconColor ?? AppTheme.accentColor),
-          const SizedBox(width: AppTheme.spacingLG + AppTheme.spacingSM),
+          Icon(icon, size: 18, color: iconColor ?? AppTheme.accentColor),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
               title,
@@ -334,25 +346,29 @@ class SettingsRow extends StatelessWidget {
               child: Text(
                 value,
                 style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: AppTheme.fontSubhead,
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption + 0.5,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
           if (trailingSwitch) ...[
             const SizedBox(width: AppTheme.spacingSM),
-            Switch(
-              value: switchValue,
-              onChanged: onSwitchChanged,
-              activeColor: AppTheme.accentColor,
+            Transform.scale(
+              scale: 0.85, // 开关略收，避免撑高行
+              child: Switch(
+                value: switchValue,
+                onChanged: onSwitchChanged,
+                activeColor: AppTheme.accentColor,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
             ),
           ] else if (onTap != null) ...[
-            const SizedBox(width: AppTheme.spacingXS),
+            const SizedBox(width: 2),
             Icon(
               Icons.chevron_right,
-              size: AppTheme.fontFootnote,
-              color: AppTheme.textTertiary,
+              size: 17,
+              color: AppTheme.textTertiary.withValues(alpha: 0.7),
             ),
           ],
         ],
@@ -360,11 +376,8 @@ class SettingsRow extends StatelessWidget {
     );
 
     if (onTap != null) {
-      return InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppTheme.radiusSM),
-        child: child,
-      );
+      // Liquid Glass 按压反馈（缩放 + 加深），替换 Material 水波纹
+      return GlassPress(onTap: onTap, pressedScale: 0.985, child: child);
     }
     return child;
   }

@@ -203,14 +203,62 @@ class LiveService extends GetxService {
         }
       } catch (e) {
         AppLog.instance.log('[LiveService] 拉取直播列表失败 $url: $e');
-        // 网络失败时，若上面已有缓存则保持现状
+        // 网络失败时，若上面已有缓存则保持现状（只是提示，不算错误）
         if (cached == null && all.isEmpty) {
-          error.value = '直播源加载失败，请检查网络';
+          error.value = humanizeLiveError(e);
         }
       }
     }
     channels.value = all;
     _rebuildGroups();
+  }
+
+  /// 把网络异常翻译成用户能看懂、且能据此行动的一句话。
+  ///
+  /// 之前直接把 `$e` 贴到错误横幅上，是一整屏英文术语
+  /// （DioException [receive timeout]: The request took longer than 0:00:12...），
+  /// 用户既看不懂也不知道该怎么办。原始异常仍然只进 app.log。
+  static String humanizeLiveError(Object e) {
+    if (e is DioException) {
+      switch (e.type) {
+        case DioExceptionType.receiveTimeout:
+        case DioExceptionType.sendTimeout:
+          return '直播源响应超时，可能是源服务器较慢。';
+        case DioExceptionType.connectionTimeout:
+          return '连接直播源超时，请检查网络后重试。';
+        case DioExceptionType.connectionError:
+          return '无法连接直播源，请检查网络或源地址是否有效。';
+        case DioExceptionType.badResponse:
+          final code = e.response?.statusCode;
+          return '直播源返回错误${code == null ? '' : '（HTTP $code）'}，'
+              '可能是源已失效。';
+        case DioExceptionType.cancel:
+          return '请求已取消。';
+        default:
+          return '加载直播源失败，请稍后重试。';
+      }
+    }
+    final s = '$e';
+    if (s.contains('SocketException') || s.contains('Failed host lookup')) {
+      return '无法连接直播源，请检查网络或源地址。';
+    }
+    return '加载直播源失败，请稍后重试。';
+  }
+
+  /// 重试上次失败的加载（直播页错误横幅的「重试」按钮用）
+  ///
+  /// 优先重载当前选中的源；没有多源时退回持久化的单源 URL。
+  Future<void> retryLast() async {
+    final idx = selectedSourceIndex.value;
+    final raw = _rawLives;
+    if (raw != null && idx >= 0 && idx < raw.length) {
+      await loadSource(idx);
+      return;
+    }
+    final url = _persistedUrl;
+    if (url != null && url.isNotEmpty) {
+      await loadFromUrl(url);
+    }
   }
 
   /// 直接从 m3u/txt URL 加载

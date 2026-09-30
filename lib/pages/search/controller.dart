@@ -54,6 +54,12 @@ class TvSearchController extends GetxController {
 
   String _latestSearchRequestId = '';
 
+  /// 单源搜索超时。
+  ///
+  /// 取 12 秒：足够 spider 源转发一次，又不会让用户干等太久。
+  /// 关键是**必须有** —— 没有超时就会因为一个卡住的源让整页永远"搜索中"。
+  static const Duration _perSourceTimeout = Duration(seconds: 12);
+
   /// 最近一次真正发起搜索的关键词，供防抖去重（避免回车 + 防抖各搜一遍）
   String _lastSearchedKeyword = '';
 
@@ -145,20 +151,42 @@ class TvSearchController extends GetxController {
 
   Future<void> _searchInSourceAndNotify(
       SourceBean source, String kw, String requestId) async {
+    // ⚠️ 必须给单源加超时。
+    //
+    // 原来直接 `await SourceService.search(...)`：只要有一个源卡住（spider 源
+    // 转发慢、接口不回包），`Future.wait` 就永远不返回 → `_activeSearches`
+    // 不归零 → `isSearching` 永久停在 true →
+    // 界面一直显示「搜索中」，而其它源其实早就返回了（结果也没落进
+    // resultsBySite，因为赋值在 await 之后）。
+    //
+    // 这是「快搜一直搜索中、没有内容」的直接原因。
     try {
       AppLog.instance.log('[SearchController] 搜索源 ${source.key}: 开始搜索 "$kw"');
-      final videos = await SourceService.instance.search(source, kw);
+      final videos = await SourceService.instance
+          .search(source, kw)
+          .timeout(_perSourceTimeout);
       AppLog.instance.log('[SearchController] 搜索源 ${source.key}: 返回 ${videos.length} 条结果');
+      // 过期请求丢弃结果，但 finally 仍要复位"搜索中"，否则 chip 永久转圈
       if (_latestSearchRequestId != requestId) return;
       resultsBySite[source.key] = videos;
       resultCount[source.key] = videos.length;
+    } on TimeoutException {
+      AppLog.instance.log('[SearchController] 搜索源 ${source.key}: '
+          '超时（${_perSourceTimeout.inSeconds}s），跳过');
+      if (_latestSearchRequestId == requestId) {
+        resultsBySite[source.key] = [];
+        resultCount[source.key] = 0;
+      }
     } catch (e) {
       AppLog.instance.log('[SearchController] 搜索源 ${source.key}: 搜索失败 $e');
-      if (_latestSearchRequestId != requestId) return;
-      resultsBySite[source.key] = [];
-      resultCount[source.key] = 0;
+      if (_latestSearchRequestId == requestId) {
+        resultsBySite[source.key] = [];
+        resultCount[source.key] = 0;
+      }
+    } finally {
+      // 无论成功/失败/超时/过期都复位，保证该源 chip 不再转圈
+      searchingStatus[source.key] = false;
     }
-    searchingStatus[source.key] = false;
   }
 
   Future<void> searchInSource(SourceBean source) async {

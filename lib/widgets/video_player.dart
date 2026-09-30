@@ -241,6 +241,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   double _gestureSeekTemp = 0;
   String _gestureHorizontalHint = ''; // 顶部水平拖动提示
 
+  /// 双击位置：onDoubleTapDown 记下，onDoubleTap 里用来决定左/中/右行为。
+  /// （onDoubleTap 自身不带坐标；而实际操作必须放在 onDoubleTap 里做，
+  ///  否则单击要等双击超时才触发 —— 见手势层注释。）
+  Offset? _doubleTapAt;
+
   static const List<double> _supportedSpeeds = [
     0.5,
     0.75,
@@ -967,7 +972,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   void _scheduleHideControls() {
     _hideTimer?.cancel();
     if (_isLocked || _showEpisodeSheet) {
-      _showControls = _isLocked || true;
+      // ⚠️ 必须走 setState：原来是直接 `_showControls = ...`，
+      // 赋值了但没触发重建 —— 锁定状态/选集面板下点击唤醒控制条时
+      // UI 不刷新，表现为「点了没反应、进度条和上下栏不出现」。
+      if (!_showControls) {
+        setState(() => _showControls = true);
+      }
       return;
     }
     _hideTimer = Timer(_hideDelay, () {
@@ -1622,8 +1632,22 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: _toggleControls,
+            // ⚠️ 双击跳转必须放在 onDoubleTap 里执行，**不能**放在 onDoubleTapDown。
+            //
+            // 原写法是 onDoubleTapDown 里直接跳转 + onDoubleTap: (){} 空实现。
+            // 后果（已用 flutter_test 实测）：只要注册了 onDoubleTap，
+            // 单击就必须等双击超时（约 300ms）才触发 onTap ——
+            // 用户点一下觉得"没反应"，再点一下又被判成双击去跳转，
+            // 于是进度条和上下功能栏一直不出现。
+            //
+            // 位置改从 onDoubleTapDown 传入（onDoubleTap 本身不带坐标）。
             onDoubleTapDown: (details) {
-              final x = details.localPosition.dx;
+              _doubleTapAt = details.localPosition;
+            },
+            onDoubleTap: () {
+              final pos = _doubleTapAt;
+              if (pos == null) return;
+              final x = pos.dx;
               if (x < width / 4) {
                 _seekBy(-_seekStep, isLeft: true);
               } else if (x > width * 3 / 4) {
@@ -1632,7 +1656,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 _togglePlayPause();
               }
             },
-            onDoubleTap: () {},
             onPanStart: (details) {
               if (_isLocked) return;
               _gestureInitialVolume = _volume;
@@ -1866,21 +1889,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       child: _gradientTopContainer(
         child: Row(
           children: [
-            // 返回与右侧功能键同一行（尺寸对齐直播页 38×38）
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
+            // 返回键：与右侧功能键同一套玻璃底衬，保持整条顶栏视觉一致
+            _iconButton(
+              icon: Icons.arrow_back_ios_new,
+              size: 17,
               onTap: widget.onBack ?? () => Navigator.of(context).maybePop(),
-              child: const SizedBox(
-                width: 38,
-                height: 38,
-                child: Center(
-                  child: Icon(
-                    Icons.arrow_back_ios_new,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                ),
-              ),
             ),
             const Spacer(),
 
@@ -2355,22 +2368,20 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   // ============================================================
 
   Widget _buildPlayPauseButton() {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
+    // 主操作：用 filled 的玻璃底，视觉权重高于两侧的切集按钮
+    return _iconButton(
+      icon: _isPlaying ? Icons.pause : Icons.play_arrow,
+      size: 24,
+      width: 46,
+      filled: true,
       onTap: _togglePlayPause,
-      child: SizedBox(
-        width: 42,
-        height: 34,
-        child: Center(
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 150),
-            child: Icon(
-              _isPlaying ? Icons.pause : Icons.play_arrow,
-              key: ValueKey(_isPlaying),
-              color: Colors.white,
-              size: 26,
-            ),
-          ),
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 150),
+        child: Icon(
+          _isPlaying ? Icons.pause : Icons.play_arrow,
+          key: ValueKey(_isPlaying),
+          color: Colors.white,
+          size: 25,
         ),
       ),
     );
@@ -3249,6 +3260,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
   }
 
+  /// 播放器功能按钮（顶栏 / 底栏共用）
+  ///
+  /// iOS 化的关键：图标不再"裸"放在视频上，而是坐进一个
+  /// 「轻玻璃圆角方块」——半透明白底 + 0.5 细描边 + 圆角 10。
+  /// 这样在亮/暗画面上都有一致的可读底衬，也不会像纯图标那样糊在一起。
+  ///
+  /// [filled] 用于主操作（播放/暂停），底色与图标都更重，视觉上排第一。
   Widget _iconButton({
     required IconData icon,
     required double size,
@@ -3256,16 +3274,32 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     double height = 38,
     required VoidCallback onTap,
     Widget? child,
+    bool filled = false,
   }) {
+    final side = height < 38 ? 38.0 : height;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: SizedBox(
-        // 与直播页 _VideoTopIcon 一致：38×38，图标 20
-        width: width < 38 ? 38 : width,
-        height: 38,
+        width: width < side ? side : width,
+        height: side,
         child: Center(
-          child: child ?? Icon(icon, color: Colors.white, size: size),
+          child: Container(
+            width: side - 4,
+            height: side - 4,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: filled ? 0.22 : 0.13),
+              borderRadius: BorderRadius.circular(filled ? 12 : 10),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: filled ? 0.34 : 0.18),
+                width: 0.5,
+              ),
+            ),
+            child: child ??
+                Icon(icon,
+                    color: Colors.white, size: filled ? size + 2 : size),
+          ),
         ),
       ),
     );
@@ -3286,40 +3320,24 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       }),
       child: Stack(
         clipBehavior: Clip.none,
+        alignment: Alignment.center,
         children: [
-          Container(
-            width: 26,
-            height: 26,
-            decoration: BoxDecoration(
-              color: on
-                  ? Colors.white.withValues(alpha: 0.16)
-                  : Colors.white.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(7),
-              border: Border.all(
-                color: on
-                    ? Colors.white.withValues(alpha: 0.45)
-                    : Colors.white.withValues(alpha: 0.18),
-              ),
-            ),
-            child: Center(
-              child: Text(
-                '弹',
-                style: TextStyle(
-                  color: on
-                      ? Colors.white
-                      : Colors.white.withValues(alpha: 0.35),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  height: 1.0,
-                ),
-              ),
+          // 注意：外层 _iconButton 已提供玻璃底，这里不再套一层带背景的
+          // 容器（会变成双层底、边线重影）。关闭态用文字透明度区分。
+          Text(
+            '弹',
+            style: TextStyle(
+              color: on ? Colors.white : Colors.white.withValues(alpha: 0.4),
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              height: 1.0,
             ),
           ),
           // 开启角标：绿色对勾
           if (on)
             Positioned(
-              right: -3,
-              bottom: -3,
+              right: -2,
+              bottom: -2,
               child: Container(
                 width: 13,
                 height: 13,

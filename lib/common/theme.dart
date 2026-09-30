@@ -61,11 +61,30 @@ class AppTheme {
       AppBrightness.isLight.value ? const Color(0x14000000) : const Color(0x2EFFFFFF);
   static Color get glassBorderSoft =>
       AppBrightness.isLight.value ? const Color(0x0F000000) : const Color(0x1FFFFFFF);
-  // 玻璃圆角
-  static const double glassRadius = 24; // 面板/弹窗大圆角
-  static const double glassRadiusCard = 16; // 卡片圆角
-  // 玻璃模糊强度 (iOS 27 对背景内容扩散更强)
+
+  // ---- Liquid Glass：内侧双色边缘 ----
+  //
+  // 玻璃的"厚度感"来自**内侧**两条描边：顶部亮（光从上方来）、
+  // 底部暗（玻璃背面吸光）。只有外圈单一描边时，面板看起来像"贴纸"。
+  static Color get glassInnerTop =>
+      AppBrightness.isLight.value ? const Color(0x59FFFFFF) : const Color(0x3DFFFFFF);
+  static Color get glassInnerBottom =>
+      AppBrightness.isLight.value ? const Color(0x0F000000) : const Color(0x1A000000);
+  /// 顶部镜面弧线（很窄，模拟折射光带）
+  static Color get glassSpecular =>
+      AppBrightness.isLight.value ? const Color(0x40FFFFFF) : const Color(0x52FFFFFF);
+
+  // 玻璃圆角 —— Liquid Glass 比旧版更圆更柔
+  static const double glassRadius = 28; // 面板/弹窗大圆角
+  static const double glassRadiusCard = 20; // 卡片圆角
+  static const double glassRadiusSmall = 14; // 小控件（行内按钮/徽章）
+  // 玻璃模糊强度 (对背景内容扩散更强)
   static const double glassBlurSigma = 28;
+
+  // ---- Liquid Glass 动效曲线 ----
+  static const Duration motionFast = Duration(milliseconds: 180);
+  static const Duration motionBase = Duration(milliseconds: 260);
+  static const Curve motionCurve = Curves.easeOutCubic;
 
   static Color get textPrimary =>
       AppBrightness.isLight.value ? const Color(0xE61A1A1A) : const Color(0xEBEBEBEB);
@@ -140,7 +159,7 @@ class AppTheme {
         filled: true,
         fillColor: const Color(0xFFEFEFF2),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(radiusSM),
+          borderRadius: BorderRadius.circular(glassRadiusSmall),
           borderSide: BorderSide.none,
         ),
       ),
@@ -196,7 +215,7 @@ class AppTheme {
         ),
       ),
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
-        backgroundColor: const Color(0xFF1C1C1E),
+        backgroundColor: Colors.transparent,
         selectedItemColor: accentColor,
         unselectedItemColor: textTertiary,
         type: BottomNavigationBarType.fixed,
@@ -204,11 +223,32 @@ class AppTheme {
             const TextStyle(fontSize: 10, fontWeight: FontWeight.w500),
         unselectedLabelStyle: const TextStyle(fontSize: 10),
       ),
+      // ---- Liquid Glass：全局弹层大圆角 ----
+      // 弹窗/底部弹层走 28（glassRadius），比旧版 16 更圆更柔。
+      dialogTheme: DialogThemeData(
+        backgroundColor: backgroundSecondary,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(glassRadius),
+        ),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        modalElevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(glassRadius),
+          ),
+        ),
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: backgroundSecondary,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(radiusMD),
+          borderRadius: BorderRadius.circular(glassRadiusSmall),
           borderSide: BorderSide.none,
         ),
         hintStyle: TextStyle(color: textTertiary, fontSize: fontSubhead),

@@ -209,16 +209,34 @@ class SettingsGroup extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (title != null) ...[
-          const SizedBox(height: 12),
-          SectionHeader(title: title!),
-          const SizedBox(height: AppTheme.spacingSM),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 6),
+            child: Text(
+              title!,
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontCaption,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.4,
+              ),
+            ),
+          ),
         ],
+        // dense：纵向内边距 4，配合行高 38 → 单行卡片约 46px
+        //（原来 72px，列表显得又高又空）
         AppCard(
+          dense: true,
           child: Column(
             children: [
               for (var i = 0; i < children.length; i++) ...[
                 if (i > 0)
-                  Divider(color: AppTheme.borderLight, height: 1),
+                  Divider(
+                      color: AppTheme.borderLight,
+                      height: 1,
+                      thickness: 0.5,
+                      indent: 28,
+                      endIndent: 4),
                 children[i],
               ],
             ],

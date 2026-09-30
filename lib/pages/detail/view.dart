@@ -270,7 +270,7 @@ class _DetailPageState extends State<DetailPage> {
                 .toString();
             final typeLabel = c.$1 == 'movie' ? '电影' : '剧集';
             return ListTile(
-              title: Text(name, style: const TextStyle(color: Colors.white)),
+              title: Text(name, style: TextStyle(color: AppTheme.textPrimary)),
               subtitle: Text('$typeLabel · $date',
                   style: TextStyle(color: AppTheme.textTertiary)),
               onTap: () async {
@@ -379,7 +379,7 @@ class _DetailPageState extends State<DetailPage> {
               if (c.note.isNotEmpty) c.note,
             ].join(' · ');
             return ListTile(
-              title: Text(c.name, style: const TextStyle(color: Colors.white)),
+              title: Text(c.name, style: TextStyle(color: AppTheme.textPrimary)),
               subtitle: extra.isNotEmpty
                   ? Text(extra, style: TextStyle(color: AppTheme.textTertiary))
                   : null,

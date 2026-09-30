@@ -47,17 +47,17 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               color: AppTheme.accentColor, size: 20),
           onPressed: () => Get.back(),
         ),
-        title: const Text('直播设置',
-            style: TextStyle(color: Colors.white, fontSize: 17)),
+        title: Text('直播设置',
+            style: TextStyle(color: AppTheme.textPrimary, fontSize: 17)),
         backgroundColor: AppTheme.backgroundPrimary,
         elevation: 0,
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
         children: [
-          const Text('直播源管理',
+          Text('直播源管理',
               style: TextStyle(
-                  color: Colors.white54,
+                  color: AppTheme.textSecondary,
                   fontSize: 13,
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
@@ -83,9 +83,9 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             }),
           ),
           const SizedBox(height: 24),
-          const Text('全局 EPG 地址',
+          Text('全局 EPG 地址',
               style: TextStyle(
-                  color: Colors.white54,
+                  color: AppTheme.textSecondary,
                   fontSize: 13,
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
@@ -108,8 +108,8 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                     Expanded(
                       child: TextField(
                         controller: _epgCtrl,
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 13),
+                        style: TextStyle(
+                            color: AppTheme.textPrimary, fontSize: 13),
                         decoration: InputDecoration(
                           filled: true,
                           fillColor: Colors.white.withValues(alpha: 0.08),
@@ -120,8 +120,8 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                           contentPadding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 12),
                           hintText: 'https://...',
-                          hintStyle: const TextStyle(
-                              color: Colors.white24, fontSize: 13),
+                          hintStyle: TextStyle(
+                              color: AppTheme.textTertiary, fontSize: 13),
                         ),
                       ),
                     ),
@@ -154,9 +154,9 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             ),
           ),
           const SizedBox(height: 24),
-          const Text('屏蔽分类',
+          Text('屏蔽分类',
               style: TextStyle(
-                  color: Colors.white54,
+                  color: AppTheme.textSecondary,
                   fontSize: 13,
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
@@ -180,18 +180,18 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                         onChanged: (_) => svc.toggleBlockedGroup(g.name),
                         title: Text(g.name,
                             style:
-                                const TextStyle(color: Colors.white70, fontSize: 14)),
+                                TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
                         subtitle: Text('${g.channels.length} 个频道',
-                            style: const TextStyle(
-                                color: Colors.white38, fontSize: 11)),
+                            style: TextStyle(
+                                color: AppTheme.textTertiary, fontSize: 11)),
                         controlAffinity: ListTileControlAffinity.leading,
                         activeColor: AppTheme.accentColor,
                       ),
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
                     child: Text(
                       '关闭后隐藏对应分类的频道',
-                      style: TextStyle(color: Colors.white38, fontSize: 11),
+                      style: TextStyle(color: AppTheme.textTertiary, fontSize: 11),
                     ),
                   ),
                 ],
@@ -220,17 +220,17 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(Icons.live_tv,
-            color: loaded ? AppTheme.accentColor : Colors.white38, size: 20),
+            color: loaded ? AppTheme.accentColor : AppTheme.textTertiary, size: 20),
       ),
       title: Text(src.name,
-          style: const TextStyle(
-              color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500)),
+          style: TextStyle(
+              color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.w500)),
       subtitle: Text(loaded ? '刚刚更新' : '未下载',
           style: TextStyle(
-              color: loaded ? Colors.white54 : Colors.white38, fontSize: 12)),
+              color: loaded ? AppTheme.textSecondary : AppTheme.textTertiary, fontSize: 12)),
       trailing: PopupMenuButton<String>(
         color: const Color(0xFF2A2A2E),
-        icon: const Icon(Icons.more_vert, color: Colors.white54),
+        icon: Icon(Icons.more_vert, color: AppTheme.textSecondary),
         onSelected: (v) async {
           if (v == 'refresh') {
             await svc.reloadSource(index);
@@ -250,26 +250,26 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                     TextEditingController(text: sourceUrl ?? '');
                 return AlertDialog(
                   backgroundColor: const Color(0xFF1C1C1E),
-                  title: const Text('编辑直播源',
-                      style: TextStyle(color: Colors.white, fontSize: 15)),
+                  title: Text('编辑直播源',
+                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
                   content: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       TextField(
                         controller: nameCtrl,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: const InputDecoration(
+                        style: TextStyle(color: AppTheme.textPrimary),
+                        decoration: InputDecoration(
                           hintText: '源名称',
-                          hintStyle: TextStyle(color: Colors.white38),
+                          hintStyle: TextStyle(color: AppTheme.textTertiary),
                         ),
                       ),
                       const SizedBox(height: 10),
                       TextField(
                         controller: ctrl,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: const InputDecoration(
+                        style: TextStyle(color: AppTheme.textPrimary),
+                        decoration: InputDecoration(
                           hintText: 'm3u / txt 地址',
-                          hintStyle: TextStyle(color: Colors.white38),
+                          hintStyle: TextStyle(color: AppTheme.textTertiary),
                         ),
                       ),
                     ],
@@ -307,10 +307,10 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               context: context,
               builder: (ctx) => AlertDialog(
                 backgroundColor: const Color(0xFF1C1C1E),
-                title: const Text('删除直播源',
-                    style: TextStyle(color: Colors.white, fontSize: 15)),
+                title: Text('删除直播源',
+                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
                 content: Text('确定删除「${src.name}」吗？',
-                    style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
                 actions: [
                   TextButton(
                       onPressed: () => Navigator.pop(ctx, false),
@@ -361,9 +361,9 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
         ),
         child: const Icon(Icons.add, color: AppTheme.accentColor, size: 20),
       ),
-      title: const Text('添加直播源',
-          style: TextStyle(color: Colors.white, fontSize: 15)),
-      trailing: const Icon(Icons.chevron_right, color: Colors.white38),
+      title: Text('添加直播源',
+          style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
+      trailing: Icon(Icons.chevron_right, color: AppTheme.textTertiary),
       onTap: () async {
         final result = await showDialog<(String, String)>(
           context: context,
@@ -372,26 +372,26 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             final ctrl = TextEditingController();
             return AlertDialog(
               backgroundColor: const Color(0xFF1C1C1E),
-              title: const Text('添加直播源',
-                  style: TextStyle(color: Colors.white, fontSize: 15)),
+              title: Text('添加直播源',
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   TextField(
                     controller: nameCtrl,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
+                    style: TextStyle(color: AppTheme.textPrimary),
+                    decoration: InputDecoration(
                       hintText: '源名称（可选，留空自动取地址）',
-                      hintStyle: TextStyle(color: Colors.white38),
+                      hintStyle: TextStyle(color: AppTheme.textTertiary),
                     ),
                   ),
                   const SizedBox(height: 10),
                   TextField(
                     controller: ctrl,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
+                    style: TextStyle(color: AppTheme.textPrimary),
+                    decoration: InputDecoration(
                       hintText: 'm3u / txt 地址',
-                      hintStyle: TextStyle(color: Colors.white38),
+                      hintStyle: TextStyle(color: AppTheme.textTertiary),
                     ),
                   ),
                 ],
@@ -432,11 +432,11 @@ class _EmptyRow extends StatelessWidget {
   const _EmptyRow();
   @override
   Widget build(BuildContext context) {
-    return const Padding(
+    return Padding(
       padding: EdgeInsets.symmetric(vertical: 24),
       child: Center(
         child: Text('暂无直播源，可添加 m3u 地址',
-            style: TextStyle(color: Colors.white38, fontSize: 13)),
+            style: TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
       ),
     );
   }

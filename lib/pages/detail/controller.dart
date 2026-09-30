@@ -131,10 +131,8 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     try {
       // ---- 关键词池：从"同类"里随机取一个 ----
       final keywordPool = <String>{
-        info.name,
         if (info.typeName.isNotEmpty) info.typeName,
         if (info.area.isNotEmpty) info.area,
-        if (info.year.isNotEmpty) info.year,
         if (info.actor.isNotEmpty)
           ...info.actor
               .split(',')
@@ -142,13 +140,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
               .where((e) => e.isNotEmpty)
               .take(3),
       }.where((k) => k.trim().isNotEmpty).toList();
-      if (keywordPool.isEmpty) return;
-      // 片名命中最准，让它有更高概率被抽到（多放一份进池）
       final rnd = Random();
-      final weighted = <String>[info.name, ...keywordPool];
-      final keyword = weighted[rnd.nextInt(weighted.length)];
 
-      // ---- 选源：完全随机抽 N 个 ----
+      // ---- 选源：随机抽 N 个（两个关键词共用同一批源）----
       final pool = ApiConfig.instance
           .getSearchableSources()
           .where((s) => s.isSupportedInSwift)
@@ -157,37 +151,57 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       pool.shuffle(rnd);
       final picked = pool.take(_recommendSourceCount).toList();
 
-      // ---- 并发搜索：每个源独立超时，慢源直接放弃 ----
-      final collected = <Video>[];
-      final seenIds = <String>{info.id};
-      final futures = <Future<List<Video>>>[];
-      for (final src in picked) {
-        futures.add(
-          SourceService.instance
-              .search(src, keyword)
-              .timeout(_recommendPerSourceTimeout)
-              .catchError((Object e) {
-            AppLog.instance.log(
-                '[Recommend] 源 ${src.name} 搜索失败/超时: $e');
-            return <Video>[];
-          }),
-        );
-      }
-      final results = await Future.wait(futures);
-      for (final list in results) {
-        for (final v in list) {
-          if (v.id.isEmpty || !seenIds.add(v.id)) continue;
-          collected.add(v);
+      /// 用一组关键词并发搜索，返回去重后的结果
+      Future<List<Video>> searchWith(String kw) async {
+        final found = <Video>[];
+        final seen = <String>{info.id};
+        final futures = <Future<List<Video>>>[];
+        for (final src in picked) {
+          futures.add(
+            SourceService.instance
+                .search(src, kw)
+                .timeout(_recommendPerSourceTimeout)
+                .catchError((Object e) {
+              AppLog.instance.log(
+                  '[Recommend] 源 ${src.name} 搜索"$kw"失败/超时: $e');
+              return <Video>[];
+            }),
+          );
         }
+        for (final list in await Future.wait(futures)) {
+          for (final v in list) {
+            if (v.id.isEmpty || !seen.add(v.id)) continue;
+            found.add(v);
+          }
+        }
+        return found;
       }
 
-      // ---- 再洗一次牌：同源结果内部顺序也随机 ----
+      // ⚠️ 随机同类只是"锦上添花"，不能只靠它。
+      // 抽到「大陆」（地区）或演员名时，源的本地过滤
+      // （SourceService._filterSearchResults 要求关键词命中视频信息）
+      // 经常返回 0 条 → 直接"暂无推荐"。
+      // 所以随机关键词空结果时必须回退用片名再搜一次 ——
+      // 片名是唯一能保证命中的锚点，这样列表基本不会空。
+      final collected = <Video>[];
+      final usedKeywords = <String>[];
+      if (keywordPool.isNotEmpty) {
+        final kw = keywordPool[rnd.nextInt(keywordPool.length)];
+        usedKeywords.add(kw);
+        collected.addAll(await searchWith(kw));
+      }
+      if (collected.isEmpty && info.name.isNotEmpty) {
+        usedKeywords.add(info.name);
+        collected.addAll(await searchWith(info.name));
+      }
+
+      // ---- 洗牌：结果顺序也随机 ----
       collected.shuffle(rnd);
       // GetxController 没有 mounted，用 isClosed 判断是否已销毁
       if (!isClosed) {
         recommended.value = collected.take(30).toList();
         AppLog.instance.log(
-            '[Recommend] 随机同类: 关键词="$keyword" '
+            '[Recommend] 关键词="${usedKeywords.join(" → ")}" '
             '源=${picked.map((s) => s.name).join("/")} 结果=${collected.length} 条');
       }
     } catch (e) {

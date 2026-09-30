@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../common/theme.dart';
 import '../../widgets/common_widgets.dart';
+import '../../widgets/glass.dart';
 import 'controller.dart';
 import 'sub/about_settings_page.dart';
 import 'sub/appearance_settings_page.dart';
@@ -160,45 +161,65 @@ class _SettingsPageState extends State<SettingsPage> {
     required String subtitle,
     required VoidCallback onTap,
   }) {
-    return AppCard(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+    return GlassPress(
+      onTap: onTap,
+      pressedScale: 0.975,
+      child: AppCard(
+        dense: true,
         child: Padding(
           padding: const EdgeInsets.symmetric(
-            horizontal: AppTheme.spacingMD,
-            vertical: 14,
+            horizontal: AppTheme.spacingXS,
+            vertical: 8,
           ),
           child: Row(
             children: [
-              Icon(icon, size: 22, color: AppTheme.accentColor),
-              const SizedBox(width: AppTheme.spacingMD),
+              // 图标放进小圆角容器（Liquid Glass 的应用图标式底板）
+              Container(
+                width: 32,
+                height: 32,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppTheme.accentColor.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(
+                    color: AppTheme.accentColor.withValues(alpha: 0.22),
+                    width: 0.5,
+                  ),
+                ),
+                child: Icon(icon, size: 17, color: AppTheme.accentColor),
+              ),
+              const SizedBox(width: 11),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       title,
                       style: TextStyle(
                         color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontBody,
-                        fontWeight: FontWeight.w500,
+                        fontSize: AppTheme.fontSubhead + 0.5,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 1),
                     Text(
                       subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: AppTheme.textTertiary,
                         fontSize: AppTheme.fontCaption,
-                        height: 1.3,
+                        height: 1.25,
                       ),
                     ),
                   ],
                 ),
               ),
+              const SizedBox(width: 6),
               Icon(Icons.chevron_right,
-                  size: 20, color: AppTheme.textTertiary),
+                  size: 17,
+                  color: AppTheme.textTertiary.withValues(alpha: 0.7)),
             ],
           ),
         ),

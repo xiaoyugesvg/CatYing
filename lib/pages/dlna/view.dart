@@ -4,6 +4,7 @@ import 'package:dlna_dart/dlna.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../services/app_log.dart';
+import '../../common/theme.dart';
 
 /// DLNA 投屏 page
 ///
@@ -104,7 +105,7 @@ class _DLNAPageState extends State<DLNAPage> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: AppTheme.backgroundPrimary,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -135,9 +136,9 @@ class _DLNAPageState extends State<DLNAPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.grey.shade900,
+        color: AppTheme.backgroundSecondary,
         border: Border(
-          top: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          top: BorderSide(color: AppTheme.borderLight),
         ),
       ),
       child: SafeArea(
@@ -157,8 +158,8 @@ class _DLNAPageState extends State<DLNAPage> {
                     children: [
                       Text(
                         '正在投屏到 $deviceName',
-                        style: const TextStyle(
-                          color: Colors.white,
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                         ),
@@ -184,15 +185,15 @@ class _DLNAPageState extends State<DLNAPage> {
                   onPressed: _isControlBusy ? null : _togglePause,
                   icon: Icon(
                     _isPlaying ? Icons.pause : Icons.play_arrow,
-                    color: Colors.white,
+                    color: AppTheme.textPrimary,
                   ),
                   tooltip: _isPlaying ? '暂停' : '继续播放',
                 ),
                 // 停止投屏
                 IconButton(
                   onPressed: _isControlBusy ? null : _stopCast,
-                  icon: const Icon(Icons.stop_circle_outlined,
-                      color: Colors.white70),
+                  icon: Icon(Icons.stop_circle_outlined,
+                      color: AppTheme.textSecondary),
                   tooltip: '停止投屏',
                 ),
               ],
@@ -205,14 +206,14 @@ class _DLNAPageState extends State<DLNAPage> {
 
   Widget _buildBody(ColorScheme colorScheme) {
     if (_isSearching && _deviceList.isEmpty) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            CircularProgressIndicator(color: Colors.white),
-            SizedBox(height: 16),
+            const CircularProgressIndicator(color: Colors.white),
+            const SizedBox(height: 16),
             Text('正在搜索局域网内的 DLNA 设备…',
-                style: TextStyle(color: Colors.white70)),
+                style: TextStyle(color: AppTheme.textSecondary)),
           ],
         ),
       );
@@ -222,17 +223,17 @@ class _DLNAPageState extends State<DLNAPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.tv_off, size: 64, color: Colors.white24),
+            Icon(Icons.tv_off, size: 64, color: AppTheme.textTertiary.withValues(alpha: 0.4)),
             const SizedBox(height: 16),
-            const Text('没有发现 DLNA 设备',
-                style: TextStyle(color: Colors.white70, fontSize: 16)),
+            Text('没有发现 DLNA 设备',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 16)),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               '请确认：\n'
               '1. 电视/投影仪与手机连接同一 WiFi\n'
               '2. 设备已开启 DLNA / AirPlay / Miracast 功能',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white38, fontSize: 12),
+              style: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
             ),
             const SizedBox(height: 24),
             TextButton.icon(
@@ -248,15 +249,15 @@ class _DLNAPageState extends State<DLNAPage> {
     return ListView.separated(
       itemCount: keys.length + (_isSearching ? 1 : 0),
       separatorBuilder: (_, __) =>
-          Divider(height: 1, color: Colors.white.withValues(alpha: 0.05)),
+          Divider(height: 1, color: AppTheme.borderLight),
       itemBuilder: (context, index) {
         if (index == keys.length) {
           // 列表底部"还在搜索"提示
-          return const Padding(
+          return Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
             child: Center(
               child: Text('继续搜索中…',
-                  style: TextStyle(color: Colors.white38, fontSize: 12)),
+                  style: TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
             ),
           );
         }
@@ -266,12 +267,12 @@ class _DLNAPageState extends State<DLNAPage> {
         return ListTile(
           leading: Icon(
             isActive ? Icons.cast_connected : Icons.tv,
-            color: isActive ? Colors.greenAccent.shade400 : Colors.white70,
+            color: isActive ? Colors.greenAccent.shade400 : AppTheme.textSecondary,
           ),
           title: Text(
             device.info.friendlyName,
             style: TextStyle(
-              color: isActive ? Colors.greenAccent.shade400 : Colors.white,
+              color: isActive ? Colors.greenAccent.shade400 : AppTheme.textPrimary,
               fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
             ),
           ),
@@ -285,7 +286,7 @@ class _DLNAPageState extends State<DLNAPage> {
           ),
           trailing: Icon(
             isActive ? Icons.check_circle : Icons.cast,
-            color: isActive ? Colors.greenAccent.shade400 : Colors.white54,
+            color: isActive ? Colors.greenAccent.shade400 : AppTheme.textTertiary,
           ),
           onTap: () => _castTo(device, key),
         );
