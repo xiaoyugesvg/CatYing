@@ -128,6 +128,9 @@ class HomeController extends GetxController {
   /// 列表请求序号：筛选/分类快速切换时丢弃过期响应
   int _listRequestId = 0;
 
+  /// 上一次请求的「分类+筛选」签名；变了就跳过缓存强制走网络
+  String _lastQuerySig = '';
+
   /// 缓存 key 必须带上筛选条件，否则会塞回错误列表
   String _catCacheKey(
       String sourceKey, String sortId, Map<String, String>? filters) {
@@ -153,9 +156,19 @@ class HomeController extends GetxController {
         : Map<String, String>.from(selectedFilters);
     final cacheKey = _catCacheKey(source.key, sort.id, filters);
 
+    // 筛选/分类变化时**必须强制走网络**。
+    //
+    // 原因：命中缓存时下面会把 cacheHit 置为 true → 不显示 loading →
+    // 界面上完全看不出"点过了"；若网络回包恰好与旧列表相同，列表也不动，
+    // 用户就会认为"筛选点了没反应、内容不跟着换"。
+    // 这里比较筛选签名，变了就跳过缓存，保证有加载反馈且拿到的是新结果。
+    final sig = '${sort.id}|${cacheKey}';
+    final filterChanged = _lastQuerySig != sig;
+    _lastQuerySig = sig;
+
     // 第一页优先读缓存：立刻出片，网络刷新静默
     var cacheHit = false;
-    if (page == 1) {
+    if (page == 1 && !filterChanged) {
       try {
         final cached = CacheStore.instance.getJsonListCache(
           cacheKey,
@@ -167,7 +180,8 @@ class HomeController extends GetxController {
               .map((e) => Video.fromJson(Map<String, dynamic>.from(e)))
               .toList();
           if (requestId == _listRequestId) {
-            videos.value = list;
+            // 同 _loadCategoryVideos：RxList 要用 assignAll 才会通知 Obx
+            videos.assignAll(list);
             cacheHit = true;
           }
         }
@@ -197,7 +211,12 @@ class HomeController extends GetxController {
       if (page == 1) {
         // 与缓存相同则不闪一下
         if (!cacheHit || !_sameVideoIds(videos, videoList)) {
-          videos.value = videoList;
+          // ⚠️ 必须用 assignAll，不能写 `videos.value = videoList`：
+          // videos 是 RxList，GetX 对它的通知走内部 listeners，
+          // 直接替换 .value 时 Obx **不一定重建** —— 表现就是
+          // "点了筛选、请求发了、数据也回来了，但列表纹丝不动"。
+          // assignAll 就地更新，保证通知到所有 Obx。
+          videos.assignAll(videoList);
         }
         if (videoList.isNotEmpty) {
           CacheStore.instance.setJsonCache(

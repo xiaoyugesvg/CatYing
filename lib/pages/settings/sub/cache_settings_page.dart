@@ -56,7 +56,6 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
             SettingsRow(
               icon: Icons.offline_bolt_outlined,
               title: '源文件缓存',
-              subtitle: '缓存源 JS，避免每次重新下载',
               value: _sourceCacheEnabled ? '已开启' : '已关闭',
               onTap: () async {
                 setState(
@@ -69,21 +68,18 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
             SettingsRow(
               icon: Icons.auto_delete_outlined,
               title: '自动清理缓存',
-              subtitle: '到期自动释放源缓存空间',
               value: _autoCleanLabels[_autoCleanIndex],
               onTap: _pickAutoClean,
             ),
             SettingsRow(
               icon: Icons.cleaning_services_outlined,
               title: '清理源文件缓存',
-              subtitle: '只删源 JS，不影响设置',
               value: '源 JS',
               onTap: () => controller.clearSourceCache(),
             ),
             Obx(() => SettingsRow(
                   icon: Icons.delete_outline,
                   title: '清除应用缓存',
-                  subtitle: '图片、临时文件与页面数据；不动历史/收藏/播放设置',
                   value: controller.cacheSizeString.value,
                   onTap: _confirmClearCache,
                 )),
@@ -91,7 +87,6 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
             SettingsRow(
               icon: Icons.checklist,
               title: '数据清理',
-              subtitle: '按项勾选要清理的内容（含用户数据）',
               value: '精细',
               onTap: () => Get.to(() => const DataCleanupPage()),
             ),

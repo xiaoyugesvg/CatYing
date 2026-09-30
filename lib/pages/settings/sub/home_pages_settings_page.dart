@@ -16,6 +16,7 @@ class HomePagesSettingsPage extends StatelessWidget {
     NavFeature.home: Icons.home_outlined,
     NavFeature.live: Icons.live_tv_outlined,
     NavFeature.music: Icons.library_music_outlined,
+    NavFeature.books: Icons.menu_book_outlined,
     NavFeature.shelf: Icons.video_library_outlined,
     NavFeature.settings: Icons.settings_outlined,
     NavFeature.search: Icons.search,

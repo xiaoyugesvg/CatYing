@@ -414,6 +414,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   /// 切换布局：2 / 3 / 4 列
+  ///
+  /// 样式与「史藏」页的布局弹窗**保持一致**：大格子 + 左侧方块示意 +
+  /// 右侧「N 列」，一行两个。原来是 Wrap + 小胶囊挤成一列，观感差很多。
   Future<void> _openLayoutSheet() async {
     final prefs = PlayerPrefs.instance;
     await showModalBottomSheet<void>(
@@ -426,36 +429,110 @@ class _HomePageState extends State<HomePage> {
         top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 4),
+              child: Text('切换布局',
+                  style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600)),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+              child: Text('一行显示几列',
+                  style: TextStyle(
+                      color: AppTheme.textTertiary,
+                      fontSize: AppTheme.fontCaption)),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: Column(
                 children: [
-                  Text('切换布局',
-                      style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600)),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Obx(() => _layoutCell(
+                              prefs.gridColumns.value, 2, ctx)),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Obx(() => _layoutCell(
+                              prefs.gridColumns.value, 3, ctx)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Obx(() => _layoutCell(
+                            prefs.gridColumns.value, 4, ctx)),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(child: SizedBox.shrink()),
+                    ],
+                  ),
                 ],
               ),
             ),
-            Obx(() => Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-                  child: Wrap(
-                    spacing: 10,
-                    children: [
-                      for (final n in const [2, 3, 4])
-                        SelectableChip(
-                          title: '$n 列',
-                          isSelected: prefs.gridColumns.value == n,
-                          onTap: () async {
-                            await prefs.setGridColumns(n);
-                            if (ctx.mounted) Navigator.pop(ctx);
-                          },
-                        ),
-                    ],
-                  ),
-                )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 布局选项格子（与史藏页同一套视觉）
+  Widget _layoutCell(int cur, int n, BuildContext ctx) {
+    final selected = cur == n;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () async {
+        await PlayerPrefs.instance.setGridColumns(n);
+        if (ctx.mounted) Navigator.pop(ctx);
+      },
+      child: Container(
+        height: 62,
+        decoration: BoxDecoration(
+          color: selected
+              ? AppTheme.accentColor.withValues(alpha: 0.14)
+              : AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(AppTheme.glassRadiusSmall),
+          border: Border.all(
+            color: selected
+                ? AppTheme.accentColor.withValues(alpha: 0.7)
+                : AppTheme.glassBorderSoft,
+            width: selected ? 1.2 : 0.6,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // 用 n 个小方块直观示意列数
+            for (var i = 0; i < n && i < 4; i++)
+              Container(
+                width: 9,
+                height: 13,
+                margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? AppTheme.accentColor
+                      : AppTheme.textTertiary.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            const SizedBox(width: 10),
+            Text('$n 列',
+                style: TextStyle(
+                    color: selected
+                        ? AppTheme.accentColor
+                        : AppTheme.textSecondary,
+                    fontSize: AppTheme.fontSubhead,
+                    fontWeight:
+                        selected ? FontWeight.w600 : FontWeight.normal)),
           ],
         ),
       ),
@@ -501,27 +578,36 @@ class _HomePageState extends State<HomePage> {
 
   /// 一行筛选：左侧组名 + 右侧**可横向滚动**的选项。
   ///
-  /// 关键修正：
-  ///   1. 组名固定宽度用 SizedBox（原 40 太窄，"地区"会被压）；
-  ///   2. 选中值若不在列表里（换分类后残留），"全部" 的选中态要跟着失效，
-  ///      否则会同时出现两个高亮；
-  ///   3. 选项末尾留 12 的余量，最后一项不再被裁掉半个字。
+  /// 关键点（都是实测问题）：
+  ///   1. 组名必须给足宽度且**允许换行** —— 原来 44 固定宽 + 不换行，
+  ///      "国家/地区" 被压得看不见，整行只剩下一列「全部」芯片；
+  ///   2. 选中值若不在当前列表里（换分类后的残留），「全部」的选中态要失效，
+  ///      否则两个同时高亮；
+  ///   3. 选项末尾留余量，最后一项不被裁掉半个字。
   Widget _filterRow(SortFilter f) {
     final selected = _controller.selectedFilters[f.key];
-    // 只有"确实选中了某个具体值"时，「全部」才不亮
     final hasValidSelection =
         selected != null && f.values.any((v) => v.v == selected);
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+      // 顶部对齐：组名可能换行成两行，芯片列保持顶部对齐才整齐
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          width: 44,
-          child: Text(
-            f.name,
-            style: TextStyle(
-              color: AppTheme.textTertiary,
-              fontSize: AppTheme.fontCaption,
-              fontWeight: FontWeight.w600,
+          width: 56,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 7, right: 4),
+            child: Text(
+              f.name,
+              // 允许换行，长组名（国家/地区）不再被截断
+              softWrap: true,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontCaption,
+                fontWeight: FontWeight.w600,
+                height: 1.25,
+              ),
             ),
           ),
         ),
@@ -746,9 +832,11 @@ class _HomePageState extends State<HomePage> {
                       crossAxisCount;
 
               // 卡片真实高度 = 海报高（宽 × posterHeightRatio）+ 文字区。
-              // 之前写的是 cardWidth/0.65 + 50，与 VodCard 内部的 0.72 不一致，
-              // 网格分给卡片的高度比实际需要多出一大截 → 卡片下方大片空白。
-              const posterRatio = 0.72; // 与 VodCard.posterHeightRatio 保持一致
+              //
+              // 海报比例 1.44 = 0.72 × 2：按要求把首页卡片高度做成原来的**两倍**。
+              // ⚠️ 必须与下面 VodCard 的 posterHeightRatio 保持一致，
+              //    否则网格分给卡片的高度与卡片实际需要的高度对不上 → 底部留白。
+              const posterRatio = 1.44;
               const textArea = 30.0; // 标题行 + 上下内边距
               final cardHeight = cardWidth * posterRatio + textArea;
               final ratio = cardWidth / cardHeight;
@@ -827,6 +915,8 @@ class _HomePageState extends State<HomePage> {
                         final vid = videos[index];
                         return VodCard(
                           video: vid,
+                          // 与上面的 posterRatio 配套（首页卡片高度 ×2）
+                          posterHeightRatio: 1.44,
                           onTap: () => Get.toNamed('/detail', arguments: vid),
                         );
                       },

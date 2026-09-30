@@ -39,6 +39,15 @@ class _LivePageState extends State<LivePage> {
   bool _audioMode = false;
   int _activeGroupIndex = 0;
   String? _playError;
+
+  /// 正在切台/加载流（显示播放器中间转圈）
+  bool _switching = false;
+
+  /// 加载遮罩兜底计时器
+  Timer? _switchTimer;
+
+  /// 「出画面」监听（position 前进即视为开播）
+  StreamSubscription? _switchReadySub;
   StreamSubscription<dynamic>? _errSub;
   Worker? _tabWorker;
 
@@ -79,6 +88,8 @@ class _LivePageState extends State<LivePage> {
     LiveService.pauseLivePlayer = null;
     _tabWorker?.dispose();
     _errSub?.cancel();
+    _switchReadySub?.cancel();
+    _switchTimer?.cancel();
     _player?.dispose();
     _player = null;
     _avPlayer?.dispose();
@@ -97,6 +108,14 @@ class _LivePageState extends State<LivePage> {
   void _playChannel(String url) {
     if (url.isEmpty) return;
     _playError = null;
+    // 切台时先亮起「加载中」遮罩：新流从 open 到出画面有几百毫秒到几秒，
+    // 期间老画面还在，没有反馈会让人以为点了没反应。
+    _switching = true;
+    _switchTimer?.cancel();
+    // 兜底：最多显示 20 秒（真正就绪时由 position/buffering 监听提前清掉）
+    _switchTimer = Timer(const Duration(seconds: 20), () {
+      if (mounted && _switching) setState(() => _switching = false);
+    });
     // 复用同一 Player，切台只 open 新地址，避免黑屏/闪断
     _player ??= Player(
       configuration: const PlayerConfiguration(title: '猫影直播'),
@@ -135,11 +154,23 @@ class _LivePageState extends State<LivePage> {
     }
     // 订阅播放错误，避免一直转圈无提示
     _errSub?.cancel();
+    _switchReadySub?.cancel();
+    _switchTimer?.cancel();
     _errSub = _player!.stream.error.listen((msg) {
       if (!mounted) return;
       setState(() {
         _playError = msg.isEmpty ? '播放失败，点此重试' : msg;
+        _switching = false;
       });
+    });
+    // 出画面了就撤掉「加载中」遮罩（position 前进即视为已开播）
+    _switchReadySub?.cancel();
+    _switchReadySub = _player!.stream.position.listen((pos) {
+      if (!mounted) return;
+      if (_switching && pos > Duration.zero) {
+        _switchTimer?.cancel();
+        setState(() => _switching = false);
+      }
     });
     setState(() {});
   }
@@ -238,28 +269,14 @@ class _LivePageState extends State<LivePage> {
                             if (err == null) return const SizedBox.shrink();
                             final loading =
                                 LiveService.instance.isLoading.value;
+                            // 按你的要求：**不显示红色错误文案与「重试」文字**。
+                            // 源加载失败时只在播放器/列表上方放一个圆形的
+                            // 重试图标按钮（无文字），点它重新加载。
                             return Padding(
                               padding:
-                                  const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                                  const EdgeInsets.fromLTRB(12, 6, 12, 0),
                               child: Row(
                                 children: [
-                                  Icon(Icons.error_outline,
-                                      size: 15,
-                                      color: Colors.redAccent
-                                          .withValues(alpha: 0.9)),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: Text(
-                                      err,
-                                      style: TextStyle(
-                                          color: Colors.redAccent
-                                              .withValues(alpha: 0.9),
-                                          fontSize: 12,
-                                          height: 1.4),
-                                    ),
-                                  ),
-                                  // 一键重试：失败时不必去找左上角刷新图标
-                                  const SizedBox(width: 8),
                                   GestureDetector(
                                     behavior: HitTestBehavior.opaque,
                                     onTap: loading
@@ -267,13 +284,13 @@ class _LivePageState extends State<LivePage> {
                                         : () =>
                                             LiveService.instance.retryLast(),
                                     child: Container(
-                                      padding: EdgeInsets.symmetric(
-                                          horizontal: 12, vertical: 5),
+                                      width: 32,
+                                      height: 32,
+                                      alignment: Alignment.center,
                                       decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
                                         color: AppTheme.accentColor
-                                            .withValues(alpha: 0.16),
-                                        borderRadius:
-                                            BorderRadius.circular(14),
+                                            .withValues(alpha: 0.14),
                                         border: Border.all(
                                             color: AppTheme.accentColor
                                                 .withValues(alpha: 0.45),
@@ -281,22 +298,25 @@ class _LivePageState extends State<LivePage> {
                                       ),
                                       child: loading
                                           ? const SizedBox(
-                                              width: 12,
-                                              height: 12,
+                                              width: 14,
+                                              height: 14,
                                               child:
                                                   CircularProgressIndicator(
-                                                      strokeWidth: 1.6,
+                                                      strokeWidth: 1.8,
                                                       color: AppTheme
                                                           .accentColor),
                                             )
-                                          : Text('重试',
-                                              style: TextStyle(
-                                                  color:
-                                                      AppTheme.accentColor,
-                                                  fontSize: 12,
-                                                  fontWeight:
-                                                      FontWeight.w600)),
+                                          : Icon(Icons.refresh_rounded,
+                                              size: 18,
+                                              color: AppTheme.accentColor),
                                     ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    loading ? '正在加载源…' : '加载失败',
+                                    style: TextStyle(
+                                        color: AppTheme.textTertiary,
+                                        fontSize: 12),
                                   ),
                                 ],
                               ),
@@ -688,45 +708,63 @@ class _LivePageState extends State<LivePage> {
               child: Icon(Icons.live_tv,
                   color: AppTheme.textTertiary, size: 56),
             ),
-          // 播放失败：显示错误 + 重试，避免无限转圈
-          if (_playError != null && !_audioMode)
+          // 切台加载中：播放器正中间转圈（无文字干扰）
+          if (_switching && !_audioMode && _playError == null)
             Positioned.fill(
-              child: GestureDetector(
-                onTap: () {
-                  final url = current?.playUrl ?? '';
-                  if (url.isNotEmpty) _playChannel(url);
-                },
+              child: IgnorePointer(
                 child: Container(
-                  color: Colors.black.withValues(alpha: 0.55),
+                  color: Colors.black.withValues(alpha: 0.35),
                   alignment: Alignment.center,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.error_outline,
-                          color: Colors.white70, size: 40),
-                      const SizedBox(height: 10),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: Text(
-                          _playError!,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 12),
+                      SizedBox(
+                        width: 34,
+                        height: 34,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.6,
+                          color: Colors.white.withValues(alpha: 0.92),
                         ),
                       ),
                       const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Text('点击重试',
-                            style: TextStyle(
-                                color: AppTheme.textPrimary, fontSize: 12)),
-                      ),
+                      Text('正在加载…',
+                          style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.85),
+                              fontSize: 12)),
                     ],
+                  ),
+                ),
+              ),
+            ),
+          // 播放失败：**不显示红字/错误文案**，只在播放器正中间放一个
+          // 重试图标按钮。点它重新拉流，成功就自动开始播。
+          if (_playError != null && !_audioMode)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  final url = current?.playUrl ?? '';
+                  if (url.isNotEmpty) {
+                    setState(() => _playError = null);
+                    _playChannel(url);
+                  }
+                },
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  alignment: Alignment.center,
+                  child: Container(
+                    width: 64,
+                    height: 64,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withValues(alpha: 0.14),
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.5),
+                          width: 1.4),
+                    ),
+                    child: const Icon(Icons.refresh_rounded,
+                        color: Colors.white, size: 32),
                   ),
                 ),
               ),

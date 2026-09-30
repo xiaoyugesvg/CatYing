@@ -58,7 +58,9 @@ class TvSearchController extends GetxController {
   ///
   /// 取 12 秒：足够 spider 源转发一次，又不会让用户干等太久。
   /// 关键是**必须有** —— 没有超时就会因为一个卡住的源让整页永远"搜索中"。
-  static const Duration _perSourceTimeout = Duration(seconds: 12);
+  // 单源超时 8s：12s 太长了，一个卡住的源会把整个「快搜」拖到没法用。
+  // 有结果的源通常 1~3s 就回，8s 足够，超时的直接跳过。
+  static const Duration _perSourceTimeout = Duration(seconds: 8);
 
   /// 最近一次真正发起搜索的关键词，供防抖去重（避免回车 + 防抖各搜一遍）
   String _lastSearchedKeyword = '';
@@ -170,22 +172,53 @@ class TvSearchController extends GetxController {
       if (_latestSearchRequestId != requestId) return;
       resultsBySite[source.key] = videos;
       resultCount[source.key] = videos.length;
+      // 结果到了就把用户带到"真有东西"的那个源。
+      //
+      // 原来默认选第一个源：只要它超时/为空，界面就一直显示「正在搜索各源...」，
+      // 而其它源其实早就返回了结果 —— 这就是"快搜看着没内容/很慢"的主因。
+      _autoPickBestSite();
     } on TimeoutException {
       AppLog.instance.log('[SearchController] 搜索源 ${source.key}: '
           '超时（${_perSourceTimeout.inSeconds}s），跳过');
       if (_latestSearchRequestId == requestId) {
         resultsBySite[source.key] = [];
         resultCount[source.key] = 0;
+        _autoPickBestSite();
       }
     } catch (e) {
       AppLog.instance.log('[SearchController] 搜索源 ${source.key}: 搜索失败 $e');
       if (_latestSearchRequestId == requestId) {
         resultsBySite[source.key] = [];
         resultCount[source.key] = 0;
+        _autoPickBestSite();
       }
     } finally {
       // 无论成功/失败/超时/过期都复位，保证该源 chip 不再转圈
       searchingStatus[source.key] = false;
+    }
+  }
+
+  /// 自动切到"有结果"的源。
+  ///
+  /// 规则：当前选中的源已有结果就**不动**（尊重用户手动切源）；
+  /// 否则挑一个结果最多的源切过去。
+  void _autoPickBestSite() {
+    final cur = selectedSiteKey.value;
+    if (cur != null && (resultCount[cur] ?? 0) > 0) return;
+
+    String? best;
+    var bestCount = 0;
+    for (final e in resultCount.entries) {
+      final n = e.value ?? 0;
+      if (n > bestCount) {
+        bestCount = n;
+        best = e.key;
+      }
+    }
+    if (best != null && bestCount > 0) {
+      selectedSiteKey.value = best;
+      AppLog.instance.log(
+          '[SearchController] 自动切到有结果的源: $best ($bestCount 条)');
     }
   }
 

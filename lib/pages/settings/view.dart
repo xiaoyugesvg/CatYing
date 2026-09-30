@@ -11,6 +11,7 @@ import 'sub/danmu_settings_page.dart';
 import 'sub/data_source_settings_page.dart';
 import 'sub/home_pages_settings_page.dart';
 import 'sub/metadata_settings_page.dart';
+import 'sub/book_source_settings_page.dart';
 import 'sub/music_source_settings_page.dart';
 import 'sub/playback_settings_page.dart';
 
@@ -73,14 +74,12 @@ class _SettingsPageState extends State<SettingsPage> {
               _categoryTile(
                 icon: Icons.brightness_6_outlined,
                 title: '外观与壁纸',
-                subtitle: '外观模式、壁纸背景、界面字号、首页主题',
                 onTap: () => Get.to(() => const AppearanceSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingSM),
               _categoryTile(
                 icon: Icons.dashboard_customize_outlined,
                 title: '主页页面',
-                subtitle: '底栏功能的开关与顺序（长按拖动调整）',
                 onTap: () => Get.to(() => const HomePagesSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingXXL),
@@ -91,15 +90,19 @@ class _SettingsPageState extends State<SettingsPage> {
               _categoryTile(
                 icon: Icons.movie_outlined,
                 title: '订阅与数据源',
-                subtitle: '点播接口地址、主页数据源、重置配置',
                 onTap: () => Get.to(() => const DataSourceSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingSM),
               _categoryTile(
                 icon: Icons.library_music_outlined,
                 title: '音乐音源',
-                subtitle: '通用 HTTP 音源地址、音质与请求头',
                 onTap: () => Get.to(() => const MusicSourceSettingsPage()),
+              ),
+              const SizedBox(height: AppTheme.spacingSM),
+              _categoryTile(
+                icon: Icons.menu_book_outlined,
+                title: '书源管理',
+                onTap: () => Get.to(() => const BookSourceSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingXXL),
 
@@ -109,14 +112,12 @@ class _SettingsPageState extends State<SettingsPage> {
               _categoryTile(
                 icon: Icons.play_circle_outline,
                 title: '播放设置',
-                subtitle: '播放内核、缓冲解码、快进与跳过片头尾',
                 onTap: () => Get.to(() => const PlaybackSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingSM),
               _categoryTile(
                 icon: Icons.live_tv_outlined,
                 title: '直播源管理',
-                subtitle: '全局 EPG、屏蔽分类',
                 onTap: () => Get.toNamed('/live/settings'),
               ),
               const SizedBox(height: AppTheme.spacingXXL),
@@ -127,14 +128,12 @@ class _SettingsPageState extends State<SettingsPage> {
               _categoryTile(
                 icon: Icons.subtitles,
                 title: '弹幕',
-                subtitle: '弹幕 API、样式、屏蔽关键词',
                 onTap: () => Get.to(() => const DanmuSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingSM),
               _categoryTile(
                 icon: Icons.movie_filter_outlined,
                 title: '元数据刮削',
-                subtitle: 'TMDB Key、自动刮削、演职员与类似作品',
                 onTap: () => Get.to(() => const MetadataSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingXXL),
@@ -145,14 +144,12 @@ class _SettingsPageState extends State<SettingsPage> {
               _categoryTile(
                 icon: Icons.cleaning_services_outlined,
                 title: '缓存',
-                subtitle: '源文件缓存、自动清理周期、清除应用缓存',
                 onTap: () => Get.to(() => const CacheSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingSM),
               _categoryTile(
                 icon: Icons.info_outline,
                 title: '关于',
-                subtitle: '版本信息、站点与解析数量',
                 onTap: () => Get.to(() => const AboutSettingsPage()),
               ),
             ],
@@ -174,7 +171,6 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _categoryTile({
     required IconData icon,
     required String title,
-    required String subtitle,
     required VoidCallback onTap,
   }) {
     return GlassPress(
@@ -183,58 +179,41 @@ class _SettingsPageState extends State<SettingsPage> {
       child: AppCard(
         dense: true,
         child: Padding(
+          // 按你的要求：不要副标题，行内边距也放开一些，别那么紧
           padding: const EdgeInsets.symmetric(
-            horizontal: AppTheme.spacingXS,
-            vertical: 8,
+            horizontal: AppTheme.spacingSM,
+            vertical: 15,
           ),
           child: Row(
             children: [
               // 图标放进小圆角容器（Liquid Glass 的应用图标式底板）
               Container(
-                width: 32,
-                height: 32,
+                width: 36,
+                height: 36,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: AppTheme.accentColor.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(9),
+                  borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: AppTheme.accentColor.withValues(alpha: 0.22),
                     width: 0.5,
                   ),
                 ),
-                child: Icon(icon, size: 17, color: AppTheme.accentColor),
+                child: Icon(icon, size: 18, color: AppTheme.accentColor),
               ),
-              const SizedBox(width: 11),
+              const SizedBox(width: 14),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontSubhead + 0.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppTheme.textTertiary,
-                        fontSize: AppTheme.fontCaption,
-                        height: 1.25,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontSubhead + 1.5,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-              const SizedBox(width: 6),
               Icon(Icons.chevron_right,
-                  size: 17,
+                  size: 18,
                   color: AppTheme.textTertiary.withValues(alpha: 0.7)),
             ],
           ),

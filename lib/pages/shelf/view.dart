@@ -51,9 +51,8 @@ class _ShelfPageState extends State<ShelfPage> {
       body: SafeArea(
         child: Column(
           children: [
-            _buildTabBar(),
-            // 工具栏：搜索 / 清空 / 编辑 / 切换布局（按你要求的顺序）
-            _buildToolbar(),
+            // 一行搞定：左边「历史 / 收藏」tab，右边四个功能图标
+            _buildHeaderRow(),
             Obx(() => c.searching.value ? _buildSearchField() : const SizedBox.shrink()),
             Expanded(child: _buildGrid()),
           ],
@@ -63,13 +62,13 @@ class _ShelfPageState extends State<ShelfPage> {
   }
 
   // ============================================================
-  // 顶栏：历史 / 收藏 + 编辑
+  // 顶栏：历史 / 收藏 + 搜索 / 清空 / 排序 / 编辑 / 布局
   // ============================================================
 
-  Widget _buildTabBar() {
+  Widget _buildHeaderRow() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingXL, AppTheme.spacingLG, AppTheme.spacingXL, 0),
+          AppTheme.spacingXL, AppTheme.spacingLG, AppTheme.spacingMD, 0),
       child: Row(
         children: [
           Obx(() => _tabLabel('历史', c.tab.value == 0, () => c.switchTab(0))),
@@ -88,55 +87,36 @@ class _ShelfPageState extends State<ShelfPage> {
                 _actionText(allSelected ? '取消全选' : '全选',
                     () => c.setAll(keys, !allSelected)),
                 if (n > 0) ...[
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 10),
                   _actionText('删除($n)', _confirmDeleteSelected,
                       danger: true),
                 ],
-                const SizedBox(width: 14),
-                _actionText('完成', c.exitEdit),
               ],
             );
           }),
-        ],
-      ),
-    );
-  }
-
-  /// 工具栏：搜索 / 清空 / 编辑 / 切换布局（依序，一行放完）
-  Widget _buildToolbar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingXL, AppTheme.spacingSM, AppTheme.spacingXL, 4),
-      child: Row(
-        children: [
-          // 1) 搜索
+          const SizedBox(width: 2),
+          // 搜索
           Obx(() => _iconBtn(
                 c.searching.value ? Icons.search_off : Icons.search,
                 c.searching.value ? '收起搜索' : '搜索',
                 c.toggleSearching,
                 active: c.searching.value,
               )),
-          const SizedBox(width: 4),
-          // 2) 清空
+          // 清空
           _iconBtn(Icons.delete_sweep_outlined, '清空', _confirmClearAll),
-          const Spacer(),
-          // 3) 收藏排序（仅收藏 tab 显示，历史不需要）
+          // 收藏排序（仅收藏 tab）
           Obx(() {
             if (c.tab.value != 1) return const SizedBox.shrink();
-            return Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: _iconBtn(Icons.sort, '排序', _pickFavSort),
-            );
+            return _iconBtn(Icons.sort, '排序', _pickFavSort);
           }),
-          // 4) 编辑
+          // 编辑 / 完成
           Obx(() => _iconBtn(
                 c.editing.value ? Icons.done : Icons.checklist,
                 c.editing.value ? '完成' : '编辑',
                 () => c.toggleEdit(),
                 active: c.editing.value,
               )),
-          const SizedBox(width: 4),
-          // 5) 切换布局
+          // 切换布局
           _iconBtn(Icons.grid_view_rounded, '切换布局', _openLayoutSheet),
         ],
       ),
@@ -355,7 +335,8 @@ class _ShelfPageState extends State<ShelfPage> {
               (constraints.maxWidth - AppTheme.cardSpacing * (cols - 1)) /
                   cols;
           // 图片约 1.5 倍高，与 VodCard.posterHeightRatio 配套
-          final aspect = cardWidth / (cardWidth * 1.015 + 30);
+          // 卡片高度 ×1.2：图片比例 1.015 → 1.218（与 VodCard 配套）
+          final aspect = cardWidth / (cardWidth * 1.218 + 30);
 
           return GridView.builder(
             padding: const EdgeInsets.fromLTRB(
@@ -400,7 +381,7 @@ class _ShelfPageState extends State<ShelfPage> {
           // 历史用 playNote 做角标（"第01集 00:20"）；收藏没有进度就不显示
           note: note,
         ),
-        posterHeightRatio: 1.015,
+        posterHeightRatio: 1.218,
         editMode: editing,
         selected: shelf.isSelected(key),
         onToggleSelect: () => shelf.toggleSelect(key),

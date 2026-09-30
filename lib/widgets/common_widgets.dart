@@ -345,27 +345,30 @@ class SettingsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = iconColor ?? AppTheme.accentColor;
+    // 行高最终 = 图标 36 + 纵向内边距 2×13 = 62，接近 iOS 设置页的呼吸感。
+    // （之前是 32 + 2×8 = 48，一屏塞太多行，显得很挤。）
     final child = Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppTheme.spacingXS,
-        vertical: 8,
+      // 不能是 const：vertical 依赖 subtitle 是否存在
+      padding: EdgeInsets.symmetric(
+        horizontal: AppTheme.spacingMD,
+        vertical: subtitle == null ? 14 : 10,
       ),
       child: Row(
         children: [
-          // 图标容器：32×32 圆角 9 + 强调色 14% 底 + 细描边（参考图样式）
+          // 图标容器：36×36 圆角 10 + 强调色 14% 底 + 细描边（参考图样式）
           Container(
-            width: 32,
-            height: 32,
+            width: 36,
+            height: 36,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: accent.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(9),
+              borderRadius: BorderRadius.circular(10),
               border:
                   Border.all(color: accent.withValues(alpha: 0.22), width: 0.5),
             ),
-            child: Icon(icon, size: 17, color: accent),
+            child: Icon(icon, size: 18, color: accent),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

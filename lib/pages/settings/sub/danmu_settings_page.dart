@@ -131,7 +131,6 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
             unifiedSwitchRow(
               icon: Icons.video_settings,
               title: '优先使用视频返回弹幕数据',
-              subtitle: '播放时优先加载播放接口返回的弹幕，未返回或加载失败时回退自动匹配',
               value: _preferVideoDanmu,
               onChanged: (v) async {
                 setState(() => _preferVideoDanmu = v);
@@ -286,7 +285,6 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
             unifiedSwitchRow(
               icon: Icons.vertical_align_top,
               title: '显示顶部弹幕',
-              subtitle: '关闭后该位置弹幕改为滚动显示',
               value: _showTop,
               onChanged: (v) async {
                 setState(() => _showTop = v);
@@ -296,7 +294,6 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
             unifiedSwitchRow(
               icon: Icons.vertical_align_bottom,
               title: '显示底部弹幕',
-              subtitle: '关闭后该位置弹幕改为滚动显示',
               value: _showBottom,
               onChanged: (v) async {
                 setState(() => _showBottom = v);
@@ -315,7 +312,6 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
             unifiedSwitchRow(
               icon: Icons.sync,
               title: '同步视频速度',
-              subtitle: '倍速播放时弹幕滚动同比缩放',
               value: _syncSpeed,
               onChanged: (v) async {
                 setState(() => _syncSpeed = v);

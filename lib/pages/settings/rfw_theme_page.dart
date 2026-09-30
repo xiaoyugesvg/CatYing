@@ -237,9 +237,6 @@ class _RfwThemePageState extends State<RfwThemePage> {
           style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
           maxLines: 1,
           overflow: TextOverflow.ellipsis),
-      subtitle: Text('${t.source.length} 字符',
-          style:
-              TextStyle(color: AppTheme.textTertiary, fontSize: 11.5)),
       onTap: () async {
         await _svc.setCurrent(t.id);
         if (!mounted) return;

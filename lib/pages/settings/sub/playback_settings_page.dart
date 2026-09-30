@@ -57,7 +57,6 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
               child: unifiedSwitchRow(
                 icon: Icons.memory,
                 title: '硬件加速',
-                subtitle: '关闭后使用软解（更兼容但更耗电）',
                 value: PlayerPrefs.instance.hardwareAccel.value,
                 onChanged: PlayerPrefs.instance.setHardwareAccel,
               ),
@@ -152,7 +151,6 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
             Obx(() => unifiedSwitchRow(
                   icon: Icons.swipe,
                   title: '长按滑动调节倍速',
-                  subtitle: '关闭后长按仅使用固定倍速',
                   value: PlayerPrefs.instance.longPressAdjustable.value,
                   onChanged: PlayerPrefs.instance.setLongPressAdjustable,
                 )),
@@ -165,7 +163,6 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
             Obx(() => unifiedSwitchRow(
                   icon: Icons.timer_outlined,
                   title: '进度条显示总时长',
-                  subtitle: '关闭则显示剩余时长',
                   value: PlayerPrefs.instance.showTotalDuration.value,
                   onChanged: PlayerPrefs.instance.setShowTotalDuration,
                 )),
@@ -184,14 +181,12 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
             Obx(() => unifiedSwitchRow(
                   icon: Icons.notifications_none,
                   title: '跳过提示',
-                  subtitle: '跳过片头片尾时显示横幅与轻提示',
                   value: PlayerPrefs.instance.skipHint.value,
                   onChanged: PlayerPrefs.instance.setSkipHint,
                 )),
             Obx(() => unifiedSwitchRow(
                   icon: Icons.switch_video,
                   title: '切集提示',
-                  subtitle: '切集时显示「正在切换至 第X集」轻提示',
                   value: PlayerPrefs.instance.switchEpisodeHint.value,
                   onChanged: PlayerPrefs.instance.setSwitchEpisodeHint,
                 )),
@@ -206,14 +201,12 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
             Obx(() => unifiedSwitchRow(
                   icon: Icons.bar_chart,
                   title: '显示帧率与编码',
-                  subtitle: '影响观影性能',
                   value: PlayerPrefs.instance.showFpsCodec.value,
                   onChanged: PlayerPrefs.instance.setShowFpsCodec,
                 )),
             Obx(() => unifiedSwitchRow(
                   icon: Icons.speed,
                   title: '始终显示网速',
-                  subtitle: '无需开启上方信息栏即可看到下载速度',
                   value: PlayerPrefs.instance.alwaysShowSpeed.value,
                   onChanged: PlayerPrefs.instance.setAlwaysShowSpeed,
                 )),

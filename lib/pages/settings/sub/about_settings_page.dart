@@ -24,25 +24,21 @@ class AboutSettingsPage extends StatelessWidget {
             const SettingsRow(
               icon: Icons.info_outline,
               title: '版本',
-              subtitle: '当前安装的版本号',
               value: appVersion,
             ),
             Obx(() => SettingsRow(
                   icon: Icons.public,
                   title: '站点数量',
-                  subtitle: '来自当前加载的点播配置源（0 = 源未加载成功）',
                   value: '${ApiConfig.instance.sourceBeanList.length}',
                 )),
             Obx(() => SettingsRow(
                   icon: Icons.auto_fix_high,
                   title: '解析数量',
-                  subtitle: '当前源里可用的解析数',
                   value: '${ApiConfig.instance.parseBeanList.length}',
                 )),
             SettingsRow(
               icon: Icons.person_outline,
               title: '关于版本',
-              subtitle: '版本说明与致谢',
               value: '',
               onTap: () => _showAboutDialog(context),
             ),

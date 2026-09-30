@@ -45,6 +45,7 @@ dependencies:
   # Remote Flutter Widgets：RFW 首页主题引擎（.rfwtxt 主题文件在运行时解析渲染）
   # 由 flutter.dev 官方维护，1.1.4 为近期版本，纯 Dart 实现无原生依赖
   rfw: ^1.1.4
+  flutter_tts: ^4.2.5
 
 dev_dependencies:
   flutter_test:

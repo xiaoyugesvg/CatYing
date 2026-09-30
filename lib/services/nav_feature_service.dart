@@ -8,6 +8,7 @@ enum NavFeature {
   home('home', '首页', true), // required
   live('live', '直播', false),
   music('music', '音乐', false),
+  books('books', '阅读', false),
   shelf('shelf', '史藏', false),
   settings('settings', '设置', true), // required
   search('search', '搜索', false);

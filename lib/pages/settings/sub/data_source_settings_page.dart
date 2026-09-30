@@ -54,16 +54,30 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             Obx(() => SettingsRow(
                   icon: Icons.movie_outlined,
                   title: '点播接口地址',
-                  subtitle: '当前生效的接口（由激活的订阅决定）',
                   value: controller.vodApiUrl.value.isEmpty
                       ? '未配置'
                       : _truncateUrl(controller.vodApiUrl.value),
                   onTap: _showApiEditDialog,
                 )),
+            // 把「当前手填的接口地址」一键存成订阅。
+            // 否则用户手填了地址，订阅列表一直显示"未添加"，
+            // 没有一个明确的转化入口（你截图里就是这个情况）。
+            Obx(() {
+              final cur = controller.vodApiUrl.value.trim();
+              if (cur.isEmpty) return const SizedBox.shrink();
+              final already = SubscriptionService.instance.subscriptions
+                  .any((s) => s.url.trim() == cur);
+              if (already) return const SizedBox.shrink();
+              return SettingsRow(
+                icon: Icons.playlist_add,
+                title: '存为订阅',
+                value: '当前地址',
+                onTap: _saveCurrentAsSubscription,
+              );
+            }),
             Obx(() => SettingsRow(
                   icon: Icons.dns_outlined,
                   title: '主页数据源',
-                  subtitle: '首页列表使用哪个源',
                   value:
                       ApiConfig.instance.homeSourceBean.value?.name ?? '未选择',
                   onTap: _showSourcePicker,
@@ -73,7 +87,6 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
               iconColor: Colors.redAccent,
               title: '重置配置',
               titleColor: Colors.redAccent,
-              subtitle: '清空接口地址与主页源选择',
               value: '回到初始',
               onTap: _showResetConfigDialog,
             ),
@@ -81,6 +94,25 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         ),
       ],
     );
+  }
+
+  // ============================================================
+  // 存为订阅
+  // ============================================================
+
+  /// 把手填的接口地址存进订阅列表并设为激活。
+  Future<void> _saveCurrentAsSubscription() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final url = controller.vodApiUrl.value.trim();
+    if (url.isEmpty) {
+      messenger.showSnackBar(const SnackBar(content: Text('还没有接口地址')));
+      return;
+    }
+    final svc = SubscriptionService.instance;
+    final s = await svc.add(url: url);
+    await svc.setActive(s.id);
+    messenger.showSnackBar(
+        SnackBar(content: Text('已存为订阅：${s.name}')));
   }
 
   // ============================================================
@@ -347,13 +379,6 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                         fontWeight:
                             isHome ? FontWeight.w600 : FontWeight.normal,
                       ),
-                    ),
-                    subtitle: Text(
-                      source.api,
-                      style: TextStyle(
-                          color: AppTheme.textTertiary, fontSize: 10),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
                     trailing: isHome
                         ? const Icon(Icons.check_circle,

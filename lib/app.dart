@@ -12,7 +12,8 @@ import 'pages/home/view.dart';
 import 'pages/shelf/view.dart';
 import 'services/nav_feature_service.dart';
 import 'pages/live/view.dart';
-import 'pages/music/view.dart';
+import 'pages/book/view.dart';
+import 'pages/music/home_page.dart';
 import 'pages/settings/view.dart';
 import 'pages/search/view.dart';
 import 'pages/search/controller.dart';
@@ -97,17 +98,37 @@ class TVBoxApp extends StatelessWidget {
                 themeMode: effectiveLight ? ThemeMode.light : ThemeMode.dark,
                 // 把 NavigatorState 暴露给 VideoPlayerPip，让画中画能插入到顶层 Overlay
                 navigatorKey: VideoPlayerPip.navigatorKey,
-                home: const ContentView(),
+                // ⚠️ key 必须跟随 exteriorLight 变化：
+                // AppTheme 的颜色 getter 读的是 AppBrightness.isLight，不是
+                // MaterialApp 的 theme。而 ContentView 是 const 实例 —— 父级重建时
+                // Flutter 发现 widget 完全相同就**跳过它的 build**，于是首页里那些
+                // 不在 Obx 内的部分（筛选面板、搜索栏等）会一直用旧颜色，
+                // 表现为"切了外观但筛选背景没变"。
+                // 换 key 强制重建整棵页面树，颜色才会跟着走。
+                home: ContentView(key: ValueKey('root-$effectiveLight')),
                 getPages: AppPages.pages,
                 debugShowCheckedModeBanner: false,
                 builder: (context, child) {
-                  if (scale <= 0 || (scale - 1.0).abs() < 0.001) {
-                    return child!;
+                  Widget out = child ?? const SizedBox.shrink();
+                  if (scale > 0 && (scale - 1.0).abs() >= 0.001) {
+                    out = MediaQuery(
+                      data: MediaQuery.of(context)
+                          .copyWith(textScaler: TextScaler.linear(scale)),
+                      child: out,
+                    );
                   }
-                  return MediaQuery(
-                    data: MediaQuery.of(context)
-                        .copyWith(textScaler: TextScaler.linear(scale)),
-                    child: child!,
+                  // ⚠️ 再包一层监听外观，并用 key 强制重建：
+                  // 弹窗 / 底部弹窗（筛选菜单、布局切换、各设置面板）挂在**根
+                  // Overlay** 上，不属于上面被重建的 tab 子树。它们内部的
+                  // AppTheme.* 颜色是在打开那一刻取值并缓存的，外观一变就会
+                  // 停在旧色（"筛选背景没变"就是这么来的）。
+                  // 在 builder 这一层换 key，Overlay 里的内容也会整体重绘。
+                  return ValueListenableBuilder<bool>(
+                    valueListenable: AppBrightness.isLight,
+                    builder: (context, isLight, __) => KeyedSubtree(
+                      key: ValueKey('appearance-$isLight'),
+                      child: out,
+                    ),
                   );
                 },
               );
@@ -640,7 +661,9 @@ class _ContentViewState extends State<ContentView>
     // 直播作为第 5 个 tab（选中才高亮，修复"首页+直播同时高亮"）
     const LivePage(),
     // 音乐（索引 5）
-    const MusicPage(),
+    const MusicHomePage(),
+    // 阅读（索引 6）
+    const BookShelfPage(),
   ];
 
   Widget _buildMainTabView() {
@@ -674,23 +697,41 @@ class _ContentViewState extends State<ContentView>
           ),
           // 5 个 tab 页 - 全屏铺满, 不做底部预留, 悬浮栏浮于其上
           // 关键: IndexedStack 的 index 必须包在 Obx 里, 切 tab 才生效
-          Obx(() => IndexedStack(
-                index: MainTabController.instance.selectedTab.value,
-                children: _tabPages,
-              )),
+          //
+          // ⚠️ 外面再套一层 ValueListenableBuilder 监听外观：
+          // AppTheme 的颜色 getter 读 AppBrightness.isLight，但 _tabPages 是
+          // **const widget 实例** —— IndexedStack 重建时 Flutter 判定 widget
+          // 未变，会**跳过子页的 build**，于是首页里不在 Obx 内的部分
+          // （筛选芯片面板、搜索栏等）一直用旧颜色，表现为
+          // "切了外观，但筛选背景没变"。
+          // 这里监听 isLight，并在变化时换 key，强制子页重绘。
+          ValueListenableBuilder<bool>(
+            valueListenable: AppBrightness.isLight,
+            builder: (context, isLight, __) => Obx(() => IndexedStack(
+                  key: ValueKey('tabs-$isLight'),
+                  index: MainTabController.instance.selectedTab.value,
+                  children: _tabPages,
+                )),
+          ),
           // 搜索页 - 对应 Swift .sheet(isPresented: $showSearch)
           if (_showSearch)
-            Positioned.fill(
-              child: Material(
-                // 半透明遮罩, 让 BackgroundService 全局背景层透出
-                // (纯黑会盖住玻璃背景层, 搜索页看起来像"死板黑块")
-                color: AppTheme.glassTintDeep,
-                child: SearchPage(
-                  onClose: () {
-                    setState(() {
-                      _showSearch = false;
-                    });
-                  },
+            ValueListenableBuilder<bool>(
+              valueListenable: AppBrightness.isLight,
+              builder: (context, isLight, __) => Positioned.fill(
+                child: Material(
+                  // 半透明遮罩, 让 BackgroundService 全局背景层透出
+                  // (纯黑会盖住玻璃背景层, 搜索页看起来像"死板黑块")
+                  color: AppTheme.glassTintDeep,
+                  // key 跟随外观：搜索浮层里的文字/输入框颜色同样读 AppTheme，
+                  // 不重建的话切外观后会停在旧色。
+                  child: SearchPage(
+                    key: ValueKey('search-$isLight'),
+                    onClose: () {
+                      setState(() {
+                        _showSearch = false;
+                      });
+                    },
+                  ),
                 ),
               ),
             ),
@@ -753,6 +794,9 @@ class _ContentViewState extends State<ContentView>
         return _navItem(Icons.home_outlined, Icons.home, f.label, 0);
       case NavFeature.live:
         return _navItem(Icons.live_tv, Icons.live_tv, f.label, 4);
+      case NavFeature.books:
+        return _navItem(
+            Icons.menu_book_outlined, Icons.menu_book, f.label, 6);
       case NavFeature.music:
         return _navItem(
             Icons.library_music_outlined, Icons.library_music, f.label, 5);

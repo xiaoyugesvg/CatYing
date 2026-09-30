@@ -1734,23 +1734,40 @@ class _DetailPageState extends State<DetailPage> {
                 color: AppTheme.accentColor,
               ),
             ),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            padding: const EdgeInsets.symmetric(
-                horizontal: AppTheme.spacingLG, vertical: 6),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              childAspectRatio: 0.62,
-              mainAxisSpacing: AppTheme.cardSpacing,
-              crossAxisSpacing: AppTheme.cardSpacing,
-            ),
-            itemCount: items.length,
-            itemBuilder: (context, index) {
-              final video = items[index];
-              return VodCard(
-                video: video,
-                onTap: () => Get.toNamed('/detail', arguments: video),
+          // ⚠️ 网格高度必须与 VodCard 内部一致：
+          //   卡片真实高 = 宽 × posterHeightRatio(0.72) + 文字区(~30)
+          // 原来写 childAspectRatio: 0.62（等于高 = 宽 / 0.62 = 宽 × 1.61），
+          // 比卡片实际需要的（宽 × 0.72 + 30）高出一大截 → 推荐卡片被拉长、
+          // 封面区域比例失真（你截图里看到的就是这个）。
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const cols = 3;
+              final cardW = (constraints.maxWidth -
+                      AppTheme.spacingLG * 2 -
+                      AppTheme.cardSpacing * (cols - 1)) /
+                  cols;
+              final ratio = cardW / (cardW * 0.72 + 30);
+              return GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppTheme.spacingLG, vertical: 6),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: cols,
+                  childAspectRatio: ratio,
+                  mainAxisSpacing: AppTheme.cardSpacing,
+                  crossAxisSpacing: AppTheme.cardSpacing,
+                ),
+                itemCount: items.length,
+                itemBuilder: (context, index) {
+                  final video = items[index];
+                  return VodCard(
+                    video: video,
+                    // 与上面的 ratio 配套
+                    posterHeightRatio: 0.72,
+                    onTap: () => Get.toNamed('/detail', arguments: video),
+                  );
+                },
               );
             },
           ),
@@ -1856,10 +1873,36 @@ class _DetailPageState extends State<DetailPage> {
               return SizedBox(
                 height: 140,
                 child: Center(
-                  child: Text(
-                    searching ? '搜索中...' : '暂无可用搜索源',
-                    style: TextStyle(
-                        color: AppTheme.textTertiary, fontSize: 13),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (searching)
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: AppTheme.accentColor),
+                          )
+                        else
+                          Icon(Icons.search_off,
+                              size: 26, color: AppTheme.textTertiary),
+                        const SizedBox(height: 10),
+                        // 原来这里恒显示「搜索中...」：没有可用搜索源时也转圈，
+                        // 看着像卡死。分三种情况给明确提示。
+                        Text(
+                          searching
+                              ? '正在准备搜索源…'
+                              : '没有可用的搜索源\n请在 设置 → 订阅与数据源 检查接口是否加载成功',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              color: AppTheme.textTertiary,
+                              fontSize: 13,
+                              height: 1.5),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               );
@@ -1987,23 +2030,36 @@ class _DetailPageState extends State<DetailPage> {
                     ),
                   )
                 else
-                  GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      childAspectRatio: 0.62,
-                      mainAxisSpacing: AppTheme.cardSpacing,
-                      crossAxisSpacing: AppTheme.cardSpacing,
-                    ),
-                    itemCount: results.length,
-                    itemBuilder: (context, i) {
-                      final v = results[i];
-                      return VodCard(
-                        video: v,
-                        onTap: () =>
-                            Get.toNamed('/detail', arguments: v),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      // 与推荐区同一套算法：网格高度必须跟 VodCard 配套
+                      // （卡片高 = 宽 × 0.72 + 文字区），否则卡片被拉长、封面失真。
+                      const cols = 3;
+                      final cardW = (constraints.maxWidth -
+                              AppTheme.spacingLG * 2 -
+                              AppTheme.cardSpacing * (cols - 1)) /
+                          cols;
+                      final ratio = cardW / (cardW * 0.72 + 30);
+                      return GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate:
+                            SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: cols,
+                          childAspectRatio: ratio,
+                          mainAxisSpacing: AppTheme.cardSpacing,
+                          crossAxisSpacing: AppTheme.cardSpacing,
+                        ),
+                        itemCount: results.length,
+                        itemBuilder: (context, i) {
+                          final v = results[i];
+                          return VodCard(
+                            video: v,
+                            posterHeightRatio: 0.72,
+                            onTap: () =>
+                                Get.toNamed('/detail', arguments: v),
+                          );
+                        },
                       );
                     },
                   ),

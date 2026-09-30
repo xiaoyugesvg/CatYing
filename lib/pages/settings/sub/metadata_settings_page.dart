@@ -35,7 +35,6 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
               child: unifiedSwitchRow(
                 icon: Icons.movie_creation_outlined,
                 title: '启用 TMDB',
-                subtitle: '关闭后完全不走 TMDB 刮削',
                 value: tmdb.enabled.value,
                 onChanged: tmdb.setEnabled,
               ),
@@ -146,28 +145,24 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
             Obx(() => SettingsRow(
                   icon: Icons.people_alt_outlined,
                   title: '显示演职人员',
-                  subtitle: '只控制显示，关掉不清已刮削的缓存',
                   value: tmdb.showCast.value ? '已开启' : '已关闭',
                   onTap: () => tmdb.setShowCast(!tmdb.showCast.value),
                 )),
             Obx(() => SettingsRow(
                   icon: Icons.local_movies_outlined,
                   title: '显示类似作品',
-                  subtitle: '只控制显示，关掉不清已刮削的缓存',
                   value: tmdb.showSimilar.value ? '已开启' : '已关闭',
                   onTap: () => tmdb.setShowSimilar(!tmdb.showSimilar.value),
                 )),
             Obx(() => SettingsRow(
                   icon: Icons.auto_awesome,
                   title: '自动刮削元数据',
-                  subtitle: '打开详情页时自动补全海报、简介与演职人员',
                   value: tmdb.autoScrape.value ? '已开启' : '已关闭',
                   onTap: () => tmdb.setAutoScrape(!tmdb.autoScrape.value),
                 )),
             Obx(() => SettingsRow(
                   icon: Icons.dashboard_customize_outlined,
                   title: '详情页样式',
-                  subtitle: '两套独立布局：默认 / 刮削版',
                   value: PlayerPrefs.instance.scrapedDetailLayout.value
                       ? '刮削版'
                       : '默认',

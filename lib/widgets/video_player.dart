@@ -2115,38 +2115,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             ),
             const Spacer(),
 
-            // 听剧模式（仅点播页显示）
-            if (widget.showAudioModeButton)
-              _iconButton(
-                icon: _audioMode ? Icons.headphones : Icons.headphones_outlined,
-                size: 20,
-                width: 36,
-                onTap: () => _safeTap(_toggleAudioMode),
-              ),
-
-            // 弹幕开关（设置里配置弹幕 API 后显示）—— 参考图样式：弹字方块 + 绿勾
-            if (_danmuApiUrl.isNotEmpty) _danmuToggleButton(),
-
-            // 画中画
-            _iconButton(
-              icon: Icons.picture_in_picture_alt,
-              size: 20,
-              width: 36,
-              onTap: () => _safeTap(_togglePiP),
-            ),
-
-            // 投屏（AirPlay / DLNA 入口）
-            _iconButton(
-              icon: Icons.cast,
-              size: 20,
-              width: 36,
-              onTap: () => _safeTap(_toggleCast),
-            ),
-
-            // 「始终显示网速」：无需打开信息栏也能看到下载速度
+            // 缓冲状态：按你的要求放在**听剧图标前面**（原来在最右侧菜单位置）
             if (_alwaysShowSpeed && _netSpeedText.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.only(right: 6),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -2164,6 +2136,33 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   ],
                 ),
               ),
+
+            // 听剧模式（仅点播页显示）
+            if (widget.showAudioModeButton)
+              _iconButton(
+                icon: _audioMode ? Icons.headphones : Icons.headphones_outlined,
+                size: 20,
+                width: 36,
+                onTap: () => _safeTap(_toggleAudioMode),
+              ),
+
+            // 弹幕开关已移到**底部功能栏**（见 _buildBottomControls）
+
+            // 画中画
+            _iconButton(
+              icon: Icons.picture_in_picture_alt,
+              size: 20,
+              width: 36,
+              onTap: () => _safeTap(_togglePiP),
+            ),
+
+            // 投屏（AirPlay / DLNA 入口）
+            _iconButton(
+              icon: Icons.cast,
+              size: 20,
+              width: 36,
+              onTap: () => _safeTap(_toggleCast),
+            ),
 
             if (_isNativeFullscreen) ...[const SizedBox(width: 4), _buildStatusBarInfo()],
 
@@ -2271,6 +2270,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         setState(() => _showEpisodeSheet = true);
                       },
                     ),
+                  // 弹幕开关：从顶栏移到底部功能栏（设置里配置弹幕 API 后显示）
+                  if (_danmuApiUrl.isNotEmpty) _danmuToggleButton(),
                   // 播放设置入口仅保留标题栏右上角「…」，底部不放齿轮
                   _iconButton(
                     icon: _isNativeFullscreen
@@ -3518,8 +3519,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         ),
       ),
       child: Padding(
+        // 按你的要求把底部功能栏**整体下移**：
+        // 原来还吃了安全区内边距（mediaPadding.bottom），但视频区本身并不
+        // 贴到屏幕物理底边，这段内边距纯属多余 → 去掉后整栏往下走。
         padding: EdgeInsets.only(
-          bottom: mediaPadding.bottom,
+          bottom: 0,
           left: mediaPadding.left,
           right: mediaPadding.right,
         ),
