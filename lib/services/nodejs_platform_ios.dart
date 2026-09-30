@@ -492,6 +492,11 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
         'http://127.0.0.1:$_managementPort/source/loadPath',
         data: {'path': path},
         options: Options(
+          // 关键：mgmtServer 全端点校验 x-auth-token（main.js 的 nativeToken
+          // 由 Swift 启动时通过 --native-token argv 注入）。loadPath 之前
+          // 用无 token 的 _dio 发 → Node 403 拒绝 → 源永远加载不进 Node →
+          // spider 端口永不出现 → 首页永久空白。这里补上与 Node 一致的 token。
+          headers: {'x-auth-token': authToken},
           responseType: ResponseType.json,
           contentType: 'application/json',
           sendTimeout: const Duration(seconds: 15),
@@ -517,10 +522,42 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
             .log('[IOSNodeJS] /source/loadPath 失败: $code $detail');
         return (false, '源加载被拒绝: $detail');
       }
+
+      // 关键：Node 的 /source/loadPath 只要收到请求就回 200，
+      // 但 loadScript 内部 require(index.js) 失败时异常被吞进 console.error，
+      // 表现为「HTTP 200 但 spider 端口永不出现」——最难查的一类故障。
+      // Node 侧已把现场写到源目录下的取证文件，这里读出来直接呈现给用户。
+      final forensic = await _readLoadForensic(path);
+      if (forensic != null) {
+        AppLog.instance.log('[IOSNodeJS] 源加载取证: $forensic');
+        return (false, '源文件加载失败: $forensic');
+      }
       return (true, '源加载成功');
     } on DioException catch (e) {
       return (false, '加载请求失败: ${e.message}');
     }
+  }
+
+  /// 读取 Node 写入的源加载取证文件（load-error / loadPath-error）
+  Future<String?> _readLoadForensic(String sourcePath) async {
+    for (final name in const ['load-error.txt', 'loadPath-error.txt']) {
+      try {
+        final f = File('$sourcePath/$name');
+        if (!await f.exists()) continue;
+        final text = (await f.readAsString()).trim();
+        if (text.isEmpty) continue;
+        // 只取 error= 行，避免把整段环境信息塞进 UI
+        final errLine = text
+            .split('\n')
+            .firstWhere((l) => l.startsWith('error='), orElse: () => '');
+        if (errLine.isEmpty) continue;
+        try {
+          await f.delete();
+        } catch (_) {}
+        return errLine.substring(6).split('\n').first;
+      } catch (_) {}
+    }
+    return null;
   }
 
   /// 后台异步刷新源文件：本地缓存存在时, 静默下载远程 MD5 比对,

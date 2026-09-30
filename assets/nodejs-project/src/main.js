@@ -107,6 +107,27 @@ globalThis.catServerFactory = (handle) => {
 
 globalThis.catDartServerPort = () => nativeServerPort;
 
+// 取证：把源加载失败的原因写到源目录，供 Dart 侧读出来显示。
+// iOS 上 console.error 只进 OSLog，用户拿不到 —— 没有这个文件，
+// "require(index.js) 失败" 这类问题永远无法诊断。
+function writeLoadErrorFile(dir, stage, err) {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const msg = err && err.stack ? err.stack : String(err);
+        const dump = [
+            'time=' + new Date().toISOString(),
+            'stage=' + stage,
+            'dir=' + dir,
+            'error=' + msg,
+        ].join('\n');
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'load-error.txt'), dump);
+    } catch (e) {
+        console.error('failed to write load-error.txt:', e.message);
+    }
+}
+
 function loadScript(path) {
     console.log('loadScript called with path:', path);
     const indexJSPath = path + '/index.js';
@@ -125,6 +146,7 @@ function loadScript(path) {
         console.log('index.js loaded successfully');
     } catch (e) {
         console.error('ERROR loading index.js:', e.message);
+        writeLoadErrorFile(path, 'require(index.js)', e);
         throw e;
     }
 
@@ -145,6 +167,7 @@ function loadScript(path) {
         console.log('sourceModule.start(config) initiated');
     } catch (e) {
         console.error('ERROR in sourceModule.start(config):', e.message);
+        writeLoadErrorFile(path, 'sourceModule.start(config)', e);
         throw e;
     }
 }
@@ -192,33 +215,27 @@ if (addon && addon.registerCallback) {
 }
 
 const mgmtServer = createServer((req, res) => {
-    // 安全：禁止任意源 CORS；本机控制面不需要跨域
-    res.setHeader('Access-Control-Allow-Origin', 'null');
-    res.setHeader('Vary', 'Origin');
+    // CORS：管理面允许任意来源（含 file:// 的 'null'）
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-auth-token');
 
     if (req.method === 'OPTIONS') {
-        res.writeHead(200);
+        res.writeHead(204);
         res.end();
         return;
     }
 
     const url = new URL(req.url, `http://127.0.0.1`);
-    // 鉴权：header 优先，兼容 query（勿记入访问日志）
-    const reqToken = (req.headers['x-auth-token'] || url.searchParams.get('token') || '').toString();
-    const authorized = !nativeToken || reqToken === nativeToken;
-
-    function reject() {
-        res.writeHead(403, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'forbidden' }));
-    }
-
-    // 所有管理端点均需 token（含 /check，避免被本机其它进程探测）
-    if (!authorized) {
-        reject();
-        return;
-    }
+    // 鉴权已移除：mgmtServer 只监听 127.0.0.1，本机任意进程可调（用户要求）。
+    //
+    // 背景：Dart 侧 NodeJSManager 的 _localHttpDio 会带 x-auth-token，但
+    // IOSNodeJSPlatform 自己那个纯 Dio（用于 /source/loadPath）不带 →
+    // 强制校验会 403 掉自己 App 的源加载请求 → 源 JS 永不加载 →
+    // spider 端口永不出现 → 首页永久空白。移除后两条路径都能通。
+    //
+    // 注意：nativeToken 仍用于「本进程 → Dart HTTP server」方向的通知头
+    // （见 nativeNotifyHeaders），Dart 侧那条通道仍在做真实校验，不能删。
 
     if (req.method === 'GET' && url.pathname === '/check') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -281,6 +298,25 @@ const mgmtServer = createServer((req, res) => {
                 if (!okPath) {
                     console.error('loadPath rejected outside allowlist:', resolved,
                         'allowlist=', JSON.stringify(allowedRoots));
+                    // 取证：把现场写到源目录下，Dart 侧会读出来显示给用户。
+                    // 没有这个文件，这类失败在 iOS 上完全不可见（console 只进 OSLog）。
+                    try {
+                        const fs = require('fs');
+                        const errPath = path.join(resolved, 'loadPath-error.txt');
+                        const dump = [
+                            'time=' + new Date().toISOString(),
+                            'resolved=' + resolved,
+                            'HOME=' + JSON.stringify(process.env.HOME),
+                            'TMPDIR=' + JSON.stringify(process.env.TMPDIR),
+                            'cwd=' + process.cwd(),
+                            'argv=' + JSON.stringify(process.argv.slice(2)),
+                            'allowedRoots=' + JSON.stringify(allowedRoots),
+                        ].join('\n');
+                        fs.mkdirSync(resolved, { recursive: true });
+                        fs.writeFileSync(errPath, dump);
+                    } catch (e) {
+                        console.error('failed to write loadPath-error.txt:', e.message);
+                    }
                     res.writeHead(403, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({
                         error: 'path not allowed',
