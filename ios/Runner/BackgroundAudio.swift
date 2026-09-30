@@ -55,94 +55,97 @@ class BackgroundAudio {
     /// 拆出来是为了让中断恢复路径能直接复用：原来 resume 里若调 start()，
     /// 而 start() 内部又 queue.sync，就会在串行队列上自我等待 → 死锁。
     private func startLocked() {
-            if isStarted {
-                NSLog("[BackgroundAudio] already started, skip")
+        if isStarted {
+            NSLog("[BackgroundAudio] already started, skip")
+            return
+        }
+
+        do {
+            // 1. 配置 audio session - playback category
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(
+                .playback,
+                mode: .default,
+                options: []  // 不需要 .mixWithOthers (我们是唯一 audio source)
+            )
+            try session.setActive(true, options: [])
+            NSLog("[BackgroundAudio] AVAudioSession activated (.playback)")
+
+            // 2. 创建静音 buffer
+            guard let format = AVAudioFormat(
+                standardFormatWithSampleRate: 22050,
+                channels: 1
+            ) else {
+                NSLog("[BackgroundAudio] ❌ failed to create AVAudioFormat")
                 return
             }
 
-            do {
-                // 1. 配置 audio session - playback category
-                let session = AVAudioSession.sharedInstance()
-                try session.setCategory(
-                    .playback,
-                    mode: .default,
-                    options: []  // 不需要 .mixWithOthers (我们是唯一 audio source)
-                )
-                try session.setActive(true, options: [])
-                NSLog("[BackgroundAudio] AVAudioSession activated (.playback)")
-
-                // 2. 创建静音 buffer
-                guard let format = AVAudioFormat(
-                    standardFormatWithSampleRate: 22050,
-                    channels: 1
-                ) else {
-                    NSLog("[BackgroundAudio] ❌ failed to create AVAudioFormat")
-                    return
-                }
-
-                let frameCapacity: AVAudioFrameCount = 4096
-                guard let buffer = AVAudioPCMBuffer(
-                    pcmFormat: format,
-                    frameCapacity: frameCapacity
-                ) else {
-                    NSLog("[BackgroundAudio] ❌ failed to create PCM buffer")
-                    return
-                }
-                buffer.frameLength = frameCapacity
-                // buffer 默认全是 0 (静音), 不需要 fill
-
-                // 3. Attach + connect + start engine
-                audioEngine.attach(player)
-                audioEngine.connect(
-                    player,
-                    to: audioEngine.mainMixerNode,
-                    format: format
-                )
-                try audioEngine.start()
-                NSLog("[BackgroundAudio] AVAudioEngine started")
-
-                // 4. Schedule buffer 循环播放
-                player.scheduleBuffer(
-                    buffer,
-                    at: nil,
-                    options: .loops,
-                    completionHandler: nil
-                )
-                NSLog("[BackgroundAudio] player.play() called, looping silent buffer")
-
-                // 5. 监听 interruption (e.g., 来电 / 其它 App 抢音频会话)
-                //
-                // ⚠️ 先移除再添加：start() 在 stop() 之后可能被再次调用，
-                // 重复注册会让同一个通知触发多次 handler。
-                NotificationCenter.default.removeObserver(
-                    self,
-                    name: AVAudioSession.interruptionNotification,
-                    object: nil
-                )
-                NotificationCenter.default.addObserver(
-                    self,
-                    selector: #selector(handleInterruption(_:)),
-                    name: AVAudioSession.interruptionNotification,
-                    object: nil
-                )
-
-                // 6. 监听 route change (耳机拔掉) - 不需要 stop
-                NotificationCenter.default.removeObserver(
-                    self,
-                    name: AVAudioSession.routeChangeNotification,
-                    object: nil
-                )
-                NotificationCenter.default.addObserver(
-                    self,
-                    selector: #selector(handleRouteChange(_:)),
-                    name: AVAudioSession.routeChangeNotification,
-                    object: nil
-
-                isStarted = true
-                NSLog("[BackgroundAudio] ✅ silent audio started, app can run in background")
-            } catch {
-                NSLog("[BackgroundAudio] ❌ start failed: \(error.localizedDescription)")
+            let frameCapacity: AVAudioFrameCount = 4096
+            guard let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: frameCapacity
+            ) else {
+                NSLog("[BackgroundAudio] ❌ failed to create PCM buffer")
+                return
             }
+            buffer.frameLength = frameCapacity
+            // buffer 默认全是 0 (静音), 不需要 fill
+
+            // 3. Attach + connect + start engine
+            audioEngine.attach(player)
+            audioEngine.connect(
+                player,
+                to: audioEngine.mainMixerNode,
+                format: format
+            )
+            try audioEngine.start()
+            NSLog("[BackgroundAudio] AVAudioEngine started")
+
+            // 4. Schedule buffer 循环播放
+            player.scheduleBuffer(
+                buffer,
+                at: nil,
+                options: .loops,
+                completionHandler: nil
+            )
+            // 启动播放：这是保活的起点（静音 buffer 循环）
+            player.play()
+            NSLog("[BackgroundAudio] player.play() called, looping silent buffer")
+
+            // 5. 监听 interruption (e.g., 来电 / 其它 App 抢音频会话)
+            //
+            // ⚠️ 先移除再添加：start() 在 stop() 之后可能被再次调用，
+            // 重复注册会让同一个通知触发多次 handler。
+            NotificationCenter.default.removeObserver(
+                self,
+                name: AVAudioSession.interruptionNotification,
+                object: nil
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleInterruption(_:)),
+                name: AVAudioSession.interruptionNotification,
+                object: nil
+            )
+
+            // 6. 监听 route change (耳机拔掉) - 不需要 stop
+            NotificationCenter.default.removeObserver(
+                self,
+                name: AVAudioSession.routeChangeNotification,
+                object: nil
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleRouteChange(_:)),
+                name: AVAudioSession.routeChangeNotification,
+                object: nil
+            )
+
+            isStarted = true
+            NSLog("[BackgroundAudio] ✅ silent audio started, app can run in background")
+        } catch {
+            NSLog("[BackgroundAudio] ❌ start failed: \(error.localizedDescription)")
+        }
     }
 
     /// 停止 (e.g., app 真正退出时)
@@ -167,11 +170,15 @@ class BackgroundAudio {
 
     @objc func appDidEnterBackground() {
         NSLog("[BackgroundAudio] app did enter background, ensure audio playing")
-        if isStarted && !player.isPlaying {
-            NSLog("[BackgroundAudio] player stopped, restart")
-            player.play()
+        // ⚠️ 不能只判断 isPlaying 就 play()：
+        // 引擎被系统停掉时 player.isPlaying 也是 false，此时 play() 会抛
+        // ObjC 异常（Swift catch 不到）→ SIGABRT 闪退，与中断路径是同一个坑。
+        // 统一走 resumeSilently()：它会先校验会话与引擎状态，必要时重启引擎。
+        if isStarted {
+            resumeSilently()
+        } else {
+            try? AVAudioSession.sharedInstance().setActive(true)
         }
-        try? AVAudioSession.sharedInstance().setActive(true)
     }
 
     @objc func appWillEnterForeground() {
