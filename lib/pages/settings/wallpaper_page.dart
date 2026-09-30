@@ -189,13 +189,24 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                 divisions: 16,
                 onChanged: bg.setOverlay,
               ),
+              _slider(
+                label: '浅色遮罩',
+                valueText: '${(bg.lightOverlay.value * 100).round()}%',
+                value: bg.lightOverlay.value,
+                min: 0,
+                max: 0.8,
+                divisions: 16,
+                onChanged: bg.setLightOverlay,
+              ),
               Padding(
                 padding: const EdgeInsets.only(left: 4, top: 2),
                 child: Text(
-                  '深色遮罩越大，明亮壁纸上的浅色文字越清晰',
+                  '遮罩按明暗自动选用：深色界面用「深色遮罩」压暗壁纸，'
+                  '浅色界面用「浅色遮罩」提亮壁纸，两者都是为了文字清晰。',
                   style: TextStyle(
                       color: AppTheme.textTertiary,
-                      fontSize: AppTheme.fontCaption),
+                      fontSize: AppTheme.fontCaption,
+                      height: 1.5),
                 ),
               ),
             ],
@@ -881,6 +892,7 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
     await bg.setOpacity(1.0);
     await bg.setBlur(0);
     await bg.setOverlay(0.3);
+    await bg.setLightOverlay(0.45);
     await bg.clearAppearanceOverride();
     // 让 ThemeModeStore 也回到深色
     await ThemeModeStore.set(ThemeMode.dark);

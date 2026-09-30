@@ -74,6 +74,24 @@ class TVBoxApp extends StatelessWidget {
                 ? isLightNow
                 : (platformLight && themeMode == ThemeMode.system) ||
                     themeMode == ThemeMode.light;
+            // ⚠️ 单一真相源：AppTheme 的 textPrimary/backgroundCard 等 getter
+            // 读的是 AppBrightness.isLight，而 MaterialApp 用的是 effectiveLight。
+            // 两者若不同步，就会出现「背景是浅色、文字却是白色」这类颜色不统一
+            // （用户实测截图：皎月白壁纸 + 白字）。
+            // 这里在构建前把 AppBrightness 强制对齐到 effectiveLight。
+            if (AppBrightness.isLight.value != effectiveLight) {
+              // 用 microtask 避免在 build 中直接改 notifier 触发的重入
+              final target = effectiveLight;
+              Future<void>.microtask(() {
+                if (AppBrightness.isLight.value != target) {
+                  AppBrightness.isLight.value = target;
+                }
+              });
+            }
+            AppLog.instance.log(
+                '[Appearance] themeMode=$themeMode platformLight=$platformLight '
+                'followBg=${ThemeModeStore.followBackground} '
+                'isLight(theme)=$isLightNow effectiveLight=$effectiveLight');
             // 全局字号缩放（设置 → 外观 → 界面字号），用 Obx 监听
             return Obx(() {
               final scale = PlayerPrefs.instance.fontScale.value;

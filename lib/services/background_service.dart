@@ -8,6 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../common/theme.dart' show AppBrightness;
+
 /// 背景选择类型
 enum BackgroundChoice {
   /// 4 个内置渐变(1-4) + 皎月白
@@ -61,6 +63,7 @@ class BackgroundService extends GetxService {
   static const String _opacityKey = 'wallpaper_opacity';
   static const String _blurKey = 'wallpaper_blur';
   static const String _overlayKey = 'wallpaper_overlay';
+  static const String _lightOverlayKey = 'wallpaper_light_overlay';
   static const String _appearanceKey = 'appearance_mode';
   static const String _manualKey = 'appearance_manual_override';
 
@@ -101,8 +104,14 @@ class BackgroundService extends GetxService {
   /// 模糊程度（sigma）0 ~ 30
   final blur = 0.0.obs;
 
-  /// 深色遮罩 0 ~ 0.8（保证浅色文字在亮壁纸上可读）
+  /// 深色遮罩 0 ~ 0.8（深色界面用：压暗壁纸，保证浅色文字可读）
   final overlay = 0.3.obs;
+
+  /// 浅色遮罩 0 ~ 0.8（浅色界面用：提亮壁纸，保证深色文字可读）
+  ///
+  /// 默认 0.45：浅色场景下文字是深色、壁纸多为浅色，需要更强的干预才够对比；
+  /// 深色场景默认 0.3 即可（浅色文字在暗背景上对比天然充足）。
+  final lightOverlay = 0.45.obs;
 
   /// 外观模式（文字明暗）
   final appearanceMode = AppearanceMode.dark.obs;
@@ -146,6 +155,8 @@ class BackgroundService extends GetxService {
     opacity.value = (prefs.getDouble(_opacityKey) ?? 1.0).clamp(0.2, 1.0);
     blur.value = (prefs.getDouble(_blurKey) ?? 0.0).clamp(0.0, 30.0);
     overlay.value = (prefs.getDouble(_overlayKey) ?? 0.3).clamp(0.0, 0.8);
+    lightOverlay.value =
+        (prefs.getDouble(_lightOverlayKey) ?? 0.45).clamp(0.0, 0.8);
 
     // 外观：手动值优先；否则由背景自动推导（方案 A）
     manualAppearance.value = prefs.getBool(_manualKey) ?? false;
@@ -280,6 +291,12 @@ class BackgroundService extends GetxService {
     overlay.value = v.clamp(0.0, 0.8);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_overlayKey, overlay.value);
+  }
+
+  Future<void> setLightOverlay(double v) async {
+    lightOverlay.value = v.clamp(0.0, 0.8);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_lightOverlayKey, lightOverlay.value);
   }
 
   /// 设置内置背景（渐变）
@@ -428,7 +445,18 @@ class BackgroundService extends GetxService {
     Widget? child,
   }) {
     return Obx(() {
-      final ov = overlay.value > 0 ? overlay.value : overlayAlpha;
+      final isLight = AppBrightness.isLight.value;
+      // 遮罩要跟着明暗走：
+      // - 深色界面 → 黑色遮罩（压暗壁纸，保证浅色文字可读）
+      // - 浅色界面 → 白色遮罩（提亮壁纸，保证深色文字可读）
+      //
+      // 只用黑色遮罩是之前的缺陷：浅色壁纸 + 浅色界面时，壁纸原样铺满，
+      // 深色文字压在花哨的图片上同样看不清。
+      final ov = isLight
+          ? (lightOverlay.value > 0 ? lightOverlay.value : 0.45)
+          : (overlay.value > 0 ? overlay.value : overlayAlpha);
+      final overlayColor =
+          isLight ? const Color(0xFFFFFFFF) : const Color(0xFF000000);
       final enabledNow = enabled.value;
 
       // ---- 图片类壁纸（本地 / 网络）----
@@ -473,7 +501,7 @@ class BackgroundService extends GetxService {
                 child: _applyBlur(image),
               ),
               if (ov > 0)
-                Container(color: Colors.black.withValues(alpha: ov)),
+                Container(color: overlayColor.withValues(alpha: ov)),
               if (child != null) child,
             ],
           );

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' show Random;
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/widgets.dart';
@@ -6,6 +7,7 @@ import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../../models/movie.dart';
+import '../../models/source_bean.dart';
 import '../../models/vod_info.dart';
 import '../../models/cache_store.dart';
 import '../../models/cache_ttl.dart';
@@ -86,45 +88,120 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   /// 推荐 tab 数据（同类型/关键词推荐）
   final recommended = <Video>[].obs;
   final isRecommendLoading = false.obs;
+
+  /// 加载中又被请求时置位，本轮结束后补跑一次
+  bool _recommendPending = false;
+
+  /// 单源搜索超时。超过就丢弃该源的结果，不等它。
+  ///
+  /// 原实现（和 SourceService.searchAll）用 Future.wait 等**所有**源，
+  /// 一个慢源就拖死整次加载 —— 这是「推荐加载慢」的主因。
+  static const Duration _recommendPerSourceTimeout = Duration(seconds: 6);
+
+  /// 每轮并发搜索的源数量上限。
+  /// 推荐只是辅助内容，不值得把全部源都打一遍（接口多有限流）。
+  static const int _recommendSourceCount = 3;
+
   /// 详情页 tab 索引: 0=简介, 1=推荐, 2=快搜
   final detailTabIndex = 0.obs;
 
-  /// 加载推荐（同类型/名称关键词在当前源搜索，失败回退用片名再搜一次）
+  /// 加载推荐（随机同类 + 多源并发 + 每源超时）。
+  ///
+  /// 做法：
+  /// - **每次调用都重新加载**（旧实现有 `if (recommended.isNotEmpty) return`，
+  ///   导致整个详情页只加载一次，内容永远不变）；
+  /// - 从「片名/类型/地区/年份/演员」里**随机抽一个关键词**（片名权重加倍，
+  ///   命中率最高），所以每次结果自然不同；
+  /// - 从可搜索源里**随机抽 N 个**并发搜索，单源超时即弃 ——
+  ///   旧实现是单源顺序搜索，且 `Future.wait` 等所有源，一个慢源就拖死。
+  /// - 结果按 id 去重后再洗牌。
+  ///
+  /// 加载期间**保留旧结果**（不先清空），避免切 tab 时闪一下白。
   Future<void> loadRecommended() async {
-    if (recommended.isNotEmpty || isRecommendLoading.value) return;
-    final info = vodInfo.value;
-    if (info == null) return;
-    final source = ApiConfig.instance.getSource(info.sourceKey) ??
-        ApiConfig.instance.homeSourceBean.value;
-    if (source == null) {
-      isRecommendLoading.value = false;
+    if (isRecommendLoading.value) {
+      // 正在加载时又被请求（用户快速切走再切回）：
+      // 记一笔，等本轮结束后再跑一次，否则这次切回来内容不会换新。
+      _recommendPending = true;
       return;
     }
+    final info = vodInfo.value;
+    if (info == null) return;
 
     isRecommendLoading.value = true;
     try {
-      // 片名命中率最高，优先；类型/演员仅在片名无结果时兜底
-      final keywords = <String>[
+      // ---- 关键词池：从"同类"里随机取一个 ----
+      final keywordPool = <String>{
         info.name,
         if (info.typeName.isNotEmpty) info.typeName,
+        if (info.area.isNotEmpty) info.area,
+        if (info.year.isNotEmpty) info.year,
         if (info.actor.isNotEmpty)
-          ...info.actor.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).take(1),
-      ];
-      var collected = <Video>[];
-      for (final keyword in keywords) {
-        try {
-          final results = await SourceService.instance.search(source, keyword);
-          collected = results.where((v) => v.id != info.id).toList();
-          if (collected.isNotEmpty) break;
-        } catch (e) {
-        AppLog.instance.log('[controller] swallowed: $e');
+          ...info.actor
+              .split(',')
+              .map((e) => e.trim())
+              .where((e) => e.isNotEmpty)
+              .take(3),
+      }.where((k) => k.trim().isNotEmpty).toList();
+      if (keywordPool.isEmpty) return;
+      // 片名命中最准，让它有更高概率被抽到（多放一份进池）
+      final rnd = Random();
+      final weighted = <String>[info.name, ...keywordPool];
+      final keyword = weighted[rnd.nextInt(weighted.length)];
+
+      // ---- 选源：完全随机抽 N 个 ----
+      final pool = ApiConfig.instance
+          .getSearchableSources()
+          .where((s) => s.isSupportedInSwift)
+          .toList();
+      if (pool.isEmpty) return;
+      pool.shuffle(rnd);
+      final picked = pool.take(_recommendSourceCount).toList();
+
+      // ---- 并发搜索：每个源独立超时，慢源直接放弃 ----
+      final collected = <Video>[];
+      final seenIds = <String>{info.id};
+      final futures = <Future<List<Video>>>[];
+      for (final src in picked) {
+        futures.add(
+          SourceService.instance
+              .search(src, keyword)
+              .timeout(_recommendPerSourceTimeout)
+              .catchError((Object e) {
+            AppLog.instance.log(
+                '[Recommend] 源 ${src.name} 搜索失败/超时: $e');
+            return <Video>[];
+          }),
+        );
       }
+      final results = await Future.wait(futures);
+      for (final list in results) {
+        for (final v in list) {
+          if (v.id.isEmpty || !seenIds.add(v.id)) continue;
+          collected.add(v);
+        }
       }
-      recommended.value = collected.take(30).toList();
-    } catch (_) {
-      recommended.value = [];
+
+      // ---- 再洗一次牌：同源结果内部顺序也随机 ----
+      collected.shuffle(rnd);
+      // GetxController 没有 mounted，用 isClosed 判断是否已销毁
+      if (!isClosed) {
+        recommended.value = collected.take(30).toList();
+        AppLog.instance.log(
+            '[Recommend] 随机同类: 关键词="$keyword" '
+            '源=${picked.map((s) => s.name).join("/")} 结果=${collected.length} 条');
+      }
+    } catch (e) {
+      AppLog.instance.log('[Recommend] loadRecommended 异常: $e');
     } finally {
       isRecommendLoading.value = false;
+      // 加载期间又来过的请求 → 补跑一次，保证"每次切回来都换新"
+      if (_recommendPending) {
+        _recommendPending = false;
+        if (!isClosed) {
+          // 不 await：让当前调用先返回，避免把调用方也拖住
+          Future<void>.microtask(loadRecommended);
+        }
+      }
     }
   }
 

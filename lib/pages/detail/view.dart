@@ -31,6 +31,7 @@ import '../../widgets/video_player.dart';
 import '../../widgets/video_player_pip.dart';
 import '../../widgets/window_fullscreen.dart';
 import '../play/webview_player_page.dart';
+import '../search/controller.dart' show TvSearchController;
 import 'controller.dart';
 import 'episode_list.dart';
 
@@ -57,7 +58,32 @@ class _DetailPageState extends State<DetailPage> {
     }
     return Get.put(DetailController());
   }
+
+  /// 「快搜」tab 专用的独立搜索控制器。
+  ///
+  /// 为什么不复用全局的 TvSearchController：那是搜索页的状态源，
+  /// 详情页拿它搜索会把搜索页正在展示的结果覆盖掉，返回搜索页就变样了。
+  /// 这里直接 new 一个实例（不走 Get.put，因此不会覆盖全局注册），
+  /// 生命周期跟详情页一致。
+  ///
+  /// ⚠️ 不走 GetX 注册，`onInit` 就**不会**自动触发（GetX 是在 `_onStart`
+  /// 里调的），所以这里手动调一次 —— 否则 searchHistory 会停在半初始化状态，
+  /// 而 `search()` 会写它。
+  final _quickSearch = _createQuickSearch();
+
+  static TvSearchController _createQuickSearch() {
+    final c = TvSearchController();
+    c.onInit();
+    return c;
+  }
+
   bool _isDescriptionExpanded = false;
+
+  /// 已为哪个关键词跑过快搜：切换 tab 不重复请求，除非用户点了别的关键词
+  String? _quickSearchDoneFor;
+
+  /// 快搜输入框（用户可直接改词）
+  final _quickSearchInput = TextEditingController();
   double _lastPersistedProgress = 0;
 
   /// 持有 Player 实例，全屏/普通模式之间复用同一实例，避免状态丢失
@@ -405,7 +431,14 @@ class _DetailPageState extends State<DetailPage> {
     _playerErrorTimer = null;
     _player?.dispose();
     _player = null;
-    
+
+    // 快搜 tab 的临时资源：输入框控制器 + 独立搜索控制器（含其 Rx 与历史加载）
+    _quickSearchInput.dispose();
+    try {
+      _quickSearch.onClose();
+      _quickSearch.dispose();
+    } catch (_) {}
+
     super.dispose();
   }
 
@@ -1341,6 +1374,9 @@ class _DetailPageState extends State<DetailPage> {
                   _controller.detailTabIndex.value = index;
                   if (index == 1) {
                     _controller.loadRecommended();
+                  } else if (index == 2) {
+                    // 快搜：切进来就自动用片名跑一次多源搜索
+                    _runQuickSearch(_controller.vodInfo.value?.name ?? '');
                   }
                 },
                 child: Container(
@@ -1630,82 +1666,331 @@ class _DetailPageState extends State<DetailPage> {
   }
 
   /// 推荐 tab - 同类型影片网格
+  ///
+  /// 加载中若有旧结果（每次切 tab 都会重新拉），继续显示旧结果 + 顶部细进度条，
+  /// 而不是整块换成转圈 —— 否则每次切回来都闪一下白，体验比"稍旧"更差。
   Widget _buildRecommendTab() {
     return Obx(() {
-      if (_controller.isRecommendLoading.value) {
-        return const SizedBox(
-          height: 200,
-          child: Center(child: AppLoading(message: '加载推荐中...')),
-        );
-      }
       final items = _controller.recommended;
+      final loading = _controller.isRecommendLoading.value;
+
       if (items.isEmpty) {
+        if (loading) {
+          return const SizedBox(
+            height: 200,
+            child: Center(child: AppLoading(message: '加载推荐中...')),
+          );
+        }
         return const SizedBox(
           height: 120,
           child: Center(child: AppError(message: '暂无推荐')),
         );
       }
-      return GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingLG),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          childAspectRatio: 0.62,
-          mainAxisSpacing: AppTheme.cardSpacing,
-          crossAxisSpacing: AppTheme.cardSpacing,
-        ),
-        itemCount: items.length,
-        itemBuilder: (context, index) {
-          final video = items[index];
-          return VodCard(
-            video: video,
-            onTap: () => Get.toNamed('/detail', arguments: video),
-          );
-        },
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (loading)
+            SizedBox(
+              height: 2,
+              child: LinearProgressIndicator(
+                minHeight: 2,
+                backgroundColor: Colors.transparent,
+                color: AppTheme.accentColor,
+              ),
+            ),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppTheme.spacingLG, vertical: 6),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              childAspectRatio: 0.62,
+              mainAxisSpacing: AppTheme.cardSpacing,
+              crossAxisSpacing: AppTheme.cardSpacing,
+            ),
+            itemCount: items.length,
+            itemBuilder: (context, index) {
+              final video = items[index];
+              return VodCard(
+                video: video,
+                onTap: () => Get.toNamed('/detail', arguments: video),
+              );
+            },
+          ),
+        ],
       );
     });
   }
 
-  /// 快搜 tab - 快捷搜索入口（关键词直达全局搜索）
+  /// 快搜 tab —— 直接展示多源搜索结果（不再只是"关键词 chip 跳搜索页"）。
+  ///
+  /// 交互对齐搜索页参考图：
+  ///   输入框（可改词）→ 横向源芯片（源名 + 命中条数）→ 当前源的结果网格。
+  /// 数据来自本页独立的 [_quickSearch] 控制器，与搜索页互不干扰。
   Widget _buildQuickSearchTab() {
     final info = _controller.vodInfo.value;
-    final keywords = <String>[
+    // 建议关键词：片名 / 演员 / 类型 —— 点一下就用它重搜
+    final suggest = <String>[
       if (info != null && info.name.isNotEmpty) info.name,
       if (info != null && info.actor.isNotEmpty)
-        ...info.actor.split(',').where((a) => a.trim().isNotEmpty).take(3),
+        ...info.actor.split(',').map((a) => a.trim()).where((a) => a.isNotEmpty).take(3),
       if (info != null && info.typeName.isNotEmpty) info.typeName,
     ];
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingLG),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '快速搜索',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: AppTheme.fontHeadline,
-              fontWeight: FontWeight.w600,
+          // ---------- 搜索输入框 ----------
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _quickSearchInput,
+                  style: TextStyle(
+                      color: AppTheme.textPrimary, fontSize: 14),
+                  decoration: InputDecoration(
+                    hintText: '搜索影片',
+                    hintStyle: TextStyle(
+                        color: AppTheme.textTertiary, fontSize: 13),
+                    prefixIcon: Icon(Icons.search,
+                        size: 18, color: AppTheme.textTertiary),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    filled: true,
+                    fillColor: Colors.white.withValues(alpha: 0.06),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  onSubmitted: (v) => _runQuickSearch(v, force: true),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () =>
+                    _runQuickSearch(_quickSearchInput.text, force: true),
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: AppTheme.accentColor,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.search,
+                      size: 20, color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+
+          // ---------- 建议关键词 ----------
+          if (suggest.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: AppTheme.spacingSM,
+              runSpacing: AppTheme.spacingSM,
+              children: suggest
+                  .map((k) => SelectableChip(
+                        title: k,
+                        isSelected: _quickSearchDoneFor == k,
+                        onTap: () {
+                          _quickSearchInput.text = k;
+                          _runQuickSearch(k, force: true);
+                        },
+                      ))
+                  .toList(),
             ),
-          ),
-          const SizedBox(height: AppTheme.spacingMD),
-          Wrap(
-            spacing: AppTheme.spacingSM,
-            runSpacing: AppTheme.spacingSM,
-            children: keywords.map((keyword) {
-              return SelectableChip(
-                title: keyword,
-                isSelected: false,
-                onTap: () {
-                  Get.toNamed('/search', arguments: keyword);
-                },
+          ],
+
+          const SizedBox(height: 12),
+
+          // ---------- 源芯片 + 结果 ----------
+          Obx(() {
+            final sites = _quickSearch.activeSites;
+            final selectedKey = _quickSearch.selectedSiteKey.value;
+            final searching = _quickSearch.isSearching.value;
+
+            if (sites.isEmpty) {
+              return SizedBox(
+                height: 140,
+                child: Center(
+                  child: Text(
+                    searching ? '搜索中...' : '暂无可用搜索源',
+                    style: TextStyle(
+                        color: AppTheme.textTertiary, fontSize: 13),
+                  ),
+                ),
               );
-            }).toList(),
-          ),
+            }
+
+            final results = selectedKey == null
+                ? <Video>[]
+                : (_quickSearch.resultsBySite[selectedKey] ?? <Video>[]);
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 源芯片（带命中条数）
+                SizedBox(
+                  height: 40,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      if (searching)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Center(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 1.5,
+                                      color: AppTheme.accentColor),
+                                ),
+                                const SizedBox(width: 6),
+                                Text('搜索中',
+                                    style: TextStyle(
+                                        color: AppTheme.textTertiary,
+                                        fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ...sites.map((site) {
+                        final sel = selectedKey == site.key;
+                        final count =
+                            _quickSearch.resultCount[site.key] ?? 0;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => _quickSearch.selectSite(site.key),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 7),
+                              decoration: BoxDecoration(
+                                color: sel
+                                    ? AppTheme.accentColor
+                                        .withValues(alpha: 0.22)
+                                    : Colors.white.withValues(alpha: 0.06),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: sel
+                                      ? AppTheme.accentColor
+                                          .withValues(alpha: 0.55)
+                                      : Colors.white24,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    site.name,
+                                    style: TextStyle(
+                                      color: sel
+                                          ? AppTheme.textPrimary
+                                          : AppTheme.textSecondary,
+                                      fontSize: 12.5,
+                                    ),
+                                  ),
+                                  if (count > 0) ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.accentColor
+                                            .withValues(alpha: 0.20),
+                                        borderRadius:
+                                            BorderRadius.circular(9),
+                                      ),
+                                      child: Text(
+                                        '$count',
+                                        style: TextStyle(
+                                          color: AppTheme.accentColor,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                if (results.isEmpty)
+                  SizedBox(
+                    height: 120,
+                    child: Center(
+                      child: Text(
+                        searching
+                            ? '正在搜索各源...'
+                            : (_quickSearchDoneFor == null
+                                ? '输入关键词开始搜索'
+                                : '该源没有相关结果'),
+                        style: TextStyle(
+                            color: AppTheme.textTertiary, fontSize: 13),
+                      ),
+                    ),
+                  )
+                else
+                  GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3,
+                      childAspectRatio: 0.62,
+                      mainAxisSpacing: AppTheme.cardSpacing,
+                      crossAxisSpacing: AppTheme.cardSpacing,
+                    ),
+                    itemCount: results.length,
+                    itemBuilder: (context, i) {
+                      final v = results[i];
+                      return VodCard(
+                        video: v,
+                        onTap: () =>
+                            Get.toNamed('/detail', arguments: v),
+                      );
+                    },
+                  ),
+              ],
+            );
+          }),
         ],
       ),
     );
+  }
+
+  /// 跑一次快搜。
+  ///
+  /// [force] = false 时，同一关键词只搜一次（切 tab 回来不重复打网络）。
+  Future<void> _runQuickSearch(String rawKeyword, {bool force = false}) async {
+    final kw = rawKeyword.trim();
+    if (kw.isEmpty) return;
+    if (!force && _quickSearchDoneFor == kw) return;
+    _quickSearchDoneFor = kw;
+    if (_quickSearchInput.text != kw) _quickSearchInput.text = kw;
+    _quickSearch.keyword.value = kw;
+    await _quickSearch.search();
   }
 
   /// 收藏按钮（小图标版）- 前置在视频名称前
