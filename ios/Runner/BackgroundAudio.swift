@@ -46,7 +46,15 @@ class BackgroundAudio {
     /// **按需保活**：仅在 Node 已启动 / 需要后台运行时调用，
     /// 避免始终占用 audio session、与其它播放器冲突、空耗电。
     func start() {
-        queue.sync {
+        queue.sync { self.startLocked() }
+    }
+
+    /// 真正的启动实现。
+    ///
+    /// ⚠️ 必须**在 queue 上调用**（内部不再自己 sync）。
+    /// 拆出来是为了让中断恢复路径能直接复用：原来 resume 里若调 start()，
+    /// 而 start() 内部又 queue.sync，就会在串行队列上自我等待 → 死锁。
+    private func startLocked() {
             if isStarted {
                 NSLog("[BackgroundAudio] already started, skip")
                 return
@@ -100,10 +108,17 @@ class BackgroundAudio {
                     options: .loops,
                     completionHandler: nil
                 )
-                player.play()
                 NSLog("[BackgroundAudio] player.play() called, looping silent buffer")
 
-                // 5. 监听 interruption (e.g., 来电) - 重新激活
+                // 5. 监听 interruption (e.g., 来电 / 其它 App 抢音频会话)
+                //
+                // ⚠️ 先移除再添加：start() 在 stop() 之后可能被再次调用，
+                // 重复注册会让同一个通知触发多次 handler。
+                NotificationCenter.default.removeObserver(
+                    self,
+                    name: AVAudioSession.interruptionNotification,
+                    object: nil
+                )
                 NotificationCenter.default.addObserver(
                     self,
                     selector: #selector(handleInterruption(_:)),
@@ -112,19 +127,22 @@ class BackgroundAudio {
                 )
 
                 // 6. 监听 route change (耳机拔掉) - 不需要 stop
+                NotificationCenter.default.removeObserver(
+                    self,
+                    name: AVAudioSession.routeChangeNotification,
+                    object: nil
+                )
                 NotificationCenter.default.addObserver(
                     self,
                     selector: #selector(handleRouteChange(_:)),
                     name: AVAudioSession.routeChangeNotification,
                     object: nil
-                )
 
                 isStarted = true
                 NSLog("[BackgroundAudio] ✅ silent audio started, app can run in background")
             } catch {
                 NSLog("[BackgroundAudio] ❌ start failed: \(error.localizedDescription)")
             }
-        }
     }
 
     /// 停止 (e.g., app 真正退出时)
@@ -172,16 +190,75 @@ class BackgroundAudio {
             NSLog("[BackgroundAudio] interruption began, pause")
             player.pause()
         case .ended:
-            NSLog("[BackgroundAudio] interruption ended, resume")
-            try? AVAudioSession.sharedInstance().setActive(true)
-            player.play()
+            // ⚠️⚠️ 这里是**闪退根因**，改动必须谨慎：
+            //
+            // 旧写法：
+            //     try? session.setActive(true)   // try? 把失败静默吞掉
+            //     player.play()                  // 会话没激活成功时直接崩
+            //
+            // `-[AVAudioPlayerNode play]` 在音频会话未激活时会抛
+            // **Objective-C 异常**（AVAE_RaiseException），而 Swift 无法 catch
+            // ObjC 异常 → 进程直接 SIGABRT（崩溃日志：Abort trap: 6，
+            // 栈顶就是 BackgroundAudio.handleInterruption → player.play）。
+            //
+            // 触发条件很常见：来电结束、其它 App 抢走音频会话、
+            // 新加的 TTS 朗读会重设 session 类别/模式 —— 都会发这个通知。
+            //
+            // 正确做法：**恢复播放前逐项验证状态**，任何一项不满足就重新
+            // 走一遍完整的启动流程，绝不盲目 play()。
+            NSLog("[BackgroundAudio] interruption ended, resume carefully")
+            resumeSilently()
         @unknown default:
             break
         }
     }
 
+    /// 中断结束后恢复静音保活。
+    ///
+    /// 宁可"这次不恢复"，也不能因为 play() 抛异常把 App 带崩 ——
+    /// 后台保活失败只是 Node 可能被挂起，崩了则整个 App 直接退出。
+    private func resumeSilently() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            guard self.isStarted else {
+                NSLog("[BackgroundAudio] resume skipped: not started")
+                return
+            }
+
+            let session = AVAudioSession.sharedInstance()
+            // 先确保会话可用；失败就不要 play
+            do {
+                try session.setActive(true, options: [])
+            } catch {
+                NSLog("[BackgroundAudio] resume: setActive failed, restart engine — \(error.localizedDescription)")
+                self.restartEngine()
+                return
+            }
+
+            // 引擎被系统停掉时必须重启，否则 play() 同样会抛异常
+            if !self.audioEngine.isRunning {
+                NSLog("[BackgroundAudio] resume: engine not running, restart")
+                self.restartEngine()
+                return
+            }
+
+            self.player.play()
+            NSLog("[BackgroundAudio] resume: silent audio resumed")
+        }
+    }
+
+    /// 兜底：按 start() 的完整流程重建（不依赖旧的 engine/player 状态）
+    private func restartEngine() {
+        // 复位状态后复用 startLocked()：已在 queue 上，不能调 start()（会死锁）
+        isStarted = false
+        startLocked()
+    }
+
     @objc private func handleRouteChange(_ notification: Notification) {
-        // route change 不需要 stop, 但要重新激活 session
-        try? AVAudioSession.sharedInstance().setActive(true)
+        // route change（拔耳机/切蓝牙）不需要 stop，但要重新激活 session。
+        // 同样不能裸调 play()：会话/引擎状态可能已被系统改变，
+        // 走 resumeSilently() 里的逐项校验 + 必要时重启引擎。
+        NSLog("[BackgroundAudio] route changed, re-check playback")
+        resumeSilently()
     }
 }

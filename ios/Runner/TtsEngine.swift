@@ -91,10 +91,16 @@ class TtsEngine: NSObject, AVSpeechSynthesizerDelegate {
       s.stopSpeaking(at: .immediate)
     }
 
-    // 语音会话：TTS 属于播放类，用 playback 才能在静音键打开时也出声
+    // 语音会话：TTS 属于播放类，用 playback 才能在静音键打开时也出声。
+    //
+    // ⚠️ options 保持为空、mode 用 .default，**故意与 BackgroundAudio
+    // 的配置一致**（它用 .playback + .default + []）。
+    // 两者配置若不同，每次朗读都会让系统重配 session 并发出
+    // interruption 通知；而 BackgroundAudio 在中断结束时会尝试恢复播放，
+    // 那条路径曾经直接 play() 导致 App 闪退。配置对齐后就不会来回抢。
     do {
       let session = AVAudioSession.sharedInstance()
-      try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+      try session.setCategory(.playback, mode: .default, options: [])
       try session.setActive(true, options: [])
     } catch {
       print("[TtsEngine] audio session 设置失败: \(error)")
