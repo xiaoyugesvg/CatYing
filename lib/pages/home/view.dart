@@ -305,6 +305,19 @@ class _HomePageState extends State<HomePage> {
         return const AppLoading();
       }
 
+      // 源配置失败（线路清单没拿到）时 homeSourceBean 为 null，控制器会直接 return
+      // 什么都不加载 → 原来这里只显示转圈/空白。优先暴露这个错误，让用户知道
+      // 该去改源地址或换源，而不是对着空白页猜。
+      final sourceConfigError = ApiConfig.instance.apiConfigError.value;
+      if (sourceConfigError != null && videos.isEmpty) {
+        return Center(
+          child: AppError(
+            message: sourceConfigError,
+            onRetry: () => _controller.refresh(),
+          ),
+        );
+      }
+
       if (errorMsg != null && videos.isEmpty) {
         return Center(
           child: Column(

@@ -59,6 +59,12 @@ class ApiConfig extends GetxController {
   final dohList = <(String, String)>[].obs;
   final isLoaded = false.obs;
   final configUrl = ''.obs;
+
+  /// 源配置阶段的错误（非空表示线路清单没拿到）。
+  ///
+  /// 之前这类失败只写日志、不暴露给 UI：配置"加载成功"但 homeSourceBean 为 null，
+  /// 首页永久空白且没有任何提示。首页据此显示可重试的错误态。
+  final apiConfigError = Rx<String?>(null);
   final wallpaper = ''.obs;
 
   final NetworkManager _network = NetworkManager.instance;
@@ -186,8 +192,11 @@ class ApiConfig extends GetxController {
     final sites = video?['sites'] as List<dynamic>?;
     if (video == null || sites == null) {
       AppLog.instance.log('[ApiConfig] Spider /config 响应中没有 video.sites');
+      // 原来的静默 return 会让 homeSourceBean 恒为 null → 首页永久空白且无提示。
+      apiConfigError.value = '源未返回线路清单（video.sites 缺失），请检查源地址或换一个源';
       return;
     }
+    apiConfigError.value = null;
 
     final newSources = <SourceBean>[];
     for (final site in sites) {
@@ -221,8 +230,10 @@ class ApiConfig extends GetxController {
 
     if (newSources.isEmpty) {
       AppLog.instance.log('[ApiConfig] Spider /config 返回的 sites 为空');
+      apiConfigError.value = '源的线路清单为空，请换一个源';
       return;
     }
+    apiConfigError.value = null;
 
     sourceBeanList.value = newSources;
 

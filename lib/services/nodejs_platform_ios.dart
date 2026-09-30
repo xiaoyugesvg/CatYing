@@ -63,6 +63,53 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     receiveTimeout: const Duration(seconds: 15),
   ));
 
+  // ============================================================
+  // 带凭据的源地址（HTTP Basic）支持
+  // ============================================================
+
+  /// 取出 URL 里的 `user:pass@` 并生成 Basic 认证头。
+  ///
+  /// **为什么必须这么做**：订阅型源地址常写成
+  /// `https://user:token@host/.../index.js`。但 Dart 的 HttpClient 会**丢弃**
+  /// URL 中的 userinfo，Dio 也不会自动把它转成 `Authorization` 头
+  /// （实测：requests headers 为空）。结果是服务端返回 401 → 下载静默失败
+  /// → `index.js` 永远不存在 → Node 的 `/config` 拿不到 `video.sites`
+  /// → `homeSourceBean` 恒为 null → **首页永久空白且没有任何错误提示**。
+  ///
+  /// 这里把凭据从 URL 剥离并转成标准 Basic 头，同时返回干净的 URL。
+  static ({String url, Map<String, String> headers}) _authSplit(String rawUrl) {
+    try {
+      final uri = Uri.parse(rawUrl);
+      final userInfo = uri.userInfo;
+      if (userInfo.isEmpty) {
+        return (url: rawUrl, headers: const <String, String>{});
+      }
+      final cleanUrl = uri.replace(userInfo: '').toString();
+      final token = base64Encode(utf8.encode(userInfo));
+      return (
+        url: cleanUrl,
+        headers: <String, String>{'Authorization': 'Basic $token'},
+      );
+    } catch (_) {
+      return (url: rawUrl, headers: const <String, String>{});
+    }
+  }
+
+  /// 组装带鉴权头的请求选项
+  static Options _opts(
+    Map<String, String> headers, {
+    required ResponseType type,
+  }) {
+    return Options(
+      responseType: type,
+      headers: headers.isEmpty ? null : headers,
+    );
+  }
+
+  /// 源文件最小有效体积。真实的 catvod 源打包后是几百 KB，
+  /// 小于这个值基本可以断定是空文件或 HTML 错误页（401/404 页面）。
+  static const int _minValidSourceBytes = 1024;
+
   @override
   bool get isRunning => _isRunning;
   @override
@@ -324,9 +371,24 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     final indexMd5Path = '$sourcePath/index.js.md5';
     final configJSPath = '$sourcePath/index.config.js';
 
-    final localJSExists = await File(indexJSPath).exists();
+    // 只判断「文件存在」是不够的：下载失败时（例如订阅源返回 401）
+    // 可能写入一个空文件或 HTML 错误页，此后每次启动都会认为「已缓存」
+    // 而直接复用坏文件 → 源永远加载不出来且看起来是"缓存命中"。
+    // 这里加一个有效性检查：体积过小一律视为无效，强制重新下载。
+    var localJSExists = false;
+    if (await File(indexJSPath).exists()) {
+      final len = await File(indexJSPath).length();
+      localJSExists = len >= _minValidSourceBytes;
+      if (!localJSExists) {
+        AppLog.instance.log(
+            '[IOSNodeJS] 本地源文件无效（$len 字节 < $_minValidSourceBytes），强制重新下载');
+        try {
+          await File(indexJSPath).delete();
+        } catch (_) {}
+      }
+    }
     final localMd5Exists = await File(indexMd5Path).exists();
-    AppLog.instance.log('[IOSNodeJS] 缓存检查: index.js 存在=$localJSExists, '
+    AppLog.instance.log('[IOSNodeJS] 缓存检查: index.js 有效=$localJSExists, '
         'index.js.md5 存在=$localMd5Exists');
 
     if (localJSExists) {
@@ -339,9 +401,11 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     }
 
     try {
+      // 凭据订阅源：把 URL 里的 user:pass@ 转成 Basic 头（HttpClient 会丢弃 userinfo）
+      final jsAuth = _authSplit(normalizedUrl);
       final jsResponse = await _dio.get<List<int>>(
-        normalizedUrl,
-        options: Options(responseType: ResponseType.bytes),
+        jsAuth.url,
+        options: _opts(jsAuth.headers, type: ResponseType.bytes),
       );
       if (jsResponse.statusCode == 200 && jsResponse.data != null) {
         final jsData = jsResponse.data!;
@@ -350,8 +414,8 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
         String? md5Data;
         try {
           final md5Response = await _dio.get<String>(
-            '$normalizedUrl.md5',
-            options: Options(responseType: ResponseType.plain),
+            '${jsAuth.url}.md5',
+            options: _opts(jsAuth.headers, type: ResponseType.plain),
           );
           if (md5Response.statusCode == 200 && md5Response.data != null) {
             md5Data = md5Response.data!.trim();
@@ -362,11 +426,11 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
 
         List<int>? configData;
         try {
-          final configUrl =
-              normalizedUrl.replaceAll('/index.js', '/index.config.js');
+          final configAuth = _authSplit(
+              normalizedUrl.replaceAll('/index.js', '/index.config.js'));
           final configResponse = await _dio.get<List<int>>(
-            configUrl,
-            options: Options(responseType: ResponseType.bytes),
+            configAuth.url,
+            options: _opts(configAuth.headers, type: ResponseType.bytes),
           );
           if (configResponse.statusCode == 200 &&
               configResponse.data != null) {
@@ -456,12 +520,13 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       final indexMd5Path = '$sourcePath/index.js.md5';
       final configJSPath = '$sourcePath/index.config.js';
 
-      // 远程 MD5
+      // 远程 MD5（同样需要 Basic 凭据）
+      final jsAuth = _authSplit(normalizedUrl);
       String? remoteMd5;
       try {
         final response = await _dio.get<String>(
-          '$normalizedUrl.md5',
-          options: Options(responseType: ResponseType.plain),
+          '${jsAuth.url}.md5',
+          options: _opts(jsAuth.headers, type: ResponseType.plain),
         );
         if (response.statusCode == 200 && response.data != null) {
           remoteMd5 = response.data!.trim();
@@ -485,8 +550,8 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
 
       AppLog.instance.log('[IOSNodeJS] 后台检测到源已更新, 重新下载...');
       final jsResponse = await _dio.get<List<int>>(
-        normalizedUrl,
-        options: Options(responseType: ResponseType.bytes),
+        jsAuth.url,
+        options: _opts(jsAuth.headers, type: ResponseType.bytes),
       );
       if (jsResponse.statusCode != 200 || jsResponse.data == null) return;
       final jsData = jsResponse.data!;
@@ -502,11 +567,11 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       await File(indexJSPath).writeAsBytes(jsData);
       await File(indexMd5Path).writeAsString(remoteMd5);
       try {
-        final configUrl =
-            normalizedUrl.replaceAll('/index.js', '/index.config.js');
+        final configAuth = _authSplit(
+            normalizedUrl.replaceAll('/index.js', '/index.config.js'));
         final configResponse = await _dio.get<List<int>>(
-          configUrl,
-          options: Options(responseType: ResponseType.bytes),
+          configAuth.url,
+          options: _opts(configAuth.headers, type: ResponseType.bytes),
         );
         if (configResponse.statusCode == 200 &&
             configResponse.data != null) {
