@@ -46,7 +46,18 @@ class BackgroundAudio {
     /// **按需保活**：仅在 Node 已启动 / 需要后台运行时调用，
     /// 避免始终占用 audio session、与其它播放器冲突、空耗电。
     func start() {
-        queue.sync { self.startLocked() }
+        // ⚠️ 整段包 TvBoxTryCatch，这是**加载源闪退**的最后一道防线。
+        //
+        // 调用链：NodeJSBridge.startNodeJS（主线程）→ start()。
+        // startLocked() 里的 AVAudioEngine.attach/connect/start 与
+        // player.play() 在音频会话状态不合法时抛 **Objective-C 异常**；
+        // 下面 do{}catch 只能接 Swift 错误，接不住 ObjC 异常 →
+        // 冒泡到 std::terminate → abort()（SIGABRT）→ App 闪退。
+        //
+        // 兜住之后，保活启动失败只会记一行日志，App 照常运行。
+        if !TvBoxTryCatch({ self.queue.sync { self.startLocked() } }) {
+            NSLog("[BackgroundAudio] ⚠️ start 抛 Objective-C 异常，保活跳过（App 继续运行）")
+        }
     }
 
     /// 真正的启动实现。
@@ -109,8 +120,14 @@ class BackgroundAudio {
                 completionHandler: nil
             )
             // 启动播放：这是保活的起点（静音 buffer 循环）
-            player.play()
-            NSLog("[BackgroundAudio] player.play() called, looping silent buffer")
+            //
+            // ⚠️ 必须包 TvBoxTryCatch：AVAudioPlayerNode.play() 在会话状态
+            // 不合法时会抛 Objective-C 异常，Swift catch 不到 → SIGABRT。
+            if TvBoxTryCatch({ self.player.play() }) {
+                NSLog("[BackgroundAudio] player.play() called, looping silent buffer")
+            } else {
+                NSLog("[BackgroundAudio] ⚠️ player.play() 抛异常，本次保活跳过（不影响 App）")
+            }
 
             // 5. 监听 interruption (e.g., 来电 / 其它 App 抢音频会话)
             //
@@ -152,10 +169,13 @@ class BackgroundAudio {
     func stop() {
         queue.sync {
             guard isStarted else { return }
-            player.stop()
-            audioEngine.stop()
-            try? AVAudioSession.sharedInstance().setActive(
-                false, options: .notifyOthersOnDeactivation)
+            // 整段兜住：stop/引擎停止/setActive 在状态不干净时都可能抛 ObjC 异常
+            _ = TvBoxTryCatch({
+                self.player.stop()
+                self.audioEngine.stop()
+                try? AVAudioSession.sharedInstance().setActive(
+                    false, options: .notifyOthersOnDeactivation)
+            })
             isStarted = false
             NSLog("[BackgroundAudio] stopped")
         }
@@ -165,7 +185,9 @@ class BackgroundAudio {
     /// iOS 在某些情况下会 deactivate audio session, 重新激活以确保保持
     @objc func appWillResignActive() {
         NSLog("[BackgroundAudio] app will resign active, re-activate session")
-        try? AVAudioSession.sharedInstance().setActive(true)
+        _ = TvBoxTryCatch({
+            try? AVAudioSession.sharedInstance().setActive(true)
+        })
     }
 
     @objc func appDidEnterBackground() {
@@ -177,13 +199,17 @@ class BackgroundAudio {
         if isStarted {
             resumeSilently()
         } else {
-            try? AVAudioSession.sharedInstance().setActive(true)
+            _ = TvBoxTryCatch({
+                try? AVAudioSession.sharedInstance().setActive(true)
+            })
         }
     }
 
     @objc func appWillEnterForeground() {
         NSLog("[BackgroundAudio] app will enter foreground, re-activate session")
-        try? AVAudioSession.sharedInstance().setActive(true)
+        _ = TvBoxTryCatch({
+            try? AVAudioSession.sharedInstance().setActive(true)
+        })
     }
 
     @objc private func handleInterruption(_ notification: Notification) {
@@ -195,7 +221,7 @@ class BackgroundAudio {
         switch type {
         case .began:
             NSLog("[BackgroundAudio] interruption began, pause")
-            player.pause()
+            _ = TvBoxTryCatch({ self.player.pause() })
         case .ended:
             // ⚠️⚠️ 这里是**闪退根因**，改动必须谨慎：
             //
@@ -232,29 +258,43 @@ class BackgroundAudio {
                 return
             }
 
-            let session = AVAudioSession.sharedInstance()
-            // 先确保会话可用；失败就不要 play
-            do {
-                try session.setActive(true, options: [])
-            } catch {
-                NSLog("[BackgroundAudio] resume: setActive failed, restart engine — \(error.localizedDescription)")
-                self.restartEngine()
-                return
-            }
+            // ⚠️ 整个恢复过程都包在 ObjC 异常保护里，理由：
+            //   · setActive / play / audioEngine 这一串都可能抛 ObjC 异常
+            //   · restartEngine() → startLocked() 内部同样可能抛
+            //     （attach/connect/start 全在引擎状态不干净时执行）
+            //   · 这个 block 跑在 GCD 队列上，抛出去同样是 SIGABRT
+            // 任何一步失败都只是"这次没恢复保活"，绝不影响 App 存活。
+            let ok = TvBoxTryCatch({
+                let session = AVAudioSession.sharedInstance()
+                // 先确保会话可用；失败就重启引擎
+                do {
+                    try session.setActive(true, options: [])
+                } catch {
+                    NSLog("[BackgroundAudio] resume: setActive failed, restart engine — \(error.localizedDescription)")
+                    self.restartEngine()
+                    return
+                }
 
-            // 引擎被系统停掉时必须重启，否则 play() 同样会抛异常
-            if !self.audioEngine.isRunning {
-                NSLog("[BackgroundAudio] resume: engine not running, restart")
-                self.restartEngine()
-                return
-            }
+                // 引擎被系统停掉时必须重启，否则 play() 同样会抛异常
+                if !self.audioEngine.isRunning {
+                    NSLog("[BackgroundAudio] resume: engine not running, restart")
+                    self.restartEngine()
+                    return
+                }
 
-            self.player.play()
-            NSLog("[BackgroundAudio] resume: silent audio resumed")
+                self.player.play()
+                NSLog("[BackgroundAudio] resume: silent audio resumed")
+            })
+
+            if !ok {
+                NSLog("[BackgroundAudio] ⚠️ resume 抛异常，已忽略（App 继续运行）")
+            }
         }
     }
 
     /// 兜底：按 start() 的完整流程重建（不依赖旧的 engine/player 状态）
+    ///
+    /// 注意：调用方需自行保证异常被兜住（见 resumeSilently）。
     private func restartEngine() {
         // 复位状态后复用 startLocked()：已在 queue 上，不能调 start()（会死锁）
         isStarted = false

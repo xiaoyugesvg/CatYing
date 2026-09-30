@@ -22,9 +22,15 @@
  * 而不是静默返回空 —— 这样你一眼能看出是哪个字段不支持。
  */
 
-import * as cheerioNs from 'cheerio';
-const cheerio = cheerioNs.default ?? cheerioNs;
+// ⚠️ cheerio 的 ESM 入口**没有 default 导出**（只有 load / html 等具名导出）。
+// 之前写 `cheerioNs.default ?? cheerioNs` 会被 esbuild 警告
+// "Import 'default' will always be undefined"，也就是每次都会走下策分支 ——
+// 能用，但很脆。这里直接用具名导出，意图明确。
+import { load as cheerioLoad } from 'cheerio';
 import vm from 'node:vm';
+
+/** 包一层，调用点和以前一致（cheerio.load(x) 的用法保持不变） */
+const cheerio = { load: cheerioLoad };
 
 // ============================================================
 // 工具

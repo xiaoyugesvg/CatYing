@@ -14,11 +14,30 @@
 const NODE_LOG_ENABLED = false;
 
 // ── 阅读 3.0 书源执行器 ────────────────────────────────────────
-// ⚠️ 必须用 **顶层静态 import**，不能用 require()：
-// 本项目 package.json 是 type=module，esbuild 会把内部模块编成 ESM，
-// 此时 require() 一个 ESM 模块拿到的是空对象（踩过：bs.bsSearch is not a function）。
-// 又要避开与本地标识符重名，所以整体命名空间导入。
-import * as bookSource from './book_source.js';
+// ⚠️ 故意**不在这里 import**，改为在 /book/source 路由里动态 import()。
+//
+// 原因（吃了两次亏）：
+//   1. 不能用 `require('./book_source.js')`：本项目 package.json 是
+//      type=module，esbuild 会把内部模块编成 ESM，require() 拿到的是
+//      **空对象**（踩过：bs.bsSearch is not a function）。
+//   2. 也不该用顶层 `import`：那样 book_source.js（连带 book_rule.js、
+//      cheerio 全文解析器、node:vm）会在 **Node 启动时立即求值**。
+//      模块顶层任何一次抛错，都会让 Node 进程直接挂掉 ——
+//      而 iOS 的 Node 和 App 是**同一个进程**，Node 崩 = App 闪退。
+//      表现就是"打开 App 正常，一加载源就闪退"。
+//
+// 书源是**可选功能**，不该有权在启动阶段拖垮整个 App。
+// 改成路由内 `await import()` 后：
+//   · esbuild 依然把它打包进 dist/main.js（不依赖运行时文件系统）
+//   · 但只有在真正请求 /book/source 时才求值 → 启动路径零风险
+//
+// 项目里 music_lx.js 本来就是这么做的（见 /music/lx 路由内的 require）。
+let bookSourceCache = null;
+async function getBookSource() {
+    if (bookSourceCache) return bookSourceCache;
+    bookSourceCache = await import('./book_source.js');
+    return bookSourceCache;
+}
 
 let nodeLogFile = null;
 if (NODE_LOG_ENABLED) try {
@@ -396,7 +415,9 @@ const mgmtServer = createServer((req, res) => {
                     res.end(JSON.stringify({ ok: false, error: 'source is required' }));
                     return;
                 }
-                const bs = bookSource; // 顶层 import（见文件头说明）
+                // 动态加载（见文件头说明）：模块只在真正用到时才求值，
+                // 它的任何初始化错误只会让这一次请求失败，不会拖垮 Node 进程。
+                const bs = await getBookSource();
                 let r;
                 switch (data.action) {
                     case 'search':
@@ -421,9 +442,15 @@ const mgmtServer = createServer((req, res) => {
                 res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
                 res.end(JSON.stringify(r));
             } catch (e) {
-                console.error('ERROR in /book/source:', e && e.message);
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ ok: false, error: (e && e.message) || String(e) }));
+                // 任何异常都只影响这一次请求：书源规则千奇百怪，解析失败是常态。
+                // 绝不能让它冒泡到进程级（Node 崩 = App 闪退）。
+                console.error('ERROR in /book/source:', (e && e.stack) || e);
+                try {
+                    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+                    res.end(JSON.stringify({ ok: false, error: (e && e.message) || String(e) }));
+                } catch (_) {
+                    // 响应可能已经开始写出，忽略二次写入错误
+                }
             }
         });
         return;

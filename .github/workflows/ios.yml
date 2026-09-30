@@ -180,14 +180,52 @@ jobs:
         #   - link NodeMobile.xcframework 到 Frameworks build phase
         #   - embed NodeMobile.xcframework 到 Embed Frameworks
         # `--xcframework` 用相对 ios/ 的短路径（xcframework 已经被上面 copy 过来）
+        #
+        # ⚠️ 这个列表是**权威来源**：脚本只会把列在这里的文件加进 target。
+        #    新增 Runner 原生文件必须同步加到这里，否则 CI 编不到它 →
+        #    引用它的代码报 "cannot find X in scope" → 整个 iOS 构建失败。
+        #    （TtsEngine.swift 曾经只靠本地手动登记 pbxproj 生效，就是这个坑）
+        #
+        # 注意：脚本内部固定把文件标成 `sourcecode.swift`（add_nodemobile.rb L108），
+        #      所以**只能放 .swift**。Objective-C 文件（如 ExceptionGuard.m）不要加，
+        #      否则会被当成 Swift 编译。ObjC 文件请在 pbxproj 里手动登记。
         run: |
           set -e
           cd ios
           ruby scripts/add_nodemobile.rb \
             --xcframework Frameworks/NodeMobile.xcframework \
-            --extra-swift NodeJSBridge.swift,BackgroundAudio.swift,PipManager.swift,AvEngine.swift,AvPlayerViewFactory.swift
+            --extra-swift NodeJSBridge.swift,BackgroundAudio.swift,PipManager.swift,AvEngine.swift,AvPlayerViewFactory.swift,TtsEngine.swift
           echo "=== pbxproj 改动 diff ==="
           git diff --stat Runner.xcodeproj/project.pbxproj || true
+
+      - name: Verify native sources are in the target
+        # 兜底自检：上面任何一步漏了文件，在这里就失败（几秒），
+        # 而不是等到 Xcode 编译到一半才报 "cannot find in scope"。
+        run: |
+          set -e
+          PBX=ios/Runner.xcodeproj/project.pbxproj
+          MISSING=0
+          for F in TtsEngine.swift ExceptionGuard.m BackgroundAudio.swift AppDelegate.swift; do
+            if grep -q "$F in Sources" "$PBX"; then
+              echo "✅ $F 已在 Sources build phase"
+            else
+              echo "❌ $F 不在 Sources build phase —— 构建必失败"
+              MISSING=1
+            fi
+          done
+          for F in ExceptionGuard.h; do
+            if grep -q "$F" "$PBX"; then
+              echo "✅ $F 已登记"
+            else
+              echo "❌ $F 未登记"
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" = "1" ]; then
+            echo "=== Sources 里实际有什么 ==="
+            grep "in Sources" "$PBX" | sed 's/^/  /'
+            exit 1
+          fi
 
       - name: Disable Swift Package Manager
         # media_kit_libs_ios_video / media_kit_video 不支持 Swift Package Manager。

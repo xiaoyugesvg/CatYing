@@ -244,11 +244,31 @@ import UIKit
         isRunning = true
         // 静音保活可关：关闭后锁屏不显示「播放中」，但 Node 可能被系统冻结
         if keepAlive {
-            BackgroundAudio.shared.start()
+            // ⚠️ 必须包 TvBoxTryCatch —— 这里是**加载源时闪退**的根因路径：
+            //
+            //   startNodeJS（MethodChannel 主线程）
+            //     → BackgroundAudio.start()
+            //       → AVAudioEngine.attach / connect / start / player.play()
+            //
+            // 这些 AVFoundation 调用在音频会话状态不合法时抛的是
+            // **Objective-C 异常**，而 Swift 的 do/catch 只能接 Swift 错误、
+            // 接不住 ObjC 异常 → 异常冒泡到 std::terminate → abort()（SIGABRT）
+            // → 与 Node 同进程的 App 直接闪退。
+            //
+            // 时序正好是"打开 App 正常，一加载源就闪退"：
+            // 加载源才第一次走到 startNodeJS，才第一次激活音频会话。
+            //
+            // 保活音频只是**可选优化**（防止 Node 被系统冻结），
+            // 失败了最多后台被挂起，绝不能让它把整个 App 带走。
+            if TvBoxTryCatch({ BackgroundAudio.shared.start() }) {
+                NSLog("[NodeJSBridge] silent keepalive started")
+            } else {
+                NSLog("[NodeJSBridge] ⚠️ 保活音频启动失败，已忽略（App 继续运行）")
+            }
         } else {
             // 必须调用 stop(): BackgroundAudio.start() 是 isStarted 幂等的,
             // 只记日志的话「先开过再关」的场景静音音频仍在后台播放, 开关等于无效。
-            BackgroundAudio.shared.stop()
+            _ = TvBoxTryCatch({ BackgroundAudio.shared.stop() })
             NSLog("[NodeJSBridge] silent keepalive disabled")
         }
 
@@ -269,7 +289,9 @@ import UIKit
 
             DispatchQueue.main.async {
                 self.isRunning = false
-                BackgroundAudio.shared.stop()
+                // 同样要兜住：stop() 内部有 player.stop/audioEngine.stop，
+                // 状态不干净时也会抛 ObjC 异常（Node 退出路径上同样会崩）
+                _ = TvBoxTryCatch({ BackgroundAudio.shared.stop() })
                 self.notifyDart(method: "onNodeExit", arguments: 0)
             }
         }
