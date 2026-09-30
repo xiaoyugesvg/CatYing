@@ -82,5 +82,16 @@ import AVFoundation
     } else {
       print("[AppDelegate] ❌ 无法获取 AvEngine 的 registrar")
     }
+
+    // 注册 TTS（听书朗读）
+    //
+    // 用系统自带的 AVSpeechSynthesizer，**不引第三方插件**：
+    // 新增 pub 依赖若没重新 pod install，插件原生库不会被链接，
+    // Flutter 启动时找不到插件会直接崩（flutter_tts 就是这么导致闪退的）。
+    if let ttsRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "TtsEngine") {
+      TtsEngine.shared.register(messenger: ttsRegistrar.messenger())
+    } else {
+      print("[AppDelegate] ❌ 无法获取 TtsEngine 的 registrar")
+    }
   }
 }

@@ -1,20 +1,26 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 import 'package:get/get.dart';
 
 import 'app_log.dart';
 
 /// 语音朗读（听书）
 ///
-/// 用 flutter_tts 走**系统 TTS 引擎**（iOS 是 AVSpeechSynthesizer）——
-/// 不自己实现语音合成，也不必申请额外权限。
+/// ── 走原生 channel，**不用第三方插件** ─────────────────────────
+/// iOS 侧 `ios/Runner/TtsEngine.swift` 用系统自带的 `AVSpeechSynthesizer`
+/// 实现，Dart 通过 `tts_engine` 频道调用。
 ///
-/// 朗读策略：把整章文本按段落切开，**一段一段念**（而不是整段丢给引擎）。
-/// 原因：
-///   · 系统引擎对超长文本的处理不一致（有的会截断、有的会卡）；
-///   · 逐段才能做到"念完自动下一段"和"高亮当前段"。
+/// 为什么不引 flutter_tts：本 App 是 TrollStore 侧载，iOS 只维护
+/// `Podfile.lock` 里已有的那几个原生库。**新增 pub 依赖若没重新
+/// `pod install`，插件原生库不会被链接** → Flutter 启动时找不到插件 →
+/// **装完就闪退**。TTS 是系统自带能力，没必要为它引插件。
+///
+/// ── 分段策略 ──────────────────────────────────────────────────
+/// 把整章按段落切开、**一段一段念**（不是整段丢给引擎）：
+///   · 系统引擎对超长文本的处理不一致（有的截断、有的卡住）
+///   · 逐段才能做到"念完自动下一段 + 高亮当前段"
 class TtsService extends GetxService {
   static TtsService get instance {
     if (!Get.isRegistered<TtsService>()) {
@@ -23,21 +29,21 @@ class TtsService extends GetxService {
     return Get.find<TtsService>();
   }
 
-  final _tts = FlutterTts();
+  static const MethodChannel _ch = MethodChannel('tts_engine');
 
   /// 正在朗读
   final isSpeaking = false.obs;
 
-  /// 暂停中（暂停后可以继续）
+  /// 暂停中（可继续）
   final isPaused = false.obs;
 
-  /// 当前念到第几段（用于高亮 + 自动滚动）
+  /// 当前念到第几段（高亮 + 自动滚动用）
   final currentIndex = 0.obs;
 
   /// 总段数
   final totalSegments = 0.obs;
 
-  /// 语速 0.1~1.0（iOS 的 AVSpeechUtterance 常规语速约 0.5）
+  /// 语速 0.1~1.0
   final rate = 0.5.obs;
 
   /// 音调 0.5~2.0
@@ -58,39 +64,11 @@ class TtsService extends GetxService {
   @override
   void onInit() {
     super.onInit();
-    _initEngine();
-  }
-
-  Future<void> _initEngine() async {
-    try {
-      // 中文优先；取不到就用系统默认，不阻塞
-      try {
-        await _tts.setLanguage('zh-CN');
-      } catch (_) {
-        await _tts.setLanguage('zh');
-      }
-      await _tts.setSpeechRate(rate.value);
-      await _tts.setPitch(pitch.value);
-      await _tts.setVolume(1.0);
-
-      // 念完一段 → 自动念下一段；全部念完 → 回调
-      _tts.setCompletionHandler(() => _onSegmentDone());
-      _tts.setErrorHandler((msg) {
-        lastError.value = '语音引擎出错：$msg';
-        AppLog.instance.log('[TTS] error: $msg');
-        // 出错时不要卡死，当作这一段念完
-        _onSegmentDone();
-      });
-      _tts.setCancelHandler(() {
-        isSpeaking.value = false;
-        isPaused.value = false;
-      });
-      available.value = true;
-    } catch (e) {
-      available.value = false;
-      lastError.value = '设备没有可用的语音引擎（iOS：设置 → 辅助功能 → 朗读内容）';
-      AppLog.instance.log('[TTS] 初始化失败: $e');
-    }
+    // 原生侧每念完一段回调 onDone，据此推进下一段
+    _ch.setMethodCallHandler((call) async {
+      if (call.method == 'onDone') _onSegmentDone();
+      return null;
+    });
   }
 
   // ============================================================
@@ -118,8 +96,10 @@ class TtsService extends GetxService {
   Future<void> pause() async {
     if (!isSpeaking.value) return;
     try {
-      await _tts.pause();
-    } catch (_) {/* 部分平台 pause 不生效，用 stop 兜底 */}
+      await _ch.invokeMethod<bool>('pause');
+    } catch (e) {
+      AppLog.instance.log('[TTS] pause 失败: $e');
+    }
     isPaused.value = true;
     isSpeaking.value = false;
   }
@@ -130,7 +110,10 @@ class TtsService extends GetxService {
     isSpeaking.value = true;
     isPaused.value = false;
     try {
-      await _tts.speak(_segments[currentIndex.value]);
+      final ok = await _ch.invokeMethod<bool>('resume') ?? false;
+      // continueSpeaking 被系统回收时会返回 false：这时从当前段重念，
+      // 保证"继续"一定有反应，而不是静默失败。
+      if (!ok) await _speakCurrent();
     } catch (e) {
       await _speakCurrent();
     }
@@ -140,8 +123,8 @@ class TtsService extends GetxService {
   Future<void> stop() async {
     _stopRequested = true;
     try {
-      await _tts.stop();
-    } catch (_) {}
+      await _ch.invokeMethod('stop');
+    } catch (_) {/* 原生侧不可用时忽略 */}
     isSpeaking.value = false;
     isPaused.value = false;
   }
@@ -158,18 +141,12 @@ class TtsService extends GetxService {
 
   Future<void> setRate(double v) async {
     rate.value = v.clamp(0.1, 1.0);
-    try {
-      await _tts.setSpeechRate(rate.value);
-    } catch (_) {}
     // 语速变更后从当前段重念，让效果立刻可感知
     if (isSpeaking.value) await _speakCurrent();
   }
 
   Future<void> setPitch(double v) async {
     pitch.value = v.clamp(0.5, 2.0);
-    try {
-      await _tts.setPitch(pitch.value);
-    } catch (_) {}
     if (isSpeaking.value) await _speakCurrent();
   }
 
@@ -183,15 +160,25 @@ class TtsService extends GetxService {
     if (i < 0 || i >= _segments.length) return;
     final seg = _segments[i];
     if (seg.trim().isEmpty) {
-      // 空段直接跳过，避免引擎对空串报错
       _onSegmentDone();
       return;
     }
     try {
-      await _tts.speak(seg);
+      await _ch.invokeMethod('speak', {
+        'text': seg,
+        'rate': rate.value,
+        'pitch': pitch.value,
+      });
+    } on MissingPluginException {
+      // 原生侧没注册（非 iOS 平台，或构建没包含 TtsEngine.swift）
+      available.value = false;
+      isSpeaking.value = false;
+      lastError.value = '当前构建不含语音引擎（非 iOS 平台或原生代码未编译）';
+      AppLog.instance.log('[TTS] tts_engine 频道未注册');
     } catch (e) {
       lastError.value = '朗读失败：$e';
       isSpeaking.value = false;
+      AppLog.instance.log('[TTS] speak 失败: $e');
     }
   }
 
@@ -211,22 +198,22 @@ class TtsService extends GetxService {
 
   /// 把章节文本切成适合朗读的片段
   ///
-  /// 规则：按空行/换行切段 → 过滤纯符号与超短行 → 过长的段按句号再切
+  /// 规则：按换行切段 → 过滤纯符号与超短行 → 过长的段按句末标点再切
   /// （系统引擎对超长文本会截断，必须自己切）。
   static List<String> splitSegments(String text) {
     final out = <String>[];
     for (final raw in text.split(RegExp(r'\n+'))) {
-      var s = raw.trim();
+      final s = raw.trim();
       if (s.isEmpty) continue;
-      // 去掉纯装饰行（分隔符、网址等）
+      // 跳过纯装饰行（分隔符等）
       if (RegExp(r'^[\s\-=*_~#·—]+$').hasMatch(s)) continue;
       if (s.length < 2) continue;
 
-      // 过长段落再按句末标点切，每片控制在 ~180 字以内
       if (s.length <= 180) {
         out.add(s);
         continue;
       }
+      // 过长段落按句末标点切，每片约 120 字
       final buf = StringBuffer();
       for (final ch in s.split('')) {
         buf.write(ch);
