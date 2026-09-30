@@ -5,8 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../../common/theme.dart';
-import '../../common/theme_mode_store.dart';
-import '../../services/app_log.dart';
 import '../../services/background_service.dart';
 import '../../services/wallpaper_api_service.dart';
 import '../../widgets/common_widgets.dart';
@@ -181,7 +179,7 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                 onChanged: bg.setBlur,
               ),
               _slider(
-                label: '深色遮罩',
+                label: '遮罩强度',
                 valueText: '${(bg.overlay.value * 100).round()}%',
                 value: bg.overlay.value,
                 min: 0,
@@ -189,20 +187,11 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                 divisions: 16,
                 onChanged: bg.setOverlay,
               ),
-              _slider(
-                label: '浅色遮罩',
-                valueText: '${(bg.lightOverlay.value * 100).round()}%',
-                value: bg.lightOverlay.value,
-                min: 0,
-                max: 0.8,
-                divisions: 16,
-                onChanged: bg.setLightOverlay,
-              ),
               Padding(
                 padding: const EdgeInsets.only(left: 4, top: 2),
                 child: Text(
-                  '遮罩按明暗自动选用：深色界面用「深色遮罩」压暗壁纸，'
-                  '浅色界面用「浅色遮罩」提亮壁纸，两者都是为了文字清晰。',
+                  '浅色/深色各有独立的遮罩值：浅色模式用白色遮罩提亮壁纸，'
+                  '深色模式用黑色遮罩压暗壁纸，都是为了让文字清晰。',
                   style: TextStyle(
                       color: AppTheme.textTertiary,
                       fontSize: AppTheme.fontCaption,
@@ -211,28 +200,11 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
               ),
             ],
 
-            // ---------- 文字颜色模式 ----------
+            // ---------- 当前正在编辑哪一套 ----------
+            // 外观模式是主导者，所以这里不再让用户单独选"文字颜色"，
+            // 而是明确告知"你正在编辑的是浅色/深色模式那一套背景"。
             const SizedBox(height: 20),
-            const SectionHeader(title: '文字颜色模式'),
-            Row(
-              children: [
-                _textModeTile(
-                  label: '浅色文字',
-                  preview: const Color(0xFF1A1A1A),
-                  letterColor: Colors.white,
-                  mode: AppearanceMode.dark,
-                ),
-                const SizedBox(width: 10),
-                _textModeTile(
-                  label: '深色文字',
-                  preview: const Color(0xFFF2F2F2),
-                  letterColor: Colors.black87,
-                  mode: AppearanceMode.light,
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            _buildAppearanceHint(bg),
+            _buildCurrentSceneBanner(bg),
           ],
         );
       }),
@@ -682,98 +654,53 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
       );
 
   // ============================================================
-  // 文字颜色模式
+  // 当前模式提示
   // ============================================================
 
-  Widget _buildAppearanceHint(BackgroundService bg) {
-    final auto = !bg.manualAppearance.value;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          auto
-              ? '当前自动跟随背景：深色背景用浅色文字，皎月白等浅色背景用深色文字。'
-              : '当前为手动指定，不再随背景变化。',
-          style: TextStyle(
-              color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption),
-        ),
-        if (!auto)
-          TextButton.icon(
-            onPressed: () async {
-              await bg.clearAppearanceOverride();
-              if (mounted) setState(() {});
-            },
-            icon: const Icon(Icons.autorenew, size: 16),
-            label: const Text('恢复跟随背景'),
-            style: TextButton.styleFrom(
-              foregroundColor: AppTheme.accentColor,
-              padding: EdgeInsets.zero,
-              minimumSize: const Size(0, 32),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _textModeTile({
-    required String label,
-    required Color preview,
-    required Color letterColor,
-    required AppearanceMode mode,
-  }) {
-    final bg = _bg;
-    // 「当前」= 实际生效的明暗（AppBrightness），而不是 appearanceMode 字段：
-    // 自动模式下字段由推导维护，两者应当一致，但以实际渲染为准更可信。
-    final selected =
-        (mode == AppearanceMode.light) == AppBrightness.isLight.value;
-    return Expanded(
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () async {
-          await bg.setAppearanceMode(mode);
-          if (mounted) setState(() {});
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            color: AppTheme.backgroundSecondary,
-            borderRadius: BorderRadius.circular(AppTheme.radiusMD),
-            border: Border.all(
-              color: selected
-                  ? AppTheme.accentColor
-                  : Colors.white.withValues(alpha: 0.10),
-              width: selected ? 2 : 1,
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  color: preview,
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: Text('A',
-                      style: TextStyle(
-                          color: letterColor,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(label,
+  /// 顶部提示：当前模式 + 在哪里切换
+  Widget _buildCurrentSceneBanner(BackgroundService bg) {
+    final isLight = bg.appearanceMode.value == AppearanceMode.light;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.accentColor.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+        border: Border.all(
+            color: AppTheme.accentColor.withValues(alpha: 0.25), width: 0.8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(isLight ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+              size: 18, color: AppTheme.accentColor),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isLight ? '正在编辑：浅色模式的背景' : '正在编辑：深色模式的背景',
                   style: TextStyle(
-                      color: AppTheme.textPrimary, fontSize: 13)),
-            ],
+                      color: AppTheme.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '浅色和深色各有一套独立背景，切到另一种外观会自动换成那套。\n'
+                  '外观模式在「设置 → 外观 → 外观模式」里切换。',
+                  style: TextStyle(
+                      color: AppTheme.textTertiary,
+                      fontSize: AppTheme.fontCaption,
+                      height: 1.5),
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
-
   // ============================================================
   // 壁纸类型磁贴
   // ============================================================
@@ -885,21 +812,23 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
   // 重置
   // ============================================================
 
+  /// 重置**当前模式**那一套背景（不动另一种模式的配置）
   Future<void> _resetAll() async {
     final bg = _bg;
+    final isLight = bg.appearanceMode.value == AppearanceMode.light;
     await bg.setEnabled(true);
-    await bg.setBuiltin(BackgroundChoice.builtin1);
+    await bg.clearCustom(); // 清图片/网络，回到渐变
+    await bg.setBuiltin(
+        isLight ? BackgroundChoice.moonWhite : BackgroundChoice.builtin1);
     await bg.setOpacity(1.0);
     await bg.setBlur(0);
-    await bg.setOverlay(0.3);
-    await bg.setLightOverlay(0.45);
-    await bg.clearAppearanceOverride();
-    // 让 ThemeModeStore 也回到深色
-    await ThemeModeStore.set(ThemeMode.dark);
+    // 浅色模式默认遮罩更重（白遮罩提亮壁纸）
+    await bg.setOverlay(isLight ? 0.35 : 0.3);
     if (mounted) {
       setState(() {});
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('壁纸设置已重置')),
+        SnackBar(
+            content: Text(isLight ? '浅色模式背景已重置' : '深色模式背景已重置')),
       );
     }
   }

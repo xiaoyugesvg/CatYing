@@ -39,7 +39,10 @@ class CircularLogoProgress extends StatelessWidget {
                   value: progress,
                   strokeWidth: 6,
                   strokeCap: StrokeCap.round,
-                  backgroundColor: Colors.white.withValues(alpha: 0.10),
+                  // 圆环底色：用强调色的淡底，浅色/深色下都可见。
+                  // 原来写死 Colors.white 10%，浅色模式下等于隐形。
+                  backgroundColor:
+                      AppTheme.accentColor.withValues(alpha: 0.18),
                   valueColor: AlwaysStoppedAnimation<Color>(ringColor),
                 ),
               ),
@@ -86,7 +89,9 @@ class CircularLogoProgress extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 3),
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.55),
+                      // 百分比徽章压在米白色 Logo 圆上，用深色底更清晰
+                      //（原 Colors.black 55% 在浅色模式下也是一块突兀的黑）
+                      color: const Color(0xFF3A2A1A).withValues(alpha: 0.85),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(

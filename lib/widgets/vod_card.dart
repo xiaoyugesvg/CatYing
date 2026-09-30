@@ -22,12 +22,20 @@ class VodCard extends StatelessWidget {
   /// [_BadgePill]，保证两处样式一致。
   final String? badgeOverride;
 
+  /// 海报区高度 = 卡片宽度 × 本系数。
+  ///
+  /// 需要它是因为网格的 childAspectRatio 决定总高，图片靠 Expanded 只能
+  /// 分到剩余空间。想调整"图片占多少"就得直接给图片定高。
+  /// 收藏/历史用 0.66（横向更方正）；首页等其他场景可保持默认 0.72。
+  final double posterHeightRatio;
+
   const VodCard({
     super.key,
     required this.video,
     this.onTap,
     this.onLongPress,
     this.badgeOverride,
+    this.posterHeightRatio = 0.72,
   });
 
   /// 角标只显示备注/评分，**不带源名**（避免「奇优影院|奇优影院|7.0」）
@@ -68,24 +76,34 @@ class VodCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 海报 + 右下半透明黑标
-            Expanded(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  _buildPoster(),
-                  if (badge.isNotEmpty)
-                    Positioned(
-                      right: 6,
-                      bottom: 6,
-                      child: _BadgePill(text: badge),
-                    ),
-                ],
-              ),
+            // 海报区：固定高度 = 卡片宽度 × [posterHeightRatio]
+            //
+            // 用 LayoutBuilder 拿宽度自己算高度，而不是靠 Expanded 分剩余空间：
+            // 网格的 childAspectRatio 决定总高，Expanded 只能跟着分，
+            // 想要"图片高、文字区薄"就必须把图片高度写死。
+            LayoutBuilder(
+              builder: (context, c) {
+                final posterH = c.maxWidth * posterHeightRatio;
+                return SizedBox(
+                  height: posterH,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _buildPoster(),
+                      if (badge.isNotEmpty)
+                        Positioned(
+                          right: 6,
+                          bottom: 6,
+                          child: _BadgePill(text: badge),
+                        ),
+                    ],
+                  ),
+                );
+              },
             ),
-            // 标题居中
+            // 标题：**只允许一行**，超长省略（不允许跨行）
             Padding(
-              padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+              padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
               child: Text(
                 video.name,
                 textAlign: TextAlign.center,
@@ -94,7 +112,8 @@ class VodCard extends StatelessWidget {
                   fontSize: AppTheme.fontFootnote,
                   fontWeight: FontWeight.w500,
                 ),
-                maxLines: 2,
+                maxLines: 1,
+                softWrap: false,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -120,7 +139,9 @@ class VodCard extends StatelessWidget {
     }
     return CachedNetworkImage(
       imageUrl: picUrl,
-      fit: BoxFit.cover,
+      // fill = 拉伸填满（可能变形），但**保证整张图都显示出来**。
+      // 之前用 cover 会裁掉两侧/上下，用户反馈"图片显示不全"。
+      fit: BoxFit.fill,
       placeholder: (_, __) => ColoredBox(color: AppTheme.backgroundTertiary),
       errorWidget: (_, __, ___) => ColoredBox(
         color: AppTheme.backgroundTertiary,

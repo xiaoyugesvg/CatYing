@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
@@ -8,7 +9,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../common/theme.dart' show AppBrightness;
 
 /// 背景选择类型
 enum BackgroundChoice {
@@ -63,61 +63,116 @@ class BackgroundService extends GetxService {
   static const String _opacityKey = 'wallpaper_opacity';
   static const String _blurKey = 'wallpaper_blur';
   static const String _overlayKey = 'wallpaper_overlay';
-  static const String _lightOverlayKey = 'wallpaper_light_overlay';
   static const String _appearanceKey = 'appearance_mode';
-  static const String _manualKey = 'appearance_manual_override';
+
+  /// 每模式场景的持久化前缀：wallpaper_scene_dark / wallpaper_scene_light
+  static const String _sceneKeyPrefix = 'wallpaper_scene_';
 
   final ImagePicker _picker = ImagePicker();
 
-  /// 当前背景选择
-  final choice = BackgroundChoice.builtin1.obs;
-
-  /// 自定义背景图片路径(仅 choice == custom 时有效)
-  final customPath = RxnString();
-
   // ============================================================
-  // 第 1 期：壁纸设置
+  // 每模式背景（外观模式主导）
   // ============================================================
+  //
+  // 设计：**外观模式是主导者**。
+  //   深色模式 → 用「深色那套」背景 + 浅色文字 + 黑遮罩
+  //   浅色模式 → 用「浅色那套」背景 + 深色文字 + 白遮罩
+  //
+  // 与旧实现方向相反：旧的是"背景决定文字颜色"，能选出
+  // 「浅色界面 + 深色壁纸」这种不搭的组合。
+  //
+  // 每套配置独立含：背景选择 / 类型 / 图片路径 / 网络URL / 不透明度 /
+  // 模糊 / 遮罩强度。
+  final _scenes = <String, WallpaperConfig>{
+    'dark': const WallpaperConfig(),
+    // 浅色默认皎月白 + 更重的白遮罩（浅色壁纸上深色文字才够对比）
+    'light': const WallpaperConfig(
+      choice: BackgroundChoice.moonWhite,
+      overlay: 0.35,
+    ),
+  }.obs;
 
-  /// 壁纸总开关（关闭则回到纯内置渐变，忽略图片与效果参数）
+  /// 场景版本号：改动配置后自增，让依赖它的 UI 重建
+  final _sceneVersion = 0.obs;
+
+  /// 当前外观模式对应的场景 key
+  String get _sceneKeyForCurrentAppearance =>
+      appearanceMode.value == AppearanceMode.light ? 'light' : 'dark';
+
+  /// 当前模式那套配置
+  WallpaperConfig get activeScene =>
+      _scenes[_sceneKeyForCurrentAppearance] ?? const WallpaperConfig();
+
+  /// 取指定模式的配置（设置页切换预览用）
+  WallpaperConfig sceneOf(String modeKey) =>
+      _scenes[modeKey] ?? const WallpaperConfig();
+
+  /// 写入指定模式的配置
+  Future<void> _saveScene(String modeKey, WallpaperConfig cfg) async {
+    _scenes[modeKey] = cfg;
+    _sceneVersion.value++;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('$_sceneKeyPrefix$modeKey', jsonEncode(cfg.toJson()));
+    AppLog.instance.log('[BackgroundService] 保存 $modeKey 背景: '
+        'choice=${cfg.choice.name} source=${cfg.sourceType.name}');
+  }
+
+  /// 改当前模式那套配置
+  Future<void> updateActiveScene(WallpaperConfig cfg) =>
+      _saveScene(_sceneKeyForCurrentAppearance, cfg);
+
+  // ---- 兼容桥接：让旧的 .value 读法仍可用，并建立 Obx 依赖 ----
+  void _touch() => _sceneVersion.value;
+
+  _WallpaperValue<BackgroundChoice> get choice {
+    _touch();
+    return _WallpaperValue(activeScene.choice);
+  }
+
+  _WallpaperValue<WallpaperSourceType> get sourceType {
+    _touch();
+    return _WallpaperValue(activeScene.sourceType);
+  }
+
+  _WallpaperValue<String> get networkUrl {
+    _touch();
+    return _WallpaperValue(activeScene.networkUrl);
+  }
+
+  _WallpaperValue<String> get networkThumbUrl {
+    _touch();
+    return _WallpaperValue(activeScene.networkThumbUrl);
+  }
+
+  _WallpaperValue<double> get opacity {
+    _touch();
+    return _WallpaperValue(activeScene.opacity);
+  }
+
+  _WallpaperValue<double> get blur {
+    _touch();
+    return _WallpaperValue(activeScene.blur);
+  }
+
+  _WallpaperValue<double> get overlay {
+    _touch();
+    return _WallpaperValue(activeScene.overlay);
+  }
+
+  _WallpaperValue<String?> get customPath {
+    _touch();
+    final p = activeScene.customPath;
+    return _WallpaperValue(p.isEmpty ? null : p);
+  }
+
+  /// 壁纸总开关（全局，不分模式）
   final enabled = true.obs;
 
-  /// 壁纸来源类型
-  final sourceType = WallpaperSourceType.gradient.obs;
-
-  /// 网络壁纸 URL（原图，实际渲染用）
-  final networkUrl = ''.obs;
-
-  /// 网络壁纸的列表缩略图 URL。
-  ///
-  /// 单独存一份的原因：在线壁纸库的原图常见 1600×2400 甚至 5000×3333，
-  /// 网格里若直接用它做缩略图，iOS 会同时解码几十张大图 → OOM。
-  /// 为空时回退用 [networkUrl]。
-  final networkThumbUrl = ''.obs;
-
-  /// 用户自建壁纸库 API 地址（在线壁纸库 → 自建源用）
+  /// 用户自建壁纸库 API 地址（全局）
   final customApiUrl = ''.obs;
 
-  /// 壁纸不透明度 0.2 ~ 1.0
-  final opacity = 1.0.obs;
-
-  /// 模糊程度（sigma）0 ~ 30
-  final blur = 0.0.obs;
-
-  /// 深色遮罩 0 ~ 0.8（深色界面用：压暗壁纸，保证浅色文字可读）
-  final overlay = 0.3.obs;
-
-  /// 浅色遮罩 0 ~ 0.8（浅色界面用：提亮壁纸，保证深色文字可读）
-  ///
-  /// 默认 0.45：浅色场景下文字是深色、壁纸多为浅色，需要更强的干预才够对比；
-  /// 深色场景默认 0.3 即可（浅色文字在暗背景上对比天然充足）。
-  final lightOverlay = 0.45.obs;
-
-  /// 外观模式（文字明暗）
+  /// 外观模式（主导）
   final appearanceMode = AppearanceMode.dark.obs;
-
-  /// 是否手动覆盖文字明暗；false = 由背景自动推导（方案 A）
-  final manualAppearance = false.obs;
 
   /// 外观变化回调 —— 由 App 层注入，避免服务层直接依赖
   /// ThemeModeStore 造成循环依赖。
@@ -130,101 +185,92 @@ class BackgroundService extends GetxService {
     _loadFromPrefs();
   }
 
-  /// 异步加载 SharedPreferences 中的背景选择 + 自定义图片路径 + 壁纸参数
+  /// 异步加载：每模式背景配置 + 外观模式 + 全局开关
+  ///
+  /// 迁移策略：老版本把背景存在一组扁平的 key 里（不分明暗）。
+  /// 首次升级时把这组值**当作深色模式的配置**写进新结构 ——
+  /// 老用户看到的仍是自己原来那套背景，只是浅色模式有了一套独立默认值。
   Future<void> _loadFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString(_choiceKey);
-    if (saved != null) {
-      choice.value = BackgroundChoice.values.firstWhere(
-        (e) => e.name == saved,
-        orElse: () => BackgroundChoice.builtin1,
-      );
-    }
-    customPath.value = prefs.getString(_customPathKey);
 
-    // ---- 第 1 期参数（缺省值保证老用户行为不变）----
-    enabled.value = prefs.getBool(_enabledKey) ?? true;
-    final st = prefs.getString(_sourceTypeKey);
-    sourceType.value = WallpaperSourceType.values.firstWhere(
-      (e) => e.name == st,
-      orElse: () => WallpaperSourceType.gradient,
-    );
-    networkUrl.value = prefs.getString(_networkUrlKey) ?? '';
-    networkThumbUrl.value = prefs.getString(_networkThumbKey) ?? '';
-    customApiUrl.value = prefs.getString(_customApiKey) ?? '';
-    opacity.value = (prefs.getDouble(_opacityKey) ?? 1.0).clamp(0.2, 1.0);
-    blur.value = (prefs.getDouble(_blurKey) ?? 0.0).clamp(0.0, 30.0);
-    overlay.value = (prefs.getDouble(_overlayKey) ?? 0.3).clamp(0.0, 0.8);
-    lightOverlay.value =
-        (prefs.getDouble(_lightOverlayKey) ?? 0.45).clamp(0.0, 0.8);
-
-    // 外观：手动值优先；否则由背景自动推导（方案 A）
-    manualAppearance.value = prefs.getBool(_manualKey) ?? false;
+    // ---- 外观模式（主导者）----
     final ap = prefs.getString(_appearanceKey);
-    if (ap != null) {
-      appearanceMode.value = ap == 'light'
-          ? AppearanceMode.light
-          : AppearanceMode.dark;
+    appearanceMode.value =
+        ap == 'light' ? AppearanceMode.light : AppearanceMode.dark;
+
+    // ---- 全局 ----
+    enabled.value = prefs.getBool(_enabledKey) ?? true;
+    customApiUrl.value = prefs.getString(_customApiKey) ?? '';
+
+    // ---- 每模式配置 ----
+    for (final key in const ['dark', 'light']) {
+      final raw = prefs.getString('$_sceneKeyPrefix$key');
+      if (raw != null && raw.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(raw);
+          if (decoded is Map) {
+            _scenes[key] = WallpaperConfig.fromJson(
+                decoded.cast<String, Object?>());
+            continue;
+          }
+        } catch (e) {
+          AppLog.instance.log('[BackgroundService] 解析 $key 背景失败: $e');
+        }
+      }
+      // 没有新结构 → 从旧扁平 key 迁移（只对深色做，浅色保留默认皎月白）
+      if (key == 'dark' && prefs.getString(_choiceKey) != null) {
+        _scenes['dark'] = WallpaperConfig(
+          choice: BackgroundChoice.values.firstWhere(
+            (e) => e.name == prefs.getString(_choiceKey),
+            orElse: () => BackgroundChoice.builtin1,
+          ),
+          sourceType: WallpaperSourceType.values.firstWhere(
+            (e) => e.name == prefs.getString(_sourceTypeKey),
+            orElse: () => WallpaperSourceType.gradient,
+          ),
+          customPath: prefs.getString(_customPathKey) ?? '',
+          networkUrl: prefs.getString(_networkUrlKey) ?? '',
+          networkThumbUrl: prefs.getString(_networkThumbKey) ?? '',
+          opacity: (prefs.getDouble(_opacityKey) ?? 1.0).clamp(0.2, 1.0),
+          blur: (prefs.getDouble(_blurKey) ?? 0.0).clamp(0.0, 30.0),
+          overlay: (prefs.getDouble(_overlayKey) ?? 0.3).clamp(0.0, 0.8),
+        );
+        AppLog.instance.log('[BackgroundService] 旧背景配置已迁移为深色模式');
+      }
     }
-    if (!manualAppearance.value) {
-      final derived = choiceIsLight(choice.value);
-      appearanceMode.value =
-          derived ? AppearanceMode.light : AppearanceMode.dark;
-    }
+
+    _sceneVersion.value++;
     _notifyAppearance();
 
-    AppLog.instance.log('[BackgroundService] 已加载: choice=${choice.value}, '
-        'source=${sourceType.value}, enabled=${enabled.value}, '
-        'appearance=${appearanceMode.value}, manual=${manualAppearance.value}, '
-        'customPath=${customPath.value}');
+    AppLog.instance.log('[BackgroundService] 已加载: '
+        'appearance=${appearanceMode.value} enabled=${enabled.value} '
+        'dark(choice=${sceneOf('dark').choice.name}/'
+        '${sceneOf('dark').sourceType.name}) '
+        'light(choice=${sceneOf('light').choice.name}/'
+        '${sceneOf('light').sourceType.name})');
   }
 
   // ============================================================
-  // 外观联动（方案 A）
+  // 外观模式（主导）
   // ============================================================
 
-  /// 该背景是否属于「浅色底」→ 需要深色文字
-  static bool choiceIsLight(BackgroundChoice c) =>
-      c == BackgroundChoice.moonWhite;
+  /// 切换外观模式：文字明暗跟着变，**背景也换成该模式自己那套**。
+  Future<void> setAppearanceMode(AppearanceMode m) async {
+    appearanceMode.value = m;
+    _notifyAppearance();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        _appearanceKey, m == AppearanceMode.light ? 'light' : 'dark');
+    AppLog.instance.log('[BackgroundService] 外观模式 → $m（背景随之切换）');
+  }
 
   /// 把当前外观推给 App 层（注入的回调）
   void _notifyAppearance() {
     onAppearanceChanged?.call(appearanceMode.value == AppearanceMode.light);
   }
 
-  /// 背景变化后按方案 A 自动推导外观（手动覆盖时不生效）
-  Future<void> _applyDerivedAppearance() async {
-    if (manualAppearance.value) return;
-    appearanceMode.value =
-        choiceIsLight(choice.value) ? AppearanceMode.light : AppearanceMode.dark;
-    _notifyAppearance();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-        _appearanceKey, appearanceMode.value == AppearanceMode.light ? 'light' : 'dark');
-  }
-
-  /// 手动设置外观模式（会打开手动覆盖标记）
-  Future<void> setAppearanceMode(AppearanceMode m, {bool manual = true}) async {
-    appearanceMode.value = m;
-    manualAppearance.value = manual;
-    _notifyAppearance();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_appearanceKey, m == AppearanceMode.light ? 'light' : 'dark');
-    await prefs.setBool(_manualKey, manual);
-    AppLog.instance.log('[BackgroundService] setAppearanceMode: $m manual=$manual');
-  }
-
-  /// 恢复「跟随背景自动决定文字颜色」
-  Future<void> clearAppearanceOverride() async {
-    manualAppearance.value = false;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_manualKey, false);
-    await _applyDerivedAppearance();
-    AppLog.instance.log('[BackgroundService] 已恢复自动外观推导');
-  }
-
   // ============================================================
-  // 壁纸参数 setter
+  // 壁纸参数 setter（都只影响当前模式那一套）
   // ============================================================
 
   Future<void> setEnabled(bool v) async {
@@ -234,31 +280,12 @@ class BackgroundService extends GetxService {
   }
 
   Future<void> setSourceType(WallpaperSourceType t) async {
-    sourceType.value = t;
-    // 类型切换时同步 choice，保证外观推导与旧字段一致
-    if (t == WallpaperSourceType.gradient) {
-      // 渐变背景明暗可推导（如皎月白=浅色底）→ 重新套用推导结果。
-      // 必须显式调用：从图片类切回来时，外观还停在图片的"深色假设"上。
-      await _applyDerivedAppearance();
-    } else if (t == WallpaperSourceType.local) {
-      choice.value = BackgroundChoice.custom;
-    } else {
-      choice.value = BackgroundChoice.custom;
-      // 网络壁纸明暗未知 → 默认浅色文字（深色界面），用户可手动覆盖
-      await _applyDerivedAppearanceForImage();
-    }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_sourceTypeKey, t.name);
-    await prefs.setString(_choiceKey, choice.value.name);
-  }
-
-  /// 图片类壁纸的默认外观：深色底假设（浅色文字），避免选中亮图后白底白字
-  Future<void> _applyDerivedAppearanceForImage() async {
-    if (manualAppearance.value) return;
-    appearanceMode.value = AppearanceMode.dark;
-    _notifyAppearance();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_appearanceKey, 'dark');
+    final cur = activeScene;
+    // 切到图片类时把 choice 归为 custom，保证渲染分支走对
+    final nextChoice = t == WallpaperSourceType.gradient
+        ? cur.choice
+        : BackgroundChoice.custom;
+    await updateActiveScene(cur.copyWith(sourceType: t, choice: nextChoice));
   }
 
   Future<void> setCustomApiUrl(String url) async {
@@ -268,46 +295,36 @@ class BackgroundService extends GetxService {
   }
 
   Future<void> setNetworkUrl(String url, {String thumbUrl = ''}) async {
-    networkUrl.value = url.trim();
-    networkThumbUrl.value = thumbUrl.trim();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_networkUrlKey, networkUrl.value);
-    await prefs.setString(_networkThumbKey, networkThumbUrl.value);
+    await updateActiveScene(activeScene.copyWith(
+      networkUrl: url.trim(),
+      networkThumbUrl: thumbUrl.trim(),
+      sourceType: WallpaperSourceType.network,
+      choice: BackgroundChoice.custom,
+    ));
   }
 
   Future<void> setOpacity(double v) async {
-    opacity.value = v.clamp(0.2, 1.0);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_opacityKey, opacity.value);
+    await updateActiveScene(activeScene.copyWith(opacity: v.clamp(0.2, 1.0)));
   }
 
   Future<void> setBlur(double v) async {
-    blur.value = v.clamp(0.0, 30.0);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_blurKey, blur.value);
+    await updateActiveScene(activeScene.copyWith(blur: v.clamp(0.0, 30.0)));
   }
 
+  /// 遮罩：不再分「深色/浅色遮罩」两个字段，各模式各自存一个值
+  ///（浅色模式默认更重，见 _scenes 初始值）
   Future<void> setOverlay(double v) async {
-    overlay.value = v.clamp(0.0, 0.8);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_overlayKey, overlay.value);
-  }
-
-  Future<void> setLightOverlay(double v) async {
-    lightOverlay.value = v.clamp(0.0, 0.8);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_lightOverlayKey, lightOverlay.value);
+    await updateActiveScene(activeScene.copyWith(overlay: v.clamp(0.0, 0.8)));
   }
 
   /// 设置内置背景（渐变）
   Future<void> setBuiltin(BackgroundChoice c) async {
-    choice.value = c;
-    sourceType.value = WallpaperSourceType.gradient;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_choiceKey, c.name);
-    await prefs.setString(_sourceTypeKey, WallpaperSourceType.gradient.name);
-    await _applyDerivedAppearance();
-    AppLog.instance.log('[BackgroundService] setBuiltin: $c');
+    await updateActiveScene(activeScene.copyWith(
+      choice: c,
+      sourceType: WallpaperSourceType.gradient,
+    ));
+    AppLog.instance.log('[BackgroundService] setBuiltin: $c '
+        '(${_sceneKeyForCurrentAppearance} 模式)');
   }
 
   /// 设置自定义背景 - 复制到应用文档目录并保存路径
@@ -323,23 +340,20 @@ class BackgroundService extends GetxService {
           '${wallDir.path}/bg_${DateTime.now().millisecondsSinceEpoch}$ext';
       await File(sourcePath).copy(destPath);
 
-      // 删除旧的自定义背景
-      final oldPath = customPath.value;
-      if (oldPath != null && oldPath != destPath) {
+      // 删除旧图（只删当前模式那套引用的，避免误删另一模式还在用的图）
+      final oldPath = activeScene.customPath;
+      if (oldPath.isNotEmpty && oldPath != destPath) {
         try {
           final f = File(oldPath);
           if (f.existsSync()) f.deleteSync();
         } catch (e) { /* ignore */ }
       }
 
-      customPath.value = destPath;
-      choice.value = BackgroundChoice.custom;
-      sourceType.value = WallpaperSourceType.local;
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_choiceKey, BackgroundChoice.custom.name);
-      await prefs.setString(_sourceTypeKey, WallpaperSourceType.local.name);
-      await prefs.setString(_customPathKey, destPath);
-      await _applyDerivedAppearanceForImage();
+      await updateActiveScene(activeScene.copyWith(
+        customPath: destPath,
+        choice: BackgroundChoice.custom,
+        sourceType: WallpaperSourceType.local,
+      ));
       AppLog.instance.log('[BackgroundService] setCustomImage: $destPath');
       return true;
     } catch (e) {
@@ -348,17 +362,22 @@ class BackgroundService extends GetxService {
     }
   }
 
-  /// 清除自定义背景 - 回到默认(builtin1)
+  /// 清除当前模式的自定义背景 - 回到默认(builtin1)
   Future<void> clearCustom() async {
-    final oldPath = customPath.value;
-    if (oldPath != null) {
+    final oldPath = activeScene.customPath;
+    if (oldPath.isNotEmpty) {
       try {
         final f = File(oldPath);
         if (f.existsSync()) f.deleteSync();
       } catch (e) { /* ignore */ }
     }
-    customPath.value = null;
-    await setBuiltin(BackgroundChoice.builtin1);
+    await updateActiveScene(activeScene.copyWith(
+      customPath: '',
+      choice: BackgroundChoice.builtin1,
+      sourceType: WallpaperSourceType.gradient,
+      networkUrl: '',
+      networkThumbUrl: '',
+    ));
   }
 
   /// 弹出图片选择器 - 选完图后自动 setCustomImage
@@ -445,16 +464,16 @@ class BackgroundService extends GetxService {
     Widget? child,
   }) {
     return Obx(() {
-      final isLight = AppBrightness.isLight.value;
-      // 遮罩要跟着明暗走：
+      // 当前模式那套配置（外观主导：浅色/深色各有独立的墙纸与效果参数）
+      final scene = activeScene;
+      final isLight = appearanceMode.value == AppearanceMode.light;
+      // 遮罩色跟着明暗走：
       // - 深色界面 → 黑色遮罩（压暗壁纸，保证浅色文字可读）
       // - 浅色界面 → 白色遮罩（提亮壁纸，保证深色文字可读）
       //
-      // 只用黑色遮罩是之前的缺陷：浅色壁纸 + 浅色界面时，壁纸原样铺满，
-      // 深色文字压在花哨的图片上同样看不清。
-      final ov = isLight
-          ? (lightOverlay.value > 0 ? lightOverlay.value : 0.45)
-          : (overlay.value > 0 ? overlay.value : overlayAlpha);
+      // 遮罩值取自当前模式那套配置（浅色默认更重），
+      // 所以「浅色界面 + 亮壁纸」不会再出现深色文字看不清。
+      final ov = scene.overlay;
       final overlayColor =
           isLight ? const Color(0xFFFFFFFF) : const Color(0xFF000000);
       final enabledNow = enabled.value;
@@ -462,9 +481,9 @@ class BackgroundService extends GetxService {
       // ---- 图片类壁纸（本地 / 网络）----
       if (enabledNow) {
         Widget? image;
-        if (sourceType.value == WallpaperSourceType.local &&
-            customPath.value != null) {
-          final file = File(customPath.value!);
+        if (scene.sourceType == WallpaperSourceType.local &&
+            scene.customPath.isNotEmpty) {
+          final file = File(scene.customPath);
           if (file.existsSync()) {
             // 用 LayoutBuilder 取实际可用宽度做解码降采样：
             // 选图时允许 4096×4096（约 64MB 位图），按原尺寸常驻内存叠加
@@ -578,12 +597,6 @@ class BackgroundService extends GetxService {
     );
   }
 
-  Widget _buildGradientFallback({required double overlayAlpha}) {
-    return _buildGradientBackground(
-      colors: _getGradientForChoice(BackgroundChoice.builtin1),
-      overlayAlpha: overlayAlpha,
-    );
-  }
 
   Widget _buildCircle({required double size, required Color color}) {
     return Container(
@@ -661,4 +674,96 @@ class BackgroundService extends GetxService {
       ),
     ];
   }
+}
+
+
+/// 单个外观模式下的壁纸配置。
+///
+/// 深浅两套各自独立，所以「切换外观 → 背景整组跟着换」不需要额外分支。
+class WallpaperConfig {
+  final BackgroundChoice choice;
+  final WallpaperSourceType sourceType;
+  final String customPath;
+  final String networkUrl;
+  final String networkThumbUrl;
+  final double opacity;
+  final double blur;
+  final double overlay;
+
+  const WallpaperConfig({
+    this.choice = BackgroundChoice.builtin1,
+    this.sourceType = WallpaperSourceType.gradient,
+    this.customPath = '',
+    this.networkUrl = '',
+    this.networkThumbUrl = '',
+    this.opacity = 1.0,
+    this.blur = 0.0,
+    this.overlay = 0.3,
+  });
+
+  WallpaperConfig copyWith({
+    BackgroundChoice? choice,
+    WallpaperSourceType? sourceType,
+    String? customPath,
+    String? networkUrl,
+    String? networkThumbUrl,
+    double? opacity,
+    double? blur,
+    double? overlay,
+  }) {
+    return WallpaperConfig(
+      choice: choice ?? this.choice,
+      sourceType: sourceType ?? this.sourceType,
+      customPath: customPath ?? this.customPath,
+      networkUrl: networkUrl ?? this.networkUrl,
+      networkThumbUrl: networkThumbUrl ?? this.networkThumbUrl,
+      opacity: opacity ?? this.opacity,
+      blur: blur ?? this.blur,
+      overlay: overlay ?? this.overlay,
+    );
+  }
+
+  Map<String, Object?> toJson() => {
+        'choice': choice.name,
+        'sourceType': sourceType.name,
+        'customPath': customPath,
+        'networkUrl': networkUrl,
+        'networkThumbUrl': networkThumbUrl,
+        'opacity': opacity,
+        'blur': blur,
+        'overlay': overlay,
+      };
+
+  static WallpaperConfig fromJson(Map<String, Object?>? json) {
+    if (json == null) return const WallpaperConfig();
+    double d(Object? v, double fallback) =>
+        v is num ? v.toDouble() : fallback;
+    String s(Object? v) => v is String ? v : '';
+    return WallpaperConfig(
+      choice: BackgroundChoice.values.firstWhere(
+        (e) => e.name == s(json['choice']),
+        orElse: () => BackgroundChoice.builtin1,
+      ),
+      sourceType: WallpaperSourceType.values.firstWhere(
+        (e) => e.name == s(json['sourceType']),
+        orElse: () => WallpaperSourceType.gradient,
+      ),
+      customPath: s(json['customPath']),
+      networkUrl: s(json['networkUrl']),
+      networkThumbUrl: s(json['networkThumbUrl']),
+      opacity: d(json['opacity'], 1.0).clamp(0.2, 1.0),
+      blur: d(json['blur'], 0.0).clamp(0.0, 30.0),
+      overlay: d(json['overlay'], 0.3).clamp(0.0, 0.8),
+    );
+  }
+}
+
+/// 「只读 Rx 外观」包装。
+///
+/// 目的：让壁纸设置页里 `bg.opacity.value` 这类旧写法继续可用，
+/// 而不必把每模式配置整组换成 Rx（那会让序列化很啰嗦）。
+/// 读取前 BackgroundService 已 `_touch()` 过版本号，所以 Obx 能建立依赖。
+class _WallpaperValue<T> {
+  final T value;
+  const _WallpaperValue(this.value);
 }

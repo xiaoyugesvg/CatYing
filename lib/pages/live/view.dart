@@ -267,7 +267,7 @@ class _LivePageState extends State<LivePage> {
                                         : () =>
                                             LiveService.instance.retryLast(),
                                     child: Container(
-                                      padding: const EdgeInsets.symmetric(
+                                      padding: EdgeInsets.symmetric(
                                           horizontal: 12, vertical: 5),
                                       decoration: BoxDecoration(
                                         color: AppTheme.accentColor
@@ -305,9 +305,9 @@ class _LivePageState extends State<LivePage> {
                           // 加载中细进度条（缓存已出列表时也能看到在刷新）
                           Obx(() {
                             if (!LiveService.instance.isLoading.value) {
-                              return const SizedBox(height: 2);
+                              return SizedBox(height: 2);
                             }
-                            return const Padding(
+                            return Padding(
                               padding: EdgeInsets.fromLTRB(12, 4, 12, 0),
                               child: LinearProgressIndicator(
                                 minHeight: 2,
@@ -345,7 +345,7 @@ class _LivePageState extends State<LivePage> {
                                       onTap: () =>
                                           _showSourcePicker(context, c),
                                       child: Container(
-                                        padding: const EdgeInsets.symmetric(
+                                        padding: EdgeInsets.symmetric(
                                             horizontal: 14, vertical: 9),
                                         decoration: BoxDecoration(
                                           color: AppTheme.backgroundTertiary,
@@ -392,7 +392,7 @@ class _LivePageState extends State<LivePage> {
                                           : () => _showGroupPicker(
                                               context, c, groups),
                                       child: Container(
-                                        padding: const EdgeInsets.symmetric(
+                                        padding: EdgeInsets.symmetric(
                                             horizontal: 14, vertical: 9),
                                         decoration: BoxDecoration(
                                           color: AppTheme.backgroundTertiary,
@@ -467,7 +467,7 @@ class _LivePageState extends State<LivePage> {
                                 GestureDetector(
                                   onTap: () => _showEpgSheet(context, c),
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(
+                                    padding: EdgeInsets.symmetric(
                                         horizontal: 10, vertical: 10),
                                     decoration: BoxDecoration(
                                       color: AppTheme.backgroundTertiary,
@@ -488,7 +488,7 @@ class _LivePageState extends State<LivePage> {
                                       c.update();
                                     },
                                     child: Container(
-                                      padding: const EdgeInsets.symmetric(
+                                      padding: EdgeInsets.symmetric(
                                           horizontal: 10, vertical: 10),
                                       decoration: BoxDecoration(
                                         color: onlyFav
@@ -515,11 +515,70 @@ class _LivePageState extends State<LivePage> {
                             const SizedBox(height: 8),
                             // 频道列表（占满宽度）
                             Expanded(
-                              child: groups.isEmpty
-                                  ? _EmptyLive(
-                                      onReload: () =>
-                                          _pickSource(context, c))
-                                  : _buildChannelList(c, channels),
+                              child: Obx(() {
+                                // 切换直播源 / 分组时给明确反馈，
+                                // 否则列表为空的那段时间就是一片黑，不知道在加载还是坏了。
+                                final loading =
+                                    LiveService.instance.isLoading.value;
+                                if (loading && channels.isEmpty) {
+                                  return Center(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        SizedBox(
+                                          width: 26,
+                                          height: 26,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2.4,
+                                            color: AppTheme.accentColor,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Text('正在加载频道…',
+                                            style: TextStyle(
+                                                color: AppTheme.textSecondary,
+                                                fontSize: AppTheme.fontSubhead)),
+                                        const SizedBox(height: 4),
+                                        Text('切换直播源需要几秒',
+                                            style: TextStyle(
+                                                color: AppTheme.textTertiary,
+                                                fontSize: AppTheme.fontCaption)),
+                                      ],
+                                    ),
+                                  );
+                                }
+                                if (groups.isEmpty) {
+                                  return _EmptyLive(
+                                      onReload: () => _pickSource(context, c));
+                                }
+                                return Stack(
+                                  children: [
+                                    _buildChannelList(c, channels),
+                                    // 已有旧列表时：叠加一层半透明遮罩 + 转圈，
+                                    // 让"正在换源"这件事可见，又不丢掉旧内容。
+                                    if (loading)
+                                      Positioned.fill(
+                                        child: IgnorePointer(
+                                          child: Container(
+                                            color: AppTheme.backgroundPrimary
+                                                .withValues(alpha: 0.45),
+                                            child: Center(
+                                              child: SizedBox(
+                                                width: 24,
+                                                height: 24,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                  strokeWidth: 2.2,
+                                                  color: AppTheme.accentColor,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                );
+                              }),
                             ),
                           ],
                         ),
@@ -541,7 +600,7 @@ class _LivePageState extends State<LivePage> {
       builder: (ctx) {
         final ctrl = TextEditingController();
         return AlertDialog(
-          backgroundColor: const Color(0xFF1C1C1E),
+          backgroundColor: AppTheme.backgroundSecondary,
           title: Text('导入直播源',
               style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
           content: TextField(
@@ -663,9 +722,9 @@ class _LivePageState extends State<LivePage> {
                           color: Colors.white.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(16),
                         ),
-                        child: const Text('点击重试',
+                        child: Text('点击重试',
                             style: TextStyle(
-                                color: Colors.white, fontSize: 12)),
+                                color: AppTheme.textPrimary, fontSize: 12)),
                       ),
                     ],
                   ),
@@ -692,8 +751,8 @@ class _LivePageState extends State<LivePage> {
                       width: 40,
                       height: 40,
                       alignment: Alignment.center,
-                      child: const Icon(Icons.arrow_back_ios_new,
-                          color: Colors.white, size: 20),
+                      child: Icon(Icons.arrow_back_ios_new,
+                          color: AppTheme.textPrimary, size: 20),
                     ),
                   ),
                   Container(
@@ -705,10 +764,10 @@ class _LivePageState extends State<LivePage> {
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
-                      children: const [
+                      children: [
                         Text('LIVE',
                             style: TextStyle(
-                                color: Colors.white,
+                                color: AppTheme.textPrimary,
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
                                 letterSpacing: 0.5)),
@@ -738,8 +797,8 @@ class _LivePageState extends State<LivePage> {
                   width: 40,
                   height: 40,
                   alignment: Alignment.center,
-                  child: const Icon(Icons.arrow_back_ios_new,
-                      color: Colors.white, size: 20),
+                  child: Icon(Icons.arrow_back_ios_new,
+                      color: AppTheme.textPrimary, size: 20),
                 ),
               ),
             ),
@@ -810,13 +869,13 @@ class _LivePageState extends State<LivePage> {
             const SizedBox(height: 16),
             if (name.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
+                padding: EdgeInsets.symmetric(horizontal: 24),
                 child: Text(
                   name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      color: Colors.white,
+                  style: TextStyle(
+                      color: AppTheme.textPrimary,
                       fontSize: 15,
                       fontWeight: FontWeight.w600),
                 ),
@@ -837,8 +896,8 @@ class _LivePageState extends State<LivePage> {
                   color: Colors.white.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: const Text('退出听剧模式',
-                    style: TextStyle(color: Colors.white, fontSize: 12)),
+                child: Text('退出听剧模式',
+                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 12)),
               ),
             ),
           ],
@@ -878,7 +937,7 @@ class _LivePageState extends State<LivePage> {
       context: context,
       builder: (ctx) {
         return Dialog(
-          backgroundColor: const Color(0xFF1C1C1E),
+          backgroundColor: AppTheme.backgroundSecondary,
           insetPadding:
               const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
           shape: RoundedRectangleBorder(
@@ -893,12 +952,12 @@ class _LivePageState extends State<LivePage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 12, 8),
+                  padding: EdgeInsets.fromLTRB(20, 18, 12, 8),
                   child: Row(
                     children: [
-                      const Text('选择直播源',
+                      Text('选择直播源',
                           style: TextStyle(
-                              color: Colors.white,
+                              color: AppTheme.textPrimary,
                               fontSize: 16,
                               fontWeight: FontWeight.w600)),
                       const Spacer(),
@@ -913,20 +972,20 @@ class _LivePageState extends State<LivePage> {
                   ),
                 ),
                 if (srcs.isEmpty)
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.all(24),
                     child: Text('还没有直播源，点击右上角添加',
                         style:
-                            TextStyle(color: Colors.white38, fontSize: 13)),
+                            TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
                   )
                 else
                   Flexible(
                     child: ListView.separated(
                       shrinkWrap: true,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      padding: EdgeInsets.symmetric(horizontal: 8),
                       itemCount: srcs.length,
                       separatorBuilder: (_, __) =>
-                          Divider(height: 1, color: Colors.white12),
+                          Divider(height: 1, color: AppTheme.borderLight),
                       itemBuilder: (_, i) {
                         final src = srcs[i];
                         final isActive = c.selectedSourceIndex == i;
@@ -935,13 +994,13 @@ class _LivePageState extends State<LivePage> {
                           leading: Icon(Icons.play_circle_fill,
                               color: isActive
                                   ? AppTheme.accentColor
-                                  : Colors.white38,
+                                  : AppTheme.textTertiary,
                               size: 22),
                           title: Text(src.name,
                               style: TextStyle(
                                   color: isActive
                                       ? AppTheme.accentColor
-                                      : Colors.white,
+                                      : AppTheme.textPrimary,
                                   fontSize: 14)),
                           subtitle: Text(
                               isActive ? '当前播放' : '未下载',
@@ -949,10 +1008,10 @@ class _LivePageState extends State<LivePage> {
                                   color: isActive
                                       ? AppTheme.accentColor
                                           .withValues(alpha: 0.7)
-                                      : Colors.white38,
+                                      : AppTheme.textTertiary,
                                   fontSize: 11)),
                           trailing: isActive
-                              ? const Icon(Icons.check_circle,
+                              ? Icon(Icons.check_circle,
                                   color: AppTheme.accentColor, size: 20)
                               : null,
                           onTap: () async {
@@ -980,7 +1039,7 @@ class _LivePageState extends State<LivePage> {
       context: context,
       builder: (ctx) {
         return Dialog(
-          backgroundColor: const Color(0xFF1C1C1E),
+          backgroundColor: AppTheme.backgroundSecondary,
           insetPadding:
               const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
           shape: RoundedRectangleBorder(
@@ -995,21 +1054,21 @@ class _LivePageState extends State<LivePage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Padding(
+                Padding(
                   padding: EdgeInsets.fromLTRB(20, 18, 20, 10),
                   child: Text('选择分组',
                       style: TextStyle(
-                          color: Colors.white,
+                          color: AppTheme.textPrimary,
                           fontSize: 16,
                           fontWeight: FontWeight.w600)),
                 ),
                 Flexible(
                   child: ListView.separated(
                     shrinkWrap: true,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    padding: EdgeInsets.symmetric(horizontal: 8),
                     itemCount: groups.length,
                     separatorBuilder: (_, __) =>
-                        Divider(height: 1, color: Colors.white12),
+                        Divider(height: 1, color: AppTheme.borderLight),
                     itemBuilder: (_, i) {
                       final g = groups[i];
                       final selected = c.selectedGroup == i;
@@ -1018,19 +1077,19 @@ class _LivePageState extends State<LivePage> {
                         leading: Icon(Icons.playlist_play,
                             color: selected
                                 ? AppTheme.accentColor
-                                : Colors.white38,
+                                : AppTheme.textTertiary,
                             size: 22),
                         title: Text(g.name,
                             style: TextStyle(
                                 color: selected
                                     ? AppTheme.accentColor
-                                    : Colors.white,
+                                    : AppTheme.textPrimary,
                                 fontSize: 14)),
                         subtitle: Text('${g.channels.length} 个频道',
-                            style: const TextStyle(
-                                color: Colors.white38, fontSize: 11)),
+                            style: TextStyle(
+                                color: AppTheme.textTertiary, fontSize: 11)),
                         trailing: selected
-                            ? const Icon(Icons.check_circle,
+                            ? Icon(Icons.check_circle,
                                 color: AppTheme.accentColor, size: 20)
                             : null,
                         onTap: () {
@@ -1056,11 +1115,11 @@ class _LivePageState extends State<LivePage> {
     final list = LiveService.instance.announcements;
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1C1C1E),
+      backgroundColor: AppTheme.backgroundSecondary,
       builder: (ctx) => SafeArea(
         child: list.isEmpty
             ? Padding(
-                padding: const EdgeInsets.all(24),
+                padding: EdgeInsets.all(24),
                 child: Text('暂无公告',
                     style: TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
               )
@@ -1068,7 +1127,7 @@ class _LivePageState extends State<LivePage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: EdgeInsets.all(16),
                     child: Text('公告',
                         style: TextStyle(
                             color: AppTheme.textPrimary, fontSize: 15)),
@@ -1135,7 +1194,7 @@ class _LivePageState extends State<LivePage> {
               if (snap.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               }
-              final list = snap.data ?? const <EpgProgram>[];
+              final list = snap.data ?? <EpgProgram>[];
               if (list.isEmpty) {
                 return Center(
                   child: Text(
@@ -1150,7 +1209,7 @@ class _LivePageState extends State<LivePage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
                     child: Text(
                       '节目单 · ${ch.name}',
                       style: TextStyle(
@@ -1211,7 +1270,7 @@ class _LivePageState extends State<LivePage> {
           children: [
             Icon(Icons.tv_off,
                 color: AppTheme.textTertiary, size: 48),
-            const SizedBox(height: 12),
+            SizedBox(height: 12),
             Text('该分组暂无频道',
                 style: TextStyle(
                     color: AppTheme.textSecondary, fontSize: 13)),
@@ -1220,7 +1279,7 @@ class _LivePageState extends State<LivePage> {
       );
     }
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 100),
+      padding: EdgeInsets.fromLTRB(12, 0, 12, 100),
       itemCount: channels.length,
       separatorBuilder: (_, __) =>
           Divider(height: 1, color: AppTheme.borderLight),
@@ -1231,10 +1290,10 @@ class _LivePageState extends State<LivePage> {
         return ListTile(
           dense: true,
           contentPadding:
-              const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           title: Text(ch.name,
               style: TextStyle(
-                color: selected ? AppTheme.accentColor : Colors.white,
+                color: selected ? AppTheme.accentColor : AppTheme.textPrimary,
                 fontSize: 15,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
               )),
@@ -1249,17 +1308,17 @@ class _LivePageState extends State<LivePage> {
                 behavior: HitTestBehavior.opaque,
                 onTap: () => c.toggleFavorite(ch),
                 child: Padding(
-                  padding: const EdgeInsets.all(6),
+                  padding: EdgeInsets.all(6),
                   child: Icon(
                     fav ? Icons.star : Icons.star_border,
-                    color: fav ? AppTheme.accentColor : Colors.white38,
+                    color: fav ? AppTheme.accentColor : AppTheme.textTertiary,
                     size: 20,
                   ),
                 ),
               ),
-              const SizedBox(width: 4),
+              SizedBox(width: 4),
               Icon(Icons.play_circle_fill,
-                  color: selected ? AppTheme.accentColor : Colors.white24,
+                  color: selected ? AppTheme.accentColor : AppTheme.textTertiary.withValues(alpha: 0.5),
                   size: 22),
             ],
           ),
@@ -1358,7 +1417,7 @@ class _VideoTopIcon extends StatelessWidget {
           width: 38,
           height: 38,
           alignment: Alignment.center,
-          child: Icon(icon, color: Colors.white, size: size),
+          child: Icon(icon, color: AppTheme.textPrimary, size: size),
         ),
       ),
     );
@@ -1376,16 +1435,16 @@ class _EmptyLive extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.live_tv, color: AppTheme.textTertiary, size: 48),
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           Text('暂无直播频道',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
-          const SizedBox(height: 6),
+          SizedBox(height: 6),
           Text('在订阅 JSON 的 lives 配置，或导入 m3u',
               style: TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
-          const SizedBox(height: 16),
+          SizedBox(height: 16),
           OutlinedButton(
             onPressed: onReload,
-            child: const Text('导入直播源',
+            child: Text('导入直播源',
                 style: TextStyle(color: AppTheme.accentColor)),
           ),
         ],

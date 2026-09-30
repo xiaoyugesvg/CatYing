@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../common/theme.dart';
 import '../../models/movie.dart';
+import '../../services/player_prefs.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/vod_card.dart';
 import '../../models/cache_store.dart';
@@ -17,8 +18,34 @@ import 'controller.dart';
 ///   - 左侧封面 (16:9 缩略图, 失败时降级到带 URL 的占位图)
 ///   - 右侧标题 (vodName) + 集数 (playNote) + 进度 (mm:ss / mm:ss)
 ///   - 底部时间 (今天 HH:mm / 昨天 HH:mm / YYYY-MM-DD)
-class HistoryPage extends StatelessWidget {
+class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
+
+  @override
+  State<HistoryPage> createState() => _HistoryPageState();
+}
+
+class _HistoryPageState extends State<HistoryPage> {
+  final _searchCtrl = TextEditingController();
+  bool _searching = false;
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged(String v) {
+    PlayerPrefs.instance.historyKeyword.value = v.trim();
+  }
+
+  void _toggleSearch() {
+    setState(() => _searching = !_searching);
+    if (!_searching) {
+      _searchCtrl.clear();
+      _onSearchChanged('');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,9 +60,117 @@ class HistoryPage extends StatelessWidget {
           child: Column(
             children: [
               _buildHeader(controller),
+              // 搜索栏（点击放大镜展开）
+              if (_searching) _buildSearchField(),
               Expanded(child: _buildContent(controller)),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchField() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppTheme.spacingXL, 0, AppTheme.spacingXL, AppTheme.spacingSM),
+      child: Container(
+        height: 36,
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppTheme.glassBorder, width: 0.8),
+        ),
+        child: Row(
+          children: [
+            const SizedBox(width: 12),
+            Icon(Icons.search, size: 15, color: AppTheme.textTertiary),
+            const SizedBox(width: 6),
+            Expanded(
+              child: TextField(
+                controller: _searchCtrl,
+                autofocus: true,
+                cursorColor: AppTheme.accentColor,
+                cursorWidth: 2,
+                onChanged: _onSearchChanged,
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: '搜索历史…',
+                  hintStyle:
+                      TextStyle(color: AppTheme.textTertiary, fontSize: 13),
+                  border: InputBorder.none,
+                  isDense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ),
+            Obx(() {
+              if (PlayerPrefs.instance.historyKeyword.value.isEmpty) {
+                return const SizedBox(width: 10);
+              }
+              return GestureDetector(
+                onTap: () {
+                  _searchCtrl.clear();
+                  _onSearchChanged('');
+                },
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Icon(Icons.cancel,
+                      size: 15, color: AppTheme.textTertiary),
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 布局切换：2~6 列
+  Future<void> _openLayoutSheet() async {
+    final prefs = PlayerPrefs.instance;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+              child: Row(
+                children: [
+                  Text('切换布局',
+                      style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+            Obx(() => Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      for (final n in const [2, 3, 4, 5, 6])
+                        SelectableChip(
+                          title: '$n 列',
+                          isSelected: prefs.historyGridColumns.value == n,
+                          onTap: () async {
+                            await prefs.setHistoryGridColumns(n);
+                            if (ctx.mounted) Navigator.pop(ctx);
+                          },
+                        ),
+                    ],
+                  ),
+                )),
+          ],
         ),
       ),
     );
@@ -56,6 +191,33 @@ class HistoryPage extends StatelessWidget {
             ),
           ),
           const Spacer(),
+          // 搜索（展开输入框）与 布局切换
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _toggleSearch,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+              child: Icon(
+                _searching ? Icons.close : Icons.search,
+                size: 19,
+                color: _searching
+                    ? AppTheme.accentColor
+                    : AppTheme.textSecondary,
+              ),
+            ),
+          ),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _openLayoutSheet,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+              child: Icon(
+                Icons.grid_view_rounded,
+                size: 19,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ),
           Obx(() {
             if (CacheStore.instance.records.isEmpty) return const SizedBox.shrink();
             return TextButton(
@@ -80,11 +242,25 @@ class HistoryPage extends StatelessWidget {
 
   Widget _buildContent(HistoryController controller) {
     return Obx(() {
-      final all = CacheStore.instance.records;
+      final allRecords = CacheStore.instance.records;
+      // 搜索过滤：按片名不区分大小写包含匹配
+      final kw = PlayerPrefs.instance.historyKeyword.value.toLowerCase();
+      final all = kw.isEmpty
+          ? allRecords
+          : allRecords
+              .where((e) => e.vodName.toLowerCase().contains(kw))
+              .toList();
       final shown = controller.shown.value;
       final records =
           all.length > shown ? all.sublist(0, shown) : all;
       if (records.isEmpty) {
+        if (kw.isNotEmpty) {
+          return const EmptyState(
+            title: '没有匹配的历史',
+            message: '试试换个关键词',
+            icon: Icons.search_off,
+          );
+        }
         return const EmptyState(
           title: '暂无历史记录',
           message: '观看影片后会自动记录',
@@ -92,16 +268,18 @@ class HistoryPage extends StatelessWidget {
         );
       }
 
-      // 一排 4 个的网格（与收藏页一致）。
+      // 网格布局（列数来自「布局切换」，2~6，默认 4）。
       // 原来是 ListView 竖排详情行，卡片又高又占地方；改成网格一屏能看更多。
       return LayoutBuilder(
         builder: (context, constraints) {
-          const crossAxisCount = 4;
+          final crossAxisCount =
+              PlayerPrefs.instance.historyGridColumns.value.clamp(2, 6);
           final cardWidth =
               (constraints.maxWidth - AppTheme.cardSpacing * (crossAxisCount - 1)) /
                   crossAxisCount;
-          // 卡片高度 = 收藏卡片的 3/4（换算说明见 favorites/view.dart）
-          final aspect = cardWidth / (cardWidth * 0.4875 + 50);
+          // 卡片总高 = 图片区 + 标题区(约30)
+          // 图片约 1.5 倍高（换算与明细见 favorites/view.dart）
+          final aspect = cardWidth / (cardWidth * 1.015 + 30);
           final hasMore = all.length > shown;
 
           return GridView.builder(
@@ -161,6 +339,8 @@ class HistoryPage extends StatelessWidget {
                   //（与首页/收藏角标同款外观）
                   note: item.playNote,
                 ),
+                // 图片区约 1.5 倍高（与上面的 aspect 配套）
+                posterHeightRatio: 1.015,
                 onTap: () => controller.openHistory(item),
                 onLongPress: () =>
                     _showDeleteConfirmDialog(context, controller, item),

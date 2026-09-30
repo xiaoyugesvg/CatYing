@@ -52,7 +52,14 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final maxHeight = MediaQuery.of(context).size.height * 0.72;
+    // 高度上限：**不能盖住首页顶部的分类栏**。
+    //
+    // 分类栏大约在状态栏 + 顶栏(约56) + 幻灯片(196) + 间距(约20) 之后，
+    // 也就是距顶部约 300pt。弹窗从屏幕底部弹出，所以其高度上限 =
+    // 屏幕高 − 该顶部占用，再留一点余量；最长不超过屏幕 62%
+    //（原来固定 72%，在长屏上会把分类栏盖住）。
+    final h = MediaQuery.of(context).size.height;
+    final maxHeight = (h - 300).clamp(h * 0.35, h * 0.62);
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.backgroundSecondary,
@@ -76,18 +83,12 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              // 搜索图标（点击展开成输入条，失焦自动缩回）+ 单列/双排切换
+              // 头部：左侧「单列/双排」切换，右侧搜索
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
                 child: Row(
                   children: [
-                    _ExpandableSearchField(
-                      controller: _searchController,
-                      keyword: _keyword,
-                      onChanged: (v) => setState(() => _keyword = v.trim()),
-                    ),
-                    const SizedBox(width: 8),
-                    // 单列/双排切换按钮
+                    // 布局切换按钮（放左边）
                     GestureDetector(
                       onTap: () => setState(() => _gridMode = !_gridMode),
                       child: Container(
@@ -104,6 +105,15 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                           size: 17,
                           color: AppTheme.textSecondary,
                         ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // 搜索（放右边，占满剩余宽度）
+                    Expanded(
+                      child: _ExpandableSearchField(
+                        controller: _searchController,
+                        keyword: _keyword,
+                        onChanged: (v) => setState(() => _keyword = v.trim()),
                       ),
                     ),
                   ],
@@ -269,7 +279,6 @@ class _ExpandableSearchField extends StatefulWidget {
 }
 
 class _ExpandableSearchFieldState extends State<_ExpandableSearchField> {
-  bool _expanded = false;
   final _focus = FocusNode();
 
   @override
@@ -280,71 +289,52 @@ class _ExpandableSearchFieldState extends State<_ExpandableSearchField> {
 
   @override
   Widget build(BuildContext context) {
-    final maxW = MediaQuery.of(context).size.width;
-    final expandedW = (maxW * 0.55).clamp(150.0, 240.0);
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeOutCubic,
-      width: _expanded ? expandedW : 34,
+    // 常驻展开的搜索框（不再缩成一枚图标）：占满头部剩余宽度，
+    // 背景/描边跟随外观（原来写死 0xFF2A2A2E，浅色模式下是一块脏黑）。
+    return Container(
       height: 34,
       decoration: BoxDecoration(
-        color: const Color(0xFF2A2A2E),
+        color: AppTheme.backgroundTertiary,
         borderRadius: BorderRadius.circular(17),
+        border: Border.all(color: AppTheme.borderLight, width: 0.5),
       ),
-      child: _expanded
-          ? Row(
-              children: [
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextField(
-                    controller: widget.controller,
-                    focusNode: _focus,
-                    autofocus: true,
-                    style: TextStyle(
-                        color: AppTheme.textPrimary, fontSize: 13),
-                    onChanged: widget.onChanged,
-                    // 点输入框外部 → 自动缩回
-                    onTapOutside: (_) {
-                      if (_expanded) {
-                        setState(() => _expanded = false);
-                        _focus.unfocus();
-                      }
-                    },
-                    decoration: InputDecoration(
-                      hintText: '搜索源...',
-                      hintStyle: TextStyle(
-                          color: AppTheme.textTertiary, fontSize: 13),
-                      border: InputBorder.none,
-                      isDense: true,
-                      contentPadding:
-                          const EdgeInsets.symmetric(vertical: 8),
-                    ),
-                  ),
-                ),
-                if (widget.keyword.isNotEmpty)
-                  GestureDetector(
-                    onTap: () {
-                      widget.controller.clear();
-                      widget.onChanged('');
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Icon(Icons.close,
-                          color: AppTheme.textTertiary, size: 14),
-                    ),
-                  ),
-                const SizedBox(width: 8),
-              ],
-            )
-          : GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                setState(() => _expanded = true);
-                _focus.requestFocus();
-              },
-              child:
-                  Icon(Icons.search, color: AppTheme.textSecondary, size: 16),
+      child: Row(
+        children: [
+          const SizedBox(width: 10),
+          Icon(Icons.search, color: AppTheme.textTertiary, size: 15),
+          const SizedBox(width: 6),
+          Expanded(
+            child: TextField(
+              controller: widget.controller,
+              focusNode: _focus,
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+              onChanged: widget.onChanged,
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                hintText: '搜索源…',
+                hintStyle:
+                    TextStyle(color: AppTheme.textTertiary, fontSize: 13),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 8),
+              ),
             ),
+          ),
+          if (widget.keyword.isNotEmpty)
+            GestureDetector(
+              onTap: () {
+                widget.controller.clear();
+                widget.onChanged('');
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(Icons.cancel,
+                    color: AppTheme.textTertiary, size: 15),
+              ),
+            ),
+          const SizedBox(width: 8),
+        ],
+      ),
     );
   }
 }

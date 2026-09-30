@@ -39,16 +39,11 @@ class _AppearanceSettingsPageState extends State<AppearanceSettingsPage> {
     );
     if (selected == null) return;
     await ThemeModeStore.set(selected);
-    // 同步壁纸侧的外观状态：这里是"用户手动指定"，要打开手动覆盖标记，
-    // 否则壁纸设置页会以为仍处于"跟随背景"，两处显示不一致。
-    if (selected == ThemeMode.system) {
-      await BackgroundService.instance.clearAppearanceOverride();
-    } else {
-      await BackgroundService.instance.setAppearanceMode(
-        selected == ThemeMode.light ? AppearanceMode.light : AppearanceMode.dark,
-        manual: true,
-      );
-    }
+    // 外观模式是唯一来源：它同时决定文字明暗与用哪一套背景。
+    // （旧版还要额外同步"手动覆盖"标记，方向反转后已不需要。）
+    await BackgroundService.instance.setAppearanceMode(
+      selected == ThemeMode.light ? AppearanceMode.light : AppearanceMode.dark,
+    );
     if (mounted) setState(() {});
   }
 

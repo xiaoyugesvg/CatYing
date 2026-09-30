@@ -83,6 +83,10 @@ class VideoPlayerWidget extends StatefulWidget {
   /// 顶部按钮栏距顶部的额外间距（默认 8，详情页可传大一点让按钮往下挪）
   final double topBarTopPadding;
 
+  /// 播放设置弹窗的最大高度（父级传入播放器所在区域高度），见构造函数注释
+  final double? sheetMaxHeight;
+
+
   final VoidCallback? onPlaying;
   final ValueChanged<Duration>? onPositionChanged;
   final VoidCallback? onEnded;
@@ -116,6 +120,13 @@ class VideoPlayerWidget extends StatefulWidget {
     this.skipIntroSeconds = 0,
     this.skipOutroSeconds = 0,
     this.topBarTopPadding = 8.0,
+
+    /// 播放设置弹窗的最大高度（由父级传入播放器所在区域的高度）。
+    ///
+    /// 需求：设置面板不能超出播放器底部、盖住下方的简介/推荐 tab 栏。
+    /// 弹窗本身是从屏幕底部弹出的，只能靠限高来"止步"在播放器范围内。
+    /// null 时回退到屏幕高度的 72%。
+    this.sheetMaxHeight,
     this.onPlaying,
     this.onPositionChanged,
     this.onEnded,
@@ -1978,8 +1989,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Widget _buildBottomControls() {
     return Positioned(
-      // 控件区整体下移一点，避免贴死画面底边
-      bottom: 2,
+      // 控件区尽量贴近画面底边（原来 bottom:2 + 渐变层又加了安全区
+      // 底部内边距，导致进度条离底部很远，与下方简介 tab 之间留下大片黑条）。
+      bottom: 0,
       left: 0,
       right: 0,
       child: _gradientBottomContainer(
@@ -1988,7 +2000,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           children: [
             _buildProgressBar(),
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 5),
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 2),
               child: Row(
                 children: [
                   if (widget.canPlayPrevious)
@@ -2551,8 +2563,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               child: const SizedBox(height: 1, width: double.infinity),
             ),
             Container(
-              constraints: const BoxConstraints(maxHeight: 240),
-              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
+              // 与内部网格高度配套（网格 84 + 标题行约 46）
+              constraints: const BoxConstraints(maxHeight: 130),
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               decoration: BoxDecoration(
                 color: const Color(0xFF1E1E1E),
                 borderRadius: BorderRadius.circular(12),
@@ -2589,10 +2602,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                       ],
                     ),
                   ),
+                  // 高度按"约一半"收紧：原来固定 168（面板总高约 249），
+                  // 现在 84（面板总高约 130）。
+                  // 集数多时不再显示滚动条，改为直接上下滑动（GridView 默认行为）。
                   SizedBox(
-                    height: 168,
+                    height: 84,
                     child: GridView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
                       gridDelegate:
                           const SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: 5,
@@ -2671,7 +2687,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               top: false,
               child: ConstrainedBox(
                 constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(context).size.height * 0.72,
+                  // 优先用父级给的播放器区域高度；没给就退回屏幕 72%。
+                  // 目的是让面板**止步在播放器范围内**，不盖住下方 tab 栏。
+                  maxHeight: widget.sheetMaxHeight ??
+                      MediaQuery.of(context).size.height * 0.72,
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,

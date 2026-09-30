@@ -257,9 +257,9 @@ class _DetailPageState extends State<DetailPage> {
       builder: (ctx) => ListView(
         padding: const EdgeInsets.all(12),
         children: [
-          const Text('选择刮削结果',
+          Text('选择刮削结果',
               style: TextStyle(
-                  color: Colors.white,
+                  color: AppTheme.textPrimary,
                   fontSize: 16,
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
@@ -364,9 +364,9 @@ class _DetailPageState extends State<DetailPage> {
       builder: (ctx) => ListView(
         padding: const EdgeInsets.all(12),
         children: [
-          const Text('选择正确结果',
+          Text('选择正确结果',
               style: TextStyle(
-                  color: Colors.white,
+                  color: AppTheme.textPrimary,
                   fontSize: 16,
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
@@ -622,7 +622,7 @@ class _DetailPageState extends State<DetailPage> {
           // (alpha≈2%)，毛玻璃+细描边+高光，内容滚过其下依旧清晰可见。
           blur: true,
           tint: AppTheme.glassTintClear,
-          borderColor: Colors.white.withValues(alpha: 0.10),
+          borderColor: AppTheme.glassBorder,
           borderWidth: 0.8,
           highlightStrength: 0.2,
           shadow: true,
@@ -852,7 +852,9 @@ class _DetailPageState extends State<DetailPage> {
                 Text(
                   info.name,
                   textAlign: TextAlign.center,
-                  maxLines: 2,
+                  // 视频名称**只允许一行**，超长省略（不允许跨行）
+                  maxLines: 1,
+                  softWrap: false,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: AppTheme.textPrimary,
@@ -1147,6 +1149,20 @@ class _DetailPageState extends State<DetailPage> {
   /// 视频组件本身不感知全屏/普通模式，全屏由 VideoState 内部处理
   /// isFull/isPip 必须由 _buildPlayerArea 在 Obx 内传入，
   /// 否则 Rx 变化时这里还是用闭包捕获的旧值，导致全屏态无法退出
+  /// 播放器（4:3 容器）在当前屏宽下的实际高度，用作播放设置弹窗的高度上限。
+  ///
+  /// 需求：设置面板不能超出播放器底部、盖住下方「简介/推荐/快搜」tab 栏。
+  /// 弹窗从屏幕底部弹出，只能靠限高让它"止步"在播放器范围内。
+  ///
+  /// 下限 220 是给横屏/小屏兜底（否则面板太矮没法操作）。
+  double _playerSheetMaxHeight(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    // 与 _buildPlayerArea 的左右 padding 一致（spacingLG × 2）
+    final width = size.width - AppTheme.spacingLG * 2;
+    final h = width * 3 / 4; // aspectRatio: 4/3
+    return h.clamp(220.0, 560.0);
+  }
+
   Widget _buildPlayerWidget({required bool isFull, required bool isPip}) {
     final url = _controller.playUrl.value!;
     // 网页播放器页（非直链媒体 URL）→ 用 WebView 兜底播放
@@ -1219,6 +1235,8 @@ class _DetailPageState extends State<DetailPage> {
       isPipMode: isPip,
       showAudioModeButton: true,
       topBarTopPadding: 8.0,
+      // 播放设置弹窗限高到播放器高度，避免盖住下方 tab 栏
+      sheetMaxHeight: _playerSheetMaxHeight(context),
       skipIntroSeconds: _controller.skipIntroSeconds.value,
       skipOutroSeconds: _controller.skipOutroSeconds.value,
       onPlayNext: () => _playNextEpisode(),
@@ -1312,7 +1330,9 @@ class _DetailPageState extends State<DetailPage> {
           }
           return Padding(
             padding: const EdgeInsets.only(top: 8),
+            // 整行居中（原来 Row 默认左对齐，跟 tab 栏不对齐显得歪）
             child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const SizedBox(
                   width: 14,

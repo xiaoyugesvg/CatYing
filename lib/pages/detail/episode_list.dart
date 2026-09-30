@@ -166,7 +166,9 @@ class _EpisodeListViewState extends State<EpisodeListView> {
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                 ),
                 textAlign: TextAlign.center,
-                maxLines: 2,
+                // 剧集名称只允许一行，超长省略
+                maxLines: 1,
+                softWrap: false,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -360,7 +362,9 @@ class _EpisodeListViewState extends State<EpisodeListView> {
                                 isSelected ? FontWeight.w600 : FontWeight.normal,
                           ),
                           textAlign: TextAlign.center,
-                          maxLines: 2,
+                          // 剧集名称只允许一行，超长省略
+                          maxLines: 1,
+                          softWrap: false,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),

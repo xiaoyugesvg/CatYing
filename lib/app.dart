@@ -37,23 +37,17 @@ class TVBoxApp extends StatelessWidget {
     // 详情页也能渲染同样的悬浮栏并切回对应 tab.
     Get.put(MainTabController(), permanent: true);
 
-    // 外观联动（方案 A）：背景/壁纸改变文字明暗时，由 BackgroundService
-    // 通过这个回调推给 ThemeModeStore，避免服务层反向依赖 App 层。
+    // 外观模式是**唯一来源**（方向已反转：外观主导，背景跟着外观走）。
+    // BackgroundService 改变外观时通过回调推给 ThemeModeStore，
+    // 避免服务层反向依赖 App 层造成循环依赖。
     final bg = BackgroundService.instance;
     bg.onAppearanceChanged = (isLight) {
       ThemeModeStore.applyLightFromBackground(isLight);
     };
-    // 冷启动时 followBackground 是内存态默认 false，必须按持久化的
-    // manualAppearance 决定归属，否则「跟随背景」会被 themeMode 覆盖：
-    // 用户选了浅色壁纸却仍是白字。
-    if (!bg.manualAppearance.value) {
-      ThemeModeStore.applyLightFromBackground(
-          bg.appearanceMode.value == AppearanceMode.light);
-    } else {
-      ThemeModeStore.set(bg.appearanceMode.value == AppearanceMode.light
-          ? ThemeMode.light
-          : ThemeMode.dark);
-    }
+    // 冷启动：直接把持久化的外观模式应用上去
+    ThemeModeStore.set(bg.appearanceMode.value == AppearanceMode.light
+        ? ThemeMode.light
+        : ThemeMode.dark);
 
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: ThemeModeStore.notifier,
@@ -160,18 +154,17 @@ class _ContentViewState extends State<ContentView>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // ⚠️ load() 是异步的：它读 theme_mode 后会把 _followBackground 置回 false
-    // 并改明暗。若用户处于「跟随背景」（方案 A），必须在它之后再按背景推导
-    // 重新断言一次，否则浅色壁纸会被 theme_mode 覆盖成白字。
+    // ⚠️ load() 是异步的：它读 theme_mode 会改明暗。外观模式是唯一来源，
+    // 所以读完必须再用 BackgroundService 的外观模式断言一次，
+    // 否则冷启动的明暗会被历史 theme_mode 覆盖。
     ThemeModeStore.load().then((_) {
       final bg = Get.isRegistered<BackgroundService>()
           ? BackgroundService.instance
           : null;
       if (bg == null) return;
-      if (!bg.manualAppearance.value) {
-        ThemeModeStore.applyLightFromBackground(
-            bg.appearanceMode.value == AppearanceMode.light);
-      }
+      ThemeModeStore.set(bg.appearanceMode.value == AppearanceMode.light
+          ? ThemeMode.light
+          : ThemeMode.dark);
     });
     _searchVM = Get.find<TvSearchController>();
     _settingsVM = Get.put(SettingsController());
@@ -299,16 +292,17 @@ class _ContentViewState extends State<ContentView>
     final appState = Get.find<AppState>();
 
     return Material(
-      color: const Color(0xFF0F0F0F),
+      // 首次配置页也跟随外观（原来写死 0xFF0F0F0F，浅色模式下是一整片黑）
+      color: AppTheme.backgroundPrimary,
       child: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              Color(0xFF0F0F0F),
-              Color(0xFF141414),
-              Color(0xFF0F0F0F),
+              AppTheme.backgroundPrimary,
+              AppTheme.backgroundSecondary,
+              AppTheme.backgroundPrimary,
             ],
           ),
         ),
@@ -723,7 +717,7 @@ class _ContentViewState extends State<ContentView>
                 radius: 30,
                 blur: true,
                 tint: AppTheme.glassTintClear,
-                borderColor: Colors.white.withValues(alpha: 0.10),
+                borderColor: AppTheme.glassBorder,
                 borderWidth: 0.8,
                 highlightStrength: 0.2,
                 shadow: true,

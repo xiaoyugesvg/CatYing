@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../common/theme.dart';
 import '../services/app_state.dart';
 import '../services/nodejs_manager.dart';
 import 'circular_logo_progress.dart';
@@ -14,14 +15,15 @@ class AppLoadingView extends StatelessWidget {
     final appState = Get.find<AppState>();
 
     return Container(
-      decoration: const BoxDecoration(
+      // 启动页跟随外观（原来写死深色径向渐变，浅色模式下是一片黑）
+      decoration: BoxDecoration(
         gradient: RadialGradient(
-          center: Alignment(0, -0.35),
+          center: const Alignment(0, -0.35),
           radius: 1.3,
           colors: [
-            Color(0xFF2A2F33),
-            Color(0xFF141618),
-            Color(0xFF0C0D0F),
+            AppTheme.backgroundTertiary,
+            AppTheme.backgroundSecondary,
+            AppTheme.backgroundPrimary,
           ],
         ),
       ),

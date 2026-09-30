@@ -43,7 +43,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
       backgroundColor: AppTheme.backgroundPrimary,
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new,
+          icon: Icon(Icons.arrow_back_ios_new,
               color: AppTheme.accentColor, size: 20),
           onPressed: () => Get.back(),
         ),
@@ -53,7 +53,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
         elevation: 0,
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
+        padding: EdgeInsets.fromLTRB(16, 8, 16, 40),
         children: [
           Text('直播源管理',
               style: TextStyle(
@@ -82,7 +82,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               return Column(children: items);
             }),
           ),
-          const SizedBox(height: 24),
+          SizedBox(height: 24),
           Text('全局 EPG 地址',
               style: TextStyle(
                   color: AppTheme.textSecondary,
@@ -98,9 +98,9 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   '直播源未自带 EPG 时使用，如 https://example.com/epg.xml.gz',
-                  style: TextStyle(color: Colors.white38, fontSize: 12),
+                  style: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
                 ),
                 const SizedBox(height: 10),
                 Row(
@@ -117,7 +117,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                             borderRadius: BorderRadius.circular(10),
                             borderSide: BorderSide.none,
                           ),
-                          contentPadding: const EdgeInsets.symmetric(
+                          contentPadding: EdgeInsets.symmetric(
                               horizontal: 12, vertical: 12),
                           hintText: 'https://...',
                           hintStyle: TextStyle(
@@ -125,7 +125,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 10),
+                    SizedBox(width: 10),
                     FilledButton(
                       style: FilledButton.styleFrom(
                         backgroundColor: AppTheme.accentColor,
@@ -153,7 +153,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               ],
             ),
           ),
-          const SizedBox(height: 24),
+          SizedBox(height: 24),
           Text('屏蔽分类',
               style: TextStyle(
                   color: AppTheme.textSecondary,
@@ -209,7 +209,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
     final sourceUrl = svc.getSourceUrl(index);
     final canEdit = sourceUrl != null && sourceUrl.isNotEmpty;
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       leading: Container(
         width: 36,
         height: 36,
@@ -229,7 +229,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
           style: TextStyle(
               color: loaded ? AppTheme.textSecondary : AppTheme.textTertiary, fontSize: 12)),
       trailing: PopupMenuButton<String>(
-        color: const Color(0xFF2A2A2E),
+        color: Color(0xFF2A2A2E),
         icon: Icon(Icons.more_vert, color: AppTheme.textSecondary),
         onSelected: (v) async {
           if (v == 'refresh') {
@@ -249,7 +249,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                 final ctrl =
                     TextEditingController(text: sourceUrl ?? '');
                 return AlertDialog(
-                  backgroundColor: const Color(0xFF1C1C1E),
+                  backgroundColor: AppTheme.backgroundSecondary,
                   title: Text('编辑直播源',
                       style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
                   content: Column(
@@ -263,7 +263,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                           hintStyle: TextStyle(color: AppTheme.textTertiary),
                         ),
                       ),
-                      const SizedBox(height: 10),
+                      SizedBox(height: 10),
                       TextField(
                         controller: ctrl,
                         style: TextStyle(color: AppTheme.textPrimary),
@@ -306,7 +306,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             final ok = await showDialog<bool>(
               context: context,
               builder: (ctx) => AlertDialog(
-                backgroundColor: const Color(0xFF1C1C1E),
+                backgroundColor: AppTheme.backgroundSecondary,
                 title: Text('删除直播源',
                     style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
                 content: Text('确定删除「${src.name}」吗？',
@@ -333,13 +333,13 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
           }
         },
         itemBuilder: (_) => [
-          const PopupMenuItem(
+          PopupMenuItem(
               value: 'refresh',
-              child: Text('立即刷新', style: TextStyle(color: Colors.white70))),
+              child: Text('立即刷新', style: TextStyle(color: AppTheme.textPrimary))),
           if (canEdit)
-            const PopupMenuItem(
+            PopupMenuItem(
                 value: 'edit',
-                child: Text('编辑直播源', style: TextStyle(color: Colors.white70))),
+                child: Text('编辑直播源', style: TextStyle(color: AppTheme.textPrimary))),
           const PopupMenuItem(
               value: 'delete',
               child:
@@ -351,7 +351,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
 
   Widget _addTile() {
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       leading: Container(
         width: 36,
         height: 36,
@@ -359,7 +359,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
           color: AppTheme.accentColor.withValues(alpha: 0.18),
           borderRadius: BorderRadius.circular(10),
         ),
-        child: const Icon(Icons.add, color: AppTheme.accentColor, size: 20),
+        child: Icon(Icons.add, color: AppTheme.accentColor, size: 20),
       ),
       title: Text('添加直播源',
           style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
@@ -371,7 +371,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             final nameCtrl = TextEditingController();
             final ctrl = TextEditingController();
             return AlertDialog(
-              backgroundColor: const Color(0xFF1C1C1E),
+              backgroundColor: AppTheme.backgroundSecondary,
               title: Text('添加直播源',
                   style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
               content: Column(
@@ -385,7 +385,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                       hintStyle: TextStyle(color: AppTheme.textTertiary),
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  SizedBox(height: 10),
                   TextField(
                     controller: ctrl,
                     style: TextStyle(color: AppTheme.textPrimary),

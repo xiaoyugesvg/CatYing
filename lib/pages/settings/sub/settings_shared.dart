@@ -24,7 +24,7 @@ class SettingsDialogs {
   }) {
     return showModalBottomSheet<T>(
       context: context,
-      backgroundColor: const Color(0xFF1C1C1E),
+      backgroundColor: AppTheme.backgroundSecondary,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -32,12 +32,13 @@ class SettingsDialogs {
             Padding(
               padding: const EdgeInsets.all(16),
               child: Text(title,
-                  style: const TextStyle(color: Colors.white, fontSize: 15)),
+                  style: TextStyle(
+                      color: AppTheme.textPrimary, fontSize: 15)),
             ),
             for (final o in options)
               ListTile(
                 title: Text(labelBuilder(o),
-                    style: const TextStyle(color: Colors.white70)),
+                    style: TextStyle(color: AppTheme.textSecondary)),
                 trailing: selected == o
                     ? const Icon(Icons.check, color: AppTheme.accentColor)
                     : null,

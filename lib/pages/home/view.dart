@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../common/theme.dart';
+import '../../services/player_prefs.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:rfw/rfw.dart' show DynamicMap;
 import '../../services/api_config.dart';
@@ -33,7 +34,10 @@ class _HomePageState extends State<HomePage> {
   final HomeController _controller = Get.put(HomeController());
   bool _isReconnecting = false;
 
-  /// 筛选面板：默认隐藏，点分类时弹出
+  /// 筛选面板显隐。
+  ///
+  /// 现在筛选走「分类栏右端筛选按钮 → 底部弹出菜单」（见 _openFilterSheet）。
+  /// 这个字段只作为 RFW 主题数据契约里的开关位保留，供自定义主题使用。
   bool _showFilters = false;
 
   @override
@@ -164,132 +168,483 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildCategoryTabBar() {
-    // 分类胶囊横向滚动
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.backgroundCard,
-        borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.06),
-          width: 0.5,
-        ),
-      ),
-      padding: const EdgeInsets.symmetric(
-        vertical: AppTheme.spacingSM,
-        horizontal: AppTheme.spacingXS,
-      ),
-      child: SizedBox(
-        height: 40,
-        child: Obx(() => ListView.builder(
-          scrollDirection: Axis.horizontal,
-          padding:
-              const EdgeInsets.symmetric(horizontal: AppTheme.spacingXS),
-          itemCount: _controller.sorts.length,
-          itemBuilder: (context, index) {
-            final sort = _controller.sorts[index];
-            final isSelected =
-                _controller.selectedSort.value?.id == sort.id;
-            return Padding(
-              padding:
-                  const EdgeInsets.only(right: AppTheme.spacingSM),
-              child: GestureDetector(
-                onTap: () {
-                  final wasSelected =
+    // 分类行：**去掉外层卡片背景**（原来是一张 backgroundCard 卡片包着，
+    // 切外观时那张卡片的描边写死白色 → 浅色模式下看起来"没跟着变"）。
+    // 现在分类直接贴在页面上，只用「|」与右侧筛选按钮分隔。
+    return SizedBox(
+      height: 40,
+      child: Row(
+        children: [
+          // 分类（横向滚动）
+          Expanded(
+            child: Obx(() {
+              // 分类屏蔽：被屏蔽的分类不进列表（在「筛选 → 分类屏蔽」里勾选）
+              final blocked = PlayerPrefs.instance.blockedCategories;
+              final sorts = _controller.sorts
+                  .where((s) => !blocked.contains(s.name))
+                  .toList();
+              return ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: EdgeInsets.zero,
+                itemCount: sorts.length,
+                itemBuilder: (context, index) {
+                  final sort = sorts[index];
+                  final isSelected =
                       _controller.selectedSort.value?.id == sort.id;
-                  if (wasSelected) {
-                    // 再点同一分类：切换筛选显隐
-                    setState(() {
-                      _showFilters = !_showFilters;
-                    });
-                    return;
-                  }
-                  _controller.selectSort(sort);
-                  setState(() {
-                    // 默认收起，避免遮住列表；用户可手动展开
-                  });
+                  return Padding(
+                    // 名称间距收紧（原 spacingSM=8，现 2）
+                    padding: const EdgeInsets.only(right: 2),
+                    child: GestureDetector(
+                      onTap: () => _controller.selectSort(sort),
+                      child: _CategoryChip(
+                        label: sort.name,
+                        selected: isSelected,
+                      ),
+                    ),
+                  );
                 },
-                child: _CategoryChip(
-                  label: sort.name,
-                  selected: isSelected,
-                ),
-              ),
-            );
-          },
-        )),
+              );
+            }),
+          ),
+          // 分隔线「|」：把分类与筛选按钮分开
+          Container(
+            width: 1,
+            height: 18,
+            margin: const EdgeInsets.symmetric(horizontal: 10),
+            color: AppTheme.borderMedium,
+          ),
+          // 右侧筛选按钮：点击弹出「分类屏蔽 / 隐藏筛选 / 切换布局」菜单
+          _buildFilterButton(),
+        ],
       ),
     );
   }
 
-  Widget _buildFilterBar() {
-    // 独立卡片：分类 / 地区 / 排序 / 年份 筛选行
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.backgroundCard,
-        borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.06),
-          width: 0.5,
+  /// 筛选入口按钮（放在分类栏右端）
+  ///
+  /// 没有筛选条件时置灰不可点；已有选中项时高亮成实心圆点，
+  /// 让用户一眼看出"当前列表是被筛选过的"。
+  /// 筛选按钮（分类栏右端）。
+  ///
+  /// 点击弹出**三项菜单**（参考图样式）：
+  ///   分类屏蔽 / 隐藏筛选 / 切换布局
+  /// 其中「隐藏筛选」展开下方的分组筛选行；按钮在有筛选条件时高亮。
+  Widget _buildFilterButton() {
+    return Obx(() {
+      final filters = _controller.currentFilters;
+      final hasAny = filters.isNotEmpty;
+      final picked = _controller.selectedFilters.entries
+          .where((e) => (e.value ?? '').isNotEmpty)
+          .length;
+      return Padding(
+        padding: const EdgeInsets.only(left: 6, right: 2),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: hasAny ? _openOptionsMenu : null,
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: picked > 0
+                  ? AppTheme.accentColor.withValues(alpha: 0.18)
+                  : AppTheme.backgroundTertiary,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: picked > 0
+                    ? AppTheme.accentColor.withValues(alpha: 0.45)
+                    : AppTheme.borderLight,
+                width: 0.6,
+              ),
+            ),
+            child: Icon(
+              Icons.tune,
+              size: 18,
+              color: hasAny
+                  ? (picked > 0
+                      ? AppTheme.accentColor
+                      : AppTheme.textSecondary)
+                  : AppTheme.textTertiary.withValues(alpha: 0.4),
+            ),
+          ),
+        ),
+      );
+    });
+  }
+
+  /// 三项菜单：分类屏蔽 / 隐藏筛选 / 切换布局
+  Future<void> _openOptionsMenu() async {
+    final prefs = PlayerPrefs.instance;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: StatefulBuilder(
+          builder: (ctx, setSheet) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.textTertiary.withValues(alpha: 0.35),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              _optionTile(
+                icon: Icons.block,
+                label: '分类屏蔽',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openCategoryBlockSheet();
+                },
+              ),
+              _optionTile(
+                icon: Icons.filter_alt_outlined,
+                label: prefs.hideFilters.value ? '显示筛选' : '隐藏筛选',
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await prefs.setHideFilters(!prefs.hideFilters.value);
+                  setSheet(() {});
+                },
+              ),
+              _optionTile(
+                icon: Icons.grid_view,
+                label: '切换布局',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openLayoutSheet();
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppTheme.spacingMD,
-        vertical: AppTheme.spacingSM,
+    );
+  }
+
+  Widget _optionTile({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: AppTheme.textPrimary),
+            const SizedBox(width: 16),
+            Text(label,
+                style: TextStyle(
+                    color: AppTheme.textPrimary, fontSize: 15)),
+          ],
+        ),
       ),
-      child: Column(
-        children: _controller.currentFilters.map((filter) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: AppTheme.spacingSM),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 36,
-                  child: Text(
-                    filter.name,
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: AppTheme.fontCaption,
-                      fontWeight: FontWeight.w500,
+    );
+  }
+
+  /// 分类屏蔽：多选分类，屏蔽后不出现在首页分类栏
+  Future<void> _openCategoryBlockSheet() async {
+    final prefs = PlayerPrefs.instance;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.6,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  children: [
+                    Text('分类屏蔽',
+                        style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600)),
+                    const Spacer(),
+                    Text('勾选的分类将隐藏',
+                        style: TextStyle(
+                            color: AppTheme.textTertiary, fontSize: 11)),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: Obx(() => SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final s in _controller.sorts)
+                            SelectableChip(
+                              title: s.name,
+                              isSelected:
+                                  prefs.blockedCategories.contains(s.name),
+                              onTap: () =>
+                                  prefs.toggleBlockCategory(s.name),
+                            ),
+                        ],
+                      ),
+                    )),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 切换布局：2 / 3 / 4 列
+  Future<void> _openLayoutSheet() async {
+    final prefs = PlayerPrefs.instance;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Row(
+                children: [
+                  Text('切换布局',
+                      style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+            Obx(() => Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+                  child: Wrap(
+                    spacing: 10,
+                    children: [
+                      for (final n in const [2, 3, 4])
+                        SelectableChip(
+                          title: '$n 列',
+                          isSelected: prefs.gridColumns.value == n,
+                          onTap: () async {
+                            await prefs.setGridColumns(n);
+                            if (ctx.mounted) Navigator.pop(ctx);
+                          },
+                        ),
+                    ],
+                  ),
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 内联筛选行（参考图样式）：分类 / 地区 / 排序 / 年份 各一行芯片。
+  ///
+  /// 显隐由「筛选 → 隐藏筛选」控制（PlayerPrefs.hideFilters）。
+  /// 点选即时生效（_controller.selectFilter）。
+  Widget _buildInlineFilters() {
+    return Obx(() {
+      final groups = _controller.currentFilters;
+      if (groups.isEmpty) return const SizedBox.shrink();
+      return Container(
+        margin: const EdgeInsets.fromLTRB(
+          AppTheme.spacingLG,
+          0,
+          AppTheme.spacingLG,
+          AppTheme.spacingSM,
+        ),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppTheme.spacingMD,
+          vertical: AppTheme.spacingMD,
+        ),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundCard,
+          borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+          border: Border.all(color: AppTheme.borderLight, width: 0.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final f in groups) ...[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 40,
+                    child: Text(
+                      f.name,
+                      style: TextStyle(
+                        color: AppTheme.textTertiary,
+                        fontSize: AppTheme.fontCaption,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        SelectableChip(
-                          title: '全部',
-                          isSelected:
-                              _controller.selectedFilters[filter.key] == null,
-                          onTap: () =>
-                              _controller.selectFilter(filter.key, ''),
-                        ),
-                        const SizedBox(width: AppTheme.spacingSM),
-                        ...filter.values.map((value) {
-                          return Padding(
-                            padding: const EdgeInsets.only(
-                                right: AppTheme.spacingSM),
-                            child: SelectableChip(
-                              title: value.n,
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          SelectableChip(
+                            title: '全部',
+                            isSelected:
+                                _controller.selectedFilters[f.key] == null,
+                            onTap: () => _controller.selectFilter(f.key, ''),
+                          ),
+                          const SizedBox(width: AppTheme.spacingSM),
+                          for (final v in f.values) ...[
+                            SelectableChip(
+                              title: v.n,
                               isSelected:
-                                  _controller.selectedFilters[filter.key] ==
-                                      value.v,
-                              onTap: () => _controller.selectFilter(
-                                  filter.key, value.v),
+                                  _controller.selectedFilters[f.key] == v.v,
+                              onTap: () =>
+                                  _controller.selectFilter(f.key, v.v),
                             ),
-                          );
-                        }),
-                      ],
+                            const SizedBox(width: AppTheme.spacingSM),
+                          ],
+                        ],
+                      ),
                     ),
+                  ),
+                ],
+              ),
+              if (f != groups.last) const SizedBox(height: AppTheme.spacingSM),
+            ],
+          ],
+        ),
+      );
+    });
+  }
+
+  /// 筛选菜单：底部弹出，分组选择，点选即时生效
+  Future<void> _openFilterSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          top: false,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.6,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 拖拽条
+                Container(
+                  margin: const EdgeInsets.only(top: 10, bottom: 4),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.textTertiary.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                // 标题 + 重置
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 6, 12, 4),
+                  child: Row(
+                    children: [
+                      Text('筛选',
+                          style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600)),
+                      const Spacer(),
+                      Obx(() {
+                        final picked = _controller.selectedFilters.entries
+                            .where((e) => (e.value ?? '').isNotEmpty)
+                            .length;
+                        if (picked == 0) return const SizedBox.shrink();
+                        return TextButton(
+                          onPressed: () {
+                            for (final f in _controller.currentFilters) {
+                              _controller.selectFilter(f.key, '');
+                            }
+                          },
+                          child: const Text('重置'),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+                    child: Obx(() => Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            for (final f in _controller.currentFilters) ...[
+                              Text(f.name,
+                                  style: TextStyle(
+                                      color: AppTheme.textTertiary,
+                                      fontSize: AppTheme.fontCaption,
+                                      fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  SelectableChip(
+                                    title: '全部',
+                                    isSelected: _controller
+                                            .selectedFilters[f.key] ==
+                                        null,
+                                    onTap: () =>
+                                        _controller.selectFilter(f.key, ''),
+                                  ),
+                                  for (final v in f.values)
+                                    SelectableChip(
+                                      title: v.n,
+                                      isSelected: _controller
+                                              .selectedFilters[f.key] ==
+                                          v.v,
+                                      onTap: () =>
+                                          _controller.selectFilter(f.key, v.v),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 18),
+                            ],
+                          ],
+                        )),
                   ),
                 ),
               ],
             ),
-          );
-        }).toList(),
-      ),
+          ),
+        );
+      },
     );
   }
+
 
   Widget _buildContentArea() {
     return Obx(() {
@@ -310,10 +665,6 @@ class _HomePageState extends State<HomePage> {
       final sorts = _controller.sorts.toList();
       final selectedSortId = _controller.selectedSort.value?.id;
       final hasMore = _controller.hasMore.value;
-      final selectedFilters =
-          Map<String, String>.from(_controller.selectedFilters);
-      final currentFilters = _controller.currentFilters.toList();
-      final showFilters = _showFilters;
       final source = ApiConfig.instance.homeSourceBean.value;
 
       if (isLoading && videos.isEmpty) {
@@ -367,11 +718,10 @@ class _HomePageState extends State<HomePage> {
         onRefresh: () => _controller.refresh(),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final cardMinWidth = 120.0;
-            final crossAxisCount =
-                (constraints.maxWidth / (cardMinWidth + AppTheme.cardSpacing))
-                    .floor()
-                    .clamp(2, 6);
+            // 列数优先用「筛选 → 切换布局」里的用户选择（2/3/4），
+            // 没设过时才退回按宽度自适应的旧逻辑。
+            final userCols = PlayerPrefs.instance.gridColumns.value;
+            final crossAxisCount = userCols.clamp(2, 4);
             final cardWidth =
                 (constraints.maxWidth -
                         AppTheme.cardSpacing * (crossAxisCount - 1)) /
@@ -403,20 +753,15 @@ class _HomePageState extends State<HomePage> {
                       child: _buildCategoryTabBar(),
                     ),
                   ),
-                if (showFilters &&
-                    selectedSortId != null &&
-                    currentFilters.isNotEmpty)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppTheme.spacingLG,
-                        0,
-                        AppTheme.spacingLG,
-                        AppTheme.spacingSM,
-                      ),
-                      child: _buildFilterBar(),
-                    ),
-                  ),
+                // 内联筛选芯片行（截图样式）：「筛选 → 隐藏筛选」可关掉它
+                SliverToBoxAdapter(
+                  child: Obx(() {
+                    if (PlayerPrefs.instance.hideFilters.value) {
+                      return const SizedBox.shrink();
+                    }
+                    return _buildInlineFilters();
+                  }),
+                ),
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(
                     AppTheme.spacingXL,
@@ -600,7 +945,9 @@ class _HomePageState extends State<HomePage> {
         break;
 
       case 'toggleFilters':
+        // RFW 主题点了"筛选" → 直接打开底部筛选菜单（与右上筛选按钮一致）
         setState(() => _showFilters = !_showFilters);
+        _openFilterSheet();
         break;
 
       case 'showSourcePicker':
@@ -610,10 +957,18 @@ class _HomePageState extends State<HomePage> {
 
       case 'showCategoryPicker':
       case 'showFilterPicker':
+        // 主题里的「筛选」→ 打开三项菜单（分类屏蔽/隐藏筛选/切换布局）
+        _openOptionsMenu();
+        break;
+
       case 'showDisplayStylePicker':
+        // 主题里的「布局」→ 打开列数选择
+        _openLayoutSheet();
+        break;
+
       case 'showApiConfigPicker':
-        // 这些是 PeekPro 的高级选择器，本 App 暂无对应原生实现。
-        // 复用最接近的「换源」入口，避免主题按钮点了完全没反应。
+        // 暂时没有原生的接口配置选择器，复用「换源」入口，
+        // 避免主题按钮点了完全没反应。
         SourceSwitchSheet.show(context);
         break;
 
@@ -876,9 +1231,9 @@ class _BannerImage extends StatelessWidget {
     }
     return CachedNetworkImage(
       imageUrl: pic,
-      fit: BoxFit.cover,
-      // 横版裁切：海报中间偏上更好看
-      alignment: Alignment(0, -0.15),
+      // fill = 拉伸填满，**保证整张图都显示出来**（cover 会把海报两侧裁掉，
+      // 用户反馈"图片显示不全"）。允许变形，不允许裁切。
+      fit: BoxFit.fill,
       placeholder: (_, __) => ColoredBox(color: AppTheme.backgroundTertiary),
       errorWidget: (_, __, ___) => ColoredBox(
         color: AppTheme.backgroundTertiary,
@@ -947,29 +1302,38 @@ class _CategoryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 去掉胶囊背景卡片：分类名直接排版，只用「文字色 + 下划线」表达选中。
+    // 原来的 backgroundTertiary 胶囊在浅色模式下是一块灰底，且描边写死白色
+    // （Colors.white.withValues(...)）→ 切外观时看起来"没跟着变"。
     return Container(
-      alignment: Alignment.center,
-      height: 32,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      decoration: BoxDecoration(
-        color: selected
-            ? AppTheme.accentColor.withValues(alpha: 0.14)
-            : AppTheme.backgroundTertiary,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: selected
-              ? AppTheme.accentColor.withValues(alpha: 0.45)
-              : Colors.white.withValues(alpha: 0.06),
-          width: selected ? 1 : 0.5,
-        ),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: selected ? AppTheme.accentColor : AppTheme.textSecondary,
-          fontSize: AppTheme.fontSubhead,
-          fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-        ),
+      alignment: Alignment.bottomCenter,
+      height: 34,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: selected ? AppTheme.accentColor : AppTheme.textSecondary,
+              fontSize: AppTheme.fontSubhead,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+            ),
+          ),
+          const SizedBox(height: 4),
+          // 选中下划线（未选中占位，避免文字上下跳动）
+          AnimatedContainer(
+            duration: AppTheme.motionFast,
+            curve: AppTheme.motionCurve,
+            width: selected ? 18 : 0,
+            height: 2.5,
+            decoration: BoxDecoration(
+              color: AppTheme.accentColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1095,28 +1459,54 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
 
   @override
   Widget build(BuildContext context) {
-    // 展开宽度跟随屏幕，避免源名长/小屏溢出
+    // iOS 风格搜索控件：
+    // - 收起 = 圆形玻璃按钮；点击展开成胶囊输入框（宽度动画）
+    // - 底色/描边/文字色全部走 AppTheme，切外观自动跟随
+    //   （原描边写死 Colors.white.withValues(0.10)，浅色模式下几乎看不见边框）
     final maxW = MediaQuery.of(context).size.width;
     final expandedW = (maxW * 0.52).clamp(140.0, 220.0);
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
+      duration: AppTheme.motionBase,
+      curve: AppTheme.motionCurve,
       width: _expanded ? expandedW : 40,
       height: 36,
       decoration: BoxDecoration(
-        color: AppTheme.backgroundTertiary,
+        // 收起时用略深的玻璃底，展开时提亮一点，形成"进入输入态"的层次
+        color: _expanded
+            ? AppTheme.backgroundElevated
+            : AppTheme.backgroundTertiary,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+        border: Border.all(
+          color: _expanded
+              ? AppTheme.accentColor.withValues(alpha: 0.45)
+              : AppTheme.glassBorder,
+          width: _expanded ? 1 : 0.8,
+        ),
+        boxShadow: _expanded
+            ? [
+                BoxShadow(
+                  color: AppTheme.accentColor.withValues(alpha: 0.18),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
       ),
       child: _expanded
           ? Row(
               children: [
-                const SizedBox(width: 10),
+                const SizedBox(width: 12),
+                Icon(Icons.search,
+                    color: AppTheme.textTertiary, size: 15),
+                const SizedBox(width: 6),
                 Expanded(
                   child: TextField(
                     controller: _ctrl,
                     focusNode: _focus,
                     autofocus: true,
+                    cursorColor: AppTheme.accentColor,
+                    cursorWidth: 2,
+                    cursorRadius: const Radius.circular(1),
                     style: TextStyle(
                         color: AppTheme.textPrimary, fontSize: 13),
                     textInputAction: TextInputAction.search,

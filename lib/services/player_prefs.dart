@@ -44,6 +44,27 @@ class PlayerPrefs {
   /// 刮削版仅在已刮削出数据时生效，否则自动回退默认版。
   final scrapedDetailLayout = false.obs;
 
+  // ============================================================
+  // 首页列表外观（筛选菜单里的三项）
+  // ============================================================
+
+  /// 分类屏蔽：被屏蔽的分类名称（这些分类不出现在首页分类栏）
+  final blockedCategories = <String>[].obs;
+
+  /// 隐藏筛选：true 时首页分类栏下方的筛选行不显示
+  final hideFilters = false.obs;
+
+  /// 布局列数：2 / 3 / 4（首页网格每行卡片数）
+  final gridColumns = 3.obs;
+
+  /// 收藏页 / 历史页各自的列数（与首页独立，便于分别设置）
+  final favGridColumns = 4.obs;
+  final historyGridColumns = 4.obs;
+
+  /// 收藏页 / 历史页的搜索关键词（不持久化，仅会话内）
+  final favKeyword = ''.obs;
+  final historyKeyword = ''.obs;
+
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -85,6 +106,54 @@ class PlayerPrefs {
     fontScale.value =
         (fs >= 0.85 && fs <= 1.30) ? fs : 1.0;
     scrapedDetailLayout.value = prefs.getBool('detail_scraped_layout') ?? false;
+
+    // 首页列表外观
+    blockedCategories
+      ..clear()
+      ..addAll(prefs.getStringList('home_blocked_categories') ?? const []);
+    hideFilters.value = prefs.getBool('home_hide_filters') ?? false;
+    final cols = prefs.getInt('home_grid_columns') ?? 3;
+    gridColumns.value = (cols >= 2 && cols <= 4) ? cols : 3;
+    final fc = prefs.getInt('fav_grid_columns') ?? 4;
+    favGridColumns.value = (fc >= 2 && fc <= 6) ? fc : 4;
+    final hc = prefs.getInt('history_grid_columns') ?? 4;
+    historyGridColumns.value = (hc >= 2 && hc <= 6) ? hc : 4;
+  }
+
+  Future<void> setFavGridColumns(int n) async {
+    favGridColumns.value = n.clamp(2, 6);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('fav_grid_columns', favGridColumns.value);
+  }
+
+  Future<void> setHistoryGridColumns(int n) async {
+    historyGridColumns.value = n.clamp(2, 6);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('history_grid_columns', historyGridColumns.value);
+  }
+
+  /// 分类屏蔽：切换某个分类的屏蔽状态
+  Future<void> toggleBlockCategory(String name) async {
+    if (blockedCategories.contains(name)) {
+      blockedCategories.remove(name);
+    } else {
+      blockedCategories.add(name);
+    }
+    blockedCategories.refresh();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('home_blocked_categories', blockedCategories.toList());
+  }
+
+  Future<void> setHideFilters(bool v) async {
+    hideFilters.value = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('home_hide_filters', v);
+  }
+
+  Future<void> setGridColumns(int n) async {
+    gridColumns.value = n.clamp(2, 4);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('home_grid_columns', gridColumns.value);
   }
 
   Future<void> setEngine(PlayerEngine e) async {
