@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import '../services/app_log.dart';
+import '../services/tmdb_service.dart';
 import 'app_player.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart' show DragToMoveArea;
@@ -181,6 +182,24 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   double _danmuSpeed = 150;
   int _danmuTracks = 4;
   List<String> _danmuBlockWords = [];
+
+  // ---- 按类型屏蔽（滚动 / 顶部 / 底部）----
+  bool _danmuBlockScroll = false;
+  bool _danmuBlockTop = false;
+  bool _danmuBlockBottom = false;
+
+  /// 显示区域：弹幕可见高度占播放器的比例（0.25 / 0.5 / 0.75 / 1.0）
+  double _danmuAreaRatio = 1.0;
+
+  /// 同步视频速度：倍速播放时弹幕滚动速度同比缩放
+  bool _danmuSyncSpeed = false;
+
+  /// 片名兜底匹配的解析缓存：'片名|年份|集号' → episodeId。
+  ///
+  /// 静态（跨实例/跨集复用）：兜底链路要 3 次请求，而该服务有速率限制
+  /// （实测密集请求返回 429），逐集重跑会很快被限流。
+  static final Map<String, int> _danmuEpCache = {};
+
   late VideoFitType _videoFit;
   double _volume = 1.0;
   // 应用内亮度遮罩：1.0 = 不遮（系统亮度）。默认不要半黑。
@@ -664,6 +683,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _danmuTracks = (prefs.getInt('danmu_tracks') ?? 4).clamp(2, 8);
       _danmuBlockWords =
           prefs.getStringList('danmu_block_words') ?? const [];
+      // 按类型屏蔽 / 显示区域 / 同步视频速度
+      _danmuBlockScroll = prefs.getBool('danmu_block_scroll') ?? false;
+      _danmuBlockTop = prefs.getBool('danmu_block_top') ?? false;
+      _danmuBlockBottom = prefs.getBool('danmu_block_bottom') ?? false;
+      _danmuAreaRatio =
+          (prefs.getDouble('danmu_area_ratio') ?? 1.0).clamp(0.25, 1.0);
+      _danmuSyncSpeed = prefs.getBool('danmu_sync_speed') ?? false;
       if (mounted) setState(() {});
       if (_danmuApiUrl.isNotEmpty) {
         // 显式传 widget.url：此方法是异步的，回来时播放器可能已经 open 了
@@ -704,55 +730,178 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     // 地址为空时不要置位 _danmuLoaded，否则该播放会话弹幕永久卡死
     if (url.isEmpty) return;
     _danmuLoaded = true;
+
+    // 片名 / 集数：url 匹配失败时用于「按片名兜底匹配」
+    final title = (widget.videoTitle ?? '').trim();
+    final epName = (widget.currentEpisodeName ?? '').trim();
+    // url 命中不到时是否还值得用片名兜底（仅 http(s) 播放地址）
+    final titleFallbackUsable = title.isNotEmpty && url.startsWith('http');
+    final silentUrl = titleFallbackUsable ? '?format=json' : '&format=json';
+
+    final base = _danmuApiBase();
+    final api =
+        '$base/api/v2/comment?url=${Uri.encodeQueryComponent(url)}$silentUrl';
+    // 记录实际请求（含被匹配的视频地址）：该服务只支持 commentId / url，
+    // 「查不到弹幕」时唯一能核对的证据就是这条请求 URL。
+    AppLog.instance.log('[video_player] danmu request: $api');
+    var list = parseDanmuBody(await _danmuGetText(api));
+
+    // ---- 按片名兜底 ----
+    // 该弹幕服务的 url 匹配要求播放地址与库里索引的**标准平台地址**完全一致；
+    // spider 源给的多是 CDN 直链（带签名/会变），几乎必然 0 条。
+    // 服务同时提供 搜索→分集→弹幕 三步链路，此处作为兜底。
+    var danmuSource = 'url';
+    if (list.isEmpty && titleFallbackUsable) {
+      list = await _danmuFetchByTitle(base, title, epName, url);
+      if (list.isNotEmpty) danmuSource = 'title';
+    }
+
+    if (_danmuBlockWords.isNotEmpty) {
+      list = list
+          .where((d) => !_danmuBlockWords
+              .any((w) => w.isNotEmpty && d.text.contains(w)))
+          .toList();
+    }
+    AppLog.instance.log(
+        '[video_player] danmu loaded: ${list.length} 条 (source=$danmuSource, title=$title)');
+    // 代次校验：快速换集时丢弃过期响应，避免旧集弹幕盖到新集上
+    if (mounted && list.isNotEmpty && loadGen == _danmuLoadGen) {
+      setState(() => _danmus = list);
+    }
+  }
+
+  /// 取文本（弹幕接口专用；失败返回空串，不抛）
+  Future<String> _danmuGetText(String api) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 8);
     try {
-      final base = _danmuApiBase();
-      final api =
-          '$base/api/v2/comment?url=${Uri.encodeQueryComponent(url)}&format=json';
-      // 无条件记录实际请求（含被匹配的视频地址）：
-      // 该弹幕服务只支持 commentId / url 两种匹配，没有按片名的搜索端点，
-      // 因此「查不到弹幕」时唯一能核对的证据就是这条请求 URL。
-      AppLog.instance.log('[video_player] danmu request: $api');
       final http = await client
           .getUrl(Uri.parse(api))
           .timeout(const Duration(seconds: 12));
       http.headers.set('User-Agent', 'NewTv/1.0');
-      final res =
-          await http.close().timeout(const Duration(seconds: 12));
-      if (res.statusCode == 200) {
-        final body = await res
-            .transform(utf8.decoder)
-            .join()
-            .timeout(const Duration(seconds: 12));
-        var list = parseDanmuBody(body);
-        if (_danmuBlockWords.isNotEmpty) {
-          list = list
-              .where((d) => !_danmuBlockWords
-                  .any((w) => w.isNotEmpty && d.text.contains(w)))
-              .toList();
-        }
-        // 诊断：弹幕"没自动加载"时，需要区分是接口没配、请求失败、
-        // 还是接口返回 0 条。之前失败路径完全静默，无从判断。
-        AppLog.instance.log(
-            '[video_player] danmu loaded: ${list.length} 条 (url=$url)');
-        // 代次校验：快速换集时丢弃过期响应，避免旧集弹幕盖到新集上
-        if (mounted && list.isNotEmpty && loadGen == _danmuLoadGen) {
-          setState(() => _danmus = list);
-        }
-      } else if (loadGen == _danmuLoadGen) {
-        AppLog.instance.log(
-            '[video_player] danmu HTTP ${res.statusCode} (api=$api)');
-        // 失败允许下次换集重试
-        _danmuLoaded = false;
+      final res = await http.close().timeout(const Duration(seconds: 12));
+      if (res.statusCode != 200) {
+        AppLog.instance.log('[video_player] danmu HTTP ${res.statusCode} ($api)');
+        return '';
       }
+      return await res
+          .transform(utf8.decoder)
+          .join()
+          .timeout(const Duration(seconds: 12));
     } catch (e) {
-      if (loadGen == _danmuLoadGen) {
-        _danmuLoaded = false;
-      }
+      AppLog.instance.log('[video_player] danmu request fail: $e');
+      return '';
     } finally {
       client.close(force: true);
     }
+  }
+
+  /// 片名 → 弹幕的兜底链路：搜索番剧 → 取分集 → 取弹幕。
+  ///
+  /// 解析结果按「片名|年份|集号」缓存（进程内），避免每一集都跑 3 次请求：
+  /// 该服务有速率限制，实测密集请求会返回 429。
+  Future<List<DanmuItem>> _danmuFetchByTitle(
+      String base, String title, String episodeName, String videoUrl) async {
+    // 片名清洗：优先复用 TMDB 的清洗规则（去「更新至N集/第N季/4K/中字」等噪音）
+    var clean = TmdbService.cleanTitle(title);
+    // 该服务搜索对「【】」等括号敏感，直接搜原始标题命中率反而更高
+    if (clean.isEmpty) clean = title;
+    // 年份用于缓存键隔离（同名不同年的剧不要互相串缓存）
+    final year = TmdbService.extractYear('', '');
+
+    final cacheKey =
+        '${clean.toLowerCase()}|${year ?? ''}|${widget.selectedEpisodeIndex}';
+    final cached = _danmuEpCache[cacheKey];
+    if (cached != null) {
+      AppLog.instance.log('[video_player] danmu title-fallback cache hit: $cacheKey');
+      return _danmuFetchComments(base, cached);
+    }
+
+    // ① 搜索番剧
+    final searchUrl = '$base/api/v2/search/anime'
+        '?keyword=${Uri.encodeQueryComponent(clean)}';
+    final searchBody = await _danmuGetText(searchUrl);
+    if (searchBody.isEmpty) return const [];
+    final animes = _danmuParseList(searchBody, 'animes');
+    if (animes.isEmpty) {
+      AppLog.instance.log('[video_player] danmu search 无结果: $clean');
+      return const [];
+    }
+
+    // 只在「首条标题包含片名」时才采用，避免搜到同名无关内容就贴弹幕
+    final firstName =
+        (animes.first['animeTitle'] ?? '').toString().trim();
+    if (firstName.isEmpty || !firstName.contains(clean)) {
+      AppLog.instance
+          .log('[video_player] danmu search 首条不匹配，放弃: "$firstName" !~ "$clean"');
+      return const [];
+    }
+    final animeId = animes.first['animeId'];
+    if (animeId == null) return const [];
+
+    // ② 取分集列表
+    final bgBody =
+        await _danmuGetText('$base/api/v2/bangumi/$animeId');
+    if (bgBody.isEmpty) return const [];
+    final bangumi = _danmuParseMap(bgBody, 'bangumi');
+    final episodes = (bangumi?['episodes'] as List?) ?? const [];
+    if (episodes.isEmpty) return const [];
+
+    // ③ 选集：优选用「当前集名」在分集标题里找，否则退回按集号顺序
+    int episodeId = 0;
+    if (episodeName.isNotEmpty) {
+      for (final e in episodes) {
+        if (e is! Map) continue;
+        final t = (e['episodeTitle'] ?? '').toString();
+        if (t.isNotEmpty && episodeName.contains(t)) {
+          episodeId = (e['episodeId'] as num?)?.toInt() ?? 0;
+          if (episodeId > 0) break;
+        }
+      }
+    }
+    if (episodeId == 0) {
+      final idx = widget.selectedEpisodeIndex
+          .clamp(0, episodes.length - 1);
+      final e = episodes[idx];
+      if (e is Map) episodeId = (e['episodeId'] as num?)?.toInt() ?? 0;
+    }
+    if (episodeId == 0) return const [];
+
+    _danmuEpCache[cacheKey] = episodeId;
+    AppLog.instance.log(
+        '[video_player] danmu title-fallback 命中: "$firstName" episodeId=$episodeId');
+    return _danmuFetchComments(base, episodeId);
+  }
+
+  /// 用 episodeId 取弹幕（兜底链路的最后一步）
+  Future<List<DanmuItem>> _danmuFetchComments(
+      String base, int episodeId) async {
+    final body = await _danmuGetText(
+        '$base/api/v2/comment/$episodeId?format=json&duration=true');
+    if (body.isEmpty) return const [];
+    return parseDanmuBody(body);
+  }
+
+  /// 解析 JSON 并取出指定 key 的数组（失败返回空）
+  List<dynamic> _danmuParseList(String body, String key) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded[key] is List) {
+        return decoded[key] as List;
+      }
+    } catch (_) {}
+    return const [];
+  }
+
+  /// 解析 JSON 并取出指定 key 的对象（失败返回 null）
+  Map<String, dynamic>? _danmuParseMap(String body, String key) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded[key] is Map) {
+        return Map<String, dynamic>.from(decoded[key] as Map);
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// 持久化弹幕开关
@@ -763,6 +912,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       await prefs.setDouble('danmu_opacity', _danmuOpacity);
       await prefs.setInt('danmu_tracks', _danmuTracks);
       await prefs.setDouble('danmu_speed', _danmuSpeed);
+      // 新增项
+      await prefs.setBool('danmu_block_scroll', _danmuBlockScroll);
+      await prefs.setBool('danmu_block_top', _danmuBlockTop);
+      await prefs.setBool('danmu_block_bottom', _danmuBlockBottom);
+      await prefs.setDouble('danmu_area_ratio', _danmuAreaRatio);
+      await prefs.setBool('danmu_sync_speed', _danmuSyncSpeed);
     } catch (e) {
       AppLog.instance.log('[video_player] persist danmu style: $e');
     }
@@ -1274,14 +1429,145 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   // 弹幕层
   // ============================================================
 
+  /// 「显示区域」滑条右侧文案
+  String _danmuAreaLabel(double r) {
+    if (r <= 0.26) return '1/4';
+    if (r <= 0.51) return '半屏';
+    if (r <= 0.76) return '3/4';
+    return '满屏';
+  }
+
+  /// 「弹幕速度」滑条右侧文案
+  String _danmuSpeedLabel(double v) {
+    if (v < 120) return '极慢';
+    if (v < 190) return '适中';
+    return '极快';
+  }
+
+  /// 按类型屏蔽的方形 chip（选中=屏蔽该类型，按钮变暗 + 斜杠）
+  Widget _danmuTypeChip({
+    required String label,
+    required IconData icon,
+    required bool blocked,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              height: 38,
+              decoration: BoxDecoration(
+                color: blocked
+                    ? Colors.white.withValues(alpha: 0.06)
+                    : Colors.white.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: blocked
+                      ? Colors.white.withValues(alpha: 0.10)
+                      : Colors.white.withValues(alpha: 0.28),
+                ),
+              ),
+              child: Center(
+                child: Icon(
+                  icon,
+                  size: 18,
+                  color: blocked
+                      ? Colors.white.withValues(alpha: 0.3)
+                      : Colors.white,
+                ),
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              label,
+              style: TextStyle(
+                color: blocked
+                    ? Colors.white.withValues(alpha: 0.35)
+                    : Colors.white.withValues(alpha: 0.85),
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 弹幕设置里的复选框行（点击文字也可切换）
+  Widget _danmuCheck({
+    required String label,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => onChanged(!value),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: Checkbox(
+              value: value,
+              activeColor: AppTheme.accentColor,
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.4)),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+              onChanged: (v) => onChanged(v ?? false),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.85),
+                fontSize: 12.5,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDanmuLayer() {
-    return DanmuLayer(
+    // 同步视频速度：倍速播放时弹幕滚动同比缩放，保持与画面节奏一致
+    final speed = _danmuSyncSpeed
+        ? (_danmuSpeed * _playbackSpeed).clamp(40.0, 480.0)
+        : _danmuSpeed;
+    final layer = DanmuLayer(
       danmus: _danmus,
       positionOf: () => _player.state.position,
       fontSize: _danmuFontSize,
       opacity: _danmuOpacity,
-      speed: _danmuSpeed,
+      speed: speed,
       trackCount: _danmuTracks,
+      blockScroll: _danmuBlockScroll,
+      blockTop: _danmuBlockTop,
+      blockBottom: _danmuBlockBottom,
+      areaRatio: _danmuAreaRatio,
+    );
+    // 显示区域：把弹幕层限制在顶部若干比例内（其余区域不显示弹幕）
+    if (_danmuAreaRatio >= 0.99) {
+      return Positioned.fill(child: IgnorePointer(child: layer));
+    }
+    return Positioned.fill(
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: FractionallySizedBox(
+          heightFactor: _danmuAreaRatio,
+          widthFactor: 1,
+          child: IgnorePointer(child: layer),
+        ),
+      ),
     );
   }
 
@@ -1607,17 +1893,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 onTap: () => _safeTap(_toggleAudioMode),
               ),
 
-            // 弹幕开关（设置里配置弹幕 API 后显示）
-            if (_danmuApiUrl.isNotEmpty)
-              _iconButton(
-                icon: _danmuOn ? Icons.subtitles : Icons.subtitles_off,
-                size: 20,
-                width: 36,
-                onTap: () => _safeTap(() async {
-                  setState(() => _danmuOn = !_danmuOn);
-                  await _persistDanmuOn();
-                }),
-              ),
+            // 弹幕开关（设置里配置弹幕 API 后显示）—— 参考图样式：弹字方块 + 绿勾
+            if (_danmuApiUrl.isNotEmpty) _danmuToggleButton(),
 
             // 画中画
             _iconButton(
@@ -2428,11 +2705,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            // ===== 弹幕设置（按参考图重排）=====
                             Row(
                               children: [
-                                const Expanded(
-                                  child: _SettingsRowLabel('弹幕'),
-                                ),
+                                const _SettingsRowLabel('弹幕'),
+                                const Spacer(),
                                 Switch(
                                   value: _danmuOn,
                                   activeColor: AppTheme.accentColor,
@@ -2446,20 +2723,84 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                               ],
                             ),
                             if (_danmuOn) ...[
-                              const SizedBox(height: 4),
-                              _DanmuSliderRow(
-                                label: '字号 ${_danmuFontSize.round()}',
-                                value: _danmuFontSize,
-                                min: 10,
-                                max: 28,
-                                onChanged: (v) {
-                                  refresh(() => _danmuFontSize = v);
-                                  _persistDanmuStyle();
-                                },
+                              // ---- 按类型屏蔽：滚动 / 顶部 / 底部 ----
+                              const SizedBox(height: 6),
+                              Text(
+                                '按类型屏蔽',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.6),
+                                  fontSize: 12,
+                                ),
                               ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  _danmuTypeChip(
+                                    label: '滚动',
+                                    icon: Icons.format_align_left,
+                                    blocked: _danmuBlockScroll,
+                                    onTap: () {
+                                      refresh(() =>
+                                          _danmuBlockScroll = !_danmuBlockScroll);
+                                      _persistDanmuStyle();
+                                    },
+                                  ),
+                                  const SizedBox(width: 10),
+                                  _danmuTypeChip(
+                                    label: '顶部',
+                                    icon: Icons.vertical_align_top,
+                                    blocked: _danmuBlockTop,
+                                    onTap: () {
+                                      refresh(() =>
+                                          _danmuBlockTop = !_danmuBlockTop);
+                                      _persistDanmuStyle();
+                                    },
+                                  ),
+                                  const SizedBox(width: 10),
+                                  _danmuTypeChip(
+                                    label: '底部',
+                                    icon: Icons.vertical_align_bottom,
+                                    blocked: _danmuBlockBottom,
+                                    onTap: () {
+                                      refresh(() =>
+                                          _danmuBlockBottom = !_danmuBlockBottom);
+                                      _persistDanmuStyle();
+                                    },
+                                  ),
+                                ],
+                              ),
+
+                              // ---- 两个行为开关 ----
+                              const SizedBox(height: 14),
+                              Row(
+                                children: [
+                                  _danmuCheck(
+                                    label: '防止弹幕重叠',
+                                    // 轨数 ≥4 视为开启：轨数越多越不容易重叠
+                                    value: _danmuTracks >= 4,
+                                    onChanged: (v) {
+                                      refresh(() => _danmuTracks = v ? 6 : 2);
+                                      _persistDanmuStyle();
+                                    },
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: _danmuCheck(
+                                      label: '同步视频速度',
+                                      value: _danmuSyncSpeed,
+                                      onChanged: (v) {
+                                        refresh(() => _danmuSyncSpeed = v);
+                                        _persistDanmuStyle();
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+
+                              // ---- 不透明度 ----
                               _DanmuSliderRow(
-                                label:
-                                    '透明度 ${(_danmuOpacity * 100).round()}%',
+                                label: '不透明度',
+                                valueText: '${(_danmuOpacity * 100).round()}%',
                                 value: _danmuOpacity,
                                 min: 0.2,
                                 max: 1,
@@ -2468,24 +2809,46 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                   _persistDanmuStyle();
                                 },
                               ),
+
+                              // ---- 显示区域（限制弹幕可见高度）----
                               _DanmuSliderRow(
-                                label: '密度 ${_danmuTracks} 轨',
-                                value: _danmuTracks.toDouble(),
-                                min: 2,
-                                max: 8,
-                                divisions: 6,
+                                label: '显示区域',
+                                valueText: _danmuAreaLabel(_danmuAreaRatio),
+                                value: _danmuAreaRatio,
+                                min: 0.25,
+                                max: 1.0,
+                                divisions: 3,
+                                ticks: const ['1/4', '半屏', '3/4', '满屏'],
                                 onChanged: (v) {
-                                  refresh(() => _danmuTracks = v.round());
+                                  refresh(() => _danmuAreaRatio = v);
                                   _persistDanmuStyle();
                                 },
                               ),
+
+                              // ---- 弹幕字号 ----
                               _DanmuSliderRow(
-                                label:
-                                    '速度 ${_danmuSpeed.round()} px/s',
+                                label: '弹幕字号',
+                                valueText: '${_danmuFontSize.round()}px',
+                                value: _danmuFontSize,
+                                min: 10,
+                                max: 28,
+                                divisions: 18,
+                                ticks: const ['小', '适中', '大'],
+                                onChanged: (v) {
+                                  refresh(() => _danmuFontSize = v);
+                                  _persistDanmuStyle();
+                                },
+                              ),
+
+                              // ---- 弹幕速度 ----
+                              _DanmuSliderRow(
+                                label: '弹幕速度',
+                                valueText: _danmuSpeedLabel(_danmuSpeed),
                                 value: _danmuSpeed,
                                 min: 80,
                                 max: 240,
                                 divisions: 16,
+                                ticks: const ['极慢', '适中', '极快'],
                                 onChanged: (v) {
                                   refresh(() => _danmuSpeed = v);
                                   _persistDanmuStyle();
@@ -2892,6 +3255,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     double width = 38,
     double height = 38,
     required VoidCallback onTap,
+    Widget? child,
   }) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -2901,8 +3265,74 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         width: width < 38 ? 38 : width,
         height: 38,
         child: Center(
-          child: Icon(icon, color: Colors.white, size: size),
+          child: child ?? Icon(icon, color: Colors.white, size: size),
         ),
+      ),
+    );
+  }
+
+  /// 顶栏弹幕开关 —— 参考图样式：
+  /// 圆角方块内一个「弹」字，开启时右下角带绿色对勾角标。
+  /// 关闭时整体变暗（不再用字幕图标，避免与系统字幕混淆）。
+  Widget _danmuToggleButton() {
+    final on = _danmuOn;
+    return _iconButton(
+      icon: Icons.subtitles,
+      size: 20,
+      width: 38,
+      onTap: () => _safeTap(() async {
+        setState(() => _danmuOn = !_danmuOn);
+        await _persistDanmuOn();
+      }),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: on
+                  ? Colors.white.withValues(alpha: 0.16)
+                  : Colors.white.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(7),
+              border: Border.all(
+                color: on
+                    ? Colors.white.withValues(alpha: 0.45)
+                    : Colors.white.withValues(alpha: 0.18),
+              ),
+            ),
+            child: Center(
+              child: Text(
+                '弹',
+                style: TextStyle(
+                  color: on
+                      ? Colors.white
+                      : Colors.white.withValues(alpha: 0.35),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  height: 1.0,
+                ),
+              ),
+            ),
+          ),
+          // 开启角标：绿色对勾
+          if (on)
+            Positioned(
+              right: -3,
+              bottom: -3,
+              child: Container(
+                width: 13,
+                height: 13,
+                decoration: BoxDecoration(
+                  color: AppTheme.accentColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.black54, width: 1),
+                ),
+                child: const Icon(Icons.check,
+                    size: 9, color: Colors.white),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -2925,6 +3355,12 @@ class _DanmuSliderRow extends StatelessWidget {
   final int? divisions;
   final ValueChanged<double> onChanged;
 
+  /// 右侧数值文案（如 "100%" / "25px" / "适中"）。空则只显示左标签。
+  final String? valueText;
+
+  /// 滑条下方的刻度标注（如 ['1/4','半屏','3/4','满屏']），均匀分布。
+  final List<String>? ticks;
+
   const _DanmuSliderRow({
     required this.label,
     required this.value,
@@ -2932,6 +3368,8 @@ class _DanmuSliderRow extends StatelessWidget {
     required this.max,
     this.divisions,
     required this.onChanged,
+    this.valueText,
+    this.ticks,
   });
 
   @override
@@ -2939,16 +3377,57 @@ class _DanmuSliderRow extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SizedBox(height: 8),
-        _SettingsRowLabel(label),
-        Slider(
-          value: value.clamp(min, max),
-          min: min,
-          max: max,
-          divisions: divisions,
-          activeColor: AppTheme.accentColor,
-          onChanged: onChanged,
+        const SizedBox(height: 10),
+        // 左标签 + 右数值（对齐参考图：不透明度 …… 100%）
+        Row(
+          children: [
+            _SettingsRowLabel(label),
+            const Spacer(),
+            if (valueText != null && valueText!.isNotEmpty)
+              Text(
+                valueText!,
+                style: TextStyle(
+                  color: AppTheme.accentColor,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+          ],
         ),
+        const SizedBox(height: 2),
+        SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            trackHeight: 3,
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+          ),
+          child: Slider(
+            value: value.clamp(min, max),
+            min: min,
+            max: max,
+            divisions: divisions,
+            activeColor: AppTheme.accentColor,
+            inactiveColor: Colors.white.withValues(alpha: 0.14),
+            onChanged: onChanged,
+          ),
+        ),
+        // 刻度行：两端对齐，中间均匀分布
+        if (ticks != null && ticks!.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: ticks!
+                  .map((t) => Text(
+                        t,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.45),
+                          fontSize: 11,
+                        ),
+                      ))
+                  .toList(),
+            ),
+          ),
       ],
     );
   }

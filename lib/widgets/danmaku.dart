@@ -180,6 +180,16 @@ class DanmuLayer extends StatefulWidget {
   final double opacity;
   final double speed; // px/s
   final int trackCount;
+
+  /// 按类型屏蔽：分别屏蔽 滚动(1) / 顶部(4) / 底部(5)
+  final bool blockScroll;
+  final bool blockTop;
+  final bool blockBottom;
+
+  /// 显示区域：弹幕可用高度占整个播放器的比例（0.25 ~ 1.0）。
+  /// 由外层用 FractionallySizedBox 限制高度，这里只用于轨道数推算。
+  final double areaRatio;
+
   const DanmuLayer({
     super.key,
     required this.danmus,
@@ -188,6 +198,10 @@ class DanmuLayer extends StatefulWidget {
     this.opacity = 1,
     this.speed = 150,
     this.trackCount = 4,
+    this.blockScroll = false,
+    this.blockTop = false,
+    this.blockBottom = false,
+    this.areaRatio = 1.0,
   });
 
   @override
@@ -224,6 +238,19 @@ class DanmuLayerState extends State<DanmuLayer> {
   @override
   void didUpdateWidget(covariant DanmuLayer oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    // 「按类型屏蔽」变化 → 立刻按新过滤重建（清屏避免已上屏的类型残留）
+    final filtersChanged = oldWidget.blockScroll != widget.blockScroll ||
+        oldWidget.blockTop != widget.blockTop ||
+        oldWidget.blockBottom != widget.blockBottom;
+    if (filtersChanged) {
+      _sorted = _sortedOf(widget.danmus);
+      _active.clear();
+      _nextIndex = 0;
+      _lastPosSec = null;
+      return;
+    }
+
     // Episode / reload changed the list: rebuild index and clear screen.
     if (!identical(oldWidget.danmus, widget.danmus)) {
       final oldLen = _sorted.length;
@@ -242,9 +269,34 @@ class DanmuLayerState extends State<DanmuLayer> {
     }
   }
 
+  /// 按「类型屏蔽」过滤后再按时间排序。
+  ///
+  /// mode 语义：1 = 滚动，4 = 顶部固定，5 = 底部固定。
+  /// 三者可分别屏蔽；全屏蔽时返回空列表（渲染层自然什么都不显示）。
+  bool _modePasses(DanmuItem d) {
+    switch (d.mode) {
+      case 4:
+        return !widget.blockTop;
+      case 5:
+        return !widget.blockBottom;
+      case 1:
+      default:
+        return !widget.blockScroll;
+    }
+  }
+
   List<DanmuItem> _sortedOf(List<DanmuItem> source) {
-    return List<DanmuItem>.of(source)
-      ..sort((a, b) => a.time.compareTo(b.time));
+    return (List<DanmuItem>.of(source)..sort((a, b) => a.time.compareTo(b.time)))
+        .where(_modePasses)
+        .toList();
+  }
+
+  /// 显示区域越小，可用轨道数越少（避免弹幕挤在窄条里重叠）
+  int get _effectiveTrackCount {
+    final base = _trackCount;
+    if (widget.areaRatio >= 0.99) return base;
+    final scaled = (base * widget.areaRatio).floor();
+    return scaled.clamp(1, base);
   }
 
   void _onTick(Timer _) {
@@ -333,8 +385,10 @@ class DanmuLayerState extends State<DanmuLayer> {
   /// Same speed => relative gap stays constant, so we only check spawn time.
   int _pickTrack() {
     final w = _viewportWidth;
+    // 用 effective（受「显示区域」压缩），避免弹幕落到被裁掉的高度上
+    final tracks = _effectiveTrackCount;
     // Prefer an empty track.
-    for (var t = 0; t < _trackCount; t++) {
+    for (var t = 0; t < tracks; t++) {
       final busy = _active.any((a) => a.item.mode == 1 && a.track == t);
       if (!busy) return t;
     }
@@ -342,7 +396,7 @@ class DanmuLayerState extends State<DanmuLayer> {
     // (largest free span on the right).
     var best = 0;
     var bestRight = double.infinity;
-    for (var t = 0; t < _trackCount; t++) {
+    for (var t = 0; t < tracks; t++) {
       double? maxRight;
       for (final a in _active) {
         if (a.item.mode != 1 || a.track != t) continue;

@@ -155,13 +155,21 @@ class TmdbService extends GetxService {
   }
 
   Future<bool> enrich(VodInfo info, {bool forceNetwork = false}) async {
-    if (!configured) return false;
+    if (!configured) {
+      AppLog.instance.log('[TmdbService] enrich 跳过: 未配置 API Key');
+      return false;
+    }
     isWorking.value = true;
     try {
       final title = cleanTitle(info.name);
-      if (title.isEmpty) return false;
+      if (title.isEmpty) {
+        AppLog.instance.log('[TmdbService] enrich 失败: 清洗后片名为空 (原始="${info.name}")');
+        return false;
+      }
       final year = extractYear(info.note, info.year);
       final ck = cacheKey(info.name, year?.toString() ?? '');
+      AppLog.instance.log(
+          '[TmdbService] enrich 开始: 片名="$title" 年份=${year ?? "无"} cacheKey=$ck');
 
       // 磁盘缓存：详情刮削 30 天
       final cached = forceNetwork
@@ -173,19 +181,35 @@ class TmdbService extends GetxService {
       if (cached != null && cached.isNotEmpty) {
         final type = cached['__type'] as String? ?? 'movie';
         _apply(info, type, cached);
+        AppLog.instance.log('[TmdbService] enrich 命中磁盘缓存 (type=$type)');
         return true;
       }
 
       final movie = await _searchBest(mediaType: 'movie', query: title, year: year);
       final tv = await _searchBest(mediaType: 'tv', query: title, year: year);
+      AppLog.instance.log(
+          '[TmdbService] 搜索: movie=${movie == null ? "无" : movie['title'] ?? movie['name']} '
+          'tv=${tv == null ? "无" : tv['title'] ?? tv['name']}');
 
       // 简单择优：有年份匹配加分，标题更长更像
       final best = _pickBetter(movie, tv, title, year);
-      if (best == null) return false;
+      if (best == null) {
+        AppLog.instance.log(
+            '[TmdbService] enrich 失败: movie/tv 均无搜索结果（片名="$title" 年份=${year ?? "无"}）');
+        return false;
+      }
 
       final detail = await _fetchDetail(best.$1, best.$2);
-      if (detail == null) return false;
+      if (detail == null) {
+        AppLog.instance.log(
+            '[TmdbService] enrich 失败: 详情接口无响应 (type=${best.$1} id=${best.$2})');
+        return false;
+      }
       _apply(info, best.$1, detail);
+      AppLog.instance.log(
+          '[TmdbService] enrich 成功: type=${best.$1} id=${best.$2} '
+          'rating=${info.rating} runtime=${info.runtime} '
+          'cast=${info.castList.length} similar=${info.similarList.length}');
       try {
         await CacheStore.instance.setJsonCache('tmdb:$ck', {
           ...detail,
@@ -194,7 +218,7 @@ class TmdbService extends GetxService {
       } catch (_) {}
       return true;
     } catch (e) {
-      AppLog.instance.log('[TmdbService] enrich 失败: $e');
+      AppLog.instance.log('[TmdbService] enrich 异常: $e');
       return false;
     } finally {
       isWorking.value = false;
