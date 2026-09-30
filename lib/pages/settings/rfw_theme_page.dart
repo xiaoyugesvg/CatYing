@@ -5,6 +5,7 @@ import 'package:get/get.dart';
 import '../../common/theme.dart';
 import '../../services/rfw_theme_service.dart';
 import '../../widgets/common_widgets.dart';
+import 'rfw_theme_editor_page.dart';
 
 /// 首页主题管理页（RFW 自定义首页）
 ///
@@ -60,28 +61,71 @@ class _RfwThemePageState extends State<RfwThemePage> {
               ),
             ),
 
-            // ---------- 导入 ----------
+            // 开关开着但没选主题 —— 这时首页不会变，必须明确告知，
+            // 否则用户导入完会以为"主题没生效"。
+            if (svc.enabled.value && svc.currentThemeId.value.isEmpty)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppTheme.accentColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline,
+                        size: 16, color: AppTheme.accentColor),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '已开启，但还没选择主题 —— 请先导入或选择一个主题，首页才会变化',
+                        style: TextStyle(
+                            color: AppTheme.accentColor,
+                            fontSize: 11.5,
+                            height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            // ---------- 导入 / 编辑 ----------
             const SectionHeader(title: '导入主题'),
             AppCard(
               child: Column(
                 children: [
                   OutlinedButton.icon(
-                    onPressed: _importFromClipboard,
-                    icon: const Icon(Icons.content_paste_go, size: 18),
-                    label: const Text('从剪贴板导入 .rfwtxt'),
+                    onPressed: _openEditor,
+                    icon: const Icon(Icons.edit_note, size: 20),
+                    label: const Text('编辑 / 粘贴主题内容'),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppTheme.accentColor,
                       side: BorderSide(
                           color: AppTheme.accentColor.withValues(alpha: 0.5)),
-                      minimumSize: const Size.fromHeight(44),
+                      minimumSize: const Size.fromHeight(46),
                       shape: RoundedRectangleBorder(
                           borderRadius:
                               BorderRadius.circular(AppTheme.radiusMD)),
                     ),
                   ),
                   const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton.icon(
+                          onPressed: _importFromClipboard,
+                          icon: const Icon(Icons.content_paste_go, size: 18),
+                          label: const Text('直接从剪贴板导入',
+                              style: TextStyle(fontSize: 13)),
+                          style: TextButton.styleFrom(
+                              foregroundColor: AppTheme.textSecondary),
+                        ),
+                      ),
+                    ],
+                  ),
                   Text(
-                    '把主题文本复制到剪贴板后点这里；导入前会自动做语法检查',
+                    '打开编辑器可粘贴或手改主题文本，保存前会自动做语法检查',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                         color: AppTheme.textTertiary,
                         fontSize: AppTheme.fontCaption),
@@ -205,13 +249,32 @@ class _RfwThemePageState extends State<RfwThemePage> {
               duration: const Duration(milliseconds: 1200)),
         );
       },
-      trailing: IconButton(
-        onPressed: () => _confirmDelete(t),
-        icon: const Icon(Icons.delete_outline,
-            size: 20, color: Colors.redAccent),
-        tooltip: '删除',
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            onPressed: () => _openEditor(editing: t),
+            icon: Icon(Icons.edit_outlined,
+                size: 19, color: AppTheme.textSecondary),
+            tooltip: '编辑',
+          ),
+          IconButton(
+            onPressed: () => _confirmDelete(t),
+            icon: const Icon(Icons.delete_outline,
+                size: 19, color: Colors.redAccent),
+            tooltip: '删除',
+          ),
+        ],
       ),
     );
+  }
+
+  Future<void> _openEditor({RfwTheme? editing}) async {
+    final saved = await Get.to<bool>(
+      () => RfwThemeEditorPage(editing: editing),
+    );
+    if (!mounted) return;
+    if (saved == true) setState(() {});
   }
 
   Future<void> _importFromClipboard() async {
@@ -229,10 +292,12 @@ class _RfwThemePageState extends State<RfwThemePage> {
         setState(() {});
         _toast('导入失败：语法检查未通过');
       } else {
+        // 导入即选中 + 打开总开关，一步到位；否则用户以为"没生效"
         await _svc.setCurrent(id);
+        await _svc.setEnabled(true);
         if (!mounted) return;
         setState(() {});
-        _toast('导入成功');
+        _toast('导入成功并已启用，回首页即可看到效果');
       }
     } catch (e) {
       _toast('导入异常：$e');
