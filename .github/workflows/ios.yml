@@ -323,23 +323,10 @@ jobs:
           echo "✅ IPA created: $IPA_NAME"
           echo "IPA_SIZE=$(du -h build/ipa/${IPA_NAME} | cut -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: Publish IPA to GitHub Release
-        # ⚠️ 不再上传 Actions artifact：免费账户存储配额满会整轮失败，
-        # 且配额检查有 6-12h 延迟（删除也不立即恢复）。
-        # 改为发布 GitHub Release（Release 存储不占 artifact 配额）：
-        # 固定 tag「latest」每次覆盖，保证永远可下载最新 IPA。
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -e
-          IPA=$(ls build/ipa/*.ipa | head -1)
-          echo "=== Publishing $IPA ==="
-          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
-          NOTES="commit \`${{ github.sha }}\` · 自动构建 · $(date -u +%Y-%m-%d\ %H:%M)"
-          if gh release view latest >/dev/null 2>&1; then
-            gh release upload latest "$IPA" --clobber
-            gh release edit latest --title "Latest build ($SHORT_SHA)" --notes "$NOTES"
-          else
-            gh release create latest "$IPA" --title "Latest build ($SHORT_SHA)" --notes "$NOTES"
-          fi
-          echo "✅ Released: latest ($SHORT_SHA)"
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tvbox-ios-trollstore
+          path: build/ipa/*.ipa
+          retention-days: 30
+          if-no-files-found: error
