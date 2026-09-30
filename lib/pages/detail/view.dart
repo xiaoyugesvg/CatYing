@@ -539,18 +539,17 @@ class _DetailPageState extends State<DetailPage> {
             ),
           Scaffold(
             backgroundColor: Colors.transparent,
-            extendBodyBehindAppBar: !immersive,
-            appBar: immersive
-                ? null
-                : AppBar(
-                    // 返回在播放器顶栏（与功能键同一行），这里不再放第二个返回
-                    automaticallyImplyLeading: false,
-                    leading: const SizedBox.shrink(),
-                    backgroundColor: Colors.transparent,
-                    elevation: 0,
-                    surfaceTintColor: Colors.transparent,
-                    flexibleSpace: const SizedBox.shrink(),
-                  ),
+            // ⚠️ 这里**不能**再放 AppBar（哪怕是空的、透明的）。
+            //
+            // 原实现有一个 backgroundColor: transparent + leading: SizedBox.shrink()
+            // 的"空 AppBar"，配 extendBodyBehindAppBar: true。它看似无害，实则
+            // **仍有真实高度（toolbar 56 + 状态栏 insets ≈ 100px）且位于 body 之上**，
+            // 于是把播放器顶栏整条盖住、吞掉所有点击 ——
+            // 表现为「竖屏点顶栏按钮（听剧/弹幕/画中画/投屏/更多）全部无反应，
+            // 横屏正常」（横屏走 immersive 分支，appBar 为 null，所以没事）。
+            //
+            // 顶栏返回键由播放器自己的 _buildHeaderBar 提供，状态栏高度也由
+            // _buildBody 内的 SizedBox 自行预留，所以这个 AppBar 本就多余。
             body: immersive
                 // 全屏/沉浸: 视频黑底, 不需要背景层
                 ? Container(

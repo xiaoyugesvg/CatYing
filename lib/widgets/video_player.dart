@@ -823,6 +823,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       return;
     }
     if (_isLocked) return;
+    // 诊断用：与 _safeTap 的日志对照，可区分「点击落到视频层」还是「落到按钮」
+    AppLog.instance.log(
+        '[video_player] toggleControls show=${!_showControls} locked=$_isLocked');
     setState(() => _showControls = !_showControls);
     if (_showControls) _scheduleHideControls();
   }
@@ -1540,7 +1543,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   /// 顶栏按钮统一入口：避免 AVPlayer 路径异常把点击吞掉
+  ///
+  /// 注意这里的诊断日志：顶栏按钮"点了没反应"时，需要区分两种可能——
+  /// (a) 触摸根本没到达按钮（层级/命中测试被挡）
+  /// (b) 触摸到了但 action 内部异常被吞
+  /// 日志出现说明是 (b)；日志不出现说明是 (a)，那就要查命中测试。
   void _safeTap(FutureOr<void> Function() action) {
+    AppLog.instance.log('[video_player] safeTap invoked');
     _scheduleHideControls();
     Future<void>(() async {
       try {
