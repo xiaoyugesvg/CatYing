@@ -496,13 +496,36 @@ class _RecommendBannerState extends State<_RecommendBanner> {
     super.initState();
     _autoTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!mounted || widget.videos.isEmpty || !_pageCtrl.hasClients) return;
-      final next = (_index + 1) % widget.videos.length;
+      final len = widget.videos.length;
+      // 防御：_index 可能因列表变化越界，取模前先夹紧
+      final cur = _index.clamp(0, len - 1);
+      final next = (cur + 1) % len;
       _pageCtrl.animateToPage(
         next,
         duration: const Duration(milliseconds: 400),
         curve: Curves.easeOut,
       );
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant _RecommendBanner oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 切换源后 homeVideos 会整体替换（数量/顺序都可能变），而 State 被复用：
+    // _index 不重置就会越界（圆点全灭 + 自动轮播跳页），PageController 也可能
+    // 停在已不存在的位置。
+    //
+    // ⚠️ 只能比「长度 + 首条 id」，不能比对象 identity：父组件每次 rebuild 都
+    // 传新建的 List（sublist / List.from），用 identical 会每帧都重置回第一页。
+    final oldFirst = oldWidget.videos.isEmpty ? '' : oldWidget.videos.first.id;
+    final newFirst = widget.videos.isEmpty ? '' : widget.videos.first.id;
+    if (oldWidget.videos.length != widget.videos.length ||
+        oldFirst != newFirst) {
+      _index = 0;
+      if (_pageCtrl.hasClients) {
+        _pageCtrl.jumpToPage(0);
+      }
+    }
   }
 
   @override

@@ -11,6 +11,7 @@ import '../../services/api_config.dart';
 import '../../services/app_state.dart';
 import '../../services/nodejs_manager.dart';
 import '../../common/constants.dart';
+import '../../models/cache_store.dart';
 
 enum PendingMultiRepoTarget { vod }
 
@@ -242,13 +243,41 @@ class SettingsController extends GetxController {
       AppLog.instance.log('=== clearCache: app cache dir clear failed: $e ===');
     }
 
-    // 5) 给用户反馈 + 刷新显示
+    // 5) 业务缓存（Hive cache_items：首页分类列表 / 详情缓存 / TMDB 刮削结果）
+    //    之前漏了这一层 —— 它在 Documents 下，用户可见，且只写不读会持续占用。
+    try {
+      await CacheStore.instance.clearItemsCache();
+      AppLog.instance.log('=== clearCache: CacheStore.clearItemsCache OK ===');
+    } catch (e) {
+      AppLog.instance.log('=== clearCache: CacheStore.clearItemsCache failed: $e ===');
+    }
+
+    // 6) 给用户反馈 + 刷新显示
     Get.snackbar(
       '清除缓存',
-      '已清空图片 / 视频切片 / 临时文件',
+      '已清空图片 / 视频切片 / 临时文件 / 页面缓存',
       snackPosition: SnackPosition.BOTTOM,
       duration: const Duration(seconds: 2),
     );
+    await refreshCacheSize();
+  }
+
+  /// 只清「页面数据缓存」（首页列表 / 分类 / 清晰度 / TMDB 刮削结果）。
+  ///
+  /// 不动图片缓存与临时文件 —— 用户遇到「首页列表不更新 / 详情信息是旧的」
+  /// 时用它精准刷新，代价比「全部清除」小得多（图片不用重新下载）。
+  Future<void> clearBusinessCache() async {
+    try {
+      await CacheStore.instance.clearItemsCache();
+      Get.snackbar(
+        '刷新页面缓存',
+        '首页列表 / 详情 / 刮削结果已清空，重新进入即可获取最新',
+        snackPosition: SnackPosition.BOTTOM,
+        duration: const Duration(seconds: 2),
+      );
+    } catch (e) {
+      AppLog.instance.log('=== clearBusinessCache failed: $e ===');
+    }
     await refreshCacheSize();
   }
 
@@ -373,6 +402,13 @@ class SettingsController extends GetxController {
       total += await _dirSize(appCacheDir);
     } catch (e) {
       AppLog.instance.log('=== refreshCacheSize: app cache dir size failed: $e ===');
+    }
+
+    // 4) 业务缓存（Hive cache_items）—— 不在上面两个目录里，之前漏算
+    try {
+      total += CacheStore.instance.cacheItemsByteSize();
+    } catch (e) {
+      AppLog.instance.log('=== refreshCacheSize: hive cache size failed: $e ===');
     }
 
     cacheSizeString.value = _formatSize(bytes: total);

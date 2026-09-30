@@ -1,6 +1,7 @@
 import 'package:get/get.dart';
 import '../../services/app_log.dart';
 import '../../models/cache_store.dart';
+import '../../models/cache_ttl.dart';
 import '../../models/movie.dart';
 import '../../models/movie_sort.dart';
 import '../../services/api_config.dart';
@@ -50,7 +51,7 @@ class HomeController extends GetxController {
     final cacheKey = 'home_videos:${source.key}';
     var hasHomeCache = false;
     try {
-      final cached = CacheStore.instance.getJsonListCache(cacheKey, ttl: const Duration(hours: 12));
+      final cached = CacheStore.instance.getJsonListCache(cacheKey, ttl: CacheTtl.homeVideos);
       if (cached != null && cached.isNotEmpty) {
         homeVideos.value = cached
             .whereType<Map>()
@@ -73,10 +74,10 @@ class HomeController extends GetxController {
       sorts.value = result.$1;
       homeVideos.value = result.$2;
       if (result.$2.isNotEmpty) {
-        // 异步写缓存，不阻塞
+        // 异步写缓存，不阻塞（列表页不显示简介 → 用 toJsonLite 省 56% 体积）
         CacheStore.instance.setJsonCache(
           cacheKey,
-          result.$2.map((v) => v.toJson()).toList(),
+          result.$2.map((v) => v.toJsonLite()).toList(),
         );
       }
 
@@ -158,7 +159,7 @@ class HomeController extends GetxController {
       try {
         final cached = CacheStore.instance.getJsonListCache(
           cacheKey,
-          ttl: const Duration(hours: 6),
+          ttl: CacheTtl.categoryList,
         );
         if (cached != null && cached.isNotEmpty) {
           final list = cached
@@ -201,7 +202,7 @@ class HomeController extends GetxController {
         if (videoList.isNotEmpty) {
           CacheStore.instance.setJsonCache(
             cacheKey,
-            videoList.map((v) => v.toJson()).toList(),
+            videoList.map((v) => v.toJsonLite()).toList(),
           );
         }
       } else {
@@ -268,7 +269,7 @@ class HomeController extends GetxController {
       if (result.$2.isNotEmpty) {
         CacheStore.instance.setJsonCache(
           'home_videos:${source.key}',
-          result.$2.map((v) => v.toJson()).toList(),
+          result.$2.map((v) => v.toJsonLite()).toList(),
         );
       }
 

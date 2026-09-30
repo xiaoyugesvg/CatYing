@@ -116,6 +116,30 @@ class Video {
     };
   }
 
+  /// 列表缓存专用：不写 `vod_content`（简介）。
+  ///
+  /// 实测简介占单条 JSON 的 **56%**（30 条/页：含简介 24.5KB vs 不含 11KB）。
+  /// 首页轮播/分类列表**不显示简介**，13 个字段里唯一被砍的就是它；
+  /// `Video.fromJson` 对缺失字段有 `?? ''` 兜底，反序列化不受影响。
+  /// 只有真正需要简介的详情路径才用完整 [toJson]。
+  Map<String, dynamic> toJsonLite() {
+    return {
+      'vod_id': id,
+      'vod_name': name,
+      'vod_pic': pic,
+      'vod_remarks': note,
+      'vod_year': year,
+      'vod_area': area,
+      'type_name': type,
+      'vod_director': director,
+      'vod_actor': actor,
+      'sourceKey': sourceKey,
+      'type_id': tid,
+      'vod_time': last,
+      'vod_play_from': dt,
+    };
+  }
+
   /// 支持 String 或 Int 类型的字段解码
   static String _parseString(dynamic value) {
     if (value == null) return '';

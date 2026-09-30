@@ -12,6 +12,18 @@ import '../../services/player_prefs.dart';
 import '../../services/app_log.dart';
 import 'controller.dart';
 
+/// 「清除应用缓存」的两种粒度
+enum _ClearCacheAction {
+  /// 取消
+  cancel,
+
+  /// 仅清页面数据缓存（图片保留）
+  itemsOnly,
+
+  /// 全部清除（含图片与临时文件）
+  all,
+}
+
 /// 设置页 - 对应 Swift SettingsView
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -1035,9 +1047,13 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  /// 清除应用缓存前确认：分项说明清理范围，避免用户担心误清历史/收藏
+  /// 清除应用缓存前确认：分项说明清理范围，避免用户担心误清历史/收藏。
+  ///
+  /// 提供两个粒度：
+  /// - 仅清页面数据：清 list/category/quality/tmdb 缓存，保留图片（下次不必重下图）
+  /// - 全部清除：连图片缓存与临时文件一起清
   Future<void> _confirmClearCache() async {
-    final ok = await showDialog<bool>(
+    final action = await showDialog<_ClearCacheAction>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.backgroundSecondary,
@@ -1047,11 +1063,14 @@ class _SettingsPageState extends State<SettingsPage> {
         title: Text('清除应用缓存',
             style: TextStyle(color: AppTheme.textPrimary)),
         content: Text(
-          '将清除：\n'
+          '「仅清页面数据」：首页列表 / 详情 / 刮削结果（图片保留，最省事）\n\n'
+          '「全部清除」：\n'
           '· 图片缓存（内存 + 磁盘）\n'
           '· 视频切片与临时文件\n'
-          '· 应用缓存目录\n\n'
-          '不会清除：观看历史、收藏、源文件 JS、播放设置',
+          '· 应用缓存目录\n'
+          '· 页面缓存（首页列表 / 详情 / 刮削结果）\n\n'
+          '都不会清除：观看历史、收藏、源文件 JS、播放设置\n'
+          '清除后相关页面下次会重新联网获取',
           style: TextStyle(
             color: AppTheme.textSecondary,
             fontSize: AppTheme.fontSubhead,
@@ -1060,20 +1079,31 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
+            onPressed: () => Navigator.pop(ctx, _ClearCacheAction.cancel),
             child: Text('取消',
                 style: TextStyle(color: AppTheme.textTertiary)),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text('清除',
+            onPressed: () => Navigator.pop(ctx, _ClearCacheAction.itemsOnly),
+            child: Text('仅清页面数据',
+                style: TextStyle(color: AppTheme.accentColor)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, _ClearCacheAction.all),
+            child: Text('全部清除',
                 style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
     );
-    if (ok == true) {
-      await controller.clearCache();
+    switch (action) {
+      case _ClearCacheAction.itemsOnly:
+        await controller.clearBusinessCache();
+      case _ClearCacheAction.all:
+        await controller.clearCache();
+      case _ClearCacheAction.cancel:
+      case null:
+        break;
     }
   }
 

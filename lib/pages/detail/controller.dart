@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 import '../../models/movie.dart';
 import '../../models/vod_info.dart';
 import '../../models/cache_store.dart';
+import '../../models/cache_ttl.dart';
 import '../../services/api_config.dart';
 import '../../services/source_service.dart';
 import '../../services/spider_service.dart';
@@ -256,8 +257,6 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   void selectFlag(String flag) {
     if (selectedFlag.value == flag) return;
     final currentIndex = selectedEpisodeIndex.value;
-    // 记住切换前是否在播：切线路后按同一集续播，而不是停在死分支
-    final wasPlaying = isPlaying.value;
 
     isPlaying.value = false;
     playUrl.value = null;
@@ -282,8 +281,10 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     final episodeURL = episodes[targetIndex].url;
     updateQualityOptions(episodeURL, resetSelection: true);
 
-    if (!wasPlaying) return;
-
+    // ⚠️ 这里**不能**按「切换前是否在播」提前 return。
+    // 旧实现在暂停状态下切线路会直接返回：playUrl 停在 null → 播放区永远转圈，
+    // 15 秒后被超时兜底报成「播放地址获取超时」。而用户点另一条线路的语义就是
+    // 「换条线路播这一集」，所以与 selectEpisode 保持一致：解析到地址就开播。
     if (isSpiderSource) {
       _resolveSpiderPlayUrl(flag: flag, id: episodeURL);
     } else {
@@ -593,7 +594,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     try {
       final disk = CacheStore.instance.getJsonListCache(
         diskKey,
-        ttl: const Duration(days: 7),
+        ttl: CacheTtl.quality,
       );
       if (disk != null && disk.isNotEmpty) {
         final cached = disk

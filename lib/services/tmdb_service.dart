@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:get/get.dart';
 import 'app_log.dart';
 import '../models/cache_store.dart';
+import '../models/cache_ttl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/vod_info.dart';
@@ -167,7 +168,7 @@ class TmdbService extends GetxService {
           ? null
           : CacheStore.instance.getJsonCache(
               'tmdb:$ck',
-              ttl: const Duration(days: 30),
+              ttl: CacheTtl.tmdb,
             );
       if (cached != null && cached.isNotEmpty) {
         final type = cached['__type'] as String? ?? 'movie';

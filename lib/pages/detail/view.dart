@@ -16,6 +16,7 @@ import '../../services/spider_service.dart';
 import '../../widgets/vod_card.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import '../../models/cache_store.dart';
+import '../../models/cache_ttl.dart';
 import '../../services/background_service.dart';
 import '../../services/tmdb_service.dart';
 import '../../services/player_fullscreen_controller.dart';
@@ -190,7 +191,7 @@ class _DetailPageState extends State<DetailPage> {
     try {
       final cached = CacheStore.instance.getJsonCache(
         'tmdb:${TmdbService.cacheKey(info.name, '')}',
-        ttl: const Duration(days: 30),
+        ttl: CacheTtl.tmdb,
       );
       if (cached != null && cached.isNotEmpty) {
         forceNetwork = !cached.containsKey('similar');

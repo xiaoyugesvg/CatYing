@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:get/get.dart';
 import 'package:hive_ce/hive.dart';
 import '../services/app_log.dart';
+import 'cache_ttl.dart';
 import 'movie.dart';
 
 String makeVodBusinessKey(String vodId, String sourceKey) {
@@ -406,7 +407,13 @@ class CacheStore {
     await _deleteBoxItemsByVodKey(_recordsBox!, vodId, sourceKey);
   }
 
-  static const int _maxCacheItems = 200;
+  /// 业务缓存条目上限（LRU 淘汰）。
+  ///
+  /// 实测单条体积：分类列表 30 条/页约 24KB（去掉简介后约 11KB），
+  /// TMDB 详情响应（含 cast/similar）约 30~60KB。
+  /// 100 条 ≈ 1.1~6MB，已足够覆盖「首页 10 个分类 + 常用筛选组合」；
+  /// 原来 200 条在最坏情况下会到 10MB+，且这些内容都在 Documents 下（用户可见）。
+  static const int _maxCacheItems = 100;
 
   Future<void> setCacheItem(String key, String value) async {
     final box = _cacheItemsBox!;
@@ -443,7 +450,7 @@ class CacheStore {
   }
 
   /// 带 TTL 的缓存读取：过期返回 null
-  String? getCacheItemFresh(String key, {Duration ttl = const Duration(hours: 6)}) {
+  String? getCacheItemFresh(String key, {Duration ttl = CacheTtl.fallback}) {
     final items = _loadCacheItems();
     final item = items.firstWhereOrNull((item) => item.key == key);
     if (item == null) return null;
@@ -460,7 +467,7 @@ class CacheStore {
 
   Map<String, dynamic>? getJsonCache(
     String key, {
-    Duration ttl = const Duration(hours: 6),
+    Duration ttl = CacheTtl.fallback,
   }) {
     try {
       final raw = getCacheItemFresh(key, ttl: ttl);
@@ -476,7 +483,7 @@ class CacheStore {
 
   List<dynamic>? getJsonListCache(
     String key, {
-    Duration ttl = const Duration(hours: 6),
+    Duration ttl = CacheTtl.fallback,
   }) {
     try {
       final raw = getCacheItemFresh(key, ttl: ttl);
@@ -490,6 +497,44 @@ class CacheStore {
 
   Future<void> removeCacheItem(String key) async {
     await _cacheItemsBox!.delete(key);
+  }
+
+  /// 业务缓存（cache_items box）占用的近似字节数。
+  ///
+  /// 这些内容存在 Hive 文件里（含首页分类列表、详情缓存、TMDB 响应），
+  /// 之前「缓存大小」只统计了图片/临时目录，导致显示值明显偏小。
+  int cacheItemsByteSize() {
+    final box = _cacheItemsBox;
+    if (box == null) return 0;
+    var total = 0;
+    for (final k in box.keys) {
+      final raw = box.get(k);
+      if (raw is Map) {
+        final v = raw['value'];
+        if (v is String) total += v.length;
+      }
+    }
+    return total;
+  }
+
+  /// 业务缓存条目数（用于设置页展示「N 项」）
+  int cacheItemsCount() {
+    final box = _cacheItemsBox;
+    if (box == null) return 0;
+    return box.length;
+  }
+
+  /// 清空业务缓存：首页分类列表 / 详情缓存 / TMDB 刮削缓存。
+  ///
+  /// **不动**收藏（vod_collects）与观看历史（vod_records）—— 那两个是用户数据，
+  /// 有各自的清理入口。清空后相关页面下次会重新联网获取。
+  Future<void> clearItemsCache() async {
+    try {
+      await _cacheItemsBox?.clear();
+      AppLog.instance.log('[CacheStore] business cache cleared');
+    } catch (e) {
+      AppLog.instance.log('[CacheStore] clearItemsCache fail: $e');
+    }
   }
 
   List<CacheItem> _loadCacheItems() {
