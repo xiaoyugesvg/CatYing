@@ -250,19 +250,43 @@ const mgmtServer = createServer((req, res) => {
                     return;
                 }
                 // 路径白名单：仅允许 App 文档/临时目录下的源，禁止任意 require
+                //
+                // ⚠️ 原实现用 `process.env.HOME + '/Documents'`，依赖 HOME 恰好等于
+                // iOS 沙盒容器根。但 Swift 侧只 setenv 了 NODE_PATH，从未设置 HOME，
+                // 一旦 HOME 为空/为其他值（如 '/var/mobile'），拼出来就是
+                // '/Documents' 之类的无效路径 → 白名单不含真实 Documents →
+                // 所有源加载被 403 拒绝 → spider 端口永不出现 → 首页永久空白。
+                // 这里改为从 Dart 传入的 sourcePath 反推 Documents 根，确保它自身
+                // 一定被允许，不再依赖 HOME。
                 const path = require('path');
+                const resolved = path.resolve(sourcePath);
+                const home = process.env.HOME || '';
+                const appDocsRoot = resolved.includes(path.sep + 'Documents' + path.sep)
+                    ? resolved.substring(
+                          0,
+                          resolved.indexOf(path.sep + 'Documents' + path.sep) +
+                              (path.sep + 'Documents').length)
+                    : null;
                 const allowedRoots = [
-                    process.env.HOME + '/Documents',
-                    process.env.HOME + '/Library',
+                    home ? path.join(home, 'Documents') : null,
+                    home ? path.join(home, 'Library') : null,
                     process.env.TMPDIR || '/tmp',
                     process.cwd(),
+                    // 关键：Dart 提供的源目录自身及其 Documents 根
+                    resolved,
+                    appDocsRoot,
                 ].filter(Boolean).map((r) => path.resolve(r));
-                const resolved = path.resolve(sourcePath);
-                const okPath = allowedRoots.some((root) => resolved === root || resolved.startsWith(root + path.sep));
+                const okPath = allowedRoots.some(
+                    (root) => resolved === root || resolved.startsWith(root + path.sep));
                 if (!okPath) {
-                    console.error('loadPath rejected outside allowlist:', resolved);
+                    console.error('loadPath rejected outside allowlist:', resolved,
+                        'allowlist=', JSON.stringify(allowedRoots));
                     res.writeHead(403, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: 'path not allowed' }));
+                    res.end(JSON.stringify({
+                        error: 'path not allowed',
+                        resolved: resolved,
+                        allowedRoots: allowedRoots,
+                    }));
                     return;
                 }
 

@@ -496,10 +496,26 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
           contentType: 'application/json',
           sendTimeout: const Duration(seconds: 15),
           receiveTimeout: const Duration(seconds: 15),
+          // 关键：Dio 默认对 4xx/5xx 抛异常，会让下面的 statusCode>=400 分支
+          // 变成死代码，并且丢掉 Node 返回的错误详情（例如 403 白名单里的
+          // allowedRoots / resolved 路径）。这里放开校验，自己解析 body。
+          validateStatus: (_) => true,
         ),
       );
-      if (response.statusCode != null && response.statusCode! >= 400) {
-        return (false, '加载失败: HTTP ${response.statusCode}');
+      final code = response.statusCode ?? 0;
+      if (code >= 400) {
+        // 优先取 Node 返回的 error 字段，便于定位（如 'path not allowed'）
+        String detail = 'HTTP $code';
+        final data = response.data;
+        if (data is Map && data['error'] != null) {
+          detail = data['error'].toString();
+          if (data['resolved'] != null) {
+            detail = '$detail（路径: ${data['resolved']}）';
+          }
+        }
+        AppLog.instance
+            .log('[IOSNodeJS] /source/loadPath 失败: $code $detail');
+        return (false, '源加载被拒绝: $detail');
       }
       return (true, '源加载成功');
     } on DioException catch (e) {
