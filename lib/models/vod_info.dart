@@ -1,5 +1,94 @@
 import 'movie.dart';
 
+/// TMDB 演职人员条目（刮削增强：带头像与角色名）
+class VodCastMember {
+  /// 演员名
+  final String name;
+  /// 饰演角色（可为空）
+  final String character;
+  /// TMDB profile_path（不含域名，可为空）
+  final String profilePath;
+  /// TMDB 排序权重，越小越靠前
+  final int order;
+
+  const VodCastMember({
+    required this.name,
+    this.character = '',
+    this.profilePath = '',
+    this.order = 0,
+  });
+
+  bool get hasPhoto => profilePath.isNotEmpty;
+
+  /// 拼成完整头像 URL；无头像返回空串（UI 侧用首字母占位）
+  String get avatarUrl {
+    if (profilePath.isEmpty) return '';
+    if (profilePath.startsWith('http')) return profilePath;
+    return 'https://image.tmdb.org/t/p/w185$profilePath';
+  }
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'character': character,
+        'profilePath': profilePath,
+        'order': order,
+      };
+
+  factory VodCastMember.fromJson(Map<String, dynamic> json) => VodCastMember(
+        name: (json['name'] ?? '').toString(),
+        character: (json['character'] ?? '').toString(),
+        profilePath: (json['profilePath'] ?? '').toString(),
+        order: (json['order'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// TMDB 类似作品条目
+class VodSimilarItem {
+  final String id;
+  /// 'movie' | 'tv'
+  final String mediaType;
+  final String title;
+  final double voteAverage;
+  final String year;
+  /// TMDB poster_path（不含域名）
+  final String posterPath;
+
+  const VodSimilarItem({
+    required this.id,
+    this.mediaType = 'movie',
+    this.title = '',
+    this.voteAverage = 0,
+    this.year = '',
+    this.posterPath = '',
+  });
+
+  bool get hasRating => voteAverage > 0;
+
+  String get posterUrl {
+    if (posterPath.isEmpty) return '';
+    if (posterPath.startsWith('http')) return posterPath;
+    return 'https://image.tmdb.org/t/p/w342$posterPath';
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'mediaType': mediaType,
+        'title': title,
+        'voteAverage': voteAverage,
+        'year': year,
+        'posterPath': posterPath,
+      };
+
+  factory VodSimilarItem.fromJson(Map<String, dynamic> json) => VodSimilarItem(
+        id: (json['id'] ?? '').toString(),
+        mediaType: (json['mediaType'] ?? 'movie').toString(),
+        title: (json['title'] ?? '').toString(),
+        voteAverage: (json['voteAverage'] as num?)?.toDouble() ?? 0,
+        year: (json['year'] ?? '').toString(),
+        posterPath: (json['posterPath'] ?? '').toString(),
+      );
+}
+
 /// 视频详情模型 - 对应 Swift VodInfo
 class VodInfo {
   /// 视频唯一 ID
@@ -37,6 +126,22 @@ class VodInfo {
   /// 当前播放剧集索引
   int playIndex;
 
+  // ============================================================
+  // TMDB 刮削增强字段（未刮削时保持默认值，UI 侧按空判断隐藏）
+  // ============================================================
+
+  /// TMDB 评分（0 表示无）
+  double rating;
+
+  /// 片长（分钟，0 表示未知；剧集通常为单集时长或 0）
+  int runtime;
+
+  /// 演职人员（带头像与角色名），最多 20 条
+  List<VodCastMember> castList;
+
+  /// 类似作品（similar + recommendations 合并去重），最多 12 条
+  List<VodSimilarItem> similarList;
+
   VodInfo({
     required this.id,
     this.name = '',
@@ -53,6 +158,10 @@ class VodInfo {
     this.playUrlMap = const {},
     this.playFlag = '',
     this.playIndex = 0,
+    this.rating = 0,
+    this.runtime = 0,
+    this.castList = const [],
+    this.similarList = const [],
   });
 
   /// 当前线路下的剧集

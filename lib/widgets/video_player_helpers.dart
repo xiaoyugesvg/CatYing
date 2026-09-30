@@ -179,14 +179,12 @@ class _SettingsRowLabel extends StatelessWidget {
 
 /// 跳过片头/片尾时间编辑器
 class _SkipSecondsEditor extends StatefulWidget {
-  final String label;
   final int value;
   final ValueChanged<int> onChange;
   final List<int> presets;
   final int maxSeconds;
 
   const _SkipSecondsEditor({
-    required this.label,
     required this.value,
     required this.onChange,
     required this.presets,

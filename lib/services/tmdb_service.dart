@@ -13,11 +13,20 @@ class TmdbService extends GetxService {
 
   static const _keyApiKey = 'tmdb_api_key';
   static const _keyAuto = 'tmdb_auto_scrape';
+  static const _keyShowCast = 'tmdb_show_cast';
+  static const _keyShowSimilar = 'tmdb_show_similar';
   static const _base = 'https://api.themoviedb.org/3';
   static const _img = 'https://image.tmdb.org/t/p';
 
   final apiKey = ''.obs;
   final autoScrape = true.obs;
+
+  /// 详情页是否展示「演职人员」区（默认开）
+  final showCast = true.obs;
+
+  /// 详情页是否展示「类似作品」区（默认开）
+  final showSimilar = true.obs;
+
   final isWorking = false.obs;
 
   Dio? _dioInstance;
@@ -44,6 +53,8 @@ class TmdbService extends GetxService {
     final prefs = await SharedPreferences.getInstance();
     apiKey.value = (prefs.getString(_keyApiKey) ?? '').trim();
     autoScrape.value = prefs.getBool(_keyAuto) ?? true;
+    showCast.value = prefs.getBool(_keyShowCast) ?? true;
+    showSimilar.value = prefs.getBool(_keyShowSimilar) ?? true;
   }
 
   Future<void> saveApiKey(String key) async {
@@ -56,6 +67,18 @@ class TmdbService extends GetxService {
     autoScrape.value = v;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyAuto, v);
+  }
+
+  Future<void> setShowCast(bool v) async {
+    showCast.value = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyShowCast, v);
+  }
+
+  Future<void> setShowSimilar(bool v) async {
+    showSimilar.value = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyShowSimilar, v);
   }
 
   bool get configured => apiKey.value.isNotEmpty;
@@ -130,7 +153,7 @@ class TmdbService extends GetxService {
     }
   }
 
-  Future<bool> enrich(VodInfo info) async {
+  Future<bool> enrich(VodInfo info, {bool forceNetwork = false}) async {
     if (!configured) return false;
     isWorking.value = true;
     try {
@@ -140,10 +163,12 @@ class TmdbService extends GetxService {
       final ck = cacheKey(info.name, year?.toString() ?? '');
 
       // 磁盘缓存：详情刮削 30 天
-      final cached = CacheStore.instance.getJsonCache(
-        'tmdb:$ck',
-        ttl: const Duration(days: 30),
-      );
+      final cached = forceNetwork
+          ? null
+          : CacheStore.instance.getJsonCache(
+              'tmdb:$ck',
+              ttl: const Duration(days: 30),
+            );
       if (cached != null && cached.isNotEmpty) {
         final type = cached['__type'] as String? ?? 'movie';
         _apply(info, type, cached);
@@ -251,12 +276,45 @@ class TmdbService extends GetxService {
   Future<Map<String, dynamic>?> _fetchDetail(String type, String id) async {
     try {
       final res = await _dio.get('$_base/$type/$id', queryParameters: {
-        'append_to_response': 'credits',
+        // 演职员 + 类似作品/推荐 一次拿全，避免多轮请求
+        'append_to_response': 'credits,similar,recommendations',
       });
       return Map<String, dynamic>.from(res.data as Map);
     } catch (_) {
       return null;
     }
+  }
+
+  /// 解析 similar + recommendations（合并去重，按评分降序，最多 12 条）
+  List<VodSimilarItem> _parseSimilar(Map<String, dynamic> d) {
+    final seen = <String>{};
+    final out = <VodSimilarItem>[];
+    for (final key in const ['similar', 'recommendations']) {
+      final block = d[key];
+      if (block is! Map) continue;
+      final list = block['results'];
+      if (list is! List) continue;
+      for (final raw in list) {
+        if (raw is! Map) continue;
+        final id = (raw['id'] ?? '').toString();
+        if (id.isEmpty || !seen.add(id)) continue;
+        final mt = (raw['media_type'] ?? 'movie').toString();
+        final title = (raw['title'] ?? raw['name'] ?? '').toString().trim();
+        if (title.isEmpty) continue;
+        final date =
+            (raw['release_date'] ?? raw['first_air_date'] ?? '').toString();
+        out.add(VodSimilarItem(
+          id: id,
+          mediaType: mt,
+          title: title,
+          voteAverage: (raw['vote_average'] as num?)?.toDouble() ?? 0,
+          year: date.length >= 4 ? date.substring(0, 4) : '',
+          posterPath: (raw['poster_path'] ?? '').toString(),
+        ));
+      }
+    }
+    out.sort((a, b) => b.voteAverage.compareTo(a.voteAverage));
+    return out.take(12).toList();
   }
 
   void _apply(VodInfo info, String type, Map<String, dynamic> d) {
@@ -268,6 +326,22 @@ class TmdbService extends GetxService {
     if (overview.isNotEmpty) {
       info.des = overview;
     }
+    // 评分（独立字段，不再挤进 note）
+    final vote = (d['vote_average'] as num?)?.toDouble() ?? 0;
+    if (vote > 0) {
+      info.rating = vote;
+    }
+    // 时长：电影 runtime；剧集 episode_run_time 取首项
+    final runtime = (d['runtime'] as num?)?.toInt() ?? 0;
+    if (runtime > 0) {
+      info.runtime = runtime;
+    } else {
+      final ert = d['episode_run_time'];
+      if (ert is List && ert.isNotEmpty) {
+        final v = (ert.first as num?)?.toInt() ?? 0;
+        if (v > 0) info.runtime = v;
+      }
+    }
     final yearStr = (d['release_date'] ?? d['first_air_date'] ?? '').toString();
     if (yearStr.length >= 4) {
       info.year = yearStr.substring(0, 4);
@@ -278,6 +352,18 @@ class TmdbService extends GetxService {
     }
     final credits = d['credits'] as Map?;
     final cast = (credits?['cast'] as List?) ?? const [];
+    // 结构化演职人员（头像 + 角色名）——UI 的「演职人员」区用这份数据
+    if (cast.isNotEmpty) {
+      info.castList = cast.take(20).map((e) {
+        final m = e is Map ? e : const <String, dynamic>{};
+        return VodCastMember(
+          name: (m['name'] ?? '').toString(),
+          character: (m['character'] ?? '').toString(),
+          profilePath: (m['profile_path'] ?? '').toString(),
+          order: (m['order'] as num?)?.toInt() ?? 0,
+        );
+      }).where((c) => c.name.isNotEmpty).toList();
+    }
     if (cast.isNotEmpty) {
       info.actor =
           cast.take(6).map((e) => (e['name'] ?? '').toString()).join('、');
@@ -291,8 +377,13 @@ class TmdbService extends GetxService {
     if (directors.isNotEmpty) {
       info.director = directors.take(2).join('、');
     }
-    if ((info.note.isEmpty) && d['vote_average'] != null) {
-      info.note = 'TMDB ${(d['vote_average'] as num).toDouble().toStringAsFixed(1)} 分';
+    // 类似作品
+    final similar = _parseSimilar(d);
+    if (similar.isNotEmpty) {
+      info.similarList = similar;
+    }
+    if ((info.note.isEmpty) && vote > 0) {
+      info.note = 'TMDB ${vote.toStringAsFixed(1)} 分';
     }
   }
 

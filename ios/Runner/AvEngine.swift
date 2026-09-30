@@ -20,6 +20,20 @@ final class AvEngine: NSObject {
   private(set) var duration: Double = 0
   private(set) var position: Double = 0
 
+  /// 画面分辨率（来自 AVPlayerItem.presentationSize）。
+  /// 0 表示尚未就绪或纯音频流；Dart 侧用 0 判定「不显示分辨率」。
+  private(set) var videoWidth: Double = 0
+  private(set) var videoHeight: Double = 0
+
+  /// presentationSize 在 item ready 前后都可能有效，统一在轮询/事件里同步
+  private func syncPresentationSize(_ item: AVPlayerItem?) {
+    guard let size = item?.presentationSize, size.width > 0, size.height > 0 else {
+      return
+    }
+    videoWidth = Double(size.width)
+    videoHeight = Double(size.height)
+  }
+
   private override init() {
     super.init()
     playerLayer.player = player
@@ -30,6 +44,9 @@ final class AvEngine: NSObject {
     ) { [weak self] t in
       guard let self = self else { return }
       self.position = t.seconds
+      // 顺带同步分辨率：presentationSize 在 readyToPlay 之后才可靠，
+      // Dart 侧每秒轮询 getState，这里持续刷新即可拿到真实画面尺寸。
+      self.syncPresentationSize(self.player.currentItem)
       self.channel?.invokeMethod("onPosition", arguments: t.seconds)
     }
   }
@@ -85,6 +102,9 @@ final class AvEngine: NSObject {
           "position": self.position,
           "duration": self.duration,
           "buffering": false,
+          // Dart 侧 AppPlayerStateView.width/height → 播放信息面板的分辨率
+          "videoWidth": self.videoWidth,
+          "videoHeight": self.videoHeight,
         ])
       default:
         result(FlutterMethodNotImplemented)
@@ -109,6 +129,9 @@ final class AvEngine: NSObject {
     statusObserver = nil
 
     duration = 0
+    // 换源先清零分辨率，避免新源就绪前 Dart 侧仍显示上一个源的尺寸
+    videoWidth = 0
+    videoHeight = 0
     position = positionMs / 1000.0
     player.replaceCurrentItem(with: item)
     if positionMs > 0 {
@@ -127,6 +150,8 @@ final class AvEngine: NSObject {
           self.duration = d
           self.channel?.invokeMethod("onDuration", arguments: d)
         }
+        // ready 时 presentationSize 已可靠，立刻同步一次（不必等下一次轮询）
+        self.syncPresentationSize(it)
         self.channel?.invokeMethod("onReady", arguments: nil)
       } else if it.status == .failed {
         self.channel?.invokeMethod(

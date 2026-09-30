@@ -978,15 +978,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   }
 
   void _toggleLock() {
+    bool needSchedule = false;
     setState(() {
       _isLocked = !_isLocked;
       if (_isLocked) {
         _showControls = false;
       } else {
         _showControls = true;
-        _scheduleHideControls();
+        needSchedule = true;
       }
     });
+    // _scheduleHideControls 内部会直接写 _showControls，不能放在 setState 回调里
+    // （那等于在构建前做非幂等的状态写入 + 起 Timer，绕过框架的脏标记契约）。
+    if (needSchedule) _scheduleHideControls();
   }
 
   void _skipIntro() {
@@ -1032,6 +1036,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         _showForwardSeek = false;
         _showBackwardSeek = false;
         _gestureHorizontalHint = '';
+        // 归零累计快进/快退秒数：旧实现只加不减，连点 6 次 10 秒会显示
+        // 「快进60秒」而不是本次操作的 10 秒（提示消失即代表本次操作结束）。
+        _seekAccumulatedSeconds = 0;
       });
     });
   }
@@ -2560,7 +2567,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                             const _SettingsRowLabel('跳过片头'),
                             const SizedBox(height: 8),
                             _SkipSecondsEditor(
-                              label: '片头',
                               value: widget.skipIntroSeconds,
                               onChange: (v) =>
                                   widget.onSetSkipIntro?.call(v),
@@ -2571,7 +2577,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                             const _SettingsRowLabel('跳过片尾'),
                             const SizedBox(height: 8),
                             _SkipSecondsEditor(
-                              label: '片尾',
                               value: widget.skipOutroSeconds,
                               onChange: (v) =>
                                   widget.onSetSkipOutro?.call(v),
@@ -2724,22 +2729,24 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         : widget.url;
     if (playUrl.isEmpty) return;
 
-    bool supported;
-    try {
-      supported = await VideoPlayerPip.instance.isIosPipSupported();
-    } catch (_) {
-      supported = false;
-    }
-    if (!supported) return;
-
+    // ⚠️ 必须在任何 await **之前**上锁：
+    // 旧写法把 _autoPipInFlight = true 放在 await isIosPipSupported() 之后，
+    // iOS 退后台时 inactive→paused 会连投两次，两次都能穿过上面的检查 →
+    // 并发 enterIos() 覆盖 VideoPlayerPip 的单槽 _iosOnStarted，导致
+    // 「小窗弹出了但 _pipActive 丢失」。下面用 try/finally 保证任何返回路径都解锁。
     _autoPipInFlight = true;
-    final currentPos = _player.state.position;
-    // 单实例：进小窗不暂停，与手动 PiP 相同
-    if (!_player.isSharedIosAv) {
-      _autoPipInFlight = false;
-      return;
-    }
     try {
+      bool supported;
+      try {
+        supported = await VideoPlayerPip.instance.isIosPipSupported();
+      } catch (_) {
+        supported = false;
+      }
+      if (!supported) return;
+
+      final currentPos = _player.state.position;
+      // 单实例：进小窗不暂停，与手动 PiP 相同
+      if (!_player.isSharedIosAv) return;
       final entered = await VideoPlayerPip.instance.enterIos(
         url: playUrl,
         headers: widget.headers,

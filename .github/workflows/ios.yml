@@ -92,6 +92,12 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
+      - name: Static analysis (errors only)
+        # 只把 error 当失败：仓库既有 500+ 条 info 级 lint（风格），不应阻塞构建。
+        # 放在 Xcode 构建之前，几秒内就能拦住「类型错误」这类会浪费 25 分钟
+        # iOS 构建的问题（例：漏 import 'dart:async' 导致 Timer 未定义）。
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings lib
+
       - name: Build Node.js project (main.js)
         # 参考 D:\gz\tvbox-Swift-main 的 build-ios.sh
         # 编译 assets/nodejs-project/src/* → dist/main.js + dist/main.js.md5

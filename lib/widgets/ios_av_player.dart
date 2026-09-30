@@ -36,6 +36,7 @@ class IosAvPlayer extends AppPlayer {
     _ensureHandlerInstalled();
     // 抢占"活跃"身份：最近一次 open() 的实例才是共享播放器的当前主人
     _activeInstance = this;
+    _startSizePolling();
     platformViewBuilder = ({BoxFit fit = BoxFit.contain, double? aspectRatio}) {
       return IosAvPlayerView(
         player: this,
@@ -50,6 +51,44 @@ class IosAvPlayer extends AppPlayer {
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   bool _buffering = true;
+
+  /// 真实倍速/音量（0-100）。
+  ///
+  /// 旧实现让 `_IosState.rate` 恒返回 1.0、`volume` 恒返回 100，而
+  /// video_player.dart 的 initState 用它们初始化 UI 状态 → 每次重建（全屏切换/
+  /// 旋转/返回）都把界面上的倍速和音量重置，与原生 AVPlayer 的真实值发散
+  /// （界面显示 1X，实际仍在 2 倍速播）。这里保存真实值供 state 读取。
+  double _rate = 1.0;
+  double _volume = 100;
+
+  /// 真实画面分辨率（由原生 AVPlayerItem.presentationSize 回传）。
+  /// 0 表示未就绪/纯音频；video_player.dart 的播放信息面板据此显示。
+  double _videoWidth = 0;
+  double _videoHeight = 0;
+
+  /// 分辨率轮询：原生的 presentationSize 只在 ready 后才可靠，且 Dart 侧
+  /// 没有任何地方调 getState（播放器每秒定时器读的是 state.width/height），
+  /// 所以这里自己按秒拉一次，供 _IosState 读取。
+  Timer? _sizePoller;
+
+  void _startSizePolling() {
+    if (_sizePoller != null) return;
+    _sizePoller = Timer.periodic(const Duration(seconds: 1), (_) async {
+      if (!identical(_activeInstance, this)) return;
+      try {
+        final st = await _channel.invokeMethod<Map<dynamic, dynamic>>('getState');
+        if (st == null) return;
+        final w = (st['videoWidth'] as num?)?.toDouble() ?? 0;
+        final h = (st['videoHeight'] as num?)?.toDouble() ?? 0;
+        if (w > 0 && h > 0 && (w != _videoWidth || h != _videoHeight)) {
+          _videoWidth = w;
+          _videoHeight = h;
+        }
+      } catch (_) {
+        // 拉取失败不影响播放，下一轮再试
+      }
+    });
+  }
 
   Future<dynamic> _onNativeCall(MethodCall call) async {
     switch (call.method) {
@@ -130,17 +169,21 @@ class IosAvPlayer extends AppPlayer {
 
   @override
   Future<void> setRate(double rate) async {
+    _rate = rate;
     await _channel.invokeMethod('setRate', rate);
     stream.addRate(rate);
   }
 
   @override
   Future<void> setVolume(double v) async {
-    await _channel.invokeMethod('setVolume', v.clamp(0.0, 100.0) / 100.0);
+    _volume = v.clamp(0.0, 100.0);
+    await _channel.invokeMethod('setVolume', _volume / 100.0);
   }
 
   @override
   Future<void> dispose() async {
+    _sizePoller?.cancel();
+    _sizePoller = null;
     try {
       await _channel.invokeMethod('pause');
     } catch (_) {}
@@ -164,13 +207,13 @@ class _IosState extends AppPlayerStateView {
   @override
   Duration get duration => _p._duration;
   @override
-  double get rate => 1.0;
+  double get rate => _p._rate;
   @override
-  double get volume => 100;
+  double get volume => _p._volume;
   @override
-  double get width => 0;
+  double get width => _p._videoWidth;
   @override
-  double get height => 0;
+  double get height => _p._videoHeight;
   @override
   ({List<AppMedia> medias}) get playlist => (
         medias: [if (_p._url.isNotEmpty) AppMedia(_p._url)],

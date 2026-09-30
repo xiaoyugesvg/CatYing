@@ -384,6 +384,49 @@ class AppLog {
     ));
   }
 
+  /// 敏感 query 参数名（小写比较）。命中则值替换为 ***，避免凭据落盘。
+  ///
+  /// 背景：日志写在 `<Documents>/nodejs-project/runtime/`，iOS「文件」App 对
+  /// 用户可见；TMDB 等第三方 API 把 key 放在 query 上，按完整 URL 记录就会
+  /// 把凭据持久化到用户可读目录。
+  static const Set<String> _sensitiveQueryKeys = {
+    'api_key',
+    'apikey',
+    'token',
+    'access_token',
+    'auth',
+    'authorization',
+    'password',
+    'passwd',
+    'secret',
+    'sign',
+    'key',
+  };
+
+  /// 把 URL 里敏感 query 的值替换成 ***（保留参数名与其余部分，便于排查）
+  static String redactUrl(String url) {
+    final qIndex = url.indexOf('?');
+    if (qIndex <= 0) return url;
+    final base = url.substring(0, qIndex);
+    final query = url.substring(qIndex + 1);
+    if (query.isEmpty) return url;
+    try {
+      final parts = query.split('&').map((seg) {
+        final eq = seg.indexOf('=');
+        if (eq <= 0) return seg;
+        final name = seg.substring(0, eq);
+        if (_sensitiveQueryKeys.contains(name.toLowerCase())) {
+          return '$name=***';
+        }
+        return seg;
+      }).join('&');
+      return '$base?$parts';
+    } catch (_) {
+      // 解析异常时保守处理：丢掉 query，宁少记不泄漏
+      return base;
+    }
+  }
+
   /// 记录通用 HTTP 请求 (dio 内部用)
   ///
   /// URL 会先经 [redactUrl] 脱敏（api_key / token 等替换为 ***）再落盘。

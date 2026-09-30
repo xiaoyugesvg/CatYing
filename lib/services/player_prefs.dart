@@ -39,6 +39,11 @@ class PlayerPrefs {
   /// 全局界面字号缩放（0.85 ~ 1.30，1.0 = 标准）
   final fontScale = 1.0.obs;
 
+  /// 详情页样式：true = 刮削版（海报沉浸式，展示 TMDB 演职人员/类似作品），
+  /// false = 默认版（播放器置顶 + 简介/推荐/快搜 tab）。
+  /// 刮削版仅在已刮削出数据时生效，否则自动回退默认版。
+  final scrapedDetailLayout = false.obs;
+
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -79,6 +84,7 @@ class PlayerPrefs {
     final fs = prefs.getDouble('ui_font_scale') ?? 0;
     fontScale.value =
         (fs >= 0.85 && fs <= 1.30) ? fs : 1.0;
+    scrapedDetailLayout.value = prefs.getBool('detail_scraped_layout') ?? false;
   }
 
   Future<void> setEngine(PlayerEngine e) async {
@@ -103,6 +109,13 @@ class PlayerPrefs {
     avAutoNext.value = v;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('av_auto_next', v);
+  }
+
+  /// 切换详情页样式（默认 / 刮削版）
+  Future<void> setScrapedDetailLayout(bool v) async {
+    scrapedDetailLayout.value = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('detail_scraped_layout', v);
   }
 
   Future<void> setWebviewForceLandscape(bool v) async {

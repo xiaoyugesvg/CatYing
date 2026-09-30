@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -74,6 +76,8 @@ class _DetailPageState extends State<DetailPage> {
   Worker? _engineWorker;
   Worker? _decodeWorker;
   Worker? _bufferWorker;
+  /// 详情页样式开关（默认/刮削版）变化时重建，无需退出重进
+  Worker? _layoutWorker;
 
   /// MPV 选项变更时热更新当前实例
   void _applyMpvOptions() {
@@ -118,6 +122,14 @@ class _DetailPageState extends State<DetailPage> {
     _engineWorker = ever(PlayerPrefs.instance.vodEngine, (_) => _onEngineChanged());
     _decodeWorker = ever(PlayerPrefs.instance.decodeMode, (_) => _applyMpvOptions());
     _bufferWorker = ever(PlayerPrefs.instance.bufferMode, (_) => _applyMpvOptions());
+    // 设置页切换「详情页样式」后立即生效（Obx 里只读值不建立依赖，
+    // 不监听的话必须退出重进详情页才会换布局）
+    _layoutWorker = ever(
+      PlayerPrefs.instance.scrapedDetailLayout,
+      (_) {
+        if (mounted) setState(() {});
+      },
+    );
   }
 
   Future<void> _loadPrefs() async {
@@ -169,7 +181,23 @@ class _DetailPageState extends State<DetailPage> {
     if (!tmdb.configured || !tmdb.autoScrape.value) return;
     final info = _controller.vodInfo.value;
     if (info == null) return;
-    final ok = await tmdb.enrich(info);
+
+    // 旧版缓存（30 天内写入的）没有 similar/recommendations 字段 —— 直接读缓存
+    // 会让「类似作品」永远空着。先探一下缓存是否缺字段，缺则本次强制联网重取，
+    // 重新写入完整响应后就不会再走这条路（判定依据是 TMDB 是否返回过该键，
+    // 因此本身就无类似作品的条目也不会被反复请求）。
+    var forceNetwork = false;
+    try {
+      final cached = CacheStore.instance.getJsonCache(
+        'tmdb:${TmdbService.cacheKey(info.name, '')}',
+        ttl: const Duration(days: 30),
+      );
+      if (cached != null && cached.isNotEmpty) {
+        forceNetwork = !cached.containsKey('similar');
+      }
+    } catch (_) {}
+
+    final ok = await tmdb.enrich(info, forceNetwork: forceNetwork);
     if (ok && mounted) {
       setState(() {});
     }
@@ -360,6 +388,7 @@ class _DetailPageState extends State<DetailPage> {
     _engineWorker?.dispose();
     _decodeWorker?.dispose();
     _bufferWorker?.dispose();
+    _layoutWorker?.dispose();
     VideoPlayerPip.instance.activeNotifier.removeListener(_onPipChanged);
     WindowFullScreen.instance.activeNotifier.removeListener(_onFullScreenActiveChanged);
     // 退出页面时关闭 PiP，恢复窗口
@@ -668,6 +697,16 @@ class _DetailPageState extends State<DetailPage> {
         return _buildPlayerArea();
       }
 
+      // 刮削版详情页（设置页可切换）：海报沉浸式布局，展示 TMDB 演职人员与
+      // 类似作品。仅在已刮削出数据时启用，否则回退默认版，避免开开关后一片空白。
+      final scrapedReady = info.castList.isNotEmpty ||
+          info.similarList.isNotEmpty ||
+          info.rating > 0 ||
+          info.runtime > 0;
+      if (PlayerPrefs.instance.scrapedDetailLayout.value && scrapedReady) {
+        return _buildScrapedBody(info, isFull: isFull, isPip: isPip);
+      }
+
       // 悬浮导航栏占位高度: 滚动内容底部少量留白, 让最后一项
       // (选集/简介) 滚动到底时能完全滚出悬浮栏上方 (真悬浮, 非全局预留)
       final mediaPad = MediaQuery.of(context).padding;
@@ -707,6 +746,308 @@ class _DetailPageState extends State<DetailPage> {
         ),
       );
     });
+  }
+
+  // MARK: - 刮削版详情页布局
+
+  /// 刮削版详情页：海报沉浸式头图 + 标题/元数据/继续播放 + 操作按钮
+  /// + 播放器卡片 + 播放源/清晰度/合集 + 演职人员 + 类似作品。
+  ///
+  /// 与默认版是两套独立布局，由设置页「详情页样式」开关切换；
+  /// 未刮削出数据时 _buildBody 不会走到这里（自动回退默认版）。
+  Widget _buildScrapedBody(VodInfo info,
+      {required bool isFull, required bool isPip}) {
+    final mediaPad = MediaQuery.of(context).padding;
+    const navFloatGap = 8.0;
+    const navBarHeight = 51.0;
+    final navReserve =
+        mediaPad.bottom + navFloatGap + navBarHeight + 22.0;
+
+    final heroUrl = info.pic.trim();
+    final year = info.year.trim();
+    final typeName = info.typeName.trim();
+    final runtime = info.runtime;
+
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ===== 头图区：海报铺满 + 底部渐隐到页面背景 =====
+          SizedBox(
+            height: 340,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (heroUrl.isNotEmpty)
+                  CachedNetworkImage(
+                    imageUrl: heroUrl,
+                    fit: BoxFit.cover,
+                    memCacheWidth: 900,
+                    placeholder: (_, __) =>
+                        ColoredBox(color: AppTheme.backgroundSecondary),
+                    errorWidget: (_, __, ___) =>
+                        ColoredBox(color: AppTheme.backgroundSecondary),
+                  )
+                else
+                  ColoredBox(color: AppTheme.backgroundSecondary),
+                // 顶部压暗，保证返回按钮可见
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.55),
+                        Colors.black.withValues(alpha: 0.15),
+                        Colors.black.withValues(alpha: 0.75),
+                        AppTheme.backgroundPrimary.withValues(alpha: 0.98),
+                      ],
+                      stops: const [0.0, 0.30, 0.72, 1.0],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ===== 标题 + 元数据 + 继续播放（上移覆盖头图底部，形成融入感）=====
+          Transform.translate(
+            offset: const Offset(0, -26),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  info.name,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontTitle2,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: AppTheme.spacingSM),
+                // 元数据行：年份 · 类型 · 时长（能力范围内尽量还原参考图）
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: AppTheme.spacingSM,
+                  runSpacing: AppTheme.spacingXS,
+                  children: [
+                    if (year.isNotEmpty) MetadataPill(text: year),
+                    if (typeName.isNotEmpty) MetadataPill(text: typeName),
+                    if (runtime > 0) MetadataPill(text: '$runtime 分钟'),
+                    if (info.rating > 0)
+                      MetadataPill(text: 'TMDB ${info.rating.toStringAsFixed(1)}'),
+                  ],
+                ),
+                const SizedBox(height: AppTheme.spacingMD),
+                // 继续播放按钮
+                if (_controller.playUrl.value != null) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppTheme.spacingLG),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: AppTheme.backgroundSecondary,
+                        borderRadius:
+                            BorderRadius.circular(AppTheme.radiusMD),
+                      ),
+                      child: Padding(
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 12),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.play_arrow,
+                                color: AppTheme.textPrimary, size: 22),
+                            const SizedBox(width: 6),
+                            Text(
+                              '继续播放',
+                              style: TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontSize: AppTheme.fontSubhead,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.spacingMD),
+                ],
+                // 操作按钮行：重刮削 / 快搜 / 收藏 / 更多
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _scrapedActionButton(
+                      icon: Icons.search,
+                      label: '快搜',
+                      // 跳到全局搜索页（默认版里是「快搜」tab，刮削版没有 tab 栏）
+                      onTap: () => Get.toNamed('/search', arguments: info.name),
+                    ),
+                    const SizedBox(width: AppTheme.spacingXL),
+                    _scrapedActionButton(
+                      icon: Icons.auto_awesome,
+                      label: '刮削',
+                      onTap: _showTmdbPickDialog,
+                    ),
+                    const SizedBox(width: AppTheme.spacingXL),
+                    _scrapedFavoriteButton(info),
+                    const SizedBox(width: AppTheme.spacingXL),
+                    _scrapedActionButton(
+                      icon: Icons.more_horiz,
+                      label: '更多',
+                      onTap: _showScrapedMoreSheet,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // ===== 播放器卡片 =====
+          Padding(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppTheme.spacingLG),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+              child: _buildPlayerWidget(isFull: isFull, isPip: isPip),
+            ),
+          ),
+
+          // ===== 播放源 / 清晰度 / 合集 =====
+          _buildPlaybackCard(),
+
+          // ===== 演职人员 =====
+          _buildCastSection(info),
+
+          // ===== 类似作品 =====
+          _buildSimilarSection(info),
+
+          // ===== 简介 =====
+          if (info.des.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppTheme.spacingLG, AppTheme.spacingMD, AppTheme.spacingLG, 0),
+              child: AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SectionHeader(title: '简介', icon: Icons.notes),
+                    const SizedBox(height: AppTheme.spacingSM),
+                    Text(
+                      info.des,
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: AppTheme.fontCaption,
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          SizedBox(height: navReserve),
+        ],
+      ),
+    );
+  }
+
+  /// 刮削版圆形操作按钮（图标 + 文字）
+  Widget _scrapedActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: AppTheme.backgroundTertiary,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: AppTheme.textSecondary, size: 20),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: AppTheme.textTertiary,
+              fontSize: AppTheme.fontFootnote,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 刮削版收藏按钮（图标随收藏态变化）
+  Widget _scrapedFavoriteButton(VodInfo info) {
+    return Obx(() {
+      final isCollected =
+          CacheStore.instance.isCollected(info.id, info.sourceKey);
+      return _scrapedActionButton(
+        icon: isCollected ? Icons.favorite : Icons.favorite_border,
+        label: isCollected ? '已收藏' : '收藏',
+        onTap: () async {
+          if (isCollected) {
+            await CacheStore.instance.removeCollect(info.id, info.sourceKey);
+          } else {
+            await CacheStore.instance.addCollect(info.toVideo());
+          }
+        },
+      );
+    });
+  }
+
+  /// 刮削版「更多」：把默认版里的推荐/快搜入口收纳进底部弹窗
+  void _showScrapedMoreSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            ListTile(
+              leading: Icon(Icons.recommend_outlined,
+                  color: AppTheme.textSecondary),
+              title: Text('相似推荐',
+                  style: TextStyle(color: AppTheme.textPrimary)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _controller.loadRecommended();
+                _controller.detailTabIndex.value = 1;
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.tune,
+                  color: AppTheme.textSecondary),
+              title: Text('切换到默认详情页',
+                  style: TextStyle(color: AppTheme.textPrimary)),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await PlayerPrefs.instance.setScrapedDetailLayout(false);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   // MARK: - 播放器
@@ -968,6 +1309,8 @@ class _DetailPageState extends State<DetailPage> {
                   const SizedBox(height: AppTheme.spacingMD),
                   // 线路列表卡片只在简介 tab 出现（参考图）
                   _buildPlaybackCard(),
+                  // 演职人员 / 类似作品只在「刮削版详情页」展示
+                  // （设置 → 详情页样式），避免两套布局内容重复。
                 ],
               );
           }
@@ -1190,6 +1533,100 @@ class _DetailPageState extends State<DetailPage> {
         ],
       ),
     );
+  }
+
+  // MARK: - TMDB 刮削增强区（演职人员 / 类似作品）
+
+  /// 演职人员区：横向头像卡（头像 + 演员名 + 角色名）
+  ///
+  /// 数据来自 TMDB credits（含 profile_path / character），未刮削时 castList
+  /// 为空则整段隐藏，不影响原有布局。
+  Widget _buildCastSection(VodInfo info) {
+    if (info.castList.isEmpty) return const SizedBox.shrink();
+    final tmdb = TmdbService.instance;
+    return Obx(() {
+      if (!tmdb.showCast.value) return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(
+            AppTheme.spacingLG, AppTheme.spacingMD, 0, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(right: AppTheme.spacingLG),
+              child: const SectionHeader(
+                  title: '演职人员', icon: Icons.people_alt_outlined),
+            ),
+            const SizedBox(height: AppTheme.spacingSM),
+            SizedBox(
+              height: 148,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.only(right: AppTheme.spacingLG),
+                itemCount: info.castList.length,
+                separatorBuilder: (_, __) =>
+                    const SizedBox(width: AppTheme.spacingMD),
+                itemBuilder: (context, index) =>
+                    _CastMemberCard(member: info.castList[index]),
+              ),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
+  /// 类似作品区：横向海报卡（海报 + 评分角标 + 年份 + 片名）
+  ///
+  /// 点击后用当前源的 key + TMDB 片名跳详情（与「推荐」tab 同策略），
+  /// 由详情页在当前源里再搜一次 —— 只有能搜到的条目才真正可播。
+  Widget _buildSimilarSection(VodInfo info) {
+    if (info.similarList.isEmpty) return const SizedBox.shrink();
+    final tmdb = TmdbService.instance;
+    return Obx(() {
+      if (!tmdb.showSimilar.value) return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(
+            AppTheme.spacingLG, AppTheme.spacingMD, 0, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(right: AppTheme.spacingLG),
+              child: const SectionHeader(
+                  title: '类似作品', icon: Icons.local_movies_outlined),
+            ),
+            const SizedBox(height: AppTheme.spacingSM),
+            SizedBox(
+              height: 208,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.only(right: AppTheme.spacingLG),
+                itemCount: info.similarList.length,
+                separatorBuilder: (_, __) =>
+                    const SizedBox(width: AppTheme.spacingMD),
+                itemBuilder: (context, index) => _SimilarCard(
+                  item: info.similarList[index],
+                  onTap: () {
+                    final item = info.similarList[index];
+                    Get.toNamed(
+                      '/detail',
+                      arguments: Video(
+                        id: item.id,
+                        name: item.title,
+                        pic: item.posterUrl,
+                        year: item.year,
+                        sourceKey: info.sourceKey,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
   /// 推荐 tab - 同类型影片网格
@@ -1730,6 +2167,170 @@ class _PillChip extends StatelessWidget {
             fontSize: AppTheme.fontFootnote,
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 演职人员卡片（头像 + 演员名 + 角色名）
+class _CastMemberCard extends StatelessWidget {
+  final VodCastMember member;
+
+  const _CastMemberCard({required this.member});
+
+  @override
+  Widget build(BuildContext context) {
+    final url = member.avatarUrl;
+    return SizedBox(
+      width: 76,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          ClipOval(
+            child: SizedBox(
+              width: 68,
+              height: 68,
+              child: url.isEmpty
+                  ? _avatarPlaceholder()
+                  : CachedNetworkImage(
+                      imageUrl: url,
+                      fit: BoxFit.cover,
+                      memCacheWidth: 160,
+                      placeholder: (_, __) => _avatarPlaceholder(),
+                      errorWidget: (_, __, ___) => _avatarPlaceholder(),
+                    ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            member.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: AppTheme.fontCaption,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          if (member.character.isNotEmpty)
+            Text(
+              member.character,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontFootnote,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 无头像时的首字占位
+  Widget _avatarPlaceholder() {
+    return ColoredBox(
+      color: AppTheme.backgroundTertiary,
+      child: Center(
+        child: Text(
+          member.name.isNotEmpty ? member.name.characters.first : '?',
+          style: TextStyle(
+            color: AppTheme.textTertiary,
+            fontSize: AppTheme.fontHeadline,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 类似作品卡片（海报 + 评分角标 + 年份 + 片名）
+class _SimilarCard extends StatelessWidget {
+  final VodSimilarItem item;
+  final VoidCallback onTap;
+
+  const _SimilarCard({required this.item, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final poster = item.posterUrl;
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: 112,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+              child: SizedBox(
+                height: 160,
+                width: 112,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // 注意：AppTheme.backgroundTertiary 是 getter（跟随明暗主题），
+                    // 不是编译期常量，因此这里不能用 const ColoredBox。
+                    poster.isEmpty
+                        ? ColoredBox(color: AppTheme.backgroundTertiary)
+                        : CachedNetworkImage(
+                            imageUrl: poster,
+                            fit: BoxFit.cover,
+                            memCacheWidth: 224,
+                            placeholder: (_, __) =>
+                                ColoredBox(color: AppTheme.backgroundTertiary),
+                            errorWidget: (_, __, ___) =>
+                                ColoredBox(color: AppTheme.backgroundTertiary),
+                          ),
+                    // 评分角标（右上）
+                    if (item.hasRating)
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.62),
+                            borderRadius: BorderRadius.circular(7),
+                          ),
+                          child: Text(
+                            item.voteAverage.toStringAsFixed(1),
+                            style: const TextStyle(
+                              color: Color(0xFFFFC107),
+                              fontSize: AppTheme.fontFootnote,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              item.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontCaption,
+              ),
+            ),
+            if (item.year.isNotEmpty)
+              Text(
+                item.year,
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontFootnote,
+                ),
+              ),
+          ],
         ),
       ),
     );

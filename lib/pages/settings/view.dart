@@ -829,6 +829,38 @@ class _SettingsPageState extends State<SettingsPage> {
             },
           )),
           Divider(color: AppTheme.borderLight, height: 1),
+          // 刮削结果里两个可选区块的显隐（数据仍会刮削并缓存，仅控制详情页展示）
+          Obx(() => SettingsRow(
+            icon: Icons.people_alt_outlined,
+            title: '显示演职人员',
+            value: tmdb.showCast.value ? '已开启' : '已关闭',
+            onTap: () async {
+              await tmdb.setShowCast(!tmdb.showCast.value);
+            },
+          )),
+          Divider(color: AppTheme.borderLight, height: 1),
+          Obx(() => SettingsRow(
+            icon: Icons.local_movies_outlined,
+            title: '显示类似作品',
+            value: tmdb.showSimilar.value ? '已开启' : '已关闭',
+            onTap: () async {
+              await tmdb.setShowSimilar(!tmdb.showSimilar.value);
+            },
+          )),
+          Divider(color: AppTheme.borderLight, height: 1),
+          // 详情页样式：两套独立布局，此处切换默认用哪一套
+          Obx(() => SettingsRow(
+            icon: Icons.dashboard_customize_outlined,
+            title: '详情页样式',
+            value: PlayerPrefs.instance.scrapedDetailLayout.value
+                ? '刮削版'
+                : '默认',
+            onTap: () async {
+              final cur = PlayerPrefs.instance.scrapedDetailLayout.value;
+              await PlayerPrefs.instance.setScrapedDetailLayout(!cur);
+            },
+          )),
+          Divider(color: AppTheme.borderLight, height: 1),
           SettingsRow(
             icon: Icons.info_outline,
             title: '说明',
