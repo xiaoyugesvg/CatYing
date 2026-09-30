@@ -18,6 +18,7 @@ import 'services/app_state.dart';
 import 'services/background_service.dart';
 import 'services/epg_service.dart';
 import 'services/live_service.dart';
+import 'services/music_service.dart';
 import 'services/player_prefs.dart';
 import 'services/rfw_theme_service.dart';
 import 'services/tmdb_service.dart';
@@ -58,6 +59,9 @@ void main() async {
 
   // 注册 TvSearchController 为永久实例 - 避免在 SearchPage 中 Get.put 创建新实例替换
   Get.put<TvSearchController>(TvSearchController(), permanent: true);
+
+  // 音乐音源（通用 HTTP 协议）
+  await MusicService.instance.load();
 
   // 首页导航栏功能开关与顺序（设置 → 主页页面）
   await NavFeatureService.instance.load();

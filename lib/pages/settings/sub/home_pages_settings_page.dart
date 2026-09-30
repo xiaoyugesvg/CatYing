@@ -15,12 +15,10 @@ class HomePagesSettingsPage extends StatelessWidget {
   static const _iconOf = <NavFeature, IconData>{
     NavFeature.home: Icons.home_outlined,
     NavFeature.live: Icons.live_tv_outlined,
+    NavFeature.music: Icons.library_music_outlined,
     NavFeature.shelf: Icons.video_library_outlined,
     NavFeature.settings: Icons.settings_outlined,
     NavFeature.search: Icons.search,
-    NavFeature.mediaServer: Icons.dns_outlined,
-    NavFeature.calendar: Icons.calendar_month_outlined,
-    NavFeature.download: Icons.download_outlined,
   };
 
   @override

@@ -7,12 +7,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 enum NavFeature {
   home('home', '首页', true), // required
   live('live', '直播', false),
+  music('music', '音乐', false),
   shelf('shelf', '史藏', false),
   settings('settings', '设置', true), // required
-  search('search', '搜索', false),
-  mediaServer('media_server', '媒体服务器', false),
-  calendar('calendar', '追剧日历', false),
-  download('download', '下载', false);
+  search('search', '搜索', false);
 
   const NavFeature(this.id, this.label, this.required);
 
@@ -39,14 +37,16 @@ class NavFeatureService extends GetxService {
   static const String _orderKey = 'nav_feature_order_v1';
 
   /// 启用中的功能（**顺序即底栏顺序**，不含 search —— 搜索是按钮不是 tab）
-  final enabled = <NavFeature>[NavFeature.home, NavFeature.shelf, NavFeature.settings].obs;
+  final enabled = <NavFeature>[
+    NavFeature.home,
+    NavFeature.music,
+    NavFeature.shelf,
+    NavFeature.settings,
+  ].obs;
 
   /// 未启用的功能（按用户排序展示）
   final disabled = <NavFeature>[
     NavFeature.live,
-    NavFeature.mediaServer,
-    NavFeature.calendar,
-    NavFeature.download,
   ].obs;
 
   @override
@@ -79,9 +79,6 @@ class NavFeatureService extends GetxService {
     }
     // 底栏不显示「搜索」（搜索是顶栏按钮）
     order.remove(NavFeature.search);
-    order.remove(NavFeature.mediaServer);
-    order.remove(NavFeature.calendar);
-    order.remove(NavFeature.download);
 
     final enabledSet = enabledRaw?.map(_byId).whereType<NavFeature>().toSet();
     final on = <NavFeature>[];

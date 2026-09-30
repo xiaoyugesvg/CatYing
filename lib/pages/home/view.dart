@@ -12,6 +12,7 @@ import '../../services/api_config.dart';
 import '../../services/app_log.dart';
 import '../../services/rfw_theme_service.dart';
 import '../../models/movie.dart';
+import '../../models/movie_sort.dart';
 import '../../router/app_pages.dart';
 import '../../services/main_tab_controller.dart';
 import '../../widgets/common_widgets.dart';
@@ -489,54 +490,68 @@ class _HomePageState extends State<HomePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             for (final f in groups) ...[
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 40,
-                    child: Text(
-                      f.name,
-                      style: TextStyle(
-                        color: AppTheme.textTertiary,
-                        fontSize: AppTheme.fontCaption,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          SelectableChip(
-                            title: '全部',
-                            isSelected:
-                                _controller.selectedFilters[f.key] == null,
-                            onTap: () => _controller.selectFilter(f.key, ''),
-                          ),
-                          const SizedBox(width: AppTheme.spacingSM),
-                          for (final v in f.values) ...[
-                            SelectableChip(
-                              title: v.n,
-                              isSelected:
-                                  _controller.selectedFilters[f.key] == v.v,
-                              onTap: () =>
-                                  _controller.selectFilter(f.key, v.v),
-                            ),
-                            const SizedBox(width: AppTheme.spacingSM),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              if (f != groups.last) const SizedBox(height: AppTheme.spacingSM),
+              _filterRow(f),
+              if (f != groups.last) const SizedBox(height: 10),
             ],
           ],
         ),
       );
     });
+  }
+
+  /// 一行筛选：左侧组名 + 右侧**可横向滚动**的选项。
+  ///
+  /// 关键修正：
+  ///   1. 组名固定宽度用 SizedBox（原 40 太窄，"地区"会被压）；
+  ///   2. 选中值若不在列表里（换分类后残留），"全部" 的选中态要跟着失效，
+  ///      否则会同时出现两个高亮；
+  ///   3. 选项末尾留 12 的余量，最后一项不再被裁掉半个字。
+  Widget _filterRow(SortFilter f) {
+    final selected = _controller.selectedFilters[f.key];
+    // 只有"确实选中了某个具体值"时，「全部」才不亮
+    final hasValidSelection =
+        selected != null && f.values.any((v) => v.v == selected);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        SizedBox(
+          width: 44,
+          child: Text(
+            f.name,
+            style: TextStyle(
+              color: AppTheme.textTertiary,
+              fontSize: AppTheme.fontCaption,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.only(right: 12),
+            child: Row(
+              children: [
+                // 「全部」只在没有有效选中时高亮，避免双高亮
+                SelectableChip(
+                  title: '全部',
+                  isSelected: !hasValidSelection,
+                  onTap: () => _controller.selectFilter(f.key, ''),
+                ),
+                const SizedBox(width: AppTheme.spacingSM),
+                for (final v in f.values) ...[
+                  SelectableChip(
+                    title: v.n,
+                    isSelected: selected == v.v,
+                    onTap: () => _controller.selectFilter(f.key, v.v),
+                  ),
+                  const SizedBox(width: AppTheme.spacingSM),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   /// 筛选菜单：底部弹出，分组选择，点选即时生效
@@ -717,18 +732,28 @@ class _HomePageState extends State<HomePage> {
         color: AppTheme.accentColor,
         backgroundColor: AppTheme.backgroundSecondary,
         onRefresh: () => _controller.refresh(),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            // 列数优先用「筛选 → 切换布局」里的用户选择（2/3/4），
-            // 没设过时才退回按宽度自适应的旧逻辑。
-            final userCols = PlayerPrefs.instance.gridColumns.value;
-            final crossAxisCount = userCols.clamp(2, 4);
-            final cardWidth =
-                (constraints.maxWidth -
-                        AppTheme.cardSpacing * (crossAxisCount - 1)) /
-                    crossAxisCount;
+        // ⚠️ Obx 必须包住 LayoutBuilder：
+        // 原来 gridColumns 只在 LayoutBuilder 内部读，改列数后这个 builder
+        // 不会重建 → 网格列数不更新，看起来像"布局切换没生效"。
+        child: Obx(() {
+          final userCols = PlayerPrefs.instance.gridColumns.value;
+          final crossAxisCount = userCols.clamp(2, 4);
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final cardWidth =
+                  (constraints.maxWidth -
+                          AppTheme.cardSpacing * (crossAxisCount - 1)) /
+                      crossAxisCount;
 
-            return CustomScrollView(
+              // 卡片真实高度 = 海报高（宽 × posterHeightRatio）+ 文字区。
+              // 之前写的是 cardWidth/0.65 + 50，与 VodCard 内部的 0.72 不一致，
+              // 网格分给卡片的高度比实际需要多出一大截 → 卡片下方大片空白。
+              const posterRatio = 0.72; // 与 VodCard.posterHeightRatio 保持一致
+              const textArea = 30.0; // 标题行 + 上下内边距
+              final cardHeight = cardWidth * posterRatio + textArea;
+              final ratio = cardWidth / cardHeight;
+
+              return CustomScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
                 SliverToBoxAdapter(
@@ -773,8 +798,7 @@ class _HomePageState extends State<HomePage> {
                   sliver: SliverGrid(
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: crossAxisCount,
-                      childAspectRatio:
-                          (cardWidth) / (cardWidth / 0.65 + 50),
+                      childAspectRatio: ratio,
                       crossAxisSpacing: AppTheme.cardSpacing,
                       mainAxisSpacing: AppTheme.cardSpacing,
                     ),
@@ -813,8 +837,9 @@ class _HomePageState extends State<HomePage> {
                 ),
               ],
             );
-          },
-        ),
+            },
+          );
+        }),
       );
     });
   }
@@ -1243,56 +1268,6 @@ class _BannerImage extends StatelessWidget {
       errorWidget: (_, __, ___) => ColoredBox(
         color: AppTheme.backgroundTertiary,
         child: Icon(Icons.broken_image_outlined, color: AppTheme.textTertiary),
-      ),
-    );
-  }
-}
-
-/// 横滑片单（标题 + 横向海报列表）
-class _ShelfRow extends StatelessWidget {
-  final String title;
-  final List<Video> videos;
-  const _ShelfRow({required this.title, required this.videos});
-
-  @override
-  Widget build(BuildContext context) {
-    return SliverToBoxAdapter(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-                AppTheme.spacingXL, AppTheme.spacingMD, AppTheme.spacingXL, 8),
-            child: Text(
-              title,
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          SizedBox(
-            height: 190,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: AppTheme.spacingXL),
-              itemCount: videos.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (_, i) {
-                final v = videos[i];
-                return SizedBox(
-                  width: 110,
-                  child: VodCard(
-                    video: v,
-                    onTap: () => Get.toNamed('/detail', arguments: v),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
       ),
     );
   }

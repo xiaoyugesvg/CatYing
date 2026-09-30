@@ -11,8 +11,8 @@ import 'services/player_prefs.dart';
 import 'pages/home/view.dart';
 import 'pages/shelf/view.dart';
 import 'services/nav_feature_service.dart';
-import 'pages/favorites/view.dart';
 import 'pages/live/view.dart';
+import 'pages/music/view.dart';
 import 'pages/settings/view.dart';
 import 'pages/search/view.dart';
 import 'pages/search/controller.dart';
@@ -633,12 +633,14 @@ class _ContentViewState extends State<ContentView>
 
   final List<Widget> _tabPages = [
     const HomePage(),
-    // 「史藏」= 播放历史 + 我的收藏（合并为一个入口，内部顶部 tab 切换）
+    // 「史藏」= 历史 + 收藏（统一页，顶部 tab 切换）
     const ShelfPage(),
-    const ShelfPage(), // 占位：索引 2 不再单独使用（保留结构避免下标错乱）
+    const ShelfPage(), // 占位：索引 2 保留结构避免下标错乱
     const SettingsPage(),
     // 直播作为第 5 个 tab（选中才高亮，修复"首页+直播同时高亮"）
     const LivePage(),
+    // 音乐（索引 5）
+    const MusicPage(),
   ];
 
   Widget _buildMainTabView() {
@@ -751,6 +753,9 @@ class _ContentViewState extends State<ContentView>
         return _navItem(Icons.home_outlined, Icons.home, f.label, 0);
       case NavFeature.live:
         return _navItem(Icons.live_tv, Icons.live_tv, f.label, 4);
+      case NavFeature.music:
+        return _navItem(
+            Icons.library_music_outlined, Icons.library_music, f.label, 5);
       case NavFeature.shelf:
         return _navItem(
             Icons.schedule_outlined, Icons.schedule, f.label, 1);
@@ -760,11 +765,6 @@ class _ContentViewState extends State<ContentView>
       // 以下功能暂未落到独立 tab 页，先复用最接近的入口，避免点了没反应
       case NavFeature.search:
         return _navItem(Icons.search, Icons.search, f.label, 0);
-      case NavFeature.mediaServer:
-      case NavFeature.calendar:
-      case NavFeature.download:
-        return _navItem(
-            Icons.widgets_outlined, Icons.widgets, f.label, 0);
     }
   }
 
