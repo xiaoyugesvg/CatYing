@@ -821,7 +821,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         '$base/api/v2/send',
       ];
       int? code;
-      String lastBody = '';
       for (final ep in endpoints) {
         try {
           final req = await client
@@ -831,7 +830,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           req.headers.set('User-Agent', 'NewTv/1.0');
           req.write(jsonEncode(payload));
           final res = await req.close().timeout(const Duration(seconds: 8));
-          lastBody = await res.transform(utf8.decoder).join();
           code = res.statusCode;
           if (res.statusCode >= 200 && res.statusCode < 300) {
             break;
