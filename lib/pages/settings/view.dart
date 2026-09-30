@@ -10,7 +10,10 @@ import '../../widgets/common_widgets.dart';
 import '../../common/theme_mode_store.dart';
 import '../../services/player_prefs.dart';
 import '../../services/app_log.dart';
+import '../../services/rfw_theme_service.dart';
 import 'controller.dart';
+import 'rfw_theme_page.dart';
+import 'wallpaper_page.dart';
 
 /// 「清除应用缓存」的两种粒度
 enum _ClearCacheAction {
@@ -119,7 +122,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: AppTheme.spacingXXL),
 
-                // 外观 - 主题 + 自定义背景
+                // 外观 - 主题 + 壁纸 + 首页主题
                 const SectionHeader(title: '外观'),
                 const SizedBox(height: AppTheme.spacingSM),
                 _buildThemeModeSection(),
@@ -127,6 +130,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 _buildAppearanceSection(),
                 const SizedBox(height: AppTheme.spacingSM),
                 _buildFontScaleSection(),
+                const SizedBox(height: AppTheme.spacingSM),
+                _buildRfwThemeSection(),
                 const SizedBox(height: AppTheme.spacingXXL),
 
                 // 数据源
@@ -254,6 +259,16 @@ class _SettingsPageState extends State<SettingsPage> {
             _ => ThemeMode.dark,
           };
           await ThemeModeStore.set(m);
+          // 同步壁纸侧的外观状态：这里是"用户手动指定"，要打开手动覆盖标记，
+          // 否则壁纸设置页会以为仍处于"跟随背景"，两处显示不一致。
+          if (m == ThemeMode.system) {
+            await BackgroundService.instance.clearAppearanceOverride();
+          } else {
+            await BackgroundService.instance.setAppearanceMode(
+              m == ThemeMode.light ? AppearanceMode.light : AppearanceMode.dark,
+              manual: true,
+            );
+          }
           if (mounted) setState(() {});
         },
       ),
@@ -261,7 +276,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ============================================================
-  // 外观 - 自定义背景
+  // 外观 - 壁纸 / 应用背景
   // ============================================================
 
   Widget _buildAppearanceSection() {
@@ -269,11 +284,11 @@ class _SettingsPageState extends State<SettingsPage> {
     return AppCard(
       child: Obx(() => SettingsRow(
             icon: Icons.wallpaper_outlined,
-            title: '应用背景',
-            value: bg.choice.value == BackgroundChoice.custom
-                ? '自定义图片'
-                : bg.currentDisplayName,
-            onTap: () => _showBackgroundPicker(bg),
+            title: '壁纸与背景',
+            // 显示当前实际生效的壁纸，而非仅 choice：
+            // 网络壁纸时 choice 也是 custom，只显示"自定义图片"会误导。
+            value: bg.wallpaperDisplayName,
+            onTap: () => Get.to(() => const WallpaperSettingsPage()),
           )),
     );
   }
@@ -347,142 +362,25 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  /// 背景选择弹窗 - 4 个内置渐变 + 相册选择 + 清除自定义
-  void _showBackgroundPicker(BackgroundService bg) {
-    final previews = BackgroundService.builtinPreviews;
+  // 旧「背景选择弹窗」已移除（2026-09-30）：它只能选背景、不能设置壁纸效果，
+  // 且与「外观模式」完全独立，允许选出「浅色文字 + 皎月白」这种白字白底的
+  // 不可读组合。已由独立页面 WallpaperSettingsPage 取代（背景 + 文字明暗联动）。
 
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.backgroundSecondary,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppTheme.radiusLG),
-        ),
-        title: Text('选择应用背景',
-            style: TextStyle(color: AppTheme.textPrimary)),
-        content: SizedBox(
-          width: 360,
-          child: Obx(() => Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 4 个内置渐变预览
-                  GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 4,
-                      mainAxisSpacing: 10,
-                      crossAxisSpacing: 10,
-                      childAspectRatio: 0.85,
-                    ),
-                    itemCount: previews.length,
-                    itemBuilder: (_, i) {
-                      final p = previews[i];
-                      final isSelected = bg.choice.value == p.choice;
-                      return _BackgroundPreviewTile(
-                        name: p.name,
-                        colors: p.colors,
-                        isSelected: isSelected,
-                        onTap: () async {
-                          await bg.setBuiltin(p.choice);
-                          if (ctx.mounted) Navigator.pop(ctx);
-                        },
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  // 从相册选择
-                  Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(AppTheme.radiusMD),
-                      onTap: () async {
-                        // 关闭当前弹窗,异步选择图片
-                        Navigator.pop(ctx);
-                        await bg.pickFromGallery();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 12,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppTheme.backgroundTertiary,
-                          borderRadius:
-                              BorderRadius.circular(AppTheme.radiusMD),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.photo_library_outlined,
-                                color: AppTheme.accentColor, size: 18),
-                            const SizedBox(width: 10),
-                            Text(
-                              '从相册选择图片',
-                              style: TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: AppTheme.fontSubhead,
-                              ),
-                            ),
-                            const Spacer(),
-                            if (bg.choice.value == BackgroundChoice.custom)
-                              const Icon(Icons.check_circle,
-                                  color: AppTheme.accentColor, size: 16),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  // 清除自定义
-                  if (bg.choice.value == BackgroundChoice.custom) ...[
-                    const SizedBox(height: 8),
-                    Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius:
-                            BorderRadius.circular(AppTheme.radiusMD),
-                        onTap: () async {
-                          await bg.clearCustom();
-                          if (ctx.mounted) Navigator.pop(ctx);
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 12,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.red.withValues(alpha: 0.1),
-                            borderRadius:
-                                BorderRadius.circular(AppTheme.radiusMD),
-                            border: Border.all(
-                              color: Colors.red.withValues(alpha: 0.3),
-                              width: 0.5,
-                            ),
-                          ),
-                          child: const Row(
-                            children: [
-                              Icon(Icons.delete_outline,
-                                  color: Colors.redAccent, size: 18),
-                              SizedBox(width: 10),
-                              Text(
-                                '清除自定义图片,恢复默认',
-                                style: TextStyle(
-                                  color: Colors.redAccent,
-                                  fontSize: AppTheme.fontSubhead,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              )),
-        ),
-      ),
-    );
+  /// 首页主题（RFW 自定义首页）入口
+  Widget _buildRfwThemeSection() {
+    final svc = RfwThemeService.instance;
+    return Obx(() => AppCard(
+          child: SettingsRow(
+            icon: Icons.dashboard_customize_outlined,
+            title: '首页主题',
+            value: svc.enabled.value
+                ? (svc.currentThemeId.value.isEmpty
+                    ? '未选择主题'
+                    : '已启用')
+                : '原生首页',
+            onTap: () => Get.to(() => const RfwThemePage()),
+          ),
+        ));
   }
 
   // ============================================================
@@ -1905,73 +1803,5 @@ class _SettingsPageState extends State<SettingsPage> {
       return '${url.substring(0, 27)}...';
     }
     return url;
-  }
-}
-
-/// 背景预览小方块 - 4 个内置渐变缩略图
-class _BackgroundPreviewTile extends StatelessWidget {
-  final String name;
-  final List<Color> colors;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _BackgroundPreviewTile({
-    required this.name,
-    required this.colors,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: colors,
-                ),
-                borderRadius: BorderRadius.circular(AppTheme.radiusMD),
-                border: Border.all(
-                  color: isSelected
-                      ? AppTheme.accentColor
-                      : AppTheme.borderLight,
-                  width: isSelected ? 2 : 0.5,
-                ),
-              ),
-              child: isSelected
-                  ? const Center(
-                      child: Icon(
-                        Icons.check_circle,
-                        color: Colors.white,
-                        size: 22,
-                        shadows: [
-                          Shadow(blurRadius: 4, color: Colors.black54),
-                        ],
-                      ),
-                    )
-                  : null,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            name,
-            style: TextStyle(
-              color: isSelected ? AppTheme.accentColor : AppTheme.textSecondary,
-              fontSize: AppTheme.fontCaption,
-              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
   }
 }

@@ -36,6 +36,25 @@ class TVBoxApp extends StatelessWidget {
     // 全局主 Tab 控制器: 底部悬浮导航选中项全局共享,
     // 详情页也能渲染同样的悬浮栏并切回对应 tab.
     Get.put(MainTabController(), permanent: true);
+
+    // 外观联动（方案 A）：背景/壁纸改变文字明暗时，由 BackgroundService
+    // 通过这个回调推给 ThemeModeStore，避免服务层反向依赖 App 层。
+    final bg = BackgroundService.instance;
+    bg.onAppearanceChanged = (isLight) {
+      ThemeModeStore.applyLightFromBackground(isLight);
+    };
+    // 冷启动时 followBackground 是内存态默认 false，必须按持久化的
+    // manualAppearance 决定归属，否则「跟随背景」会被 themeMode 覆盖：
+    // 用户选了浅色壁纸却仍是白字。
+    if (!bg.manualAppearance.value) {
+      ThemeModeStore.applyLightFromBackground(
+          bg.appearanceMode.value == AppearanceMode.light);
+    } else {
+      ThemeModeStore.set(bg.appearanceMode.value == AppearanceMode.light
+          ? ThemeMode.light
+          : ThemeMode.dark);
+    }
+
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: ThemeModeStore.notifier,
       builder: (context, themeMode, _) {
@@ -47,7 +66,14 @@ class TVBoxApp extends StatelessWidget {
         // AppTheme 玻璃色等随 isLight 变化，必须监听后整体重建
         return ValueListenableBuilder<bool>(
           valueListenable: ThemeModeStore.brightnessListenable,
-          builder: (context, _, __) {
+          builder: (context, isLightNow, __) {
+            // ⚠️ 必须在内层算：外观联动（方案 A）改的是 AppBrightness，
+            // 只会触发这一层重建。若在外层算 effectiveLight，外层不重建，
+            // MaterialApp.themeMode 会一直用旧值，界面文字颜色不跟着壁纸变。
+            final effectiveLight = ThemeModeStore.followBackground
+                ? isLightNow
+                : (platformLight && themeMode == ThemeMode.system) ||
+                    themeMode == ThemeMode.light;
             // 全局字号缩放（设置 → 外观 → 界面字号），用 Obx 监听
             return Obx(() {
               final scale = PlayerPrefs.instance.fontScale.value;
@@ -55,7 +81,7 @@ class TVBoxApp extends StatelessWidget {
                 title: '猫影',
                 theme: AppTheme.lightTheme,
                 darkTheme: AppTheme.darkTheme,
-                themeMode: themeMode,
+                themeMode: effectiveLight ? ThemeMode.light : ThemeMode.dark,
                 // 把 NavigatorState 暴露给 VideoPlayerPip，让画中画能插入到顶层 Overlay
                 navigatorKey: VideoPlayerPip.navigatorKey,
                 home: const ContentView(),
@@ -116,7 +142,19 @@ class _ContentViewState extends State<ContentView>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    ThemeModeStore.load();
+    // ⚠️ load() 是异步的：它读 theme_mode 后会把 _followBackground 置回 false
+    // 并改明暗。若用户处于「跟随背景」（方案 A），必须在它之后再按背景推导
+    // 重新断言一次，否则浅色壁纸会被 theme_mode 覆盖成白字。
+    ThemeModeStore.load().then((_) {
+      final bg = Get.isRegistered<BackgroundService>()
+          ? BackgroundService.instance
+          : null;
+      if (bg == null) return;
+      if (!bg.manualAppearance.value) {
+        ThemeModeStore.applyLightFromBackground(
+            bg.appearanceMode.value == AppearanceMode.light);
+      }
+    });
     _searchVM = Get.find<TvSearchController>();
     _settingsVM = Get.put(SettingsController());
     // 对应 Swift: .onChange(of: appState.pendingSearchKeyword)

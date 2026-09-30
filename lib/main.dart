@@ -13,6 +13,7 @@ import 'services/background_service.dart';
 import 'services/epg_service.dart';
 import 'services/live_service.dart';
 import 'services/player_prefs.dart';
+import 'services/rfw_theme_service.dart';
 import 'services/tmdb_service.dart';
 import 'pages/search/controller.dart';
 
@@ -59,6 +60,10 @@ void main() async {
   // TMDB 智能刮削
   Get.put<TmdbService>(TmdbService(), permanent: true);
   await TmdbService.instance.loadPrefs();
+
+  // RFW 自定义首页主题引擎（.rfwtxt 主题文件管理 + 解析）
+  Get.put<RfwThemeService>(RfwThemeService.instance, permanent: true);
+  await RfwThemeService.instance.init();
 
   // 初始化窗口管理器（桌面端）- 对应 Swift .defaultSize(width: 1200, height: 800)
   try {

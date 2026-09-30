@@ -1,4 +1,4 @@
-﻿name: tvbox
+name: tvbox
 description: 跨平台 TVBox 视频播放器（iOS 巨魔 / Android / Windows）。基于 Flutter + Node.js 远程源 + media_kit 视频播放。
 publish_to: 'none'
 version: 1.0.0+1
@@ -42,6 +42,9 @@ dependencies:
   dlna_dart: ^0.1.0
   # 应用内 WebView（用于配置中心 URL，替代 url_launcher 跳外部浏览器）
   webview_flutter: ^4.10.0
+  # Remote Flutter Widgets：RFW 首页主题引擎（.rfwtxt 主题文件在运行时解析渲染）
+  # 由 flutter.dev 官方维护，1.1.4 为近期版本，纯 Dart 实现无原生依赖
+  rfw: ^1.1.4
 
 dev_dependencies:
   flutter_test:
