@@ -306,13 +306,12 @@ class _FavoritesPageState extends State<FavoritesPage>
                                   ),
                                 const Spacer(),
                                 // 右侧只有 1 个搜索按钮（浅灰圆 + 近黑图标）
-                                if (contentTabs.length >= 2)
-                                  _buildCircleIcon(
-                                    isDark: isDark,
-                                    icon: Icons.search_rounded,
-                                    tooltip: '搜索',
-                                    onTap: _openSearch,
-                                  ),
+                                _buildCircleIcon(
+                                  isDark: isDark,
+                                  icon: Icons.search_rounded,
+                                  tooltip: '搜索',
+                                  onTap: _openSearch,
+                                ),
                               ],
                             ),
                           ),

@@ -15,10 +15,10 @@ import '../theme/jelly_theme.dart';
 import '../services/settings_service.dart';
 import '../widgets/jelly_book_card.dart';
 import '../widgets/jelly_nav_bar.dart';
+import '../widgets/jelly_ring_button.dart';
 import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_pull_cord.dart';
 import '../widgets/jelly_segmented_toggle.dart';
-import '../widgets/jelly_sliding_actions.dart';
 import '../widgets/staggered_entrance.dart';
 import 'book_detail_page.dart';
 import 'book_source_search_page.dart';
@@ -921,76 +921,107 @@ class _BookSearchPageState extends State<BookSearchPage>
                         // 搜索框占据剩余宽度（Expanded 让右侧图标始终贴边）
                         Expanded(child: _buildSearchBar(isDark)),
                         const SizedBox(width: 8),
-                        // 视图切换（网格 / 列表）
-                        _buildViewToggle(isDark),
-                        const SizedBox(width: 8),
-                        // 下载：进「史藏 → 图书」看已下载的书
-                        // （阅读模块没有独立的图书下载页，史藏就是它的列表）
-                        _buildCircleIcon(
+                        // 指环切换菜单：视图/下载/分类/常用操作收敛成一个环按钮
+                        //（z-library 头像保留在右侧作为登录入口）
+                        JellyRingButton(
                           isDark: isDark,
-                          icon: Icons.file_download_outlined,
-                          tooltip: '已下载的图书',
-                          onTap: () => MainTabController.instance.select(
-                            MainTabController.bookshelfTabIndex,
+                          tooltip: '切换菜单',
+                          menuBuilder: (ctx) => JellyRingMenuPanel(
+                            isDark: isDark,
+                            title: '切换菜单',
+                            children: [
+                              // 视图切换（网格/列表）
+                              JellyRingMenuRow(
+                                isDark: isDark,
+                                label: '视图',
+                                child: _buildViewToggle(isDark),
+                              ),
+                              // 分类筛选（年份/语言/格式）
+                              JellyRingMenuRow(
+                                isDark: isDark,
+                                label: '分类筛选',
+                                child: _buildCategoryButton(isDark),
+                              ),
+                              // 已下载的图书（跳书架）
+                              JellyRingMenuRow(
+                                isDark: isDark,
+                                label: '已下载的图书',
+                                child: _buildCircleIcon(
+                                  isDark: isDark,
+                                  icon: Icons.file_download_outlined,
+                                  tooltip: '已下载的图书',
+                                  onTap: () {
+                                    Navigator.pop(ctx);
+                                    MainTabController.instance.select(
+                                      MainTabController.bookshelfTabIndex,
+                                    );
+                                  },
+                                ),
+                              ),
+                              const Divider(
+                                  height: 12, indent: 20, endIndent: 20),
+                              // 常用操作
+                              JellyRingMenuActions(
+                                isDark: isDark,
+                                actions: [
+                                  (
+                                    icon: Icons.history_rounded,
+                                    label: '浏览记录',
+                                    onTap: () {
+                                      Navigator.pop(ctx);
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              const BrowseHistoryPage(
+                                                  showTabs: false),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  (
+                                    icon: Icons.favorite_rounded,
+                                    label: '收藏',
+                                    onTap: () {
+                                      Navigator.pop(ctx);
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => const FavoritesPage(),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  (
+                                    icon: Icons.file_download_rounded,
+                                    label: '下载',
+                                    onTap: () {
+                                      Navigator.pop(ctx);
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => const DownloadPage(),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  (
+                                    icon: Icons.leaderboard_rounded,
+                                    label: '豆瓣排行',
+                                    onTap: () {
+                                      Navigator.pop(ctx);
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => const DoubanRankingPage(),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        // 分类筛选（年份 / 语言 / 格式）。原来在第二行，
-                        // 并进标题行后仍保留 —— 它是真实功能，
-                        // 不能因为重排布局就丢掉。
-                        _buildCategoryButton(isDark),
-                        const SizedBox(width: 8),
-                        // 其余动作（浏览记录 / 收藏 / 下载记录 / 豆瓣排行榜）
-                        // 保持滑动图标组：点按切换、长按展开成竖列。
-                        JellySlidingActions(
-                          isDark: isDark,
-                          width: 168,
-                          actions: [
-                            JellyAction(
-                              icon: Icons.history_rounded,
-                              tooltip: '浏览记录',
-                              onPressed: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      const BrowseHistoryPage(showTabs: false),
-                                ),
-                              ),
-                            ),
-                            JellyAction(
-                              icon: Icons.favorite_rounded,
-                              tooltip: '收藏',
-                              onPressed: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const FavoritesPage(),
-                                ),
-                              ),
-                            ),
-                            JellyAction(
-                              icon: Icons.file_download_rounded,
-                              tooltip: '下载',
-                              onPressed: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const DownloadPage(),
-                                ),
-                              ),
-                            ),
-                            // 第 4 个图标：**豆瓣图书排行榜**
-                            // （按用户要求：图书页的这个位置放豆瓣排行榜，
-                            //   不是漫画源仓库 —— 那是漫画页的）
-                            JellyAction(
-                              icon: Icons.leaderboard_rounded,
-                              tooltip: '豆瓣图书排行榜',
-                              onPressed: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const DoubanRankingPage(),
-                                ),
-                              ),
-                            ),
-                          ],
                         ),
                         const SizedBox(width: 8),
                         _buildAvatar(isDark),

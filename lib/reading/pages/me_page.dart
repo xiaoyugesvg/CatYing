@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/settings_service.dart';
 import '../services/theme_switch.dart';
+import '../services/zlibrary_service.dart';
 import '../theme/jelly_palette.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/bookshelf_icon.dart';
@@ -20,6 +21,7 @@ import 'reading_settings_page.dart';
 import 'search_page.dart';
 import 'book_source_repo_page.dart';
 import 'source_repo_page.dart';
+import 'zlibrary_auth_page.dart';
 import '../../common/theme.dart';
 
 /// "我的"页：菜单（下载设置等）+ 右上角暗色模式切换 + 版本信息
@@ -121,6 +123,7 @@ class _MePageState extends State<MePage> {
                 ],
               ),
             ),
+            _buildAccountCard(isDark),
             LayoutBuilder(
               builder: (context, constraints) {
                 final cols = _adaptiveCols(constraints.maxWidth);
@@ -353,12 +356,187 @@ class _MePageState extends State<MePage> {
                           child: _buildHiddenTabItem(isDark, hiddenTabs[i]),
                         ),
                       ),
+                    // 捐赠与支持（底部入口）
+                    StaggeredEntrance(
+                      key: ValueKey('${_session}_donate'),
+                      index: 9 + hiddenTabs.length,
+                      child: SizedBox(
+                        width: itemWidth,
+                        child: _buildMenuItem(
+                          isDark,
+                          icon: Icons.volunteer_activism_rounded,
+                          iconBg: JellyTheme.primary,
+                          title: '捐赠与支持',
+                          subtitle: '咸鱼店铺 · 微信 / 支付宝扫码',
+                          onTap: _showDonateSheet,
+                        ),
+                      ),
+                    ),
                   ],
                 );
               },
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 顶部账号卡：已登录显示头像/邮箱/配额；未登录显示登录引导（参考目标样式）
+  Widget _buildAccountCard(bool isDark) {
+    return ListenableBuilder(
+      listenable: ZlibraryService(),
+      builder: (context, _) {
+        final z = ZlibraryService();
+        final logged = z.isLoggedIn;
+        final limit = logged
+            ? (z.serverDownloadsLimit ?? ZlibraryService.loggedDailyLimit)
+            : ZlibraryService.builtinDailyLimit;
+        final used = logged ? z.loggedCountToday : z.builtinCountToday;
+        final fg = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+        final sub = isDark
+            ? Colors.white.withValues(alpha: 0.55)
+            : JellyTheme.textSecondary;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: Material(
+            color: isDark ? JellyTheme.cardDark : Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const ZlibraryAuthPage(),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    // 头像
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: logged
+                            ? JellyTheme.primary
+                            : (isDark
+                                ? Colors.white.withValues(alpha: 0.10)
+                                : Colors.black.withValues(alpha: 0.05)),
+                      ),
+                      child: logged
+                          ? Image.asset(
+                              'assets/icons/user.png',
+                              width: 40,
+                              height: 40,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) => Icon(
+                                Icons.person_rounded,
+                                color: Colors.white,
+                                size: 24,
+                              ),
+                            )
+                          : Icon(
+                              Icons.person_outline_rounded,
+                              color: sub,
+                              size: 26,
+                            ),
+                    ),
+                    const SizedBox(width: 14),
+                    // 账号信息
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            logged ? z.email : '登录 / 注册',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: fg,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            logged
+                                ? 'z-library 账号 · 点击管理'
+                                : '登录 z-library 账号，每日可下载 $limit 本',
+                            style: TextStyle(fontSize: 13, color: sub),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // 右侧：配额 / 立即登录
+                    logged
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                '今日可下 $used/$limit 本',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: fg,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '点击管理账号',
+                                style: TextStyle(fontSize: 11, color: sub),
+                              ),
+                            ],
+                          )
+                        : Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: JellyTheme.primary,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Text(
+                              '立即登录',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 捐赠与支持弹窗（咸鱼店铺 · 微信/支付宝扫码）
+  Future<void> _showDonateSheet() async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('捐赠与支持'),
+        content: const Text(
+          '如果这个 App 对你有帮助，欢迎支持：\n\n'
+          '· 咸鱼店铺：New-Tv 周边\n'
+          '· 微信 / 支付宝：扫描店铺二维码即可\n\n'
+          '每一份支持都会用来继续打磨功能。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了'),
+          ),
+        ],
       ),
     );
   }

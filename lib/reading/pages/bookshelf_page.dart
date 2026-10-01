@@ -36,6 +36,29 @@ import 'reader_page.dart';
 import '../../widgets/app_empty_view.dart';
 import '../../common/theme.dart';
 
+/// "全部"虚拟书架 id：聚合当前 tab 可见的所有书架条目（仅浏览，不参与移出等管理操作）
+const String kAllShelfId = '__all__';
+
+/// 解析书架条目：普通书架直接取；"全部"聚合所有书架（漫画 tab 排除本地图书）。
+/// 供书架页正文两个子组件与选择/移除逻辑共用。
+List<BookshelfItem> resolveShelfItems(
+  String shelfId,
+  BookshelfItemType type, {
+  bool excludeLocal = false,
+}) {
+  final svc = BookshelfService();
+  if (shelfId != kAllShelfId) return svc.getItemsInShelf(shelfId, type);
+  final seen = <String>{};
+  final result = <BookshelfItem>[];
+  for (final shelf in svc.bookshelves) {
+    if (excludeLocal && shelf.id == BookshelfService.presetLocal) continue;
+    for (final item in svc.getItemsInShelf(shelf.id, type)) {
+      if (seen.add(item.itemId)) result.add(item);
+    }
+  }
+  return result;
+}
+
 /// 书架页面
 class BookshelfPage extends StatefulWidget {
   final bool isActive;
@@ -908,7 +931,8 @@ class _BookshelfPageState extends State<BookshelfPage>
     final newType = tab == NavTab.manga
         ? BookshelfItemType.comic
         : BookshelfItemType.book;
-    if (BookshelfService().countInShelf(_currentShelfId, newType) == 0) {
+    if (_currentShelfId != kAllShelfId &&
+        BookshelfService().countInShelf(_currentShelfId, newType) == 0) {
       _switchShelf(shelves.first.id);
     }
   }
@@ -1195,9 +1219,11 @@ class _BookshelfPageState extends State<BookshelfPage>
       _selectedItemIds
         ..clear()
         ..addAll(
-          BookshelfService()
-              .getItemsInShelf(_currentShelfId, type)
-              .map((i) => i.itemId),
+          resolveShelfItems(
+            _currentShelfId,
+            type,
+            excludeLocal: _isComicTab,
+          ).map((i) => i.itemId),
         );
     });
   }
@@ -1224,6 +1250,18 @@ class _BookshelfPageState extends State<BookshelfPage>
       ),
     );
     if (confirmed != true) return;
+    if (_currentShelfId == kAllShelfId) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('「全部」为汇总视图，请进入具体书架后管理'),
+            duration: Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      return;
+    }
     for (final itemId in _selectedItemIds.toList()) {
       await BookshelfService().removeFromBookshelf(
         _currentShelfId,
@@ -2242,6 +2280,7 @@ class _BookshelfPageState extends State<BookshelfPage>
 
         // 先构建所有 chip 子元素
         final chips = <Widget>[
+          _buildAllShelfChip(currentType, isDark),
           for (int i = 0; i < shelves.length; i++)
             _buildShelfChip(shelves[i], currentType, isDark),
           _buildAddChip(isDark),
@@ -2268,6 +2307,23 @@ class _BookshelfPageState extends State<BookshelfPage>
               );
 
               double totalWidth = 0;
+              {
+                final allCount = _visibleShelves(_currentTab).fold<int>(
+                  0,
+                  (sum, sh) => sum +
+                      BookshelfService().countInShelf(sh.id, currentType),
+                );
+                final allPainter = TextPainter(
+                  text: const TextSpan(text: '全部', style: textStyle),
+                  textDirection: TextDirection.ltr,
+                )..layout();
+                final numPainter = TextPainter(
+                  text: TextSpan(text: '$allCount', style: textStyle),
+                  textDirection: TextDirection.ltr,
+                )..layout();
+                totalWidth +=
+                    chipPadding + allPainter.width + 4 + numPainter.width + spacing;
+              }
               for (int i = 0; i < shelves.length; i++) {
                 final shelf = shelves[i];
                 final displayName = _shelfDisplayName(shelf, currentType);
@@ -2310,6 +2366,70 @@ class _BookshelfPageState extends State<BookshelfPage>
           ),
         );
       },
+    );
+  }
+
+  /// 「全部」书架 chip：聚合所有可见书架条目（仅浏览，样式同普通书架 chip）
+  Widget _buildAllShelfChip(BookshelfItemType currentType, bool isDark) {
+    final selected = _currentShelfId == kAllShelfId;
+    final count = _visibleShelves(_currentTab).fold<int>(
+      0,
+      (sum, sh) =>
+          sum + BookshelfService().countInShelf(sh.id, currentType),
+    );
+    return Padding(
+      key: _shelfChipKey(kAllShelfId),
+      padding: const EdgeInsets.only(right: 8),
+      child: GestureDetector(
+        onTap: () => _switchShelf(kAllShelfId),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected
+                ? JellyTheme.primary
+                : (isDark ? JellyTheme.cardDark : Colors.white),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          alignment: Alignment.center,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '全部',
+                style: TextStyle(
+                  fontSize: AppTheme.fontFootnote,
+                  fontWeight: FontWeight.w600,
+                  color: selected
+                      ? Colors.white
+                      : (isDark ? Colors.white70 : JellyTheme.textSecondary),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: AppTheme.fontCaption,
+                  color: selected
+                      ? Colors.white.withValues(alpha: 0.7)
+                      : (isDark
+                            ? Colors.white38
+                            : JellyTheme.textSecondary.withValues(alpha: 0.7)),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -2570,9 +2690,10 @@ class _ComicShelfTab extends StatelessWidget {
         ReadingProgressService(),
       ]),
       builder: (context, _) {
-        final items = BookshelfService().getItemsInShelf(
+        final items = resolveShelfItems(
           shelfId,
           BookshelfItemType.comic,
+          excludeLocal: true,
         );
         // 排序由「标题行的排序按钮」决定（SettingsService.shelfSort）。
         // 若只弹面板不生效，那按钮就是假的 —— 比不放更糟。
@@ -2923,7 +3044,7 @@ class _BookShelfTab extends StatelessWidget {
         BookReadingProgressService(),
       ]),
       builder: (context, _) {
-        final items = BookshelfService().getItemsInShelf(
+        final items = resolveShelfItems(
           shelfId,
           BookshelfItemType.book,
         );
