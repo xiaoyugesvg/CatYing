@@ -16,13 +16,13 @@ class BlockedCategoriesPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final svc = LiveService.instance;
     return Scaffold(
-      backgroundColor: AppTheme.backgroundPrimary,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: AppTheme.backgroundPrimary,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: IconThemeData(color: AppTheme.textPrimary),
         title: Text('屏蔽分类',
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 17)),
+            style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontTitle3)),
         actions: [
           IconButton(
             icon: Icon(Icons.add, color: AppTheme.accentColor),
@@ -112,7 +112,7 @@ class BlockedCategoriesPage extends StatelessWidget {
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppTheme.glassRadius)),
         title: Text('添加分类',
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
+            style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontHeadline)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -121,11 +121,11 @@ class BlockedCategoriesPage extends StatelessWidget {
               controller: ctrl,
               autofocus: true,
               cursorColor: AppTheme.accentColor,
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontBody),
               decoration: InputDecoration(
                 hintText: '输入要屏蔽的分类名称',
                 hintStyle: TextStyle(
-                    color: AppTheme.textTertiary, fontSize: 13),
+                    color: AppTheme.textTertiary, fontSize: AppTheme.fontSubhead),
                 filled: true,
                 fillColor: AppTheme.backgroundTertiary,
                 border: OutlineInputBorder(

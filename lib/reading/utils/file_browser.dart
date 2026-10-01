@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 /// JellyTheme 的色值分 Light/Dark 两套字段，这里按当前主题明暗取。
 Color _bg(BuildContext c) => Theme.of(c).brightness == Brightness.dark
@@ -151,7 +152,7 @@ class _LocalFileBrowserPageState extends State<_LocalFileBrowserPage> {
         iconTheme: IconThemeData(color: _fg(context)),
         title: Text(
           '选择 $extLabel 文件',
-          style: TextStyle(color: _fg(context), fontSize: 16),
+          style: TextStyle(color: _fg(context), fontSize: AppTheme.fontHeadline),
         ),
       ),
       body: _error != null
@@ -176,7 +177,7 @@ class _LocalFileBrowserPageState extends State<_LocalFileBrowserPage> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                         color: _fg(context).withValues(alpha: 0.55),
-                        fontSize: 11),
+                        fontSize: AppTheme.fontCaption),
                   ),
                 ),
                 Expanded(
@@ -219,7 +220,7 @@ class _LocalFileBrowserPageState extends State<_LocalFileBrowserPage> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                    color: _fg(context), fontSize: 14),
+                                    color: _fg(context), fontSize: AppTheme.fontBody),
                               ),
                               trailing: isDir
                                   ? Icon(Icons.chevron_right,

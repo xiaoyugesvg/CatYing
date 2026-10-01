@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../services/library_store.dart';
 import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
+import '../../common/theme.dart';
 
 /// 播放队列管理页（#11）。
 ///
@@ -28,7 +29,7 @@ class MusicQueuePage extends StatelessWidget {
     final player = MusicPlayerManager.instance;
 
     return Scaffold(
-      backgroundColor: MusicTheme.background,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -36,7 +37,7 @@ class MusicQueuePage extends StatelessWidget {
           listenable: player,
           builder: (context, _) => Text(
             '播放队列 (${player.queue.length})',
-            style: TextStyle(color: MusicTheme.label, fontSize: 17),
+            style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontTitle3),
           ),
         ),
         iconTheme: IconThemeData(color: MusicTheme.label),
@@ -93,7 +94,7 @@ class MusicQueuePage extends StatelessWidget {
                   const SizedBox(height: 12),
                   Text('队列是空的',
                       style:
-                          TextStyle(color: MusicTheme.secondary, fontSize: 14)),
+                          TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontBody)),
                 ],
               ),
             );
@@ -184,7 +185,7 @@ class _QueueTile extends StatelessWidget {
                           size: 15, color: MusicTheme.tint)
                       : Text('${index + 1}',
                           style: TextStyle(
-                              color: MusicTheme.secondary, fontSize: 12)),
+                              color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
                 ),
                 const SizedBox(width: 6),
                 Expanded(
@@ -203,7 +204,7 @@ class _QueueTile extends StatelessWidget {
                                 color: playing
                                     ? MusicTheme.tint
                                     : MusicTheme.label,
-                                fontSize: 14,
+                                fontSize: AppTheme.fontBody,
                                 fontWeight: playing
                                     ? FontWeight.w600
                                     : FontWeight.w400,
@@ -223,13 +224,13 @@ class _QueueTile extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style:
-                            TextStyle(color: MusicTheme.secondary, fontSize: 12),
+                            TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
                       ),
                     ],
                   ),
                 ),
                 Text(song.formattedDuration,
-                    style: TextStyle(color: MusicTheme.secondary, fontSize: 11)),
+                    style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontCaption)),
                 // 拖动排序手柄
                 ReorderableDragStartListener(
                   index: index,

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:rfw/rfw.dart';
 
 import '../../services/app_log.dart';
+import '../../common/theme.dart';
 
 /// `peek.home` 本地组件库 —— RFW 主题文件靠这些组件渲染首页。
 ///
@@ -137,7 +138,7 @@ class PeekHomeWidgets {
             child: empty ??
                 const Center(
                   child: Text('暂无内容',
-                      style: TextStyle(color: Colors.white54, fontSize: 13)),
+                      style: TextStyle(color: Colors.white54, fontSize: AppTheme.fontSubhead)),
                 ),
           ));
         } else {

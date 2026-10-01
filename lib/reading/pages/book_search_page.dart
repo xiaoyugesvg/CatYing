@@ -27,6 +27,7 @@ import 'browse_history_page.dart';
 import 'download_page.dart';
 import 'favorites_page.dart';
 import 'zlibrary_auth_page.dart';
+import '../../common/theme.dart';
 
 /// 日志工具
 void _log(String message) {
@@ -686,7 +687,7 @@ class _BookSearchPageState extends State<BookSearchPage>
           padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
           decoration: BoxDecoration(
             color: isDark ? JellyTheme.cardDark : Colors.white,
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(20),
             boxShadow: JellyTheme.jellyShadows(
               color: JellyTheme.primary,
               blurRadius: 30,
@@ -721,7 +722,7 @@ class _BookSearchPageState extends State<BookSearchPage>
               Text(
                 z.username.isEmpty ? z.email : z.username,
                 style: TextStyle(
-                  fontSize: 17,
+                  fontSize: AppTheme.fontTitle3,
                   fontWeight: FontWeight.w700,
                   color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                 ),
@@ -731,7 +732,7 @@ class _BookSearchPageState extends State<BookSearchPage>
                 Text(
                   z.email,
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: AppTheme.fontSubhead,
                     color: JellyTheme.textSecondary,
                   ),
                 ),
@@ -760,7 +761,7 @@ class _BookSearchPageState extends State<BookSearchPage>
                     Text(
                       '今日下载  $used / $limit 本',
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: AppTheme.fontSubhead,
                         fontWeight: FontWeight.w600,
                         color: isDark
                             ? Colors.white70
@@ -785,7 +786,7 @@ class _BookSearchPageState extends State<BookSearchPage>
                     child: Text(
                       '退出后将回退内置账号（${ZlibraryService.builtinDailyLimit} 本/天）',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: AppTheme.fontFootnote,
                         color: JellyTheme.textSecondary,
                       ),
                     ),
@@ -810,7 +811,7 @@ class _BookSearchPageState extends State<BookSearchPage>
                         child: const Text(
                           '取消',
                           style: TextStyle(
-                            fontSize: 15,
+                            fontSize: AppTheme.fontHeadline,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -890,7 +891,7 @@ class _BookSearchPageState extends State<BookSearchPage>
                         Text(
                           '图书',
                           style: TextStyle(
-                            fontSize: 22,
+                            fontSize: AppTheme.fontPageTitle,
                             fontWeight: FontWeight.bold,
                             color: isDark
                                 ? Colors.white
@@ -1131,7 +1132,7 @@ class _BookSearchPageState extends State<BookSearchPage>
         Text(
           logged ? '$used/$limit' : '未登录',
           style: TextStyle(
-            fontSize: 9,
+            fontSize: AppTheme.fontCaption,
             color: isDark ? Colors.white54 : JellyTheme.textSecondary,
           ),
         ),
@@ -1210,7 +1211,7 @@ class _BookSearchPageState extends State<BookSearchPage>
         child: Text(
           f.label,
           style: TextStyle(
-            fontSize: 12,
+            fontSize: AppTheme.fontFootnote,
             fontWeight: FontWeight.w600,
             color: selected
                 ? Colors.white
@@ -1380,7 +1381,7 @@ class _BookSearchPageState extends State<BookSearchPage>
                 Text(
                   '搜索历史',
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: AppTheme.fontBody,
                     fontWeight: FontWeight.w600,
                     color: labelColor,
                   ),
@@ -1389,7 +1390,7 @@ class _BookSearchPageState extends State<BookSearchPage>
                 if (_history.isNotEmpty)
                   TextButton(
                     onPressed: _clearHistory,
-                    child: const Text('清空', style: TextStyle(fontSize: 13)),
+                    child: const Text('清空', style: TextStyle(fontSize: AppTheme.fontSubhead)),
                   ),
               ],
             ),
@@ -1565,7 +1566,7 @@ class _LogoutButtonState extends State<_LogoutButton> {
             child: Text(
               '退出登录',
               style: TextStyle(
-                fontSize: 15,
+                fontSize: AppTheme.fontHeadline,
                 fontWeight: FontWeight.w700,
                 color: Colors.white,
               ),
@@ -1732,8 +1733,8 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
           value: value,
           isExpanded: true,
           isDense: true,
-          hint: Text(hint, style: const TextStyle(fontSize: 12)),
-          style: TextStyle(fontSize: 12, color: labelColor),
+          hint: Text(hint, style: const TextStyle(fontSize: AppTheme.fontFootnote)),
+          style: TextStyle(fontSize: AppTheme.fontFootnote, color: labelColor),
           items: _yearOptions
               .map(
                 (y) => DropdownMenuItem<int?>(
@@ -1767,7 +1768,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
             child: Text(
               label,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: AppTheme.fontFootnote,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
                 color: selected ? Colors.white : chipTextColor,
               ),
@@ -1790,7 +1791,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                   Text(
                     '分类筛选',
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.bold,
                       color: labelColor,
                     ),
@@ -1854,7 +1855,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                         child: Text(
                           g.title,
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: AppTheme.fontSubhead,
                             fontWeight: selected
                                 ? FontWeight.w600
                                 : FontWeight.normal,
@@ -1882,7 +1883,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                     Text(
                       '子分类',
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: AppTheme.fontSubhead,
                         fontWeight: FontWeight.w600,
                         color: labelColor,
                       ),
@@ -1894,7 +1895,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                             child: Text(
                               '请选择主分类',
                               style: TextStyle(
-                                fontSize: 12,
+                                fontSize: AppTheme.fontFootnote,
                                 color: chipTextColor,
                               ),
                             ),
@@ -1919,7 +1920,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                     Text(
                       '年份',
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: AppTheme.fontSubhead,
                         fontWeight: FontWeight.w600,
                         color: labelColor,
                       ),
@@ -1951,7 +1952,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                     Text(
                       '语言',
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: AppTheme.fontSubhead,
                         fontWeight: FontWeight.w600,
                         color: labelColor,
                       ),
@@ -1979,7 +1980,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                     Text(
                       '格式',
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: AppTheme.fontSubhead,
                         fontWeight: FontWeight.w600,
                         color: labelColor,
                       ),

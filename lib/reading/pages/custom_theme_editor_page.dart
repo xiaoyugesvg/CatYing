@@ -6,6 +6,7 @@ import '../services/settings_service.dart';
 import '../theme/jelly_palette.dart';
 import '../theme/theme_background_painters.dart';
 import '../widgets/color_picker_dialog.dart';
+import '../../common/theme.dart';
 
 /// 自定义主题编辑页：命名 + 选基底预设 + 全量 18 色逐项调色 + 保存。
 ///
@@ -39,10 +40,18 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
       _workingBg = e.background;
       _nameCtrl = TextEditingController(text: e.name);
     } else {
-      // 新建：默认以当前主题为基底
-      final current = SettingsService().currentThemeInfo;
+      // 新建：**默认以当前已应用的主题为基底**（调色板 + 背景都要跟）
+      final svc = SettingsService();
+      final current = svc.currentThemeInfo;
       _baseId = current.id;
       _working = current.palette;
+      // 🔴 这里原来**漏了背景配置** ——
+      // `current.palette` 只带颜色，而背景（纯色 / 内置动画 / 自定义图片）
+      // 存在主题的 `background` 字段里。不复制它，新建出来的主题
+      // 背景会退回默认的 `ThemeBackground.none()`（纯色），
+      // 于是"我当前用的是内置动画，新建主题却是纯色"。
+      // `currentBackground` 会正确处理内置预设与自定义两种情况。
+      _workingBg = svc.currentBackground;
       _nameCtrl = TextEditingController(text: '自定义主题');
     }
   }
@@ -169,7 +178,7 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
         children: [
           Text(
             '预览效果',
-            style: TextStyle(fontSize: 13, color: _working.textSecondary),
+            style: TextStyle(fontSize: AppTheme.fontSubhead, color: _working.textSecondary),
           ),
           const SizedBox(height: 10),
           Row(
@@ -181,7 +190,7 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
                     Text(
                       '标题文字',
                       style: TextStyle(
-                        fontSize: 18,
+                        fontSize: AppTheme.fontTitle3,
                         fontWeight: FontWeight.bold,
                         color: isDark
                             ? _working.textPrimaryDark
@@ -192,7 +201,7 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
                     Text(
                       '次要说明文字',
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: AppTheme.fontSubhead,
                         color: _working.textSecondary,
                       ),
                     ),
@@ -210,7 +219,7 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
                 ),
                 child: Text(
                   '按钮',
-                  style: TextStyle(color: Colors.white, fontSize: 13),
+                  style: TextStyle(color: Colors.white, fontSize: AppTheme.fontSubhead),
                 ),
               ),
               const SizedBox(width: 10),
@@ -237,7 +246,7 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
           padding: const EdgeInsets.only(left: 4, bottom: 8),
           child: Text(
             '基底预设（点击覆盖当前所有颜色）',
-            style: TextStyle(fontSize: 13, color: _working.textSecondary),
+            style: TextStyle(fontSize: AppTheme.fontSubhead, color: _working.textSecondary),
           ),
         ),
         SizedBox(
@@ -280,7 +289,7 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
                     Text(
                       p.name,
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: AppTheme.fontCaption,
                         color: selected
                             ? (isDark
                                   ? _working.textPrimaryDark
@@ -308,7 +317,7 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
             child: Text(
               section.title,
               style: TextStyle(
-                fontSize: 13,
+                fontSize: AppTheme.fontSubhead,
                 fontWeight: FontWeight.w600,
                 color: _working.textSecondary,
               ),
@@ -352,14 +361,14 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
         height: 32,
         decoration: BoxDecoration(
           color: c,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(color: Colors.black12),
         ),
       ),
       title: Text(
         field.label,
         style: TextStyle(
-          fontSize: 14,
+          fontSize: AppTheme.fontBody,
           color: isDark ? _working.textPrimaryDark : _working.textPrimaryLight,
         ),
       ),
@@ -382,7 +391,7 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
           child: Text(
             '背景',
             style: TextStyle(
-              fontSize: 13,
+              fontSize: AppTheme.fontSubhead,
               fontWeight: FontWeight.w600,
               color: _working.textSecondary,
             ),
@@ -455,7 +464,7 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
       title: Text(
         label,
         style: TextStyle(
-          fontSize: 14,
+          fontSize: AppTheme.fontBody,
           color: isDark ? _working.textPrimaryDark : _working.textPrimaryLight,
         ),
       ),
@@ -508,7 +517,7 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
                   Text(
                     p.name,
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: AppTheme.fontCaption,
                       color: selected
                           ? (isDark
                                 ? _working.textPrimaryDark
@@ -534,7 +543,7 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
         children: [
           if (hasImg) ...[
             ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(10),
               child: Image.file(
                 File(_workingBg.imagePath!),
                 width: 56,
@@ -559,7 +568,7 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
               children: [
                 Text(
                   hasImg ? '已选择图片' : '选择一张图片作为背景',
-                  style: TextStyle(fontSize: 12, color: _working.textSecondary),
+                  style: TextStyle(fontSize: AppTheme.fontFootnote, color: _working.textSecondary),
                 ),
                 const SizedBox(height: 6),
                 Wrap(
@@ -598,12 +607,12 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
       avatar: Icon(icon, size: 16, color: _working.primary),
       label: Text(
         label,
-        style: TextStyle(fontSize: 12, color: _working.primary),
+        style: TextStyle(fontSize: AppTheme.fontFootnote, color: _working.primary),
       ),
       onPressed: onTap,
       backgroundColor: Colors.transparent,
       side: BorderSide(color: _working.primary.withValues(alpha: 0.5)),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       visualDensity: VisualDensity.compact,
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );

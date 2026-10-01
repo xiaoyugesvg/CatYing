@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/tts_source.dart';
 import '../services/tts_source_store.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 /// 添加 / 编辑朗读源（截图 IMG_8102~8110）。
 ///
@@ -125,12 +126,12 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
         title: Text(
           _s.name.isEmpty ? '添加朗读源' : _s.name,
           style: TextStyle(
-              fontSize: 17, fontWeight: FontWeight.w700, color: label),
+              fontSize: AppTheme.fontTitle3, fontWeight: FontWeight.w700, color: label),
         ),
         actions: [
           TextButton(
             onPressed: _busy ? null : _save,
-            child: const Text('保存', style: TextStyle(fontSize: 15)),
+            child: const Text('保存', style: TextStyle(fontSize: AppTheme.fontHeadline)),
           ),
         ],
       ),
@@ -255,7 +256,7 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
                 Expanded(
                   child: Text('会真发一次很短的合成请求',
                       style: TextStyle(
-                          fontSize: 12.5, color: JellyTheme.textSecondary)),
+                          fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
                 ),
                 FilledButton(
                   onPressed: _busy ? null : _test,
@@ -281,7 +282,7 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
                 ),
                 child: Text(_testResult!,
                     style: TextStyle(
-                        fontSize: 12.5, height: 1.6, color: label)),
+                        fontSize: AppTheme.fontSubhead, height: 1.6, color: label)),
               ),
             ],
           ]),
@@ -306,7 +307,7 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
         children: [
           Text(title,
               style: TextStyle(
-                  fontSize: 15,
+                  fontSize: AppTheme.fontHeadline,
                   fontWeight: FontWeight.w700,
                   color: label)),
           const SizedBox(height: 12),
@@ -334,7 +335,7 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
           SizedBox(
             width: 78,
             child: Text(label,
-                style: TextStyle(fontSize: 14, color: labelColor)),
+                style: TextStyle(fontSize: AppTheme.fontBody, color: labelColor)),
           ),
           Expanded(
             child: readOnly
@@ -344,13 +345,13 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
                     alignment: Alignment.centerLeft,
                     child: Text(hint ?? '',
                         style: TextStyle(
-                            fontSize: 13.5,
+                            fontSize: AppTheme.fontBody,
                             color: JellyTheme.textSecondary)),
                   )
                 : TextField(
                     controller: ctrl,
                     obscureText: obscure,
-                    style: TextStyle(fontSize: 13.5, color: labelColor),
+                    style: TextStyle(fontSize: AppTheme.fontBody, color: labelColor),
                     decoration: InputDecoration(
                       isDense: true,
                       filled: true,
@@ -359,7 +360,7 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
                           : Colors.black.withValues(alpha: 0.045),
                       hintText: hint,
                       hintStyle: TextStyle(
-                          fontSize: 13.5, color: JellyTheme.textSecondary),
+                          fontSize: AppTheme.fontBody, color: JellyTheme.textSecondary),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
                         borderSide: BorderSide.none,
@@ -391,13 +392,13 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
               children: [
                 Text(title,
                     style: TextStyle(
-                        fontSize: 14,
+                        fontSize: AppTheme.fontBody,
                         fontWeight: FontWeight.w600,
                         color: label)),
                 const SizedBox(height: 3),
                 Text(sub,
                     style: TextStyle(
-                        fontSize: 11.5,
+                        fontSize: AppTheme.fontFootnote,
                         height: 1.5,
                         color: JellyTheme.textSecondary)),
               ],
@@ -423,13 +424,13 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
               Expanded(
                 child: Text(title,
                     style: TextStyle(
-                        fontSize: 14,
+                        fontSize: AppTheme.fontBody,
                         fontWeight: FontWeight.w600,
                         color: label)),
               ),
               Text(display,
                   style: TextStyle(
-                      fontSize: 14,
+                      fontSize: AppTheme.fontBody,
                       fontWeight: FontWeight.w700,
                       color: label)),
             ],
@@ -437,7 +438,7 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
           const SizedBox(height: 2),
           Text(sub,
               style: TextStyle(
-                  fontSize: 11.5,
+                  fontSize: AppTheme.fontFootnote,
                   height: 1.5,
                   color: JellyTheme.textSecondary)),
           Slider(
@@ -460,7 +461,7 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
               content: Text('拉取音色列表需要该服务的鉴权请求，还没接'),
               duration: Duration(seconds: 2)),
         ),
-        child: Text(text, style: const TextStyle(fontSize: 13)),
+        child: Text(text, style: const TextStyle(fontSize: AppTheme.fontSubhead)),
       ),
     );
   }
@@ -470,7 +471,7 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
       padding: const EdgeInsets.only(top: 8),
       child: Text(text,
           style: TextStyle(
-              fontSize: 11.5, height: 1.7, color: JellyTheme.textSecondary)),
+              fontSize: AppTheme.fontFootnote, height: 1.7, color: JellyTheme.textSecondary)),
     );
   }
 }

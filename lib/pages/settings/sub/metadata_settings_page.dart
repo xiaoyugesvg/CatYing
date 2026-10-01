@@ -7,6 +7,7 @@ import '../../../services/player_prefs.dart';
 import '../../../services/tmdb_service.dart';
 import '../../../widgets/common_widgets.dart';
 import 'settings_shared.dart';
+import '../../../widgets/app_toast.dart';
 
 /// 设置 → 元数据（TMDB 刮削详细配置）
 ///
@@ -30,44 +31,51 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
       title: 'TMDB 配置',
       children: [
         // ---------- 启用 ----------
-        Obx(() => AppCard(
-              dense: true,
-              child: unifiedSwitchRow(
-                icon: Icons.movie_creation_outlined,
-                title: '启用 TMDB',
-                value: tmdb.enabled.value,
-                onChanged: tmdb.setEnabled,
-              ),
-            )),
+        Obx(
+          () => AppCard(
+            dense: true,
+            child: unifiedSwitchRow(
+              icon: Icons.movie_creation_outlined,
+              title: '启用 TMDB',
+              value: tmdb.enabled.value,
+              onChanged: tmdb.setEnabled,
+            ),
+          ),
+        ),
         const SizedBox(height: AppTheme.spacingLG),
 
         // ---------- 海报展示样式 ----------
-        Obx(() => AppCard(
-              dense: true,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-                    child: Text('海报展示样式',
-                        style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: AppTheme.fontSubhead + 0.5,
-                            fontWeight: FontWeight.w600)),
+        Obx(
+          () => AppCard(
+            dense: true,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+                  child: Text(
+                    '海报展示样式',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontSubhead + 0.5,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                  _segmented(
-                    options: const [
-                      ('fixed', '固定'),
-                      ('random', '随机'),
-                      ('rotate', '轮播'),
-                    ],
-                    current: tmdb.posterStyle.value,
-                    onChanged: tmdb.setPosterStyle,
-                  ),
-                  const SizedBox(height: 12),
-                ],
-              ),
-            )),
+                ),
+                _segmented(
+                  options: const [
+                    ('fixed', '固定'),
+                    ('random', '随机'),
+                    ('rotate', '轮播'),
+                  ],
+                  current: tmdb.posterStyle.value,
+                  onChanged: tmdb.setPosterStyle,
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        ),
         const SizedBox(height: AppTheme.spacingLG),
 
         // ---------- Key / 代理 ----------
@@ -85,8 +93,11 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
                     await tmdb.disconnect();
                     if (mounted) setState(() {});
                   },
-                  child: Icon(Icons.cancel,
-                      size: 17, color: AppTheme.textTertiary),
+                  child: Icon(
+                    Icons.cancel,
+                    size: 17,
+                    color: AppTheme.textTertiary,
+                  ),
                 ),
               ),
               Divider(color: AppTheme.borderLight, height: 1, thickness: 0.5),
@@ -112,13 +123,17 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
                 child: Row(
                   children: [
                     Expanded(
-                      child: _outlineButton('测试 API 代理',
-                          () => _runTest(api: true)),
+                      child: _outlineButton(
+                        '测试 API 代理',
+                        () => _runTest(api: true),
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: _outlineButton('测试图片代理',
-                          () => _runTest(api: false)),
+                      child: _outlineButton(
+                        '测试图片代理',
+                        () => _runTest(api: false),
+                      ),
                     ),
                   ],
                 ),
@@ -132,8 +147,10 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
         Center(
           child: TextButton(
             onPressed: _confirmDisconnect,
-            child: const Text('断开连接',
-                style: TextStyle(color: Colors.redAccent)),
+            child: const Text(
+              '断开连接',
+              style: TextStyle(color: Colors.redAccent),
+            ),
           ),
         ),
         const SizedBox(height: AppTheme.spacingLG),
@@ -142,36 +159,43 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
         SettingsGroup(
           title: '详情页展示',
           children: [
-            Obx(() => SettingsRow(
-                  icon: Icons.people_alt_outlined,
-                  title: '显示演职人员',
-                  value: tmdb.showCast.value ? '已开启' : '已关闭',
-                  onTap: () => tmdb.setShowCast(!tmdb.showCast.value),
-                )),
-            Obx(() => SettingsRow(
-                  icon: Icons.local_movies_outlined,
-                  title: '显示类似作品',
-                  value: tmdb.showSimilar.value ? '已开启' : '已关闭',
-                  onTap: () => tmdb.setShowSimilar(!tmdb.showSimilar.value),
-                )),
-            Obx(() => SettingsRow(
-                  icon: Icons.auto_awesome,
-                  title: '自动刮削元数据',
-                  value: tmdb.autoScrape.value ? '已开启' : '已关闭',
-                  onTap: () => tmdb.setAutoScrape(!tmdb.autoScrape.value),
-                )),
-            Obx(() => SettingsRow(
-                  icon: Icons.dashboard_customize_outlined,
-                  title: '详情页样式',
-                  value: PlayerPrefs.instance.scrapedDetailLayout.value
-                      ? '刮削版'
-                      : '默认',
-                  onTap: () async {
-                    final cur =
-                        PlayerPrefs.instance.scrapedDetailLayout.value;
-                    await PlayerPrefs.instance.setScrapedDetailLayout(!cur);
-                  },
-                )),
+            Obx(
+              () => SettingsRow(
+                icon: Icons.people_alt_outlined,
+                title: '显示演职人员',
+                value: tmdb.showCast.value ? '已开启' : '已关闭',
+                onTap: () => tmdb.setShowCast(!tmdb.showCast.value),
+              ),
+            ),
+            Obx(
+              () => SettingsRow(
+                icon: Icons.local_movies_outlined,
+                title: '显示类似作品',
+                value: tmdb.showSimilar.value ? '已开启' : '已关闭',
+                onTap: () => tmdb.setShowSimilar(!tmdb.showSimilar.value),
+              ),
+            ),
+            Obx(
+              () => SettingsRow(
+                icon: Icons.auto_awesome,
+                title: '自动刮削元数据',
+                value: tmdb.autoScrape.value ? '已开启' : '已关闭',
+                onTap: () => tmdb.setAutoScrape(!tmdb.autoScrape.value),
+              ),
+            ),
+            Obx(
+              () => SettingsRow(
+                icon: Icons.dashboard_customize_outlined,
+                title: '详情页样式',
+                value: PlayerPrefs.instance.scrapedDetailLayout.value
+                    ? '刮削版'
+                    : '默认',
+                onTap: () async {
+                  final cur = PlayerPrefs.instance.scrapedDetailLayout.value;
+                  await PlayerPrefs.instance.setScrapedDetailLayout(!cur);
+                },
+              ),
+            ),
           ],
         ),
       ],
@@ -217,8 +241,7 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(9),
                       border: current == options[i].$1
-                          ? Border.all(
-                              color: AppTheme.glassBorder, width: 0.6)
+                          ? Border.all(color: AppTheme.glassBorder, width: 0.6)
                           : null,
                     ),
                     child: Text(
@@ -255,10 +278,13 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: AppTheme.fontSubhead)),
+          Text(
+            label,
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: AppTheme.fontSubhead,
+            ),
+          ),
           const SizedBox(height: 6),
           Container(
             decoration: BoxDecoration(
@@ -275,15 +301,18 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
                     onChanged: onChanged,
                     cursorColor: AppTheme.accentColor,
                     style: TextStyle(
-                        color: AppTheme.textPrimary, fontSize: 14),
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontBody,
+                    ),
                     decoration: InputDecoration(
                       hintText: hint,
                       hintStyle: TextStyle(
-                          color: AppTheme.textTertiary, fontSize: 12),
+                        color: AppTheme.textTertiary,
+                        fontSize: AppTheme.fontFootnote,
+                      ),
                       border: InputBorder.none,
                       isDense: true,
-                      contentPadding:
-                          const EdgeInsets.symmetric(vertical: 12),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
                     ),
                   ),
                 ),
@@ -306,15 +335,16 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
           : () async {
               await Clipboard.setData(ClipboardData(text: value.trim()));
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('已复制')));
+                AppToast.message('已复制');
               }
             },
-      child: Icon(Icons.copy,
-          size: 17,
-          color: value.trim().isEmpty
-              ? AppTheme.textTertiary.withValues(alpha: 0.4)
-              : AppTheme.textSecondary),
+      child: Icon(
+        Icons.copy,
+        size: 17,
+        color: value.trim().isEmpty
+            ? AppTheme.textTertiary.withValues(alpha: 0.4)
+            : AppTheme.textSecondary,
+      ),
     );
   }
 
@@ -329,12 +359,13 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
           borderRadius: BorderRadius.circular(AppTheme.glassRadiusSmall),
           border: Border.all(color: AppTheme.borderMedium, width: 0.8),
         ),
-        child: Text(text,
-            style: TextStyle(
-                color: _testing
-                    ? AppTheme.textTertiary
-                    : AppTheme.textSecondary,
-                fontSize: AppTheme.fontSubhead)),
+        child: Text(
+          text,
+          style: TextStyle(
+            color: _testing ? AppTheme.textTertiary : AppTheme.textSecondary,
+            fontSize: AppTheme.fontSubhead,
+          ),
+        ),
       ),
     );
   }
@@ -348,10 +379,7 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
     final r = api ? await tmdb.testApiProxy() : await tmdb.testImgProxy();
     if (!mounted) return;
     setState(() => _testing = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(r.message),
-      backgroundColor: r.ok ? null : Colors.redAccent,
-    ));
+    AppToast.message(r.message, isError: true);
   }
 
   Future<void> _confirmDisconnect() async {
@@ -360,16 +388,17 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.backgroundSecondary,
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppTheme.glassRadius)),
-        title:
-            Text('断开连接', style: TextStyle(color: AppTheme.textPrimary)),
-        content: Text('将清空 TMDB API Key（代理地址保留）。确定？',
-            style: TextStyle(color: AppTheme.textSecondary)),
+          borderRadius: BorderRadius.circular(AppTheme.glassRadius),
+        ),
+        title: Text('断开连接', style: TextStyle(color: AppTheme.textPrimary)),
+        content: Text(
+          '将清空 TMDB API Key（代理地址保留）。确定？',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('取消',
-                style: TextStyle(color: AppTheme.textTertiary)),
+            child: Text('取消', style: TextStyle(color: AppTheme.textTertiary)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),

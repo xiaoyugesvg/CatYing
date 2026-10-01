@@ -105,7 +105,7 @@ class _DLNAPageState extends State<DLNAPage> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: AppTheme.backgroundPrimary,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -160,7 +160,7 @@ class _DLNAPageState extends State<DLNAPage> {
                         '正在投屏到 $deviceName',
                         style: TextStyle(
                           color: AppTheme.textPrimary,
-                          fontSize: 13,
+                          fontSize: AppTheme.fontSubhead,
                           fontWeight: FontWeight.w600,
                         ),
                         maxLines: 1,
@@ -171,7 +171,7 @@ class _DLNAPageState extends State<DLNAPage> {
                         _title ?? '',
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.5),
-                          fontSize: 11,
+                          fontSize: AppTheme.fontCaption,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -226,14 +226,14 @@ class _DLNAPageState extends State<DLNAPage> {
             Icon(Icons.tv_off, size: 64, color: AppTheme.textTertiary.withValues(alpha: 0.4)),
             const SizedBox(height: 16),
             Text('没有发现 DLNA 设备',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 16)),
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTheme.fontHeadline)),
             const SizedBox(height: 8),
             Text(
               '请确认：\n'
               '1. 电视/投影仪与手机连接同一 WiFi\n'
               '2. 设备已开启 DLNA / AirPlay / Miracast 功能',
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
+              style: TextStyle(color: AppTheme.textTertiary, fontSize: AppTheme.fontFootnote),
             ),
             const SizedBox(height: 24),
             TextButton.icon(
@@ -257,7 +257,7 @@ class _DLNAPageState extends State<DLNAPage> {
             padding: EdgeInsets.symmetric(vertical: 16),
             child: Center(
               child: Text('继续搜索中…',
-                  style: TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
+                  style: TextStyle(color: AppTheme.textTertiary, fontSize: AppTheme.fontFootnote)),
             ),
           );
         }
@@ -282,7 +282,7 @@ class _DLNAPageState extends State<DLNAPage> {
                 color: isActive
                     ? Colors.greenAccent.shade400.withValues(alpha: 0.7)
                     : Colors.white.withValues(alpha: 0.4),
-                fontSize: 11),
+                fontSize: AppTheme.fontCaption),
           ),
           trailing: Icon(
             isActive ? Icons.check_circle : Icons.cast,

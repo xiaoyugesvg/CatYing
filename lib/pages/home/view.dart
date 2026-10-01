@@ -349,7 +349,7 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(width: 16),
             Text(label,
                 style: TextStyle(
-                    color: AppTheme.textPrimary, fontSize: 15)),
+                    color: AppTheme.textPrimary, fontSize: AppTheme.fontHeadline)),
           ],
         ),
       ),
@@ -382,12 +382,12 @@ class _HomePageState extends State<HomePage> {
                     Text('分类屏蔽',
                         style: TextStyle(
                             color: AppTheme.textPrimary,
-                            fontSize: 16,
+                            fontSize: AppTheme.fontHeadline,
                             fontWeight: FontWeight.w600)),
                     const Spacer(),
                     Text('勾选的分类将隐藏',
                         style: TextStyle(
-                            color: AppTheme.textTertiary, fontSize: 11)),
+                            color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
                   ],
                 ),
               ),
@@ -440,7 +440,7 @@ class _HomePageState extends State<HomePage> {
               child: Text('切换布局',
                   style: TextStyle(
                       color: AppTheme.textPrimary,
-                      fontSize: 16,
+                      fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.w600)),
             ),
             Padding(
@@ -681,7 +681,7 @@ class _HomePageState extends State<HomePage> {
                       Text('筛选',
                           style: TextStyle(
                               color: AppTheme.textPrimary,
-                              fontSize: 16,
+                              fontSize: AppTheme.fontHeadline,
                               fontWeight: FontWeight.w600)),
                       const Spacer(),
                       Obx(() {
@@ -1011,7 +1011,7 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 12),
             Text(
               '当前主题无法渲染',
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontBody),
             ),
             const SizedBox(height: 6),
             Text(
@@ -1022,7 +1022,7 @@ class _HomePageState extends State<HomePage> {
               maxLines: 4,
               overflow: TextOverflow.ellipsis,
               style:
-                  TextStyle(color: AppTheme.textTertiary, fontSize: 11.5),
+                  TextStyle(color: AppTheme.textTertiary, fontSize: AppTheme.fontFootnote),
             ),
           ],
         ),
@@ -1272,7 +1272,7 @@ class _RecommendBannerState extends State<_RecommendBanner> {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 18,
+                            fontSize: AppTheme.fontTitle3,
                             fontWeight: FontWeight.w600,
                             shadows: [
                               Shadow(blurRadius: 8, color: Colors.black54),
@@ -1300,7 +1300,7 @@ class _RecommendBannerState extends State<_RecommendBanner> {
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 11,
+                                fontSize: AppTheme.fontCaption,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -1585,7 +1585,7 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
                     cursorWidth: 2,
                     cursorRadius: const Radius.circular(1),
                     style: TextStyle(
-                      fontSize: 15,
+                      fontSize: AppTheme.fontHeadline,
                       height: 1.0,
                       color: AppTheme.textPrimary,
                     ),
@@ -1611,7 +1611,7 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
                     decoration: InputDecoration(
                       hintText: '搜索影片',
                       hintStyle: TextStyle(
-                        fontSize: 15,
+                        fontSize: AppTheme.fontHeadline,
                         color: AppTheme.textTertiary,
                       ),
                       border: InputBorder.none,
@@ -1683,7 +1683,7 @@ class _BannerPlaceholder extends StatelessWidget {
                 color: AppTheme.textTertiary, size: 36),
             const SizedBox(height: 8),
             Text('正在加载推荐…',
-                style: TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
+                style: TextStyle(color: AppTheme.textTertiary, fontSize: AppTheme.fontSubhead)),
           ],
         ),
       ),

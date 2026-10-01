@@ -4,6 +4,7 @@ import '../../common/theme.dart';
 import '../../models/subscription.dart';
 import '../../widgets/common_widgets.dart';
 import 'pin_dialog.dart';
+import '../../widgets/app_toast.dart';
 
 /// 编辑订阅页 —— 对应参考图
 ///
@@ -48,26 +49,38 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.backgroundPrimary,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: AppTheme.backgroundPrimary,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: IconThemeData(color: AppTheme.textPrimary),
-        title: Text(isNew ? '新增订阅' : '编辑订阅',
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 17)),
+        title: Text(
+          isNew ? '新增订阅' : '编辑订阅',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontTitle3,
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: _save,
-            child: Text('保存',
-                style: TextStyle(
-                    color: AppTheme.accentColor,
-                    fontWeight: FontWeight.w600)),
+            child: Text(
+              '保存',
+              style: TextStyle(
+                color: AppTheme.accentColor,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
         ],
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(
-            AppTheme.spacingLG, AppTheme.spacingSM, AppTheme.spacingLG, 28),
+          AppTheme.spacingLG,
+          AppTheme.spacingSM,
+          AppTheme.spacingLG,
+          28,
+        ),
         children: [
           // ---- 地址 / 名称 ----
           AppCard(
@@ -80,8 +93,11 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
                   hint: 'https://… 接口地址',
                   // 地址可能很长，允许多行展示
                   maxLines: 2,
-                  trailing: Icon(Icons.lock_outline,
-                      size: 16, color: AppTheme.textTertiary),
+                  trailing: Icon(
+                    Icons.lock_outline,
+                    size: 16,
+                    color: AppTheme.textTertiary,
+                  ),
                 ),
                 Divider(color: AppTheme.borderLight, height: 1, thickness: 0.5),
                 _labeledField(
@@ -90,8 +106,11 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
                   hint: '给这个订阅起个名字',
                   trailing: GestureDetector(
                     onTap: () => setState(() => _nameCtrl.clear()),
-                    child: Icon(Icons.cancel,
-                        size: 16, color: AppTheme.textTertiary),
+                    child: Icon(
+                      Icons.cancel,
+                      size: 16,
+                      color: AppTheme.textTertiary,
+                    ),
                   ),
                 ),
               ],
@@ -136,7 +155,10 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
                     value: widget.subscription!.lastUpdatedText,
                   ),
                   Divider(
-                      color: AppTheme.borderLight, height: 1, thickness: 0.5),
+                    color: AppTheme.borderLight,
+                    height: 1,
+                    thickness: 0.5,
+                  ),
                   _infoRow(
                     icon: Icons.fingerprint,
                     label: '内容指纹',
@@ -156,19 +178,30 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
                 onTap: _confirmDelete,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: AppTheme.spacingXS, vertical: 12),
+                    horizontal: AppTheme.spacingXS,
+                    vertical: 12,
+                  ),
                   child: Row(
                     children: [
-                      Icon(Icons.delete_outline,
-                          size: 18, color: Colors.redAccent),
+                      Icon(
+                        Icons.delete_outline,
+                        size: 18,
+                        color: Colors.redAccent,
+                      ),
                       const SizedBox(width: 10),
-                      Text('删除订阅',
-                          style: TextStyle(
-                              color: Colors.redAccent,
-                              fontSize: AppTheme.fontSubhead + 0.5)),
+                      Text(
+                        '删除订阅',
+                        style: TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: AppTheme.fontSubhead + 0.5,
+                        ),
+                      ),
                       const Spacer(),
-                      Icon(Icons.chevron_right,
-                          size: 17, color: AppTheme.textTertiary),
+                      Icon(
+                        Icons.chevron_right,
+                        size: 17,
+                        color: AppTheme.textTertiary,
+                      ),
                     ],
                   ),
                 ),
@@ -193,15 +226,20 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(
-          horizontal: AppTheme.spacingXS, vertical: 10),
+        horizontal: AppTheme.spacingXS,
+        vertical: 10,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: TextStyle(
-                  color: AppTheme.textTertiary,
-                  fontSize: AppTheme.fontCaption,
-                  fontWeight: FontWeight.w600)),
+          Text(
+            label,
+            style: TextStyle(
+              color: AppTheme.textTertiary,
+              fontSize: AppTheme.fontCaption,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 6),
           Container(
             decoration: BoxDecoration(
@@ -219,11 +257,15 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
                     minLines: 1,
                     cursorColor: AppTheme.accentColor,
                     style: TextStyle(
-                        color: AppTheme.textPrimary, fontSize: 14),
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontBody,
+                    ),
                     decoration: InputDecoration(
                       hintText: hint,
                       hintStyle: TextStyle(
-                          color: AppTheme.textTertiary, fontSize: 13),
+                        color: AppTheme.textTertiary,
+                        fontSize: AppTheme.fontSubhead,
+                      ),
                       border: InputBorder.none,
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(vertical: 12),
@@ -251,7 +293,9 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(
-          horizontal: AppTheme.spacingXS, vertical: 12),
+        horizontal: AppTheme.spacingXS,
+        vertical: 12,
+      ),
       child: Row(
         children: [
           Container(
@@ -269,16 +313,22 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontSubhead + 0.5,
-                        fontWeight: FontWeight.w600)),
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontSubhead + 0.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(height: 2),
-                Text(subtitle,
-                    style: TextStyle(
-                        color: AppTheme.textTertiary,
-                        fontSize: AppTheme.fontCaption)),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
+                ),
               ],
             ),
           ),
@@ -303,20 +353,28 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(
-          horizontal: AppTheme.spacingXS, vertical: 14),
+        horizontal: AppTheme.spacingXS,
+        vertical: 14,
+      ),
       child: Row(
         children: [
           Icon(icon, size: 17, color: AppTheme.textSecondary),
           const SizedBox(width: 10),
-          Text(label,
-              style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: AppTheme.fontSubhead + 0.5)),
+          Text(
+            label,
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: AppTheme.fontSubhead + 0.5,
+            ),
+          ),
           const Spacer(),
-          Text(value,
-              style: TextStyle(
-                  color: AppTheme.textTertiary,
-                  fontSize: AppTheme.fontSubhead)),
+          Text(
+            value,
+            style: TextStyle(
+              color: AppTheme.textTertiary,
+              fontSize: AppTheme.fontSubhead,
+            ),
+          ),
         ],
       ),
     );
@@ -351,8 +409,7 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
       final ok = await svc.verifyPin(r.substring(3));
       if (!ok) {
         if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(const SnackBar(content: Text('密码不正确')));
+          AppToast.message('密码不正确');
         }
         return;
       }
@@ -363,8 +420,7 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
   Future<void> _save() async {
     final url = _urlCtrl.text.trim();
     if (url.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('请填写数据源地址')));
+      AppToast.message('请填写数据源地址');
       return;
     }
     final name = _nameCtrl.text.trim();
@@ -394,16 +450,17 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.backgroundSecondary,
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppTheme.glassRadius)),
-        title:
-            Text('删除订阅', style: TextStyle(color: AppTheme.textPrimary)),
-        content: Text('确定删除「${s.name}」？',
-            style: TextStyle(color: AppTheme.textSecondary)),
+          borderRadius: BorderRadius.circular(AppTheme.glassRadius),
+        ),
+        title: Text('删除订阅', style: TextStyle(color: AppTheme.textPrimary)),
+        content: Text(
+          '确定删除「${s.name}」？',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('取消',
-                style: TextStyle(color: AppTheme.textTertiary)),
+            child: Text('取消', style: TextStyle(color: AppTheme.textTertiary)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),

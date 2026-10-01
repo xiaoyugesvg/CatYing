@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -260,7 +260,7 @@ class _ContentViewState extends State<ContentView>
                 Text(
                   'TVBox',
                   style: TextStyle(
-                    fontSize: 48,
+                    fontSize: AppTheme.fontDisplay,
                     fontWeight: FontWeight.w800,
                     color: AppTheme.textPrimary,
                     letterSpacing: 2,
@@ -366,7 +366,7 @@ class _ContentViewState extends State<ContentView>
                                       : '正在解析配置...',
                                   style: const TextStyle(
                                       fontWeight: FontWeight.bold,
-                                      fontSize: 16),
+                                      fontSize: AppTheme.fontHeadline),
                                 );
                               }),
                             ],
@@ -375,7 +375,7 @@ class _ContentViewState extends State<ContentView>
                             '开启影音之旅',
                             style: TextStyle(
                                 fontWeight: FontWeight.bold,
-                                fontSize: 16),
+                                fontSize: AppTheme.fontHeadline),
                           ),
                   ),
                 ),
@@ -614,11 +614,20 @@ class _ContentViewState extends State<ContentView>
           // 这里监听 isLight，并在变化时换 key，强制子页重绘。
           ValueListenableBuilder<bool>(
             valueListenable: AppBrightness.isLight,
-            builder: (context, isLight, __) => Obx(() => IndexedStack(
-                  key: ValueKey('tabs-$isLight'),
+            // ⚠️ 除了 isLight，**paletteRevision 也必须拼进 key**：
+            // `AppTheme` 是静态类，换配色（app.dart 的"主题与外观"）
+            // 时它的 `_palette` 变了但不会通知任何 widget；
+            // 而 `_tabPages` 是 const 实例，IndexedStack 重建时
+            // Flutter 判定"子 widget 未变"会跳过它们的 build。
+            // 拼进来之后，**换配色只需重建这一段**，
+            // 不必再靠 app.dart 换外层 key 去销毁整个 ContentView。
+            builder: (context, isLight, __) => ValueListenableBuilder<int>(
+              valueListenable: AppTheme.paletteRevision,
+              builder: (context, paletteRev, ___) => Obx(() => IndexedStack(
+                  key: ValueKey('tabs-$isLight-$paletteRev'),
                   index: MainTabController.instance.selectedTab.value,
                   children: _tabPages,
-                )),
+                ))),
           ),
           // 搜索页 - 对应 Swift .sheet(isPresented: $showSearch)
           if (_showSearch)
@@ -697,35 +706,44 @@ class _ContentViewState extends State<ContentView>
               // 只保留影视特有的两件事：
               //   · 项来自 `NavFeatureService.enabled`（可开关 + 拖动排序）
               //   · 长按「设置」= 返回影视顶层（阅读/音乐是从这边进去的）
-              return Obx(() {
-                final features = NavFeatureService.instance.enabled;
-                final cur = MainTabController.instance.selectedTab.value;
-                return JellyNavBar(
-                  // ⚠️ 必须显式传影视的调色板 —— JellyNavBar 默认用
-                  // 阅读的 JellyTheme.palette，切影视配色时那个不会变，
-                  // 会导致影视栏颜色错（静默 bug）。
-                  palette: AppTheme.palette,
-                  currentIndex:
-                      features.indexWhere((f) => f.tabIndex == cur).clamp(
-                            0,
-                            features.isEmpty ? 0 : features.length - 1,
+              // 悬浮栏读 `AppTheme.palette`，所以换配色时它也**必须**重建 ——
+              // 用 ValueListenableBuilder 监听 paletteRevision，
+              // 并用它当 key 强制重建（JellyNavBar 内部取色是构造时读的）。
+              return ValueListenableBuilder<int>(
+                valueListenable: AppTheme.paletteRevision,
+                builder: (context, paletteRev, __) => Obx(
+                  () {
+                    final features = NavFeatureService.instance.enabled;
+                    final cur = MainTabController.instance.selectedTab.value;
+                    return JellyNavBar(
+                      key: ValueKey('video-nav-$paletteRev'),
+                      // ⚠️ 必须显式传影视的调色板 —— JellyNavBar 默认用
+                      // 阅读的 JellyTheme.palette，切影视配色时那个不会变，
+                      // 会导致影视栏颜色错（静默 bug）。
+                      palette: AppTheme.palette,
+                      currentIndex:
+                          features.indexWhere((f) => f.tabIndex == cur).clamp(
+                                0,
+                                features.isEmpty ? 0 : features.length - 1,
+                              ),
+                      floating: true,
+                      items: [
+                        for (final f in features)
+                          JellyNavItem(
+                            icon: f.activeIcon,
+                            label: f.label,
                           ),
-                  floating: true,
-                  items: [
-                    for (final f in features)
-                      JellyNavItem(
-                        icon: f.activeIcon,
-                        label: f.label,
-                      ),
-                  ],
-                  onTap: (i) {
-                    if (i < 0 || i >= features.length) return;
-                    MainTabController.instance.select(features[i].tabIndex);
+                      ],
+                      onTap: (i) {
+                        if (i < 0 || i >= features.length) return;
+                        MainTabController.instance.select(features[i].tabIndex);
+                      },
+                      onLongPress: (_) =>
+                          MainTabController.instance.backToVideo(),
+                    );
                   },
-                  onLongPress: (_) =>
-                      MainTabController.instance.backToVideo(),
-                );
-              });
+                ),
+              );
             }),
           ),
         ],

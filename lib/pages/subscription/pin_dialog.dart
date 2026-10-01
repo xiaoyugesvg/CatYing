@@ -42,14 +42,14 @@ class _PinDialogState extends State<PinDialog> {
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppTheme.glassRadius)),
       title: Text(widget.setup ? '设置密码' : '输入密码',
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
+          style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontHeadline)),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             widget.setup ? '设置一个 6 位数字密码，用于保护已上锁的订阅' : '该订阅已上锁，请输入 6 位密码',
-            style: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
+            style: TextStyle(color: AppTheme.textTertiary, fontSize: AppTheme.fontFootnote),
           ),
           const SizedBox(height: 14),
           TextField(
@@ -61,7 +61,7 @@ class _PinDialogState extends State<PinDialog> {
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
             cursorColor: AppTheme.accentColor,
             style: TextStyle(
-                color: AppTheme.textPrimary, fontSize: 20, letterSpacing: 8),
+                color: AppTheme.textPrimary, fontSize: AppTheme.fontTitle2, letterSpacing: 8),
             textAlign: TextAlign.center,
             onChanged: (_) {
               if (_error != null) setState(() => _error = null);
@@ -83,7 +83,7 @@ class _PinDialogState extends State<PinDialog> {
           if (_error != null) ...[
             const SizedBox(height: 8),
             Text(_error!,
-                style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+                style: const TextStyle(color: Colors.redAccent, fontSize: AppTheme.fontFootnote)),
           ],
         ],
       ),

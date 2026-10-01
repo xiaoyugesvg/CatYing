@@ -7,6 +7,7 @@ import 'package:flutter_pdfview/flutter_pdfview.dart';
 import '../services/book_download_service.dart';
 import '../services/book_reading_progress_service.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 void _log(String message) {
   if (kDebugMode) debugPrint('[PdfReader] $message');
@@ -136,7 +137,7 @@ class _PdfReaderPageState extends State<PdfReaderPage> {
       child: Center(
         child: Text(
           _totalPages > 0 ? '$cur / $_totalPages' : '$cur',
-          style: const TextStyle(fontSize: 14),
+          style: const TextStyle(fontSize: AppTheme.fontBody),
         ),
       ),
     );

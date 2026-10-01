@@ -469,7 +469,7 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
               text.isEmpty ? '（暂无日志，先操作几步再打开）' : text,
               style: TextStyle(
                 color: AppTheme.textSecondary,
-                fontSize: 11,
+                fontSize: AppTheme.fontCaption,
                 fontFamily: 'monospace',
               ),
             ),

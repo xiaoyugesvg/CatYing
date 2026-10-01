@@ -1614,6 +1614,6 @@ class SettingsService extends ChangeNotifier {
       }
     }
     final doc = await getApplicationDocumentsDirectory();
-    return Directory('${doc.path}/${AppConstants.downloadDir}');
+    return Directory('${doc.path}/${CmbokConstants.downloadDir}');
   }
 }

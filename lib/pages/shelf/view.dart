@@ -434,7 +434,7 @@ class _ShelfPageState extends State<ShelfPage> {
               child: Text('每行显示',
                   style: TextStyle(
                       color: AppTheme.textPrimary,
-                      fontSize: 16,
+                      fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.w600)),
             ),
             Padding(

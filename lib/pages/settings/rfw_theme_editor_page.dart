@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../common/theme.dart';
 import '../../services/rfw_theme_service.dart';
+import '../../widgets/app_toast.dart';
 
 /// 主题编辑器 —— 粘贴 / 手改 `.rfwtxt` 主题文本。
 ///
@@ -34,8 +35,7 @@ class _RfwThemeEditorPageState extends State<RfwThemeEditorPage> {
   void initState() {
     super.initState();
     final e = widget.editing;
-    _nameCtrl = TextEditingController(
-        text: e == null ? '' : e.name);
+    _nameCtrl = TextEditingController(text: e == null ? '' : e.name);
     _sourceCtrl = TextEditingController(text: e?.source ?? '');
   }
 
@@ -61,9 +61,7 @@ class _RfwThemeEditorPageState extends State<RfwThemeEditorPage> {
     final text = data?.text ?? '';
     if (text.trim().isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('剪贴板为空')),
-        );
+        AppToast.message('剪贴板为空');
       }
       return;
     }
@@ -105,11 +103,9 @@ class _RfwThemeEditorPageState extends State<RfwThemeEditorPage> {
       await _svc.setCurrent(id);
       await _svc.setEnabled(true);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('已保存并启用，返回首页即可看到效果'),
-          duration: Duration(seconds: 2),
-        ),
+      AppToast.message(
+        '已保存并启用，返回首页即可看到效果',
+        duration: const Duration(seconds: 2),
       );
       Navigator.of(context).pop(true);
     } finally {
@@ -120,22 +116,28 @@ class _RfwThemeEditorPageState extends State<RfwThemeEditorPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.backgroundPrimary,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: AppTheme.backgroundPrimary,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: IconThemeData(color: AppTheme.textPrimary),
-        title: Text(widget.editing == null ? '新建主题' : '编辑主题',
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 17)),
+        title: Text(
+          widget.editing == null ? '新建主题' : '编辑主题',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontTitle3,
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: _saving ? null : _save,
-            child: Text(_saving ? '保存中…' : '保存',
-                style: TextStyle(
-                    color: _saving
-                        ? AppTheme.textTertiary
-                        : AppTheme.accentColor,
-                    fontWeight: FontWeight.w600)),
+            child: Text(
+              _saving ? '保存中…' : '保存',
+              style: TextStyle(
+                color: _saving ? AppTheme.textTertiary : AppTheme.accentColor,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
         ],
       ),
@@ -146,14 +148,21 @@ class _RfwThemeEditorPageState extends State<RfwThemeEditorPage> {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: TextField(
               controller: _nameCtrl,
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontBody,
+              ),
               decoration: InputDecoration(
                 labelText: '主题名',
-                labelStyle:
-                    TextStyle(color: AppTheme.textTertiary, fontSize: 13),
+                labelStyle: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontSubhead,
+                ),
                 hintText: '例如：墨白极简',
-                hintStyle:
-                    TextStyle(color: AppTheme.textTertiary, fontSize: 13),
+                hintStyle: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontSubhead,
+                ),
                 isDense: true,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(AppTheme.radiusMD),
@@ -170,7 +179,10 @@ class _RfwThemeEditorPageState extends State<RfwThemeEditorPage> {
                 TextButton.icon(
                   onPressed: _pasteFromClipboard,
                   icon: const Icon(Icons.content_paste, size: 16),
-                  label: const Text('粘贴', style: TextStyle(fontSize: 13)),
+                  label: const Text(
+                    '粘贴',
+                    style: TextStyle(fontSize: AppTheme.fontSubhead),
+                  ),
                   style: TextButton.styleFrom(
                     foregroundColor: AppTheme.accentColor,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -180,8 +192,10 @@ class _RfwThemeEditorPageState extends State<RfwThemeEditorPage> {
                 TextButton.icon(
                   onPressed: _runCheck,
                   icon: const Icon(Icons.spellcheck, size: 16),
-                  label: const Text('语法检查',
-                      style: TextStyle(fontSize: 13)),
+                  label: const Text(
+                    '语法检查',
+                    style: TextStyle(fontSize: AppTheme.fontSubhead),
+                  ),
                   style: TextButton.styleFrom(
                     foregroundColor: AppTheme.accentColor,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -194,7 +208,10 @@ class _RfwThemeEditorPageState extends State<RfwThemeEditorPage> {
                     _checkResult = null;
                   }),
                   icon: const Icon(Icons.clear, size: 16),
-                  label: const Text('清空', style: TextStyle(fontSize: 13)),
+                  label: const Text(
+                    '清空',
+                    style: TextStyle(fontSize: AppTheme.fontSubhead),
+                  ),
                   style: TextButton.styleFrom(
                     foregroundColor: AppTheme.textSecondary,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -205,7 +222,9 @@ class _RfwThemeEditorPageState extends State<RfwThemeEditorPage> {
                 Text(
                   '${_sourceCtrl.text.length} 字符',
                   style: TextStyle(
-                      color: AppTheme.textTertiary, fontSize: 11.5),
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontFootnote,
+                  ),
                 ),
               ],
             ),
@@ -238,14 +257,12 @@ class _RfwThemeEditorPageState extends State<RfwThemeEditorPage> {
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      _checkResult!.isEmpty
-                          ? '语法检查通过，可以保存'
-                          : _checkResult!,
+                      _checkResult!.isEmpty ? '语法检查通过，可以保存' : _checkResult!,
                       style: TextStyle(
                         color: _checkResult!.isEmpty
                             ? AppTheme.accentColor
                             : Colors.redAccent,
-                        fontSize: 12,
+                        fontSize: AppTheme.fontFootnote,
                         height: 1.4,
                       ),
                     ),
@@ -277,18 +294,20 @@ class _RfwThemeEditorPageState extends State<RfwThemeEditorPage> {
                 },
                 style: TextStyle(
                   color: AppTheme.textPrimary,
-                  fontSize: 12,
+                  fontSize: AppTheme.fontFootnote,
                   height: 1.5,
                   fontFamily: 'monospace',
                 ),
                 decoration: InputDecoration(
-                  hintText: 'import core.widgets;\nimport peek.home;\n\n'
+                  hintText:
+                      'import core.widgets;\nimport peek.home;\n\n'
                       'widget root = PeekStickyGrid(\n  ...\n);',
                   hintStyle: TextStyle(
-                      color: AppTheme.textTertiary,
-                      fontSize: 12,
-                      height: 1.5,
-                      fontFamily: 'monospace'),
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontFootnote,
+                    height: 1.5,
+                    fontFamily: 'monospace',
+                  ),
                   contentPadding: const EdgeInsets.all(12),
                   border: InputBorder.none,
                 ),

@@ -6,6 +6,7 @@ import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
 import '../pages/player_page.dart';
+import '../../common/theme.dart';
 
 /// 迷你播放器的布局常量（#8）。
 ///
@@ -69,7 +70,7 @@ class MiniPlayer extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 10),
               decoration: BoxDecoration(
                 color: MusicTheme.card,
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(20),
                 border: Border.all(
                   color: MusicTheme.label.withValues(alpha: 0.07),
                   width: 0.5,
@@ -156,7 +157,7 @@ class MiniPlayer extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                             color: MusicTheme.label,
-                            fontSize: 14,
+                            fontSize: AppTheme.fontBody,
                             fontWeight: FontWeight.w600),
                       ),
                     ),
@@ -171,7 +172,7 @@ class MiniPlayer extends StatelessWidget {
                   sub,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: subColor, fontSize: 11.5),
+                  style: TextStyle(color: subColor, fontSize: AppTheme.fontFootnote),
                 ),
               ],
             );

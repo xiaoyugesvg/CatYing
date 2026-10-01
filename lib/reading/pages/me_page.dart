@@ -20,6 +20,7 @@ import 'reading_settings_page.dart';
 import 'search_page.dart';
 import 'book_source_repo_page.dart';
 import 'source_repo_page.dart';
+import '../../common/theme.dart';
 
 /// "我的"页：菜单（下载设置等）+ 右上角暗色模式切换 + 版本信息
 class MePage extends StatefulWidget {
@@ -84,7 +85,7 @@ class _MePageState extends State<MePage> {
                     child: Text(
                       '我的',
                       style: TextStyle(
-                        fontSize: 22,
+                        fontSize: AppTheme.fontPageTitle,
                         fontWeight: FontWeight.bold,
                         color: titleColor,
                       ),
@@ -500,7 +501,7 @@ class _MePageState extends State<MePage> {
                     Text(
                       title,
                       style: TextStyle(
-                        fontSize: 15,
+                        fontSize: AppTheme.fontHeadline,
                         fontWeight: FontWeight.w600,
                         color: isDark
                             ? Colors.white
@@ -511,7 +512,7 @@ class _MePageState extends State<MePage> {
                     Text(
                       subtitle,
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: AppTheme.fontFootnote,
                         color: JellyTheme.textSecondary,
                       ),
                     ),
@@ -570,7 +571,7 @@ class _MePageState extends State<MePage> {
                               margin: const EdgeInsets.only(bottom: 12),
                               decoration: BoxDecoration(
                                 color: isDark ? Colors.white24 : Colors.black12,
-                                borderRadius: BorderRadius.circular(2),
+                                borderRadius: BorderRadius.circular(10),
                               ),
                             ),
                           ),
@@ -579,7 +580,7 @@ class _MePageState extends State<MePage> {
                               Text(
                                 '主题风格',
                                 style: TextStyle(
-                                  fontSize: 18,
+                                  fontSize: AppTheme.fontTitle3,
                                   fontWeight: FontWeight.w600,
                                   color: isDark
                                       ? Colors.white
@@ -590,7 +591,7 @@ class _MePageState extends State<MePage> {
                               Text(
                                 '省电',
                                 style: TextStyle(
-                                  fontSize: 13,
+                                  fontSize: AppTheme.fontSubhead,
                                   color: isDark
                                       ? Colors.white70
                                       : Colors.black54,
@@ -610,7 +611,7 @@ class _MePageState extends State<MePage> {
                               Text(
                                 '动画',
                                 style: TextStyle(
-                                  fontSize: 13,
+                                  fontSize: AppTheme.fontSubhead,
                                   color: isDark
                                       ? Colors.white70
                                       : Colors.black54,
@@ -639,74 +640,92 @@ class _MePageState extends State<MePage> {
                                 mainAxisSize: MainAxisSize.min,
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  ...themePresets.map(
-                                    (p) => _buildPresetCard(
-                                      p,
-                                      p.id == current,
-                                      isDark,
-                                      switching
-                                          ? null
-                                          : () async {
-                                              setSheetState(
-                                                () => _switchingTo = p.id,
-                                              );
-                                              await SettingsService()
-                                                  .setThemePreset(p.id);
-                                              // 等圆形揭示动画（截图+重建+扩散）完成，再收面板避免抢帧卡顿
-                                              await Future.delayed(
-                                                const Duration(
-                                                  milliseconds: 500,
-                                                ),
-                                              );
-                                              if (mounted)
-                                                Navigator.pop(context);
-                                            },
-                                    ),
+                                  // 预设：圆点网格（每主题一颗大圆点 + 名称）
+                                  Wrap(
+                                    spacing: 10,
+                                    runSpacing: 14,
+                                    children: [
+                                      for (final p in themePresets)
+                                        _buildPresetDot(
+                                          p,
+                                          p.id == current,
+                                          isDark,
+                                          switching
+                                              ? null
+                                              : () async {
+                                                  setSheetState(
+                                                    () => _switchingTo = p.id,
+                                                  );
+                                                  await SettingsService()
+                                                      .setThemePreset(p.id);
+                                                  // 等圆形揭示动画（截图+重建+扩散）完成，再收面板避免抢帧卡顿
+                                                  await Future.delayed(
+                                                    const Duration(
+                                                      milliseconds: 500,
+                                                    ),
+                                                  );
+                                                  if (mounted) {
+                                                    Navigator.pop(context);
+                                                  }
+                                                },
+                                        ),
+                                    ],
                                   ),
-                                  if (SettingsService().customThemes.isNotEmpty)
+                                  if (SettingsService()
+                                      .customThemes
+                                      .isNotEmpty) ...[
                                     Padding(
                                       padding: const EdgeInsets.fromLTRB(
                                         4,
-                                        10,
+                                        14,
                                         4,
-                                        6,
+                                        8,
                                       ),
                                       child: Text(
-                                        '我的自定义',
+                                        '我的自定义（长按可编辑/删除）',
                                         style: TextStyle(
-                                          fontSize: 13,
+                                          fontSize: AppTheme.fontSubhead,
                                           color: JellyTheme.textSecondary,
                                         ),
                                       ),
                                     ),
-                                  ...SettingsService().customThemes.map(
-                                    (t) => _buildPresetCard(
-                                      t,
-                                      t.id == current,
-                                      isDark,
-                                      switching
-                                          ? null
-                                          : () async {
-                                              setSheetState(
-                                                () => _switchingTo = t.id,
-                                              );
-                                              await SettingsService()
-                                                  .setThemePreset(t.id);
-                                              await Future.delayed(
-                                                const Duration(
-                                                  milliseconds: 500,
-                                                ),
-                                              );
-                                              if (mounted)
-                                                Navigator.pop(context);
-                                            },
-                                      deletable: true,
-                                      onDelete: () => _confirmDeleteCustom(t),
-                                      editable: true,
-                                      onEdit: () => _editCustom(t),
+                                    Wrap(
+                                      spacing: 10,
+                                      runSpacing: 14,
+                                      children: [
+                                        for (final t
+                                            in SettingsService().customThemes)
+                                          _buildPresetDot(
+                                            t,
+                                            t.id == current,
+                                            isDark,
+                                            switching
+                                                ? null
+                                                : () async {
+                                                    setSheetState(
+                                                      () => _switchingTo = t.id,
+                                                    );
+                                                    await SettingsService()
+                                                        .setThemePreset(t.id);
+                                                    await Future.delayed(
+                                                      const Duration(
+                                                        milliseconds: 500,
+                                                      ),
+                                                    );
+                                                    if (mounted) {
+                                                      Navigator.pop(context);
+                                                    }
+                                                  },
+                                            deletable: true,
+                                            onDelete: () =>
+                                                _confirmDeleteCustom(t),
+                                            editable: true,
+                                            onEdit: () => _editCustom(t),
+                                          ),
+                                      ],
                                     ),
-                                  ),
-                                  const SizedBox(height: 8),
+                                  ],
+                                  const SizedBox(height: 10),
                                   _buildCreateThemeButton(isDark),
                                 ],
                               ),
@@ -737,7 +756,7 @@ class _MePageState extends State<MePage> {
                                   Text(
                                     '应用中...',
                                     style: TextStyle(
-                                      fontSize: 14,
+                                      fontSize: AppTheme.fontBody,
                                       color: isDark
                                           ? Colors.white70
                                           : JellyTheme.textPrimaryLight,
@@ -759,7 +778,19 @@ class _MePageState extends State<MePage> {
     );
   }
 
-  Widget _buildPresetCard(
+  /// 一个主题「圆点」（照用户截图的样式 + 复用统一主题页的画法）。
+  ///
+  /// ── 为什么改成"一个大圆点" ────────────────────────────────────
+  /// 原来是**每个主题三个小圆点**（主色/强调色/浅色底）排一行、占满整宽。
+  /// 用户对比后指出："这个圆点样式没有（统一主题页）这一排好看"。
+  ///
+  /// 统一主题页 `_presetDot` 的做法是 **一个 SweepGradient 四色环大圆点**：
+  /// 颜色沿圆周扫过，像一颗小球 —— 比三个并排的小点更有"一颗主题"的整体感，
+  /// 也更容易一眼分辨 7 套配色。这里照抄那个画法并把尺寸放大到 52。
+  ///
+  /// 自定义主题的「编辑 / 删除」放**长按菜单**（点按 = 应用主题）——
+  /// 圆点式布局里没有合适的位置常驻两个图标，长按是 iOS 的常规交互。
+  Widget _buildPresetDot(
     ThemePresetInfo preset,
     bool selected,
     bool isDark,
@@ -769,103 +800,139 @@ class _MePageState extends State<MePage> {
     bool editable = false,
     VoidCallback? onEdit,
   }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Material(
-        color: selected
-            ? preset.palette.primary.withValues(alpha: 0.12)
-            : (isDark
-                  ? Colors.white.withValues(alpha: 0.04)
-                  : Colors.black.withValues(alpha: 0.03)),
-        borderRadius: BorderRadius.circular(16),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              children: [
-                ...[
+    final labelColor = isDark ? Colors.white : const Color(0xFF1C1C1E);
+    final hintColor = isDark ? Colors.white54 : const Color(0xFF8E8E93);
+    final canEdit = (editable && onEdit != null) || (deletable && onDelete != null);
+
+    Future<void> showActions() async {
+      if (!canEdit) return;
+      final v = await showModalBottomSheet<String>(
+        context: context,
+        backgroundColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  children: [
+                    Text(
+                      preset.name,
+                      style: TextStyle(
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w600,
+                        color: labelColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (editable && onEdit != null)
+                ListTile(
+                  leading: const Icon(Icons.edit_outlined, size: 20),
+                  title: const Text('编辑主题'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    onEdit();
+                  },
+                ),
+              if (deletable && onDelete != null)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline_rounded,
+                      size: 20, color: Colors.redAccent),
+                  title: const Text('删除主题',
+                      style: TextStyle(color: Colors.redAccent)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    onDelete();
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      );
+      // showModalBottomSheet 的返回值这里用不到（动作在 onTap 里已执行）
+      if (v != null) return;
+    }
+
+    return GestureDetector(
+      onTap: onTap,
+      onLongPress: canEdit ? showActions : null,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 64,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                // 四色扫描渐变 —— 与统一主题页 _presetDot 同一画法
+                gradient: SweepGradient(colors: [
+                  preset.palette.backgroundLight,
                   preset.palette.primary,
+                  preset.palette.backgroundDark,
                   preset.palette.accent,
                   preset.palette.backgroundLight,
-                ].map(
-                  (c) => Container(
-                    width: 28,
-                    height: 28,
-                    margin: const EdgeInsets.only(right: 8),
-                    decoration: BoxDecoration(
-                      color: c,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.black12),
-                    ),
-                  ),
+                ]),
+                shape: BoxShape.circle,
+                // 选中：加粗描边 + 打勾；未选中：细描边
+                border: Border.all(
+                  color: selected ? labelColor : hintColor.withValues(alpha: 0.4),
+                  width: selected ? 2.5 : 1,
                 ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    preset.name,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: isDark
-                          ? Colors.white
-                          : JellyTheme.textPrimaryLight,
-                    ),
-                  ),
-                ),
-                if (editable && onEdit != null)
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: onEdit,
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 4, right: 2),
-                      child: Icon(
-                        Icons.edit_outlined,
-                        color: JellyTheme.textSecondary,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                if (deletable)
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: onDelete,
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 8, right: 6),
-                      child: Icon(
-                        Icons.close_rounded,
-                        color: JellyTheme.textSecondary,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                Icon(
-                  selected
-                      ? Icons.check_circle_rounded
-                      : Icons.radio_button_unchecked_rounded,
-                  color: selected
-                      ? preset.palette.primary
-                      : JellyTheme.textSecondary,
-                  size: 22,
-                ),
-              ],
+              ),
+              child: selected
+                  ? Icon(Icons.check,
+                      size: 20,
+                      color: preset.palette.backgroundLight.computeLuminance() >
+                              0.5
+                          ? Colors.black87
+                          : Colors.white)
+                  : null,
             ),
-          ),
+            const SizedBox(height: 6),
+            Text(
+              preset.name,
+              maxLines: 2,
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: AppTheme.fontCaption,
+                height: 1.15,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                color: selected ? labelColor : hintColor,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
   /// 「新建自定义主题」按钮：跳转编辑器（保存后 addCustomTheme 已通知，sheet 自动刷新）
+  ///
+  /// 样式照用户给的截图：**中性描边圆角按钮**（不是主题色描边）——
+  /// 面板里已经有 10 个主题色点了，按钮再用主题色会显得花；
+  /// 中性灰/白描边让"新建"这个动作在视觉上退后一步，不与主题卡抢注意。
   Widget _buildCreateThemeButton(bool isDark) {
+    final stroke = isDark
+        ? Colors.white.withValues(alpha: 0.22)
+        : Colors.black.withValues(alpha: 0.16);
+    final fg = isDark ? Colors.white : const Color(0xFF1C1C1E);
     return Padding(
-      padding: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.only(top: 6),
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           onTap: () => Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const CustomThemeEditorPage()),
@@ -873,22 +940,19 @@ class _MePageState extends State<MePage> {
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 14),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: JellyTheme.primary.withValues(alpha: 0.5),
-                width: 1.5,
-              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: stroke, width: 1.2),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.add_rounded, color: JellyTheme.primary, size: 20),
+                Icon(Icons.add_rounded, color: fg, size: 20),
                 const SizedBox(width: 6),
                 Text(
                   '新建自定义主题',
                   style: TextStyle(
-                    color: JellyTheme.primary,
-                    fontSize: 15,
+                    color: fg,
+                    fontSize: AppTheme.fontHeadline,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -1037,7 +1101,7 @@ class _MePageState extends State<MePage> {
                   Text(
                     title,
                     style: TextStyle(
-                      fontSize: 15,
+                      fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.w600,
                       color: isDark
                           ? Colors.white
@@ -1048,7 +1112,7 @@ class _MePageState extends State<MePage> {
                   Text(
                     subtitle,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: AppTheme.fontFootnote,
                       color: JellyTheme.textSecondary,
                     ),
                   ),

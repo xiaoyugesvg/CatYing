@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/trim_preset.dart';
 import '../services/trim_preset_service.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 /// 预设管理弹窗
 ///
@@ -44,7 +45,7 @@ class _TrimPresetDialogState extends State<TrimPresetDialog> {
                     '暂无预设，点击下方按钮保存当前设置',
                     style: TextStyle(
                       color: JellyTheme.textSecondary,
-                      fontSize: 13,
+                      fontSize: AppTheme.fontSubhead,
                     ),
                   ),
                 ),
@@ -95,7 +96,7 @@ class _TrimPresetDialogState extends State<TrimPresetDialog> {
                   preset.name,
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: 14,
+                    fontSize: AppTheme.fontBody,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
                 ),
@@ -104,7 +105,7 @@ class _TrimPresetDialogState extends State<TrimPresetDialog> {
                   '阈值 ${preset.threshold} · 边距 ${preset.padding} · '
                   '放大 ${preset.zoom}% · ${preset.deviceWidth}×${preset.deviceHeight}',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: AppTheme.fontCaption,
                     color: JellyTheme.textSecondary,
                   ),
                 ),

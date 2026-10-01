@@ -2,7 +2,7 @@ import 'dart:async';
 import '../../widgets/common_widgets.dart';
 import 'dart:convert';
 import 'dart:io';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:photo_view/photo_view.dart';
@@ -11,7 +11,6 @@ import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../models/comic.dart';
 import '../services/bookshelf_service.dart';
 import '../source/adapter.dart';
-import '../source/image_cache_manager.dart';
 import '../source/source_manager.dart';
 import '../source/webview_image_fetcher.dart';
 import '../services/download_service.dart';
@@ -21,6 +20,8 @@ import '../services/reader_override_service.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/pomodoro_button.dart';
+import '../../common/theme.dart';
+import '../../widgets/app_image_cache.dart';
 
 /// 漫画阅读页面
 class ReaderPage extends StatefulWidget {
@@ -433,7 +434,7 @@ class _ReaderPageState extends State<ReaderPage> {
           CachedNetworkImageProvider(
             url,
             headers: _imageHeaders,
-            cacheManager: comicImageCacheManager,
+            cacheManager: appImageCacheManager,
           ),
           context,
         );
@@ -521,7 +522,7 @@ class _ReaderPageState extends State<ReaderPage> {
                         const Text(
                           '阅读设置',
                           style: TextStyle(
-                            fontSize: 16,
+                            fontSize: AppTheme.fontHeadline,
                             fontWeight: FontWeight.bold,
                             color: Colors.white,
                           ),
@@ -530,7 +531,7 @@ class _ReaderPageState extends State<ReaderPage> {
                         Text(
                           '独立设置',
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: AppTheme.fontSubhead,
                             color: draftIndependent
                                 ? JellyTheme.primary
                                 : Colors.white70,
@@ -552,12 +553,12 @@ class _ReaderPageState extends State<ReaderPage> {
                       ),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.06),
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
                         draftIndependent ? '当前修改仅对本书生效' : '当前为全局设置，修改影响所有漫画',
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: AppTheme.fontCaption,
                           color: draftIndependent
                               ? JellyTheme.primary.withValues(alpha: 0.9)
                               : Colors.white54,
@@ -568,7 +569,7 @@ class _ReaderPageState extends State<ReaderPage> {
                       children: [
                         const Text(
                           '阅读模式',
-                          style: TextStyle(fontSize: 14, color: Colors.white),
+                          style: TextStyle(fontSize: AppTheme.fontBody, color: Colors.white),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -623,7 +624,7 @@ class _ReaderPageState extends State<ReaderPage> {
                       children: [
                         const Text(
                           '预加载',
-                          style: TextStyle(fontSize: 14, color: Colors.white),
+                          style: TextStyle(fontSize: AppTheme.fontBody, color: Colors.white),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -657,14 +658,14 @@ class _ReaderPageState extends State<ReaderPage> {
                       children: [
                         const Text(
                           '翻页反转',
-                          style: TextStyle(fontSize: 14, color: Colors.white),
+                          style: TextStyle(fontSize: AppTheme.fontBody, color: Colors.white),
                         ),
                         const SizedBox(width: 12),
                         const Expanded(
                           child: Text(
                             '左点下一页、右点上一页',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: AppTheme.fontFootnote,
                               color: Colors.white54,
                             ),
                           ),
@@ -680,14 +681,14 @@ class _ReaderPageState extends State<ReaderPage> {
                       children: [
                         const Text(
                           '双页模式',
-                          style: TextStyle(fontSize: 14, color: Colors.white),
+                          style: TextStyle(fontSize: AppTheme.fontBody, color: Colors.white),
                         ),
                         const SizedBox(width: 12),
                         const Expanded(
                           child: Text(
                             '横屏左右并排',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: AppTheme.fontFootnote,
                               color: Colors.white54,
                             ),
                           ),
@@ -703,14 +704,14 @@ class _ReaderPageState extends State<ReaderPage> {
                       children: [
                         const Text(
                           '信息栏',
-                          style: TextStyle(fontSize: 14, color: Colors.white),
+                          style: TextStyle(fontSize: AppTheme.fontBody, color: Colors.white),
                         ),
                         const SizedBox(width: 12),
                         const Expanded(
                           child: Text(
                             '显示时间、页码、进度',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: AppTheme.fontFootnote,
                               color: Colors.white54,
                             ),
                           ),
@@ -726,14 +727,14 @@ class _ReaderPageState extends State<ReaderPage> {
                       children: [
                         const Text(
                           '音量键翻页',
-                          style: TextStyle(fontSize: 14, color: Colors.white),
+                          style: TextStyle(fontSize: AppTheme.fontBody, color: Colors.white),
                         ),
                         const SizedBox(width: 12),
                         const Expanded(
                           child: Text(
                             '按音量上/下键翻页（会接管音量键）',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: AppTheme.fontFootnote,
                               color: Colors.white54,
                             ),
                           ),
@@ -749,14 +750,14 @@ class _ReaderPageState extends State<ReaderPage> {
                       children: [
                         const Text(
                           '墨水屏',
-                          style: TextStyle(fontSize: 14, color: Colors.white),
+                          style: TextStyle(fontSize: AppTheme.fontBody, color: Colors.white),
                         ),
                         const SizedBox(width: 12),
                         const Expanded(
                           child: Text(
                             '黑白柔和显示',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: AppTheme.fontFootnote,
                               color: Colors.white54,
                             ),
                           ),
@@ -827,13 +828,13 @@ class _ReaderPageState extends State<ReaderPage> {
             color: selected
                 ? JellyTheme.primary
                 : Colors.white.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(10),
           ),
           alignment: Alignment.center,
           child: Text(
             label,
             style: TextStyle(
-              fontSize: 13,
+              fontSize: AppTheme.fontSubhead,
               color: selected ? Colors.white : Colors.white70,
               fontWeight: selected ? FontWeight.bold : FontWeight.normal,
             ),
@@ -901,7 +902,7 @@ class _ReaderPageState extends State<ReaderPage> {
                           const Text(
                             '目录',
                             style: TextStyle(
-                              fontSize: 18,
+                              fontSize: AppTheme.fontTitle3,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -918,7 +919,7 @@ class _ReaderPageState extends State<ReaderPage> {
                             child: Text(
                               '${chapters.length} 话',
                               style: TextStyle(
-                                fontSize: 11,
+                                fontSize: AppTheme.fontCaption,
                                 color: JellyTheme.primary,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -975,7 +976,7 @@ class _ReaderPageState extends State<ReaderPage> {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontSize: 14,
+                                    fontSize: AppTheme.fontBody,
                                     color: cur ? JellyTheme.primary : textColor,
                                     fontWeight: cur
                                         ? FontWeight.w700
@@ -1512,7 +1513,7 @@ class _ReaderPageState extends State<ReaderPage> {
     return CachedNetworkImageProvider(
       url,
       headers: _imageHeaders,
-      cacheManager: comicImageCacheManager,
+      cacheManager: appImageCacheManager,
     );
   }
 
@@ -1589,7 +1590,7 @@ class _ReaderPageState extends State<ReaderPage> {
       key: key,
       imageUrl: url,
       httpHeaders: _imageHeaders,
-      cacheManager: comicImageCacheManager,
+      cacheManager: appImageCacheManager,
       fit: fit,
       alignment: alignment,
       width: width,
@@ -1864,7 +1865,7 @@ class _ReaderPageState extends State<ReaderPage> {
           return const SizedBox.shrink();
         }
         final style = TextStyle(
-          fontSize: 11,
+          fontSize: AppTheme.fontCaption,
           color: Colors.white.withValues(alpha: 0.5),
           shadows: const [
             Shadow(
@@ -1976,11 +1977,11 @@ class _ReaderPageState extends State<ReaderPage> {
                 children: [
                   Text(
                     widget.comic.title,
-                    style: const TextStyle(fontSize: 14, color: Colors.grey),
+                    style: const TextStyle(fontSize: AppTheme.fontBody, color: Colors.grey),
                   ),
                   Text(
                     _currentChapter.title,
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    style: const TextStyle(fontSize: AppTheme.fontFootnote, color: Colors.grey),
                   ),
                 ],
               ),

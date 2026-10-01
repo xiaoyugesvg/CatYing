@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../common/theme.dart';
 
 /// 通用整页加载态（三模块共用）。
 ///
@@ -33,7 +34,7 @@ class AppPageLoading extends StatelessWidget {
             Text(
               label!,
               style: TextStyle(
-                fontSize: 13,
+                fontSize: AppTheme.fontSubhead,
                 color: Theme.of(context)
                     .colorScheme
                     .onSurface

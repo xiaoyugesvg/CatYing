@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 /// 分段数据（图标、emoji 或 文字）
 class JellySegmentData {
@@ -39,7 +40,7 @@ class JellySegmentedToggle extends StatelessWidget {
       height: 50,
       decoration: BoxDecoration(
         color: isDark ? JellyTheme.cardDark : Colors.white,
-        borderRadius: BorderRadius.circular(25),
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
             color: isDark
@@ -89,14 +90,14 @@ class JellySegmentedToggle extends StatelessWidget {
                         child: seg.emoji != null
                             ? Text(
                                 seg.emoji!,
-                                style: const TextStyle(fontSize: 18),
+                                style: const TextStyle(fontSize: AppTheme.fontTitle3),
                               )
                             : seg.icon != null
                             ? Icon(seg.icon, size: 20, color: color)
                             : Text(
                                 seg.label ?? '',
                                 style: TextStyle(
-                                  fontSize: 13,
+                                  fontSize: AppTheme.fontSubhead,
                                   fontWeight: selected
                                       ? FontWeight.w700
                                       : FontWeight.w500,

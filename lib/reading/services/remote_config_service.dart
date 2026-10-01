@@ -33,9 +33,9 @@ class RemoteConfigService extends ChangeNotifier {
   static const _kZlibraryDomain = 'remote_zlibrary_domain';
   static const _kNotification = 'remote_notification';
 
-  String _copyApiUrl = AppConstants.defaultCopyApiUrl;
+  String _copyApiUrl = CmbokConstants.defaultCopyApiUrl;
   String _zlibraryDomain =
-      _hostOf(AppConstants.zLibraryApiUrl) ?? 'zh.zlibrary.by';
+      _hostOf(CmbokConstants.zLibraryApiUrl) ?? 'zh.zlibrary.by';
   Object?
   _cloudZlibraryUrl; // 云端 zlibrary_url 原始值（单字符串或数组），交 ZlibraryService 探测
   String _notification = '';
@@ -138,7 +138,7 @@ class RemoteConfigService extends ChangeNotifier {
   /// 拉取 url_config.json：更新拷贝漫画地址 / z-library 默认域名。返回是否有变化。
   Future<bool> _fetchUrlConfig(Dio dio, SharedPreferences prefs) async {
     try {
-      final res = await dio.get<dynamic>(AppConstants.urlConfigUrl);
+      final res = await dio.get<dynamic>(CmbokConstants.urlConfigUrl);
       final cfg = _asMap(res.data);
       if (cfg == null) return false;
       var changed = false;
@@ -171,7 +171,7 @@ class RemoteConfigService extends ChangeNotifier {
   /// 拉取 notification.json：更新公告文本。返回是否有变化。
   Future<bool> _fetchNotification(Dio dio, SharedPreferences prefs) async {
     try {
-      final res = await dio.get<dynamic>(AppConstants.notificationUrl);
+      final res = await dio.get<dynamic>(CmbokConstants.notificationUrl);
       final n = _asMap(res.data)?['notification']?.toString().trim() ?? '';
       if (n != _notification) {
         _notification = n;

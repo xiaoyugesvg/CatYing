@@ -15,6 +15,7 @@ import 'video_player_pip.dart';
 import 'window_fullscreen.dart';
 import 'danmaku.dart';
 import '../services/audio_focus.dart';
+import 'app_toast.dart';
 part 'video_player_helpers.dart';
 
 /// 视频画面比例 - 对应 Swift VideoFitType
@@ -86,7 +87,6 @@ class VideoPlayerWidget extends StatefulWidget {
 
   /// 播放设置弹窗的最大高度（父级传入播放器所在区域高度），见构造函数注释
   final double? sheetMaxHeight;
-
 
   final VoidCallback? onPlaying;
   final ValueChanged<Duration>? onPositionChanged;
@@ -187,6 +187,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   bool _danmuOn = true;
   bool _danmuLoaded = false;
   String _danmuApiUrl = '';
+
   /// 弹幕拉取代次：换集时递增，过期响应直接丢弃
   int _danmuLoadGen = 0;
   double _danmuFontSize = 14;
@@ -253,8 +254,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   int _userSeekStep = 10;
 
   /// 实际使用的快进步长（优先用户配置）
-  int get _effectiveSeekStep =>
-      _userSeekStep > 0 ? _userSeekStep : _seekStep;
+  int get _effectiveSeekStep => _userSeekStep > 0 ? _userSeekStep : _seekStep;
 
   /// 顶部轻提示的自动清除定时器
   Timer? _hintClearTimer;
@@ -425,83 +425,98 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _durationVN.value = _duration;
     _playbackSpeed = _player.state.rate;
 
-    _playerSubs.add(_player.stream.error.listen((error) {
-      if (error.isNotEmpty) widget.onError?.call();
-    }));
+    _playerSubs.add(
+      _player.stream.error.listen((error) {
+        if (error.isNotEmpty) widget.onError?.call();
+      }),
+    );
 
-    _playerSubs.add(_player.stream.playing.listen((playing) {
-      if (mounted) {
-        setState(() {
-          _isPlaying = playing;
-          _isBuffering = false;
-          // 暂停时常显控制条；开播后再按空闲隐藏
-          if (!playing) {
-            _showControls = true;
-          }
-        });
-        if (playing) {
-          _scheduleHideControls();
-          widget.onPlaying?.call();
-          _applyPendingResumeSeek();
-          // Spider 异步解析 URL 后才可匹配弹幕：开播时再试一次
-          if (!_danmuLoaded && _danmuApiUrl.isNotEmpty) {
-            _ensureDanmuLoaded(urlOverride: widget.url);
-          }
-          // iOS：前台预热原生 AVPlayer（静音预缓冲常驻），退后台/点 PiP 时
-          // 原生立即启动系统悬浮窗，避免"后台等缓冲"导致 PiP 时灵时不灵
-          if (Platform.isIOS) {
-            final u = _player.state.playlist.medias.isNotEmpty
-                ? _player.state.playlist.medias.last.uri
-                : widget.url;
-            if (u.isNotEmpty) {
-              VideoPlayerPip.instance
-                  .prepareIos(url: u, headers: widget.headers);
+    _playerSubs.add(
+      _player.stream.playing.listen((playing) {
+        if (mounted) {
+          setState(() {
+            _isPlaying = playing;
+            _isBuffering = false;
+            // 暂停时常显控制条；开播后再按空闲隐藏
+            if (!playing) {
+              _showControls = true;
+            }
+          });
+          if (playing) {
+            _scheduleHideControls();
+            widget.onPlaying?.call();
+            _applyPendingResumeSeek();
+            // Spider 异步解析 URL 后才可匹配弹幕：开播时再试一次
+            if (!_danmuLoaded && _danmuApiUrl.isNotEmpty) {
+              _ensureDanmuLoaded(urlOverride: widget.url);
+            }
+            // iOS：前台预热原生 AVPlayer（静音预缓冲常驻），退后台/点 PiP 时
+            // 原生立即启动系统悬浮窗，避免"后台等缓冲"导致 PiP 时灵时不灵
+            if (Platform.isIOS) {
+              final u = _player.state.playlist.medias.isNotEmpty
+                  ? _player.state.playlist.medias.last.uri
+                  : widget.url;
+              if (u.isNotEmpty) {
+                VideoPlayerPip.instance.prepareIos(
+                  url: u,
+                  headers: widget.headers,
+                );
+              }
             }
           }
         }
-      }
-    }));
+      }),
+    );
 
-    _playerSubs.add(_player.stream.buffering.listen((buffering) {
-      if (!mounted) return;
-      // 换集后 buffering=true 时必须能显示转圈，不能被旧的 _isPlaying/_position 挡住
-      if (buffering != _isBuffering) {
-        setState(() => _isBuffering = buffering);
-      }
-    }));
+    _playerSubs.add(
+      _player.stream.buffering.listen((buffering) {
+        if (!mounted) return;
+        // 换集后 buffering=true 时必须能显示转圈，不能被旧的 _isPlaying/_position 挡住
+        if (buffering != _isBuffering) {
+          setState(() => _isBuffering = buffering);
+        }
+      }),
+    );
 
     // 进度：只更新 ValueNotifier（进度条/时间局部重建），
     // 仅在跳过片头/片尾按钮可见性变化时才整树 setState
-    _playerSubs.add(_player.stream.position.listen((position) {
-      if (!mounted) return;
-      _position = position;
-      _positionVN.value = position;
-      if (_isBuffering && position > Duration.zero) {
-        _isBuffering = false;
-      }
-      final sec = position.inSeconds;
-      if (sec != _lastNotifiedPositionSec) {
-        final prevSkip = _skipVisibilityFor(
-            _lastNotifiedPositionSec < 0 ? -1 : _lastNotifiedPositionSec);
-        final nextSkip = _skipVisibilityFor(sec);
-        _lastNotifiedPositionSec = sec;
-        if (prevSkip != nextSkip) {
-          setState(() {});
+    _playerSubs.add(
+      _player.stream.position.listen((position) {
+        if (!mounted) return;
+        _position = position;
+        _positionVN.value = position;
+        if (_isBuffering && position > Duration.zero) {
+          _isBuffering = false;
         }
-        widget.onPositionChanged?.call(position);
-      }
-    }));
+        final sec = position.inSeconds;
+        if (sec != _lastNotifiedPositionSec) {
+          final prevSkip = _skipVisibilityFor(
+            _lastNotifiedPositionSec < 0 ? -1 : _lastNotifiedPositionSec,
+          );
+          final nextSkip = _skipVisibilityFor(sec);
+          _lastNotifiedPositionSec = sec;
+          if (prevSkip != nextSkip) {
+            setState(() {});
+          }
+          widget.onPositionChanged?.call(position);
+        }
+      }),
+    );
 
-    _playerSubs.add(_player.stream.duration.listen((duration) {
-      if (!mounted) return;
-      _duration = duration;
-      _durationVN.value = duration;
-      setState(() {});
-    }));
+    _playerSubs.add(
+      _player.stream.duration.listen((duration) {
+        if (!mounted) return;
+        _duration = duration;
+        _durationVN.value = duration;
+        setState(() {});
+      }),
+    );
 
-    _playerSubs.add(_player.stream.completed.listen((completed) {
-      if (completed) widget.onEnded?.call();
-    }));
+    _playerSubs.add(
+      _player.stream.completed.listen((completed) {
+        if (completed) widget.onEnded?.call();
+      }),
+    );
 
     _volume = _player.state.volume;
     if (_ownsPlayer) {
@@ -589,8 +604,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           if (!mounted) return;
           setState(() => _batteryLevel = lvl);
         } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
+          AppLog.instance.log('[video_player] swallowed: $e');
+        }
       });
     } catch (e) {
       AppLog.instance.log('=== _initBatteryMonitor: 失败: $e ===');
@@ -614,7 +629,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           _currentTime,
           style: const TextStyle(
             color: Colors.white,
-            fontSize: 13,
+            fontSize: AppTheme.fontSubhead,
             fontWeight: FontWeight.w600,
             shadows: [Shadow(blurRadius: 4, color: Colors.black87)],
           ),
@@ -641,7 +656,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           level,
           style: const TextStyle(
             color: Colors.white,
-            fontSize: 11,
+            fontSize: AppTheme.fontCaption,
             fontWeight: FontWeight.w500,
             shadows: [Shadow(blurRadius: 4, color: Colors.black87)],
           ),
@@ -664,8 +679,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         try {
           _player.setRate(_playbackSpeed);
         } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
+          AppLog.instance.log('[video_player] swallowed: $e');
+        }
       }
       // 换集/换源：清掉上一集的进度与缓冲态，避免进度条/转圈残留
       _pendingResumeSeconds = null;
@@ -726,13 +741,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       final cur = _player.state.position;
       if (cur > target) {
         AppLog.instance.log(
-            '=== _scheduleResumeSeek: cur=$cur > target=$target, 用户已观看, 跳过 ===');
+          '=== _scheduleResumeSeek: cur=$cur > target=$target, 用户已观看, 跳过 ===',
+        );
         _pendingResumeSeconds = null;
         return;
       }
     } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
+      AppLog.instance.log('[video_player] swallowed: $e');
+    }
     _pendingResumeSeconds = resume;
     try {
       _player.seek(target);
@@ -754,22 +770,27 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       final cur = _player.state.position;
       if (cur > target) {
         AppLog.instance.log(
-            '=== _applyPendingResumeSeek: cur=$cur > target=$target, 用户已观看, 跳过 ===');
+          '=== _applyPendingResumeSeek: cur=$cur > target=$target, 用户已观看, 跳过 ===',
+        );
         _pendingResumeSeconds = null;
         return;
       }
       if ((cur - target).abs() < const Duration(seconds: 2)) {
-        AppLog.instance.log('=== _applyPendingResumeSeek: 已在 $pending 附近, 跳过 ===');
+        AppLog.instance.log(
+          '=== _applyPendingResumeSeek: 已在 $pending 附近, 跳过 ===',
+        );
         _pendingResumeSeconds = null;
         return;
       }
     } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
+      AppLog.instance.log('[video_player] swallowed: $e');
+    }
     _pendingResumeSeconds = null;
     try {
       _player.seek(target);
-      AppLog.instance.log('=== _applyPendingResumeSeek: 兜底 seek 到 ${pending}s ===');
+      AppLog.instance.log(
+        '=== _applyPendingResumeSeek: 兜底 seek 到 ${pending}s ===',
+      );
     } catch (e) {
       AppLog.instance.log('=== _applyPendingResumeSeek: 兜底 seek 失败: $e ===');
     }
@@ -797,14 +818,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _alwaysShowSpeed = prefs.getBool('play_always_show_speed') ?? true;
 
       // ---- 数值类 ----
-      _longPressSpeed =
-          (prefs.getDouble('play_longpress_speed') ?? 3.0).clamp(1.5, 5.0);
-      _longPressAdjustable =
-          prefs.getBool('play_longpress_adjustable') ?? true;
+      _longPressSpeed = (prefs.getDouble('play_longpress_speed') ?? 3.0).clamp(
+        1.5,
+        5.0,
+      );
+      _longPressAdjustable = prefs.getBool('play_longpress_adjustable') ?? true;
       _userSeekStep = prefs.getInt('play_time_step') ?? 10;
       final fillMode = (prefs.getInt('play_video_fill') ?? 0).clamp(0, 2);
-      final defaultSpeed =
-          (prefs.getDouble('play_default_speed') ?? 1.0).clamp(0.5, 3.0);
+      final defaultSpeed = (prefs.getDouble('play_default_speed') ?? 1.0).clamp(
+        0.5,
+        3.0,
+      );
 
       // ---- 立即应用：画面填充 ----
       _videoFit = switch (fillMode) {
@@ -850,26 +874,34 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       final prefs = await SharedPreferences.getInstance();
       _danmuApiUrl = (prefs.getString('danmu_api_url') ?? '').trim();
       _danmuOn = prefs.getBool('danmu_enabled') ?? true;
-      _danmuFontSize = (prefs.getDouble('danmu_font_size') ?? 14).clamp(10.0, 28.0);
+      _danmuFontSize = (prefs.getDouble('danmu_font_size') ?? 14).clamp(
+        10.0,
+        28.0,
+      );
       _danmuOpacity = (prefs.getDouble('danmu_opacity') ?? 1).clamp(0.2, 1.0);
       _danmuSpeed = (prefs.getDouble('danmu_speed') ?? 150).clamp(80.0, 240.0);
       _danmuTracks = (prefs.getInt('danmu_tracks') ?? 4).clamp(2, 8);
-      _danmuBlockWords =
-          prefs.getStringList('danmu_block_words') ?? const [];
+      _danmuBlockWords = prefs.getStringList('danmu_block_words') ?? const [];
       // 按类型屏蔽 / 显示区域 / 同步视频速度
       _danmuBlockScroll = prefs.getBool('danmu_block_scroll') ?? false;
       _danmuBlockTop = prefs.getBool('danmu_block_top') ?? false;
       _danmuBlockBottom = prefs.getBool('danmu_block_bottom') ?? false;
-      _danmuAreaRatio =
-          (prefs.getDouble('danmu_area_ratio') ?? 1.0).clamp(0.25, 1.0);
+      _danmuAreaRatio = (prefs.getDouble('danmu_area_ratio') ?? 1.0).clamp(
+        0.25,
+        1.0,
+      );
       _danmuSyncSpeed = prefs.getBool('danmu_sync_speed') ?? false;
       // 新增样式项
-      _danmuLineSpacing =
-          (prefs.getDouble('danmu_line_spacing') ?? 1.6).clamp(1.0, 3.0);
-      _danmuStrokeWidth =
-          (prefs.getDouble('danmu_stroke_width') ?? 1.5).clamp(0.0, 3.0);
-      _danmuDelaySeconds =
-          (prefs.getDouble('danmu_delay_seconds') ?? 0.0).clamp(-5.0, 5.0);
+      _danmuLineSpacing = (prefs.getDouble('danmu_line_spacing') ?? 1.6).clamp(
+        1.0,
+        3.0,
+      );
+      _danmuStrokeWidth = (prefs.getDouble('danmu_stroke_width') ?? 1.5).clamp(
+        0.0,
+        3.0,
+      );
+      _danmuDelaySeconds = (prefs.getDouble('danmu_delay_seconds') ?? 0.0)
+          .clamp(-5.0, 5.0);
       // 字体粗细存 weight 数值（400/500/600/700），未知值回落 w500
       final w = prefs.getInt('danmu_font_weight') ?? 500;
       _danmuFontWeight = switch (w) {
@@ -885,8 +917,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         _ensureDanmuLoaded(urlOverride: widget.url);
       }
     } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
+      AppLog.instance.log('[video_player] swallowed: $e');
+    }
   }
 
   /// 通过视频 URL 直接匹配弹幕（Logvr-danmu 的 /api/v2/comment?url= 接口）
@@ -913,8 +945,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     final url = (urlOverride != null && urlOverride.isNotEmpty)
         ? urlOverride
         : (_player.state.playlist.medias.isNotEmpty
-            ? _player.state.playlist.medias.last.uri
-            : widget.url);
+              ? _player.state.playlist.medias.last.uri
+              : widget.url);
     // 地址为空时不要置位 _danmuLoaded，否则该播放会话弹幕永久卡死
     if (url.isEmpty) return;
     _danmuLoaded = true;
@@ -946,12 +978,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
     if (_danmuBlockWords.isNotEmpty) {
       list = list
-          .where((d) => !_danmuBlockWords
-              .any((w) => w.isNotEmpty && d.text.contains(w)))
+          .where(
+            (d) => !_danmuBlockWords.any(
+              (w) => w.isNotEmpty && d.text.contains(w),
+            ),
+          )
           .toList();
     }
     AppLog.instance.log(
-        '[video_player] danmu loaded: ${list.length} 条 (source=$danmuSource, title=$title)');
+      '[video_player] danmu loaded: ${list.length} 条 (source=$danmuSource, title=$title)',
+    );
     // 代次校验：快速换集时丢弃过期响应，避免旧集弹幕盖到新集上
     if (mounted && list.isNotEmpty && loadGen == _danmuLoadGen) {
       setState(() => _danmus = list);
@@ -960,8 +996,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   /// 取文本（弹幕接口专用；失败返回空串，不抛）
   Future<String> _danmuGetText(String api) async {
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 8);
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
     try {
       final http = await client
           .getUrl(Uri.parse(api))
@@ -969,7 +1004,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       http.headers.set('User-Agent', 'NewTv/1.0');
       final res = await http.close().timeout(const Duration(seconds: 12));
       if (res.statusCode != 200) {
-        AppLog.instance.log('[video_player] danmu HTTP ${res.statusCode} ($api)');
+        AppLog.instance.log(
+          '[video_player] danmu HTTP ${res.statusCode} ($api)',
+        );
         return '';
       }
       return await res
@@ -989,7 +1026,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// 解析结果按「片名|年份|集号」缓存（进程内），避免每一集都跑 3 次请求：
   /// 该服务有速率限制，实测密集请求会返回 429。
   Future<List<DanmuItem>> _danmuFetchByTitle(
-      String base, String title, String episodeName, String videoUrl) async {
+    String base,
+    String title,
+    String episodeName,
+    String videoUrl,
+  ) async {
     // 片名清洗：优先复用 TMDB 的清洗规则（去「更新至N集/第N季/4K/中字」等噪音）
     var clean = TmdbService.cleanTitle(title);
     // 该服务搜索对「【】」等括号敏感，直接搜原始标题命中率反而更高
@@ -1001,12 +1042,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         '${clean.toLowerCase()}|${year ?? ''}|${widget.selectedEpisodeIndex}';
     final cached = _danmuEpCache[cacheKey];
     if (cached != null) {
-      AppLog.instance.log('[video_player] danmu title-fallback cache hit: $cacheKey');
+      AppLog.instance.log(
+        '[video_player] danmu title-fallback cache hit: $cacheKey',
+      );
       return _danmuFetchComments(base, cached);
     }
 
     // ① 搜索番剧
-    final searchUrl = '$base/api/v2/search/anime'
+    final searchUrl =
+        '$base/api/v2/search/anime'
         '?keyword=${Uri.encodeQueryComponent(clean)}';
     final searchBody = await _danmuGetText(searchUrl);
     if (searchBody.isEmpty) return const [];
@@ -1017,19 +1061,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
 
     // 只在「首条标题包含片名」时才采用，避免搜到同名无关内容就贴弹幕
-    final firstName =
-        (animes.first['animeTitle'] ?? '').toString().trim();
+    final firstName = (animes.first['animeTitle'] ?? '').toString().trim();
     if (firstName.isEmpty || !firstName.contains(clean)) {
-      AppLog.instance
-          .log('[video_player] danmu search 首条不匹配，放弃: "$firstName" !~ "$clean"');
+      AppLog.instance.log(
+        '[video_player] danmu search 首条不匹配，放弃: "$firstName" !~ "$clean"',
+      );
       return const [];
     }
     final animeId = animes.first['animeId'];
     if (animeId == null) return const [];
 
     // ② 取分集列表
-    final bgBody =
-        await _danmuGetText('$base/api/v2/bangumi/$animeId');
+    final bgBody = await _danmuGetText('$base/api/v2/bangumi/$animeId');
     if (bgBody.isEmpty) return const [];
     final bangumi = _danmuParseMap(bgBody, 'bangumi');
     final episodes = (bangumi?['episodes'] as List?) ?? const [];
@@ -1048,8 +1091,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       }
     }
     if (episodeId == 0) {
-      final idx = widget.selectedEpisodeIndex
-          .clamp(0, episodes.length - 1);
+      final idx = widget.selectedEpisodeIndex.clamp(0, episodes.length - 1);
       final e = episodes[idx];
       if (e is Map) episodeId = (e['episodeId'] as num?)?.toInt() ?? 0;
     }
@@ -1057,15 +1099,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
     _danmuEpCache[cacheKey] = episodeId;
     AppLog.instance.log(
-        '[video_player] danmu title-fallback 命中: "$firstName" episodeId=$episodeId');
+      '[video_player] danmu title-fallback 命中: "$firstName" episodeId=$episodeId',
+    );
     return _danmuFetchComments(base, episodeId);
   }
 
   /// 用 episodeId 取弹幕（兜底链路的最后一步）
   Future<List<DanmuItem>> _danmuFetchComments(
-      String base, int episodeId) async {
+    String base,
+    int episodeId,
+  ) async {
     final body = await _danmuGetText(
-        '$base/api/v2/comment/$episodeId?format=json&duration=true');
+      '$base/api/v2/comment/$episodeId?format=json&duration=true',
+    );
     if (body.isEmpty) return const [];
     return parseDanmuBody(body);
   }
@@ -1121,8 +1167,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('danmu_enabled', _danmuOn);
     } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
+      AppLog.instance.log('[video_player] swallowed: $e');
+    }
   }
 
   void _startBitrateTimer() {
@@ -1201,7 +1247,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (_isLocked) return;
     // 诊断用：与 _safeTap 的日志对照，可区分「点击落到视频层」还是「落到按钮」
     AppLog.instance.log(
-        '[video_player] toggleControls show=${!_showControls} locked=$_isLocked');
+      '[video_player] toggleControls show=${!_showControls} locked=$_isLocked',
+    );
     setState(() => _showControls = !_showControls);
     if (_showControls) _scheduleHideControls();
   }
@@ -1221,7 +1268,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _player.pause();
     } else {
       AudioFocus.request('video');
-    _player.play();
+      _player.play();
     }
     _scheduleHideControls();
   }
@@ -1287,19 +1334,23 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     widget.onFullScreenChanged?.call(true);
     try {
       await WindowFullScreen.instance.enter();
-      AppLog.instance.log('=== _enterFullScreen: WindowFullScreen enter OK ===');
+      AppLog.instance.log(
+        '=== _enterFullScreen: WindowFullScreen enter OK ===',
+      );
     } catch (e) {
-      AppLog.instance.log('=== _enterFullScreen: WindowFullScreen enter failed: $e ===');
+      AppLog.instance.log(
+        '=== _enterFullScreen: WindowFullScreen enter failed: $e ===',
+      );
     }
     if (mounted) _onWindowFullScreenChanged();
     try {
       if (!_player.state.playing) {
         await AudioFocus.request('video');
-    await _player.play();
+        await _player.play();
       }
     } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
+      AppLog.instance.log('[video_player] swallowed: $e');
+    }
   }
 
   /// 调 WindowFullScreen 退出全屏
@@ -1318,7 +1369,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       await WindowFullScreen.instance.exit();
       AppLog.instance.log('=== _exitFullScreen: WindowFullScreen exit OK ===');
     } catch (e) {
-      AppLog.instance.log('=== _exitFullScreen: WindowFullScreen exit failed: $e ===');
+      AppLog.instance.log(
+        '=== _exitFullScreen: WindowFullScreen exit failed: $e ===',
+      );
     }
     if (Platform.isIOS) {
       await SystemChrome.setPreferredOrientations(const [
@@ -1332,11 +1385,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     try {
       if (!_player.state.playing) {
         await AudioFocus.request('video');
-    await _player.play();
+        await _player.play();
       }
     } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
+      AppLog.instance.log('[video_player] swallowed: $e');
+    }
   }
 
   void _seekTo(Duration position) {
@@ -1629,31 +1682,46 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.picture_in_picture_alt,
-                color: Colors.white70, size: 40),
+            const Icon(
+              Icons.picture_in_picture_alt,
+              color: Colors.white70,
+              size: 40,
+            ),
             const SizedBox(height: 12),
             const Text(
               '正在画中画',
-              style: TextStyle(color: Colors.white, fontSize: 15),
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: AppTheme.fontHeadline,
+              ),
             ),
             const SizedBox(height: 6),
             Text(
               '小窗播放中，回到 App 可继续控制',
               style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.6), fontSize: 12),
+                color: Colors.white.withValues(alpha: 0.6),
+                fontSize: AppTheme.fontFootnote,
+              ),
             ),
             const SizedBox(height: 16),
             GestureDetector(
               onTap: _togglePiP,
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(18),
                 ),
-                child: const Text('回到 App 内播放',
-                    style: TextStyle(color: Colors.white, fontSize: 13)),
+                child: const Text(
+                  '回到 App 内播放',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: AppTheme.fontSubhead,
+                  ),
+                ),
               ),
             ),
           ],
@@ -1725,7 +1793,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 color: blocked
                     ? Colors.white.withValues(alpha: 0.35)
                     : Colors.white.withValues(alpha: 0.85),
-                fontSize: 12,
+                fontSize: AppTheme.fontFootnote,
               ),
             ),
           ],
@@ -1766,7 +1834,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.85),
-                fontSize: 12.5,
+                fontSize: AppTheme.fontSubhead,
               ),
             ),
           ),
@@ -1784,7 +1852,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       danmus: _danmus,
       // 弹幕延迟：正数表示"晚出现"，等价于把查询位置往回拨，
       // 这样同一时刻会取到更早的那批弹幕，视觉上就整体延后了。
-      positionOf: () => _player.state.position -
+      positionOf: () =>
+          _player.state.position -
           Duration(milliseconds: (_danmuDelaySeconds * 1000).round()),
       fontSize: _danmuFontSize,
       opacity: _danmuOpacity,
@@ -1920,8 +1989,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   final scale = totalMs * 0.3;
                   final deltaMs = (dx / width) * scale;
                   // 目标 = 起点 + 本次累计位移；dx 已是从起点的累计值
-                  _gestureSeekTemp =
-                      (_gestureSeekStartMs + deltaMs).clamp(0.0, totalMs);
+                  _gestureSeekTemp = (_gestureSeekStartMs + deltaMs).clamp(
+                    0.0,
+                    totalMs,
+                  );
                   final newPos = Duration(
                     milliseconds: _gestureSeekTemp.round(),
                   );
@@ -1981,6 +2052,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Offset _gesturePanStartPosition = Offset.zero;
   PanAxis? _gesturePanAxis;
+
   /// 水平拖动 seek：手势起点的进度（ms）。拖动中目标 = 本值 + 累计位移换算，
   /// 不能对 _gestureSeekTemp 逐帧累加累计 delta（会变成平方漂移）。
   double _gestureSeekStartMs = 0;
@@ -2050,7 +2122,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                     _displayTitle,
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 16,
+                      fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.w600,
                     ),
                     maxLines: 1,
@@ -2063,7 +2135,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 '听剧模式 · 后台可继续播放',
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.5),
-                  fontSize: 12,
+                  fontSize: AppTheme.fontFootnote,
                 ),
               ),
               const SizedBox(height: 40),
@@ -2091,7 +2163,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         '退出听剧模式',
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: 13,
+                          fontSize: AppTheme.fontSubhead,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -2147,14 +2219,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.network_check,
-                        size: 12, color: Colors.white.withValues(alpha: 0.7)),
+                    Icon(
+                      Icons.network_check,
+                      size: 12,
+                      color: Colors.white.withValues(alpha: 0.7),
+                    ),
                     const SizedBox(width: 3),
                     Text(
                       _netSpeedText,
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.8),
-                        fontSize: 10,
+                        fontSize: AppTheme.fontCaption,
                         fontFamily: 'monospace',
                       ),
                     ),
@@ -2189,7 +2264,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               onTap: () => _safeTap(_toggleCast),
             ),
 
-            if (_isNativeFullscreen) ...[const SizedBox(width: 4), _buildStatusBarInfo()],
+            if (_isNativeFullscreen) ...[
+              const SizedBox(width: 4),
+              _buildStatusBarInfo(),
+            ],
 
             // 设置
             _iconButton(
@@ -2325,10 +2403,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// 跳过按钮可见性（0=无，1=片头，2=片尾，3=两者）
   int _skipVisibilityFor(int posSec) {
     if (posSec < 0) return 0;
-    final showIntro = widget.skipIntroSeconds > 0 &&
+    final showIntro =
+        widget.skipIntroSeconds > 0 &&
         posSec > 0 &&
         posSec < widget.skipIntroSeconds;
-    final showOutro = widget.skipOutroSeconds > 0 &&
+    final showOutro =
+        widget.skipOutroSeconds > 0 &&
         _duration > Duration.zero &&
         posSec > _duration.inSeconds - widget.skipOutroSeconds;
     return (showIntro ? 1 : 0) | (showOutro ? 2 : 0);
@@ -2385,7 +2465,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               text,
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 12,
+                fontSize: AppTheme.fontFootnote,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -2439,7 +2519,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   speedLabel,
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 22,
+                    fontSize: AppTheme.fontPageTitle,
                     fontWeight: FontWeight.w700,
                     fontFamily: 'monospace',
                     letterSpacing: 1.0,
@@ -2450,7 +2530,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   locked ? '已锁定' : '长按倍速中',
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 11,
+                    fontSize: AppTheme.fontCaption,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -2464,7 +2544,35 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (locked) ...[const Icon(Icons.touch_app, color: Colors.white70, size: 11), const SizedBox(width: 3), const Text('点击解除', style: TextStyle(color: Colors.white70, fontSize: 9))] else ...[const Icon(Icons.arrow_upward, color: Colors.white70, size: 11), const SizedBox(width: 3), const Text('上滑锁定', style: TextStyle(color: Colors.white70, fontSize: 9))],
+                    if (locked) ...[
+                      const Icon(
+                        Icons.touch_app,
+                        color: Colors.white70,
+                        size: 11,
+                      ),
+                      const SizedBox(width: 3),
+                      const Text(
+                        '点击解除',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: AppTheme.fontCaption,
+                        ),
+                      ),
+                    ] else ...[
+                      const Icon(
+                        Icons.arrow_upward,
+                        color: Colors.white70,
+                        size: 11,
+                      ),
+                      const SizedBox(width: 3),
+                      const Text(
+                        '上滑锁定',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: AppTheme.fontCaption,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ],
@@ -2506,7 +2614,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         '${isForward ? '快进' : '快退'}${_seekAccumulatedSeconds.abs()}秒',
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 13,
+                          fontSize: AppTheme.fontSubhead,
                         ),
                       ),
                     ],
@@ -2532,7 +2640,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         '快进${_seekAccumulatedSeconds.abs()}秒',
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 13,
+                          fontSize: AppTheme.fontSubhead,
                         ),
                       ),
                     ],
@@ -2558,78 +2666,80 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         final currentMs = _isDragging
             ? _dragValue
             : _position.inMilliseconds.toDouble();
-        final progress = totalMs > 0 ? (currentMs / totalMs).clamp(0.0, 1.0) : 0.0;
+        final progress = totalMs > 0
+            ? (currentMs / totalMs).clamp(0.0, 1.0)
+            : 0.0;
 
         return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      // 开始时间在进度条起点正下方, 结束时间在终点正下方
-      child: Row(
-        children: [
-          SizedBox(
-            width: 56,
-            child: Text(
-              _formatDuration(
-                _isDragging
-                    ? Duration(milliseconds: _dragValue.round())
-                    : _position,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          // 开始时间在进度条起点正下方, 结束时间在终点正下方
+          child: Row(
+            children: [
+              SizedBox(
+                width: 56,
+                child: Text(
+                  _formatDuration(
+                    _isDragging
+                        ? Duration(milliseconds: _dragValue.round())
+                        : _position,
+                  ),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: AppTheme.fontCaption,
+                    fontFamily: 'monospace',
+                  ),
+                  textAlign: TextAlign.left,
+                ),
               ),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 10,
-                fontFamily: 'monospace',
+              Expanded(
+                child: SizedBox(
+                  height: 20,
+                  child: _ProgressBarGesture(
+                    progress: progress,
+                    onSeekToRatio: (ratio) {
+                      if (totalMs > 0) {
+                        final targetMs = ratio * totalMs;
+                        _seekTo(Duration(milliseconds: targetMs.round()));
+                      }
+                    },
+                    onDrag: (ratio) {
+                      setState(() {
+                        _isDragging = true;
+                        _dragValue = ratio * totalMs;
+                      });
+                      _scheduleHideControls();
+                    },
+                    onDragEnd: () {
+                      setState(() => _isDragging = false);
+                      _scheduleHideControls();
+                      // **修复拖动进度不生效 (2026-09-26)**：松手时用拖动预览值
+                      // 真正执行 seek。之前只更新预览位置不跳转，滑动进度无效。
+                      if (totalMs > 0) {
+                        _seekTo(Duration(milliseconds: _dragValue.round()));
+                      }
+                    },
+                  ),
+                ),
               ),
-              textAlign: TextAlign.left,
-            ),
-          ),
-          Expanded(
-            child: SizedBox(
-              height: 20,
-              child: _ProgressBarGesture(
-                progress: progress,
-                onSeekToRatio: (ratio) {
-                  if (totalMs > 0) {
-                    final targetMs = ratio * totalMs;
-                    _seekTo(Duration(milliseconds: targetMs.round()));
-                  }
-                },
-                onDrag: (ratio) {
-                  setState(() {
-                    _isDragging = true;
-                    _dragValue = ratio * totalMs;
-                  });
-                  _scheduleHideControls();
-                },
-                onDragEnd: () {
-                  setState(() => _isDragging = false);
-                  _scheduleHideControls();
-                  // **修复拖动进度不生效 (2026-09-26)**：松手时用拖动预览值
-                  // 真正执行 seek。之前只更新预览位置不跳转，滑动进度无效。
-                  if (totalMs > 0) {
-                    _seekTo(Duration(milliseconds: _dragValue.round()));
-                  }
-                },
-              ),
-            ),
-          ),
-          SizedBox(
-            width: 56,
-            child: Text(
-              // 「进度条显示总时长」关闭时改为显示剩余时长（前面带 -）
-              _duration <= Duration.zero
-                  ? '--:--'
-                  : _showTotalDuration
+              SizedBox(
+                width: 56,
+                child: Text(
+                  // 「进度条显示总时长」关闭时改为显示剩余时长（前面带 -）
+                  _duration <= Duration.zero
+                      ? '--:--'
+                      : _showTotalDuration
                       ? _formatDuration(_duration)
                       : '-${_formatDuration(_duration - _position)}',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.82),
-                fontSize: 10,
-                fontFamily: 'monospace',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.82),
+                    fontSize: AppTheme.fontCaption,
+                    fontFamily: 'monospace',
+                  ),
+                  textAlign: TextAlign.right,
+                ),
               ),
-              textAlign: TextAlign.right,
-            ),
+            ],
           ),
-        ],
-      ),
         );
       },
     );
@@ -2681,15 +2791,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 ),
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 10,
+                  fontSize: AppTheme.fontCaption,
                   fontFamily: 'monospace',
                 ),
               ),
               Text(
-                _duration > Duration.zero ? _formatDuration(_duration) : '--:--',
+                _duration > Duration.zero
+                    ? _formatDuration(_duration)
+                    : '--:--',
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.82),
-                  fontSize: 10,
+                  fontSize: AppTheme.fontCaption,
                   fontFamily: 'monospace',
                 ),
               ),
@@ -2732,10 +2844,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 _formatSpeed(speed),
                 style: TextStyle(
                   color: selected ? AppTheme.accentColor : AppTheme.textPrimary,
-                  fontSize: 13,
+                  fontSize: AppTheme.fontSubhead,
                 ),
               ),
-              if (selected) ...[const Spacer(), Icon(Icons.check, color: AppTheme.accentColor, size: 16)],
+              if (selected) ...[
+                const Spacer(),
+                Icon(Icons.check, color: AppTheme.accentColor, size: 16),
+              ],
             ],
           ),
         );
@@ -2750,7 +2865,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               color: _isLongPressSpeedLocked
                   ? AppTheme.accentColor
                   : Colors.white,
-              fontSize: 13,
+              fontSize: AppTheme.fontSubhead,
               fontWeight: _isLongPressSpeedLocked
                   ? FontWeight.w700
                   : FontWeight.normal,
@@ -2785,10 +2900,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 fit.desc,
                 style: TextStyle(
                   color: selected ? AppTheme.accentColor : AppTheme.textPrimary,
-                  fontSize: 13,
+                  fontSize: AppTheme.fontSubhead,
                 ),
               ),
-              if (selected) ...[const Spacer(), Icon(Icons.check, color: AppTheme.accentColor, size: 16)],
+              if (selected) ...[
+                const Spacer(),
+                Icon(Icons.check, color: AppTheme.accentColor, size: 16),
+              ],
             ],
           ),
         );
@@ -2799,7 +2917,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         child: Center(
           child: Text(
             _videoFit.desc,
-            style: const TextStyle(color: Colors.white, fontSize: 13),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: AppTheme.fontSubhead,
+            ),
           ),
         ),
       ),
@@ -2841,7 +2962,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                           '选集',
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: 16,
+                            fontSize: AppTheme.fontHeadline,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -2899,7 +3020,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                 color: isSelected
                                     ? Colors.white
                                     : Colors.white70,
-                                fontSize: 13,
+                                fontSize: AppTheme.fontSubhead,
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -2949,7 +3070,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 constraints: BoxConstraints(
                   // 优先用父级给的播放器区域高度；没给就退回屏幕 72%。
                   // 目的是让面板**止步在播放器范围内**，不盖住下方 tab 栏。
-                  maxHeight: widget.sheetMaxHeight ??
+                  maxHeight:
+                      widget.sheetMaxHeight ??
                       MediaQuery.of(context).size.height * 0.72,
                 ),
                 child: Column(
@@ -2973,7 +3095,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                             '播放设置',
                             style: TextStyle(
                               color: Colors.white,
-                              fontSize: 16,
+                              fontSize: AppTheme.fontHeadline,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -3019,7 +3141,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                 '按类型屏蔽',
                                 style: TextStyle(
                                   color: Colors.white.withValues(alpha: 0.6),
-                                  fontSize: 12,
+                                  fontSize: AppTheme.fontFootnote,
                                 ),
                               ),
                               const SizedBox(height: 8),
@@ -3030,8 +3152,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                     icon: Icons.format_align_left,
                                     blocked: _danmuBlockScroll,
                                     onTap: () {
-                                      refresh(() =>
-                                          _danmuBlockScroll = !_danmuBlockScroll);
+                                      refresh(
+                                        () => _danmuBlockScroll =
+                                            !_danmuBlockScroll,
+                                      );
                                       _persistDanmuStyle();
                                     },
                                   ),
@@ -3041,8 +3165,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                     icon: Icons.vertical_align_top,
                                     blocked: _danmuBlockTop,
                                     onTap: () {
-                                      refresh(() =>
-                                          _danmuBlockTop = !_danmuBlockTop);
+                                      refresh(
+                                        () => _danmuBlockTop = !_danmuBlockTop,
+                                      );
                                       _persistDanmuStyle();
                                     },
                                   ),
@@ -3052,8 +3177,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                     icon: Icons.vertical_align_bottom,
                                     blocked: _danmuBlockBottom,
                                     onTap: () {
-                                      refresh(() =>
-                                          _danmuBlockBottom = !_danmuBlockBottom);
+                                      refresh(
+                                        () => _danmuBlockBottom =
+                                            !_danmuBlockBottom,
+                                      );
                                       _persistDanmuStyle();
                                     },
                                   ),
@@ -3172,10 +3299,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                     decoration: BoxDecoration(
                                       color: selected
                                           ? AppTheme.accentColor
-                                          : Colors.white
-                                              .withValues(alpha: 0.08),
-                                      borderRadius:
-                                          BorderRadius.circular(16),
+                                          : Colors.white.withValues(
+                                              alpha: 0.08,
+                                            ),
+                                      borderRadius: BorderRadius.circular(16),
                                     ),
                                     child: Text(
                                       _formatSpeed(s),
@@ -3183,7 +3310,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                         color: selected
                                             ? Colors.white
                                             : Colors.white70,
-                                        fontSize: 12,
+                                        fontSize: AppTheme.fontFootnote,
                                         fontWeight: selected
                                             ? FontWeight.w600
                                             : FontWeight.normal,
@@ -3216,10 +3343,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                     decoration: BoxDecoration(
                                       color: selected
                                           ? AppTheme.accentColor
-                                          : Colors.white
-                                              .withValues(alpha: 0.08),
-                                      borderRadius:
-                                          BorderRadius.circular(16),
+                                          : Colors.white.withValues(
+                                              alpha: 0.08,
+                                            ),
+                                      borderRadius: BorderRadius.circular(16),
                                     ),
                                     child: Text(
                                       fit.desc,
@@ -3227,7 +3354,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                         color: selected
                                             ? Colors.white
                                             : Colors.white70,
-                                        fontSize: 12,
+                                        fontSize: AppTheme.fontFootnote,
                                         fontWeight: selected
                                             ? FontWeight.w600
                                             : FontWeight.normal,
@@ -3242,8 +3369,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                             const SizedBox(height: 8),
                             _SkipSecondsEditor(
                               value: widget.skipIntroSeconds,
-                              onChange: (v) =>
-                                  widget.onSetSkipIntro?.call(v),
+                              onChange: (v) => widget.onSetSkipIntro?.call(v),
                               presets: _skipPresets,
                               maxSeconds: _skipMaxSeconds,
                             ),
@@ -3252,8 +3378,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                             const SizedBox(height: 8),
                             _SkipSecondsEditor(
                               value: widget.skipOutroSeconds,
-                              onChange: (v) =>
-                                  widget.onSetSkipOutro?.call(v),
+                              onChange: (v) => widget.onSetSkipOutro?.call(v),
                               presets: _skipPresets,
                               maxSeconds: _skipMaxSeconds,
                             ),
@@ -3267,7 +3392,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                 '分辨率: $_resolutionText',
                                 style: const TextStyle(
                                   color: Colors.white70,
-                                  fontSize: 12,
+                                  fontSize: AppTheme.fontFootnote,
                                 ),
                               ),
                               if (_bitrateText.isNotEmpty)
@@ -3275,7 +3400,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                   '码率: $_bitrateText',
                                   style: const TextStyle(
                                     color: Colors.white70,
-                                    fontSize: 12,
+                                    fontSize: AppTheme.fontFootnote,
                                   ),
                                 ),
                             ],
@@ -3309,7 +3434,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         }
         await Future<void>.delayed(const Duration(milliseconds: 120));
         await AudioFocus.request('video');
-    await _player.play();
+        await _player.play();
       } catch (e) {
         AppLog.instance.log('[video_player] resume after pip failed: $e');
       }
@@ -3334,15 +3459,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           try {
             _player.seek(resume);
           } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
+            AppLog.instance.log('[video_player] swallowed: $e');
+          }
         }
         try {
           AudioFocus.request('video');
-    _player.play();
+          _player.play();
         } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
+          AppLog.instance.log('[video_player] swallowed: $e');
+        }
         return;
       }
       final supported = await VideoPlayerPip.instance.isIosPipSupported();
@@ -3380,10 +3505,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (!entered) {
         try {
           AudioFocus.request('video');
-    _player.play();
+          _player.play();
         } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
+          AppLog.instance.log('[video_player] swallowed: $e');
+        }
         _showMessage('画中画启动失败，请稍后重试');
       }
       return;
@@ -3457,10 +3582,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         setState(() => _pipActive = false);
         try {
           AudioFocus.request('video');
-    _player.play();
+          _player.play();
         } catch (e) {
-        AppLog.instance.log('[video_player] swallowed: $e');
-      }
+          AppLog.instance.log('[video_player] swallowed: $e');
+        }
       }
     } finally {
       _autoPipInFlight = false;
@@ -3491,14 +3616,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   void _showMessage(String text) {
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (messenger == null) return;
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(text),
-        duration: const Duration(seconds: 3),
-        backgroundColor: Colors.black87,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    AppToast.message(text, duration: const Duration(seconds: 3), isError: true);
   }
 
   // ============================================================
@@ -3597,9 +3715,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 width: 0.5,
               ),
             ),
-            child: child ??
-                Icon(icon,
-                    color: Colors.white, size: filled ? size + 2 : size),
+            child:
+                child ??
+                Icon(icon, color: Colors.white, size: filled ? size + 2 : size),
           ),
         ),
       ),
@@ -3629,7 +3747,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             '弹',
             style: TextStyle(
               color: on ? Colors.white : Colors.white.withValues(alpha: 0.4),
-              fontSize: 15,
+              fontSize: AppTheme.fontHeadline,
               fontWeight: FontWeight.w600,
               height: 1.0,
             ),
@@ -3647,8 +3765,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.black54, width: 1),
                 ),
-                child: const Icon(Icons.check,
-                    size: 9, color: Colors.white),
+                child: const Icon(Icons.check, size: 9, color: Colors.white),
               ),
             ),
         ],
@@ -3662,8 +3779,6 @@ enum PanAxis { horizontal, vertical }
 // ============================================================
 // 进度条拖动手势
 // ============================================================
-
-
 
 /// 设置面板里的弹幕样式滑条
 class _DanmuSliderRow extends StatelessWidget {
@@ -3707,7 +3822,7 @@ class _DanmuSliderRow extends StatelessWidget {
                 valueText!,
                 style: TextStyle(
                   color: AppTheme.accentColor,
-                  fontSize: 13,
+                  fontSize: AppTheme.fontSubhead,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -3737,13 +3852,15 @@ class _DanmuSliderRow extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: ticks!
-                  .map((t) => Text(
-                        t,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.45),
-                          fontSize: 11,
-                        ),
-                      ))
+                  .map(
+                    (t) => Text(
+                      t,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.45),
+                        fontSize: AppTheme.fontCaption,
+                      ),
+                    ),
+                  )
                   .toList(),
             ),
           ),

@@ -230,6 +230,21 @@ class AppTheme {
   static const double fontTitle3 = 18;
   static const double fontTitle2 = 20;
 
+  /// 页面大标题（"音乐库" / "我的" / "书架" 这类整页标题，通常配 w700）。
+  ///
+  /// ── 为什么单独加这一档 ────────────────────────────────────────
+  /// 三个模块原来各写各的：音乐 `24`、影视 `20`、阅读 `22`（主流）。
+  /// 统一时若把 24 压到 `fontTitle2`(20) 会**明显变小**、页面层级感丢失；
+  /// 取 **22** 是因为阅读侧已有 7 处用它作页面标题，改成 22 的改动面最小。
+  static const double fontPageTitle = 22;
+
+  /// 品牌大标题（splash / 关于页的 "TVBox" 这种大字）。
+  /// 与 `textTheme.headlineLarge` 的 48 保持一致。
+  static const double fontDisplay = 48;
+
+  /// 底部导航栏的文字（比 [fontCaption] 还小一档，因为栏内空间紧）。
+  static const double fontNavLabel = 10;
+
   /// 暗色主题
 
   /// 浅色主题（设置 → 深色/浅色/跟随系统）
@@ -308,12 +323,92 @@ class AppTheme {
         unselectedItemColor: textTertiary,
         type: BottomNavigationBarType.fixed,
         selectedLabelStyle:
-            const TextStyle(fontSize: 10, fontWeight: FontWeight.w500),
-        unselectedLabelStyle: const TextStyle(fontSize: 10),
+            const TextStyle(fontSize: fontNavLabel, fontWeight: FontWeight.w500),
+        unselectedLabelStyle: const TextStyle(fontSize: fontNavLabel),
+      ),
+      // ── 按钮统一（三个模块的按钮圆角/内边距/按压反馈一致）──────────
+      //
+      // 三个模块此前都**没有**配 *ButtonTheme，全靠 Material 默认 +
+      // 各处零散的 `styleFrom(...)` 覆盖 —— 于是同一个 App 里
+      // 按钮圆角有 8/10/11/12/14 五种，内边距也各异。
+      //
+      // 这里从主题层统一：**圆角 20 = `glassRadiusCard`**（与卡片同一档）——
+      // 用户明确要求按钮"对齐卡片那波的做法"。原来三模块的按钮圆角
+      // 散在 8/10/11/12/14 五种，现在都归到卡片这一档。
+      // 文字按钮保持紧凑的内边距（它们是对话框/设置行里最常用的，
+      // 加大 padding 会把布局撑开）。
+      //
+      // ⚠️ 各处已有的 `styleFrom(borderRadius: ...)` **优先级高于主题**，
+      // 所以这个主题不会破坏那些"故意不一样"的按钮（如胶囊形搜索/筛选）。
+      // 它统一的是**没有显式指定样式**的那大部分。
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(glassRadiusCard),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          textStyle: const TextStyle(
+            fontSize: fontBody,
+            fontWeight: FontWeight.w600,
+          ),
+          // ── 阴影：对齐卡片那波（blur 12 / offset(0,4)）──────────
+          // 原来按钮**完全没有阴影**，与有阴影的卡片不在同一个视觉层次上。
+          // 用很淡的黑（6%：浅色 12%、深色 22%）—— 太重会显得脏。
+          elevation: 1,
+          shadowColor: Colors.black.withValues(alpha: _light ? 0.12 : 0.22),
+          // ── 按压反馈 ─────────────────────────────────────────
+          // 未指定 overlayColor 时用的是主题色叠加，三个模块因调色板不同
+          // 而按压效果各异；这里统一成**中性**的：
+          // 深色下压亮、浅色下压暗，与卡片/输入框同一套手感。
+          overlayColor:
+              (_light ? Colors.black : Colors.white).withValues(alpha: 0.08),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(glassRadiusCard),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          textStyle: const TextStyle(
+            fontSize: fontBody,
+            fontWeight: FontWeight.w600,
+          ),
+          // 描边按钮**不加阴影**（它本来就是"平"的语义）；
+          // 但按压反馈要和 Filled 一致，否则两种按钮手感不同。
+          overlayColor:
+              accentColor.withValues(alpha: _light ? 0.08 : 0.12),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(glassRadiusCard),
+          ),
+          // 保持紧凑：TextButton 大量用在对话框/设置行里
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          textStyle: const TextStyle(fontSize: fontBody),
+          // 按压反馈同样中性化（见 FilledButton 处的说明）
+          overlayColor:
+              accentColor.withValues(alpha: _light ? 0.08 : 0.12),
+        ),
+      ),
+      // SnackBar 统一外观（与顶部气泡 AppToast 同一种视觉）
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: backgroundCard,
+        contentTextStyle: TextStyle(
+          color: textPrimary,
+          fontSize: fontBody,
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        elevation: 0,
       ),
       textTheme: TextTheme(
         headlineLarge: TextStyle(
-            color: textPrimary, fontSize: 48, fontWeight: FontWeight.w800),
+            color: textPrimary, fontSize: fontDisplay, fontWeight: FontWeight.w800),
         headlineMedium: TextStyle(
             color: textPrimary,
             fontSize: fontTitle2,
@@ -386,8 +481,8 @@ class AppTheme {
         unselectedItemColor: textTertiary,
         type: BottomNavigationBarType.fixed,
         selectedLabelStyle:
-            const TextStyle(fontSize: 10, fontWeight: FontWeight.w500),
-        unselectedLabelStyle: const TextStyle(fontSize: 10),
+            const TextStyle(fontSize: fontNavLabel, fontWeight: FontWeight.w500),
+        unselectedLabelStyle: const TextStyle(fontSize: fontNavLabel),
       ),
       // ---- Liquid Glass：全局弹层大圆角 ----
       // 弹窗/底部弹层走 28（glassRadius），比旧版 16 更圆更柔。
@@ -423,9 +518,72 @@ class AppTheme {
           vertical: spacingMD,
         ),
       ),
+      // ── 按钮统一（三个模块的按钮圆角/内边距/按压反馈一致）──────────
+      //
+      // 三个模块此前都**没有**配 *ButtonTheme，全靠 Material 默认 +
+      // 各处零散的 `styleFrom(...)` 覆盖 —— 于是同一个 App 里
+      // 按钮圆角有 8/10/11/12/14 五种，内边距也各异。
+      //
+      // 这里从主题层统一：**圆角 20 = `glassRadiusCard`**（与卡片同一档）——
+      // 用户明确要求按钮"对齐卡片那波的做法"。原来三模块的按钮圆角
+      // 散在 8/10/11/12/14 五种，现在都归到卡片这一档。
+      // 文字按钮保持紧凑的内边距（它们是对话框/设置行里最常用的，
+      // 加大 padding 会把布局撑开）。
+      //
+      // ⚠️ 各处已有的 `styleFrom(borderRadius: ...)` **优先级高于主题**，
+      // 所以这个主题不会破坏那些"故意不一样"的按钮（如胶囊形搜索/筛选）。
+      // 它统一的是**没有显式指定样式**的那大部分。
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(glassRadiusCard),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          textStyle: const TextStyle(
+            fontSize: fontBody,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(glassRadiusCard),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          textStyle: const TextStyle(
+            fontSize: fontBody,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(glassRadiusCard),
+          ),
+          // 保持紧凑：TextButton 大量用在对话框/设置行里
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          textStyle: const TextStyle(fontSize: fontBody),
+        ),
+      ),
+      // SnackBar 统一外观（与顶部气泡 AppToast 同一种视觉）——
+      // 全 App 56 处 showSnackBar 不改调用点，靠主题层统一长相。
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: backgroundCard,
+        contentTextStyle: TextStyle(
+          color: textPrimary,
+          fontSize: fontBody,
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        elevation: 0,
+      ),
       textTheme: TextTheme(
         headlineLarge: TextStyle(
-            color: textPrimary, fontSize: 48, fontWeight: FontWeight.w800),
+            color: textPrimary, fontSize: fontDisplay, fontWeight: FontWeight.w800),
         headlineMedium: TextStyle(
             color: textPrimary,
             fontSize: fontTitle2,

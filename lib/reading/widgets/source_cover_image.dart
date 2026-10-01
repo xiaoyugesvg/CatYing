@@ -5,7 +5,7 @@
 import 'dart:convert' show base64;
 import 'dart:io' show File;
 
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 class SourceCoverImage extends StatelessWidget {

@@ -33,7 +33,7 @@ class SettingsDialogs {
               padding: const EdgeInsets.all(16),
               child: Text(title,
                   style: TextStyle(
-                      color: AppTheme.textPrimary, fontSize: 15)),
+                      color: AppTheme.textPrimary, fontSize: AppTheme.fontHeadline)),
             ),
             for (final o in options)
               ListTile(
@@ -77,11 +77,11 @@ class SettingsDialogs {
                 controller: ctrl,
                 maxLines: maxLines,
                 autofocus: true,
-                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontSubhead),
                 decoration: InputDecoration(
                   hintText: hint,
                   hintStyle:
-                      TextStyle(color: AppTheme.textTertiary, fontSize: 12),
+                      TextStyle(color: AppTheme.textTertiary, fontSize: AppTheme.fontFootnote),
                   filled: true,
                   fillColor: AppTheme.backgroundTertiary,
                   border: OutlineInputBorder(
@@ -171,14 +171,26 @@ class SettingsSubPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // ── 背景透明：透出全局壁纸层（与阅读模块一致）────────────────
+    //
+    // 三模块视觉统一：**以阅读为准，页面透出壁纸**。
+    // 阅读侧 41 处页面 Scaffold 都是 `Colors.transparent`。
+    //
+    // 这里改一处 = **11 个设置子页一起统一**
+    //（外观/播放/数据源/元数据/缓存/弹幕/主页页面/关于/统一主题 + 2 个内部页）。
+    //
+    // ⚠️ 只改「页面 Scaffold / AppBar」这两处。
+    // 本文件里 L27 / L68 / L131 那几处是**弹层**
+    //（showModalBottomSheet / AlertDialog）的底色 —— 那些**必须保持不透明**，
+    // 否则弹层浮在壁纸上会看不清内容。
     return Scaffold(
-      backgroundColor: AppTheme.backgroundPrimary,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: AppTheme.backgroundPrimary,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: IconThemeData(color: AppTheme.textPrimary),
         title: Text(title,
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 17)),
+            style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontTitle3)),
         actions: action == null ? null : [action!],
       ),
       body: ListView(

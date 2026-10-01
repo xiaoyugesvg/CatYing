@@ -14,6 +14,7 @@ import '../source/source_manager.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/device_frame_preview.dart';
 import '../widgets/trim_preset_dialog.dart';
+import '../../common/theme.dart';
 
 /// 去白边预览页面
 ///
@@ -285,7 +286,7 @@ class _TrimPreviewPageState extends State<TrimPreviewPage> {
             const SizedBox(height: 8),
             Text(
               '用于限制放大上限，图片放大后不会超过该尺寸',
-              style: TextStyle(fontSize: 12, color: JellyTheme.textSecondary),
+              style: TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary),
             ),
           ],
         ),
@@ -487,7 +488,7 @@ class _TrimPreviewPageState extends State<TrimPreviewPage> {
             child: Text(
               title,
               style: TextStyle(
-                fontSize: 13,
+                fontSize: AppTheme.fontSubhead,
                 fontWeight: FontWeight.bold,
                 color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
               ),
@@ -514,7 +515,7 @@ class _TrimPreviewPageState extends State<TrimPreviewPage> {
             child: Text(
               unit.isEmpty ? '$value' : '$value$unit',
               style: TextStyle(
-                fontSize: 13,
+                fontSize: AppTheme.fontSubhead,
                 fontWeight: FontWeight.bold,
                 color: JellyTheme.primary,
               ),
@@ -541,7 +542,7 @@ class _TrimPreviewPageState extends State<TrimPreviewPage> {
                 Text(
                   '设备分辨率',
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: AppTheme.fontBody,
                     fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
@@ -549,7 +550,7 @@ class _TrimPreviewPageState extends State<TrimPreviewPage> {
                 const SizedBox(height: 1),
                 Text(
                   '${_params.deviceWidth} × ${_params.deviceHeight}',
-                  style: TextStyle(fontSize: 11, color: JellyTheme.textSecondary),
+                  style: TextStyle(fontSize: AppTheme.fontCaption, color: JellyTheme.textSecondary),
                 ),
               ],
             ),
@@ -557,7 +558,7 @@ class _TrimPreviewPageState extends State<TrimPreviewPage> {
           TextButton.icon(
             onPressed: _editResolution,
             icon: const Icon(Icons.edit, size: 15),
-            label: const Text('修改', style: TextStyle(fontSize: 13)),
+            label: const Text('修改', style: TextStyle(fontSize: AppTheme.fontSubhead)),
           ),
         ],
       ),

@@ -18,6 +18,7 @@ import '../widgets/jelly_bookshelf_dialog.dart';
 import '../widgets/jelly_score_badge.dart';
 import '../widgets/theme_background_animation.dart';
 import 'reader_page.dart';
+import '../../common/theme.dart';
 
 /// 日志工具
 void _log(String message) {
@@ -272,7 +273,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         _comic.title,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 16),
+        style: const TextStyle(fontSize: AppTheme.fontHeadline),
       ),
     );
   }
@@ -370,7 +371,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                       Text(
                         _comic.title,
                         style: TextStyle(
-                          fontSize: 20,
+                          fontSize: AppTheme.fontTitle2,
                           fontWeight: FontWeight.bold,
                           color: titleColor,
                         ),
@@ -392,7 +393,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                               child: Text(
                                 _comic.author!,
                                 style: TextStyle(
-                                  fontSize: 13,
+                                  fontSize: AppTheme.fontSubhead,
                                   color: secondaryColor,
                                 ),
                                 maxLines: 1,
@@ -479,7 +480,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
               Text(
                 label,
                 style: const TextStyle(
-                  fontSize: 12,
+                  fontSize: AppTheme.fontFootnote,
                   color: Colors.white,
                   fontWeight: FontWeight.w600,
                 ),
@@ -624,7 +625,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
       ),
       child: Text(
         status,
-        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: fg),
+        style: TextStyle(fontSize: AppTheme.fontFootnote, fontWeight: FontWeight.w600, color: fg),
       ),
     );
   }
@@ -636,12 +637,12 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         color: isDark
             ? Colors.white.withValues(alpha: 0.08)
             : JellyTheme.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Text(
         tag,
         style: TextStyle(
-          fontSize: 11,
+          fontSize: AppTheme.fontCaption,
           color: isDark ? Colors.white70 : JellyTheme.primary,
         ),
       ),
@@ -658,7 +659,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         Text(
           '简介',
           style: TextStyle(
-            fontSize: 14,
+            fontSize: AppTheme.fontBody,
             fontWeight: FontWeight.w700,
             color: titleColor,
           ),
@@ -668,7 +669,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
           desc,
           maxLines: _descExpanded ? null : 3,
           overflow: _descExpanded ? TextOverflow.clip : TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 13, height: 1.5, color: secondaryColor),
+          style: TextStyle(fontSize: AppTheme.fontSubhead, height: 1.5, color: secondaryColor),
         ),
         if (likelyLong)
           Align(
@@ -682,7 +683,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
               ),
               child: Text(
                 _descExpanded ? '收起' : '展开',
-                style: const TextStyle(fontSize: 12),
+                style: const TextStyle(fontSize: AppTheme.fontFootnote),
               ),
             ),
           ),
@@ -721,7 +722,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
               child: Text(
                 '最新章节',
                 style: TextStyle(
-                  fontSize: 16,
+                  fontSize: AppTheme.fontHeadline,
                   fontWeight: FontWeight.bold,
                   color: titleColor,
                 ),
@@ -756,7 +757,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                           chapter.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 11),
+                          style: const TextStyle(fontSize: AppTheme.fontCaption),
                         ),
                       ),
                       if (isLastRead)
@@ -802,7 +803,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
             Text(
               '章节',
               style: TextStyle(
-                fontSize: 16,
+                fontSize: AppTheme.fontHeadline,
                 fontWeight: FontWeight.bold,
                 color: titleColor,
               ),
@@ -810,7 +811,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
             const SizedBox(width: 8),
             Text(
               '共 $_totalChapters 话',
-              style: TextStyle(fontSize: 13, color: JellyTheme.textSecondary),
+              style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
             ),
             if (_continueChapter != null) ...[
               const SizedBox(width: 12),
@@ -876,7 +877,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                     chapter.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11),
+                    style: const TextStyle(fontSize: AppTheme.fontCaption),
                   ),
                 ),
                 if (isLastRead)
@@ -962,7 +963,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                         : (isDark
                               ? Colors.white.withValues(alpha: 0.06)
                               : Colors.white),
-                    borderRadius: BorderRadius.circular(19),
+                    borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                       color: selected
                           ? JellyTheme.primary
@@ -973,7 +974,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                   child: Text(
                     '${g.name} (${g.chapters.length})',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: AppTheme.fontSubhead,
                       fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                       color: selected
                           ? Colors.white

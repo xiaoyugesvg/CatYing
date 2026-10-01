@@ -1,9 +1,5 @@
-import 'dart:io';
-import 'package:cached_network_image_ce/cached_network_image.dart';
-import 'package:flutter/painting.dart';
 import 'package:get/get.dart';
 import '../../services/app_log.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/player_engine.dart';
 import '../../services/player_prefs.dart';
@@ -12,6 +8,7 @@ import '../../services/app_state.dart';
 import '../../services/nodejs_manager.dart';
 import '../../common/constants.dart';
 import '../../models/cache_store.dart';
+import '../../services/cache_manager_service.dart';
 
 enum PendingMultiRepoTarget { vod }
 
@@ -126,7 +123,9 @@ class SettingsController extends GetxController {
         final appState = Get.find<AppState>();
         await appState.ensureNodeJSAndLoadSource();
         appState.applyLoadedConfigState();
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        /* ignore */
+      }
     } catch (e) {
       configError.value = e.toString();
     }
@@ -134,13 +133,11 @@ class SettingsController extends GetxController {
     isLoadingConfig.value = false;
   }
 
-  Future<void> selectPendingMultiRepoOption(
-      MultiRepoOption option) async {
+  Future<void> selectPendingMultiRepoOption(MultiRepoOption option) async {
     final pending = pendingMultiRepoSelection.value;
     if (pending == null) return;
 
-    final normalizedSource =
-        ApiConfig.normalizeConfigUrl(pending.sourceUrl);
+    final normalizedSource = ApiConfig.normalizeConfigUrl(pending.sourceUrl);
 
     switch (pending.target) {
       case PendingMultiRepoTarget.vod:
@@ -160,8 +157,7 @@ class SettingsController extends GetxController {
   Future<PendingMultiRepoSelection?> _detectPendingMultiRepoSelection({
     required String vodUrl,
   }) async {
-    final vodOptions =
-        await ApiConfig.instance.fetchMultiRepoOptions(vodUrl);
+    final vodOptions = await ApiConfig.instance.fetchMultiRepoOptions(vodUrl);
     if (vodOptions != null) {
       if (vodOptions.isEmpty) {
         throw Exception('点播多仓库配置中没有可用地址');
@@ -202,60 +198,23 @@ class SettingsController extends GetxController {
   ///
   /// 涉及到的缓存：
   /// - `PaintingBinding.instance.imageCache` —— Flutter 内存图片缓存
-  /// - `DefaultCacheManager` —— cached_network_image_ce 的磁盘缓存
-  ///   （HLS / m3u8 切片、详情页海报、Home 列表缩略图都走它）
-  /// - `getTemporaryDirectory()` —— Flutter / dio / webview 的临时文件
-  /// - `getApplicationCacheDirectory()` —— 应用自定义缓存
+  /// 清除缓存 —— **委托给 [CacheManagerService]**（单一来源）。
   ///
-  /// **不清** `<Documents>/` 下的 Node.js 源码（user 自己的 source URL 内容），
-  /// 那个走 [NodeJSManager.deleteSource]，跟"清除缓存"是不同语义。
+  /// ── 为什么改成委托（C 类重复的第 1 处）────────────────────────
+  /// 原来这里自己清了 5 样东西（内存图片 / DefaultCacheManager /
+  /// getTemporaryDirectory / getApplicationCacheDirectory / Hive cache_items），
+  /// 而**新建的 `CacheManagerService` 又清了一遍类似的东西** ——
+  /// 两份清单迟早会走偏（事实上就偏了：以前两者都**没覆盖**音乐和阅读的缓存）。
+  ///
+  /// 现在"量什么、清什么"只在 `CacheManagerService` 一处定义，
+  /// 这里只是把它全清 + 给用户反馈。
   Future<void> clearCache() async {
-    // 1) Flutter 内存图片缓存
-    try {
-      final imageCache = PaintingBinding.instance.imageCache;
-      imageCache.clear();
-      imageCache.clearLiveImages();
-    } catch (e) {
-      AppLog.instance.log('=== clearCache: imageCache.clear failed: $e ===');
-    }
-
-    // 2) cached_network_image_ce 磁盘缓存
-    try {
-      await DefaultCacheManager().emptyCache();
-      AppLog.instance.log('=== clearCache: DefaultCacheManager.emptyCache OK ===');
-    } catch (e) {
-      AppLog.instance.log('=== clearCache: DefaultCacheManager.emptyCache failed: $e ===');
-    }
-
-    // 3) getTemporaryDirectory()
-    try {
-      final tmpDir = await getTemporaryDirectory();
-      await _deleteDirContents(tmpDir);
-    } catch (e) {
-      AppLog.instance.log('=== clearCache: tmp dir clear failed: $e ===');
-    }
-
-    // 4) getApplicationCacheDirectory()
-    try {
-      final appCacheDir = await getApplicationCacheDirectory();
-      await _deleteDirContents(appCacheDir);
-    } catch (e) {
-      AppLog.instance.log('=== clearCache: app cache dir clear failed: $e ===');
-    }
-
-    // 5) 业务缓存（Hive cache_items：首页分类列表 / 详情缓存 / TMDB 刮削结果）
-    //    之前漏了这一层 —— 它在 Documents 下，用户可见，且只写不读会持续占用。
-    try {
-      await CacheStore.instance.clearItemsCache();
-      AppLog.instance.log('=== clearCache: CacheStore.clearItemsCache OK ===');
-    } catch (e) {
-      AppLog.instance.log('=== clearCache: CacheStore.clearItemsCache failed: $e ===');
-    }
-
-    // 6) 给用户反馈 + 刷新显示
+    final all = await CacheManagerService.instance.list();
+    await CacheManagerService.clearAll(all);
+    AppLog.instance.log('[Settings] clearCache: 已清 ${all.length} 类缓存');
     Get.snackbar(
       '清除缓存',
-      '已清空图片 / 视频切片 / 临时文件 / 页面缓存',
+      '已清空图片 / 临时文件 / 页面缓存 / 音乐与阅读缓存',
       snackPosition: SnackPosition.BOTTOM,
       duration: const Duration(seconds: 2),
     );
@@ -319,7 +278,9 @@ class SettingsController extends GetxController {
     // 下次进 setupView 输入新 URL 时会重新下载
     try {
       await NodeJSManager.instance.deleteSource();
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ignore */
+    }
 
     return true;
   }
@@ -358,20 +319,36 @@ class SettingsController extends GetxController {
   Future<void> runAutoCacheCleanIfNeeded() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final mode = prefs.getInt('source_cache_auto_clean') ?? 0; // 0 off 1 day 2 week 3 month
+      final mode =
+          prefs.getInt('source_cache_auto_clean') ??
+          0; // 0 off 1 day 2 week 3 month
       if (mode == 0) return;
-      final last =
-          DateTime.fromMillisecondsSinceEpoch(prefs.getInt('cache_last_clean') ?? 0);
+      final last = DateTime.fromMillisecondsSinceEpoch(
+        prefs.getInt('cache_last_clean') ?? 0,
+      );
       final now = DateTime.now();
-      final days = switch (mode) { 1 => 1, 2 => 7, 3 => 30, _ => 0 };
+      final days = switch (mode) {
+        1 => 1,
+        2 => 7,
+        3 => 30,
+        _ => 0,
+      };
       if (days == 0) return;
       if (now.difference(last).inDays < days) return;
-      // 清临时目录与图片缓存
-      try {
-        PaintingBinding.instance.imageCache.clear();
-      } catch (_) {}
-      final tmp = await getTemporaryDirectory();
-      await _deleteDirContents(tmp);
+      // 清图片缓存与临时文件 —— **同样走 CacheManagerService**（C 类重复的第 4 处）
+      //
+      // 原来这里自己清了一遍内存图片 + 临时目录，与 `clearCache()`、
+      // `DataCleanupPage` 的清单各写一份。现在统一按 entry id 清。
+      final entries = await CacheManagerService.instance.list();
+      for (final e in entries) {
+        if (e.id == 'app_image_memory' || e.id == 'app_temp') {
+          try {
+            await e.clear();
+          } catch (_) {
+            /* 单项失败不影响自动清理 */
+          }
+        }
+      }
       await prefs.setInt('cache_last_clean', now.millisecondsSinceEpoch);
       AppLog.instance.log('[Settings] auto cache clean mode=$mode');
     } catch (e) {
@@ -379,91 +356,18 @@ class SettingsController extends GetxController {
     }
   }
 
+  /// 刷新"缓存总大小"显示 —— **委托给 [CacheManagerService]**（单一来源）。
+  ///
+  /// 原来这里自己算 4 项（内存图片 / 临时目录 / 应用缓存目录 / Hive 业务缓存），
+  /// 与 `CacheManagerService` 的口径各写一份；现在统一由后者计算，
+  /// 于是"显示的大小"和"清掉的东西"必然是同一套范围。
+  /// （顺带把音乐/阅读的缓存也计入了 —— 以前它们的占用是"隐形"的。）
   Future<void> refreshCacheSize() async {
-    int total = 0;
-
-    // 1) Flutter 内存图片缓存
     try {
-      final imageCache = PaintingBinding.instance.imageCache;
-      total += imageCache.currentSizeBytes;
-    } catch (e) { /* ignore */ }
-
-    // 2) getTemporaryDirectory() —— Flutter / dio / webview 临时文件
-    try {
-      final tmpDir = await getTemporaryDirectory();
-      total += await _dirSize(tmpDir);
+      final total = await CacheManagerService.totalSize();
+      cacheSizeString.value = CacheManagerService.formatSize(total);
     } catch (e) {
-      AppLog.instance.log('=== refreshCacheSize: tmp dir size failed: $e ===');
+      AppLog.instance.log('=== refreshCacheSize failed: $e ===');
     }
-
-    // 3) getApplicationCacheDirectory() —— 包含 cached_network_image 磁盘缓存
-    try {
-      final appCacheDir = await getApplicationCacheDirectory();
-      total += await _dirSize(appCacheDir);
-    } catch (e) {
-      AppLog.instance.log('=== refreshCacheSize: app cache dir size failed: $e ===');
-    }
-
-    // 4) 业务缓存（Hive cache_items）—— 不在上面两个目录里，之前漏算
-    try {
-      total += CacheStore.instance.cacheItemsByteSize();
-    } catch (e) {
-      AppLog.instance.log('=== refreshCacheSize: hive cache size failed: $e ===');
-    }
-
-    cacheSizeString.value = _formatSize(bytes: total);
-  }
-
-  /// 递归算目录字节数（不跟符号链接，防循环）
-  Future<int> _dirSize(Directory dir) async {
-    int total = 0;
-    try {
-      if (!await dir.exists()) return 0;
-      await for (final entity
-          in dir.list(recursive: true, followLinks: false)) {
-        if (entity is File) {
-          try {
-            total += await entity.length();
-          } catch (e) { /* ignore */ }
-        }
-      }
-    } catch (e) {
-      AppLog.instance.log('=== _dirSize: ${dir.path} failed: $e ===');
-    }
-    return total;
-  }
-
-  /// 删除目录所有内容（保留目录本身）
-  Future<void> _deleteDirContents(Directory dir) async {
-    try {
-      if (!await dir.exists()) return;
-      await for (final entity
-          in dir.list(recursive: false, followLinks: false)) {
-        try {
-          if (entity is File) {
-            await entity.delete();
-          } else if (entity is Directory) {
-            await entity.delete(recursive: true);
-          }
-        } catch (e) {
-          AppLog.instance.log(
-              '=== _deleteDirContents: ${entity.path} failed: $e ===');
-        }
-      }
-    } catch (e) {
-      AppLog.instance.log('=== _deleteDirContents: ${dir.path} failed: $e ===');
-    }
-  }
-
-  static String _formatSize({required int bytes}) {
-    final size = bytes < 0 ? 0 : bytes;
-    if (size < 1024) return '$size B';
-    if (size < 1024 * 1024) {
-      return '${(size / 1024.0).toStringAsFixed(1)} KB';
-    }
-    if (size < 1024 * 1024 * 1024) {
-      return '${(size / 1024.0 / 1024.0).toStringAsFixed(1)} MB';
-    }
-    return '${(size / 1024.0 / 1024.0 / 1024.0).toStringAsFixed(2)} GB';
   }
 }

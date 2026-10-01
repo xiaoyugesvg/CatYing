@@ -6,6 +6,7 @@ import '../../common/theme.dart';
 import '../../services/rfw_theme_service.dart';
 import '../../widgets/common_widgets.dart';
 import 'rfw_theme_editor_page.dart';
+import '../../widgets/app_toast.dart';
 
 /// 首页主题管理页（RFW 自定义首页）
 ///
@@ -26,12 +27,17 @@ class _RfwThemePageState extends State<RfwThemePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.backgroundPrimary,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: AppTheme.backgroundPrimary,
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text('首页主题',
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 17)),
+        title: Text(
+          '首页主题',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontTitle3,
+          ),
+        ),
         iconTheme: IconThemeData(color: AppTheme.textPrimary),
       ),
       body: Obx(() {
@@ -56,8 +62,9 @@ class _RfwThemePageState extends State<RfwThemePage> {
               child: Text(
                 '关闭时使用原生首页。主题只影响首页内容区，详情页与播放器不变。',
                 style: TextStyle(
-                    color: AppTheme.textTertiary,
-                    fontSize: AppTheme.fontCaption),
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption,
+                ),
               ),
             ),
 
@@ -73,16 +80,20 @@ class _RfwThemePageState extends State<RfwThemePage> {
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.info_outline,
-                        size: 16, color: AppTheme.accentColor),
+                    Icon(
+                      Icons.info_outline,
+                      size: 16,
+                      color: AppTheme.accentColor,
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
                         '已开启，但还没选择主题 —— 请先导入或选择一个主题，首页才会变化',
                         style: TextStyle(
-                            color: AppTheme.accentColor,
-                            fontSize: 11.5,
-                            height: 1.4),
+                          color: AppTheme.accentColor,
+                          fontSize: AppTheme.fontFootnote,
+                          height: 1.4,
+                        ),
                       ),
                     ),
                   ],
@@ -101,11 +112,12 @@ class _RfwThemePageState extends State<RfwThemePage> {
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppTheme.accentColor,
                       side: BorderSide(
-                          color: AppTheme.accentColor.withValues(alpha: 0.5)),
+                        color: AppTheme.accentColor.withValues(alpha: 0.5),
+                      ),
                       minimumSize: const Size.fromHeight(46),
                       shape: RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius.circular(AppTheme.radiusMD)),
+                        borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -115,10 +127,13 @@ class _RfwThemePageState extends State<RfwThemePage> {
                         child: TextButton.icon(
                           onPressed: _importFromClipboard,
                           icon: const Icon(Icons.content_paste_go, size: 18),
-                          label: const Text('直接从剪贴板导入',
-                              style: TextStyle(fontSize: 13)),
+                          label: const Text(
+                            '直接从剪贴板导入',
+                            style: TextStyle(fontSize: AppTheme.fontSubhead),
+                          ),
                           style: TextButton.styleFrom(
-                              foregroundColor: AppTheme.textSecondary),
+                            foregroundColor: AppTheme.textSecondary,
+                          ),
                         ),
                       ),
                     ],
@@ -127,8 +142,9 @@ class _RfwThemePageState extends State<RfwThemePage> {
                     '打开编辑器可粘贴或手改主题文本，保存前会自动做语法检查',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                        color: AppTheme.textTertiary,
-                        fontSize: AppTheme.fontCaption),
+                      color: AppTheme.textTertiary,
+                      fontSize: AppTheme.fontCaption,
+                    ),
                   ),
                   if (svc.lastError.value.isNotEmpty) ...[
                     const SizedBox(height: 10),
@@ -137,22 +153,26 @@ class _RfwThemePageState extends State<RfwThemePage> {
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
                         color: Colors.red.withValues(alpha: 0.10),
-                        borderRadius:
-                            BorderRadius.circular(AppTheme.radiusMD),
+                        borderRadius: BorderRadius.circular(AppTheme.radiusMD),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('语法检查未通过',
-                              style: TextStyle(
-                                  color: Colors.redAccent,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600)),
+                          const Text(
+                            '语法检查未通过',
+                            style: TextStyle(
+                              color: Colors.redAccent,
+                              fontSize: AppTheme.fontFootnote,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                           const SizedBox(height: 4),
                           Text(
                             svc.lastError.value,
                             style: const TextStyle(
-                                color: Colors.redAccent, fontSize: 11.5),
+                              color: Colors.redAccent,
+                              fontSize: AppTheme.fontFootnote,
+                            ),
                           ),
                         ],
                       ),
@@ -171,16 +191,27 @@ class _RfwThemePageState extends State<RfwThemePage> {
                   padding: const EdgeInsets.symmetric(vertical: 20),
                   child: Column(
                     children: [
-                      Icon(Icons.auto_awesome_outlined,
-                          size: 32, color: AppTheme.textTertiary),
+                      Icon(
+                        Icons.auto_awesome_outlined,
+                        size: 32,
+                        color: AppTheme.textTertiary,
+                      ),
                       const SizedBox(height: 8),
-                      Text('还没有导入主题',
-                          style: TextStyle(
-                              color: AppTheme.textSecondary, fontSize: 13)),
+                      Text(
+                        '还没有导入主题',
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: AppTheme.fontSubhead,
+                        ),
+                      ),
                       const SizedBox(height: 4),
-                      Text('可从 PeekPro 主题包复制 .rfwtxt 内容导入',
-                          style: TextStyle(
-                              color: AppTheme.textTertiary, fontSize: 11.5)),
+                      Text(
+                        '可从 PeekPro 主题包复制 .rfwtxt 内容导入',
+                        style: TextStyle(
+                          color: AppTheme.textTertiary,
+                          fontSize: AppTheme.fontFootnote,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -192,8 +223,9 @@ class _RfwThemePageState extends State<RfwThemePage> {
                     for (var i = 0; i < svc.userThemes.length; i++) ...[
                       if (i > 0)
                         Divider(
-                            height: 1,
-                            color: Colors.white.withValues(alpha: 0.06)),
+                          height: 1,
+                          color: Colors.white.withValues(alpha: 0.06),
+                        ),
                       _themeRow(svc.userThemes[i]),
                     ],
                   ],
@@ -212,9 +244,10 @@ class _RfwThemePageState extends State<RfwThemePage> {
                   '主题里若引用了 App 未提供的组件，或存在语法错误，首页会自动回退到原生界面，'
                   '不会白屏。',
                   style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
-                      height: 1.6),
+                    color: AppTheme.textSecondary,
+                    fontSize: AppTheme.fontFootnote,
+                    height: 1.6,
+                  ),
                 ),
               ),
             ),
@@ -233,17 +266,21 @@ class _RfwThemePageState extends State<RfwThemePage> {
         color: selected ? AppTheme.accentColor : AppTheme.textTertiary,
         size: 20,
       ),
-      title: Text(t.name,
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis),
+      title: Text(
+        t.name,
+        style: TextStyle(
+          color: AppTheme.textPrimary,
+          fontSize: AppTheme.fontBody,
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
       onTap: () async {
         await _svc.setCurrent(t.id);
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('已选择主题：${t.name}'),
-              duration: const Duration(milliseconds: 1200)),
+        AppToast.message(
+          '已选择主题：${t.name}',
+          duration: const Duration(milliseconds: 1200),
         );
       },
       trailing: Row(
@@ -251,14 +288,20 @@ class _RfwThemePageState extends State<RfwThemePage> {
         children: [
           IconButton(
             onPressed: () => _openEditor(editing: t),
-            icon: Icon(Icons.edit_outlined,
-                size: 19, color: AppTheme.textSecondary),
+            icon: Icon(
+              Icons.edit_outlined,
+              size: 19,
+              color: AppTheme.textSecondary,
+            ),
             tooltip: '编辑',
           ),
           IconButton(
             onPressed: () => _confirmDelete(t),
-            icon: const Icon(Icons.delete_outline,
-                size: 19, color: Colors.redAccent),
+            icon: const Icon(
+              Icons.delete_outline,
+              size: 19,
+              color: Colors.redAccent,
+            ),
             tooltip: '删除',
           ),
         ],
@@ -307,18 +350,18 @@ class _RfwThemePageState extends State<RfwThemePage> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.backgroundSecondary,
         title: Text('删除主题', style: TextStyle(color: AppTheme.textPrimary)),
-        content: Text('确定删除「${t.name}」？',
-            style: TextStyle(color: AppTheme.textSecondary)),
+        content: Text(
+          '确定删除「${t.name}」？',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('取消',
-                style: TextStyle(color: AppTheme.textSecondary)),
+            child: Text('取消', style: TextStyle(color: AppTheme.textSecondary)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child:
-                const Text('删除', style: TextStyle(color: Colors.redAccent)),
+            child: const Text('删除', style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -331,8 +374,6 @@ class _RfwThemePageState extends State<RfwThemePage> {
 
   void _toast(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
-    );
+    AppToast.message(msg, duration: const Duration(seconds: 2));
   }
 }

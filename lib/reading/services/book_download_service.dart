@@ -288,7 +288,7 @@ class BookDownloadService extends ChangeNotifier {
 
   Future<Directory> _booksDir() async {
     final base = await SettingsService.downloadBaseDir();
-    final dir = Directory('${base.path}/${AppConstants.bookDir}');
+    final dir = Directory('${base.path}/${CmbokConstants.bookDir}');
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;
   }
@@ -420,7 +420,7 @@ class BookDownloadService extends ChangeNotifier {
   /// 封面图存放目录：下载目录下 `bookDir/covers` 子目录。
   Future<Directory> _coversDir() async {
     final base = await SettingsService.downloadBaseDir();
-    final dir = Directory('${base.path}/${AppConstants.bookDir}/covers');
+    final dir = Directory('${base.path}/${CmbokConstants.bookDir}/covers');
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;
   }

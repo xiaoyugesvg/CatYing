@@ -7,6 +7,8 @@ import '../../../widgets/common_widgets.dart';
 import '../controller.dart';
 import 'data_cleanup_page.dart';
 import 'settings_shared.dart';
+import '../../../services/cache_manager_service.dart';
+import '../../../widgets/app_toast.dart';
 
 /// 清除应用缓存的粒度
 enum _ClearCacheAction { cancel, itemsOnly, all }
@@ -28,12 +30,18 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
   bool _sourceCacheEnabled = true;
   int _autoCleanIndex = 0;
 
+  /// 缓存明细（按模块分类）。null = 还在算
+  List<CacheEntryInfo>? _entries;
+  /// 清空进行中（防重复点击）
+  bool _busy = false;
+
   static const _autoCleanLabels = ['关闭', '每天', '每周', '每月'];
 
   @override
   void initState() {
     super.initState();
     _load();
+    _reloadEntries();
   }
 
   Future<void> _load() async {
@@ -92,8 +100,169 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
             ),
           ],
         ),
+
+        // ── 缓存明细（按模块分开，可单独清）──────────────────────
+        //
+        // 上面那排"清除应用缓存"只有一个**总数**，用户看不出
+        // "到底是影视占的、还是阅读占的"。这里按 [CacheModule] 分组：
+        // 最上面几排是**软件本身**，往下依次是影视/音乐/阅读。
+        const SizedBox(height: AppTheme.spacingMD),
+        _cacheDetailSection(),
       ],
     );
+  }
+
+  // ============================================================
+  // 缓存明细：按模块分组，每组可单独清空
+  // ============================================================
+
+  Widget _cacheDetailSection() {
+    if (_entries == null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        child: Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+                strokeWidth: 2, color: AppTheme.accentColor),
+          ),
+        ),
+      );
+    }
+    final all = _entries!;
+    // 按 module 分组（保持枚举顺序：app → video → music → reading）
+    final groups = <CacheModule, List<CacheEntryInfo>>{};
+    for (final e in all) {
+      groups.putIfAbsent(e.module, () => []).add(e);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final m in CacheModule.values)
+          if ((groups[m] ?? const []).isNotEmpty) ...[
+            _groupHeader(
+              m,
+              totalBytes: (groups[m] ?? const [])
+                  .fold<int>(0, (a, b) => a + (b.size < 0 ? 0 : b.size)),
+              entries: groups[m] ?? const [],
+            ),
+            const SizedBox(height: 6),
+            for (final e in groups[m] ?? const []) _entryRow(e),
+            const SizedBox(height: AppTheme.spacingMD),
+          ],
+      ],
+    );
+  }
+
+  Widget _groupHeader(
+    CacheModule m, {
+    required int totalBytes,
+    required List<CacheEntryInfo> entries,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 2, 4, 2),
+      child: Row(
+        children: [
+          Icon(_moduleIcon(m), size: 15, color: AppTheme.textSecondary),
+          const SizedBox(width: 6),
+          Text(
+            m.label,
+            style: TextStyle(
+              fontSize: AppTheme.fontSubhead,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            CacheManagerService.formatSize(totalBytes),
+            style: TextStyle(
+                fontSize: AppTheme.fontCaption, color: AppTheme.textTertiary),
+          ),
+          const Spacer(),
+          // 整组清空（比逐个点省事）
+          GestureDetector(
+            onTap: _busy ? null : () => _confirmClearModule(m, entries),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Text(
+                '清空',
+                style: TextStyle(
+                    fontSize: AppTheme.fontSubhead,
+                    color: AppTheme.accentColor),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _entryRow(CacheEntryInfo e) {
+    return SettingsRow(
+      icon: _moduleIcon(e.module),
+      title: e.label,
+      value: CacheManagerService.formatSize(e.size),
+      // 副标题写清"清了会怎样" —— 让用户敢点
+      onTap: null,
+    );
+  }
+
+  IconData _moduleIcon(CacheModule m) => switch (m) {
+        CacheModule.app => Icons.phone_iphone_rounded,
+        CacheModule.video => Icons.movie_outlined,
+        CacheModule.music => Icons.music_note_outlined,
+        CacheModule.reading => Icons.menu_book_outlined,
+      };
+
+  /// 整组清空前二次确认（说清影响）
+  Future<void> _confirmClearModule(
+      CacheModule m, List<CacheEntryInfo> entries) async {
+    final names = entries.map((e) => '· ${e.label}').join('\n');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        title: Text('清空「${m.label}」缓存',
+            style: TextStyle(color: AppTheme.textPrimary)),
+        content: Text(
+          '将清理：\n$names\n\n'
+          '不会清除：收藏 / 历史 / 订阅 / 设置。\n'
+          '清理后相关内容下次会重新联网或重新解析。',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: AppTheme.fontSubhead,
+            height: 1.5,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('取消',
+                style: TextStyle(color: AppTheme.textTertiary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('清空', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _busy = true);
+    await CacheManagerService.clearModule(_entries!, m);
+    await _reloadEntries();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    AppToast.success('已清空「${m.label}」缓存');
+  }
+
+  Future<void> _reloadEntries() async {
+    final list = await CacheManagerService.instance.list();
+    if (!mounted) return;
+    setState(() => _entries = list);
   }
 
   Future<void> _pickAutoClean() async {

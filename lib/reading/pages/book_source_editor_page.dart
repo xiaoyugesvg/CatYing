@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/book_source.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 /// 书源编辑页 —— 7 个 tab（源变量 / 基础 / 搜索 / 发现 / 详情 / 目录 / 正文）。
 ///
@@ -261,12 +262,12 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-              fontSize: 17, fontWeight: FontWeight.w700, color: label),
+              fontSize: AppTheme.fontTitle3, fontWeight: FontWeight.w700, color: label),
         ),
         actions: [
           TextButton(
             onPressed: _save,
-            child: const Text('保存', style: TextStyle(fontSize: 15)),
+            child: const Text('保存', style: TextStyle(fontSize: AppTheme.fontHeadline)),
           ),
         ],
         bottom: TabBar(
@@ -278,8 +279,8 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
           indicatorColor: label,
           indicatorSize: TabBarIndicatorSize.label,
           labelStyle:
-              const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-          unselectedLabelStyle: const TextStyle(fontSize: 14),
+              const TextStyle(fontSize: AppTheme.fontBody, fontWeight: FontWeight.w600),
+          unselectedLabelStyle: const TextStyle(fontSize: AppTheme.fontBody),
           tabs: [for (final t in _tabs) Tab(text: t.title)],
         ),
       ),
@@ -300,11 +301,11 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 40),
       children: [
         Text('源变量可在脚本中通过 source.getVariable() 获取',
-            style: TextStyle(fontSize: 12.5, color: JellyTheme.textSecondary)),
+            style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
         const SizedBox(height: 4),
         Text(
           _varKvMode ? '键值对：每行一个 key=value，脚本里按键取值' : '单值：整条串直接保存，适合单个 Token 等裸值',
-          style: TextStyle(fontSize: 12.5, color: JellyTheme.textSecondary),
+          style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
         ),
         const SizedBox(height: 14),
         // ── 单值 / 键值对 分段切换（按截图 IMG_8112）────────────
@@ -319,7 +320,7 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
             color: isDark
                 ? Colors.white.withValues(alpha: 0.06)
                 : const Color(0xFFF2F2F4),
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(20),
           ),
           child: Row(
             children: [
@@ -337,12 +338,12 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
                                 ? Colors.white.withValues(alpha: 0.14)
                                 : const Color(0xFFE3E3E6))
                             : Colors.transparent,
-                        borderRadius: BorderRadius.circular(21),
+                        borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
                         kv ? '键值对' : '单值',
                         style: TextStyle(
-                          fontSize: 14,
+                          fontSize: AppTheme.fontBody,
                           fontWeight: _varKvMode == kv
                               ? FontWeight.w600
                               : FontWeight.normal,
@@ -368,13 +369,13 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
             onChanged: (v) => _draft['variable'] = v,
             maxLines: 6,
             minLines: 3,
-            style: TextStyle(fontSize: 13.5, color: label),
+            style: TextStyle(fontSize: AppTheme.fontBody, color: label),
             decoration: InputDecoration(
               isDense: true,
               filled: false,
               hintText: _varKvMode ? 'key1=value1\nkey2=value2' : '变量值',
               hintStyle: TextStyle(
-                  fontSize: 13.5, color: JellyTheme.textSecondary),
+                  fontSize: AppTheme.fontBody, color: JellyTheme.textSecondary),
               border: InputBorder.none,
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -410,7 +411,7 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           child: Text(t.toggles[i].label,
                               style:
-                                  TextStyle(fontSize: 15, color: label)),
+                                  TextStyle(fontSize: AppTheme.fontHeadline, color: label)),
                         ),
                       ),
                       Switch(
@@ -430,7 +431,7 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
         for (final f in t.fields) ...[
           Text(f.label,
               style: TextStyle(
-                  fontSize: 13,
+                  fontSize: AppTheme.fontSubhead,
                   fontWeight: FontWeight.w600,
                   color: label)),
           const SizedBox(height: 6),
@@ -446,13 +447,13 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
               onChanged: (v) => _draft[f.key] = v,
               maxLines: f.multiline ? 6 : 1,
               minLines: f.multiline ? 3 : 1,
-              style: TextStyle(fontSize: 13.5, color: label),
+              style: TextStyle(fontSize: AppTheme.fontBody, color: label),
               decoration: InputDecoration(
                 isDense: true,
                 filled: false,
                 hintText: f.hint,
                 hintStyle: TextStyle(
-                    fontSize: 13.5, color: JellyTheme.textSecondary),
+                    fontSize: AppTheme.fontBody, color: JellyTheme.textSecondary),
                 border: InputBorder.none,
                 contentPadding: const EdgeInsets.symmetric(
                     horizontal: 14, vertical: 12),

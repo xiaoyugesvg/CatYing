@@ -8,6 +8,7 @@ import '../widgets/music_components.dart';
 import 'playlist_detail_page.dart';
 import '../../widgets/app_page_loading.dart';
 import '../../widgets/app_empty_view.dart';
+import '../../common/theme.dart';
 
 /// 发现页（主页）—— 移植自 Beans 的 `DiscoverView.swift`（2074 行，取其主干）。
 ///
@@ -140,12 +141,12 @@ class _DiscoverPageState extends State<DiscoverPage>
                 Text(greet,
                     style: TextStyle(
                         color: MusicTheme.label,
-                        fontSize: 24,
+                        fontSize: AppTheme.fontPageTitle,
                         fontWeight: FontWeight.w700)),
                 const SizedBox(height: 2),
                 Text('今天想听点什么？',
                     style: TextStyle(
-                        color: MusicTheme.secondary, fontSize: 13)),
+                        color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
               ],
             ),
           ),
@@ -189,12 +190,12 @@ class _DiscoverPageState extends State<DiscoverPage>
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        color: MusicTheme.secondary, fontSize: 12)),
+                        color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
               ),
               TextButton(
                 onPressed: _loadAll,
                 child: Text('重试',
-                    style: TextStyle(color: MusicTheme.tint, fontSize: 12)),
+                    style: TextStyle(color: MusicTheme.tint, fontSize: AppTheme.fontFootnote)),
               ),
             ],
           ),
@@ -343,9 +344,9 @@ class _DiscoverPageState extends State<DiscoverPage>
 class _QuickSearchDelegate extends SearchDelegate<void> {
   @override
   ThemeData appBarTheme(BuildContext context) => Theme.of(context).copyWith(
-        scaffoldBackgroundColor: MusicTheme.background,
+        scaffoldBackgroundColor: Colors.transparent,
         appBarTheme: AppBarTheme(
-          backgroundColor: MusicTheme.background,
+          backgroundColor: Colors.transparent,
           elevation: 0,
         ),
         inputDecorationTheme: const InputDecorationTheme(border: InputBorder.none),
@@ -376,7 +377,7 @@ class _QuickSearchDelegate extends SearchDelegate<void> {
     if (query.trim().isEmpty) {
       return Center(
         child: Text('输入歌名、歌手或专辑',
-            style: TextStyle(color: MusicTheme.secondary, fontSize: 13)),
+            style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
       );
     }
     return FutureBuilder<MusicListResult<Song>>(

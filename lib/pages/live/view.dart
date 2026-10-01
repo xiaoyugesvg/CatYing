@@ -21,6 +21,7 @@ import '../../widgets/video_player_pip.dart';
 import 'controller.dart';
 import '../../services/audio_focus.dart';
 import '../../widgets/app_empty_view.dart';
+import '../../widgets/app_toast.dart';
 
 /// 直播主界面（对照参考图）
 /// 上：视频区 + LIVE 角标 + 小窗/全屏
@@ -36,6 +37,7 @@ class _LivePageState extends State<LivePage> {
   final _controller = Get.put(LiveController());
   Player? _player;
   VideoController? _videoController;
+
   /// iOS：与点播共用 IosAvPlayer（AvEngine）
   IosAvPlayer? _avPlayer;
   bool _fullscreen = false;
@@ -70,7 +72,9 @@ class _LivePageState extends State<LivePage> {
       if (tab != 4) {
         try {
           _player?.pause();
-        } catch (e) { /* ignore */ }
+        } catch (e) {
+          /* ignore */
+        }
       } else {
         final playing = _player?.state.playing ?? false;
         if (!playing) {
@@ -143,7 +147,9 @@ class _LivePageState extends State<LivePage> {
         origin = base;
         referer = '$base/';
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ignore */
+    }
     final headers = <String, String>{
       'User-Agent':
           'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
@@ -191,17 +197,13 @@ class _LivePageState extends State<LivePage> {
     final ch = _controller.currentChannel;
     final url = ch?.playUrl ?? '';
     if (url.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先选择频道')),
-      );
+      AppToast.message('请先选择频道');
       return;
     }
     try {
       final supported = await VideoPlayerPip.instance.isIosPipSupported();
       if (!supported) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('当前设备不支持系统小窗（需真机 iOS）')),
-        );
+        AppToast.message('当前设备不支持系统小窗（需真机 iOS）');
         return;
       }
       final pos = _player?.state.position ?? Duration.zero;
@@ -210,8 +212,7 @@ class _LivePageState extends State<LivePage> {
         'User-Agent':
             'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
       };
-      await VideoPlayerPip.instance
-          .prepareIos(url: url, headers: pipHeaders);
+      await VideoPlayerPip.instance.prepareIos(url: url, headers: pipHeaders);
       // 单实例 AVPlayer：进/出小窗都不要 pause，否则小窗冻结/回 App 停播
       final ok = await VideoPlayerPip.instance.enterIos(
         url: url,
@@ -226,22 +227,17 @@ class _LivePageState extends State<LivePage> {
         },
       );
       if (!ok) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('小窗启动失败')),
-        );
+        AppToast.message('小窗启动失败');
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('小窗失败：$e')),
-      );
+      AppToast.message('小窗失败：$e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor:
-          _fullscreen ? Colors.black : AppTheme.backgroundPrimary,
+      backgroundColor: _fullscreen ? Colors.black : AppTheme.backgroundPrimary,
       body: GetBuilder<LiveController>(
         builder: (c) {
           final groups = c.groups;
@@ -264,7 +260,10 @@ class _LivePageState extends State<LivePage> {
                 children: [
                   // 状态栏高度黑边：状态栏压在黑边上，不与画面重叠
                   if (topBar > 0)
-                    SizedBox(height: topBar, child: const ColoredBox(color: Colors.black)),
+                    SizedBox(
+                      height: topBar,
+                      child: const ColoredBox(color: Colors.black),
+                    ),
                   // 视频层（全屏时吃掉剩余高度）
                   SizedBox(
                     height: videoHeight,
@@ -285,8 +284,7 @@ class _LivePageState extends State<LivePage> {
                             // 源加载失败时只在播放器/列表上方放一个圆形的
                             // 重试图标按钮（无文字），点它重新加载。
                             return Padding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(12, 6, 12, 0),
+                              padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
                               child: Row(
                                 children: [
                                   GestureDetector(
@@ -294,41 +292,45 @@ class _LivePageState extends State<LivePage> {
                                     onTap: loading
                                         ? null
                                         : () =>
-                                            LiveService.instance.retryLast(),
+                                              LiveService.instance.retryLast(),
                                     child: Container(
                                       width: 32,
                                       height: 32,
                                       alignment: Alignment.center,
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
-                                        color: AppTheme.accentColor
-                                            .withValues(alpha: 0.14),
+                                        color: AppTheme.accentColor.withValues(
+                                          alpha: 0.14,
+                                        ),
                                         border: Border.all(
-                                            color: AppTheme.accentColor
-                                                .withValues(alpha: 0.45),
-                                            width: 0.8),
+                                          color: AppTheme.accentColor
+                                              .withValues(alpha: 0.45),
+                                          width: 0.8,
+                                        ),
                                       ),
                                       child: loading
                                           ? SizedBox(
                                               width: 14,
                                               height: 14,
-                                              child:
-                                                  CircularProgressIndicator(
-                                                      strokeWidth: 1.8,
-                                                      color: AppTheme
-                                                          .accentColor),
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 1.8,
+                                                color: AppTheme.accentColor,
+                                              ),
                                             )
-                                          : Icon(Icons.refresh_rounded,
+                                          : Icon(
+                                              Icons.refresh_rounded,
                                               size: 18,
-                                              color: AppTheme.accentColor),
+                                              color: AppTheme.accentColor,
+                                            ),
                                     ),
                                   ),
                                   const SizedBox(width: 8),
                                   Text(
                                     loading ? '正在加载源…' : '加载失败',
                                     style: TextStyle(
-                                        color: AppTheme.textTertiary,
-                                        fontSize: 12),
+                                      color: AppTheme.textTertiary,
+                                      fontSize: AppTheme.fontFootnote,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -348,273 +350,297 @@ class _LivePageState extends State<LivePage> {
                               ),
                             );
                           }),
-                            const SizedBox(height: 8),
-                            // 双层选择器：直播源 + 分组
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 12),
-                              child: Row(
-                                children: [
-                                  // 刷新按钮
-                                  GestureDetector(
-                                    onTap: _onRefreshSource,
-                                    child: Container(
-                                      width: 38,
-                                      height: 38,
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.backgroundTertiary,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Icon(Icons.refresh,
-                                          color: AppTheme.textSecondary,
-                                          size: 18),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  // 直播源选择（左下拉）
-                                  Expanded(
-                                    child: GestureDetector(
-                                      onTap: () =>
-                                          _showSourcePicker(context, c),
-                                      child: Container(
-                                        padding: EdgeInsets.symmetric(
-                                            horizontal: 14, vertical: 9),
-                                        decoration: BoxDecoration(
-                                          color: AppTheme.backgroundTertiary,
-                                          borderRadius:
-                                              BorderRadius.circular(20),
-                                          border: Border.all(
-                                            color: AppTheme.accentColor
-                                                .withValues(alpha: 0.3),
-                                          ),
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            Icon(Icons.rss_feed,
-                                                color: AppTheme.accentColor,
-                                                size: 16),
-                                            const SizedBox(width: 6),
-                                            Expanded(
-                                              child: Text(
-                                                currentSourceName,
-                                                maxLines: 1,
-                                                overflow:
-                                                    TextOverflow.ellipsis,
-                                                style: TextStyle(
-                                                  color: AppTheme.accentColor,
-                                                  fontSize: 13,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                            ),
-                                            Icon(Icons.arrow_drop_down,
-                                                color: AppTheme.textSecondary,
-                                                size: 18),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  // 分组选择（右下拉）
-                                  Expanded(
-                                    child: GestureDetector(
-                                      onTap: groups.isEmpty
-                                          ? null
-                                          : () => _showGroupPicker(
-                                              context, c, groups),
-                                      child: Container(
-                                        padding: EdgeInsets.symmetric(
-                                            horizontal: 14, vertical: 9),
-                                        decoration: BoxDecoration(
-                                          color: AppTheme.backgroundTertiary,
-                                          borderRadius:
-                                              BorderRadius.circular(20),
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            Icon(Icons.playlist_play,
-                                                color: AppTheme.textSecondary,
-                                                size: 16),
-                                            const SizedBox(width: 6),
-                                            Expanded(
-                                              child: Text(
-                                                currentGroupName,
-                                                maxLines: 1,
-                                                overflow:
-                                                    TextOverflow.ellipsis,
-                                                style: TextStyle(
-                                                  color: AppTheme.textPrimary,
-                                                  fontSize: 13,
-                                                ),
-                                              ),
-                                            ),
-                                            Icon(Icons.arrow_drop_down,
-                                                color: AppTheme.textSecondary,
-                                                size: 18),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            // 跨组搜索 + 只看收藏
-                            Row(
+                          const SizedBox(height: 8),
+                          // 双层选择器：直播源 + 分组
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            child: Row(
                               children: [
-                                Expanded(
-                                  child: TextField(
-                                    onChanged: (v) {
-                                      c.searchKeyword.value = v;
-                                      c.update();
-                                    },
-                                    style: TextStyle(
-                                        color: AppTheme.textPrimary,
-                                        fontSize: 13),
-                                    decoration: InputDecoration(
-                                      isDense: true,
-                                      hintText: '搜索频道（跨分组）',
-                                      hintStyle: TextStyle(
-                                          color: AppTheme.textTertiary,
-                                          fontSize: 12),
-                                      prefixIcon: Icon(Icons.search,
-                                          size: 18,
-                                          color: AppTheme.textTertiary),
-                                      filled: true,
-                                      fillColor: AppTheme.backgroundTertiary,
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                              horizontal: 10, vertical: 8),
-                                      border: OutlineInputBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12),
-                                        borderSide: BorderSide.none,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
+                                // 刷新按钮
                                 GestureDetector(
-                                  onTap: () => _showEpgSheet(context, c),
+                                  onTap: _onRefreshSource,
                                   child: Container(
-                                    padding: EdgeInsets.symmetric(
-                                        horizontal: 10, vertical: 10),
+                                    width: 38,
+                                    height: 38,
                                     decoration: BoxDecoration(
                                       color: AppTheme.backgroundTertiary,
-                                      borderRadius: BorderRadius.circular(12),
+                                      shape: BoxShape.circle,
                                     ),
-                                    child: Icon(Icons.schedule,
-                                        size: 18,
-                                        color: AppTheme.textSecondary),
+                                    child: Icon(
+                                      Icons.refresh,
+                                      color: AppTheme.textSecondary,
+                                      size: 18,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                Obx(() {
-                                  final onlyFav =
-                                      c.showOnlyFavorites.value;
-                                  return GestureDetector(
-                                    onTap: () {
-                                      c.showOnlyFavorites.value = !onlyFav;
-                                      c.update();
-                                    },
+                                // 直播源选择（左下拉）
+                                Expanded(
+                                  child: GestureDetector(
+                                    onTap: () => _showSourcePicker(context, c),
                                     child: Container(
                                       padding: EdgeInsets.symmetric(
-                                          horizontal: 10, vertical: 10),
-                                      decoration: BoxDecoration(
-                                        color: onlyFav
-                                            ? AppTheme.accentColor
-                                                .withValues(alpha: 0.2)
-                                            : AppTheme.backgroundTertiary,
-                                        borderRadius:
-                                            BorderRadius.circular(12),
+                                        horizontal: 14,
+                                        vertical: 9,
                                       ),
-                                      child: Icon(
-                                        onlyFav
-                                            ? Icons.star
-                                            : Icons.star_border,
-                                        size: 18,
-                                        color: onlyFav
-                                            ? AppTheme.accentColor
-                                            : AppTheme.textSecondary,
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.backgroundTertiary,
+                                        borderRadius: BorderRadius.circular(20),
+                                        border: Border.all(
+                                          color: AppTheme.accentColor
+                                              .withValues(alpha: 0.3),
+                                        ),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.rss_feed,
+                                            color: AppTheme.accentColor,
+                                            size: 16,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Expanded(
+                                            child: Text(
+                                              currentSourceName,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                color: AppTheme.accentColor,
+                                                fontSize: AppTheme.fontSubhead,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                          Icon(
+                                            Icons.arrow_drop_down,
+                                            color: AppTheme.textSecondary,
+                                            size: 18,
+                                          ),
+                                        ],
                                       ),
                                     ),
-                                  );
-                                }),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                // 分组选择（右下拉）
+                                Expanded(
+                                  child: GestureDetector(
+                                    onTap: groups.isEmpty
+                                        ? null
+                                        : () => _showGroupPicker(
+                                            context,
+                                            c,
+                                            groups,
+                                          ),
+                                    child: Container(
+                                      padding: EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 9,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.backgroundTertiary,
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.playlist_play,
+                                            color: AppTheme.textSecondary,
+                                            size: 16,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Expanded(
+                                            child: Text(
+                                              currentGroupName,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                color: AppTheme.textPrimary,
+                                                fontSize: AppTheme.fontSubhead,
+                                              ),
+                                            ),
+                                          ),
+                                          Icon(
+                                            Icons.arrow_drop_down,
+                                            color: AppTheme.textSecondary,
+                                            size: 18,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               ],
                             ),
-                            const SizedBox(height: 8),
-                            // 频道列表（占满宽度）
-                            Expanded(
-                              child: Obx(() {
-                                // 切换直播源 / 分组时给明确反馈，
-                                // 否则列表为空的那段时间就是一片黑，不知道在加载还是坏了。
-                                final loading =
-                                    LiveService.instance.isLoading.value;
-                                if (loading && channels.isEmpty) {
-                                  return Center(
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        SizedBox(
-                                          width: 26,
-                                          height: 26,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2.4,
-                                            color: AppTheme.accentColor,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 12),
-                                        Text('正在加载频道…',
-                                            style: TextStyle(
-                                                color: AppTheme.textSecondary,
-                                                fontSize: AppTheme.fontSubhead)),
-                                        const SizedBox(height: 4),
-                                        Text('切换直播源需要几秒',
-                                            style: TextStyle(
-                                                color: AppTheme.textTertiary,
-                                                fontSize: AppTheme.fontCaption)),
-                                      ],
+                          ),
+                          const SizedBox(height: 10),
+                          // 跨组搜索 + 只看收藏
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  onChanged: (v) {
+                                    c.searchKeyword.value = v;
+                                    c.update();
+                                  },
+                                  style: TextStyle(
+                                    color: AppTheme.textPrimary,
+                                    fontSize: AppTheme.fontSubhead,
+                                  ),
+                                  decoration: InputDecoration(
+                                    isDense: true,
+                                    hintText: '搜索频道（跨分组）',
+                                    hintStyle: TextStyle(
+                                      color: AppTheme.textTertiary,
+                                      fontSize: AppTheme.fontFootnote,
                                     ),
-                                  );
-                                }
-                                if (groups.isEmpty) {
-                                  return _EmptyLive(
-                                      onReload: () => _pickSource(context, c));
-                                }
-                                return Stack(
-                                  children: [
-                                    _buildChannelList(c, channels),
-                                    // 已有旧列表时：叠加一层半透明遮罩 + 转圈，
-                                    // 让"正在换源"这件事可见，又不丢掉旧内容。
-                                    if (loading)
-                                      Positioned.fill(
-                                        child: IgnorePointer(
-                                          child: Container(
-                                            color: AppTheme.backgroundPrimary
-                                                .withValues(alpha: 0.45),
-                                            child: Center(
-                                              child: SizedBox(
-                                                width: 24,
-                                                height: 24,
-                                                child:
-                                                    CircularProgressIndicator(
-                                                  strokeWidth: 2.2,
-                                                  color: AppTheme.accentColor,
-                                                ),
+                                    prefixIcon: Icon(
+                                      Icons.search,
+                                      size: 18,
+                                      color: AppTheme.textTertiary,
+                                    ),
+                                    filled: true,
+                                    fillColor: AppTheme.backgroundTertiary,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 8,
+                                    ),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              GestureDetector(
+                                onTap: () => _showEpgSheet(context, c),
+                                child: Container(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 10,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.backgroundTertiary,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Icon(
+                                    Icons.schedule,
+                                    size: 18,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Obx(() {
+                                final onlyFav = c.showOnlyFavorites.value;
+                                return GestureDetector(
+                                  onTap: () {
+                                    c.showOnlyFavorites.value = !onlyFav;
+                                    c.update();
+                                  },
+                                  child: Container(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 10,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: onlyFav
+                                          ? AppTheme.accentColor.withValues(
+                                              alpha: 0.2,
+                                            )
+                                          : AppTheme.backgroundTertiary,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Icon(
+                                      onlyFav ? Icons.star : Icons.star_border,
+                                      size: 18,
+                                      color: onlyFav
+                                          ? AppTheme.accentColor
+                                          : AppTheme.textSecondary,
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          // 频道列表（占满宽度）
+                          Expanded(
+                            child: Obx(() {
+                              // 切换直播源 / 分组时给明确反馈，
+                              // 否则列表为空的那段时间就是一片黑，不知道在加载还是坏了。
+                              final loading =
+                                  LiveService.instance.isLoading.value;
+                              if (loading && channels.isEmpty) {
+                                return Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      SizedBox(
+                                        width: 26,
+                                        height: 26,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.4,
+                                          color: AppTheme.accentColor,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        '正在加载频道…',
+                                        style: TextStyle(
+                                          color: AppTheme.textSecondary,
+                                          fontSize: AppTheme.fontSubhead,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '切换直播源需要几秒',
+                                        style: TextStyle(
+                                          color: AppTheme.textTertiary,
+                                          fontSize: AppTheme.fontCaption,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+                              if (groups.isEmpty) {
+                                return _EmptyLive(
+                                  onReload: () => _pickSource(context, c),
+                                );
+                              }
+                              return Stack(
+                                children: [
+                                  _buildChannelList(c, channels),
+                                  // 已有旧列表时：叠加一层半透明遮罩 + 转圈，
+                                  // 让"正在换源"这件事可见，又不丢掉旧内容。
+                                  if (loading)
+                                    Positioned.fill(
+                                      child: IgnorePointer(
+                                        child: Container(
+                                          color: AppTheme.backgroundPrimary
+                                              .withValues(alpha: 0.45),
+                                          child: Center(
+                                            child: SizedBox(
+                                              width: 24,
+                                              height: 24,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2.2,
+                                                color: AppTheme.accentColor,
                                               ),
                                             ),
                                           ),
                                         ),
                                       ),
-                                  ],
-                                );
-                              }),
-                            ),
-                          ],
-                        ),
+                                    ),
+                                ],
+                              );
+                            }),
+                          ),
+                        ],
                       ),
+                    ),
                 ],
               );
             },
@@ -624,7 +650,6 @@ class _LivePageState extends State<LivePage> {
     );
   }
 
-
   Future<void> _pickSource(BuildContext context, LiveController c) async {
     // 导入/覆盖直播源（m3u/txt URL）——左栏底部 + 号进入
     final url = await showDialog<String>(
@@ -633,8 +658,13 @@ class _LivePageState extends State<LivePage> {
         final ctrl = TextEditingController();
         return AlertDialog(
           backgroundColor: AppTheme.backgroundSecondary,
-          title: Text('导入直播源',
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
+          title: Text(
+            '导入直播源',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: AppTheme.fontHeadline,
+            ),
+          ),
           content: TextField(
             controller: ctrl,
             style: TextStyle(color: AppTheme.textPrimary),
@@ -645,11 +675,13 @@ class _LivePageState extends State<LivePage> {
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('取消')),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消'),
+            ),
             TextButton(
-                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-                child: const Text('加载')),
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('加载'),
+            ),
           ],
         );
       },
@@ -668,9 +700,7 @@ class _LivePageState extends State<LivePage> {
     final ch = _controller.currentChannel;
     final url = ch?.playUrl ?? '';
     if (url.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先选择频道')),
-      );
+      AppToast.message('请先选择频道');
       return;
     }
     Get.toNamed(
@@ -717,8 +747,11 @@ class _LivePageState extends State<LivePage> {
             )
           else
             Center(
-              child: Icon(Icons.live_tv,
-                  color: AppTheme.textTertiary, size: 56),
+              child: Icon(
+                Icons.live_tv,
+                color: AppTheme.textTertiary,
+                size: 56,
+              ),
             ),
           // 切台加载中：播放器正中间转圈（无文字干扰）
           if (_switching && !_audioMode && _playError == null)
@@ -739,10 +772,13 @@ class _LivePageState extends State<LivePage> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      Text('正在加载…',
-                          style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.85),
-                              fontSize: 12)),
+                      Text(
+                        '正在加载…',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.85),
+                          fontSize: AppTheme.fontFootnote,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -772,11 +808,15 @@ class _LivePageState extends State<LivePage> {
                       shape: BoxShape.circle,
                       color: Colors.white.withValues(alpha: 0.14),
                       border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.5),
-                          width: 1.4),
+                        color: Colors.white.withValues(alpha: 0.5),
+                        width: 1.4,
+                      ),
                     ),
-                    child: const Icon(Icons.refresh_rounded,
-                        color: Colors.white, size: 32),
+                    child: const Icon(
+                      Icons.refresh_rounded,
+                      color: Colors.white,
+                      size: 32,
+                    ),
                   ),
                 ),
               ),
@@ -801,13 +841,18 @@ class _LivePageState extends State<LivePage> {
                       width: 40,
                       height: 40,
                       alignment: Alignment.center,
-                      child: Icon(Icons.arrow_back_ios_new,
-                          color: AppTheme.textPrimary, size: 20),
+                      child: Icon(
+                        Icons.arrow_back_ios_new,
+                        color: AppTheme.textPrimary,
+                        size: 20,
+                      ),
                     ),
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.5),
                       borderRadius: BorderRadius.circular(12),
@@ -815,12 +860,15 @@ class _LivePageState extends State<LivePage> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('LIVE',
-                            style: TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.5)),
+                        Text(
+                          'LIVE',
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: AppTheme.fontCaption,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
                         SizedBox(width: 5),
                         _LiveDot(size: 7),
                       ],
@@ -847,8 +895,11 @@ class _LivePageState extends State<LivePage> {
                   width: 40,
                   height: 40,
                   alignment: Alignment.center,
-                  child: Icon(Icons.arrow_back_ios_new,
-                      color: AppTheme.textPrimary, size: 20),
+                  child: Icon(
+                    Icons.arrow_back_ios_new,
+                    color: AppTheme.textPrimary,
+                    size: 20,
+                  ),
                 ),
               ),
             ),
@@ -863,15 +914,18 @@ class _LivePageState extends State<LivePage> {
                   Container(
                     constraints: const BoxConstraints(maxWidth: 150),
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 8),
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
                     child: Text(
                       current.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11,
-                          fontFamily: 'monospace'),
+                        color: Colors.white70,
+                        fontSize: AppTheme.fontCaption,
+                        fontFamily: 'monospace',
+                      ),
                     ),
                   ),
                 _VideoTopIcon(
@@ -892,9 +946,7 @@ class _LivePageState extends State<LivePage> {
                   tooltip: '投屏',
                 ),
                 _VideoTopIcon(
-                  icon: _fullscreen
-                      ? Icons.fullscreen_exit
-                      : Icons.fullscreen,
+                  icon: _fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
                   onTap: _toggleFullscreen,
                   tooltip: _fullscreen ? '退出全屏' : '全屏',
                 ),
@@ -905,7 +957,6 @@ class _LivePageState extends State<LivePage> {
       ),
     );
   }
-
 
   Widget _buildAudioModeOverlay(LiveController c, LiveChannel? current) {
     final name = current?.name ?? '';
@@ -925,29 +976,39 @@ class _LivePageState extends State<LivePage> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600),
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontHeadline,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             const SizedBox(height: 6),
             Text(
               '听剧模式 · 后台可继续播放',
               style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.5), fontSize: 11),
+                color: Colors.white.withValues(alpha: 0.5),
+                fontSize: AppTheme.fontCaption,
+              ),
             ),
             const SizedBox(height: 18),
             GestureDetector(
               onTap: _toggleAudioMode,
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: Text('退出听剧模式',
-                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 12)),
+                child: Text(
+                  '退出听剧模式',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontFootnote,
+                  ),
+                ),
               ),
             ),
           ],
@@ -970,26 +1031,22 @@ class _LivePageState extends State<LivePage> {
       c.selectSource(index).then((_) {
         if (mounted) _autoplayCurrent();
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('正在刷新直播源...'),
-          duration: Duration(seconds: 1),
-        ),
-      );
+      AppToast.message('正在刷新直播源...', duration: const Duration(seconds: 1));
     }
   }
 
   /// 显示直播源选择弹窗 — 居中、不透明、过高可滚动
-  Future<void> _showSourcePicker(
-      BuildContext context, LiveController c) async {
+  Future<void> _showSourcePicker(BuildContext context, LiveController c) async {
     final srcs = LiveService.instance.sources;
     showDialog(
       context: context,
       builder: (ctx) {
         return Dialog(
           backgroundColor: AppTheme.backgroundSecondary,
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 28,
+            vertical: 24,
+          ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -1005,11 +1062,14 @@ class _LivePageState extends State<LivePage> {
                   padding: EdgeInsets.fromLTRB(20, 18, 12, 8),
                   child: Row(
                     children: [
-                      Text('选择直播源',
-                          style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600)),
+                      Text(
+                        '选择直播源',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                       const Spacer(),
                       TextButton(
                         onPressed: () {
@@ -1024,9 +1084,13 @@ class _LivePageState extends State<LivePage> {
                 if (srcs.isEmpty)
                   Padding(
                     padding: EdgeInsets.all(24),
-                    child: Text('还没有直播源，点击右上角添加',
-                        style:
-                            TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
+                    child: Text(
+                      '还没有直播源，点击右上角添加',
+                      style: TextStyle(
+                        color: AppTheme.textTertiary,
+                        fontSize: AppTheme.fontSubhead,
+                      ),
+                    ),
                   )
                 else
                   Flexible(
@@ -1041,28 +1105,37 @@ class _LivePageState extends State<LivePage> {
                         final isActive = c.selectedSourceIndex == i;
                         return ListTile(
                           dense: true,
-                          leading: Icon(Icons.play_circle_fill,
+                          leading: Icon(
+                            Icons.play_circle_fill,
+                            color: isActive
+                                ? AppTheme.accentColor
+                                : AppTheme.textTertiary,
+                            size: 22,
+                          ),
+                          title: Text(
+                            src.name,
+                            style: TextStyle(
                               color: isActive
                                   ? AppTheme.accentColor
-                                  : AppTheme.textTertiary,
-                              size: 22),
-                          title: Text(src.name,
-                              style: TextStyle(
-                                  color: isActive
-                                      ? AppTheme.accentColor
-                                      : AppTheme.textPrimary,
-                                  fontSize: 14)),
+                                  : AppTheme.textPrimary,
+                              fontSize: AppTheme.fontBody,
+                            ),
+                          ),
                           subtitle: Text(
-                              isActive ? '当前播放' : '未下载',
-                              style: TextStyle(
-                                  color: isActive
-                                      ? AppTheme.accentColor
-                                          .withValues(alpha: 0.7)
-                                      : AppTheme.textTertiary,
-                                  fontSize: 11)),
+                            isActive ? '当前播放' : '未下载',
+                            style: TextStyle(
+                              color: isActive
+                                  ? AppTheme.accentColor.withValues(alpha: 0.7)
+                                  : AppTheme.textTertiary,
+                              fontSize: AppTheme.fontCaption,
+                            ),
+                          ),
                           trailing: isActive
-                              ? Icon(Icons.check_circle,
-                                  color: AppTheme.accentColor, size: 20)
+                              ? Icon(
+                                  Icons.check_circle,
+                                  color: AppTheme.accentColor,
+                                  size: 20,
+                                )
                               : null,
                           onTap: () async {
                             Navigator.pop(ctx);
@@ -1084,14 +1157,19 @@ class _LivePageState extends State<LivePage> {
 
   /// 显示分组选择弹窗 — 居中、不透明、过高可滚动
   Future<void> _showGroupPicker(
-      BuildContext context, LiveController c, List<LiveGroup> groups) async {
+    BuildContext context,
+    LiveController c,
+    List<LiveGroup> groups,
+  ) async {
     showDialog(
       context: context,
       builder: (ctx) {
         return Dialog(
           backgroundColor: AppTheme.backgroundSecondary,
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 28,
+            vertical: 24,
+          ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -1106,11 +1184,14 @@ class _LivePageState extends State<LivePage> {
               children: [
                 Padding(
                   padding: EdgeInsets.fromLTRB(20, 18, 20, 10),
-                  child: Text('选择分组',
-                      style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600)),
+                  child: Text(
+                    '选择分组',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontHeadline,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
                 Flexible(
                   child: ListView.separated(
@@ -1124,23 +1205,35 @@ class _LivePageState extends State<LivePage> {
                       final selected = c.selectedGroup == i;
                       return ListTile(
                         dense: true,
-                        leading: Icon(Icons.playlist_play,
+                        leading: Icon(
+                          Icons.playlist_play,
+                          color: selected
+                              ? AppTheme.accentColor
+                              : AppTheme.textTertiary,
+                          size: 22,
+                        ),
+                        title: Text(
+                          g.name,
+                          style: TextStyle(
                             color: selected
                                 ? AppTheme.accentColor
-                                : AppTheme.textTertiary,
-                            size: 22),
-                        title: Text(g.name,
-                            style: TextStyle(
-                                color: selected
-                                    ? AppTheme.accentColor
-                                    : AppTheme.textPrimary,
-                                fontSize: 14)),
-                        subtitle: Text('${g.channels.length} 个频道',
-                            style: TextStyle(
-                                color: AppTheme.textTertiary, fontSize: 11)),
+                                : AppTheme.textPrimary,
+                            fontSize: AppTheme.fontBody,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '${g.channels.length} 个频道',
+                          style: TextStyle(
+                            color: AppTheme.textTertiary,
+                            fontSize: AppTheme.fontCaption,
+                          ),
+                        ),
                         trailing: selected
-                            ? Icon(Icons.check_circle,
-                                color: AppTheme.accentColor, size: 20)
+                            ? Icon(
+                                Icons.check_circle,
+                                color: AppTheme.accentColor,
+                                size: 20,
+                              )
                             : null,
                         onTap: () {
                           Navigator.pop(ctx);
@@ -1166,34 +1259,52 @@ class _LivePageState extends State<LivePage> {
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.backgroundSecondary,
-      builder: (ctx) => kbSheet(SafeArea(
-        child: list.isEmpty
-            ? Padding(
-                padding: EdgeInsets.all(24),
-                child: Text('暂无公告',
-                    style: TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
-              )
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text('公告',
-                        style: TextStyle(
-                            color: AppTheme.textPrimary, fontSize: 15)),
-                  ),
-                  for (final item in list)
-                    ListTile(
-                      dense: true,
-                      leading: Icon(Icons.tv,
-                          color: AppTheme.textSecondary, size: 20),
-                      title: Text(item,
-                          style: TextStyle(
-                              color: AppTheme.textSecondary, fontSize: 13)),
+      builder: (ctx) => kbSheet(
+        SafeArea(
+          child: list.isEmpty
+              ? Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    '暂无公告',
+                    style: TextStyle(
+                      color: AppTheme.textTertiary,
+                      fontSize: AppTheme.fontSubhead,
                     ),
-                ],
-              ),
-      )),
+                  ),
+                )
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text(
+                        '公告',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontHeadline,
+                        ),
+                      ),
+                    ),
+                    for (final item in list)
+                      ListTile(
+                        dense: true,
+                        leading: Icon(
+                          Icons.tv,
+                          color: AppTheme.textSecondary,
+                          size: 20,
+                        ),
+                        title: Text(
+                          item,
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: AppTheme.fontSubhead,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+      ),
     );
   }
 
@@ -1263,9 +1374,10 @@ class _LivePageState extends State<LivePage> {
                     child: Text(
                       '节目单 · ${ch.name}',
                       style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600),
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                   Expanded(
@@ -1274,7 +1386,8 @@ class _LivePageState extends State<LivePage> {
                       itemCount: list.length,
                       itemBuilder: (_, i) {
                         final p = list[i];
-                        final playing = p.start != null &&
+                        final playing =
+                            p.start != null &&
                             p.stop != null &&
                             now.isAfter(p.start!) &&
                             now.isBefore(p.stop!);
@@ -1286,8 +1399,9 @@ class _LivePageState extends State<LivePage> {
                               color: playing
                                   ? AppTheme.accentColor
                                   : AppTheme.textPrimary,
-                              fontWeight:
-                                  playing ? FontWeight.w600 : FontWeight.w400,
+                              fontWeight: playing
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
                             ),
                           ),
                           trailing: Text(
@@ -1296,7 +1410,7 @@ class _LivePageState extends State<LivePage> {
                               color: playing
                                   ? AppTheme.accentColor
                                   : AppTheme.textTertiary,
-                              fontSize: 12,
+                              fontSize: AppTheme.fontFootnote,
                             ),
                           ),
                         );
@@ -1318,12 +1432,15 @@ class _LivePageState extends State<LivePage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.tv_off,
-                color: AppTheme.textTertiary, size: 48),
+            Icon(Icons.tv_off, color: AppTheme.textTertiary, size: 48),
             SizedBox(height: 12),
-            Text('该分组暂无频道',
-                style: TextStyle(
-                    color: AppTheme.textSecondary, fontSize: 13)),
+            Text(
+              '该分组暂无频道',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: AppTheme.fontSubhead,
+              ),
+            ),
           ],
         ),
       );
@@ -1339,18 +1456,22 @@ class _LivePageState extends State<LivePage> {
         final fav = c.isFavorite(ch);
         return ListTile(
           dense: true,
-          contentPadding:
-              EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          title: Text(ch.name,
-              style: TextStyle(
-                color: selected ? AppTheme.accentColor : AppTheme.textPrimary,
-                fontSize: 15,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-              )),
+          contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          title: Text(
+            ch.name,
+            style: TextStyle(
+              color: selected ? AppTheme.accentColor : AppTheme.textPrimary,
+              fontSize: AppTheme.fontHeadline,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            ),
+          ),
           subtitle: Text(
-              ch.urls.isNotEmpty ? (ch.group) : '未下载',
-              style:
-                  TextStyle(color: AppTheme.textTertiary, fontSize: 11)),
+            ch.urls.isNotEmpty ? (ch.group) : '未下载',
+            style: TextStyle(
+              color: AppTheme.textTertiary,
+              fontSize: AppTheme.fontCaption,
+            ),
+          ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1367,9 +1488,13 @@ class _LivePageState extends State<LivePage> {
                 ),
               ),
               SizedBox(width: 4),
-              Icon(Icons.play_circle_fill,
-                  color: selected ? AppTheme.accentColor : AppTheme.textTertiary.withValues(alpha: 0.5),
-                  size: 22),
+              Icon(
+                Icons.play_circle_fill,
+                color: selected
+                    ? AppTheme.accentColor
+                    : AppTheme.textTertiary.withValues(alpha: 0.5),
+                size: 22,
+              ),
             ],
           ),
           onTap: () {
@@ -1391,9 +1516,10 @@ class _LiveDot extends StatefulWidget {
 
 class _LiveDotState extends State<_LiveDot>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _c =
-      AnimationController(vsync: this, duration: const Duration(seconds: 1))
-        ..repeat(reverse: true);
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 1),
+  )..repeat(reverse: true);
 
   @override
   void dispose() {
@@ -1487,8 +1613,7 @@ class _EmptyLive extends StatelessWidget {
       iconColor: AppTheme.textTertiary,
       action: OutlinedButton(
         onPressed: onReload,
-        child: Text('导入直播源',
-            style: TextStyle(color: AppTheme.accentColor)),
+        child: Text('导入直播源', style: TextStyle(color: AppTheme.accentColor)),
       ),
     );
   }

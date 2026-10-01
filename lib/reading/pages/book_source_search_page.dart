@@ -1,4 +1,4 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../models/book_source.dart';
@@ -8,6 +8,7 @@ import '../widgets/jelly_pull_cord.dart';
 import '../widgets/jelly_sliding_actions.dart';
 import 'book_source_detail_page.dart';
 import 'book_source_repo_page.dart';
+import '../../common/theme.dart';
 
 /// 书源搜索页 —— 用已导入的 Legado 书源跨站搜小说。
 ///
@@ -162,7 +163,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
           children: [
             Text('书源',
                 style: TextStyle(
-                    fontSize: 20,
+                    fontSize: AppTheme.fontTitle2,
                     fontWeight: FontWeight.w700,
                     color: _titleColor)),
             const SizedBox(width: 4),
@@ -235,10 +236,10 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
         controller: _ctrl,
         textInputAction: TextInputAction.search,
         onSubmitted: (_) => _run(),
-        style: TextStyle(fontSize: 15, color: _titleColor),
+        style: TextStyle(fontSize: AppTheme.fontHeadline, color: _titleColor),
         decoration: InputDecoration(
           hintText: '搜索书源图书',
-          hintStyle: TextStyle(fontSize: 15, color: JellyTheme.textSecondary),
+          hintStyle: TextStyle(fontSize: AppTheme.fontHeadline, color: JellyTheme.textSecondary),
           prefixIcon: Icon(Icons.search_rounded,
               size: 20, color: JellyTheme.textSecondary),
           suffixIcon: _searching
@@ -287,7 +288,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
             '已搜索 $_doneCount/$_totalCount 个源'
             '${ok > 0 ? ' · 成功 $ok' : ''}'
             '${bad > 0 ? ' · 失败 $bad' : ''}',
-            style: TextStyle(fontSize: 12, color: JellyTheme.textSecondary),
+            style: TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary),
           ),
         ],
       ),
@@ -324,14 +325,14 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
             const SizedBox(height: 20),
             Text('还没有书源',
                 style: TextStyle(
-                    fontSize: 17,
+                    fontSize: AppTheme.fontTitle3,
                     fontWeight: FontWeight.w600,
                     color: _titleColor)),
             const SizedBox(height: 8),
             Text('用地址、口令或本地文件导入书源',
                 textAlign: TextAlign.center,
                 style:
-                    TextStyle(fontSize: 13, color: JellyTheme.textSecondary)),
+                    TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
             const SizedBox(height: 28),
             FilledButton.icon(
               onPressed: () async {
@@ -364,7 +365,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
               child: Text(text,
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                      fontSize: 13, color: JellyTheme.textSecondary)),
+                      fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
             ),
           ],
         ),
@@ -386,7 +387,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-              fontSize: 15, fontWeight: FontWeight.w600, color: _titleColor),
+              fontSize: AppTheme.fontHeadline, fontWeight: FontWeight.w600, color: _titleColor),
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -400,7 +401,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style:
-                  TextStyle(fontSize: 12, color: JellyTheme.textSecondary),
+                  TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary),
             ),
             const SizedBox(height: 4),
             // 来源标签：点开可以选从哪个源看（换源的基础）
@@ -414,12 +415,12 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                             horizontal: 7, vertical: 2),
                         decoration: BoxDecoration(
                           color: JellyTheme.primary.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(5),
+                          borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
                           r.source.name,
                           style: TextStyle(
-                              fontSize: 10.5, color: JellyTheme.primary),
+                              fontSize: AppTheme.fontCaption, color: JellyTheme.primary),
                         ),
                       ))
                   .toList(),
@@ -429,7 +430,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                 padding: const EdgeInsets.only(top: 3),
                 child: Text('等 ${g.items.length} 个源',
                     style: TextStyle(
-                        fontSize: 10.5, color: JellyTheme.textSecondary)),
+                        fontSize: AppTheme.fontCaption, color: JellyTheme.textSecondary)),
               ),
           ],
         ),
@@ -442,7 +443,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
 
   Widget _cover(String url) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
       child: SizedBox(
         width: 46,
         height: 62,
@@ -484,7 +485,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
               const SizedBox(height: 14),
               Text('选择书源（${g.items.length} 个）',
                   style: TextStyle(
-                      fontSize: 16,
+                      fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.w600,
                       color: _titleColor)),
               const SizedBox(height: 8),
@@ -495,7 +496,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                       .map((r) => ListTile(
                             title: Text(r.source.name,
                                 style:
-                                    TextStyle(fontSize: 14, color: _titleColor)),
+                                    TextStyle(fontSize: AppTheme.fontBody, color: _titleColor)),
                             subtitle: Text(
                               r.lastChapter.isNotEmpty
                                   ? r.lastChapter
@@ -505,7 +506,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                  fontSize: 11.5,
+                                  fontSize: AppTheme.fontFootnote,
                                   color: JellyTheme.textSecondary),
                             ),
                             onTap: () => Navigator.pop(ctx, r),

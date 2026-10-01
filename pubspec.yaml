@@ -26,7 +26,9 @@ dependencies:
   connectivity_plus: 6.1.5  # 7.x 用了 iOS 26 SDK 的 API（NWPath.isUltraConstrained），macos-14 runner 是 Xcode 15-16 编译不过
   window_manager: ^0.4.0
   # url_launcher 已废弃：配置中心改用应用内 webview_flutter 替代
-  flutter_smart_dialog: ^4.9.0
+  # flutter_smart_dialog 已移除（A1）：全项目 **0 处引用**，且它是**纯 Dart 包**
+  # （无 iOS podspec、.flutter-plugins-dependencies 命中 0），删掉不影响 iOS 工程。
+  # 弹窗统一用 Flutter 原生的 showDialog / showModalBottomSheet。
   uuid: ^4.5.1
   shared_preferences: ^2.3.4
   crypto: ^3.0.6
@@ -59,7 +61,11 @@ dependencies:
   flutter_cache_manager: ^3.4.5
   flutter_staggered_grid_view: ^0.7.0
   share_plus: ^13.3.0
-  cached_network_image: 3.3.1
+  # cached_network_image 3.3.1 已移除（A2）：它与 cached_network_image_ce
+  # 是**两条平行的完整实现**（各带 platform_interface / web 子包），
+  # 同时编译进 App 且各自维护磁盘缓存 → 同一个网络图在影视和音乐会存两份。
+  # 现已全项目统一到 `cached_network_image_ce`（更新、用 hive_ce 做缓存索引、
+  # 有 HTTP 拦截器），共享缓存见 lib/widgets/app_image_cache.dart。
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -277,7 +277,7 @@ class _BadgePill extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(
           color: Colors.white,
-          fontSize: 10,
+          fontSize: AppTheme.fontCaption,
           fontWeight: FontWeight.w500,
           letterSpacing: 0.2,
         ),

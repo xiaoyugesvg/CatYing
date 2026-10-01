@@ -23,7 +23,7 @@ class UpdateService {
   static Future<UpdateResult> check() async {
     try {
       final res = await Dio().get<dynamic>(
-        AppConstants.latestReleaseApiUrl,
+        CmbokConstants.latestReleaseApiUrl,
         options: Options(
           headers: {'Accept': 'application/vnd.github+json'},
           receiveTimeout: const Duration(seconds: 15),
@@ -38,10 +38,10 @@ class UpdateService {
         var tag = (data['tag_name'] ?? '').toString().trim();
         if (tag.isEmpty) return const UpdateResult(error: '无法获取版本信息');
         if (tag.startsWith('v') || tag.startsWith('V')) tag = tag.substring(1);
-        final htmlUrl = (data['html_url'] ?? AppConstants.githubUrl).toString();
+        final htmlUrl = (data['html_url'] ?? CmbokConstants.githubUrl).toString();
         final body = (data['body'] ?? '').toString().trim();
         return UpdateResult(
-          hasUpdate: tag != AppConstants.version,
+          hasUpdate: tag != CmbokConstants.version,
           latestVersion: tag,
           releaseUrl: htmlUrl,
           releaseBody: body.isEmpty ? null : body,

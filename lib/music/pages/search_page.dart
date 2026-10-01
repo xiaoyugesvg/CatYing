@@ -8,6 +8,7 @@ import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
 import '../../widgets/app_page_loading.dart';
+import '../../common/theme.dart';
 
 /// 搜索页 —— 移植自 Beans 的 `SearchView.swift`（1127 行，取其主干）。
 ///
@@ -208,14 +209,14 @@ class _SearchPageState extends State<SearchPage>
                         });
                       },
                       style: TextStyle(
-                          color: MusicTheme.label, fontSize: 15),
+                          color: MusicTheme.label, fontSize: AppTheme.fontHeadline),
                       cursorColor: MusicTheme.tint,
                       decoration: InputDecoration(
                         isDense: true,
                         border: InputBorder.none,
                         hintText: '搜索歌曲、歌手、专辑',
                         hintStyle: TextStyle(
-                            color: MusicTheme.secondary, fontSize: 14),
+                            color: MusicTheme.secondary, fontSize: AppTheme.fontBody),
                       ),
                     ),
                   ),
@@ -240,7 +241,7 @@ class _SearchPageState extends State<SearchPage>
                 setState(() {});
               },
               child: Text('取消',
-                  style: TextStyle(color: MusicTheme.tint, fontSize: 14)),
+                  style: TextStyle(color: MusicTheme.tint, fontSize: AppTheme.fontBody)),
             ),
         ],
       ),
@@ -277,7 +278,7 @@ class _SearchPageState extends State<SearchPage>
                 child: Text(label,
                     style: TextStyle(
                       color: active ? MusicTheme.tint : MusicTheme.secondary,
-                      fontSize: 13,
+                      fontSize: AppTheme.fontSubhead,
                       fontWeight:
                           active ? FontWeight.w600 : FontWeight.w400,
                     )),
@@ -303,7 +304,7 @@ class _SearchPageState extends State<SearchPage>
               Text('搜索历史',
                   style: TextStyle(
                       color: MusicTheme.label,
-                      fontSize: 15,
+                      fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.w600)),
               const Spacer(),
               GestureDetector(
@@ -329,7 +330,7 @@ class _SearchPageState extends State<SearchPage>
               Text('热门搜索',
                   style: TextStyle(
                       color: MusicTheme.label,
-                      fontSize: 15,
+                      fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.w600)),
               const Spacer(),
               GestureDetector(
@@ -362,7 +363,7 @@ class _SearchPageState extends State<SearchPage>
             child: Center(
               child: Text('输入关键词开始搜索',
                   style:
-                      TextStyle(color: MusicTheme.secondary, fontSize: 13)),
+                      TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
             ),
           ),
       ],
@@ -395,7 +396,7 @@ class _SearchPageState extends State<SearchPage>
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: filled ? MusicTheme.tint : MusicTheme.label,
-                  fontSize: 13,
+                  fontSize: AppTheme.fontSubhead,
                 ),
               ),
             ),
@@ -419,7 +420,7 @@ class _SearchPageState extends State<SearchPage>
           padding: const EdgeInsets.all(32),
           child: Text(_error,
               textAlign: TextAlign.center,
-              style: TextStyle(color: MusicTheme.secondary, fontSize: 13)),
+              style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
         ),
       );
     }
@@ -446,10 +447,10 @@ class _SearchPageState extends State<SearchPage>
               leading: CoverImage(
                   url: a.avatarUrl, size: 46, cornerRadius: 23),
               title: Text(a.name,
-                  style: TextStyle(color: MusicTheme.label, fontSize: 15)),
+                  style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
               subtitle: Text('歌手',
                   style:
-                      TextStyle(color: MusicTheme.secondary, fontSize: 12)),
+                      TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
               onTap: () => _openArtist(a),
             );
           },
@@ -466,10 +467,10 @@ class _SearchPageState extends State<SearchPage>
               title: Text(al.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: MusicTheme.label, fontSize: 15)),
+                  style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
               subtitle: Text(al.artist ?? '',
                   style:
-                      TextStyle(color: MusicTheme.secondary, fontSize: 12)),
+                      TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
               onTap: () => _openAlbum(al),
             );
           },
@@ -479,7 +480,7 @@ class _SearchPageState extends State<SearchPage>
 
   Widget _empty() => Center(
         child: Text('没有找到相关结果',
-            style: TextStyle(color: MusicTheme.secondary, fontSize: 13)),
+            style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
       );
 
   Future<void> _openArtist(Artist a) async {
@@ -523,13 +524,13 @@ class _SongListPage extends StatelessWidget {
     return Theme(
       data: MusicTheme.themeData(),
       child: Scaffold(
-        backgroundColor: MusicTheme.background,
+        backgroundColor: Colors.transparent,
         appBar: AppBar(
-          backgroundColor: MusicTheme.background,
+          backgroundColor: Colors.transparent,
           elevation: 0,
           iconTheme: IconThemeData(color: MusicTheme.label),
           title: Text(title,
-              style: TextStyle(color: MusicTheme.label, fontSize: 16)),
+              style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
           actions: [
             IconButton(
               tooltip: '播放全部',

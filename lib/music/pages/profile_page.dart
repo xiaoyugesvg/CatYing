@@ -9,6 +9,7 @@ import '../../common/module_theme_store.dart';
 import '../../common/theme_mode_store.dart';
 import '../../services/background_service.dart';
 import '../../reading/theme/jelly_palette.dart';
+import '../../common/theme.dart';
 
 /// 「我的」页 —— 移植自 Beans 的 `ProfileView.swift`（3350 行，取其主干）。
 ///
@@ -39,7 +40,7 @@ class ProfilePage extends StatelessWidget {
             child: Text('我的',
                 style: TextStyle(
                     color: MusicTheme.label,
-                    fontSize: 24,
+                    fontSize: AppTheme.fontPageTitle,
                     fontWeight: FontWeight.w700)),
           ),
 
@@ -70,11 +71,11 @@ class ProfilePage extends StatelessWidget {
                 leading: _iconBox(Icons.extension_rounded),
                 title: Text('音源管理',
                     style:
-                        TextStyle(color: MusicTheme.label, fontSize: 15)),
+                        TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
                 subtitle: Text(
                   n == 0 ? '还没有导入音源' : '已导入 $n 个音源',
                   style:
-                      TextStyle(color: MusicTheme.secondary, fontSize: 12),
+                      TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
                 ),
                 trailing: Icon(Icons.chevron_right,
                     size: 18, color: MusicTheme.secondary),
@@ -95,7 +96,7 @@ class ProfilePage extends StatelessWidget {
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: MusicTheme.tint.withValues(alpha: 0.13),
-          borderRadius: BorderRadius.circular(9),
+          borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(icon, size: 17, color: MusicTheme.tint),
       );
@@ -112,12 +113,12 @@ class ProfilePage extends StatelessWidget {
           activeThumbColor: MusicTheme.tint,
           contentPadding: const EdgeInsets.symmetric(horizontal: 16),
           title: Text(label,
-              style: TextStyle(color: MusicTheme.label, fontSize: 15)),
+              style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
           subtitle: subtitle == null
               ? null
               : Text(subtitle,
                   style: TextStyle(
-                      color: MusicTheme.secondary, fontSize: 12)),
+                      color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
           onChanged: (v) {
             onChanged(v);
             setLocal(() {});
@@ -130,9 +131,9 @@ class ProfilePage extends StatelessWidget {
         builder: (context, q, _) => ListTile(
           leading: _iconBox(Icons.high_quality_rounded),
           title:
-              Text('音质', style: TextStyle(color: MusicTheme.label, fontSize: 15)),
+              Text('音质', style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
           subtitle: Text(q.displayName,
-              style: TextStyle(color: MusicTheme.secondary, fontSize: 12)),
+              style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
           trailing: Icon(Icons.chevron_right,
               size: 18, color: MusicTheme.secondary),
           onTap: () async {
@@ -177,9 +178,9 @@ class ProfilePage extends StatelessWidget {
         builder: (context, v, _) => ListTile(
           leading: _iconBox(Icons.album_rounded),
           title: Text('封面形态',
-              style: TextStyle(color: MusicTheme.label, fontSize: 15)),
+              style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
           subtitle: Text(v.label,
-              style: TextStyle(color: MusicTheme.secondary, fontSize: 12)),
+              style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
           onTap: () async {
             final picked = await showModalBottomSheet<MusicCoverStyle>(
               context: context,
@@ -221,9 +222,9 @@ class ProfilePage extends StatelessWidget {
         builder: (context, v, _) => ListTile(
           leading: _iconBox(Icons.blur_on_rounded),
           title: Text('背景氛围',
-              style: TextStyle(color: MusicTheme.label, fontSize: 15)),
+              style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
           subtitle: Text(v.label,
-              style: TextStyle(color: MusicTheme.secondary, fontSize: 12)),
+              style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
           onTap: () async {
             final picked = await showModalBottomSheet<MusicDustMode>(
               context: context,
@@ -271,7 +272,7 @@ class _GroupTitle extends StatelessWidget {
         child: Text(text,
             style: TextStyle(
                 color: MusicTheme.tint,
-                fontSize: 13,
+                fontSize: AppTheme.fontSubhead,
                 fontWeight: FontWeight.w700)),
       );
 }
@@ -301,9 +302,9 @@ class _ModeTile extends StatelessWidget {
         return ListTile(
           leading: ProfilePage._iconBox(icon),
           title: Text('外观模式',
-              style: TextStyle(color: MusicTheme.label, fontSize: 15)),
+              style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
           subtitle: Text(label,
-              style: TextStyle(color: MusicTheme.secondary, fontSize: 12)),
+              style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
           onTap: () async {
             final options = [
               (mode: ThemeMode.light, label: '浅色'),
@@ -384,7 +385,7 @@ class _AccentPicker extends StatelessWidget {
                 children: [
                   Text('主题配色',
                       style:
-                          TextStyle(color: MusicTheme.label, fontSize: 15)),
+                          TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
                   const Spacer(),
                   if (current == ModuleThemeStore.followReading)
                     Container(
@@ -392,11 +393,11 @@ class _AccentPicker extends StatelessWidget {
                           horizontal: 7, vertical: 2),
                       decoration: BoxDecoration(
                         color: MusicTheme.tint.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text('跟随阅读',
                           style: TextStyle(
-                              fontSize: 10,
+                              fontSize: AppTheme.fontCaption,
                               fontWeight: FontWeight.w600,
                               color: MusicTheme.tint)),
                     ),
@@ -487,7 +488,7 @@ class _AccentPicker extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 9.5,
+                  fontSize: AppTheme.fontCaption,
                   color: selected ? MusicTheme.tint : MusicTheme.secondary,
                 ),
               ),

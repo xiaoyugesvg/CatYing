@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 /// 漫画阅读模式下拉选项顺序（与枚举顺序解耦：枚举末尾为 dissolve/leftToRight/none
 /// 以保持旧持久化 index 不变；这里展示为 从右往左/从左往右/消散/拼页/无动画）
@@ -176,7 +177,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 Text(
                   '漫画墨水屏模式',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: AppTheme.fontHeadline,
                     fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
@@ -185,7 +186,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 Text(
                   '黑白柔和显示，缓解纯白刺眼',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
                   ),
                 ),
@@ -220,7 +221,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 Text(
                   '漫画阅读模式',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: AppTheme.fontHeadline,
                     fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
@@ -229,7 +230,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 Text(
                   '从右往左：图片从右翻入（日漫方向）\n从左往右：图片从左翻入\n消散：当前页淡出、下一页淡入\n拼页：上下连续滚动\n无动画：点击直接切换，不滑动',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
                   ),
                 ),
@@ -242,7 +243,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
             underline: const SizedBox(),
             isDense: true,
             style: TextStyle(
-              fontSize: 14,
+              fontSize: AppTheme.fontBody,
               fontWeight: FontWeight.w600,
               color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
             ),
@@ -283,7 +284,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 Text(
                   '图书阅读模式',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: AppTheme.fontHeadline,
                     fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
@@ -292,7 +293,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 Text(
                   '左右：左右平移翻页\n上下：上下平移翻页\n仿真：纸张卷曲翻页\n覆盖：新页滑入覆盖当前页\n无动画：点击直接切换，不滑动',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
                   ),
                 ),
@@ -305,7 +306,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
             underline: const SizedBox(),
             isDense: true,
             style: TextStyle(
-              fontSize: 14,
+              fontSize: AppTheme.fontBody,
               fontWeight: FontWeight.w600,
               color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
             ),
@@ -344,7 +345,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
               Text(
                 '在线预加载图片',
                 style: TextStyle(
-                  fontSize: 15,
+                  fontSize: AppTheme.fontHeadline,
                   fontWeight: FontWeight.bold,
                   color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                 ),
@@ -362,7 +363,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 child: Text(
                   '$value',
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: AppTheme.fontBody,
                     fontWeight: FontWeight.bold,
                     color: JellyTheme.primary,
                   ),
@@ -373,7 +374,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
           const SizedBox(height: 4),
           Text(
             '在线阅读时预先加载后续图片，提升翻页流畅度（仅在线阅读生效）',
-            style: TextStyle(fontSize: 12, color: JellyTheme.textSecondary),
+            style: TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary),
           ),
           Slider(
             value: value.toDouble(),
@@ -389,12 +390,12 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
             children: [
               Text(
                 '${SettingsService.minPreloadImages}',
-                style: TextStyle(fontSize: 11, color: JellyTheme.textSecondary),
+                style: TextStyle(fontSize: AppTheme.fontCaption, color: JellyTheme.textSecondary),
               ),
               const Spacer(),
               Text(
                 '${SettingsService.maxPreloadImages}',
-                style: TextStyle(fontSize: 11, color: JellyTheme.textSecondary),
+                style: TextStyle(fontSize: AppTheme.fontCaption, color: JellyTheme.textSecondary),
               ),
             ],
           ),
@@ -422,7 +423,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 Text(
                   '翻页按钮反转',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: AppTheme.fontHeadline,
                     fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
@@ -431,7 +432,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 Text(
                   '开启后：点击左侧下一页、右侧上一页（与默认相反）',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
                   ),
                 ),
@@ -467,7 +468,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 Text(
                   '双页模式',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: AppTheme.fontHeadline,
                     fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
@@ -476,7 +477,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 Text(
                   '横屏时左右并排显示两页',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
                   ),
                 ),
@@ -511,7 +512,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 Text(
                   '显示阅读信息',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: AppTheme.fontHeadline,
                     fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
@@ -520,7 +521,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 Text(
                   '阅读时在角落显示时间、页码、进度等',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
                   ),
                 ),
@@ -555,7 +556,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 Text(
                   '音量键翻页',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: AppTheme.fontHeadline,
                     fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
@@ -564,7 +565,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 Text(
                   '阅读时按音量上/下键翻页（会接管音量键）',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
                   ),
                 ),
@@ -592,7 +593,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
       child: Text(
         text,
         style: TextStyle(
-          fontSize: 13,
+          fontSize: AppTheme.fontSubhead,
           fontWeight: FontWeight.w600,
           color: JellyTheme.textSecondary,
         ),
@@ -632,7 +633,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                   Text(
                     title,
                     style: TextStyle(
-                      fontSize: 15,
+                      fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.bold,
                       color:
                           isDark ? Colors.white : JellyTheme.textPrimaryLight,
@@ -642,7 +643,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                   Text(
                     subtitle,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: AppTheme.fontFootnote,
                       height: 1.5,
                       color: JellyTheme.textSecondary,
                     ),
@@ -683,7 +684,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 Text(
                   '屏幕休眠',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: AppTheme.fontHeadline,
                     fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
@@ -693,7 +694,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                   '图书阅读时是否允许手机休眠：默认跟随系统，'
                   '可选 10 分钟无操作休眠或永不息屏',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppTheme.fontFootnote,
                     height: 1.5,
                     color: JellyTheme.textSecondary,
                   ),
@@ -716,7 +717,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 color: isDark
                     ? Colors.white.withValues(alpha: 0.08)
                     : Colors.black.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -724,7 +725,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                   Text(
                     options[s.screenSleep] ?? '默认',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: AppTheme.fontSubhead,
                       color:
                           isDark ? Colors.white : JellyTheme.textPrimaryLight,
                     ),

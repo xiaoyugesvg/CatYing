@@ -25,7 +25,7 @@ void showUpdateAvailableDialog(BuildContext context, UpdateResult result) {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('最新版本 v${result.latestVersion}，当前 v${AppConstants.version}。'),
+          Text('最新版本 v${result.latestVersion}，当前 v${CmbokConstants.version}。'),
           if (hasBody) ...[
             const SizedBox(height: 12),
             Text(
@@ -62,7 +62,7 @@ void showUpdateAvailableDialog(BuildContext context, UpdateResult result) {
           onPressed: () {
             Navigator.pop(ctx);
             launchUrl(
-              Uri.parse(AppConstants.blogUrl),
+              Uri.parse(CmbokConstants.blogUrl),
               mode: LaunchMode.externalApplication,
             );
           },
@@ -72,7 +72,7 @@ void showUpdateAvailableDialog(BuildContext context, UpdateResult result) {
           onPressed: () {
             Navigator.pop(ctx);
             launchUrl(
-              Uri.parse(result.releaseUrl ?? AppConstants.githubUrl),
+              Uri.parse(result.releaseUrl ?? CmbokConstants.githubUrl),
               mode: LaunchMode.externalApplication,
             );
           },

@@ -10,6 +10,7 @@ import '../../../reading/services/settings_service.dart';
 import '../../../reading/theme/jelly_palette.dart';
 import '../wallpaper_page.dart';
 import 'settings_shared.dart';
+import '../../../widgets/app_toast.dart';
 
 /// 统一主题设置 —— 一个页面里分别调**影视/直播、音乐、阅读**的风格。
 ///
@@ -110,7 +111,7 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
                 '· 壁纸 → 默认（深邃黑）\n\n'
                 '你自己新建的自定义配色**不会被删除**，'
                 '只是不再被选中。',
-                style: TextStyle(fontSize: 13, height: 1.7),
+                style: TextStyle(fontSize: AppTheme.fontSubhead, height: 1.7),
               ),
               actions: [
                 TextButton(
@@ -144,17 +145,11 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
     await store.resetAll();
     // 3) 明暗回深色（与出厂的默认壁纸「深邃黑」配套）
     await ThemeModeStore.set(ThemeMode.dark);
-    await BackgroundService.instance
-        .setAppearanceMode(AppearanceMode.dark);
+    await BackgroundService.instance.setAppearanceMode(AppearanceMode.dark);
     // 4) 统一把调色板推给 AppTheme + 音乐
     await _afterPresetChanged();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('已还原默认主题'),
-        duration: Duration(seconds: 2),
-      ),
-    );
+    AppToast.message('已还原默认主题', duration: const Duration(seconds: 2));
   }
 
   // ============================================================
@@ -173,61 +168,72 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
         children: [
           Row(
             children: [
-              Icon(Icons.brightness_6_outlined,
-                  size: 18, color: AppTheme.accentColor),
+              Icon(
+                Icons.brightness_6_outlined,
+                size: 18,
+                color: AppTheme.accentColor,
+              ),
               const SizedBox(width: 8),
-              Text('明暗模式',
-                  style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary)),
+              Text(
+                '明暗模式',
+                style: TextStyle(
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 4),
           Text(
             '作用于全 App；阅读模块也跟随它（阅读里另有独立开关）',
-            style: TextStyle(fontSize: 12, color: AppTheme.textTertiary),
+            style: TextStyle(
+              fontSize: AppTheme.fontFootnote,
+              color: AppTheme.textTertiary,
+            ),
           ),
           const SizedBox(height: 12),
-          Builder(builder: (context) {
-            // 三个选项：浅色 / 深色 / 跟随系统
-            // 由 ThemeModeStore 统一管理，set() 内部会通过 GlobalThemeSync
-            // 同步给音乐和阅读模块，做到"一个开关，三处同时变"。
-            final m = ThemeModeStore.mode;
-            final sel = switch (m) {
-              ThemeMode.light => 0,
-              ThemeMode.dark => 1,
-              ThemeMode.system => 2,
-            };
-            return _chips(
-              labels: const ['浅色', '深色', '跟随系统'],
-              selectedIndex: sel,
-              onPick: (i) async {
-                final target = switch (i) {
-                  0 => ThemeMode.light,
-                  1 => ThemeMode.dark,
-                  _ => ThemeMode.system,
-                };
-                // 壁纸那套按"实际该显示的明暗"选：
-                //   浅色→light；深色→dark；跟随系统→看平台亮度
-                final wantLight = switch (target) {
-                  ThemeMode.light => true,
-                  ThemeMode.dark => false,
-                  ThemeMode.system =>
-                    MediaQuery.of(context).platformBrightness ==
-                        Brightness.light,
-                };
-                // 1) 改全局明暗（内部会自动同步给音乐/阅读）
-                await ThemeModeStore.set(target);
-                // 2) 改壁纸外观模式（壁纸只有 light/dark 两套）
-                await BackgroundService.instance.setAppearanceMode(
-                  wantLight ? AppearanceMode.light : AppearanceMode.dark,
-                );
-                // 3) 立刻刷新当前页面 UI
-                if (mounted) setState(() {});
-              },
-            );
-          }),
+          Builder(
+            builder: (context) {
+              // 三个选项：浅色 / 深色 / 跟随系统
+              // 由 ThemeModeStore 统一管理，set() 内部会通过 GlobalThemeSync
+              // 同步给音乐和阅读模块，做到"一个开关，三处同时变"。
+              final m = ThemeModeStore.mode;
+              final sel = switch (m) {
+                ThemeMode.light => 0,
+                ThemeMode.dark => 1,
+                ThemeMode.system => 2,
+              };
+              return _chips(
+                labels: const ['浅色', '深色', '跟随系统'],
+                selectedIndex: sel,
+                onPick: (i) async {
+                  final target = switch (i) {
+                    0 => ThemeMode.light,
+                    1 => ThemeMode.dark,
+                    _ => ThemeMode.system,
+                  };
+                  // 壁纸那套按"实际该显示的明暗"选：
+                  //   浅色→light；深色→dark；跟随系统→看平台亮度
+                  final wantLight = switch (target) {
+                    ThemeMode.light => true,
+                    ThemeMode.dark => false,
+                    ThemeMode.system =>
+                      MediaQuery.of(context).platformBrightness ==
+                          Brightness.light,
+                  };
+                  // 1) 改全局明暗（内部会自动同步给音乐/阅读）
+                  await ThemeModeStore.set(target);
+                  // 2) 改壁纸外观模式（壁纸只有 light/dark 两套）
+                  await BackgroundService.instance.setAppearanceMode(
+                    wantLight ? AppearanceMode.light : AppearanceMode.dark,
+                  );
+                  // 3) 立刻刷新当前页面 UI
+                  if (mounted) setState(() {});
+                },
+              );
+            },
+          ),
         ],
       ),
     );
@@ -250,33 +256,46 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
         ),
         child: Row(
           children: [
-            Icon(Icons.wallpaper_outlined,
-                size: 18, color: AppTheme.accentColor),
+            Icon(
+              Icons.wallpaper_outlined,
+              size: 18,
+              color: AppTheme.accentColor,
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('壁纸与背景',
-                      style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary)),
+                  Text(
+                    '壁纸与背景',
+                    style: TextStyle(
+                      fontSize: AppTheme.fontHeadline,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
                   const SizedBox(height: 4),
                   // 与旧「外观」页一样显示当前壁纸名（Obx 跟随变化）
-                  Obx(() => Text(
-                        bg.wallpaperDisplayName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 12, color: AppTheme.textTertiary),
-                      )),
+                  Obx(
+                    () => Text(
+                      bg.wallpaperDisplayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: AppTheme.fontFootnote,
+                        color: AppTheme.textTertiary,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
-            Icon(Icons.chevron_right_rounded,
-                size: 20, color: AppTheme.textTertiary),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: AppTheme.textTertiary,
+            ),
           ],
         ),
       ),
@@ -311,21 +330,32 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
               children: [
                 Icon(icon, size: 18, color: AppTheme.accentColor),
                 const SizedBox(width: 8),
-                Text(title,
-                    style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textPrimary)),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontHeadline,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
                 const Spacer(),
                 Text(
                   _presetName(effective),
-                  style: TextStyle(fontSize: 12, color: AppTheme.textTertiary),
+                  style: TextStyle(
+                    fontSize: AppTheme.fontFootnote,
+                    color: AppTheme.textTertiary,
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
-            Text(subtitle,
-                style: TextStyle(fontSize: 12, color: AppTheme.textTertiary)),
+            Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                color: AppTheme.textTertiary,
+              ),
+            ),
             const SizedBox(height: 12),
             // 「跟随阅读」+ 7 套预设
             Wrap(
@@ -364,15 +394,13 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
               : AppTheme.backgroundTertiary,
           borderRadius: BorderRadius.circular(9),
           border: Border.all(
-            color: on
-                ? AppTheme.accentColor
-                : AppTheme.borderLight,
+            color: on ? AppTheme.accentColor : AppTheme.borderLight,
           ),
         ),
         child: Text(
           '跟随阅读',
           style: TextStyle(
-            fontSize: 12.5,
+            fontSize: AppTheme.fontSubhead,
             fontWeight: on ? FontWeight.w600 : FontWeight.normal,
             color: on ? AppTheme.accentColor : AppTheme.textSecondary,
           ),
@@ -407,13 +435,15 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
             height: 34,
             decoration: BoxDecoration(
               // 色块用该预设的"主色 + 浅色底 + 深色底"三色环，像阅读的主题列表
-              gradient: SweepGradient(colors: [
-                palette.backgroundLight,
-                palette.primary,
-                palette.backgroundDark,
-                palette.accent,
-                palette.backgroundLight,
-              ]),
+              gradient: SweepGradient(
+                colors: [
+                  palette.backgroundLight,
+                  palette.primary,
+                  palette.backgroundDark,
+                  palette.accent,
+                  palette.backgroundLight,
+                ],
+              ),
               shape: BoxShape.circle,
               border: Border.all(
                 color: selected ? AppTheme.accentColor : AppTheme.borderLight,
@@ -421,11 +451,13 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
               ),
             ),
             child: selected
-                ? Icon(Icons.check,
+                ? Icon(
+                    Icons.check,
                     size: 16,
                     color: palette.backgroundLight.computeLuminance() > 0.5
                         ? Colors.black
-                        : Colors.white)
+                        : Colors.white,
+                  )
                 : null,
           ),
           const SizedBox(height: 4),
@@ -437,7 +469,7 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 9.5,
+                fontSize: AppTheme.fontCaption,
                 color: selected ? AppTheme.accentColor : AppTheme.textTertiary,
               ),
             ),
@@ -466,25 +498,37 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
           children: [
             Row(
               children: [
-                Icon(Icons.menu_book_outlined,
-                    size: 18, color: AppTheme.accentColor),
+                Icon(
+                  Icons.menu_book_outlined,
+                  size: 18,
+                  color: AppTheme.accentColor,
+                ),
                 const SizedBox(width: 8),
-                Text('阅读',
-                    style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textPrimary)),
+                Text(
+                  '阅读',
+                  style: TextStyle(
+                    fontSize: AppTheme.fontHeadline,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
                 const Spacer(),
                 Text(
                   _presetName(readingPreset),
-                  style: TextStyle(fontSize: 12, color: AppTheme.textTertiary),
+                  style: TextStyle(
+                    fontSize: AppTheme.fontFootnote,
+                    color: AppTheme.textTertiary,
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
               '以阅读的 7 套主题为基准；影视、音乐默认跟随阅读',
-              style: TextStyle(fontSize: 12, color: AppTheme.textTertiary),
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                color: AppTheme.textTertiary,
+              ),
             ),
             const SizedBox(height: 12),
             // 7 套预设（直接选，和影视/音乐同款）
@@ -535,7 +579,7 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
                 '影视 · 直播 · 音乐 三个模块的配色会全部改为「跟随阅读」，'
                 '也就是与阅读当前的配色一致。\n\n'
                 '阅读自己的配色不会被改动。',
-                style: TextStyle(fontSize: 13, height: 1.6),
+                style: TextStyle(fontSize: AppTheme.fontSubhead, height: 1.6),
               ),
               actions: [
                 TextButton(
@@ -590,8 +634,10 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
             child: GestureDetector(
               onTap: () => onPick(i),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: i == selectedIndex
                       ? AppTheme.accentColor
@@ -601,14 +647,14 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
                 child: Text(
                   labels[i],
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: AppTheme.fontSubhead,
                     fontWeight: i == selectedIndex
                         ? FontWeight.w600
                         : FontWeight.normal,
                     color: i == selectedIndex
                         ? (AppTheme.accentColor.computeLuminance() > 0.5
-                            ? Colors.black
-                            : Colors.white)
+                              ? Colors.black
+                              : Colors.white)
                         : AppTheme.textSecondary,
                   ),
                 ),
@@ -642,7 +688,7 @@ class _ReadingThemeHintPage extends StatelessWidget {
             '蓝色海洋 / 落日余晖 / 蓝色天空）、自定义颜色编辑器，'
             '以及纯色 / 内置动画 / 自定义图片三种背景。',
             style: TextStyle(
-              fontSize: 13,
+              fontSize: AppTheme.fontSubhead,
               height: 1.7,
               color: AppTheme.textSecondary,
             ),

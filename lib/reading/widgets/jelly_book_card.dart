@@ -1,9 +1,10 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../models/book.dart';
 import '../services/book_favorites_service.dart';
 import '../services/book_reading_progress_service.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 /// 果冻风图书卡片（grid / list 两态）
 /// 布局同漫画主卡片：封面 + 书名 + 作者 + 元信息 + 收藏按钮；点击进入详情页。
@@ -298,12 +299,12 @@ class _JellyBookCardState extends State<JellyBookCard>
                   ),
                   decoration: BoxDecoration(
                     color: JellyTheme.primary.withValues(alpha: 0.9),
-                    borderRadius: BorderRadius.circular(5),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
                     _extBadge,
                     style: const TextStyle(
-                      fontSize: 9,
+                      fontSize: AppTheme.fontCaption,
                       color: Colors.white,
                       fontWeight: FontWeight.w700,
                     ),
@@ -328,7 +329,7 @@ class _JellyBookCardState extends State<JellyBookCard>
                       Text(
                         widget.book.title,
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: AppTheme.fontSubhead,
                           fontWeight: FontWeight.w600,
                           color: isDark
                               ? Colors.white
@@ -338,7 +339,7 @@ class _JellyBookCardState extends State<JellyBookCard>
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
-                      _buildMetaRow(isDark, fontSize: 10),
+                      _buildMetaRow(isDark, fontSize: AppTheme.fontCaption),
                     ],
                   ),
                 ),
@@ -373,7 +374,7 @@ class _JellyBookCardState extends State<JellyBookCard>
                 Text(
                   widget.book.title,
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: AppTheme.fontHeadline,
                     fontWeight: FontWeight.w700,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
@@ -386,7 +387,7 @@ class _JellyBookCardState extends State<JellyBookCard>
                   Text(
                     widget.book.author!,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: AppTheme.fontFootnote,
                       color: isDark ? Colors.white54 : JellyTheme.textSecondary,
                     ),
                     maxLines: 1,
@@ -394,13 +395,13 @@ class _JellyBookCardState extends State<JellyBookCard>
                   ),
                   const SizedBox(height: 6),
                 ],
-                _buildMetaRow(isDark, fontSize: 11),
+                _buildMetaRow(isDark, fontSize: AppTheme.fontCaption),
                 if (readPct != null) ...[
                   const SizedBox(height: 4),
                   Text(
                     '已读 ${(readPct * 100).toInt()}%',
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: AppTheme.fontCaption,
                       color: JellyTheme.primary,
                       fontWeight: FontWeight.w700,
                     ),
@@ -420,12 +421,12 @@ class _JellyBookCardState extends State<JellyBookCard>
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: JellyTheme.primary.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(5),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
                   _extBadge,
                   style: TextStyle(
-                    fontSize: 10,
+                    fontSize: AppTheme.fontCaption,
                     color: JellyTheme.primary,
                     fontWeight: FontWeight.w700,
                   ),

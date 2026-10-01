@@ -1,8 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:cached_network_image_ce/cached_network_image.dart';
-import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -10,6 +8,8 @@ import '../../../common/constants.dart';
 import '../../../common/theme.dart';
 import '../../../models/cache_store.dart';
 import '../../../services/app_log.dart';
+import '../../../widgets/app_toast.dart';
+import '../../../services/cache_manager_service.dart';
 
 /// 可清理的数据项
 enum CleanTarget {
@@ -63,25 +63,37 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.backgroundPrimary,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: AppTheme.backgroundPrimary,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: IconThemeData(color: AppTheme.textPrimary),
-        title: Text('数据清理',
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 17)),
+        title: Text(
+          '数据清理',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontTitle3,
+          ),
+        ),
       ),
       body: Column(
         children: [
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(
-                  AppTheme.spacingLG, AppTheme.spacingSM, AppTheme.spacingLG, 16),
+                AppTheme.spacingLG,
+                AppTheme.spacingSM,
+                AppTheme.spacingLG,
+                16,
+              ),
               children: [
-                Text('勾选要清理的项目，点击底部按钮执行。',
-                    style: TextStyle(
-                        color: AppTheme.textTertiary,
-                        fontSize: AppTheme.fontCaption)),
+                Text(
+                  '勾选要清理的项目，点击底部按钮执行。',
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
+                ),
                 const SizedBox(height: 12),
 
                 // ---- 全选 ----
@@ -100,8 +112,9 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
 
                 // ---- 缓存 ----
                 _groupHeader('缓存', CleanGroup.cache),
-                for (final t in CleanTarget.values
-                    .where((e) => e.group == CleanGroup.cache))
+                for (final t in CleanTarget.values.where(
+                  (e) => e.group == CleanGroup.cache,
+                ))
                   _row(
                     label: t.label,
                     checked: selected.contains(t),
@@ -111,8 +124,9 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
 
                 // ---- 用户数据 ----
                 _groupHeader('用户数据', CleanGroup.user),
-                for (final t in CleanTarget.values
-                    .where((e) => e.group == CleanGroup.user))
+                for (final t in CleanTarget.values.where(
+                  (e) => e.group == CleanGroup.user,
+                ))
                   _row(
                     label: t.label,
                     checked: selected.contains(t),
@@ -126,7 +140,11 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
             top: false,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(
-                  AppTheme.spacingLG, 8, AppTheme.spacingLG, 12),
+                AppTheme.spacingLG,
+                8,
+                AppTheme.spacingLG,
+                12,
+              ),
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: (selected.isEmpty || busy) ? null : _confirmAndRun,
@@ -137,8 +155,9 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
                     color: selected.isEmpty
                         ? AppTheme.backgroundTertiary
                         : Colors.redAccent.withValues(alpha: 0.22),
-                    borderRadius:
-                        BorderRadius.circular(AppTheme.glassRadiusSmall),
+                    borderRadius: BorderRadius.circular(
+                      AppTheme.glassRadiusSmall,
+                    ),
                     border: Border.all(
                       color: selected.isEmpty
                           ? AppTheme.borderLight
@@ -150,7 +169,8 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2))
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
                       : Text(
                           selected.isEmpty
                               ? '清理选中项'
@@ -159,7 +179,7 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
                             color: selected.isEmpty
                                 ? AppTheme.textTertiary
                                 : Colors.redAccent,
-                            fontSize: 15,
+                            fontSize: AppTheme.fontHeadline,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -188,11 +208,14 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
         : AppTheme.accentColor;
     return Padding(
       padding: const EdgeInsets.only(left: 2, bottom: 8),
-      child: Text(title,
-          style: TextStyle(
-              color: color,
-              fontSize: AppTheme.fontCaption,
-              fontWeight: FontWeight.w600)),
+      child: Text(
+        title,
+        style: TextStyle(
+          color: color,
+          fontSize: AppTheme.fontCaption,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 
@@ -227,9 +250,7 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
                 height: 20,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(5),
-                  color: checked
-                      ? AppTheme.accentColor
-                      : Colors.transparent,
+                  color: checked ? AppTheme.accentColor : Colors.transparent,
                   border: Border.all(
                     color: checked
                         ? AppTheme.accentColor
@@ -242,10 +263,13 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
                     : null,
               ),
               const SizedBox(width: 12),
-              Text(label,
-                  style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: AppTheme.fontSubhead + 0.5)),
+              Text(
+                label,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontSubhead + 0.5,
+                ),
+              ),
             ],
           ),
         ),
@@ -259,32 +283,37 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
 
   Future<void> _confirmAndRun() async {
     final names = selected.map((e) => e.label).join('、');
-    final danger = selected.any((e) =>
-        e == CleanTarget.favorites ||
-        e == CleanTarget.subscriptionList ||
-        e == CleanTarget.appSettings);
+    final danger = selected.any(
+      (e) =>
+          e == CleanTarget.favorites ||
+          e == CleanTarget.subscriptionList ||
+          e == CleanTarget.appSettings,
+    );
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.backgroundSecondary,
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppTheme.glassRadius)),
-        title: Text('清理 ${selected.length} 项',
-            style: TextStyle(color: AppTheme.textPrimary)),
+          borderRadius: BorderRadius.circular(AppTheme.glassRadius),
+        ),
+        title: Text(
+          '清理 ${selected.length} 项',
+          style: TextStyle(color: AppTheme.textPrimary),
+        ),
         content: Text(
           '将清理：$names\n\n'
           '${danger ? "⚠️ 其中包含「收藏 / 订阅列表 / 应用设置」，删除后无法恢复。\n\n" : ""}'
           '确定继续？',
           style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: AppTheme.fontSubhead,
-              height: 1.5),
+            color: AppTheme.textSecondary,
+            fontSize: AppTheme.fontSubhead,
+            height: 1.5,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('取消',
-                style: TextStyle(color: AppTheme.textTertiary)),
+            child: Text('取消', style: TextStyle(color: AppTheme.textTertiary)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -312,34 +341,47 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
       busy = false;
       selected.clear();
     });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(failed.isEmpty
-          ? '已清理 $done 项'
-          : '已清理 $done 项，失败 ${failed.length} 项'),
-    ));
+    AppToast.message(
+      failed.isEmpty ? '已清理 $done 项' : '已清理 $done 项，失败 ${failed.length} 项',
+    );
+  }
+
+  /// 按 [CacheManagerService] 的 entry id 清理（单一来源）
+  Future<void> _clearCacheById(List<String> ids) async {
+    final all = await CacheManagerService.instance.list();
+    for (final e in all) {
+      if (ids.contains(e.id)) {
+        try {
+          await e.clear();
+        } catch (_) {
+          /* 单项失败不影响其它项 */
+        }
+      }
+    }
   }
 
   Future<void> _run(CleanTarget t) async {
     final prefs = await SharedPreferences.getInstance();
     switch (t) {
+      // ── 缓存三项：**委托给 [CacheManagerService]**（C 类重复的第 2 处）──
+      //
+      // 原来这里自己清了「内存图片 + DefaultCacheManager 磁盘 +
+      // getTemporaryDirectory + Hive 业务缓存」，而 `SettingsController.clearCache()`
+      // 里**又写了一遍类似的清单** —— 两份迟早走偏
+      //（事实上就偏了：两处都没覆盖音乐和阅读的缓存）。
+      //
+      // 现在"什么算缓存、怎么清"只在 `CacheManagerService` 一处定义，
+      // 这里只是按用户勾选的项去挑对应的那几条。
       case CleanTarget.imageCache:
-        // 内存图片缓存
-        PaintingBinding.instance.imageCache.clear();
-        PaintingBinding.instance.imageCache.clearLiveImages();
-        // 磁盘图片缓存（cached_network_image）
-        try {
-          await DefaultCacheManager().emptyCache();
-        } catch (_) {/* 未使用时忽略 */}
+        await _clearCacheById(['app_image_memory', 'app_image_disk']);
         break;
 
       case CleanTarget.tempFiles:
-        final dir = await getTemporaryDirectory();
-        await _clearDir(dir);
+        await _clearCacheById(['app_temp']);
         break;
 
       case CleanTarget.syncCache:
-        // 同步缓存 = 业务缓存（首页列表/详情/刮削结果的持久化记录）
-        await CacheStore.instance.clearItemsCache();
+        await _clearCacheById(['video_biz']);
         break;
 
       case CleanTarget.logs:
@@ -359,10 +401,12 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
 
       case CleanTarget.lastEpisode:
         // 「上次集数」= 详情页记住的选集下标
-        final keys = prefs.getKeys().where((k) =>
-            k.contains('last_episode') ||
-            k.contains('selected_episode') ||
-            k.contains('episode_index'));
+        final keys = prefs.getKeys().where(
+          (k) =>
+              k.contains('last_episode') ||
+              k.contains('selected_episode') ||
+              k.contains('episode_index'),
+        );
         for (final k in keys.toList()) {
           await prefs.remove(k);
         }
@@ -391,10 +435,12 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
 
       case CleanTarget.sitePrefs:
         // 站点偏好：正则/解析/寻址等按站点记的键
-        final keys = prefs.getKeys().where((k) =>
-            k.startsWith('site_') ||
-            k.startsWith('source_pref') ||
-            k.contains('parse_pref'));
+        final keys = prefs.getKeys().where(
+          (k) =>
+              k.startsWith('site_') ||
+              k.startsWith('source_pref') ||
+              k.contains('parse_pref'),
+        );
         for (final k in keys.toList()) {
           await prefs.remove(k);
         }
@@ -403,8 +449,7 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
       case CleanTarget.tmdbMatch:
         // TMDB 匹配缓存：刮削结果落盘
         await CacheStore.instance.clearItemsCache();
-        final keys =
-            prefs.getKeys().where((k) => k.startsWith('tmdb_match'));
+        final keys = prefs.getKeys().where((k) => k.startsWith('tmdb_match'));
         for (final k in keys.toList()) {
           await prefs.remove(k);
         }
@@ -433,7 +478,9 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
               if (f.existsSync()) {
                 try {
                   f.deleteSync();
-                } catch (_) {/* ignore */}
+                } catch (_) {
+                  /* ignore */
+                }
               }
             }
           }
@@ -448,14 +495,16 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
           'has_accepted_disclaimer',
           'show_about_on_launch',
         };
-        final keys = prefs.getKeys().where((k) =>
-            (k.startsWith('play_') ||
-                k.startsWith('ui_') ||
-                k.startsWith('nav_') ||
-                k.startsWith('wallpaper_') ||
-                k.startsWith('appearance_') ||
-                k.startsWith('tmdb_')) &&
-            !keep.contains(k));
+        final keys = prefs.getKeys().where(
+          (k) =>
+              (k.startsWith('play_') ||
+                  k.startsWith('ui_') ||
+                  k.startsWith('nav_') ||
+                  k.startsWith('wallpaper_') ||
+                  k.startsWith('appearance_') ||
+                  k.startsWith('tmdb_')) &&
+              !keep.contains(k),
+        );
         for (final k in keys.toList()) {
           await prefs.remove(k);
         }

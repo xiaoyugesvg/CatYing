@@ -10,6 +10,7 @@ import 'library_page.dart';
 import 'profile_page.dart';
 import 'search_page.dart';
 import '../../reading/widgets/jelly_nav_bar.dart';
+import '../../common/theme.dart';
 
 /// 音乐模块的 App 骨架 —— 移植自 Beans 的 `RootView.swift`。
 ///
@@ -96,7 +97,7 @@ class _MusicRootViewState extends State<MusicRootView> {
         return Theme(
           data: MusicTheme.themeData(),
           child: Scaffold(
-            backgroundColor: MusicTheme.background,
+            backgroundColor: Colors.transparent,
             body: Stack(
               children: [
                 // tab 内容（用 IndexedStack 保留各页滚动位置）
@@ -163,13 +164,13 @@ class _MusicRootViewState extends State<MusicRootView> {
                                 child: Text(
                                   '音乐数据加载失败（可能是网络不通）',
                                   style: TextStyle(
-                                      color: MusicTheme.label, fontSize: 13),
+                                      color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
                                 ),
                               ),
                               Text('点击重试',
                                   style: TextStyle(
                                       color: MusicTheme.tint,
-                                      fontSize: 13,
+                                      fontSize: AppTheme.fontSubhead,
                                       fontWeight: FontWeight.w600)),
                             ],
                           ),

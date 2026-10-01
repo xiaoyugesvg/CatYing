@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../services/player_manager.dart';
 import '../services/settings_store.dart';
 import '../theme/music_theme.dart';
+import '../../common/theme.dart';
 
 /// 播放设置面板（Beans 的播放设置/个性化外观的合并入口）。
 ///
@@ -33,7 +34,7 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
               height: 4,
               decoration: BoxDecoration(
                 color: MusicTheme.secondary.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(2),
+                borderRadius: BorderRadius.circular(10),
               ),
             ),
             const SizedBox(height: 14),
@@ -103,7 +104,7 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
                 '音质以「公开可用的最高档」为准；会员/独家曲目可能拿不到音源，'
                 '播放器会明确提示而不是静默失败。',
                 style: TextStyle(
-                    color: MusicTheme.secondary, fontSize: 11, height: 1.5),
+                    color: MusicTheme.secondary, fontSize: AppTheme.fontCaption, height: 1.5),
               ),
             ),
           ],
@@ -119,7 +120,7 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
           child: Text(t,
               style: TextStyle(
                   color: MusicTheme.tint,
-                  fontSize: 13,
+                  fontSize: AppTheme.fontSubhead,
                   fontWeight: FontWeight.w700)),
         ),
       );
@@ -139,7 +140,7 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
           SizedBox(
             width: 64,
             child: Text(label,
-                style: TextStyle(color: MusicTheme.label, fontSize: 13)),
+                style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead)),
           ),
           Expanded(
             child: SliderTheme(
@@ -163,7 +164,7 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
             width: 66,
             child: Text(display,
                 textAlign: TextAlign.right,
-                style: TextStyle(color: MusicTheme.secondary, fontSize: 12)),
+                style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
           ),
         ],
       ),
@@ -179,7 +180,7 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
       dense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 20),
       title: Text(label,
-          style: TextStyle(color: MusicTheme.label, fontSize: 14)),
+          style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontBody)),
       activeThumbColor: MusicTheme.tint,
       value: value,
       onChanged: onChanged,
@@ -199,7 +200,7 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label,
-              style: TextStyle(color: MusicTheme.label, fontSize: 14)),
+              style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontBody)),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -227,7 +228,7 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
                     labelOf(e),
                     style: TextStyle(
                       color: active ? MusicTheme.tint : MusicTheme.secondary,
-                      fontSize: 12,
+                      fontSize: AppTheme.fontFootnote,
                       fontWeight:
                           active ? FontWeight.w600 : FontWeight.w400,
                     ),

@@ -4,7 +4,7 @@ import '../../widgets/common_widgets.dart';
 import 'dart:io';
 import 'dart:ui';
 
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'peer_transfer_page.dart';
@@ -34,6 +34,7 @@ import 'book_reader_page.dart';
 import 'comic_detail_page.dart';
 import 'reader_page.dart';
 import '../../widgets/app_empty_view.dart';
+import '../../common/theme.dart';
 
 /// 书架页面
 class BookshelfPage extends StatefulWidget {
@@ -377,7 +378,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                   height: 4,
                   decoration: BoxDecoration(
                     color: JellyTheme.textSecondary.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(2),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                 ),
                 Padding(
@@ -387,7 +388,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                     children: [
                       Text('书架设置',
                           style: TextStyle(
-                            fontSize: 17,
+                            fontSize: AppTheme.fontTitle3,
                             fontWeight: FontWeight.w700,
                             color: label,
                           )),
@@ -400,13 +401,13 @@ class _BookshelfPageState extends State<BookshelfPage>
                               children: [
                                 Text('移除同时删除本地文件',
                                     style: TextStyle(
-                                        fontSize: 15, color: label)),
+                                        fontSize: AppTheme.fontHeadline, color: label)),
                                 const SizedBox(height: 5),
                                 Text(
                                   '从书架移除后，若该书不在其他书架，'
                                   '删除其本地文件（含导入的原文件），不可恢复',
                                   style: TextStyle(
-                                    fontSize: 12.5,
+                                    fontSize: AppTheme.fontSubhead,
                                     height: 1.5,
                                     color: JellyTheme.textSecondary,
                                   ),
@@ -474,7 +475,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                     height: 4,
                     decoration: BoxDecoration(
                       color: JellyTheme.textSecondary.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(2),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
                   Padding(
@@ -483,7 +484,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                       children: [
                         Text('管理书架',
                             style: TextStyle(
-                              fontSize: 17,
+                              fontSize: AppTheme.fontTitle3,
                               fontWeight: FontWeight.w700,
                               color: label,
                             )),
@@ -495,7 +496,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                               size: 20, color: Colors.redAccent),
                           label: const Text('取消',
                               style: TextStyle(
-                                  fontSize: 14, color: Colors.redAccent)),
+                                  fontSize: AppTheme.fontBody, color: Colors.redAccent)),
                         ),
                       ],
                     ),
@@ -507,7 +508,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                             padding: const EdgeInsets.all(40),
                             child: Text('没有可删除的书架（预设书架不可删）',
                                 style: TextStyle(
-                                    fontSize: 13,
+                                    fontSize: AppTheme.fontSubhead,
                                     color: JellyTheme.textSecondary)),
                           )
                         : ListView(
@@ -528,7 +529,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                                   title: Text(
                                     _shelfDisplayName(s, _currentTypeFor()),
                                     style: TextStyle(
-                                        fontSize: 15.5, color: label),
+                                        fontSize: AppTheme.fontHeadline, color: label),
                                   ),
                                   controlAffinity:
                                       ListTileControlAffinity.leading,
@@ -545,7 +546,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                         Text(
                           '已选 ${picked.length} 个可删除书架',
                           style: TextStyle(
-                              fontSize: 13,
+                              fontSize: AppTheme.fontSubhead,
                               color: JellyTheme.textSecondary),
                         ),
                         const Spacer(),
@@ -624,7 +625,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                     height: 4,
                     decoration: BoxDecoration(
                       color: JellyTheme.textSecondary.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(2),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
                   // ── 标题行 + 右侧动作 ────────────────────────────
@@ -634,7 +635,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                       children: [
                         Text('管理书架',
                             style: TextStyle(
-                              fontSize: 17,
+                              fontSize: AppTheme.fontTitle3,
                               fontWeight: FontWeight.w700,
                               color: label,
                             )),
@@ -669,7 +670,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                           icon: Icon(Icons.delete_sweep_outlined,
                               size: 20, color: label),
                           label: Text('批量删除',
-                              style: TextStyle(fontSize: 13.5, color: label)),
+                              style: TextStyle(fontSize: AppTheme.fontBody, color: label)),
                         ),
                       ],
                     ),
@@ -721,13 +722,13 @@ class _BookshelfPageState extends State<BookshelfPage>
                                 child: Text(
                                   _shelfDisplayName(s, type),
                                   style: TextStyle(
-                                      fontSize: 15.5, color: label),
+                                      fontSize: AppTheme.fontHeadline, color: label),
                                 ),
                               ),
                               Text(
                                 '$count 本',
                                 style: TextStyle(
-                                    fontSize: 13,
+                                    fontSize: AppTheme.fontSubhead,
                                     color: JellyTheme.textSecondary),
                               ),
                               const SizedBox(width: 10),
@@ -797,7 +798,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                     color: isDark
                         ? Colors.white.withValues(alpha: 0.2)
                         : Colors.black.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(2),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -1033,7 +1034,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                                   child: Text(
                                     '书架',
                                     style: TextStyle(
-                                      fontSize: 22,
+                                      fontSize: AppTheme.fontPageTitle,
                                       fontWeight: FontWeight.bold,
                                       color: isDark
                                           ? Colors.white
@@ -1287,14 +1288,14 @@ class _BookshelfPageState extends State<BookshelfPage>
                         margin: const EdgeInsets.only(bottom: 12),
                         decoration: BoxDecoration(
                           color: Colors.grey.withValues(alpha: 0.3),
-                          borderRadius: BorderRadius.circular(2),
+                          borderRadius: BorderRadius.circular(10),
                         ),
                       ),
                     ),
                     Text(
                       '移到其他书架',
                       style: TextStyle(
-                        fontSize: 18,
+                        fontSize: AppTheme.fontTitle3,
                         fontWeight: FontWeight.bold,
                         color: textColor,
                       ),
@@ -1348,7 +1349,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                                     child: Text(
                                       s.name,
                                       style: TextStyle(
-                                        fontSize: 14,
+                                        fontSize: AppTheme.fontBody,
                                         color: disabled
                                             ? Colors.grey
                                             : textColor,
@@ -1358,7 +1359,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                                   Text(
                                     '${BookshelfService().countInShelf(s.id)}',
                                     style: TextStyle(
-                                      fontSize: 12,
+                                      fontSize: AppTheme.fontFootnote,
                                       color: isDark
                                           ? Colors.white38
                                           : Colors.black38,
@@ -1390,7 +1391,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                         child: const Text(
                           '确定',
                           style: TextStyle(
-                            fontSize: 15,
+                            fontSize: AppTheme.fontHeadline,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -1429,7 +1430,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 14,
+                fontSize: AppTheme.fontBody,
                 fontWeight: FontWeight.w600,
                 color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
               ),
@@ -1517,7 +1518,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                   height: 4,
                   decoration: BoxDecoration(
                     color: JellyTheme.textSecondary.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(2),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                 ),
                 // ── 标题行：排序方式 / 全局开关 / 方向 / 关闭 ──────────
@@ -1527,7 +1528,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                     children: [
                       Text('排序方式',
                           style: TextStyle(
-                            fontSize: 17,
+                            fontSize: AppTheme.fontTitle3,
                             fontWeight: FontWeight.w700,
                             color: label,
                           )),
@@ -1535,7 +1536,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                       // 「全局」开关：所有书架共用这套排序
                       Text('全局',
                           style: TextStyle(
-                              fontSize: 13,
+                              fontSize: AppTheme.fontSubhead,
                               color: JellyTheme.textSecondary)),
                       const SizedBox(width: 4),
                       Transform.scale(
@@ -1606,7 +1607,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                               child: Text(
                                 e.value,
                                 style: TextStyle(
-                                  fontSize: 15,
+                                  fontSize: AppTheme.fontHeadline,
                                   fontWeight: s.shelfSort == e.key
                                       ? FontWeight.w600
                                       : FontWeight.normal,
@@ -1773,7 +1774,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                     color: isDark
                         ? Colors.white.withValues(alpha: 0.2)
                         : Colors.black.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(2),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -1796,7 +1797,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                     child: Text(
                       '导入的图书会加入「本地图书」书架，仅在图书标签下显示，离线可读',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: AppTheme.fontFootnote,
                         color: isDark ? Colors.white38 : Colors.black38,
                       ),
                     ),
@@ -2155,7 +2156,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                         child: Text(
                           '仅显示前 10 条，继续输入缩小范围',
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: AppTheme.fontFootnote,
                             color: isDark ? Colors.white38 : Colors.black38,
                           ),
                           textAlign: TextAlign.center,
@@ -2212,7 +2213,7 @@ class _BookshelfPageState extends State<BookshelfPage>
             '没有找到相关书籍',
             style: TextStyle(
               color: isDark ? Colors.white54 : Colors.black45,
-              fontSize: 14,
+              fontSize: AppTheme.fontBody,
             ),
           ),
         ],
@@ -2258,11 +2259,11 @@ class _BookshelfPageState extends State<BookshelfPage>
               const addChipPadding = 20.0; // horizontal 10*2
               const spacing = 8.0;
               const textStyle = TextStyle(
-                fontSize: 12,
+                fontSize: AppTheme.fontFootnote,
                 fontWeight: FontWeight.w600,
               );
               const addTextStyle = TextStyle(
-                fontSize: 12,
+                fontSize: AppTheme.fontFootnote,
                 fontWeight: FontWeight.w600,
               );
 
@@ -2349,7 +2350,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               Text(
                 _shelfDisplayName(shelf, currentType),
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: AppTheme.fontFootnote,
                   fontWeight: FontWeight.w600,
                   color: selected
                       ? Colors.white
@@ -2360,7 +2361,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               Text(
                 '$count',
                 style: TextStyle(
-                  fontSize: 10,
+                  fontSize: AppTheme.fontCaption,
                   color: selected
                       ? Colors.white.withValues(alpha: 0.7)
                       : (isDark
@@ -2406,7 +2407,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               Text(
                 '新建',
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: AppTheme.fontFootnote,
                   fontWeight: FontWeight.w600,
                   color: isDark ? Colors.white70 : JellyTheme.textSecondary,
                 ),
@@ -2437,7 +2438,7 @@ class _SearchComicTile extends StatelessWidget {
         width: 36,
         height: 48,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(10),
           color: isDark ? Colors.white10 : Colors.black12,
         ),
         clipBehavior: Clip.antiAlias,
@@ -2455,7 +2456,7 @@ class _SearchComicTile extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          fontSize: 14,
+          fontSize: AppTheme.fontBody,
           fontWeight: FontWeight.w600,
           color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
         ),
@@ -2465,7 +2466,7 @@ class _SearchComicTile extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          fontSize: 12,
+          fontSize: AppTheme.fontFootnote,
           color: isDark ? Colors.white54 : JellyTheme.textSecondary,
         ),
       ),
@@ -2493,7 +2494,7 @@ class _SearchBookTile extends StatelessWidget {
         width: 36,
         height: 48,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(10),
           color: isDark ? Colors.white10 : Colors.black12,
         ),
         clipBehavior: Clip.antiAlias,
@@ -2509,7 +2510,7 @@ class _SearchBookTile extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          fontSize: 14,
+          fontSize: AppTheme.fontBody,
           fontWeight: FontWeight.w600,
           color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
         ),
@@ -2519,7 +2520,7 @@ class _SearchBookTile extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          fontSize: 12,
+          fontSize: AppTheme.fontFootnote,
           color: isDark ? Colors.white54 : JellyTheme.textSecondary,
         ),
       ),
@@ -3269,7 +3270,7 @@ class _ShelfCoverState extends State<_ShelfCover> {
           color: (isDark ? Colors.black : JellyTheme.primary).withValues(
             alpha: 0.75,
           ),
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(10),
         ),
         child: child,
       ),
@@ -3291,7 +3292,7 @@ class _ShelfCoverState extends State<_ShelfCover> {
             children: [
               Container(
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(10),
                   color: isDark
                       ? Colors.white.withValues(alpha: 0.05)
                       : Colors.grey[200],
@@ -3306,7 +3307,7 @@ class _ShelfCoverState extends State<_ShelfCover> {
                   ],
                 ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(10),
                   child: _buildCoverImage(isDark),
                 ),
               ),
@@ -3329,12 +3330,12 @@ class _ShelfCoverState extends State<_ShelfCover> {
                     decoration: BoxDecoration(
                       color: (isDark ? Colors.black : JellyTheme.primary)
                           .withValues(alpha: 0.75),
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
                       widget.formatLabel ?? widget.sourceLabel!,
                       style: const TextStyle(
-                        fontSize: 9,
+                        fontSize: AppTheme.fontCaption,
                         color: Colors.white,
                         fontWeight: FontWeight.w700,
                       ),
@@ -3346,7 +3347,7 @@ class _ShelfCoverState extends State<_ShelfCover> {
                   Text(
                     '${(widget.progress! * 100).round()}%',
                     style: const TextStyle(
-                      fontSize: 9,
+                      fontSize: AppTheme.fontCaption,
                       color: Colors.white,
                       fontWeight: FontWeight.w700,
                     ),
@@ -3357,7 +3358,7 @@ class _ShelfCoverState extends State<_ShelfCover> {
                   Text(
                     widget.progressLabel!,
                     style: const TextStyle(
-                      fontSize: 9,
+                      fontSize: AppTheme.fontCaption,
                       color: Colors.white,
                       fontWeight: FontWeight.w700,
                     ),
@@ -3438,7 +3439,7 @@ class _ShelfCaption extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 12,
+              fontSize: AppTheme.fontFootnote,
               fontWeight: FontWeight.w600,
               height: 1.3,
               color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
@@ -3451,12 +3452,12 @@ class _ShelfCaption extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             strutStyle: const StrutStyle(
-              fontSize: 10,
+              fontSize: AppTheme.fontCaption,
               height: 1.3,
               forceStrutHeight: true,
             ),
             style: TextStyle(
-              fontSize: 10,
+              fontSize: AppTheme.fontCaption,
               color: isDark ? Colors.white54 : JellyTheme.textSecondary,
             ),
           ),
@@ -3541,7 +3542,7 @@ void _showShelfItemMenu(BuildContext context, String shelfId, _ShelfEntry e) {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 16,
+                  fontSize: AppTheme.fontHeadline,
                   fontWeight: FontWeight.w600,
                   color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                 ),

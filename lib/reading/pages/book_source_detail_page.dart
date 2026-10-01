@@ -1,10 +1,11 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../models/book_source.dart';
 import '../services/book_source_service.dart';
 import '../theme/jelly_theme.dart';
 import 'book_source_reader_page.dart';
+import '../../common/theme.dart';
 
 /// 书源详情页 —— 书籍信息 + 目录。
 ///
@@ -108,7 +109,7 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
           _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
       appBar: AppBar(
         title: Text('书籍详情',
-            style: TextStyle(fontSize: 18, color: _titleColor)),
+            style: TextStyle(fontSize: AppTheme.fontTitle3, color: _titleColor)),
         actions: [
           IconButton(
             tooltip: '换源',
@@ -172,7 +173,7 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        fontSize: 17,
+                        fontSize: AppTheme.fontTitle3,
                         fontWeight: FontWeight.w700,
                         color: _titleColor)),
                 const SizedBox(height: 4),
@@ -182,7 +183,7 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                     if (_chapters.isNotEmpty) '${_chapters.length} 章',
                   ].join(' · '),
                   style:
-                      TextStyle(fontSize: 12.5, color: JellyTheme.textSecondary),
+                      TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
                 ),
                 const SizedBox(height: 6),
                 // 来源标签：明确告诉用户"这本书是从哪个源来的"
@@ -191,11 +192,11 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
                     color: JellyTheme.primary.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(_result.source.name,
                       style: TextStyle(
-                          fontSize: 11, color: JellyTheme.primary)),
+                          fontSize: AppTheme.fontCaption, color: JellyTheme.primary)),
                 ),
                 if (_intro.isNotEmpty) ...[
                   const SizedBox(height: 8),
@@ -204,7 +205,7 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        fontSize: 12,
+                        fontSize: AppTheme.fontFootnote,
                         height: 1.5,
                         color: JellyTheme.textSecondary),
                   ),
@@ -226,7 +227,7 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
             CircularProgressIndicator(color: JellyTheme.primary),
             const SizedBox(height: 14),
             Text('正在获取目录...',
-                style: TextStyle(fontSize: 13, color: JellyTheme.textSecondary)),
+                style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
           ],
         ),
       );
@@ -244,7 +245,7 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
               Text(_error!,
                   textAlign: TextAlign.center,
                   style:
-                      TextStyle(fontSize: 13, color: JellyTheme.textSecondary)),
+                      TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
               const SizedBox(height: 16),
               TextButton.icon(
                 onPressed: _load,
@@ -271,7 +272,7 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
           title: Text(ch.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 14, color: _titleColor)),
+              style: TextStyle(fontSize: AppTheme.fontBody, color: _titleColor)),
           onTap: () => _openReader(i),
         );
       },
@@ -362,13 +363,13 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
             const SizedBox(height: 14),
             Text('换源（找到 ${found.length} 个）',
                 style: TextStyle(
-                    fontSize: 16,
+                    fontSize: AppTheme.fontHeadline,
                     fontWeight: FontWeight.w600,
                     color: _titleColor)),
             const SizedBox(height: 6),
             Text('换源可解决正文乱码 / 缺章',
                 style:
-                    TextStyle(fontSize: 12, color: JellyTheme.textSecondary)),
+                    TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary)),
             const SizedBox(height: 8),
             Flexible(
               child: ListView(
@@ -377,12 +378,12 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                     .map((r) => ListTile(
                           title: Text(r.source.name,
                               style:
-                                  TextStyle(fontSize: 14, color: _titleColor)),
+                                  TextStyle(fontSize: AppTheme.fontBody, color: _titleColor)),
                           subtitle: Text(r.name,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                  fontSize: 11.5,
+                                  fontSize: AppTheme.fontFootnote,
                                   color: JellyTheme.textSecondary)),
                           onTap: () => Navigator.pop(ctx, r),
                         ))

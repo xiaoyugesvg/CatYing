@@ -8,6 +8,7 @@ import '../../common/theme.dart';
 import '../../services/background_service.dart';
 import '../../services/wallpaper_api_service.dart';
 import '../../widgets/common_widgets.dart';
+import '../../widgets/app_toast.dart';
 
 /// 壁纸设置页
 ///
@@ -36,6 +37,7 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
   bool _loading = false;
   bool _loadFailed = false;
   int _page = 1;
+
   /// 分页是否还有更多（Bing 只有几天的图，Picsum 可翻页）
   bool _hasMore = false;
   bool _fetchedOnce = false;
@@ -83,12 +85,17 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.backgroundPrimary,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: AppTheme.backgroundPrimary,
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text('壁纸设置',
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 17)),
+        title: Text(
+          '壁纸设置',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontTitle3,
+          ),
+        ),
         iconTheme: IconThemeData(color: AppTheme.textPrimary),
         actions: [
           TextButton(
@@ -119,7 +126,9 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
               child: Text(
                 '关闭后使用内置渐变背景，不加载图片与效果',
                 style: TextStyle(
-                    color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption),
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption,
+                ),
               ),
             ),
 
@@ -193,9 +202,10 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                   '浅色/深色各有独立的遮罩值：浅色模式用白色遮罩提亮壁纸，'
                   '深色模式用黑色遮罩压暗壁纸，都是为了让文字清晰。',
                   style: TextStyle(
-                      color: AppTheme.textTertiary,
-                      fontSize: AppTheme.fontCaption,
-                      height: 1.5),
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption,
+                    height: 1.5,
+                  ),
                 ),
               ),
             ],
@@ -226,19 +236,20 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
               final ok = await bg.pickFromGallery();
               if (!mounted) return;
               if (!ok) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('未选择图片')),
-                );
+                AppToast.message('未选择图片');
               }
             },
             icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
             label: Text(hasImage ? '更换图片' : '选择图片'),
             style: OutlinedButton.styleFrom(
               foregroundColor: AppTheme.accentColor,
-              side: BorderSide(color: AppTheme.accentColor.withValues(alpha: 0.5)),
+              side: BorderSide(
+                color: AppTheme.accentColor.withValues(alpha: 0.5),
+              ),
               minimumSize: const Size.fromHeight(44),
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppTheme.radiusMD)),
+                borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+              ),
             ),
           ),
           if (hasImage) ...[
@@ -284,10 +295,14 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                   _providerChip('自建', WallpaperProvider.custom),
                   const Spacer(),
                   IconButton(
-                    onPressed:
-                        _loading ? null : () => _loadWallpapers(reset: true),
-                    icon: Icon(Icons.refresh,
-                        size: 20, color: AppTheme.textSecondary),
+                    onPressed: _loading
+                        ? null
+                        : () => _loadWallpapers(reset: true),
+                    icon: Icon(
+                      Icons.refresh,
+                      size: 20,
+                      color: AppTheme.textSecondary,
+                    ),
                     tooltip: '刷新',
                   ),
                 ],
@@ -315,8 +330,11 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                   padding: const EdgeInsets.symmetric(vertical: 24),
                   child: Column(
                     children: [
-                      Icon(Icons.image_not_supported_outlined,
-                          size: 34, color: AppTheme.textTertiary),
+                      Icon(
+                        Icons.image_not_supported_outlined,
+                        size: 34,
+                        color: AppTheme.textTertiary,
+                      ),
                       const SizedBox(height: 8),
                       Text(
                         _loadFailed && _fetchedOnce
@@ -324,8 +342,9 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                             : '点右上角刷新加载壁纸',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                            color: AppTheme.textTertiary,
-                            fontSize: AppTheme.fontCaption),
+                          color: AppTheme.textTertiary,
+                          fontSize: AppTheme.fontCaption,
+                        ),
                       ),
                     ],
                   ),
@@ -334,8 +353,7 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                 GridView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate:
-                      const SliverGridDelegateWithFixedCrossAxisCount(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 3,
                     mainAxisSpacing: 8,
                     crossAxisSpacing: 8,
@@ -353,8 +371,10 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                               _page += 1;
                               _loadWallpapers();
                             },
-                      child: Text(_loading ? '加载中…' : '加载更多',
-                          style: TextStyle(color: AppTheme.accentColor)),
+                      child: Text(
+                        _loading ? '加载中…' : '加载更多',
+                        style: TextStyle(color: AppTheme.accentColor),
+                      ),
                     ),
                   ),
               ],
@@ -371,12 +391,16 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
             children: [
               TextField(
                 controller: TextEditingController(text: bg.networkUrl.value),
-                style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontBody,
+                ),
                 decoration: InputDecoration(
                   hintText: 'https://example.com/wallpaper.jpg',
                   hintStyle: TextStyle(
-                      color: AppTheme.textTertiary,
-                      fontSize: AppTheme.fontCaption),
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
                   isDense: true,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(AppTheme.radiusMD),
@@ -391,8 +415,9 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
               Text(
                 '粘贴图片直链后按回车确认',
                 style: TextStyle(
-                    color: AppTheme.textTertiary,
-                    fontSize: AppTheme.fontCaption),
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption,
+                ),
               ),
               if (bg.networkUrl.value.isNotEmpty) ...[
                 const SizedBox(height: 10),
@@ -405,7 +430,9 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                   },
                   icon: const Icon(Icons.delete_outline, size: 18),
                   label: const Text('清除网络壁纸'),
-                  style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.redAccent,
+                  ),
                 ),
               ],
             ],
@@ -440,11 +467,13 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
             color: selected ? AppTheme.accentColor : Colors.transparent,
           ),
         ),
-        child: Text(label,
-            style: TextStyle(
-                color:
-                    selected ? AppTheme.textPrimary : AppTheme.textSecondary,
-                fontSize: 12.5)),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? AppTheme.textPrimary : AppTheme.textSecondary,
+            fontSize: AppTheme.fontSubhead,
+          ),
+        ),
       ),
     );
   }
@@ -453,11 +482,16 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
   Widget _customApiField(BackgroundService bg) {
     return TextField(
       controller: TextEditingController(text: bg.customApiUrl.value),
-      style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+      style: TextStyle(
+        color: AppTheme.textPrimary,
+        fontSize: AppTheme.fontSubhead,
+      ),
       decoration: InputDecoration(
         hintText: 'https://your-api/wallpapers?page={page}',
-        hintStyle:
-            TextStyle(color: AppTheme.textTertiary, fontSize: 11.5),
+        hintStyle: TextStyle(
+          color: AppTheme.textTertiary,
+          fontSize: AppTheme.fontFootnote,
+        ),
         isDense: true,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppTheme.radiusMD),
@@ -481,12 +515,7 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
         await _bg.setSourceType(WallpaperSourceType.network);
         if (!mounted) return;
         setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('已设为壁纸'),
-            duration: Duration(milliseconds: 900),
-          ),
-        );
+        AppToast.message('已设为壁纸', duration: const Duration(milliseconds: 900));
       },
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppTheme.radiusMD),
@@ -502,8 +531,11 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
               errorWidget: (_, __, ___) => Container(
                 color: AppTheme.backgroundTertiary,
                 alignment: Alignment.center,
-                child: Icon(Icons.broken_image_outlined,
-                    size: 20, color: AppTheme.textTertiary),
+                child: Icon(
+                  Icons.broken_image_outlined,
+                  size: 20,
+                  color: AppTheme.textTertiary,
+                ),
               ),
             ),
             if (item.title.isNotEmpty)
@@ -528,7 +560,9 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        color: Colors.white, fontSize: 10.5),
+                      color: Colors.white,
+                      fontSize: AppTheme.fontCaption,
+                    ),
                   ),
                 ),
               ),
@@ -542,8 +576,11 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                   alignment: Alignment.topRight,
                   child: Padding(
                     padding: EdgeInsets.all(4),
-                    child: Icon(Icons.check_circle,
-                        color: AppTheme.accentColor, size: 18),
+                    child: Icon(
+                      Icons.check_circle,
+                      color: AppTheme.accentColor,
+                      size: 18,
+                    ),
                   ),
                 ),
               ),
@@ -599,8 +636,12 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                     ),
                     child: selected
                         ? const Center(
-                            child: Icon(Icons.check_circle,
-                                color: Colors.white, size: 22))
+                            child: Icon(
+                              Icons.check_circle,
+                              color: Colors.white,
+                              size: 22,
+                            ),
+                          )
                         : null,
                   ),
                 ),
@@ -608,10 +649,11 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                 Text(
                   p.name,
                   style: TextStyle(
-                      color: selected
-                          ? AppTheme.textPrimary
-                          : AppTheme.textSecondary,
-                      fontSize: 11),
+                    color: selected
+                        ? AppTheme.textPrimary
+                        : AppTheme.textSecondary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
                 ),
               ],
             ),
@@ -647,11 +689,16 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
   }
 
   Widget _previewError() => Container(
-        color: AppTheme.backgroundTertiary,
-        alignment: Alignment.center,
-        child: Text('图片无法加载',
-            style: TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
-      );
+    color: AppTheme.backgroundTertiary,
+    alignment: Alignment.center,
+    child: Text(
+      '图片无法加载',
+      style: TextStyle(
+        color: AppTheme.textTertiary,
+        fontSize: AppTheme.fontFootnote,
+      ),
+    ),
+  );
 
   // ============================================================
   // 当前模式提示
@@ -666,13 +713,18 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
         color: AppTheme.accentColor.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(AppTheme.radiusMD),
         border: Border.all(
-            color: AppTheme.accentColor.withValues(alpha: 0.25), width: 0.8),
+          color: AppTheme.accentColor.withValues(alpha: 0.25),
+          width: 0.8,
+        ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(isLight ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
-              size: 18, color: AppTheme.accentColor),
+          Icon(
+            isLight ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+            size: 18,
+            color: AppTheme.accentColor,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
@@ -681,18 +733,20 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                 Text(
                   isLight ? '正在编辑：浅色模式的背景' : '正在编辑：深色模式的背景',
                   style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600),
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontSubhead,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   '浅色和深色各有一套独立背景，切到另一种外观会自动换成那套。\n'
                   '外观模式在「设置 → 外观 → 外观模式」里切换。',
                   style: TextStyle(
-                      color: AppTheme.textTertiary,
-                      fontSize: AppTheme.fontCaption,
-                      height: 1.5),
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption,
+                    height: 1.5,
+                  ),
                 ),
               ],
             ),
@@ -726,25 +780,28 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                 : AppTheme.backgroundSecondary,
             borderRadius: BorderRadius.circular(AppTheme.radiusMD),
             border: Border.all(
-              color: selected
-                  ? AppTheme.accentColor
-                  : Colors.transparent,
+              color: selected ? AppTheme.accentColor : Colors.transparent,
               width: selected ? 2 : 1,
             ),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon,
-                  size: 22,
-                  color: selected ? AppTheme.accentColor : AppTheme.textSecondary),
+              Icon(
+                icon,
+                size: 22,
+                color: selected ? AppTheme.accentColor : AppTheme.textSecondary,
+              ),
               const SizedBox(height: 6),
-              Text(label,
-                  style: TextStyle(
-                      color: selected
-                          ? AppTheme.textPrimary
-                          : AppTheme.textSecondary,
-                      fontSize: 12)),
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected
+                      ? AppTheme.textPrimary
+                      : AppTheme.textSecondary,
+                  fontSize: AppTheme.fontFootnote,
+                ),
+              ),
             ],
           ),
         ),
@@ -771,8 +828,13 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
         const SizedBox(height: 10),
         Row(
           children: [
-            Text(label,
-                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13)),
+            Text(
+              label,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontSubhead,
+              ),
+            ),
             const Spacer(),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -780,11 +842,14 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                 color: AppTheme.accentColor.withValues(alpha: 0.16),
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: Text(valueText,
-                  style: TextStyle(
-                      color: AppTheme.accentColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600)),
+              child: Text(
+                valueText,
+                style: TextStyle(
+                  color: AppTheme.accentColor,
+                  fontSize: AppTheme.fontFootnote,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
           ],
         ),
@@ -819,17 +884,15 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
     await bg.setEnabled(true);
     await bg.clearCustom(); // 清图片/网络，回到渐变
     await bg.setBuiltin(
-        isLight ? BackgroundChoice.moonWhite : BackgroundChoice.builtin1);
+      isLight ? BackgroundChoice.moonWhite : BackgroundChoice.builtin1,
+    );
     await bg.setOpacity(1.0);
     await bg.setBlur(0);
     // 浅色模式默认遮罩更重（白遮罩提亮壁纸）
     await bg.setOverlay(isLight ? 0.35 : 0.3);
     if (mounted) {
       setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(isLight ? '浅色模式背景已重置' : '深色模式背景已重置')),
-      );
+      AppToast.message(isLight ? '浅色模式背景已重置' : '深色模式背景已重置');
     }
   }
 }

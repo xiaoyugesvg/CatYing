@@ -11,6 +11,7 @@ import 'unblock_service.dart';
 import '../../services/audio_focus.dart';
 import '../../services/app_log.dart';
 import 'library_store.dart';
+import '../../widgets/app_toast.dart';
 
 /// 播放模式（对齐 Beans 的循环/随机语义）
 enum PlayMode {
@@ -103,6 +104,25 @@ class MusicPlayerManager extends ChangeNotifier {
     });
     if (_inited) return;
     _inited = true;
+
+    // ── 🔴 把播放错误接到统一提示组件（原来完全静默）────────────────
+    //
+    // `lastError` 之前只有 6 处**赋值**（"正在尝试音源 i/n" / "无免费音源" /
+    // 播放失败…），但**全项目没有任何 UI 读它** ——
+    // 于是音乐播放失败时用户看不到任何提示，只听到"没声音"。
+    //
+    // 现在挂一个监听，任何非空错误都通过 `AppToast` 显示
+    //（顶部气泡，浮在所有路由之上，不依赖 BuildContext）。
+    // **数据流保留**：`lastError` 照样更新，只是多了一个展示出口。
+    lastError.addListener(() {
+      final msg = lastError.value;
+      if (msg.isEmpty) return;
+      // "正在尝试音源 2/3：xxx" 这类是进度信息，用中性色；
+      // 其余（无免费音源 / 播放失败）按错误显示。
+      final isProgress = msg.startsWith('正在尝试音源');
+      AppToast.show(msg, '', isError: !isProgress);
+    });
+
     _player = Player();
 
     _posSub = _player.stream.position.listen((p) {

@@ -5,6 +5,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../models/book_source.dart';
 import '../services/book_source_service.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 /// 书源登录（截图 IMG_8113）。
 ///
@@ -132,7 +133,7 @@ class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          fontSize: 17,
+                          fontSize: AppTheme.fontTitle3,
                           fontWeight: FontWeight.w700,
                           color: label),
                     ),
@@ -165,13 +166,13 @@ class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
                             maxLines: 3,
                             minLines: 1,
                             style: TextStyle(
-                                fontSize: 13, height: 1.5, color: label),
+                                fontSize: AppTheme.fontSubhead, height: 1.5, color: label),
                             decoration: InputDecoration(
                               isDense: true,
                               filled: false,
                               hintText: '网页登录后在此回显采集到的 Cookie',
                               hintStyle: TextStyle(
-                                  fontSize: 13,
+                                  fontSize: AppTheme.fontSubhead,
                                   color: JellyTheme.textSecondary),
                               border: InputBorder.none,
                             ),
@@ -202,7 +203,7 @@ class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
                     child: Text(
                       'Cookie、书源变量与登录请求会按此书源保存。',
                       style: TextStyle(
-                          fontSize: 12.5,
+                          fontSize: AppTheme.fontSubhead,
                           height: 1.6,
                           color: JellyTheme.textSecondary),
                     ),
@@ -211,7 +212,7 @@ class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
                     const SizedBox(height: 12),
                     Text(_status,
                         style: TextStyle(
-                            fontSize: 12.5,
+                            fontSize: AppTheme.fontSubhead,
                             color: JellyTheme.textSecondary)),
                   ],
                 ],
@@ -226,7 +227,7 @@ class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
                     onPressed: () => _save(''),
                     child: Text('清除登录态',
                         style: TextStyle(
-                            fontSize: 14,
+                            fontSize: AppTheme.fontBody,
                             color: JellyTheme.textSecondary)),
                   ),
                   const Spacer(),
@@ -343,7 +344,7 @@ class _WebLoginPageState extends State<WebLoginPage> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-              fontSize: 16, fontWeight: FontWeight.w600, color: label),
+              fontSize: AppTheme.fontHeadline, fontWeight: FontWeight.w600, color: label),
         ),
         actions: [
           IconButton(
@@ -385,11 +386,11 @@ class _WebLoginPageState extends State<WebLoginPage> {
                       size: 40, color: label.withValues(alpha: 0.4)),
                   const SizedBox(height: 12),
                   Text('网页打不开',
-                      style: TextStyle(fontSize: 14, color: label)),
+                      style: TextStyle(fontSize: AppTheme.fontBody, color: label)),
                   const SizedBox(height: 6),
                   Text('可能是源地址不通，或站点需要代理',
                       style: TextStyle(
-                          fontSize: 12, color: JellyTheme.textSecondary)),
+                          fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary)),
                   const SizedBox(height: 14),
                   TextButton(
                     onPressed: () => _c.reload(),

@@ -1,4 +1,4 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
@@ -7,6 +7,7 @@ import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
 import '../../widgets/app_page_loading.dart';
+import '../../common/theme.dart';
 
 /// 歌单/榜单详情 —— 对齐 Beans 的 `PlaylistView` + 详情页。
 ///
@@ -62,7 +63,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     return Theme(
       data: MusicTheme.themeData(),
       child: Scaffold(
-        backgroundColor: MusicTheme.background,
+        backgroundColor: Colors.transparent,
         body: _loading
             ? AppPageLoading(color: MusicTheme.tint)
             : CustomScrollView(
@@ -75,7 +76,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                         child: Center(
                           child: Text(_error,
                               style: TextStyle(
-                                  color: MusicTheme.secondary, fontSize: 13)),
+                                  color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
                         ),
                       ),
                     ),
@@ -98,7 +99,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     return SliverAppBar(
       pinned: true,
       expandedHeight: 300,
-      backgroundColor: MusicTheme.background,
+      backgroundColor: Colors.transparent,
       iconTheme: IconThemeData(color: MusicTheme.label),
       flexibleSpace: FlexibleSpaceBar(
         background: Stack(
@@ -136,7 +137,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                           color: MusicTheme.label,
-                          fontSize: 19,
+                          fontSize: AppTheme.fontTitle2,
                           fontWeight: FontWeight.w700)),
                   const SizedBox(height: 4),
                   Text(
@@ -147,7 +148,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style:
-                        TextStyle(color: MusicTheme.secondary, fontSize: 12),
+                        TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -200,7 +201,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
             const SizedBox(width: 5),
             Text(label,
                 style: TextStyle(
-                    fontSize: 13,
+                    fontSize: AppTheme.fontSubhead,
                     fontWeight: FontWeight.w600,
                     color: outlined ? MusicTheme.label : Colors.white)),
           ],

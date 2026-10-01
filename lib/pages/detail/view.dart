@@ -31,6 +31,7 @@ import '../play/webview_player_page.dart';
 import '../search/controller.dart' show TvSearchController;
 import 'controller.dart';
 import 'episode_list.dart';
+import '../../widgets/app_toast.dart';
 
 /// 详情页 - 对应 Swift DetailView
 class DetailPage extends StatefulWidget {
@@ -41,7 +42,6 @@ class DetailPage extends StatefulWidget {
 }
 
 class _DetailPageState extends State<DetailPage> {
-
   /// 每次进入详情页强制重建 controller（兼容旧版 GetX，无 force 参数）：
   /// 先删除旧实例再重新 put，确保 vodInfo/isPlaying/playUrl 不残留上次状态，
   /// 避免"进详情页像重启/显示旧视频"。
@@ -88,11 +88,13 @@ class _DetailPageState extends State<DetailPage> {
 
   /// 播放地址解析超时：URL 一直拿不到时给出提示，避免无限转圈
   Timer? _playerErrorTimer;
+
   /// 持有 VideoController 实例，与上面 _player 配套使用，跨全屏/普通模式共享，
   /// 保证 ANGLE surface / texture 通道在 OS 全屏切换时不被重建。
-  
+
   String? _lastPlayerUrl;
   String? _lastPlayerHeadersKey;
+
   /// 是否已排队 post-frame 重建 Player，防止 build 内重复 schedule
   bool _playerRecreateScheduled = false;
   SharedPreferences? _prefs;
@@ -100,6 +102,7 @@ class _DetailPageState extends State<DetailPage> {
   Worker? _engineWorker;
   Worker? _decodeWorker;
   Worker? _bufferWorker;
+
   /// 详情页样式开关（默认/刮削版）变化时重建，无需退出重进
   Worker? _layoutWorker;
 
@@ -162,11 +165,22 @@ class _DetailPageState extends State<DetailPage> {
     VideoPlayerPip.instance.activeNotifier.addListener(_onPipChanged);
     // 监听 WindowFullScreen 状态变化：作为冗余同步通道，
     // 保证 WindowFullScreen.toggle 后 isFullScreen Rx 一定被同步
-    WindowFullScreen.instance.activeNotifier.addListener(_onFullScreenActiveChanged);
+    WindowFullScreen.instance.activeNotifier.addListener(
+      _onFullScreenActiveChanged,
+    );
     // 设置切换内核：立刻换播放器
-    _engineWorker = ever(PlayerPrefs.instance.vodEngine, (_) => _onEngineChanged());
-    _decodeWorker = ever(PlayerPrefs.instance.decodeMode, (_) => _applyMpvOptions());
-    _bufferWorker = ever(PlayerPrefs.instance.bufferMode, (_) => _applyMpvOptions());
+    _engineWorker = ever(
+      PlayerPrefs.instance.vodEngine,
+      (_) => _onEngineChanged(),
+    );
+    _decodeWorker = ever(
+      PlayerPrefs.instance.decodeMode,
+      (_) => _applyMpvOptions(),
+    );
+    _bufferWorker = ever(
+      PlayerPrefs.instance.bufferMode,
+      (_) => _applyMpvOptions(),
+    );
     // 「硬件加速」总开关变化时同样热更新
     // 设置页切换「详情页样式」后立即生效（Obx 里只读值不建立依赖，
     // 不监听的话必须退出重进详情页才会换布局）
@@ -183,9 +197,10 @@ class _DetailPageState extends State<DetailPage> {
       final prefs = await SharedPreferences.getInstance();
       _prefs = prefs;
       await PlayerPrefs.instance.load();
-      _prefsPlayTypeVod =
-          PlayerPrefs.instance.vodEngine.value.value;
-    } catch (e) { /* ignore */ }
+      _prefsPlayTypeVod = PlayerPrefs.instance.vodEngine.value.value;
+    } catch (e) {
+      /* ignore */
+    }
   }
 
   /// 设置里切换内核 → 立刻换播放器（丢弃旧实例重建）
@@ -255,9 +270,7 @@ class _DetailPageState extends State<DetailPage> {
     final info = _controller.vodInfo.value;
     if (info == null) return;
     if (!tmdb.configured) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先在 设置 → 元数据 填写 TMDB API Key')),
-      );
+      AppToast.message('请先在 设置 → 元数据 填写 TMDB API Key');
       return;
     }
     final title = TmdbService.cleanTitle(info.name);
@@ -265,42 +278,50 @@ class _DetailPageState extends State<DetailPage> {
     final cands = await tmdb.searchCandidates(title, year);
     if (!mounted) return;
     if (cands.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('TMDB 无匹配结果')),
-      );
+      AppToast.message('TMDB 无匹配结果');
       return;
     }
     await showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.backgroundPrimary,
-      builder: (ctx) => kbSheet(ListView(
-        padding: const EdgeInsets.all(12),
-        children: [
-          Text('选择刮削结果',
+      builder: (ctx) => kbSheet(
+        ListView(
+          padding: const EdgeInsets.all(12),
+          children: [
+            Text(
+              '选择刮削结果',
               style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          ...cands.map((c) {
-            final it = c.$2;
-            final name = (it['title'] ?? it['name'] ?? '').toString();
-            final date = (it['release_date'] ?? it['first_air_date'] ?? '')
-                .toString();
-            final typeLabel = c.$1 == 'movie' ? '电影' : '剧集';
-            return ListTile(
-              title: Text(name, style: TextStyle(color: AppTheme.textPrimary)),
-              subtitle: Text('$typeLabel · $date',
-                  style: TextStyle(color: AppTheme.textTertiary)),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final ok = await tmdb.applyCandidate(info, c.$1, it);
-                if (ok && mounted) setState(() {});
-              },
-            );
-          }),
-        ],
-      )),
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontHeadline,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ...cands.map((c) {
+              final it = c.$2;
+              final name = (it['title'] ?? it['name'] ?? '').toString();
+              final date = (it['release_date'] ?? it['first_air_date'] ?? '')
+                  .toString();
+              final typeLabel = c.$1 == 'movie' ? '电影' : '剧集';
+              return ListTile(
+                title: Text(
+                  name,
+                  style: TextStyle(color: AppTheme.textPrimary),
+                ),
+                subtitle: Text(
+                  '$typeLabel · $date',
+                  style: TextStyle(color: AppTheme.textTertiary),
+                ),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final ok = await tmdb.applyCandidate(info, c.$1, it);
+                  if (ok && mounted) setState(() {});
+                },
+              );
+            }),
+          ],
+        ),
+      ),
     );
   }
 
@@ -308,22 +329,16 @@ class _DetailPageState extends State<DetailPage> {
   Future<void> _manualScrapeFromTmdb() async {
     final tmdb = TmdbService.instance;
     if (!tmdb.configured) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先在 设置 → 元数据 填写 TMDB API Key')),
-      );
+      AppToast.message('请先在 设置 → 元数据 填写 TMDB API Key');
       return;
     }
     final info = _controller.vodInfo.value;
     if (info == null) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('正在刮削 TMDB 元数据...')),
-    );
+    AppToast.message('正在刮削 TMDB 元数据...');
     final ok = await tmdb.enrich(info);
     if (!mounted) return;
     setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(ok ? '刮削完成，已更新海报/简介/演职员' : '未匹配到 TMDB 条目')),
-    );
+    AppToast.message(ok ? '刮削完成，已更新海报/简介/演职员' : '未匹配到 TMDB 条目');
   }
 
   /// Spider 源手动换源/选择正确结果：
@@ -334,19 +349,19 @@ class _DetailPageState extends State<DetailPage> {
     if (info == null) return;
     final spiderInfo = SpiderService.instance.getCurrentSpiderInfo();
     if (spiderInfo.$1.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('当前源不是 Spider 源，无法搜索候选')),
-      );
+      AppToast.message('当前源不是 Spider 源，无法搜索候选');
       return;
     }
     // 用片名在当前源搜索（search 不修改当前 Spider 上下文，只发请求）
-    final res = await SpiderService.instance
-        .search(spiderInfo.$1, spiderInfo.$2, spiderInfo.$3, info.name);
+    final res = await SpiderService.instance.search(
+      spiderInfo.$1,
+      spiderInfo.$2,
+      spiderInfo.$3,
+      info.name,
+    );
     if (!mounted) return;
     if (res == null || res['list'] is! List) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('搜索候选失败，请重试')),
-      );
+      AppToast.message('搜索候选失败，请重试');
       return;
     }
     final List<Video> cands = [];
@@ -355,63 +370,81 @@ class _DetailPageState extends State<DetailPage> {
       try {
         final v = Video.fromJson(Map<String, dynamic>.from(e));
         // spider 搜索结果通常没有 sourceKey，补上当前源
-        cands.add(Video(
-          id: v.id,
-          name: v.name,
-          pic: v.pic,
-          note: v.note,
-          year: v.year,
-          area: v.area,
-          director: v.director,
-          actor: v.actor,
-          des: v.des,
-          sourceKey: info.sourceKey,
-        ));
-      } catch (_) {/* 单条解析失败跳过 */}
+        cands.add(
+          Video(
+            id: v.id,
+            name: v.name,
+            pic: v.pic,
+            note: v.note,
+            year: v.year,
+            area: v.area,
+            director: v.director,
+            actor: v.actor,
+            des: v.des,
+            sourceKey: info.sourceKey,
+          ),
+        );
+      } catch (_) {
+        /* 单条解析失败跳过 */
+      }
     }
     // 排除当前正在看的条目
     cands.removeWhere((v) => v.id == info.id);
     if (cands.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('当前源没有其他候选结果')),
-      );
+      AppToast.message('当前源没有其他候选结果');
       return;
     }
     await showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.backgroundPrimary,
-      builder: (ctx) => kbSheet(ListView(
-        padding: const EdgeInsets.all(12),
-        children: [
-          Text('选择正确结果',
+      builder: (ctx) => kbSheet(
+        ListView(
+          padding: const EdgeInsets.all(12),
+          children: [
+            Text(
+              '选择正确结果',
               style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          Text('当前源：${info.name} 的候选（同名剧/不同版本）',
-              style: TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
-          const SizedBox(height: 4),
-          ...cands.map((c) {
-            final extra = <String>[
-              if (c.year.isNotEmpty) c.year,
-              if (c.note.isNotEmpty) c.note,
-            ].join(' · ');
-            return ListTile(
-              title: Text(c.name, style: TextStyle(color: AppTheme.textPrimary)),
-              subtitle: extra.isNotEmpty
-                  ? Text(extra, style: TextStyle(color: AppTheme.textTertiary))
-                  : null,
-              onTap: () async {
-                Navigator.pop(ctx);
-                await _controller.loadDetail(c);
-                if (mounted) setState(() {});
-                _saveHistoryForCurrentEpisode();
-              },
-            );
-          }),
-        ],
-      )),
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontHeadline,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '当前源：${info.name} 的候选（同名剧/不同版本）',
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontFootnote,
+              ),
+            ),
+            const SizedBox(height: 4),
+            ...cands.map((c) {
+              final extra = <String>[
+                if (c.year.isNotEmpty) c.year,
+                if (c.note.isNotEmpty) c.note,
+              ].join(' · ');
+              return ListTile(
+                title: Text(
+                  c.name,
+                  style: TextStyle(color: AppTheme.textPrimary),
+                ),
+                subtitle: extra.isNotEmpty
+                    ? Text(
+                        extra,
+                        style: TextStyle(color: AppTheme.textTertiary),
+                      )
+                    : null,
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _controller.loadDetail(c);
+                  if (mounted) setState(() {});
+                  _saveHistoryForCurrentEpisode();
+                },
+              );
+            }),
+          ],
+        ),
+      ),
     );
   }
 
@@ -445,7 +478,9 @@ class _DetailPageState extends State<DetailPage> {
     _bufferWorker?.dispose();
     _layoutWorker?.dispose();
     VideoPlayerPip.instance.activeNotifier.removeListener(_onPipChanged);
-    WindowFullScreen.instance.activeNotifier.removeListener(_onFullScreenActiveChanged);
+    WindowFullScreen.instance.activeNotifier.removeListener(
+      _onFullScreenActiveChanged,
+    );
     // 退出页面时关闭 PiP，恢复窗口
     if (VideoPlayerPip.instance.isActive) {
       VideoPlayerPip.instance.exit();
@@ -595,8 +630,9 @@ class _DetailPageState extends State<DetailPage> {
         children: [
           if (!immersive)
             Positioned.fill(
-              child: BackgroundService.instance
-                  .buildBackground(overlayAlpha: 0.3),
+              child: BackgroundService.instance.buildBackground(
+                overlayAlpha: 0.3,
+              ),
             ),
           Scaffold(
             backgroundColor: Colors.transparent,
@@ -664,7 +700,8 @@ class _DetailPageState extends State<DetailPage> {
 
       // 刮削版详情页（设置页可切换）：海报沉浸式布局，展示 TMDB 演职人员与
       // 类似作品。仅在已刮削出数据时启用，否则回退默认版，避免开开关后一片空白。
-      final scrapedReady = info.castList.isNotEmpty ||
+      final scrapedReady =
+          info.castList.isNotEmpty ||
           info.similarList.isNotEmpty ||
           info.rating > 0 ||
           info.runtime > 0;
@@ -716,8 +753,11 @@ class _DetailPageState extends State<DetailPage> {
   ///
   /// 与默认版是两套独立布局，由设置页「详情页样式」开关切换；
   /// 未刮削出数据时 _buildBody 不会走到这里（自动回退默认版）。
-  Widget _buildScrapedBody(VodInfo info,
-      {required bool isFull, required bool isPip}) {
+  Widget _buildScrapedBody(
+    VodInfo info, {
+    required bool isFull,
+    required bool isPip,
+  }) {
     final mediaPad = MediaQuery.of(context).padding;
     final bottomPadding = mediaPad.bottom + 32.0;
 
@@ -803,7 +843,9 @@ class _DetailPageState extends State<DetailPage> {
                     if (typeName.isNotEmpty) MetadataPill(text: typeName),
                     if (runtime > 0) MetadataPill(text: '$runtime 分钟'),
                     if (info.rating > 0)
-                      MetadataPill(text: 'TMDB ${info.rating.toStringAsFixed(1)}'),
+                      MetadataPill(
+                        text: 'TMDB ${info.rating.toStringAsFixed(1)}',
+                      ),
                   ],
                 ),
                 const SizedBox(height: AppTheme.spacingMD),
@@ -811,21 +853,23 @@ class _DetailPageState extends State<DetailPage> {
                 if (_controller.playUrl.value != null) ...[
                   Padding(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: AppTheme.spacingLG),
+                      horizontal: AppTheme.spacingLG,
+                    ),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         color: AppTheme.backgroundSecondary,
-                        borderRadius:
-                            BorderRadius.circular(AppTheme.radiusMD),
+                        borderRadius: BorderRadius.circular(AppTheme.radiusMD),
                       ),
                       child: Padding(
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 12),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.play_arrow,
-                                color: AppTheme.textPrimary, size: 22),
+                            Icon(
+                              Icons.play_arrow,
+                              color: AppTheme.textPrimary,
+                              size: 22,
+                            ),
                             const SizedBox(width: 6),
                             Text(
                               '继续播放',
@@ -874,8 +918,7 @@ class _DetailPageState extends State<DetailPage> {
 
           // ===== 播放器卡片 =====
           Padding(
-            padding: const EdgeInsets.symmetric(
-                horizontal: AppTheme.spacingLG),
+            padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingLG),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(AppTheme.radiusMD),
               child: _buildPlayerWidget(isFull: isFull, isPip: isPip),
@@ -895,7 +938,11 @@ class _DetailPageState extends State<DetailPage> {
           if (info.des.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(
-                  AppTheme.spacingLG, AppTheme.spacingMD, AppTheme.spacingLG, 0),
+                AppTheme.spacingLG,
+                AppTheme.spacingMD,
+                AppTheme.spacingLG,
+                0,
+              ),
               child: AppCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -958,8 +1005,10 @@ class _DetailPageState extends State<DetailPage> {
   /// 刮削版收藏按钮（图标随收藏态变化）
   Widget _scrapedFavoriteButton(VodInfo info) {
     return Obx(() {
-      final isCollected =
-          CacheStore.instance.isCollected(info.id, info.sourceKey);
+      final isCollected = CacheStore.instance.isCollected(
+        info.id,
+        info.sourceKey,
+      );
       return _scrapedActionButton(
         icon: isCollected ? Icons.favorite : Icons.favorite_border,
         label: isCollected ? '已收藏' : '收藏',
@@ -982,36 +1031,43 @@ class _DetailPageState extends State<DetailPage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => kbSheet(SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            ListTile(
-              leading: Icon(Icons.recommend_outlined,
-                  color: AppTheme.textSecondary),
-              title: Text('相似推荐',
-                  style: TextStyle(color: AppTheme.textPrimary)),
-              onTap: () {
-                Navigator.pop(ctx);
-                _controller.loadRecommended();
-                _controller.detailTabIndex.value = 1;
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.tune,
-                  color: AppTheme.textSecondary),
-              title: Text('切换到默认详情页',
-                  style: TextStyle(color: AppTheme.textPrimary)),
-              onTap: () async {
-                Navigator.pop(ctx);
-                await PlayerPrefs.instance.setScrapedDetailLayout(false);
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
+      builder: (ctx) => kbSheet(
+        SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              ListTile(
+                leading: Icon(
+                  Icons.recommend_outlined,
+                  color: AppTheme.textSecondary,
+                ),
+                title: Text(
+                  '相似推荐',
+                  style: TextStyle(color: AppTheme.textPrimary),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _controller.loadRecommended();
+                  _controller.detailTabIndex.value = 1;
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.tune, color: AppTheme.textSecondary),
+                title: Text(
+                  '切换到默认详情页',
+                  style: TextStyle(color: AppTheme.textPrimary),
+                ),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await PlayerPrefs.instance.setScrapedDetailLayout(false);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
-      )),
+      ),
     );
   }
 
@@ -1148,18 +1204,17 @@ class _DetailPageState extends State<DetailPage> {
       // 不会残留绑在已 dispose Player 上的 controller/纹理（灰屏）
       key: ObjectKey(_player),
       player: _player,
-       // 跨全屏/普通模式共享同一个 controller
+      // 跨全屏/普通模式共享同一个 controller
       initialVideoFit: VideoFitType.contain, // 4:3 容器 + 黑框适配: 画面按原始比例完整显示, 上下黑边
       url: url,
       headers: headers.isEmpty ? null : headers,
       resumeSeconds: _controller.resumeSeconds.value,
       videoTitle: info?.name,
       currentEpisodeName: episode?.name,
-      episodeNames: _controller.currentEpisodes
-          .map((e) => e.name)
-          .toList(),
+      episodeNames: _controller.currentEpisodes.map((e) => e.name).toList(),
       selectedEpisodeIndex: _controller.selectedEpisodeIndex.value,
-      canPlayNext: _controller.selectedEpisodeIndex.value <
+      canPlayNext:
+          _controller.selectedEpisodeIndex.value <
           _controller.currentEpisodes.length - 1,
       canPlayPrevious: _controller.selectedEpisodeIndex.value > 0,
       isPipMode: isPip,
@@ -1221,8 +1276,22 @@ class _DetailPageState extends State<DetailPage> {
   /// - 含常见媒体扩展名（m3u8/mp4/flv/ts 等）→ 直链，走原生播放器
   /// - 其余 http(s) URL → 视为网页播放页（解析页 / player 页 / 网页端地址）
   static const List<String> _directMediaExtensions = [
-    '.m3u8', '.m3u', '.mp4', '.flv', '.ts', '.mkv', '.avi', '.mov',
-    '.webm', '.rmvb', '.rm', '.wmv', '.mp3', '.aac', '.ogg', '.flac',
+    '.m3u8',
+    '.m3u',
+    '.mp4',
+    '.flv',
+    '.ts',
+    '.mkv',
+    '.avi',
+    '.mov',
+    '.webm',
+    '.rmvb',
+    '.rm',
+    '.wmv',
+    '.mp3',
+    '.aac',
+    '.ogg',
+    '.flac',
   ];
 
   bool _isWebPageUrl(String url) {
@@ -1270,9 +1339,13 @@ class _DetailPageState extends State<DetailPage> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
                 const SizedBox(width: 8),
-                Text('正在刮削元数据…',
-                    style: TextStyle(
-                        color: AppTheme.textTertiary, fontSize: 12)),
+                Text(
+                  '正在刮削元数据…',
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontFootnote,
+                  ),
+                ),
               ],
             ),
           );
@@ -1340,9 +1413,13 @@ class _DetailPageState extends State<DetailPage> {
                   child: Text(
                     tabs[index],
                     style: TextStyle(
-                      color: selected ? AppTheme.textPrimary : AppTheme.textTertiary,
+                      color: selected
+                          ? AppTheme.textPrimary
+                          : AppTheme.textTertiary,
                       fontSize: AppTheme.fontSubhead,
-                      fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                      fontWeight: selected
+                          ? FontWeight.w600
+                          : FontWeight.normal,
                     ),
                   ),
                 ),
@@ -1376,21 +1453,30 @@ class _DetailPageState extends State<DetailPage> {
                       placeholder: (_, __) => Container(
                         color: AppTheme.backgroundTertiary,
                         alignment: Alignment.center,
-                        child: Icon(Icons.movie_outlined,
-                            color: AppTheme.textTertiary, size: 28),
+                        child: Icon(
+                          Icons.movie_outlined,
+                          color: AppTheme.textTertiary,
+                          size: 28,
+                        ),
                       ),
                       errorWidget: (_, __, ___) => Container(
                         color: AppTheme.backgroundTertiary,
                         alignment: Alignment.center,
-                        child: Icon(Icons.broken_image_outlined,
-                            color: AppTheme.textTertiary, size: 28),
+                        child: Icon(
+                          Icons.broken_image_outlined,
+                          color: AppTheme.textTertiary,
+                          size: 28,
+                        ),
                       ),
                     )
                   : Container(
                       color: AppTheme.backgroundTertiary,
                       alignment: Alignment.center,
-                      child: Icon(Icons.movie_outlined,
-                          color: AppTheme.textTertiary, size: 28),
+                      child: Icon(
+                        Icons.movie_outlined,
+                        color: AppTheme.textTertiary,
+                        size: 28,
+                      ),
                     ),
             ),
           ),
@@ -1436,8 +1522,11 @@ class _DetailPageState extends State<DetailPage> {
                               color: AppTheme.borderLight,
                             ),
                           ),
-                          child: Icon(Icons.swap_horiz,
-                              size: 18, color: AppTheme.accentColor),
+                          child: Icon(
+                            Icons.swap_horiz,
+                            size: 18,
+                            color: AppTheme.accentColor,
+                          ),
                         ),
                       );
                     }),
@@ -1456,8 +1545,11 @@ class _DetailPageState extends State<DetailPage> {
                             color: AppTheme.borderLight,
                           ),
                         ),
-                        child: Icon(Icons.auto_fix_high,
-                            size: 18, color: AppTheme.accentColor),
+                        child: Icon(
+                          Icons.auto_fix_high,
+                          size: 18,
+                          color: AppTheme.accentColor,
+                        ),
                       ),
                     ),
                     const SizedBox(width: AppTheme.spacingSM),
@@ -1469,7 +1561,9 @@ class _DetailPageState extends State<DetailPage> {
                 if (sourceName.isNotEmpty)
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
                     decoration: BoxDecoration(
                       color: AppTheme.accentColor.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
@@ -1480,8 +1574,11 @@ class _DetailPageState extends State<DetailPage> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.theaters_outlined,
-                            size: 12, color: AppTheme.accentColor),
+                        Icon(
+                          Icons.theaters_outlined,
+                          size: 12,
+                          color: AppTheme.accentColor,
+                        ),
                         const SizedBox(width: 4),
                         Flexible(
                           child: Text(
@@ -1534,14 +1631,20 @@ class _DetailPageState extends State<DetailPage> {
       if (!tmdb.showCast.value) return const SizedBox.shrink();
       return Padding(
         padding: const EdgeInsets.fromLTRB(
-            AppTheme.spacingLG, AppTheme.spacingMD, 0, 0),
+          AppTheme.spacingLG,
+          AppTheme.spacingMD,
+          0,
+          0,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
               padding: const EdgeInsets.only(right: AppTheme.spacingLG),
               child: const SectionHeader(
-                  title: '演职人员', icon: Icons.people_alt_outlined),
+                title: '演职人员',
+                icon: Icons.people_alt_outlined,
+              ),
             ),
             const SizedBox(height: AppTheme.spacingSM),
             SizedBox(
@@ -1573,14 +1676,20 @@ class _DetailPageState extends State<DetailPage> {
       if (!tmdb.showSimilar.value) return const SizedBox.shrink();
       return Padding(
         padding: const EdgeInsets.fromLTRB(
-            AppTheme.spacingLG, AppTheme.spacingMD, 0, 0),
+          AppTheme.spacingLG,
+          AppTheme.spacingMD,
+          0,
+          0,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
               padding: const EdgeInsets.only(right: AppTheme.spacingLG),
               child: const SectionHeader(
-                  title: '类似作品', icon: Icons.local_movies_outlined),
+                title: '类似作品',
+                icon: Icons.local_movies_outlined,
+              ),
             ),
             const SizedBox(height: AppTheme.spacingSM),
             SizedBox(
@@ -1657,7 +1766,8 @@ class _DetailPageState extends State<DetailPage> {
           LayoutBuilder(
             builder: (context, constraints) {
               const cols = 3;
-              final cardW = (constraints.maxWidth -
+              final cardW =
+                  (constraints.maxWidth -
                       AppTheme.spacingLG * 2 -
                       AppTheme.cardSpacing * (cols - 1)) /
                   cols;
@@ -1666,7 +1776,9 @@ class _DetailPageState extends State<DetailPage> {
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 padding: const EdgeInsets.symmetric(
-                    horizontal: AppTheme.spacingLG, vertical: 6),
+                  horizontal: AppTheme.spacingLG,
+                  vertical: 6,
+                ),
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: cols,
                   childAspectRatio: ratio,
@@ -1702,7 +1814,11 @@ class _DetailPageState extends State<DetailPage> {
     final suggest = <String>[
       if (info != null && info.name.isNotEmpty) info.name,
       if (info != null && info.actor.isNotEmpty)
-        ...info.actor.split(',').map((a) => a.trim()).where((a) => a.isNotEmpty).take(3),
+        ...info.actor
+            .split(',')
+            .map((a) => a.trim())
+            .where((a) => a.isNotEmpty)
+            .take(3),
       if (info != null && info.typeName.isNotEmpty) info.typeName,
     ];
 
@@ -1718,16 +1834,25 @@ class _DetailPageState extends State<DetailPage> {
                 child: TextField(
                   controller: _quickSearchInput,
                   style: TextStyle(
-                      color: AppTheme.textPrimary, fontSize: 14),
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontBody,
+                  ),
                   decoration: InputDecoration(
                     hintText: '搜索影片',
                     hintStyle: TextStyle(
-                        color: AppTheme.textTertiary, fontSize: 13),
-                    prefixIcon: Icon(Icons.search,
-                        size: 18, color: AppTheme.textTertiary),
+                      color: AppTheme.textTertiary,
+                      fontSize: AppTheme.fontSubhead,
+                    ),
+                    prefixIcon: Icon(
+                      Icons.search,
+                      size: 18,
+                      color: AppTheme.textTertiary,
+                    ),
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
                     filled: true,
                     fillColor: Colors.white.withValues(alpha: 0.06),
                     border: OutlineInputBorder(
@@ -1750,8 +1875,11 @@ class _DetailPageState extends State<DetailPage> {
                     color: AppTheme.accentColor,
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.search,
-                      size: 20, color: Colors.white),
+                  child: const Icon(
+                    Icons.search,
+                    size: 20,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ],
@@ -1764,14 +1892,16 @@ class _DetailPageState extends State<DetailPage> {
               spacing: AppTheme.spacingSM,
               runSpacing: AppTheme.spacingSM,
               children: suggest
-                  .map((k) => SelectableChip(
-                        title: k,
-                        isSelected: _quickSearchDoneFor == k,
-                        onTap: () {
-                          _quickSearchInput.text = k;
-                          _runQuickSearch(k, force: true);
-                        },
-                      ))
+                  .map(
+                    (k) => SelectableChip(
+                      title: k,
+                      isSelected: _quickSearchDoneFor == k,
+                      onTap: () {
+                        _quickSearchInput.text = k;
+                        _runQuickSearch(k, force: true);
+                      },
+                    ),
+                  )
                   .toList(),
             ),
           ],
@@ -1798,11 +1928,16 @@ class _DetailPageState extends State<DetailPage> {
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: AppTheme.accentColor),
+                              strokeWidth: 2,
+                              color: AppTheme.accentColor,
+                            ),
                           )
                         else
-                          Icon(Icons.search_off,
-                              size: 26, color: AppTheme.textTertiary),
+                          Icon(
+                            Icons.search_off,
+                            size: 26,
+                            color: AppTheme.textTertiary,
+                          ),
                         const SizedBox(height: 10),
                         // 原来这里恒显示「搜索中...」：没有可用搜索源时也转圈，
                         // 看着像卡死。分三种情况给明确提示。
@@ -1812,9 +1947,10 @@ class _DetailPageState extends State<DetailPage> {
                               : '没有可用的搜索源\n请在 设置 → 订阅与数据源 检查接口是否加载成功',
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                              color: AppTheme.textTertiary,
-                              fontSize: 13,
-                              height: 1.5),
+                            color: AppTheme.textTertiary,
+                            fontSize: AppTheme.fontSubhead,
+                            height: 1.5,
+                          ),
                         ),
                       ],
                     ),
@@ -1847,22 +1983,25 @@ class _DetailPageState extends State<DetailPage> {
                                   width: 12,
                                   height: 12,
                                   child: CircularProgressIndicator(
-                                      strokeWidth: 1.5,
-                                      color: AppTheme.accentColor),
+                                    strokeWidth: 1.5,
+                                    color: AppTheme.accentColor,
+                                  ),
                                 ),
                                 const SizedBox(width: 6),
-                                Text('搜索中',
-                                    style: TextStyle(
-                                        color: AppTheme.textTertiary,
-                                        fontSize: 12)),
+                                Text(
+                                  '搜索中',
+                                  style: TextStyle(
+                                    color: AppTheme.textTertiary,
+                                    fontSize: AppTheme.fontFootnote,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
                         ),
                       ...sites.map((site) {
                         final sel = selectedKey == site.key;
-                        final count =
-                            _quickSearch.resultCount[site.key] ?? 0;
+                        final count = _quickSearch.resultCount[site.key] ?? 0;
                         return Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: GestureDetector(
@@ -1870,17 +2009,21 @@ class _DetailPageState extends State<DetailPage> {
                             onTap: () => _quickSearch.selectSite(site.key),
                             child: Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 7),
+                                horizontal: 12,
+                                vertical: 7,
+                              ),
                               decoration: BoxDecoration(
                                 color: sel
-                                    ? AppTheme.accentColor
-                                        .withValues(alpha: 0.22)
+                                    ? AppTheme.accentColor.withValues(
+                                        alpha: 0.22,
+                                      )
                                     : Colors.white.withValues(alpha: 0.06),
                                 borderRadius: BorderRadius.circular(20),
                                 border: Border.all(
                                   color: sel
-                                      ? AppTheme.accentColor
-                                          .withValues(alpha: 0.55)
+                                      ? AppTheme.accentColor.withValues(
+                                          alpha: 0.55,
+                                        )
                                       : Colors.white24,
                                 ),
                               ),
@@ -1893,25 +2036,27 @@ class _DetailPageState extends State<DetailPage> {
                                       color: sel
                                           ? AppTheme.textPrimary
                                           : AppTheme.textSecondary,
-                                      fontSize: 12.5,
+                                      fontSize: AppTheme.fontSubhead,
                                     ),
                                   ),
                                   if (count > 0) ...[
                                     const SizedBox(width: 6),
                                     Container(
                                       padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 1),
+                                        horizontal: 6,
+                                        vertical: 1,
+                                      ),
                                       decoration: BoxDecoration(
-                                        color: AppTheme.accentColor
-                                            .withValues(alpha: 0.20),
-                                        borderRadius:
-                                            BorderRadius.circular(9),
+                                        color: AppTheme.accentColor.withValues(
+                                          alpha: 0.20,
+                                        ),
+                                        borderRadius: BorderRadius.circular(9),
                                       ),
                                       child: Text(
                                         '$count',
                                         style: TextStyle(
                                           color: AppTheme.accentColor,
-                                          fontSize: 11,
+                                          fontSize: AppTheme.fontCaption,
                                           fontWeight: FontWeight.w600,
                                         ),
                                       ),
@@ -1937,10 +2082,12 @@ class _DetailPageState extends State<DetailPage> {
                         searching
                             ? '正在搜索各源...'
                             : (_quickSearchDoneFor == null
-                                ? '输入关键词开始搜索'
-                                : '该源没有相关结果'),
+                                  ? '输入关键词开始搜索'
+                                  : '该源没有相关结果'),
                         style: TextStyle(
-                            color: AppTheme.textTertiary, fontSize: 13),
+                          color: AppTheme.textTertiary,
+                          fontSize: AppTheme.fontSubhead,
+                        ),
                       ),
                     ),
                   )
@@ -1950,7 +2097,8 @@ class _DetailPageState extends State<DetailPage> {
                       // 与推荐区同一套算法：网格高度必须跟 VodCard 配套
                       // （卡片高 = 宽 × 0.72 + 文字区），否则卡片被拉长、封面失真。
                       const cols = 3;
-                      final cardW = (constraints.maxWidth -
+                      final cardW =
+                          (constraints.maxWidth -
                               AppTheme.spacingLG * 2 -
                               AppTheme.cardSpacing * (cols - 1)) /
                           cols;
@@ -1958,8 +2106,7 @@ class _DetailPageState extends State<DetailPage> {
                       return GridView.builder(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate:
-                            SliverGridDelegateWithFixedCrossAxisCount(
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: cols,
                           childAspectRatio: ratio,
                           mainAxisSpacing: AppTheme.cardSpacing,
@@ -1971,8 +2118,7 @@ class _DetailPageState extends State<DetailPage> {
                           return VodCard(
                             video: v,
                             posterHeightRatio: 0.72,
-                            onTap: () =>
-                                Get.toNamed('/detail', arguments: v),
+                            onTap: () => Get.toNamed('/detail', arguments: v),
                           );
                         },
                       );
@@ -2005,8 +2151,10 @@ class _DetailPageState extends State<DetailPage> {
     return Obx(() {
       final info = _controller.vodInfo.value;
       if (info == null) return const SizedBox.shrink();
-      final isCollected =
-          CacheStore.instance.isCollected(info.id, info.sourceKey);
+      final isCollected = CacheStore.instance.isCollected(
+        info.id,
+        info.sourceKey,
+      );
 
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -2204,7 +2352,10 @@ class _DetailPageState extends State<DetailPage> {
           padding: const EdgeInsets.symmetric(vertical: AppTheme.spacingMD),
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [AppTheme.accentColor, AppTheme.accentColor.withValues(alpha: 0.75)],
+              colors: [
+                AppTheme.accentColor,
+                AppTheme.accentColor.withValues(alpha: 0.75),
+              ],
             ),
             borderRadius: BorderRadius.circular(AppTheme.radiusMD),
           ),
@@ -2241,36 +2392,46 @@ class _DetailPageState extends State<DetailPage> {
     }
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingLG, AppTheme.spacingMD, AppTheme.spacingLG, 0),
+        AppTheme.spacingLG,
+        AppTheme.spacingMD,
+        AppTheme.spacingLG,
+        0,
+      ),
       child: AppCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (hasFlag) ...[
-              const SectionHeader(title: '播放源', icon: Icons.settings_input_antenna),
+              const SectionHeader(
+                title: '播放源',
+                icon: Icons.settings_input_antenna,
+              ),
               const SizedBox(height: AppTheme.spacingSM),
-              Obx(() => SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: _controller.flags.map((flag) {
-                        final isSelected =
-                            _controller.selectedFlag.value == flag;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: AppTheme.spacingSM),
-                          child: _PillChip(
-                            title: flag,
-                            isSelected: isSelected,
-                            onTap: () {
-                              _controller.selectFlag(flag);
-                              if (_controller.isPlaying.value) {
-                                _saveHistoryForCurrentEpisode();
-                              }
-                            },
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  )),
+              Obx(
+                () => SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: _controller.flags.map((flag) {
+                      final isSelected = _controller.selectedFlag.value == flag;
+                      return Padding(
+                        padding: const EdgeInsets.only(
+                          right: AppTheme.spacingSM,
+                        ),
+                        child: _PillChip(
+                          title: flag,
+                          isSelected: isSelected,
+                          onTap: () {
+                            _controller.selectFlag(flag);
+                            if (_controller.isPlaying.value) {
+                              _saveHistoryForCurrentEpisode();
+                            }
+                          },
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
             ],
             // 清晰度：三段式卡片之前把 hasQuality 算出来了却没渲染，
             // 导致 qualityOptions（HLS master 解析出的多档码率）用户完全点不到。
@@ -2280,28 +2441,32 @@ class _DetailPageState extends State<DetailPage> {
               const SizedBox(height: AppTheme.spacingMD),
               const SectionHeader(title: '清晰度', icon: Icons.auto_awesome),
               const SizedBox(height: AppTheme.spacingSM),
-              Obx(() => SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: _controller.qualityOptions.map((option) {
-                        final isSelected =
-                            _controller.selectedQualityId.value == option.id;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: AppTheme.spacingSM),
-                          child: _PillChip(
-                            title: option.name,
-                            isSelected: isSelected,
-                            onTap: () {
-                              _controller.selectQuality(option);
-                              if (_controller.isPlaying.value) {
-                                _saveHistoryForCurrentEpisode();
-                              }
-                            },
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  )),
+              Obx(
+                () => SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: _controller.qualityOptions.map((option) {
+                      final isSelected =
+                          _controller.selectedQualityId.value == option.id;
+                      return Padding(
+                        padding: const EdgeInsets.only(
+                          right: AppTheme.spacingSM,
+                        ),
+                        child: _PillChip(
+                          title: option.name,
+                          isSelected: isSelected,
+                          onTap: () {
+                            _controller.selectQuality(option);
+                            if (_controller.isPlaying.value) {
+                              _saveHistoryForCurrentEpisode();
+                            }
+                          },
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
             ],
             if (hasEpisodes) ...[
               const SizedBox(height: AppTheme.spacingMD),
@@ -2309,16 +2474,18 @@ class _DetailPageState extends State<DetailPage> {
               const SizedBox(height: AppTheme.spacingMD),
               const SectionHeader(title: '合集', icon: Icons.list),
               const SizedBox(height: AppTheme.spacingSM),
-              Obx(() => EpisodeListView(
-                    episodeNames: _controller.currentEpisodes
-                        .map((e) => e.name)
-                        .toList(),
-                    selectedIndex: _controller.selectedEpisodeIndex.value,
-                    onEpisodeTap: (index) {
-                      _controller.selectEpisode(index);
-                      _saveHistoryForCurrentEpisode();
-                    },
-                  )),
+              Obx(
+                () => EpisodeListView(
+                  episodeNames: _controller.currentEpisodes
+                      .map((e) => e.name)
+                      .toList(),
+                  selectedIndex: _controller.selectedEpisodeIndex.value,
+                  onEpisodeTap: (index) {
+                    _controller.selectEpisode(index);
+                    _saveHistoryForCurrentEpisode();
+                  },
+                ),
+              ),
             ],
           ],
         ),
@@ -2337,9 +2504,13 @@ class _DetailPageState extends State<DetailPage> {
     final episodeLabel = episodeName.isEmpty
         ? '第${_controller.selectedEpisodeIndex.value + 1}集'
         : episodeName;
-    final progress = (progressOverride ?? _controller.currentPlaybackSeconds()).clamp(0.0, double.infinity).toDouble();
+    final progress = (progressOverride ?? _controller.currentPlaybackSeconds())
+        .clamp(0.0, double.infinity)
+        .toDouble();
     final timeLabel = progress > 0 ? _formatDuration(progress) : '';
-    final playNote = timeLabel.isEmpty ? episodeLabel : '$episodeLabel $timeLabel';
+    final playNote = timeLabel.isEmpty
+        ? episodeLabel
+        : '$episodeLabel $timeLabel';
 
     final playbackState = VodPlaybackState(
       flag: _controller.selectedFlag.value,
@@ -2364,7 +2535,9 @@ class _DetailPageState extends State<DetailPage> {
   void _persistHistoryIfNeeded({required bool force, double? currentProgress}) {
     // force（退出页）时即便暂停也要写，否则暂停返回会丢进度
     if (!force && !_controller.isPlaying.value) return;
-    final progress = (currentProgress ?? _controller.currentPlaybackSeconds()).clamp(0.0, double.infinity).toDouble();
+    final progress = (currentProgress ?? _controller.currentPlaybackSeconds())
+        .clamp(0.0, double.infinity)
+        .toDouble();
     if (!progress.isFinite) return;
 
     if (!force && (progress - _lastPersistedProgress).abs() < 5) {
@@ -2388,7 +2561,9 @@ class _DetailPageState extends State<DetailPage> {
     if (playbackState == null) return false;
 
     _controller.applyPlaybackState(playbackState);
-    _lastPersistedProgress = playbackState.progressSeconds.clamp(0.0, double.infinity).toDouble();
+    _lastPersistedProgress = playbackState.progressSeconds
+        .clamp(0.0, double.infinity)
+        .toDouble();
     return true;
   }
 
@@ -2584,7 +2759,9 @@ class _SimilarCard extends StatelessWidget {
                         right: 6,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.black.withValues(alpha: 0.62),
                             borderRadius: BorderRadius.circular(7),
@@ -2633,15 +2810,15 @@ class _SimilarCard extends StatelessWidget {
 /// (进入详情页即播放, 不再需要点击绿色播放按钮)
 extension VodInfoExt on VodInfo {
   Video toVideo() => Video(
-        id: id,
-        name: name,
-        pic: pic,
-        note: note,
-        year: year,
-        area: area,
-        director: director,
-        actor: actor,
-        des: des,
-        sourceKey: sourceKey,
-      );
+    id: id,
+    name: name,
+    pic: pic,
+    note: note,
+    year: year,
+    area: area,
+    director: director,
+    actor: actor,
+    des: des,
+    sourceKey: sourceKey,
+  );
 }

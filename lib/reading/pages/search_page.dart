@@ -25,6 +25,7 @@ import 'comic_detail_page.dart';
 import 'download_page.dart';
 import 'favorites_page.dart';
 import 'source_repo_page.dart';
+import '../../common/theme.dart';
 
 /// 日志工具
 void _log(String message) {
@@ -565,7 +566,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     final label = Text(
       src.name,
       style: TextStyle(
-        fontSize: 12,
+        fontSize: AppTheme.fontFootnote,
         fontWeight: FontWeight.w600,
         color: selected
             ? Colors.white
@@ -776,7 +777,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                             Text(
                               '分类筛选',
                               style: TextStyle(
-                                fontSize: 16,
+                                fontSize: AppTheme.fontHeadline,
                                 fontWeight: FontWeight.bold,
                                 color: labelColor,
                               ),
@@ -811,7 +812,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                     child: Text(
                                       g.title,
                                       style: TextStyle(
-                                        fontSize: 13,
+                                        fontSize: AppTheme.fontSubhead,
                                         fontWeight: FontWeight.w600,
                                         color: labelColor,
                                       ),
@@ -850,7 +851,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                           child: Text(
                                             o.name,
                                             style: TextStyle(
-                                              fontSize: 12,
+                                              fontSize: AppTheme.fontFootnote,
                                               fontWeight: selected
                                                   ? FontWeight.w600
                                                   : FontWeight.normal,
@@ -1110,7 +1111,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                           Text(
                             '漫画',
                             style: TextStyle(
-                              fontSize: 22,
+                              fontSize: AppTheme.fontPageTitle,
                               fontWeight: FontWeight.bold,
                               color: isDark
                                   ? Colors.white
@@ -1257,7 +1258,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             Text(
               hasConfigured ? '漫画源已锁定' : '暂无漫画源',
               style: TextStyle(
-                fontSize: 17,
+                fontSize: AppTheme.fontTitle3,
                 fontWeight: FontWeight.bold,
                 color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
               ),
@@ -1267,7 +1268,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
               hasConfigured
                   ? '漫画源已锁定：未能连接密钥服务器，请检查网络后重启软件'
                   : '请到「漫画源仓库」填入云端地址并更新',
-              style: TextStyle(fontSize: 13, color: JellyTheme.textSecondary),
+              style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),
@@ -1401,7 +1402,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 Text(
                   '搜索历史',
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: AppTheme.fontBody,
                     fontWeight: FontWeight.w600,
                     color: labelColor,
                   ),
@@ -1410,7 +1411,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 if (_history.isNotEmpty)
                   TextButton(
                     onPressed: _clearHistory,
-                    child: const Text('清空', style: TextStyle(fontSize: 13)),
+                    child: const Text('清空', style: TextStyle(fontSize: AppTheme.fontSubhead)),
                   ),
               ],
             ),

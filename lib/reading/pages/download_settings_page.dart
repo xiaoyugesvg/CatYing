@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 /// 下载设置页：保存位置 + 同时下载量 + 分片并发量 + 合并 EPUB 开关
 class DownloadSettingsPage extends StatelessWidget {
@@ -92,7 +93,7 @@ class DownloadSettingsPage extends StatelessWidget {
                   '提示：同时下载量越大，下载越快但更易触发站点风控；'
                   '分片并发量越大，单章下载越快但更耗带宽。',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
                   ),
                 ),
@@ -130,7 +131,7 @@ class DownloadSettingsPage extends StatelessWidget {
                 Text(
                   '保存位置',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: AppTheme.fontHeadline,
                     fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
@@ -141,7 +142,7 @@ class DownloadSettingsPage extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
                   ),
                 ),
@@ -257,7 +258,7 @@ class DownloadSettingsPage extends StatelessWidget {
                 Text(
                   title,
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: AppTheme.fontHeadline,
                     fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
@@ -266,7 +267,7 @@ class DownloadSettingsPage extends StatelessWidget {
                 Text(
                   subtitle,
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
                   ),
                 ),
@@ -306,7 +307,7 @@ class DownloadSettingsPage extends StatelessWidget {
               Text(
                 title,
                 style: TextStyle(
-                  fontSize: 15,
+                  fontSize: AppTheme.fontHeadline,
                   fontWeight: FontWeight.bold,
                   color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                 ),
@@ -324,7 +325,7 @@ class DownloadSettingsPage extends StatelessWidget {
                 child: Text(
                   '$value',
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: AppTheme.fontBody,
                     fontWeight: FontWeight.bold,
                     color: JellyTheme.primary,
                   ),
@@ -335,7 +336,7 @@ class DownloadSettingsPage extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             subtitle,
-            style: TextStyle(fontSize: 12, color: JellyTheme.textSecondary),
+            style: TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary),
           ),
           Slider(
             value: value.toDouble(),
@@ -349,12 +350,12 @@ class DownloadSettingsPage extends StatelessWidget {
             children: [
               Text(
                 '$min',
-                style: TextStyle(fontSize: 11, color: JellyTheme.textSecondary),
+                style: TextStyle(fontSize: AppTheme.fontCaption, color: JellyTheme.textSecondary),
               ),
               const Spacer(),
               Text(
                 '$max',
-                style: TextStyle(fontSize: 11, color: JellyTheme.textSecondary),
+                style: TextStyle(fontSize: AppTheme.fontCaption, color: JellyTheme.textSecondary),
               ),
             ],
           ),

@@ -7,6 +7,7 @@ import '../../../common/theme.dart';
 import '../../../widgets/common_widgets.dart';
 import '../../webview/view.dart';
 import 'settings_shared.dart';
+import '../../../widgets/app_toast.dart';
 
 /// 弹幕服务来源
 enum DanmuSource {
@@ -18,8 +19,10 @@ enum DanmuSource {
   final String id;
   final String label;
 
-  static DanmuSource fromId(String? v) => DanmuSource.values
-      .firstWhere((e) => e.id == v, orElse: () => DanmuSource.remote);
+  static DanmuSource fromId(String? v) => DanmuSource.values.firstWhere(
+    (e) => e.id == v,
+    orElse: () => DanmuSource.remote,
+  );
 }
 
 /// 设置 → 弹幕服务（详细）
@@ -80,19 +83,17 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
       _colorMode = p.getString('danmu_color_mode') ?? 'builtin';
       _blockWords = p.getStringList('danmu_block_words') ?? const [];
 
-      _fontSize =
-          (p.getDouble('danmu_font_size') ?? 16).clamp(10.0, 28.0);
-      _lineSpacing =
-          (p.getDouble('danmu_line_spacing') ?? 1.6).clamp(1.0, 3.0);
+      _fontSize = (p.getDouble('danmu_font_size') ?? 16).clamp(10.0, 28.0);
+      _lineSpacing = (p.getDouble('danmu_line_spacing') ?? 1.6).clamp(1.0, 3.0);
       _opacity = (p.getDouble('danmu_opacity') ?? 1.0).clamp(0.2, 1.0);
-      _areaRatio =
-          (p.getDouble('danmu_area_ratio') ?? 1.0).clamp(0.25, 1.0);
+      _areaRatio = (p.getDouble('danmu_area_ratio') ?? 1.0).clamp(0.25, 1.0);
       _speed = (p.getDouble('danmu_speed') ?? 150).clamp(60.0, 300.0);
-      _strokeWidth =
-          (p.getDouble('danmu_stroke_width') ?? 1.5).clamp(0.0, 3.0);
+      _strokeWidth = (p.getDouble('danmu_stroke_width') ?? 1.5).clamp(0.0, 3.0);
       _fontWeight = p.getInt('danmu_font_weight') ?? 500;
-      _delaySeconds =
-          (p.getDouble('danmu_delay_seconds') ?? 0.0).clamp(-5.0, 5.0);
+      _delaySeconds = (p.getDouble('danmu_delay_seconds') ?? 0.0).clamp(
+        -5.0,
+        5.0,
+      );
     });
   }
 
@@ -163,10 +164,13 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
                 children: [
                   Padding(
                     padding: const EdgeInsets.only(left: 2, bottom: 8),
-                    child: Text('弹幕服务来源',
-                        style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: AppTheme.fontSubhead)),
+                    child: Text(
+                      '弹幕服务来源',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: AppTheme.fontSubhead,
+                      ),
+                    ),
                   ),
                   _sourceSelector(),
                 ],
@@ -197,31 +201,38 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
                           color: AppTheme.accentColor.withValues(alpha: 0.16),
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
-                              color:
-                                  AppTheme.accentColor.withValues(alpha: 0.24),
-                              width: 0.5),
+                            color: AppTheme.accentColor.withValues(alpha: 0.24),
+                            width: 0.5,
+                          ),
                         ),
-                        child: Icon(Icons.public,
-                            size: 19, color: AppTheme.accentColor),
+                        child: Icon(
+                          Icons.public,
+                          size: 19,
+                          color: AppTheme.accentColor,
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('自定义远程服务',
-                                style: TextStyle(
-                                    color: AppTheme.textPrimary,
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600)),
+                            Text(
+                              '自定义远程服务',
+                              style: TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontSize: AppTheme.fontHeadline,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                             const SizedBox(height: 2),
                             Text(
                               _apiUrl.isEmpty ? '未配置' : _apiUrl,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                  color: AppTheme.textTertiary,
-                                  fontSize: AppTheme.fontCaption),
+                                color: AppTheme.textTertiary,
+                                fontSize: AppTheme.fontCaption,
+                              ),
                             ),
                           ],
                         ),
@@ -235,10 +246,13 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('服务地址',
-                          style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: AppTheme.fontSubhead)),
+                      Text(
+                        '服务地址',
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: AppTheme.fontSubhead,
+                        ),
+                      ),
                       const SizedBox(height: 6),
                       _urlField(),
                     ],
@@ -255,14 +269,18 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: AppTheme.accentColor,
-                        borderRadius:
-                            BorderRadius.circular(AppTheme.glassRadiusSmall),
+                        borderRadius: BorderRadius.circular(
+                          AppTheme.glassRadiusSmall,
+                        ),
                       ),
-                      child: const Text('保存',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600)),
+                      child: const Text(
+                        '保存',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -277,16 +295,22 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
                       height: 44,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        borderRadius:
-                            BorderRadius.circular(AppTheme.glassRadiusSmall),
+                        borderRadius: BorderRadius.circular(
+                          AppTheme.glassRadiusSmall,
+                        ),
                         border: Border.all(
-                            color: AppTheme.accentColor, width: 1),
+                          color: AppTheme.accentColor,
+                          width: 1,
+                        ),
                       ),
-                      child: Text('打开网页',
-                          style: TextStyle(
-                              color: AppTheme.accentColor,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600)),
+                      child: Text(
+                        '打开网页',
+                        style: TextStyle(
+                          color: AppTheme.accentColor,
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -463,9 +487,10 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
             '播放器按视频 URL 匹配弹幕（{API}/api/v2/comment?url=...）。\n'
             'spider 源的 CDN 直链常匹配不到，此时会自动改用片名在各源搜索兜底。',
             style: TextStyle(
-                color: AppTheme.textTertiary,
-                fontSize: AppTheme.fontCaption,
-                height: 1.5),
+              color: AppTheme.textTertiary,
+              fontSize: AppTheme.fontCaption,
+              height: 1.5,
+            ),
           ),
         ),
       ],
@@ -473,10 +498,10 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
   }
 
   String get _colorModeText => switch (_colorMode) {
-        'white' => '统一白色',
-        'custom' => '自定义',
-        _ => '自带色',
-      };
+    'white' => '统一白色',
+    'custom' => '自定义',
+    _ => '自带色',
+  };
 
   // ============================================================
   // 组件
@@ -505,8 +530,7 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
                 onTap: () async {
                   setState(() => _source = DanmuSource.values[i]);
                   final p = await SharedPreferences.getInstance();
-                  await p.setString(
-                      'danmu_source', DanmuSource.values[i].id);
+                  await p.setString('danmu_source', DanmuSource.values[i].id);
                 },
                 child: Container(
                   alignment: Alignment.center,
@@ -517,18 +541,19 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
                         : Colors.transparent,
                     borderRadius: BorderRadius.circular(9),
                     border: _source == DanmuSource.values[i]
-                        ? Border.all(
-                            color: AppTheme.glassBorder, width: 0.6)
+                        ? Border.all(color: AppTheme.glassBorder, width: 0.6)
                         : null,
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(_sourceIcon(DanmuSource.values[i]),
-                          size: 13,
-                          color: _source == DanmuSource.values[i]
-                              ? AppTheme.textPrimary
-                              : AppTheme.textSecondary),
+                      Icon(
+                        _sourceIcon(DanmuSource.values[i]),
+                        size: 13,
+                        color: _source == DanmuSource.values[i]
+                            ? AppTheme.textPrimary
+                            : AppTheme.textSecondary,
+                      ),
                       const SizedBox(width: 4),
                       Text(
                         DanmuSource.values[i].label,
@@ -554,10 +579,10 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
   }
 
   IconData _sourceIcon(DanmuSource s) => switch (s) {
-        DanmuSource.local => Icons.cloud_off,
-        DanmuSource.builtin => Icons.cloud_outlined,
-        DanmuSource.remote => Icons.dns_outlined,
-      };
+    DanmuSource.local => Icons.cloud_off,
+    DanmuSource.builtin => Icons.cloud_outlined,
+    DanmuSource.remote => Icons.dns_outlined,
+  };
 
   Widget _urlField() {
     final ctrl = TextEditingController(text: _apiUrl)
@@ -575,12 +600,17 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
             child: TextField(
               controller: ctrl,
               cursorColor: AppTheme.accentColor,
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontBody,
+              ),
               onChanged: (v) => _apiUrl = v,
               decoration: InputDecoration(
                 hintText: 'https://dm.example.com/your-token',
                 hintStyle: TextStyle(
-                    color: AppTheme.textTertiary, fontSize: 13),
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontSubhead,
+                ),
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 12),
@@ -593,8 +623,7 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
                 ctrl.clear();
                 setState(() => _apiUrl = '');
               },
-              child: Icon(Icons.cancel,
-                  size: 17, color: AppTheme.textTertiary),
+              child: Icon(Icons.cancel, size: 17, color: AppTheme.textTertiary),
             ),
         ],
       ),
@@ -617,27 +646,31 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
         children: [
           Row(
             children: [
-              Text(label,
-                  style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: AppTheme.fontSubhead + 0.5)),
+              Text(
+                label,
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontSubhead + 0.5,
+                ),
+              ),
               const Spacer(),
-              Text(text,
-                  style: TextStyle(
-                      color: AppTheme.textTertiary,
-                      fontSize: AppTheme.fontSubhead)),
+              Text(
+                text,
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontSubhead,
+                ),
+              ),
             ],
           ),
           SliderTheme(
             data: SliderThemeData(
               trackHeight: 3,
               activeTrackColor: AppTheme.accentColor,
-              inactiveTrackColor:
-                  AppTheme.textTertiary.withValues(alpha: 0.28),
+              inactiveTrackColor: AppTheme.textTertiary.withValues(alpha: 0.28),
               thumbColor: AppTheme.accentColor,
               overlayColor: AppTheme.accentColor.withValues(alpha: 0.12),
-              thumbShape:
-                  const RoundSliderThumbShape(enabledThumbRadius: 7),
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
             ),
             child: Slider(
               value: value.clamp(min, max),
@@ -661,15 +694,13 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
     await p.setString('danmu_api_url', _apiUrl.trim());
     _apiUrl = _apiUrl.trim();
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('已保存')));
+    AppToast.message('已保存');
   }
 
   Future<void> _openWeb() async {
     final url = _apiUrl.trim();
     if (url.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('请先填写服务地址')));
+      AppToast.message('请先填写服务地址');
       return;
     }
     // 用应用内的 WebView 页面浏览弹幕服务（它没有命名路由，直接构造）
@@ -821,13 +852,19 @@ class _DanmuPreviewState extends State<_DanmuPreview>
                 top: 8,
                 child: Row(
                   children: [
-                    Icon(Icons.play_circle_outline,
-                        size: 12, color: Colors.white.withValues(alpha: 0.35)),
+                    Icon(
+                      Icons.play_circle_outline,
+                      size: 12,
+                      color: Colors.white.withValues(alpha: 0.35),
+                    ),
                     const SizedBox(width: 4),
-                    Text('预览',
-                        style: TextStyle(
-                            fontSize: 10,
-                            color: Colors.white.withValues(alpha: 0.35))),
+                    Text(
+                      '预览',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontCaption,
+                        color: Colors.white.withValues(alpha: 0.35),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -858,10 +895,13 @@ class _DanmuPreviewState extends State<_DanmuPreview>
                                 ? null
                                 : [
                                     Shadow(
-                                        color: Colors.black,
-                                        blurRadius: widget.strokeWidth),
+                                      color: Colors.black,
+                                      blurRadius: widget.strokeWidth,
+                                    ),
                                     const Shadow(
-                                        color: Colors.black, blurRadius: 2),
+                                      color: Colors.black,
+                                      blurRadius: 2,
+                                    ),
                                   ],
                           ),
                         ),

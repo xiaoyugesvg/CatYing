@@ -1,9 +1,10 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
 import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
+import '../../common/theme.dart';
 
 /// 音乐模块的通用 UI 组件 —— 对应 Beans 的 `Components.swift` / `SongCell.swift`。
 ///
@@ -106,7 +107,7 @@ class VipBadge extends StatelessWidget {
         'VIP',
         style: TextStyle(
           color: Colors.white,
-          fontSize: 9,
+          fontSize: AppTheme.fontCaption,
           fontWeight: FontWeight.w700,
           height: 1.2,
         ),
@@ -175,7 +176,7 @@ class SongCell extends StatelessWidget {
                         color: isCurrent
                             ? MusicTheme.tint
                             : MusicTheme.secondary,
-                        fontSize: 13,
+                        fontSize: AppTheme.fontSubhead,
                         fontWeight:
                             isCurrent ? FontWeight.w600 : FontWeight.w400,
                       ),
@@ -199,7 +200,7 @@ class SongCell extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 color: titleColor,
-                                fontSize: 15,
+                                fontSize: AppTheme.fontHeadline,
                                 fontWeight: isCurrent
                                     ? FontWeight.w600
                                     : FontWeight.w400,
@@ -218,7 +219,7 @@ class SongCell extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                            color: MusicTheme.secondary, fontSize: 12),
+                            color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
                       ),
                     ],
                   ),
@@ -286,13 +287,13 @@ Future<void> showSongActions(
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                               color: MusicTheme.label,
-                              fontSize: 15,
+                              fontSize: AppTheme.fontHeadline,
                               fontWeight: FontWeight.w600)),
                       Text(song.artists,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                              color: MusicTheme.secondary, fontSize: 12)),
+                              color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
                     ],
                   ),
                 ),
@@ -320,7 +321,7 @@ Future<void> showSongActions(
             leading: Icon(Icons.person_outline_rounded, color: MusicTheme.tint),
             title: Text('查看歌手', style: TextStyle(color: MusicTheme.label)),
             subtitle: Text(song.artists,
-                style: TextStyle(color: MusicTheme.secondary, fontSize: 12)),
+                style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
             onTap: () => Navigator.pop(ctx),
           ),
           const SizedBox(height: 8),
@@ -391,14 +392,14 @@ class SectionTitle extends StatelessWidget {
             height: 15,
             decoration: BoxDecoration(
               gradient: LinearGradient(colors: MusicTheme.accentGradient),
-              borderRadius: BorderRadius.circular(2),
+              borderRadius: BorderRadius.circular(10),
             ),
           ),
           const SizedBox(width: 8),
           Text(title,
               style: TextStyle(
                   color: MusicTheme.label,
-                  fontSize: 18,
+                  fontSize: AppTheme.fontTitle3,
                   fontWeight: FontWeight.w700)),
           const Spacer(),
           if (action != null)
@@ -408,7 +409,7 @@ class SectionTitle extends StatelessWidget {
                 children: [
                   Text(action!,
                       style:
-                          TextStyle(color: MusicTheme.secondary, fontSize: 13)),
+                          TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
                   Icon(Icons.chevron_right,
                       size: 16, color: MusicTheme.secondary),
                 ],
@@ -490,12 +491,12 @@ class CoverCard extends StatelessWidget {
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.55),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(badge!,
                         style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 10,
+                            fontSize: AppTheme.fontCaption,
                             fontWeight: FontWeight.w600)),
                   ),
                 ),
@@ -506,12 +507,12 @@ class CoverCard extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  color: MusicTheme.label, fontSize: 12, height: 1.3)),
+                  color: MusicTheme.label, fontSize: AppTheme.fontFootnote, height: 1.3)),
           if (subtitle != null)
             Text(subtitle!,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: MusicTheme.secondary, fontSize: 11)),
+                style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontCaption)),
         ],
       ),
     );

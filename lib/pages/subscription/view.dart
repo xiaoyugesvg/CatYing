@@ -7,6 +7,7 @@ import '../../services/api_config.dart';
 import '../../pages/settings/controller.dart';
 import 'edit_page.dart';
 import 'pin_dialog.dart';
+import '../../widgets/app_toast.dart';
 
 /// 订阅列表页 —— 多订阅管理
 ///
@@ -27,32 +28,41 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.backgroundPrimary,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: AppTheme.backgroundPrimary,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: IconThemeData(color: AppTheme.textPrimary),
-        title: Text('订阅',
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 17)),
+        title: Text(
+          '订阅',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontTitle3,
+          ),
+        ),
         actions: [
           // 「同步」：手动触发所有勾了自动更新的订阅拉一遍（忽略时间节流）
-          Obx(() => svc.syncingId.value.isNotEmpty
-              ? Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Center(
-                    child: SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 1.8, color: AppTheme.accentColor),
+          Obx(
+            () => svc.syncingId.value.isNotEmpty
+                ? Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Center(
+                      child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.8,
+                          color: AppTheme.accentColor,
+                        ),
+                      ),
                     ),
+                  )
+                : IconButton(
+                    icon: Icon(Icons.sync, color: AppTheme.accentColor),
+                    tooltip: '立即同步全部',
+                    onPressed: _syncAll,
                   ),
-                )
-              : IconButton(
-                  icon: Icon(Icons.sync, color: AppTheme.accentColor),
-                  tooltip: '立即同步全部',
-                  onPressed: _syncAll,
-                )),
+          ),
           // 「编辑」：进入后卡片右侧变成删除按钮
           GestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -63,9 +73,10 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 child: Text(
                   _editing ? '完成' : '编辑',
                   style: TextStyle(
-                      color: AppTheme.accentColor,
-                      fontSize: AppTheme.fontSubhead,
-                      fontWeight: FontWeight.w600),
+                    color: AppTheme.accentColor,
+                    fontSize: AppTheme.fontSubhead,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ),
@@ -85,26 +96,38 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.rss_feed,
-                    size: 44,
-                    color: AppTheme.textTertiary.withValues(alpha: 0.5)),
+                Icon(
+                  Icons.rss_feed,
+                  size: 44,
+                  color: AppTheme.textTertiary.withValues(alpha: 0.5),
+                ),
                 const SizedBox(height: 14),
-                Text('还没有订阅',
-                    style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: AppTheme.fontSubhead)),
+                Text(
+                  '还没有订阅',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: AppTheme.fontSubhead,
+                  ),
+                ),
                 const SizedBox(height: 6),
-                Text('点右上角「＋」添加一个接口地址',
-                    style: TextStyle(
-                        color: AppTheme.textTertiary,
-                        fontSize: AppTheme.fontCaption)),
+                Text(
+                  '点右上角「＋」添加一个接口地址',
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
+                ),
               ],
             ),
           );
         }
         return ListView.separated(
           padding: const EdgeInsets.fromLTRB(
-              AppTheme.spacingLG, AppTheme.spacingSM, AppTheme.spacingLG, 28),
+            AppTheme.spacingLG,
+            AppTheme.spacingSM,
+            AppTheme.spacingLG,
+            28,
+          ),
           itemCount: list.length,
           separatorBuilder: (_, __) => const SizedBox(height: 10),
           itemBuilder: (context, i) {
@@ -147,8 +170,11 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 color: AppTheme.accentColor.withValues(alpha: 0.16),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child:
-                  Icon(Icons.rss_feed, size: 20, color: AppTheme.accentColor),
+              child: Icon(
+                Icons.rss_feed,
+                size: 20,
+                color: AppTheme.accentColor,
+              ),
             ),
             const SizedBox(width: 12),
             // 名称 + 地址 + 上次更新
@@ -164,25 +190,32 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600),
+                            color: AppTheme.textPrimary,
+                            fontSize: AppTheme.fontHeadline,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                       if (s.locked) ...[
                         const SizedBox(width: 6),
-                        Icon(Icons.lock,
-                            size: 13, color: AppTheme.textTertiary),
+                        Icon(
+                          Icons.lock,
+                          size: 13,
+                          color: AppTheme.textTertiary,
+                        ),
                       ],
                     ],
                   ),
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      Text('网络地址',
-                          style: TextStyle(
-                              color: AppTheme.textTertiary,
-                              fontSize: AppTheme.fontCaption)),
+                      Text(
+                        '网络地址',
+                        style: TextStyle(
+                          color: AppTheme.textTertiary,
+                          fontSize: AppTheme.fontCaption,
+                        ),
+                      ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
@@ -190,17 +223,21 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: AppTheme.fontCaption),
+                            color: AppTheme.textSecondary,
+                            fontSize: AppTheme.fontCaption,
+                          ),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 4),
-                  Text('上次更新 ${s.lastUpdatedText}',
-                      style: TextStyle(
-                          color: AppTheme.textTertiary,
-                          fontSize: AppTheme.fontCaption)),
+                  Text(
+                    '上次更新 ${s.lastUpdatedText}',
+                    style: TextStyle(
+                      color: AppTheme.textTertiary,
+                      fontSize: AppTheme.fontCaption,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -212,8 +249,11 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 onTap: () => _confirmDelete(s),
                 child: Padding(
                   padding: const EdgeInsets.all(6),
-                  child: Icon(Icons.delete_outline,
-                      size: 20, color: Colors.redAccent),
+                  child: Icon(
+                    Icons.delete_outline,
+                    size: 20,
+                    color: Colors.redAccent,
+                  ),
                 ),
               )
             else
@@ -236,7 +276,9 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
               : AppTheme.accentColor.withValues(alpha: 0.14),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-              color: AppTheme.accentColor.withValues(alpha: 0.5), width: 0.8),
+            color: AppTheme.accentColor.withValues(alpha: 0.5),
+            width: 0.8,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -270,9 +312,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     if (!mounted) return;
     await _applyActiveToApi();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已激活「${s.name}」')),
-    );
+    AppToast.message('已激活「${s.name}」');
   }
 
   Future<bool> _askPin() async {
@@ -284,8 +324,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     final pin = r.substring(3);
     final ok = await svc.verifyPin(pin);
     if (!ok && mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('密码不正确')));
+      AppToast.message('密码不正确');
     }
     return ok;
   }
@@ -305,8 +344,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       await svc.markSynced(a.id, ApiConfig.instance.configUrl.value);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('加载失败：$e')));
+        AppToast.message('加载失败：$e');
       }
     }
   }
@@ -316,17 +354,13 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     final svc = SubscriptionService.instance;
     final targets = svc.subscriptions.where((s) => s.autoUpdate).toList();
     if (targets.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('没有开启「自动更新」的订阅')),
-      );
+      AppToast.message('没有开启「自动更新」的订阅');
       return;
     }
     await svc.syncAllNow();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(svc.lastSyncMessage.value.isEmpty
-          ? '同步完成'
-          : svc.lastSyncMessage.value)),
+    AppToast.message(
+      svc.lastSyncMessage.value.isEmpty ? '同步完成' : svc.lastSyncMessage.value,
     );
   }
 
@@ -342,16 +376,17 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.backgroundSecondary,
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppTheme.glassRadius)),
-        title: Text('删除订阅',
-            style: TextStyle(color: AppTheme.textPrimary)),
-        content: Text('确定删除「${s.name}」？',
-            style: TextStyle(color: AppTheme.textSecondary)),
+          borderRadius: BorderRadius.circular(AppTheme.glassRadius),
+        ),
+        title: Text('删除订阅', style: TextStyle(color: AppTheme.textPrimary)),
+        content: Text(
+          '确定删除「${s.name}」？',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('取消',
-                style: TextStyle(color: AppTheme.textTertiary)),
+            child: Text('取消', style: TextStyle(color: AppTheme.textTertiary)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),

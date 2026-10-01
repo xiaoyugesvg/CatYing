@@ -247,7 +247,7 @@ class _SourceRow extends StatelessWidget {
                     color: selected
                         ? AppTheme.textPrimary
                         : AppTheme.textSecondary,
-                    fontSize: 14,
+                    fontSize: AppTheme.fontBody,
                     fontWeight:
                         selected ? FontWeight.w600 : FontWeight.normal,
                   ),
@@ -308,13 +308,13 @@ class _ExpandableSearchFieldState extends State<_ExpandableSearchField> {
             child: TextField(
               controller: widget.controller,
               focusNode: _focus,
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontSubhead),
               onChanged: widget.onChanged,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
                 hintText: '搜索源…',
                 hintStyle:
-                    TextStyle(color: AppTheme.textTertiary, fontSize: 13),
+                    TextStyle(color: AppTheme.textTertiary, fontSize: AppTheme.fontSubhead),
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 8),
@@ -389,7 +389,7 @@ class _SourceTile extends StatelessWidget {
                   color: selected
                       ? AppTheme.textPrimary
                       : AppTheme.textSecondary,
-                  fontSize: 13,
+                  fontSize: AppTheme.fontSubhead,
                   fontWeight:
                       selected ? FontWeight.w600 : FontWeight.normal,
                 ),

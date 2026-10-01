@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import 'jelly_palette.dart';
+import '../../common/theme.dart';
 
 /// 果冻风主题配置
 ///
@@ -95,7 +96,7 @@ class JellyTheme {
         backgroundColor: backgroundLight,
         foregroundColor: textPrimaryLight,
         titleTextStyle: TextStyle(
-          fontSize: 18,
+          fontSize: AppTheme.fontTitle3,
           fontWeight: FontWeight.w600,
           color: textPrimaryLight,
         ),
@@ -140,10 +141,10 @@ class JellyTheme {
 
       // 文字主题
       textTheme: const TextTheme(
-        titleLarge: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-        titleMedium: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-        bodyLarge: TextStyle(fontSize: 16),
-        bodyMedium: TextStyle(fontSize: 14),
+        titleLarge: TextStyle(fontSize: AppTheme.fontPageTitle, fontWeight: FontWeight.bold),
+        titleMedium: TextStyle(fontSize: AppTheme.fontTitle3, fontWeight: FontWeight.w600),
+        bodyLarge: TextStyle(fontSize: AppTheme.fontHeadline),
+        bodyMedium: TextStyle(fontSize: AppTheme.fontBody),
       ),
     );
   }
@@ -171,7 +172,7 @@ class JellyTheme {
         backgroundColor: backgroundDark,
         foregroundColor: textPrimaryDark,
         titleTextStyle: TextStyle(
-          fontSize: 18,
+          fontSize: AppTheme.fontTitle3,
           fontWeight: FontWeight.w600,
           color: textPrimaryDark,
         ),
@@ -216,10 +217,10 @@ class JellyTheme {
 
       // 文字主题
       textTheme: const TextTheme(
-        titleLarge: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-        titleMedium: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-        bodyLarge: TextStyle(fontSize: 16, color: Colors.white),
-        bodyMedium: TextStyle(fontSize: 14, color: Colors.white70),
+        titleLarge: TextStyle(fontSize: AppTheme.fontPageTitle, fontWeight: FontWeight.bold),
+        titleMedium: TextStyle(fontSize: AppTheme.fontTitle3, fontWeight: FontWeight.w600),
+        bodyLarge: TextStyle(fontSize: AppTheme.fontHeadline, color: Colors.white),
+        bodyMedium: TextStyle(fontSize: AppTheme.fontBody, color: Colors.white70),
       ),
     );
   }

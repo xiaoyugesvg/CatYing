@@ -12,7 +12,7 @@
 
 import 'dart:convert';
 
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:archive/archive.dart';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
@@ -25,6 +25,7 @@ import '../source/source_config_store.dart';
 import '../source/source_definition.dart';
 import '../source/source_manager.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 class SourceRepoPage extends StatefulWidget {
   const SourceRepoPage({super.key});
@@ -140,13 +141,13 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                   children: [
                     Text('共 ${SourceManager().sources.length} 个',
                         style: TextStyle(
-                            fontSize: 12.5, color: JellyTheme.textSecondary)),
+                            fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
                     const Spacer(),
                     if (SourceManager().sources.isNotEmpty)
                       TextButton(
                         onPressed: _clearAll,
                         child: const Text('清空',
-                            style: TextStyle(fontSize: 12.5)),
+                            style: TextStyle(fontSize: AppTheme.fontSubhead)),
                       ),
                   ],
                 ),
@@ -163,7 +164,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                   controller: _filterCtrl,
                   onChanged: (v) => setState(() => _filter = v),
                   style: TextStyle(
-                      fontSize: 13.5,
+                      fontSize: AppTheme.fontBody,
                       color:
                           isDark ? Colors.white : JellyTheme.textPrimaryLight),
                   decoration: InputDecoration(
@@ -171,7 +172,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                     filled: false,
                     hintText: '筛选已注册的漫画源',
                     hintStyle: TextStyle(
-                        fontSize: 13.5, color: JellyTheme.textSecondary),
+                        fontSize: AppTheme.fontBody, color: JellyTheme.textSecondary),
                     prefixIcon: Icon(Icons.search_rounded,
                         size: 19, color: JellyTheme.textSecondary),
                     prefixIconConstraints:
@@ -260,7 +261,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: _cardNow,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.10),
@@ -273,7 +274,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
         children: [
           Text('已选 ${_selected.length} 项',
               style: TextStyle(
-                  fontSize: 13.5,
+                  fontSize: AppTheme.fontBody,
                   fontWeight: FontWeight.w600,
                   color: isDark ? Colors.white : JellyTheme.textPrimaryLight)),
           const SizedBox(width: 10),
@@ -288,7 +289,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
               }
             }),
             child: Text(allPicked ? '取消全选' : '全选',
-                style: const TextStyle(fontSize: 13)),
+                style: const TextStyle(fontSize: AppTheme.fontSubhead)),
           ),
           const Spacer(),
           // 批量启用/停用：若已选的都启用 → 点它全停用，反之全启用
@@ -360,11 +361,11 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('已复制 ${picked.length} 个漫画源',
-            style: const TextStyle(fontSize: 16)),
+            style: const TextStyle(fontSize: AppTheme.fontHeadline)),
         content: const Text(
           'JSON 已复制到剪贴板，可直接粘贴分享给别人。\n\n'
           '对方用「导入文件」或粘贴导入即可。',
-          style: TextStyle(fontSize: 13, height: 1.6),
+          style: TextStyle(fontSize: AppTheme.fontSubhead, height: 1.6),
         ),
         actions: [
           TextButton(
@@ -530,7 +531,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
           Text(
             '云端仓库',
             style: TextStyle(
-              fontSize: 16,
+              fontSize: AppTheme.fontHeadline,
               fontWeight: FontWeight.w700,
               color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
             ),
@@ -540,20 +541,20 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
             // 截图原文。这句同时回答了用户两个疑问：
             // "会不会把我已有的源冲掉"（不会）+"多个地址怎么处理"（合并去重）
             '导入按地址合并去重，不会覆盖已有源',
-            style: TextStyle(fontSize: 12, color: JellyTheme.textSecondary),
+            style: TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _urlCtrl,
             style: TextStyle(
-              fontSize: 13.5,
+              fontSize: AppTheme.fontBody,
               color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
             ),
             keyboardType: TextInputType.url,
             decoration: InputDecoration(
               hintText: '书源地址（json / zip / 仓库索引）',
               hintStyle: TextStyle(
-                fontSize: 13.5,
+                fontSize: AppTheme.fontBody,
                 color: JellyTheme.textSecondary,
               ),
               filled: true,
@@ -591,7 +592,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                   ),
                   icon: const Icon(Icons.file_upload_outlined, size: 17),
                   label: const Text('导入文件',
-                      style: TextStyle(fontSize: 13.5)),
+                      style: TextStyle(fontSize: AppTheme.fontBody)),
                 ),
               ),
               const SizedBox(width: 10),
@@ -611,7 +612,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                         )
                       : const Icon(Icons.cloud_download_rounded, size: 17),
                   label: const Text('从云端更新',
-                      style: TextStyle(fontSize: 13.5)),
+                      style: TextStyle(fontSize: AppTheme.fontBody)),
                 ),
               ),
             ],
@@ -700,7 +701,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
           Text(
             '还没有漫画源',
             style: TextStyle(
-              fontSize: 17,
+              fontSize: AppTheme.fontTitle3,
               fontWeight: FontWeight.w600,
               color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
             ),
@@ -715,7 +716,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
               '粘贴加密的云端地址后点「从云端更新」，或导入密文文件',
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 12.5,
+                fontSize: AppTheme.fontSubhead,
                 height: 1.6,
                 color: JellyTheme.textSecondary,
               ),
@@ -786,7 +787,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 15,
+                          fontSize: AppTheme.fontHeadline,
                           fontWeight: FontWeight.w600,
                           color: enabled
                               ? (isDark
@@ -814,7 +815,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
                   ),
                 ),
@@ -887,11 +888,11 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('删除漫画源', style: TextStyle(fontSize: 16)),
+        title: Text('删除漫画源', style: TextStyle(fontSize: AppTheme.fontHeadline)),
         content: Text(
           '确定删除「${src.name}」？\n\n'
           '注意：如果它来自云端 sources.json，下次「从云端更新」会重新出现。',
-          style: const TextStyle(fontSize: 13, height: 1.5),
+          style: const TextStyle(fontSize: AppTheme.fontSubhead, height: 1.5),
         ),
         actions: [
           TextButton(
@@ -953,7 +954,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
       child: Text(
         src.name.isNotEmpty ? src.name[0] : '?',
         style: TextStyle(
-          fontSize: 18,
+          fontSize: AppTheme.fontTitle3,
           fontWeight: FontWeight.bold,
           color: JellyTheme.primary,
         ),

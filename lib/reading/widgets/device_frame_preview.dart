@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import '../../common/theme.dart';
 
 /// 设备边框预览组件
 ///
@@ -52,11 +53,11 @@ class DeviceFramePreview extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: frameColor,
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(20),
           border: Border.all(color: frameColor, width: bezelWidth),
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -129,7 +130,7 @@ class DeviceFramePreview extends StatelessWidget {
                         pageIndicator,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 11,
+                          fontSize: AppTheme.fontCaption,
                         ),
                       ),
                     ),

@@ -1,7 +1,7 @@
 import 'dart:math' show min;
 import 'dart:ui';
 
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../models/book.dart';
@@ -24,6 +24,7 @@ import '../widgets/staggered_entrance.dart';
 import '../widgets/source_cover_image.dart';
 import 'book_detail_page.dart';
 import 'comic_detail_page.dart';
+import '../../common/theme.dart';
 
 /// 收藏页面（顶部 Tab：漫画收藏 / 图书收藏）
 class FavoritesPage extends StatefulWidget {
@@ -271,7 +272,7 @@ class _FavoritesPageState extends State<FavoritesPage>
                                 Text(
                                   '收藏',
                                   style: TextStyle(
-                                    fontSize: 22,
+                                    fontSize: AppTheme.fontPageTitle,
                                     fontWeight: FontWeight.bold,
                                     color: isDark
                                         ? Colors.white
@@ -451,7 +452,7 @@ class _FavoritesPageState extends State<FavoritesPage>
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 14,
+                fontSize: AppTheme.fontBody,
                 fontWeight: FontWeight.w600,
                 color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
               ),
@@ -601,7 +602,7 @@ class _FavoritesPageState extends State<FavoritesPage>
                                 '仅显示前 $maxResults 条，共 ${all.length} 条',
                                 style: const TextStyle(
                                   color: Colors.grey,
-                                  fontSize: 12,
+                                  fontSize: AppTheme.fontFootnote,
                                 ),
                               ),
                             ),
@@ -623,7 +624,7 @@ class _FavoritesPageState extends State<FavoritesPage>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return ListTile(
       leading: ClipRRect(
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(10),
         child: SourceCoverImage(
           url: comic.cover,
           width: 40,
@@ -649,7 +650,7 @@ class _FavoritesPageState extends State<FavoritesPage>
         ].whereType<String>().where((s) => s.isNotEmpty).join(' · '),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 12),
+        style: const TextStyle(fontSize: AppTheme.fontFootnote),
       ),
       trailing: Icon(
         Icons.palette_rounded,
@@ -667,7 +668,7 @@ class _FavoritesPageState extends State<FavoritesPage>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return ListTile(
       leading: ClipRRect(
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(10),
         child: (book.cover ?? '').isEmpty
             ? Container(
                 color: Colors.grey[300],
@@ -706,7 +707,7 @@ class _FavoritesPageState extends State<FavoritesPage>
         ].whereType<String>().where((s) => s.isNotEmpty).join(' · '),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 12),
+        style: const TextStyle(fontSize: AppTheme.fontFootnote),
       ),
       trailing: Icon(
         Icons.book_rounded,

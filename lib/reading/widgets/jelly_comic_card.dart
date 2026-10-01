@@ -5,6 +5,7 @@ import '../theme/jelly_theme.dart';
 import 'jelly_favorite_button.dart';
 import 'jelly_score_badge.dart';
 import 'source_cover_image.dart';
+import '../../common/theme.dart';
 
 /// 果冻风漫画卡片
 class JellyComicCard extends StatefulWidget {
@@ -201,12 +202,12 @@ class _JellyComicCardState extends State<JellyComicCard>
                           decoration: BoxDecoration(
                             color: (isDark ? Colors.black : JellyTheme.primary)
                                 .withValues(alpha: 0.75),
-                            borderRadius: BorderRadius.circular(4),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
                             sourceName,
                             style: const TextStyle(
-                              fontSize: 9,
+                              fontSize: AppTheme.fontCaption,
                               color: Colors.white,
                               fontWeight: FontWeight.w700,
                             ),
@@ -234,7 +235,7 @@ class _JellyComicCardState extends State<JellyComicCard>
                             Text(
                               widget.comic.title,
                               style: TextStyle(
-                                fontSize: 13,
+                                fontSize: AppTheme.fontSubhead,
                                 fontWeight: FontWeight.w600,
                                 color: isDark
                                     ? Colors.white
@@ -256,12 +257,12 @@ class _JellyComicCardState extends State<JellyComicCard>
                                   color: JellyTheme.primary.withValues(
                                     alpha: 0.15,
                                   ),
-                                  borderRadius: BorderRadius.circular(8),
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
                                   widget.comic.author!,
                                   style: TextStyle(
-                                    fontSize: 10,
+                                    fontSize: AppTheme.fontCaption,
                                     color: JellyTheme.primary,
                                     fontWeight: FontWeight.w500,
                                   ),

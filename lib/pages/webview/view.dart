@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/app_log.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import '../../common/theme.dart';
 
 /// 应用内 WebView 页面
 ///
@@ -71,7 +72,7 @@ class _InAppWebViewPageState extends State<InAppWebViewPage> {
           widget.title ?? widget.url,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 14),
+          style: const TextStyle(fontSize: AppTheme.fontBody),
         ),
         actions: [
           // 刷新

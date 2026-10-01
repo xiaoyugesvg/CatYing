@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../models/comic.dart';
 import 'source_cover_image.dart';
+import '../../common/theme.dart';
 
 /// 日志工具
 void _log(String message) {
@@ -62,7 +63,7 @@ class ComicCard extends StatelessWidget {
                   Text(
                     comic.title,
                     style: const TextStyle(
-                      fontSize: 13,
+                      fontSize: AppTheme.fontSubhead,
                       fontWeight: FontWeight.w500,
                     ),
                     maxLines: 2,
@@ -72,7 +73,7 @@ class ComicCard extends StatelessWidget {
                   if (comic.author != null && comic.author!.isNotEmpty)
                     Text(
                       comic.author!,
-                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                      style: TextStyle(fontSize: AppTheme.fontCaption, color: Colors.grey[600]),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),

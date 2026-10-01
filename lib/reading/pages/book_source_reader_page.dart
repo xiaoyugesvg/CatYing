@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:flutter/services.dart';
@@ -13,10 +13,11 @@ import '../models/reading_settings.dart';
 import '../services/book_paginator.dart';
 import '../services/book_source_service.dart';
 import '../services/tts_service.dart';
-import '../source/image_cache_manager.dart';
 import '../widgets/book_page_curl.dart';
 import '../widgets/pomodoro_button.dart';
 import 'tts_engine_page.dart';
+import '../../common/theme.dart';
+import '../../widgets/app_image_cache.dart';
 
 /// 书源在线阅读器。
 ///
@@ -509,7 +510,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             const CircularProgressIndicator(strokeWidth: 2),
             const SizedBox(height: 14),
             Text('正在加载正文...',
-                style: TextStyle(fontSize: 13, color: fg.withValues(alpha: 0.6))),
+                style: TextStyle(fontSize: AppTheme.fontSubhead, color: fg.withValues(alpha: 0.6))),
           ],
         ),
       );
@@ -526,7 +527,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               const SizedBox(height: 14),
               Text(_error!,
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 13, color: fg.withValues(alpha: 0.7))),
+                  style: TextStyle(fontSize: AppTheme.fontSubhead, color: fg.withValues(alpha: 0.7))),
               const SizedBox(height: 16),
               TextButton.icon(
                 onPressed: () => _loadChapter(_index),
@@ -553,11 +554,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             const SizedBox(height: 12),
             Text('这一章没有正文',
                 style: TextStyle(
-                    fontSize: 13, color: fg.withValues(alpha: 0.6))),
+                    fontSize: AppTheme.fontSubhead, color: fg.withValues(alpha: 0.6))),
             const SizedBox(height: 6),
             Text('（如果是漫画源，检查 ruleContent.content 是否返回图片）',
                 style: TextStyle(
-                    fontSize: 11.5, color: fg.withValues(alpha: 0.45))),
+                    fontSize: AppTheme.fontFootnote, color: fg.withValues(alpha: 0.45))),
           ],
         ),
       );
@@ -755,7 +756,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     _index + 1 < widget.chapters.length
                         ? '下一章：${widget.chapters[_index + 1].name}'
                         : '已是最后一章',
-                    style: const TextStyle(fontSize: 13),
+                    style: const TextStyle(fontSize: AppTheme.fontSubhead),
                   ),
                 ),
               ),
@@ -766,10 +767,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             child: CachedNetworkImage(
               imageUrl: _images[i],
               // ⚠️ 参数名是 httpHeaders（不是 headers）；
-              // 并且复用项目共享的 comicImageCacheManager ——
+              // 并且复用项目共享的 appImageCacheManager ——
               // 漫画图很大，另建一个 cacheManager 会重复占盘。
               httpHeaders: headers,
-              cacheManager: comicImageCacheManager,
+              cacheManager: appImageCacheManager,
               fit: BoxFit.fitWidth,
               width: double.infinity,
               // 加载中占位：给个和屏幕同比例的空块，避免滚动条乱跳
@@ -791,7 +792,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 margin: const EdgeInsets.symmetric(vertical: 6),
                 decoration: BoxDecoration(
                   color: fg.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -801,10 +802,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     const SizedBox(height: 8),
                     Text('第 ${i + 1} 张加载失败',
                         style: TextStyle(
-                            fontSize: 12, color: fg.withValues(alpha: 0.6))),
+                            fontSize: AppTheme.fontFootnote, color: fg.withValues(alpha: 0.6))),
                     Text('（图床可能需要 Referer，或该图已失效）',
                         style: TextStyle(
-                            fontSize: 11, color: fg.withValues(alpha: 0.45))),
+                            fontSize: AppTheme.fontCaption, color: fg.withValues(alpha: 0.45))),
                   ],
                 ),
               ),
@@ -916,7 +917,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final c = colors[_ttsColor.clamp(0, colors.length - 1)];
     return BoxDecoration(
       color: c.withValues(alpha: 0.22),
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(10),
       // 当前句模式：左侧竖线标出句首位置
       border: _ttsHighlight == 1
           ? Border(left: BorderSide(color: c, width: 3))
@@ -1111,7 +1112,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   }
 
   TextStyle _statusStyle(Color fg) => TextStyle(
-      fontSize: 11, color: fg.withValues(alpha: 0.5));
+      fontSize: AppTheme.fontCaption, color: fg.withValues(alpha: 0.5));
 
   Widget _statusText(String s, Color fg) => Padding(
         padding: const EdgeInsets.only(right: 10),
@@ -1182,7 +1183,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          fontSize: 14,
+                          fontSize: AppTheme.fontBody,
                           fontWeight: FontWeight.w600,
                           color: fg)),
                   // 副标题是**当前章节名**（截图 IMG_8110 里就是"第一章 礼物"），
@@ -1194,7 +1195,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          fontSize: 11,
+                          fontSize: AppTheme.fontCaption,
                           color: fg.withValues(alpha: 0.6))),
                 ],
               ),
@@ -1344,7 +1345,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               const SizedBox(height: 5),
               Text(label,
                   style: TextStyle(
-                      fontSize: 11.5, color: fg.withValues(alpha: 0.88))),
+                      fontSize: AppTheme.fontFootnote, color: fg.withValues(alpha: 0.88))),
             ],
           ),
         ),
@@ -1506,13 +1507,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                 autofocus: true,
                                 onChanged: run,
                                 style: TextStyle(
-                                    fontSize: 14, color: _fg),
+                                    fontSize: AppTheme.fontBody, color: _fg),
                                 decoration: InputDecoration(
                                   isDense: true,
                                   filled: false,
                                   hintText: '搜索全书内容',
                                   hintStyle: TextStyle(
-                                      fontSize: 14, color: _fgMuted),
+                                      fontSize: AppTheme.fontBody, color: _fgMuted),
                                   prefixIcon: Icon(Icons.search_rounded,
                                       size: 19, color: _fgMuted),
                                   prefixIconConstraints:
@@ -1537,7 +1538,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                               ? '输入关键词搜索全书'
                               : '已搜 ${_cache.length} 章缓存 · 命中 ${results.length} 处',
                           style:
-                              TextStyle(fontSize: 12, color: _fgMuted),
+                              TextStyle(fontSize: AppTheme.fontFootnote, color: _fgMuted),
                         ),
                       ),
                     ),
@@ -1556,7 +1557,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                           '所以搜不到不代表书里没有。',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
-                                      fontSize: 13,
+                                      fontSize: AppTheme.fontSubhead,
                                       height: 1.7,
                                       color: _fgMuted),
                                 ),
@@ -1574,13 +1575,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                         ? '章节 · ${r.snippet}'
                                         : widget.chapters[r.ch].name,
                                     style: TextStyle(
-                                        fontSize: 13.5, color: _fg),
+                                        fontSize: AppTheme.fontBody, color: _fg),
                                   ),
                                   subtitle: r.para < 0
                                       ? null
                                       : Text('…${r.snippet}…',
                                           style: TextStyle(
-                                              fontSize: 12, color: _fgMuted)),
+                                              fontSize: AppTheme.fontFootnote, color: _fgMuted)),
                                   onTap: () {
                                     Navigator.pop(ctx);
                                     if (r.ch != _index) _jumpTo(r.ch);
@@ -1656,12 +1657,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       children: [
                         Text('排版',
                             style: TextStyle(
-                                fontSize: 17,
+                                fontSize: AppTheme.fontTitle3,
                                 fontWeight: FontWeight.w700,
                                 color: _fg)),
                         const Spacer(),
                         Text('独立排版',
-                            style: TextStyle(fontSize: 12, color: _fgMuted)),
+                            style: TextStyle(fontSize: AppTheme.fontFootnote, color: _fgMuted)),
                         const SizedBox(width: 4),
                         Switch(value: false, onChanged: null),
                       ],
@@ -1691,7 +1692,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                 child: Text(
                                   _layoutTabs[i],
                                   style: TextStyle(
-                                    fontSize: 13.5,
+                                    fontSize: AppTheme.fontBody,
                                     fontWeight: tab == i
                                         ? FontWeight.w600
                                         : FontWeight.normal,
@@ -1731,17 +1732,17 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         TextButton(
                           onPressed: () => Navigator.pop(ctx),
                           child: Text('取消',
-                              style: TextStyle(fontSize: 14, color: _fg)),
+                              style: TextStyle(fontSize: AppTheme.fontBody, color: _fg)),
                         ),
                         TextButton(
                           onPressed: () => _showSavePresetDialog(ctrl),
                           child: Text('存预设',
-                              style: TextStyle(fontSize: 14, color: _fg)),
+                              style: TextStyle(fontSize: AppTheme.fontBody, color: _fg)),
                         ),
                         TextButton(
                           onPressed: () => Navigator.pop(ctx),
                           child: Text('阅读',
-                              style: TextStyle(fontSize: 14, color: _fg)),
+                              style: TextStyle(fontSize: AppTheme.fontBody, color: _fg)),
                         ),
                         const Spacer(),
                         FilledButton(
@@ -1774,7 +1775,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         const SizedBox(height: 30),
         Center(
           child: Text('暂无预设，调好排版后点「存预设」',
-              style: TextStyle(fontSize: 13, color: _fgMuted)),
+              style: TextStyle(fontSize: AppTheme.fontSubhead, color: _fgMuted)),
         ),
         const SizedBox(height: 30),
       ];
@@ -1783,7 +1784,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       for (final name in presets)
         ListTile(
           contentPadding: EdgeInsets.zero,
-          title: Text(name, style: TextStyle(fontSize: 14, color: _fg)),
+          title: Text(name, style: TextStyle(fontSize: AppTheme.fontBody, color: _fg)),
           trailing: IconButton(
             icon: Icon(Icons.delete_outline, size: 20, color: _fgMuted),
             onPressed: () => setSheet(() => _savedPresets.remove(name)),
@@ -1830,7 +1831,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   ),
                   const SizedBox(width: 6),
                   Text(bgNames[i % bgNames.length],
-                      style: TextStyle(fontSize: 13, color: _fg)),
+                      style: TextStyle(fontSize: AppTheme.fontSubhead, color: _fg)),
                 ],
               ),
             ),
@@ -1864,7 +1865,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   ),
                   const SizedBox(width: 6),
                   Text(fgNames[i],
-                      style: TextStyle(fontSize: 13, color: _fg)),
+                      style: TextStyle(fontSize: AppTheme.fontSubhead, color: _fg)),
                 ],
               ),
             ),
@@ -1883,18 +1884,18 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 color: n == '无'
                     ? _fg.withValues(alpha: 0.85)
                     : _fg.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Text(n,
                   style: TextStyle(
-                      fontSize: 12.5,
+                      fontSize: AppTheme.fontSubhead,
                       color: n == '无' ? _bgs[_bgIndex][0] : _fg)),
             ),
         ],
       ),
       const SizedBox(height: 10),
       Text('阅读背景图片需要图片选择器组件，还没接。',
-          style: TextStyle(fontSize: 11.5, color: _fgMuted)),
+          style: TextStyle(fontSize: AppTheme.fontFootnote, color: _fgMuted)),
     ];
   }
 
@@ -1924,11 +1925,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 color: n == '跟随模式'
                     ? _fg.withValues(alpha: 0.85)
                     : _fg.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Text(n,
                   style: TextStyle(
-                      fontSize: 12.5,
+                      fontSize: AppTheme.fontSubhead,
                       color: n == '跟随模式' ? _bgs[_bgIndex][0] : _fg)),
             ),
         ],
@@ -1946,11 +1947,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 color: n == '靠左'
                     ? _fg.withValues(alpha: 0.85)
                     : _fg.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Text(n,
                   style: TextStyle(
-                      fontSize: 12.5,
+                      fontSize: AppTheme.fontSubhead,
                       color: n == '靠左' ? _bgs[_bgIndex][0] : _fg)),
             ),
         ],
@@ -1988,7 +1989,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           (v) => upd(() => _footerPadBottom = v)),
       const SizedBox(height: 8),
       Text('页眉/页脚需要正文分页器配合才显示，当前阅读器是整章滚动。',
-          style: TextStyle(fontSize: 11.5, color: _fgMuted)),
+          style: TextStyle(fontSize: AppTheme.fontFootnote, color: _fgMuted)),
     ];
   }
 
@@ -2011,11 +2012,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   color: _underlineStyle == i
                       ? _fg.withValues(alpha: 0.85)
                       : _fg.withValues(alpha: 0.07),
-                  borderRadius: BorderRadius.circular(9),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(styles[i],
                     style: TextStyle(
-                        fontSize: 12.5,
+                        fontSize: AppTheme.fontSubhead,
                         color: _underlineStyle == i
                             ? _bgs[_bgIndex][0]
                             : _fg)),
@@ -2036,11 +2037,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 color: n == '跟随文字'
                     ? _fg.withValues(alpha: 0.85)
                     : _fg.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Text(n,
                   style: TextStyle(
-                      fontSize: 12,
+                      fontSize: AppTheme.fontFootnote,
                       color: n == '跟随文字' ? _bgs[_bgIndex][0] : _fg)),
             ),
         ],
@@ -2062,12 +2063,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               children: [
                 Text('满行底线',
                     style: TextStyle(
-                        fontSize: 14,
+                        fontSize: AppTheme.fontBody,
                         fontWeight: FontWeight.w600,
                         color: _fg)),
                 const SizedBox(height: 3),
                 Text('开 = 每行拉满整行宽（信纸）；关 = 跟随文字宽',
-                    style: TextStyle(fontSize: 11.5, color: _fgMuted)),
+                    style: TextStyle(fontSize: AppTheme.fontFootnote, color: _fgMuted)),
               ],
             ),
           ),
@@ -2081,7 +2082,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         Padding(
           padding: const EdgeInsets.only(top: 6),
           child: Text('满行底线需要自定义绘制（每行拉满），还没做。',
-              style: TextStyle(fontSize: 11.5, color: _fgMuted)),
+              style: TextStyle(fontSize: AppTheme.fontFootnote, color: _fgMuted)),
         ),
     ];
   }
@@ -2090,7 +2091,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         padding: const EdgeInsets.only(bottom: 8, top: 2),
         child: Text(s,
             style:
-                TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: _fg)),
+                TextStyle(fontSize: AppTheme.fontBody, fontWeight: FontWeight.w600, color: _fg)),
       );
 
   /// 「添加书签」弹层（截图 IMG_8100）：
@@ -2128,7 +2129,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 children: [
                   Text('添加书签',
                       style: TextStyle(
-                          fontSize: 17,
+                          fontSize: AppTheme.fontTitle3,
                           fontWeight: FontWeight.w700,
                           color: _fg)),
                   const SizedBox(height: 18),
@@ -2170,7 +2171,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         Expanded(
                           child: Text(
                             '不再提示（下次直接使用上次选择的颜色）',
-                            style: TextStyle(fontSize: 13, color: _fg),
+                            style: TextStyle(fontSize: AppTheme.fontSubhead, color: _fg),
                           ),
                         ),
                       ],
@@ -2218,15 +2219,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       context: context,
       builder: (c) => AlertDialog(
         backgroundColor: _bgs[_bgIndex][0],
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text('保存排版预设',
-            style: TextStyle(fontSize: 17, color: _fg)),
+            style: TextStyle(fontSize: AppTheme.fontTitle3, color: _fg)),
         content: TextField(
           controller: ctrl,
           autofocus: true,
           decoration: InputDecoration(
             labelText: '预设名',
-            labelStyle: TextStyle(fontSize: 13, color: _fgMuted),
+            labelStyle: TextStyle(fontSize: AppTheme.fontSubhead, color: _fgMuted),
           ),
         ),
         actions: [
@@ -2260,7 +2261,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         children: [
           SizedBox(
             width: 62,
-            child: Text(label, style: TextStyle(fontSize: 13.5, color: _fg)),
+            child: Text(label, style: TextStyle(fontSize: AppTheme.fontBody, color: _fg)),
           ),
           Expanded(
             child: Slider(
@@ -2280,7 +2281,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             child: Text(display,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                    fontSize: 13.5,
+                    fontSize: AppTheme.fontBody,
                     fontWeight: FontWeight.w600,
                     color: _fg)),
           ),
@@ -2342,13 +2343,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       children: [
                         Text('朗读',
                             style: TextStyle(
-                                fontSize: 17,
+                                fontSize: AppTheme.fontTitle3,
                                 fontWeight: FontWeight.w700,
                                 color: _fg)),
                         const Spacer(),
                         Text('独立设置',
                             style: TextStyle(
-                                fontSize: 12.5, color: _fgMuted)),
+                                fontSize: AppTheme.fontSubhead, color: _fgMuted)),
                         const SizedBox(width: 4),
                         Switch(value: false, onChanged: null),
                       ],
@@ -2367,7 +2368,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                            fontSize: 12.5, height: 1.5, color: _fgMuted),
+                            fontSize: AppTheme.fontSubhead, height: 1.5, color: _fgMuted),
                       );
                     }),
                   ),
@@ -2441,12 +2442,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                   color: tab == i
                                       ? _fg.withValues(alpha: 0.85)
                                       : _fg.withValues(alpha: 0.06),
-                                  borderRadius: BorderRadius.circular(9),
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
                                   _ttsTabs[i],
                                   style: TextStyle(
-                                    fontSize: 13.5,
+                                    fontSize: AppTheme.fontBody,
                                     fontWeight: tab == i
                                         ? FontWeight.w600
                                         : FontWeight.normal,
@@ -2487,7 +2488,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                           },
                           child: Text('停止朗读',
                               style:
-                                  TextStyle(fontSize: 14, color: _fg)),
+                                  TextStyle(fontSize: AppTheme.fontBody, color: _fg)),
                         ),
                         const Spacer(),
                         FilledButton(
@@ -2567,17 +2568,17 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 children: [
                   Text('朗读引擎',
                       style: TextStyle(
-                          fontSize: 14,
+                          fontSize: AppTheme.fontBody,
                           fontWeight: FontWeight.w600,
                           color: _fg)),
                   const SizedBox(height: 2),
                   Text('系统朗读 · 跟随系统',
                       style:
-                          TextStyle(fontSize: 12, color: _fgMuted)),
+                          TextStyle(fontSize: AppTheme.fontFootnote, color: _fgMuted)),
                 ],
               ),
               const Spacer(),
-              Text('更换', style: TextStyle(fontSize: 13, color: _fg)),
+              Text('更换', style: TextStyle(fontSize: AppTheme.fontSubhead, color: _fg)),
               Icon(Icons.chevron_right_rounded,
                   size: 18, color: _fgMuted),
             ],
@@ -2588,7 +2589,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       Text(
         '音量用系统音量键调整（AVSpeechSynthesizer 的音量由系统控制）。'
         '语速/音调改完立刻对下一句生效。',
-        style: TextStyle(fontSize: 11.5, height: 1.7, color: _fgMuted),
+        style: TextStyle(fontSize: AppTheme.fontFootnote, height: 1.7, color: _fgMuted),
       ),
     ];
   }
@@ -2615,11 +2616,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     color: _ttsHighlight == i
                         ? _fg.withValues(alpha: 0.85)
                         : _fg.withValues(alpha: 0.06),
-                    borderRadius: BorderRadius.circular(9),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(['关', '当前句', '当前段'][i],
                       style: TextStyle(
-                          fontSize: 13,
+                          fontSize: AppTheme.fontSubhead,
                           color: _ttsHighlight == i
                               ? _bgs[_bgIndex][0]
                               : _fg)),
@@ -2644,13 +2645,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   color: i == 0
                       ? _fg.withValues(alpha: 0.10)
                       : _fg.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                   border: i == 0
                       ? Border.all(color: _fg.withValues(alpha: 0.4))
                       : null,
                 ),
                 child: Text(styles[i],
-                    style: TextStyle(fontSize: 14, color: _fg)),
+                    style: TextStyle(fontSize: AppTheme.fontBody, color: _fg)),
               ),
             ),
         ],
@@ -2694,11 +2695,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     color: n == '本章'
                         ? _fg.withValues(alpha: 0.06)
                         : _fg.withValues(alpha: 0.85),
-                    borderRadius: BorderRadius.circular(9),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(n,
                       style: TextStyle(
-                          fontSize: 13,
+                          fontSize: AppTheme.fontSubhead,
                           color: n == '本章' ? _fg : _bgs[_bgIndex][0])),
                 ),
               ),
@@ -2707,7 +2708,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       ),
       const SizedBox(height: 12),
       Text('跟读高亮会在正文里给正在念的句子加底色，方便对照着听。',
-          style: TextStyle(fontSize: 11.5, color: _fgMuted)),
+          style: TextStyle(fontSize: AppTheme.fontFootnote, color: _fgMuted)),
     ];
   }
 
@@ -2731,11 +2732,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   color: _ttsTimer == m
                       ? _fg.withValues(alpha: 0.85)
                       : _fg.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(9),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(m == 0 ? '关' : '$m 分钟',
                     style: TextStyle(
-                        fontSize: 13,
+                        fontSize: AppTheme.fontSubhead,
                         color: _ttsTimer == m
                             ? _bgs[_bgIndex][0]
                             : _fg)),
@@ -2750,11 +2751,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 color: _ttsTimer == -1
                     ? _fg.withValues(alpha: 0.85)
                     : _fg.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Text('读完本章',
                   style: TextStyle(
-                      fontSize: 13,
+                      fontSize: AppTheme.fontSubhead,
                       color: _ttsTimer == -1
                           ? _bgs[_bgIndex][0]
                           : _fg)),
@@ -2764,7 +2765,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       ),
       const SizedBox(height: 12),
       Text('定时到点为暂停，按播放键即接着读。',
-          style: TextStyle(fontSize: 11.5, color: _fgMuted)),
+          style: TextStyle(fontSize: AppTheme.fontFootnote, color: _fgMuted)),
     ];
   }
 
@@ -2798,7 +2799,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           SizedBox(
             width: 48,
             child:
-                Text(label, style: TextStyle(fontSize: 13.5, color: _fg)),
+                Text(label, style: TextStyle(fontSize: AppTheme.fontBody, color: _fg)),
           ),
           Expanded(
             child: Slider(
@@ -2813,7 +2814,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             child: Text(display,
                 textAlign: TextAlign.right,
                 style: TextStyle(
-                    fontSize: 13.5,
+                    fontSize: AppTheme.fontBody,
                     fontWeight: FontWeight.w600,
                     color: _fg)),
           ),
@@ -2826,7 +2827,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         padding: const EdgeInsets.only(bottom: 8),
         child: Text(s,
             style: TextStyle(
-                fontSize: 13.5,
+                fontSize: AppTheme.fontBody,
                 fontWeight: FontWeight.w600,
                 color: _fg)),
       );
@@ -2842,13 +2843,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               children: [
                 Text(title,
                     style: TextStyle(
-                        fontSize: 14,
+                        fontSize: AppTheme.fontBody,
                         fontWeight: FontWeight.w600,
                         color: _fg)),
                 const SizedBox(height: 3),
                 Text(sub,
                     style: TextStyle(
-                        fontSize: 11.5, height: 1.5, color: _fgMuted)),
+                        fontSize: AppTheme.fontFootnote, height: 1.5, color: _fgMuted)),
               ],
             ),
           ),
@@ -2923,7 +2924,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   children: [
                     Text('AI',
                         style: TextStyle(
-                            fontSize: 17,
+                            fontSize: AppTheme.fontTitle3,
                             fontWeight: FontWeight.w700,
                             color: _fg)),
                     const Spacer(),
@@ -2938,7 +2939,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               for (final a in ['总结本章', '解释这段', '生成书评', '问答'])
                 ListTile(
                   title: Text(a,
-                      style: TextStyle(fontSize: 15, color: _fg)),
+                      style: TextStyle(fontSize: AppTheme.fontHeadline, color: _fg)),
                   trailing: Icon(Icons.chevron_right_rounded,
                       size: 20, color: _fgMuted),
                   onTap: () {
@@ -2952,7 +2953,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   'AI 需要接入一个对话接口（自己的 API Key）。'
                   '这一步还没做 —— 所以这里点了不会有结果，不假装能总结。',
                   style: TextStyle(
-                      fontSize: 11.5, height: 1.7, color: _fgMuted),
+                      fontSize: AppTheme.fontFootnote, height: 1.7, color: _fgMuted),
                 ),
               ),
             ],
@@ -2997,12 +2998,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   children: [
                     Text('图片模式',
                         style: TextStyle(
-                            fontSize: 17,
+                            fontSize: AppTheme.fontTitle3,
                             fontWeight: FontWeight.w700,
                             color: _fg)),
                     const SizedBox(width: 8),
                     Text('${urls.length} 张',
-                        style: TextStyle(fontSize: 12.5, color: _fgMuted)),
+                        style: TextStyle(fontSize: AppTheme.fontSubhead, color: _fgMuted)),
                     const Spacer(),
                     IconButton(
                       onPressed: () => Navigator.pop(ctx),
@@ -3022,7 +3023,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                             '图片模式会把正文里的插图单独列出来看和保存。',
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                                fontSize: 13, height: 1.7, color: _fgMuted),
+                                fontSize: AppTheme.fontSubhead, height: 1.7, color: _fgMuted),
                           ),
                         ),
                       )
@@ -3038,7 +3039,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         itemBuilder: (c, i) => GestureDetector(
                           onTap: () => _previewImage(ctx, urls[i]),
                           child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(10),
                             child: Image.network(
                               urls[i],
                               fit: BoxFit.cover,
@@ -3155,15 +3156,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               children: [
                 Text('笔记',
                     style: TextStyle(
-                        fontSize: 17,
+                        fontSize: AppTheme.fontTitle3,
                         fontWeight: FontWeight.w700,
                         color: _fg)),
                 const SizedBox(height: 10),
                 Text('在正文里长按选中文字即可划线、写批注。',
-                    style: TextStyle(fontSize: 13, color: _fgMuted)),
+                    style: TextStyle(fontSize: AppTheme.fontSubhead, color: _fgMuted)),
                 const SizedBox(height: 6),
                 Text('（本页按截图保留入口；划线/批注的完整交互还没做）',
-                    style: TextStyle(fontSize: 12, color: _fgMuted)),
+                    style: TextStyle(fontSize: AppTheme.fontFootnote, color: _fgMuted)),
               ],
             ),
           ),
@@ -3206,12 +3207,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   children: [
                     Text('阅读设置',
                         style: TextStyle(
-                            fontSize: 16,
+                            fontSize: AppTheme.fontHeadline,
                             fontWeight: FontWeight.w700,
                             color: _fg)),
                     const Spacer(),
                     Text('独立设置',
-                        style: TextStyle(fontSize: 12.5, color: _fgMuted)),
+                        style: TextStyle(fontSize: AppTheme.fontSubhead, color: _fgMuted)),
                     const SizedBox(width: 4),
                     Switch(value: false, onChanged: null),
                   ],
@@ -3259,12 +3260,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                           children: [
                             Text('点击区域',
                                 style:
-                                    TextStyle(fontSize: 14.5, color: _fg)),
+                                    TextStyle(fontSize: AppTheme.fontHeadline, color: _fg)),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text('自定义各区域触发上一页/菜单/下一页',
                                   style: TextStyle(
-                                      fontSize: 12.5, color: _fgMuted)),
+                                      fontSize: AppTheme.fontSubhead, color: _fgMuted)),
                             ),
                             Icon(Icons.grid_view_rounded,
                                 size: 20, color: _fgMuted),
@@ -3283,12 +3284,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       child: Row(
                         children: [
                           Text('信息栏',
-                              style: TextStyle(fontSize: 14.5, color: _fg)),
+                              style: TextStyle(fontSize: AppTheme.fontHeadline, color: _fg)),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text('页眉页脚显示的信息，可逐项开关',
                                 style: TextStyle(
-                                    fontSize: 12.5, color: _fgMuted)),
+                                    fontSize: AppTheme.fontSubhead, color: _fgMuted)),
                           ),
                         ],
                       ),
@@ -3339,13 +3340,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     TextButton(
                       onPressed: () => setState(() => _showBar = false),
                       child: Text('取消',
-                          style: TextStyle(fontSize: 14, color: _fg)),
+                          style: TextStyle(fontSize: AppTheme.fontBody, color: _fg)),
                     ),
                     const Spacer(),
                     TextButton(
                       onPressed: _showLayoutSheet,
                       child: Text('排版',
-                          style: TextStyle(fontSize: 14, color: _fg)),
+                          style: TextStyle(fontSize: AppTheme.fontBody, color: _fg)),
                     ),
                     const SizedBox(width: 10),
                     FilledButton(
@@ -3378,7 +3379,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           SizedBox(
             width: 76,
             child: Text(label,
-                style: TextStyle(fontSize: 14.5, color: _fg)),
+                style: TextStyle(fontSize: AppTheme.fontHeadline, color: _fg)),
           ),
           Expanded(
             child: Align(alignment: Alignment.centerRight, child: child),
@@ -3398,10 +3399,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(label,
-                    style: TextStyle(fontSize: 14.5, color: _fg)),
+                    style: TextStyle(fontSize: AppTheme.fontHeadline, color: _fg)),
                 const SizedBox(height: 2),
                 Text(sub,
-                    style: TextStyle(fontSize: 12.5, color: _fgMuted)),
+                    style: TextStyle(fontSize: AppTheme.fontSubhead, color: _fgMuted)),
               ],
             ),
           ),
@@ -3422,7 +3423,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           color: on
               ? _fg.withValues(alpha: 0.85)
               : _fg.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(9),
+          borderRadius: BorderRadius.circular(10),
         ),
         child: Text(
           label,
@@ -3486,7 +3487,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                                 ListTile(
                                                   title: Text(a.label,
                                                       style: TextStyle(
-                                                          fontSize: 15,
+                                                          fontSize: AppTheme.fontHeadline,
                                                           color: _fg)),
                                                   trailing: zones[z] == a
                                                       ? Icon(Icons.check_rounded,
@@ -3517,7 +3518,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                       (zones[row * 3 + col] ?? TapAction.none)
                                           .label,
                                       style: TextStyle(
-                                        fontSize: 15,
+                                        fontSize: AppTheme.fontHeadline,
                                         color: _fg,
                                         shadows: const [
                                           Shadow(
@@ -3552,7 +3553,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       const Expanded(
                         child: Text(
                           '点击屏幕上的区域，在弹层中选择该区域的动作',
-                          style: TextStyle(fontSize: 13.5, color: Colors.white),
+                          style: TextStyle(fontSize: AppTheme.fontBody, color: Colors.white),
                         ),
                       ),
                       IconButton(
@@ -3599,10 +3600,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
         decoration: BoxDecoration(
           color: Colors.black.withValues(alpha: 0.55),
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(20),
         ),
         child: Text(label,
-            style: const TextStyle(fontSize: 15, color: Colors.white)),
+            style: const TextStyle(fontSize: AppTheme.fontHeadline, color: Colors.white)),
       ),
     );
   }
@@ -3665,7 +3666,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                               children: [
                                 Text(e.$1,
                                     style: TextStyle(
-                                      fontSize: 16,
+                                      fontSize: AppTheme.fontHeadline,
                                       fontWeight: tab == tabNames.indexOf(e.$1)
                                           ? FontWeight.w700
                                           : FontWeight.normal,
@@ -3676,7 +3677,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                 const SizedBox(height: 2),
                                 Text(e.$2,
                                     style: TextStyle(
-                                        fontSize: 11.5, color: _fgMuted)),
+                                        fontSize: AppTheme.fontFootnote, color: _fgMuted)),
                                 const SizedBox(height: 4),
                                 Container(
                                   height: 2,
@@ -3707,19 +3708,19 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                               height: 38,
                               decoration: BoxDecoration(
                                 color: _fg.withValues(alpha: 0.07),
-                                borderRadius: BorderRadius.circular(19),
+                                borderRadius: BorderRadius.circular(20),
                               ),
                               child: TextField(
                                 controller: ctrl,
                                 onChanged: (v) =>
                                     setSheet(() => kw = v.trim()),
-                                style: TextStyle(fontSize: 13.5, color: _fg),
+                                style: TextStyle(fontSize: AppTheme.fontBody, color: _fg),
                                 decoration: InputDecoration(
                                   isDense: true,
                                   filled: false,
                                   hintText: '搜索章节',
                                   hintStyle: TextStyle(
-                                      fontSize: 13.5, color: _fgMuted),
+                                      fontSize: AppTheme.fontBody, color: _fgMuted),
                                   prefixIcon: Icon(Icons.search_rounded,
                                       size: 18, color: _fgMuted),
                                   prefixIconConstraints:
@@ -3775,7 +3776,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
-                                            fontSize: 14.5,
+                                            fontSize: AppTheme.fontHeadline,
                                             color: _fg,
                                             fontWeight: current
                                                 ? FontWeight.w700
@@ -3806,7 +3807,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                               width: 26,
                               decoration: BoxDecoration(
                                 color: _fg.withValues(alpha: 0.07),
-                                borderRadius: BorderRadius.circular(13),
+                                borderRadius: BorderRadius.circular(12),
                               ),
                               child: Column(
                                 mainAxisAlignment:
@@ -3833,7 +3834,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                   '还没有书签。\n\n长按正文段落即可加书签。',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
-                                      fontSize: 13,
+                                      fontSize: AppTheme.fontSubhead,
                                       height: 1.7,
                                       color: _fgMuted),
                                 ),
@@ -3850,7 +3851,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                       decoration: BoxDecoration(
                                         color: e.value,
                                         borderRadius:
-                                            BorderRadius.circular(3),
+                                            BorderRadius.circular(10),
                                       ),
                                     ),
                                     title: Text(
@@ -3860,7 +3861,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
-                                          fontSize: 13.5, color: _fg),
+                                          fontSize: AppTheme.fontBody, color: _fg),
                                     ),
                                     trailing: IconButton(
                                       icon: Icon(Icons.delete_outline,
@@ -3893,7 +3894,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                             '在正文里长按选中文字即可划线、写批注',
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                                fontSize: 13, height: 1.7, color: _fgMuted),
+                                fontSize: AppTheme.fontSubhead, height: 1.7, color: _fgMuted),
                           ),
                         ),
                       ),

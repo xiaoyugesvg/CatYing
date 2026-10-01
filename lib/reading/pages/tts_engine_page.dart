@@ -4,6 +4,7 @@ import '../models/tts_source.dart';
 import '../services/tts_source_store.dart';
 import '../theme/jelly_theme.dart';
 import 'tts_source_edit_page.dart';
+import '../../common/theme.dart';
 
 /// 朗读引擎（截图 IMG_8087/8088）。
 ///
@@ -55,7 +56,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                     children: [
                       Text('朗读源类型',
                           style: TextStyle(
-                              fontSize: 17,
+                              fontSize: AppTheme.fontTitle3,
                               fontWeight: FontWeight.w700,
                               color: isDark
                                   ? Colors.white
@@ -74,7 +75,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                     title: Text(
                       TtsSource.blank(t).typeLabel,
                       style: TextStyle(
-                          fontSize: 15.5,
+                          fontSize: AppTheme.fontHeadline,
                           color: isDark
                               ? Colors.white
                               : JellyTheme.textPrimaryLight),
@@ -109,7 +110,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
         centerTitle: true,
         title: Text('朗读引擎',
             style: TextStyle(
-                fontSize: 17, fontWeight: FontWeight.w700, color: label)),
+                fontSize: AppTheme.fontTitle3, fontWeight: FontWeight.w700, color: label)),
       ),
       body: ListenableBuilder(
         listenable: TtsSourceStore.instance,
@@ -135,7 +136,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                         const SizedBox(width: 8),
                         Text('系统朗读',
                             style: TextStyle(
-                                fontSize: 15.5,
+                                fontSize: AppTheme.fontHeadline,
                                 fontWeight: FontWeight.w700,
                                 color: label)),
                         const Spacer(),
@@ -150,7 +151,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                           ),
                           child: Text('兜底引擎',
                               style: TextStyle(
-                                  fontSize: 12,
+                                  fontSize: AppTheme.fontFootnote,
                                   color: JellyTheme.textSecondary)),
                         ),
                       ],
@@ -159,7 +160,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                     Text(
                       '离线、零流量、不需要任何配置。其它朗读源不可用时一律回落到它。',
                       style: TextStyle(
-                          fontSize: 12.5,
+                          fontSize: AppTheme.fontSubhead,
                           height: 1.6,
                           color: JellyTheme.textSecondary),
                     ),
@@ -167,7 +168,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                     Row(
                       children: [
                         Text('当前引擎',
-                            style: TextStyle(fontSize: 14, color: label)),
+                            style: TextStyle(fontSize: AppTheme.fontBody, color: label)),
                         const Spacer(),
                         TextButton(
                           onPressed: () => ScaffoldMessenger.of(context)
@@ -182,13 +183,13 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                     ),
                     Text('未取到',
                         style: TextStyle(
-                            fontSize: 13, color: JellyTheme.textSecondary)),
+                            fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
                     const SizedBox(height: 8),
                     Text(
                       '未检测到已安装的朗读引擎。若系统设置·文字转语音里能试听，'
                       '通常是引擎被禁用或系统限制了应用查询已安装引擎。',
                       style: TextStyle(
-                          fontSize: 12,
+                          fontSize: AppTheme.fontFootnote,
                           height: 1.6,
                           color: JellyTheme.textSecondary),
                     ),
@@ -198,7 +199,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
               const SizedBox(height: 18),
               Text('朗读源',
                   style: TextStyle(
-                      fontSize: 13.5,
+                      fontSize: AppTheme.fontBody,
                       fontWeight: FontWeight.w600,
                       color: JellyTheme.textSecondary)),
               const SizedBox(height: 8),
@@ -214,7 +215,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                     '还没有添加朗读源。朗读源用来接入系统之外的语音合成服务，'
                     '音色通常比系统引擎好得多，但需要你自己的 API Key。',
                     style: TextStyle(
-                        fontSize: 12.5,
+                        fontSize: AppTheme.fontSubhead,
                         height: 1.7,
                         color: JellyTheme.textSecondary),
                   ),
@@ -231,10 +232,10 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                     ),
                     child: ListTile(
                       title: Text(s.name,
-                          style: TextStyle(fontSize: 15, color: label)),
+                          style: TextStyle(fontSize: AppTheme.fontHeadline, color: label)),
                       subtitle: Text(s.typeLabel,
                           style: TextStyle(
-                              fontSize: 12,
+                              fontSize: AppTheme.fontFootnote,
                               color: JellyTheme.textSecondary)),
                       trailing: IconButton(
                         icon: Icon(Icons.delete_outline,
@@ -272,13 +273,13 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                       const SizedBox(width: 10),
                       Text('添加朗读源',
                           style: TextStyle(
-                              fontSize: 15,
+                              fontSize: AppTheme.fontHeadline,
                               fontWeight: FontWeight.w600,
                               color: label)),
                       const Spacer(),
                       Text('网络导入 / Azure / OpenAI 兼容',
                           style: TextStyle(
-                              fontSize: 12,
+                              fontSize: AppTheme.fontFootnote,
                               color: JellyTheme.textSecondary)),
                     ],
                   ),
@@ -304,7 +305,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                       const SizedBox(width: 10),
                       Text('导入朗读引擎',
                           style: TextStyle(
-                              fontSize: 15,
+                              fontSize: AppTheme.fontHeadline,
                               fontWeight: FontWeight.w600,
                               color: label)),
                       const Spacer(),
@@ -353,24 +354,24 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                     children: [
                       Text('导入朗读引擎',
                           style: TextStyle(
-                              fontSize: 17,
+                              fontSize: AppTheme.fontTitle3,
                               fontWeight: FontWeight.w700,
                               color: label)),
                       const SizedBox(height: 12),
                       Text('粘贴朗读引擎的链接或 JSON 文本（支持单条与数组）',
                           style: TextStyle(
-                              fontSize: 12.5,
+                              fontSize: AppTheme.fontSubhead,
                               color: JellyTheme.textSecondary)),
                       const SizedBox(height: 10),
                       TextField(
                         controller: ctrl,
                         maxLines: 4,
                         minLines: 1,
-                        style: TextStyle(fontSize: 13.5, color: label),
+                        style: TextStyle(fontSize: AppTheme.fontBody, color: label),
                         decoration: InputDecoration(
                           hintText: 'https://.../engine.json',
                           hintStyle: TextStyle(
-                              fontSize: 13.5,
+                              fontSize: AppTheme.fontBody,
                               color: JellyTheme.textSecondary),
                           filled: true,
                           fillColor: isDark
@@ -406,13 +407,13 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                         const SizedBox(height: 10),
                         Text(msg!,
                             style: TextStyle(
-                                fontSize: 12.5, color: label)),
+                                fontSize: AppTheme.fontSubhead, color: label)),
                       ],
                       const SizedBox(height: 14),
                       Text(
                         '解析后的引擎会列在这里\n带「更新」徽标的会覆盖本地同名条目',
                         style: TextStyle(
-                            fontSize: 12,
+                            fontSize: AppTheme.fontFootnote,
                             height: 1.7,
                             color: JellyTheme.textSecondary),
                       ),

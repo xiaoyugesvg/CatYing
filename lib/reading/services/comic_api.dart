@@ -43,7 +43,7 @@ class ComicApi {
   final String? token;
 
   /// 拷贝漫画 API 地址：优先构造传入的 override，否则读远程配置
-  /// （RemoteConfigService 默认回退 AppConstants.defaultCopyApiUrl，无配置时与原硬编码一致）
+  /// （RemoteConfigService 默认回退 CmbokConstants.defaultCopyApiUrl，无配置时与原硬编码一致）
   String get baseUrl => _baseUrlOverride ?? RemoteConfigService().copyApiUrl;
 
   ComicApi({String? baseUrl, this.token})

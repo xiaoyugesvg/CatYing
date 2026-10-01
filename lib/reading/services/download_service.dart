@@ -164,7 +164,7 @@ class DownloadService extends ChangeNotifier {
         )
         ..httpClientAdapter = IOHttpClientAdapter(
           // 设浏览器 UA：dio 跨域重定向用 client.userAgent（非 req.headers UA），
-          // 默认 Dart/xxx 会被 c-nd3 等 CDN 拦 403（同 reader comicImageCacheManager 修复）
+          // 默认 Dart/xxx 会被 c-nd3 等 CDN 拦 403（同 app_image_cache.dart 的 UA 拦截器修复）
           createHttpClient: () {
             final client = HttpClient();
             client.userAgent =

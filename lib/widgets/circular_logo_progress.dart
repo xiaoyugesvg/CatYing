@@ -71,7 +71,7 @@ class CircularLogoProgress extends StatelessWidget {
                       Text(
                         '猫影',
                         style: TextStyle(
-                          fontSize: 18,
+                          fontSize: AppTheme.fontTitle3,
                           fontWeight: FontWeight.w700,
                           color: const Color(0xFF3A2A1A),
                           letterSpacing: 2,
@@ -98,7 +98,7 @@ class CircularLogoProgress extends StatelessWidget {
                       percentText,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 13,
+                        fontSize: AppTheme.fontSubhead,
                         fontWeight: FontWeight.w700,
                       ),
                     ),

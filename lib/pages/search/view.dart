@@ -8,18 +8,32 @@ import '../../services/api_config.dart';
 import '../../widgets/vod_card.dart';
 import '../../widgets/common_widgets.dart';
 import 'controller.dart';
+import '../../widgets/app_toast.dart';
 
 /// 热门搜索词（静态兜底列表，点击直达搜索）
 const List<String> _hotKeywords = [
-  '海贼王', '火影忍者', '斗罗大陆', '庆余年', '狂飙',
-  '三体', '流浪地球', '甄嬛传', '西游记', '灌篮高手',
-  '名侦探柯南', '奥特曼', '熊出没', '爱情公寓', '白夜追凶',
+  '海贼王',
+  '火影忍者',
+  '斗罗大陆',
+  '庆余年',
+  '狂飙',
+  '三体',
+  '流浪地球',
+  '甄嬛传',
+  '西游记',
+  '灌篮高手',
+  '名侦探柯南',
+  '奥特曼',
+  '熊出没',
+  '爱情公寓',
+  '白夜追凶',
 ];
 
 /// 搜索页 - 对应 Swift SearchView
 class SearchPage extends StatefulWidget {
   /// 可选的初始搜索关键词，从其他页面传入时自动搜索
   final String? initialKeyword;
+
   /// 关闭回调 - 对应 Swift .sheet 的 dismiss
   final VoidCallback? onClose;
 
@@ -68,21 +82,28 @@ class _SearchPageState extends State<SearchPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.transparent,
       // AppBar 与背景同色，标题居中；右侧放「搜源」与「列表/网格」切换
       appBar: AppBar(
-        backgroundColor: AppTheme.backgroundPrimary,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: true,
         iconTheme: IconThemeData(color: AppTheme.textPrimary),
-        title: Text('搜索',
-            style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 17,
-                fontWeight: FontWeight.w600)),
+        title: Text(
+          '搜索',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontTitle3,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new,
-              size: 18, color: AppTheme.textPrimary),
+          icon: Icon(
+            Icons.arrow_back_ios_new,
+            size: 18,
+            color: AppTheme.textPrimary,
+          ),
           onPressed: () {
             if (widget.onClose != null) {
               widget.onClose!();
@@ -94,23 +115,28 @@ class _SearchPageState extends State<SearchPage> {
         actions: [
           // 跳到源列表（搜索历史区没有源面板时可用来选源）
           IconButton(
-            icon: Icon(Icons.manage_search,
-                size: 22, color: AppTheme.accentColor),
+            icon: Icon(
+              Icons.manage_search,
+              size: 22,
+              color: AppTheme.accentColor,
+            ),
             tooltip: '选择搜索源',
             onPressed: _openSourcePicker,
           ),
           // 网格 / 列表切换
-          Obx(() => IconButton(
-                icon: Icon(
-                  _listMode.value
-                      ? Icons.view_list_rounded
-                      : Icons.grid_view_rounded,
-                  size: 22,
-                  color: AppTheme.accentColor,
-                ),
-                tooltip: _listMode.value ? '网格显示' : '列表显示',
-                onPressed: () => _listMode.value = !_listMode.value,
-              )),
+          Obx(
+            () => IconButton(
+              icon: Icon(
+                _listMode.value
+                    ? Icons.view_list_rounded
+                    : Icons.grid_view_rounded,
+                size: 22,
+                color: AppTheme.accentColor,
+              ),
+              tooltip: _listMode.value ? '网格显示' : '列表显示',
+              onPressed: () => _listMode.value = !_listMode.value,
+            ),
+          ),
         ],
       ),
       body: Container(
@@ -141,8 +167,7 @@ class _SearchPageState extends State<SearchPage> {
         ? _searchController.activeSites
         : ApiConfig.instance.getSearchableSources();
     if (sites.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('当前源没有可搜索的站点')));
+      AppToast.message('当前源没有可搜索的站点');
       return;
     }
     final picked = await showModalBottomSheet<SourceBean>(
@@ -151,52 +176,65 @@ class _SearchPageState extends State<SearchPage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (ctx) => kbSheet(SafeArea(
-        top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Row(
-                children: [
-                  Text('选择搜索源',
+      builder: (ctx) => kbSheet(
+        SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  children: [
+                    Text(
+                      '选择搜索源',
                       style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600)),
-                  const Spacer(),
-                  Text('点选即搜索',
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '点选即搜索',
                       style: TextStyle(
-                          color: AppTheme.textTertiary,
-                          fontSize: AppTheme.fontCaption)),
-                ],
-              ),
-            ),
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: sites.length,
-                itemBuilder: (c, i) => ListTile(
-                  leading: Icon(Icons.dns_outlined,
-                      size: 18, color: AppTheme.accentColor),
-                  title: Text(sites[i].name,
-                      style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: AppTheme.fontSubhead)),
-                  onTap: () => Navigator.pop(ctx, sites[i]),
+                        color: AppTheme.textTertiary,
+                        fontSize: AppTheme.fontCaption,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-          ],
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: sites.length,
+                  itemBuilder: (c, i) => ListTile(
+                    leading: Icon(
+                      Icons.dns_outlined,
+                      size: 18,
+                      color: AppTheme.accentColor,
+                    ),
+                    title: Text(
+                      sites[i].name,
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontSubhead,
+                      ),
+                    ),
+                    onTap: () => Navigator.pop(ctx, sites[i]),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-      )),
+      ),
     );
     if (picked == null || !mounted) return;
     final kw = _inputController.text.trim();
     if (kw.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('请先输入搜索内容')));
+      AppToast.message('请先输入搜索内容');
       return;
     }
     _searchController.keyword.value = kw;
@@ -209,7 +247,11 @@ class _SearchPageState extends State<SearchPage> {
   Widget _buildSearchBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingLG, AppTheme.spacingXS, AppTheme.spacingLG, AppTheme.spacingMD),
+        AppTheme.spacingLG,
+        AppTheme.spacingXS,
+        AppTheme.spacingLG,
+        AppTheme.spacingMD,
+      ),
       child: Row(
         children: [
           Expanded(
@@ -223,8 +265,7 @@ class _SearchPageState extends State<SearchPage> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.search,
-                      color: AppTheme.textTertiary, size: 18),
+                  Icon(Icons.search, color: AppTheme.textTertiary, size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: TextField(
@@ -239,8 +280,9 @@ class _SearchPageState extends State<SearchPage> {
                       decoration: InputDecoration(
                         hintText: '搜索影视...',
                         hintStyle: TextStyle(
-                            color: AppTheme.textTertiary,
-                            fontSize: AppTheme.fontSubhead + 1),
+                          color: AppTheme.textTertiary,
+                          fontSize: AppTheme.fontSubhead + 1,
+                        ),
                         border: InputBorder.none,
                         isDense: true,
                         contentPadding: EdgeInsets.zero,
@@ -260,23 +302,28 @@ class _SearchPageState extends State<SearchPage> {
                     ),
                   ),
                   // 清除按钮
-                  Obx(() => _searchController.keyword.value.isNotEmpty
-                      ? GestureDetector(
-                          onTap: () {
-                            _inputController.clear();
-                            _focusNode.unfocus();
-                            _searchController.keyword.value = '';
-                            _searchController.resultsBySite.clear();
-                            _searchController.searchingStatus.clear();
-                            _searchController.resultCount.clear();
-                            _searchController.activeSites.clear();
-                            _searchController.selectedSiteKey.value = null;
-                            _searchController.isSearching.value = false;
-                          },
-                          child: Icon(Icons.cancel,
-                              color: AppTheme.textTertiary, size: 18),
-                        )
-                      : const SizedBox.shrink()),
+                  Obx(
+                    () => _searchController.keyword.value.isNotEmpty
+                        ? GestureDetector(
+                            onTap: () {
+                              _inputController.clear();
+                              _focusNode.unfocus();
+                              _searchController.keyword.value = '';
+                              _searchController.resultsBySite.clear();
+                              _searchController.searchingStatus.clear();
+                              _searchController.resultCount.clear();
+                              _searchController.activeSites.clear();
+                              _searchController.selectedSiteKey.value = null;
+                              _searchController.isSearching.value = false;
+                            },
+                            child: Icon(
+                              Icons.cancel,
+                              color: AppTheme.textTertiary,
+                              size: 18,
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
                 ],
               ),
             ),
@@ -299,11 +346,14 @@ class _SearchPageState extends State<SearchPage> {
                 color: AppTheme.accentColor,
                 borderRadius: BorderRadius.circular(22),
               ),
-              child: const Text('搜索',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600)),
+              child: const Text(
+                '搜索',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
           ),
         ],
@@ -350,8 +400,11 @@ class _SearchPageState extends State<SearchPage> {
                 child: (v.pic.trim().isEmpty || !v.pic.startsWith('http'))
                     ? ColoredBox(
                         color: AppTheme.backgroundTertiary,
-                        child: Icon(Icons.movie_outlined,
-                            size: 22, color: AppTheme.textTertiary),
+                        child: Icon(
+                          Icons.movie_outlined,
+                          size: 22,
+                          color: AppTheme.textTertiary,
+                        ),
                       )
                     : CachedNetworkImage(
                         imageUrl: v.pic,
@@ -360,8 +413,11 @@ class _SearchPageState extends State<SearchPage> {
                             ColoredBox(color: AppTheme.backgroundTertiary),
                         errorWidget: (_, __, ___) => ColoredBox(
                           color: AppTheme.backgroundTertiary,
-                          child: Icon(Icons.broken_image_outlined,
-                              size: 20, color: AppTheme.textTertiary),
+                          child: Icon(
+                            Icons.broken_image_outlined,
+                            size: 20,
+                            color: AppTheme.textTertiary,
+                          ),
                         ),
                       ),
               ),
@@ -390,8 +446,9 @@ class _SearchPageState extends State<SearchPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          color: AppTheme.textTertiary,
-                          fontSize: AppTheme.fontCaption),
+                        color: AppTheme.textTertiary,
+                        fontSize: AppTheme.fontCaption,
+                      ),
                     ),
                   ],
                   if (v.sourceKey.isNotEmpty) ...[
@@ -401,15 +458,19 @@ class _SearchPageState extends State<SearchPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          color: AppTheme.accentColor.withValues(alpha: 0.8),
-                          fontSize: AppTheme.fontCaption),
+                        color: AppTheme.accentColor.withValues(alpha: 0.8),
+                        fontSize: AppTheme.fontCaption,
+                      ),
                     ),
                   ],
                 ],
               ),
             ),
-            Icon(Icons.chevron_right,
-                size: 17, color: AppTheme.textTertiary.withValues(alpha: 0.7)),
+            Icon(
+              Icons.chevron_right,
+              size: 17,
+              color: AppTheme.textTertiary.withValues(alpha: 0.7),
+            ),
           ],
         ),
       ),
@@ -421,19 +482,24 @@ class _SearchPageState extends State<SearchPage> {
     return Obx(() {
       final sites = _searchController.activeSites;
       if (sites.isEmpty) return const SizedBox.shrink();
-      final anySearching =
-          sites.any((s) => _searchController.searchingStatus[s.key] == true);
+      final anySearching = sites.any(
+        (s) => _searchController.searchingStatus[s.key] == true,
+      );
       return ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(
-            horizontal: AppTheme.spacingMD, vertical: 6),
+          horizontal: AppTheme.spacingMD,
+          vertical: 6,
+        ),
         children: [
           if (anySearching)
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: AppTheme.backgroundTertiary,
                   borderRadius: BorderRadius.circular(20),
@@ -445,12 +511,18 @@ class _SearchPageState extends State<SearchPage> {
                       width: 12,
                       height: 12,
                       child: CircularProgressIndicator(
-                          strokeWidth: 1.5, color: AppTheme.accentColor),
+                        strokeWidth: 1.5,
+                        color: AppTheme.accentColor,
+                      ),
                     ),
                     SizedBox(width: 6),
-                    Text('搜索中',
-                        style: TextStyle(
-                            color: AppTheme.textTertiary, fontSize: 12)),
+                    Text(
+                      '搜索中',
+                      style: TextStyle(
+                        color: AppTheme.textTertiary,
+                        fontSize: AppTheme.fontFootnote,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -466,7 +538,9 @@ class _SearchPageState extends State<SearchPage> {
                 onTap: () => _searchController.selectSite(site.key),
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 8),
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: selected
                         ? AppTheme.accentColor.withValues(alpha: 0.22)
@@ -484,18 +558,22 @@ class _SearchPageState extends State<SearchPage> {
                       Text(
                         site.name,
                         style: TextStyle(
-                          color:
-                              selected ? AppTheme.accentColor : AppTheme.textSecondary,
-                          fontSize: 13,
-                          fontWeight:
-                              selected ? FontWeight.w600 : FontWeight.normal,
+                          color: selected
+                              ? AppTheme.accentColor
+                              : AppTheme.textSecondary,
+                          fontSize: AppTheme.fontSubhead,
+                          fontWeight: selected
+                              ? FontWeight.w600
+                              : FontWeight.normal,
                         ),
                       ),
                       if (count > 0) ...[
                         const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 1),
+                            horizontal: 6,
+                            vertical: 1,
+                          ),
                           decoration: BoxDecoration(
                             color: selected
                                 ? AppTheme.accentColor
@@ -505,8 +583,10 @@ class _SearchPageState extends State<SearchPage> {
                           child: Text(
                             '$count',
                             style: TextStyle(
-                              color: selected ? Colors.white : AppTheme.textPrimary,
-                              fontSize: 11,
+                              color: selected
+                                  ? Colors.white
+                                  : AppTheme.textPrimary,
+                              fontSize: AppTheme.fontCaption,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -536,17 +616,27 @@ class _SearchPageState extends State<SearchPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.touch_app,size: 48,color: AppTheme.textTertiary.withValues(alpha: 0.5)),
+                Icon(
+                  Icons.touch_app,
+                  size: 48,
+                  color: AppTheme.textTertiary.withValues(alpha: 0.5),
+                ),
                 SizedBox(height: 16),
                 Text(
                   '选择左侧站点查看搜索结果',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: AppTheme.fontBody,
+                  ),
                   textAlign: TextAlign.center,
                 ),
                 SizedBox(height: 8),
                 Text(
                   '已完成全部站点搜索，点击站点名称查看对应结果',
-                  style: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontFootnote,
+                  ),
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -571,16 +661,26 @@ class _SearchPageState extends State<SearchPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.search_off,size: 48,color: AppTheme.textTertiary.withValues(alpha: 0.5)),
+                Icon(
+                  Icons.search_off,
+                  size: 48,
+                  color: AppTheme.textTertiary.withValues(alpha: 0.5),
+                ),
                 SizedBox(height: 16),
                 Text(
                   '该站点暂无搜索结果',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: AppTheme.fontBody,
+                  ),
                 ),
                 SizedBox(height: 8),
                 Text(
                   '试试左侧其他站点',
-                  style: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontFootnote,
+                  ),
                 ),
               ],
             ),
@@ -614,8 +714,9 @@ class _SearchPageState extends State<SearchPage> {
                   .floor()
                   .clamp(2, 6);
           final cardWidth =
-              (constraints.maxWidth - AppTheme.cardSpacing * (crossAxisCount - 1)) /
-                  crossAxisCount;
+              (constraints.maxWidth -
+                  AppTheme.cardSpacing * (crossAxisCount - 1)) /
+              crossAxisCount;
 
           return GridView.builder(
             padding: const EdgeInsets.fromLTRB(
@@ -653,7 +754,11 @@ class _SearchPageState extends State<SearchPage> {
   Widget _buildSearchHistorySection() {
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingLG, AppTheme.spacingSM, AppTheme.spacingLG, 24),
+        AppTheme.spacingLG,
+        AppTheme.spacingSM,
+        AppTheme.spacingLG,
+        24,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -664,7 +769,7 @@ class _SearchPageState extends State<SearchPage> {
               '热门搜索',
               style: TextStyle(
                 color: AppTheme.textPrimary,
-                fontSize: 20,
+                fontSize: AppTheme.fontTitle2,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -685,7 +790,7 @@ class _SearchPageState extends State<SearchPage> {
                     '搜索历史',
                     style: TextStyle(
                       color: AppTheme.textPrimary,
-                      fontSize: 20,
+                      fontSize: AppTheme.fontTitle2,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -696,8 +801,11 @@ class _SearchPageState extends State<SearchPage> {
                     onTap: () => _confirmClearHistory(),
                     child: Padding(
                       padding: const EdgeInsets.all(4),
-                      child: Icon(Icons.delete_sweep_outlined,
-                          color: AppTheme.textTertiary, size: 20),
+                      child: Icon(
+                        Icons.delete_sweep_outlined,
+                        color: AppTheme.textTertiary,
+                        size: 20,
+                      ),
                     ),
                   ),
                 ],
@@ -780,16 +888,17 @@ class _SearchPageState extends State<SearchPage> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.backgroundSecondary,
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppTheme.glassRadius)),
-        title:
-            Text('清空搜索历史', style: TextStyle(color: AppTheme.textPrimary)),
-        content: Text('将删除全部搜索历史记录，确定？',
-            style: TextStyle(color: AppTheme.textSecondary)),
+          borderRadius: BorderRadius.circular(AppTheme.glassRadius),
+        ),
+        title: Text('清空搜索历史', style: TextStyle(color: AppTheme.textPrimary)),
+        content: Text(
+          '将删除全部搜索历史记录，确定？',
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('取消',
-                style: TextStyle(color: AppTheme.textTertiary)),
+            child: Text('取消', style: TextStyle(color: AppTheme.textTertiary)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),

@@ -6,6 +6,7 @@ import '../services/search_history_service.dart';
 import '../services/zlibrary_service.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/staggered_entrance.dart';
+import '../../common/theme.dart';
 
 /// z-library 登录/注册页面（扁平风、内容丰富、灵动）。
 /// 一个全屏页面内用分段切换在「登录 / 注册」间过渡。
@@ -234,7 +235,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
                               child: Text(
                                 email,
                                 style: TextStyle(
-                                  fontSize: 14,
+                                  fontSize: AppTheme.fontBody,
                                   color: isDark
                                       ? Colors.white
                                       : JellyTheme.textPrimaryLight,
@@ -482,7 +483,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
         Text(
           'Cmbok',
           style: TextStyle(
-            fontSize: 22,
+            fontSize: AppTheme.fontPageTitle,
             fontWeight: FontWeight.bold,
             color: titleColor,
           ),
@@ -490,7 +491,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
         const SizedBox(height: 2),
         Text(
           '图书账号',
-          style: TextStyle(fontSize: 13, color: JellyTheme.textSecondary),
+          style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
         ),
       ],
     );
@@ -551,7 +552,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
         child: Text(
           text,
           style: TextStyle(
-            fontSize: 14,
+            fontSize: AppTheme.fontBody,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
             color: selected ? Colors.white : JellyTheme.textSecondary,
           ),
@@ -666,7 +667,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
         Expanded(
           child: Text(
             text,
-            style: TextStyle(fontSize: 13, color: JellyTheme.textSecondary),
+            style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
           ),
         ),
       ],
@@ -766,7 +767,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
           Expanded(
             child: Text(
               '注册自有账号，享每日 ${ZlibraryService.loggedDailyLimit} 本下载额度',
-              style: TextStyle(fontSize: 13, color: JellyTheme.textSecondary),
+              style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
             ),
           ),
         ],
@@ -801,7 +802,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
             : Text(
                 label,
                 style: const TextStyle(
-                  fontSize: 13,
+                  fontSize: AppTheme.fontSubhead,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -857,7 +858,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
               padding: const EdgeInsets.only(top: 8),
               child: Text(
                 msg,
-                style: TextStyle(color: JellyTheme.error, fontSize: 12),
+                style: TextStyle(color: JellyTheme.error, fontSize: AppTheme.fontFootnote),
               ),
             ),
     );
@@ -873,7 +874,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
               padding: const EdgeInsets.only(top: 8),
               child: Text(
                 msg,
-                style: TextStyle(color: JellyTheme.success, fontSize: 12),
+                style: TextStyle(color: JellyTheme.success, fontSize: AppTheme.fontFootnote),
               ),
             ),
     );
@@ -889,7 +890,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
           child: Text(
             text,
             style: TextStyle(
-              fontSize: 13,
+              fontSize: AppTheme.fontSubhead,
               color: JellyTheme.primary,
               fontWeight: FontWeight.w500,
             ),
@@ -928,7 +929,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
                 '服务器地址',
                 style: TextStyle(
                   color: JellyTheme.textPrimaryLight,
-                  fontSize: 13,
+                  fontSize: AppTheme.fontSubhead,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -941,7 +942,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
                     const SizedBox(width: 3),
                     Text('已配置',
                         style: TextStyle(
-                            color: JellyTheme.success, fontSize: 11)),
+                            color: JellyTheme.success, fontSize: AppTheme.fontCaption)),
                   ],
                 ),
             ],
@@ -968,7 +969,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
               color: svc.hasDomain
                   ? JellyTheme.textSecondary
                   : JellyTheme.warning,
-              fontSize: 11,
+              fontSize: AppTheme.fontCaption,
               height: 1.4,
             ),
           ),
@@ -1054,7 +1055,7 @@ class _PrimaryButtonState extends State<_PrimaryButton> {
                 : Text(
                     widget.label,
                     style: const TextStyle(
-                      fontSize: 16,
+                      fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.w700,
                       color: Colors.white,
                     ),

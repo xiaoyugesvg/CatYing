@@ -60,6 +60,39 @@ class BookPageCacheService {
         ':$bookId:$fingerprint:dp${doublePage ? 1 : 0}';
   }
 
+  /// 缓存目录（供「缓存管理」页算大小 / 清空用）
+  Future<Directory> cacheDir() async {
+    final dir = await getApplicationSupportDirectory();
+    return Directory('${dir.path}/book_pagination_cache');
+  }
+
+  /// 当前占用字节数
+  Future<int> sizeBytes() async {
+    try {
+      final d = await cacheDir();
+      if (!await d.exists()) return 0;
+      var total = 0;
+      await for (final e in d.list(recursive: true, followLinks: false)) {
+        if (e is File) {
+          total += await e.length();
+        }
+      }
+      return total;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// 清空全部分页缓存（下次打开会重新分页，只是慢一点）
+  Future<void> clear() async {
+    try {
+      final d = await cacheDir();
+      if (await d.exists()) await d.delete(recursive: true);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
   Future<File> _file(String bookId) async {
     final dir = await getApplicationSupportDirectory();
     final cacheDir = Directory('${dir.path}/book_pagination_cache');

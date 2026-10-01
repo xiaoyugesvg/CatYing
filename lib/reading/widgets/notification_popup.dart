@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/remote_config_service.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 /// 公告弹窗：首页居中弹出远程公告（同步 Windows 端）。
 /// - 显示条件：notification 非空、未被用户关闭、且当前无新版本提示。
@@ -70,7 +71,7 @@ class _NotificationPopupState extends State<NotificationPopup> {
             const Text('公告'),
           ],
         ),
-        content: Text(text, style: const TextStyle(fontSize: 14, height: 1.6)),
+        content: Text(text, style: const TextStyle(fontSize: AppTheme.fontBody, height: 1.6)),
         actionsAlignment: MainAxisAlignment.center,
         actions: [
           TextButton(

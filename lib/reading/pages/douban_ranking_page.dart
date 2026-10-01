@@ -1,9 +1,10 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/jelly_theme.dart';
 import '../../widgets/app_page_loading.dart';
+import '../../common/theme.dart';
 
 /// 豆瓣图书排行榜。
 ///
@@ -202,7 +203,7 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
         centerTitle: true,
         title: Text('豆瓣图书排行榜',
             style: TextStyle(
-              fontSize: 18,
+              fontSize: AppTheme.fontTitle3,
               fontWeight: FontWeight.w700,
               color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
             )),
@@ -265,12 +266,12 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
                   color: (idx - i).abs() < 0.5
                       ? (isDark ? Colors.white : JellyTheme.primary)
                       : Colors.transparent,
-                  borderRadius: BorderRadius.circular(17),
+                  borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
                   _boards[i].label,
                   style: TextStyle(
-                    fontSize: 13.5,
+                    fontSize: AppTheme.fontBody,
                     fontWeight: (idx - i).abs() < 0.5
                         ? FontWeight.w600
                         : FontWeight.normal,
@@ -335,7 +336,7 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
                     : Text(
                         _done[b.tag] == true ? '已经到底了' : '',
                         style: TextStyle(
-                            fontSize: 12, color: JellyTheme.textSecondary),
+                            fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary),
                       ),
               ),
             );
@@ -367,7 +368,7 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
               clipBehavior: Clip.none,
               children: [
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(10),
                   child: SizedBox(
                     width: 74,
                     height: 108,
@@ -403,7 +404,7 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
                     child: Text(
                       'No.${b.rank}',
                       style: const TextStyle(
-                        fontSize: 11,
+                        fontSize: AppTheme.fontCaption,
                         fontWeight: FontWeight.w700,
                         color: Colors.white,
                       ),
@@ -428,7 +429,7 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 15.5,
+                          fontSize: AppTheme.fontHeadline,
                           fontWeight: FontWeight.w700,
                           height: 1.25,
                           color: label,
@@ -447,7 +448,7 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
                           Text(
                             b.rating.toStringAsFixed(1),
                             style: const TextStyle(
-                              fontSize: 13.5,
+                              fontSize: AppTheme.fontBody,
                               fontWeight: FontWeight.w700,
                               color: Color(0xFFF5A623),
                             ),
@@ -463,7 +464,7 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        fontSize: 12.5,
+                        fontSize: AppTheme.fontSubhead,
                         height: 1.4,
                         color: JellyTheme.textSecondary),
                   ),
@@ -474,7 +475,7 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        fontSize: 12.5,
+                        fontSize: AppTheme.fontSubhead,
                         height: 1.4,
                         color: JellyTheme.textSecondary),
                   ),
@@ -483,7 +484,7 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
                 Text(
                   b.ratingCount > 0 ? '${b.ratingCount}人评价' : '暂无评分',
                   style: TextStyle(
-                      fontSize: 12, color: JellyTheme.textSecondary),
+                      fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary),
                 ),
               ],
             ),
@@ -550,7 +551,7 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
             const SizedBox(height: 16),
             Text(title,
                 style: TextStyle(
-                  fontSize: 16,
+                  fontSize: AppTheme.fontHeadline,
                   fontWeight: FontWeight.w600,
                   color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                 )),
@@ -558,7 +559,7 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
             Text(subtitle,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                    fontSize: 12.5,
+                    fontSize: AppTheme.fontSubhead,
                     height: 1.6,
                     color: JellyTheme.textSecondary)),
             const SizedBox(height: 18),

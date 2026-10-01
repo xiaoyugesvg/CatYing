@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../common/theme.dart';
 
 /// 通用空态视图（三模块共用）。
 ///
@@ -48,7 +49,7 @@ class AppEmptyView extends StatelessWidget {
               title,
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 15,
+                fontSize: AppTheme.fontHeadline,
                 fontWeight: FontWeight.w600,
                 color: scheme.onSurface,
               ),
@@ -59,7 +60,7 @@ class AppEmptyView extends StatelessWidget {
                 subtitle!,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: AppTheme.fontSubhead,
                   height: 1.5,
                   color: scheme.onSurface.withValues(alpha: 0.6),
                 ),

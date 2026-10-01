@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../common/theme.dart';
 import 'blocked_categories_page.dart';
 import '../../services/live_service.dart';
+import '../../widgets/app_toast.dart';
 
 /// 设置 → 直播：直播源管理 + 全局 EPG + 屏蔽分类
 class LiveSettingsPage extends StatefulWidget {
@@ -28,7 +29,9 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString('epg_url') ?? '';
       if (mounted) _epgCtrl.text = saved;
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ignore */
+    }
   }
 
   @override
@@ -41,26 +44,37 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       // 不透明底，避免路由切换时与下层设置页叠影
-      backgroundColor: AppTheme.backgroundPrimary,
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new,
-              color: AppTheme.accentColor, size: 20),
+          icon: Icon(
+            Icons.arrow_back_ios_new,
+            color: AppTheme.accentColor,
+            size: 20,
+          ),
           onPressed: () => Get.back(),
         ),
-        title: Text('直播设置',
-            style: TextStyle(color: AppTheme.textPrimary, fontSize: 17)),
-        backgroundColor: AppTheme.backgroundPrimary,
+        title: Text(
+          '直播设置',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontTitle3,
+          ),
+        ),
+        backgroundColor: Colors.transparent,
         elevation: 0,
       ),
       body: ListView(
         padding: EdgeInsets.fromLTRB(16, 8, 16, 40),
         children: [
-          Text('直播源管理',
-              style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600)),
+          Text(
+            '直播源管理',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: AppTheme.fontSubhead,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 10),
           Container(
             decoration: BoxDecoration(
@@ -84,11 +98,14 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             }),
           ),
           SizedBox(height: 24),
-          Text('全局 EPG 地址',
-              style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600)),
+          Text(
+            '全局 EPG 地址',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: AppTheme.fontSubhead,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.all(12),
@@ -101,7 +118,10 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               children: [
                 Text(
                   '直播源未自带 EPG 时使用，如 https://example.com/epg.xml.gz',
-                  style: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontFootnote,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 Row(
@@ -110,7 +130,9 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                       child: TextField(
                         controller: _epgCtrl,
                         style: TextStyle(
-                            color: AppTheme.textPrimary, fontSize: 13),
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontSubhead,
+                        ),
                         decoration: InputDecoration(
                           filled: true,
                           fillColor: Colors.white.withValues(alpha: 0.08),
@@ -119,10 +141,14 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                             borderSide: BorderSide.none,
                           ),
                           contentPadding: EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 12),
+                            horizontal: 12,
+                            vertical: 12,
+                          ),
                           hintText: 'https://...',
                           hintStyle: TextStyle(
-                              color: AppTheme.textTertiary, fontSize: 13),
+                            color: AppTheme.textTertiary,
+                            fontSize: AppTheme.fontSubhead,
+                          ),
                         ),
                       ),
                     ),
@@ -132,22 +158,26 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                         backgroundColor: AppTheme.accentColor,
                         foregroundColor: Colors.black,
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 18, vertical: 14),
+                          horizontal: 18,
+                          vertical: 14,
+                        ),
                       ),
                       onPressed: () async {
                         final v = _epgCtrl.text.trim();
                         try {
                           final prefs = await SharedPreferences.getInstance();
                           await prefs.setString('epg_url', v);
-                        } catch (e) { /* ignore */ }
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                              content:
-                                  Text(v.isEmpty ? '已清空 EPG 地址' : 'EPG 地址已保存')),
+                        } catch (e) {
+                          /* ignore */
+                        }
+                        AppToast.message(
+                          v.isEmpty ? '已清空 EPG 地址' : 'EPG 地址已保存',
                         );
                       },
-                      child: const Text('保存',
-                          style: TextStyle(fontWeight: FontWeight.w600)),
+                      child: const Text(
+                        '保存',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
                     ),
                   ],
                 ),
@@ -155,11 +185,14 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             ),
           ),
           SizedBox(height: 24),
-          Text('屏蔽分类管理',
-              style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600)),
+          Text(
+            '屏蔽分类管理',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: AppTheme.fontSubhead,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 10),
           // 改为跳转独立管理页（可手动输入分类名，也能从当前源里挑）
           Container(
@@ -170,25 +203,36 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             child: Obx(() {
               final blocked = LiveService.instance.blockedGroups;
               return ListTile(
-                leading: Icon(Icons.block,
-                    size: 20, color: AppTheme.textSecondary),
-                title: Text('屏蔽分类',
-                    style: TextStyle(
-                        color: AppTheme.textPrimary, fontSize: 14)),
+                leading: Icon(
+                  Icons.block,
+                  size: 20,
+                  color: AppTheme.textSecondary,
+                ),
+                title: Text(
+                  '屏蔽分类',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontBody,
+                  ),
+                ),
                 subtitle: Text(
                   blocked.isEmpty
                       ? '屏蔽后隐藏对应分类的频道'
                       : '已屏蔽 ${blocked.length} 个：${blocked.take(3).join("、")}'
-                          '${blocked.length > 3 ? "…" : ""}',
+                            '${blocked.length > 3 ? "…" : ""}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      color: AppTheme.textTertiary, fontSize: 11),
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
                 ),
-                trailing: Icon(Icons.chevron_right,
-                    size: 18, color: AppTheme.textTertiary),
-                onTap: () =>
-                    Get.to(() => const BlockedCategoriesPage()),
+                trailing: Icon(
+                  Icons.chevron_right,
+                  size: 18,
+                  color: AppTheme.textTertiary,
+                ),
+                onTap: () => Get.to(() => const BlockedCategoriesPage()),
               );
             }),
           ),
@@ -213,15 +257,27 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               : Colors.white.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Icon(Icons.live_tv,
-            color: loaded ? AppTheme.accentColor : AppTheme.textTertiary, size: 20),
+        child: Icon(
+          Icons.live_tv,
+          color: loaded ? AppTheme.accentColor : AppTheme.textTertiary,
+          size: 20,
+        ),
       ),
-      title: Text(src.name,
-          style: TextStyle(
-              color: AppTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.w500)),
-      subtitle: Text(loaded ? '刚刚更新' : '未下载',
-          style: TextStyle(
-              color: loaded ? AppTheme.textSecondary : AppTheme.textTertiary, fontSize: 12)),
+      title: Text(
+        src.name,
+        style: TextStyle(
+          color: AppTheme.textPrimary,
+          fontSize: AppTheme.fontHeadline,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      subtitle: Text(
+        loaded ? '刚刚更新' : '未下载',
+        style: TextStyle(
+          color: loaded ? AppTheme.textSecondary : AppTheme.textTertiary,
+          fontSize: AppTheme.fontFootnote,
+        ),
+      ),
       trailing: PopupMenuButton<String>(
         color: Color(0xFF2A2A2E),
         icon: Icon(Icons.more_vert, color: AppTheme.textSecondary),
@@ -230,9 +286,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             await svc.reloadSource(index);
             final err = svc.error.value;
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(
-                      err == null ? '已刷新 ${src.name}' : '刷新失败：$err')));
+              AppToast.message(err == null ? '已刷新 ${src.name}' : '刷新失败：$err');
             }
             setState(() {});
           } else if (v == 'edit') {
@@ -240,12 +294,16 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               context: context,
               builder: (ctx) {
                 final nameCtrl = TextEditingController(text: src.name);
-                final ctrl =
-                    TextEditingController(text: sourceUrl ?? '');
+                final ctrl = TextEditingController(text: sourceUrl ?? '');
                 return AlertDialog(
                   backgroundColor: AppTheme.backgroundSecondary,
-                  title: Text('编辑直播源',
-                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
+                  title: Text(
+                    '编辑直播源',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontHeadline,
+                    ),
+                  ),
                   content: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -270,12 +328,16 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                   ),
                   actions: [
                     TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        child: const Text('取消')),
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('取消'),
+                    ),
                     TextButton(
-                        onPressed: () => Navigator.pop(
-                            ctx, (nameCtrl.text.trim(), ctrl.text.trim())),
-                        child: const Text('保存')),
+                      onPressed: () => Navigator.pop(ctx, (
+                        nameCtrl.text.trim(),
+                        ctrl.text.trim(),
+                      )),
+                      child: const Text('保存'),
+                    ),
                   ],
                 );
               },
@@ -288,11 +350,12 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                 url: result.$2,
               );
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(svc.error.value == null
-                        ? '已更新 ${result.$1.isEmpty ? src.name : result.$1}'
-                        : '更新失败：${svc.error.value}'),
-                    duration: const Duration(seconds: 3)));
+                AppToast.message(
+                  svc.error.value == null
+                      ? '已更新 ${result.$1.isEmpty ? src.name : result.$1}'
+                      : '更新失败：${svc.error.value}',
+                  duration: const Duration(seconds: 3),
+                );
               }
               setState(() {});
             }
@@ -301,26 +364,39 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               context: context,
               builder: (ctx) => AlertDialog(
                 backgroundColor: AppTheme.backgroundSecondary,
-                title: Text('删除直播源',
-                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
-                content: Text('确定删除「${src.name}」吗？',
-                    style: TextStyle(color: AppTheme.textSecondary, fontSize: 13)),
+                title: Text(
+                  '删除直播源',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontHeadline,
+                  ),
+                ),
+                content: Text(
+                  '确定删除「${src.name}」吗？',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: AppTheme.fontSubhead,
+                  ),
+                ),
                 actions: [
                   TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('取消')),
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('取消'),
+                  ),
                   TextButton(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('删除',
-                          style: TextStyle(color: Colors.redAccent))),
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text(
+                      '删除',
+                      style: TextStyle(color: Colors.redAccent),
+                    ),
+                  ),
                 ],
               ),
             );
             if (ok == true) {
               await svc.removeSource(index);
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('已删除 ${src.name}')));
+                AppToast.message('已删除 ${src.name}');
               }
               setState(() {});
             }
@@ -328,16 +404,21 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
         },
         itemBuilder: (_) => [
           PopupMenuItem(
-              value: 'refresh',
-              child: Text('立即刷新', style: TextStyle(color: AppTheme.textPrimary))),
+            value: 'refresh',
+            child: Text('立即刷新', style: TextStyle(color: AppTheme.textPrimary)),
+          ),
           if (canEdit)
             PopupMenuItem(
-                value: 'edit',
-                child: Text('编辑直播源', style: TextStyle(color: AppTheme.textPrimary))),
+              value: 'edit',
+              child: Text(
+                '编辑直播源',
+                style: TextStyle(color: AppTheme.textPrimary),
+              ),
+            ),
           const PopupMenuItem(
-              value: 'delete',
-              child:
-                  Text('删除', style: TextStyle(color: Colors.redAccent))),
+            value: 'delete',
+            child: Text('删除', style: TextStyle(color: Colors.redAccent)),
+          ),
         ],
       ),
     );
@@ -355,8 +436,13 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
         ),
         child: Icon(Icons.add, color: AppTheme.accentColor, size: 20),
       ),
-      title: Text('添加直播源',
-          style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
+      title: Text(
+        '添加直播源',
+        style: TextStyle(
+          color: AppTheme.textPrimary,
+          fontSize: AppTheme.fontHeadline,
+        ),
+      ),
       trailing: Icon(Icons.chevron_right, color: AppTheme.textTertiary),
       onTap: () async {
         final result = await showDialog<(String, String)>(
@@ -366,8 +452,13 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             final ctrl = TextEditingController();
             return AlertDialog(
               backgroundColor: AppTheme.backgroundSecondary,
-              title: Text('添加直播源',
-                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 15)),
+              title: Text(
+                '添加直播源',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontHeadline,
+                ),
+              ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -392,28 +483,33 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               ),
               actions: [
                 TextButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('取消')),
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('取消'),
+                ),
                 TextButton(
-                    onPressed: () => Navigator.pop(
-                        ctx, (nameCtrl.text.trim(), ctrl.text.trim())),
-                    child: const Text('添加')),
+                  onPressed: () => Navigator.pop(ctx, (
+                    nameCtrl.text.trim(),
+                    ctrl.text.trim(),
+                  )),
+                  child: const Text('添加'),
+                ),
               ],
             );
           },
         );
         if (result != null && result.$2.isNotEmpty) {
-          await LiveService.instance.addSource(result.$2,
-              name: result.$1.isEmpty ? null : result.$1);
+          await LiveService.instance.addSource(
+            result.$2,
+            name: result.$1.isEmpty ? null : result.$1,
+          );
           if (mounted) {
             final err = LiveService.instance.error.value;
             final count = LiveService.instance.channels.length;
             final srcCount = LiveService.instance.sources.length;
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text(err == null
-                    ? '已添加第 $srcCount 个直播源，共 $count 个频道'
-                    : '添加失败：$err'),
-                duration: const Duration(seconds: 3)));
+            AppToast.message(
+              err == null ? '已添加第 $srcCount 个直播源，共 $count 个频道' : '添加失败：$err',
+              duration: const Duration(seconds: 3),
+            );
           }
           setState(() {});
         }
@@ -429,8 +525,13 @@ class _EmptyRow extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.symmetric(vertical: 24),
       child: Center(
-        child: Text('暂无直播源，可添加 m3u 地址',
-            style: TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
+        child: Text(
+          '暂无直播源，可添加 m3u 地址',
+          style: TextStyle(
+            color: AppTheme.textTertiary,
+            fontSize: AppTheme.fontSubhead,
+          ),
+        ),
       ),
     );
   }

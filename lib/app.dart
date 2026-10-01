@@ -145,20 +145,30 @@ class TVBoxApp extends StatelessWidget {
                 themeMode: effectiveLight ? ThemeMode.light : ThemeMode.dark,
                 // 把 NavigatorState 暴露给 VideoPlayerPip，让画中画能插入到顶层 Overlay
                 navigatorKey: VideoPlayerPip.navigatorKey,
-                // ⚠️ key 必须跟随 exteriorLight 变化：
-                // AppTheme 的颜色 getter 读的是 AppBrightness.isLight，不是
-                // MaterialApp 的 theme。而 ContentView 是 const 实例 —— 父级重建时
-                // Flutter 发现 widget 完全相同就**跳过它的 build**，于是首页里那些
-                // 不在 Obx 内的部分（筛选面板、搜索栏等）会一直用旧颜色，
-                // 表现为"切了外观但筛选背景没变"。
-                // 换 key 强制重建整棵页面树，颜色才会跟着走。
+                // ── ⚠️ 这里原来会**换 key 销毁重建整个 ContentView** ──────
                 //
-                // paletteRev 同理：切「主题与外观」里的配色方案时，
-                // AppTheme 内部换了调色板，但它是静态类不会通知任何人 ——
-                // 不把 paletteRevision 拼进 key 就会"选了新配色界面没反应"。
-                home: ContentView(
-                  key: ValueKey('root-$effectiveLight-$paletteRev'),
-                ),
+                //   key: ValueKey('root-$effectiveLight-$paletteRev')
+                //
+                // 理由（旧注释）是：`AppTheme` 是静态类，颜色 getter 读
+                // `AppBrightness.isLight` / `_palette`，改了**不通知任何 widget**；
+                // 而 `ContentView` 是 const 实例，父级重建时 Flutter 判定
+                // "widget 完全相同"会**跳过它的 build**，于是首页里那些不在
+                // Obx 内的部分一直用旧颜色（"切了外观但筛选背景没变"）。
+                //
+                // 但**代价太大**：换 key 会把 `ContentView` 连同它下面
+                // 5 个 tab 页**整体销毁重建**（用户实测"主题切换卡顿"）。
+                //
+                // 现在改成**收窄到真正需要变色的地方**（见 `content_view.dart`）：
+                //   · `IndexedStack` 的 key 拼了 `isLight + paletteRev`
+                //   · 底部悬浮栏自己监听 `paletteRevision` 并换 key
+                //   · 搜索浮层 key 拼了 `isLight`
+                // 这三处覆盖了 `ContentView` 里所有读 `AppTheme` 的地方，
+                // 所以外层**不再需要**换 key。
+                //
+                // ⚠️ 若将来在 `content_view.dart` 的 IndexedStack/悬浮栏
+                // **之外**新增读 `AppTheme` 的 widget，记得也给它加监听/换 key，
+                // 否则它会停在旧色。
+                home: const ContentView(),
                 getPages: AppPages.pages,
                 debugShowCheckedModeBanner: false,
                 builder: (context, child) {

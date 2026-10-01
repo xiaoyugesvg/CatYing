@@ -27,6 +27,39 @@ class BookContentCacheService {
     return File('${cacheDir.path}/$bookId.json');
   }
 
+  /// 缓存目录（供「缓存管理」页算大小 / 清空用）
+  Future<Directory> cacheDir() async {
+    final dir = await getApplicationSupportDirectory();
+    return Directory('${dir.path}/book_content_cache');
+  }
+
+  /// 当前占用字节数
+  Future<int> sizeBytes() async {
+    try {
+      final d = await cacheDir();
+      if (!await d.exists()) return 0;
+      var total = 0;
+      await for (final e in d.list(recursive: true, followLinks: false)) {
+        if (e is File) {
+          total += await e.length();
+        }
+      }
+      return total;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// 清空全部正文缓存
+  Future<void> clear() async {
+    try {
+      final d = await cacheDir();
+      if (await d.exists()) await d.delete(recursive: true);
+    } catch (_) {
+      /* 删不掉不抛，避免影响"清理"这一个动作 */
+    }
+  }
+
   /// 文件指纹：size + 修改时间(ms)。用于判断缓存是否仍有效，避免读文件算 hash。
   Future<String> fingerprintOf(File file) async {
     final stat = await file.stat();

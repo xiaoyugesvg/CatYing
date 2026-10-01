@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/comic.dart';
+import '../../common/theme.dart';
 
 /// 是否有可显示的评分 / 热度
 bool comicHasScore(Comic comic) {
@@ -27,7 +28,7 @@ class JellyScoreBadge extends StatelessWidget {
           Text(
             comic.rating!.toStringAsFixed(1),
             style: const TextStyle(
-              fontSize: 11,
+              fontSize: AppTheme.fontCaption,
               fontWeight: FontWeight.w700,
               color: Color(0xFFFFB400),
             ),
@@ -48,7 +49,7 @@ class JellyScoreBadge extends StatelessWidget {
           Text(
             _formatPopular(comic.popular!),
             style: TextStyle(
-              fontSize: 11,
+              fontSize: AppTheme.fontCaption,
               fontWeight: FontWeight.w700,
               color: isDark ? Colors.white70 : const Color(0xFF6B7280),
             ),

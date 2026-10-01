@@ -8,6 +8,7 @@ import '../../subscription/view.dart';
 import '../../../widgets/common_widgets.dart';
 import '../controller.dart';
 import 'settings_shared.dart';
+import '../../../widgets/app_toast.dart';
 
 /// 设置 → 数据源
 ///
@@ -17,8 +18,7 @@ class DataSourceSettingsPage extends StatefulWidget {
   const DataSourceSettingsPage({super.key});
 
   @override
-  State<DataSourceSettingsPage> createState() =>
-      _DataSourceSettingsPageState();
+  State<DataSourceSettingsPage> createState() => _DataSourceSettingsPageState();
 }
 
 class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
@@ -51,22 +51,25 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         ),
         SettingsGroup(
           children: [
-            Obx(() => SettingsRow(
-                  icon: Icons.movie_outlined,
-                  title: '点播接口地址',
-                  value: controller.vodApiUrl.value.isEmpty
-                      ? '未配置'
-                      : _truncateUrl(controller.vodApiUrl.value),
-                  onTap: _showApiEditDialog,
-                )),
+            Obx(
+              () => SettingsRow(
+                icon: Icons.movie_outlined,
+                title: '点播接口地址',
+                value: controller.vodApiUrl.value.isEmpty
+                    ? '未配置'
+                    : _truncateUrl(controller.vodApiUrl.value),
+                onTap: _showApiEditDialog,
+              ),
+            ),
             // 把「当前手填的接口地址」一键存成订阅。
             // 否则用户手填了地址，订阅列表一直显示"未添加"，
             // 没有一个明确的转化入口（你截图里就是这个情况）。
             Obx(() {
               final cur = controller.vodApiUrl.value.trim();
               if (cur.isEmpty) return const SizedBox.shrink();
-              final already = SubscriptionService.instance.subscriptions
-                  .any((s) => s.url.trim() == cur);
+              final already = SubscriptionService.instance.subscriptions.any(
+                (s) => s.url.trim() == cur,
+              );
               if (already) return const SizedBox.shrink();
               return SettingsRow(
                 icon: Icons.playlist_add,
@@ -75,13 +78,14 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                 onTap: _saveCurrentAsSubscription,
               );
             }),
-            Obx(() => SettingsRow(
-                  icon: Icons.dns_outlined,
-                  title: '主页数据源',
-                  value:
-                      ApiConfig.instance.homeSourceBean.value?.name ?? '未选择',
-                  onTap: _showSourcePicker,
-                )),
+            Obx(
+              () => SettingsRow(
+                icon: Icons.dns_outlined,
+                title: '主页数据源',
+                value: ApiConfig.instance.homeSourceBean.value?.name ?? '未选择',
+                onTap: _showSourcePicker,
+              ),
+            ),
             SettingsRow(
               icon: Icons.restart_alt,
               iconColor: Colors.redAccent,
@@ -105,14 +109,13 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
     final messenger = ScaffoldMessenger.of(context);
     final url = controller.vodApiUrl.value.trim();
     if (url.isEmpty) {
-      messenger.showSnackBar(const SnackBar(content: Text('还没有接口地址')));
+      AppToast.message('还没有接口地址');
       return;
     }
     final svc = SubscriptionService.instance;
     final s = await svc.add(url: url);
     await svc.setActive(s.id);
-    messenger.showSnackBar(
-        SnackBar(content: Text('已存为订阅：${s.name}')));
+    AppToast.message('已存为订阅：${s.name}');
   }
 
   // ============================================================
@@ -120,8 +123,9 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
   // ============================================================
 
   void _showApiEditDialog() {
-    final vodController =
-        TextEditingController(text: controller.vodApiUrl.value);
+    final vodController = TextEditingController(
+      text: controller.vodApiUrl.value,
+    );
 
     showDialog(
       context: context,
@@ -160,11 +164,11 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                           itemCount: history.length,
                           itemBuilder: (_, i) {
                             final url = history[i];
-                            final selected =
-                                url == controller.vodApiUrl.value;
+                            final selected = url == controller.vodApiUrl.value;
                             return InkWell(
-                              borderRadius:
-                                  BorderRadius.circular(AppTheme.radiusSM),
+                              borderRadius: BorderRadius.circular(
+                                AppTheme.radiusSM,
+                              ),
                               onTap: () {
                                 vodController.text = url;
                                 setDialogState(() {});
@@ -183,7 +187,9 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                               },
                               child: Padding(
                                 padding: const EdgeInsets.symmetric(
-                                    vertical: 6, horizontal: 4),
+                                  vertical: 6,
+                                  horizontal: 4,
+                                ),
                                 child: Row(
                                   children: [
                                     Icon(
@@ -243,22 +249,29 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                         filled: true,
                         fillColor: AppTheme.backgroundTertiary,
                         border: OutlineInputBorder(
-                          borderRadius:
-                              BorderRadius.circular(AppTheme.radiusSM),
+                          borderRadius: BorderRadius.circular(
+                            AppTheme.radiusSM,
+                          ),
                           borderSide: BorderSide.none,
                         ),
                         contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         isDense: true,
-                        prefixIcon: Icon(Icons.movie_outlined,
-                            size: 18, color: AppTheme.textTertiary),
+                        prefixIcon: Icon(
+                          Icons.movie_outlined,
+                          size: 18,
+                          color: AppTheme.textTertiary,
+                        ),
                       ),
                     ),
                     Obx(() {
                       if (controller.isLoadingConfig.value) {
                         return Padding(
-                          padding:
-                              const EdgeInsets.only(top: AppTheme.spacingSM),
+                          padding: const EdgeInsets.only(
+                            top: AppTheme.spacingSM,
+                          ),
                           child: Row(
                             children: [
                               SizedBox(
@@ -283,25 +296,29 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                       }
                       if (controller.configError.value != null) {
                         return Padding(
-                          padding:
-                              const EdgeInsets.only(top: AppTheme.spacingSM),
+                          padding: const EdgeInsets.only(
+                            top: AppTheme.spacingSM,
+                          ),
                           child: Text(
                             controller.configError.value!,
                             style: const TextStyle(
-                                color: Colors.red,
-                                fontSize: AppTheme.fontCaption),
+                              color: Colors.red,
+                              fontSize: AppTheme.fontCaption,
+                            ),
                           ),
                         );
                       }
                       if (controller.configSuccess.value) {
                         return Padding(
-                          padding:
-                              const EdgeInsets.only(top: AppTheme.spacingSM),
+                          padding: const EdgeInsets.only(
+                            top: AppTheme.spacingSM,
+                          ),
                           child: Text(
                             '配置加载成功',
                             style: TextStyle(
-                                color: AppTheme.accentColor,
-                                fontSize: AppTheme.fontCaption),
+                              color: AppTheme.accentColor,
+                              fontSize: AppTheme.fontCaption,
+                            ),
                           ),
                         );
                       }
@@ -313,21 +330,27 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
-                  child: Text('取消',
-                      style: TextStyle(color: AppTheme.textTertiary)),
+                  child: Text(
+                    '取消',
+                    style: TextStyle(color: AppTheme.textTertiary),
+                  ),
                 ),
-                Obx(() => TextButton(
-                      onPressed: controller.isLoadingConfig.value
-                          ? null
-                          : () {
-                              controller.vodApiUrl.value =
-                                  vodController.text.trim();
-                              controller.loadConfig();
-                              Navigator.pop(ctx);
-                            },
-                      child: Text('加载',
-                          style: TextStyle(color: AppTheme.accentColor)),
-                    )),
+                Obx(
+                  () => TextButton(
+                    onPressed: controller.isLoadingConfig.value
+                        ? null
+                        : () {
+                            controller.vodApiUrl.value = vodController.text
+                                .trim();
+                            controller.loadConfig();
+                            Navigator.pop(ctx);
+                          },
+                    child: Text(
+                      '加载',
+                      style: TextStyle(color: AppTheme.accentColor),
+                    ),
+                  ),
+                ),
               ],
             );
           },
@@ -354,8 +377,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppTheme.radiusLG),
         ),
-        title: Text('主页数据源',
-            style: TextStyle(color: AppTheme.textPrimary)),
+        title: Text('主页数据源', style: TextStyle(color: AppTheme.textPrimary)),
         content: Obx(() {
           final homeKey = ApiConfig.instance.homeSourceBean.value?.key;
           return ConstrainedBox(
@@ -376,13 +398,17 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                         color: isHome
                             ? AppTheme.accentColor
                             : AppTheme.textPrimary,
-                        fontWeight:
-                            isHome ? FontWeight.w600 : FontWeight.normal,
+                        fontWeight: isHome
+                            ? FontWeight.w600
+                            : FontWeight.normal,
                       ),
                     ),
                     trailing: isHome
-                        ? Icon(Icons.check_circle,
-                            color: AppTheme.accentColor, size: 16)
+                        ? Icon(
+                            Icons.check_circle,
+                            color: AppTheme.accentColor,
+                            size: 16,
+                          )
                         : null,
                     onTap: () {
                       ApiConfig.instance.setHomeSource(source);
@@ -408,7 +434,8 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
     final ok = await SettingsDialogs.confirm(
       context: context,
       title: '重置配置',
-      message: '将清除已保存的点播接口地址、接口历史以及已下载的源缓存。\n\n'
+      message:
+          '将清除已保存的点播接口地址、接口历史以及已下载的源缓存。\n\n'
           '播放器、主题、字体等本地设置会保留。\n\n'
           '重置后请重启应用，下次打开将回到初始设置界面。',
       confirmText: '重置',
@@ -428,8 +455,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.check_circle,
-                color: AppTheme.accentColor, size: 48),
+            Icon(Icons.check_circle, color: AppTheme.accentColor, size: 48),
             const SizedBox(height: 12),
             Text(
               '配置已重置',
@@ -454,8 +480,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx2),
-            child: Text('知道了',
-                style: TextStyle(color: AppTheme.accentColor)),
+            child: Text('知道了', style: TextStyle(color: AppTheme.accentColor)),
           ),
         ],
       ),

@@ -118,7 +118,7 @@ class _IndicatorBadge extends StatelessWidget {
             text,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 13,
+              fontSize: AppTheme.fontSubhead,
               fontFamily: 'monospace',
             ),
           ),
@@ -144,7 +144,7 @@ class _GestureHintBubble extends StatelessWidget {
         text,
         style: const TextStyle(
           color: Colors.white,
-          fontSize: 13,
+          fontSize: AppTheme.fontSubhead,
           fontFamily: 'monospace',
         ),
       ),
@@ -170,7 +170,7 @@ class _SettingsRowLabel extends StatelessWidget {
       text,
       style: const TextStyle(
         color: Colors.white,
-        fontSize: 13,
+        fontSize: AppTheme.fontSubhead,
         fontWeight: FontWeight.w500,
       ),
     );
@@ -297,7 +297,7 @@ class _SkipSecondsEditorState extends State<_SkipSecondsEditor> {
                         textInputAction: TextInputAction.done,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 14,
+                          fontSize: AppTheme.fontBody,
                         ),
                         cursorColor: AppTheme.accentColor,
                         decoration: const InputDecoration(
@@ -307,7 +307,7 @@ class _SkipSecondsEditorState extends State<_SkipSecondsEditor> {
                           hintText: '秒',
                           hintStyle: TextStyle(
                             color: Colors.white24,
-                            fontSize: 14,
+                            fontSize: AppTheme.fontBody,
                           ),
                         ),
                         onSubmitted: (_) {
@@ -322,7 +322,7 @@ class _SkipSecondsEditorState extends State<_SkipSecondsEditor> {
                         '秒',
                         style: TextStyle(
                           color: Colors.white54,
-                          fontSize: 12,
+                          fontSize: AppTheme.fontFootnote,
                         ),
                       ),
                     ),
@@ -350,7 +350,7 @@ class _SkipSecondsEditorState extends State<_SkipSecondsEditor> {
                   '应用',
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 13,
+                    fontSize: AppTheme.fontSubhead,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -358,7 +358,7 @@ class _SkipSecondsEditorState extends State<_SkipSecondsEditor> {
             ),
           ],
         ),
-        if (_errorText != null) ...[const SizedBox(height: 4), Text(_errorText!, style: const TextStyle(color: Colors.red, fontSize: 11))],
+        if (_errorText != null) ...[const SizedBox(height: 4), Text(_errorText!, style: const TextStyle(color: Colors.red, fontSize: AppTheme.fontCaption))],
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
@@ -383,7 +383,7 @@ class _SkipSecondsEditorState extends State<_SkipSecondsEditor> {
                   s == 0 ? '关闭' : '${s}秒',
                   style: TextStyle(
                     color: selected ? Colors.white : Colors.white70,
-                    fontSize: 12,
+                    fontSize: AppTheme.fontFootnote,
                     fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
                   ),
                 ),

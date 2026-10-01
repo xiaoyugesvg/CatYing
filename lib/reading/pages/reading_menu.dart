@@ -4,6 +4,7 @@ import '../../widgets/common_widgets.dart';
 import '../theme/jelly_theme.dart';
 import 'display_settings_page.dart';
 import 'reading_settings_page.dart';
+import '../../common/theme.dart';
 
 /// 阅读模块的设置入口。
 ///
@@ -34,7 +35,7 @@ Future<void> showReadingMenu(BuildContext context) {
             height: 4,
             decoration: BoxDecoration(
               color: JellyTheme.textSecondary.withValues(alpha: 0.35),
-              borderRadius: BorderRadius.circular(2),
+              borderRadius: BorderRadius.circular(10),
             ),
           ),
           _item(
@@ -68,9 +69,9 @@ Widget _item(
   return ListTile(
     leading: Icon(icon, color: JellyTheme.primary, size: 22),
     title: Text(title,
-        style: TextStyle(color: JellyTheme.textPrimaryLight, fontSize: 15)),
+        style: TextStyle(color: JellyTheme.textPrimaryLight, fontSize: AppTheme.fontHeadline)),
     subtitle: Text(subtitle,
-        style: TextStyle(color: JellyTheme.textSecondary, fontSize: 12)),
+        style: TextStyle(color: JellyTheme.textSecondary, fontSize: AppTheme.fontFootnote)),
     trailing: Icon(Icons.chevron_right,
         size: 18, color: JellyTheme.textSecondary),
     onTap: () {

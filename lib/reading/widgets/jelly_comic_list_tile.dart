@@ -5,6 +5,7 @@ import '../theme/jelly_theme.dart';
 import 'jelly_favorite_button.dart';
 import 'jelly_score_badge.dart';
 import 'source_cover_image.dart';
+import '../../common/theme.dart';
 
 /// 果冻风漫画列表项（横向：封面 + 信息，用于列表视图）
 class JellyComicListTile extends StatefulWidget {
@@ -181,12 +182,12 @@ class _JellyComicListTileState extends State<JellyComicListTile>
                               color:
                                   (isDark ? Colors.black : JellyTheme.primary)
                                       .withValues(alpha: 0.75),
-                              borderRadius: BorderRadius.circular(4),
+                              borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(
                               sourceName,
                               style: const TextStyle(
-                                fontSize: 9,
+                                fontSize: AppTheme.fontCaption,
                                 color: Colors.white,
                                 fontWeight: FontWeight.w700,
                               ),
@@ -213,7 +214,7 @@ class _JellyComicListTileState extends State<JellyComicListTile>
                             child: Text(
                               comic.title,
                               style: TextStyle(
-                                fontSize: 15,
+                                fontSize: AppTheme.fontHeadline,
                                 fontWeight: FontWeight.w700,
                                 color: isDark
                                     ? Colors.white
@@ -245,12 +246,12 @@ class _JellyComicListTileState extends State<JellyComicListTile>
                                   color: JellyTheme.primary.withValues(
                                     alpha: 0.15,
                                   ),
-                                  borderRadius: BorderRadius.circular(8),
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
                                   comic.author!,
                                   style: TextStyle(
-                                    fontSize: 11,
+                                    fontSize: AppTheme.fontCaption,
                                     color: JellyTheme.primary,
                                     fontWeight: FontWeight.w500,
                                   ),
@@ -267,7 +268,7 @@ class _JellyComicListTileState extends State<JellyComicListTile>
                       const SizedBox(height: 6),
                       // 描述区：固定 2 行高度，优先显示简介，无简介时显示别名
                       SizedBox(
-                        height: 11 * 1.4 * 2, // fontSize:11, height:1.4, 2行
+                        height: 11 * 1.4 * 2, // fontSize: AppTheme.fontCaption, height:1.4, 2行
                         child: Text(
                           (comic.description != null &&
                                   comic.description!.trim().isNotEmpty)
@@ -276,7 +277,7 @@ class _JellyComicListTileState extends State<JellyComicListTile>
                               ? '别名：${comic.alias}'
                               : '',
                           style: TextStyle(
-                            fontSize: 11,
+                            fontSize: AppTheme.fontCaption,
                             height: 1.4,
                             color: isDark
                                 ? Colors.white54
@@ -353,7 +354,7 @@ class _MetaItem extends StatelessWidget {
         const SizedBox(width: 3),
         Text(
           text,
-          style: TextStyle(fontSize: 11, color: color),
+          style: TextStyle(fontSize: AppTheme.fontCaption, color: color),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),

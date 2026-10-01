@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/third_party_source.dart';
@@ -391,11 +392,91 @@ class SourceImportParser {
     return out;
   }
 
-  /// 便捷：把解析结果直接并入存储，返回新增条数
+  /// 便捷：把解析结果直接并入存储，返回新增条数。
+  ///
+  /// ── 🔴 这里原来有一个真实的缺陷（用户实测：音源导入用不了）──────
+  /// 旧实现是 `parse(text)` 一把梭 —— 但导入弹层的输入框里
+  /// **用户粘贴的常常是一个网址**，于是一整行 `https://...js`
+  /// 被当成"脚本内容"去解析：
+  ///   · 不是 JSON                       ✗
+  ///   · 不含 module.exports 等 LX 特征  ✗
+  ///   · 无 `@name/@template` 注释头     ✗
+  ///   · 长度够但不是脚本                ✗
+  /// → 必然抛 `unsupported('无法识别的音源格式')`。
+  /// **它从来没有去下载那个网址。**
+  ///
+  /// 同一文件里其实早就写好了 [parseFetched]（拉取后再解析），
+  /// 只是**没有任何调用方** —— 现在在这里接上。
   static Future<int> importIntoStore(String text, {String? fallbackName}) async {
-    final list = parse(text, fallbackName: fallbackName);
+    final trimmed = text.trim();
+    // 输入是一个网址 → 先下载再解析（否则只会报"无法识别"）
+    if (_looksLikeUrl(trimmed)) {
+      final body = await _fetchUrl(trimmed);
+      final list = parseFetched(body, trimmed);
+      final n = await ThirdPartySourceStore.instance.addAll(list);
+      debugPrint('[MusicSource] 从网址导入 ${list.length} 条，新增 $n 条');
+      return n;
+    }
+    final list = parse(trimmed, fallbackName: fallbackName);
     final n = await ThirdPartySourceStore.instance.addAll(list);
     debugPrint('[MusicSource] 导入 ${list.length} 条，新增 $n 条');
     return n;
+  }
+
+  /// 是不是一个 http/https 网址（而不是脚本文本）
+  static bool _looksLikeUrl(String s) {
+    if (!(s.startsWith('http://') || s.startsWith('https://'))) return false;
+    // 单行、无换行、无大括号 —— 基本可以断定是网址而非脚本
+    if (s.contains('\n')) return false;
+    if (s.contains('{') || s.contains('}')) return false;
+    return s.length < 2000;
+  }
+
+  /// 拉取网址内容。
+  ///
+  /// ⚠️ **不要对 path 再做 `Uri.encodeFull`** ——
+  /// `Uri.parse` 已经把中文等非 ASCII 字符编码好了
+  ///（`星海音乐源.js` → `%E6%98%9F...`），再编码一次会变成 `%25E6...`
+  /// 让服务器 404。直接用 `Uri.parse(url).toString()` 即可。
+  static Future<String> _fetchUrl(String url) async {
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) {
+      throw const SourceImportException(SourceImportError.invalidUrl);
+    }
+    try {
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 20),
+        // 音源站点五花八门，有的返回非 200 但内容是脚本；仍然按内容判断
+        validateStatus: (c) => c != null && c >= 200 && c < 400,
+        responseType: ResponseType.plain,
+      ));
+      final res = await dio.get<String>(uri.toString());
+      final body = res.data ?? '';
+      if (body.trim().isEmpty) {
+        throw const SourceImportException(
+            SourceImportError.network, '服务器返回了空内容');
+      }
+      return body;
+    } on SourceImportException {
+      rethrow;
+    } catch (e) {
+      // 把网络层的异常翻译成用户能看懂的提示（不要把堆栈甩给用户）
+      throw SourceImportException(SourceImportError.network, _shortError(e));
+    }
+  }
+
+  /// 网络异常 → 简短说明（技术细节进日志）
+  static String _shortError(Object e) {
+    final s = e.toString();
+    if (s.contains('SocketException') || s.contains('Connection')) {
+      return '连不上服务器，请检查网络或网址';
+    }
+    if (s.contains('timeout') || s.contains('Timeout')) {
+      return '请求超时，请重试';
+    }
+    if (s.contains('404')) return '网址不存在（404）';
+    if (s.contains('403')) return '服务器拒绝访问（403）';
+    return '下载失败，请检查网址';
   }
 }

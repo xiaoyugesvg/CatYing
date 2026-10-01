@@ -8,6 +8,7 @@ import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
 import 'playlist_detail_page.dart';
 import '../../widgets/app_page_loading.dart';
+import '../../common/theme.dart';
 
 /// 音乐库 —— 移植自 Beans 的 `LibraryView.swift`（817 行，取其主干）。
 ///
@@ -80,7 +81,7 @@ class _LibraryPageState extends State<LibraryPage>
             child: Text('音乐库',
                 style: TextStyle(
                     color: MusicTheme.label,
-                    fontSize: 24,
+                    fontSize: AppTheme.fontPageTitle,
                     fontWeight: FontWeight.w700)),
           ),
           _queueSection(),
@@ -92,10 +93,10 @@ class _LibraryPageState extends State<LibraryPage>
                       url: t.coverUrl, size: 46, cornerRadius: 8),
                   title: Text(t.name,
                       style:
-                          TextStyle(color: MusicTheme.label, fontSize: 15)),
+                          TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
                   subtitle: Text(t.updateFrequency ?? '',
                       style: TextStyle(
-                          color: MusicTheme.secondary, fontSize: 12)),
+                          color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
                   trailing: Icon(Icons.chevron_right,
                       size: 18, color: MusicTheme.secondary),
                   onTap: () => openPlaylist(context, t.id, t.name),
@@ -132,7 +133,7 @@ class _LibraryPageState extends State<LibraryPage>
                 padding: const EdgeInsets.only(left: 16, top: 4),
                 child: Text('还有 ${q.length - 6} 首…',
                     style: TextStyle(
-                        color: MusicTheme.secondary, fontSize: 12)),
+                        color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
               ),
           ],
         );
@@ -155,7 +156,7 @@ class _LibraryPageState extends State<LibraryPage>
                   '还没有收藏的歌曲。在歌曲右侧菜单里可以收藏（存在本机，不需要账号）。',
                   style: TextStyle(
                       color: MusicTheme.secondary,
-                      fontSize: 12,
+                      fontSize: AppTheme.fontFootnote,
                       height: 1.5),
                 ),
               ),

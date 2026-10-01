@@ -2,7 +2,7 @@ import 'dart:math' as math;
 import 'dart:async';
 import 'dart:ui';
 
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
@@ -12,6 +12,7 @@ import '../widgets/music_components.dart';
 import 'player_settings_sheet.dart';
 import '../services/library_store.dart';
 import 'queue_page.dart';
+import '../../common/theme.dart';
 
 /// 全屏播放器 —— 移植自 Beans 的 `PlayerView.swift`（4447 行，这里取其主干）。
 ///
@@ -180,7 +181,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
     final song = player.currentSong;
     if (song == null) {
       return Scaffold(
-        backgroundColor: MusicTheme.background,
+        backgroundColor: Colors.transparent,
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
@@ -192,7 +193,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
         ),
         body: Center(
           child: Text('没有正在播放的歌曲',
-              style: TextStyle(color: MusicTheme.secondary, fontSize: 14)),
+              style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontBody)),
         ),
       );
     }
@@ -285,7 +286,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
   void _showVolumeSheet() {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: MusicTheme.background,
+      backgroundColor: Colors.transparent,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
@@ -299,7 +300,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
               Text('音量',
                   style: TextStyle(
                       color: MusicTheme.label,
-                      fontSize: 15,
+                      fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
               Row(
@@ -325,7 +326,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
               ),
               Text(
                 '提示：这里调的是播放器音量；手机侧边键调的是系统音量。',
-                style: TextStyle(color: MusicTheme.secondary, fontSize: 12),
+                style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
               ),
               const SizedBox(height: 6),
             ],
@@ -356,7 +357,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 15,
+                      fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 2),
@@ -367,7 +368,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                   textAlign: TextAlign.center,
                   style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.6),
-                      fontSize: 12),
+                      fontSize: AppTheme.fontFootnote),
                 ),
               ],
             ),
@@ -436,7 +437,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
               Text(
                 '轻点封面查看歌词',
                 style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.35), fontSize: 11),
+                    color: Colors.white.withValues(alpha: 0.35), fontSize: AppTheme.fontCaption),
               ),
             ],
           ),
@@ -460,7 +461,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
           child: Text(
             q,
             style: const TextStyle(
-                color: Colors.white, fontSize: 10, fontWeight: FontWeight.w600),
+                color: Colors.white, fontSize: AppTheme.fontCaption, fontWeight: FontWeight.w600),
           ),
         );
       },
@@ -534,7 +535,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                 height: 96,
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.28),
-                  borderRadius: BorderRadius.circular(3),
+                  borderRadius: BorderRadius.circular(10),
                 ),
               ),
             ),
@@ -608,7 +609,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
           _glow(280, 0.35),
           Container(
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(20),
               boxShadow: [
                 BoxShadow(
                     color: Colors.black.withValues(alpha: 0.5),
@@ -702,7 +703,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                 Text('暂无歌词',
                     style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.5),
-                        fontSize: 14)),
+                        fontSize: AppTheme.fontBody)),
               ],
             ),
           );
@@ -758,7 +759,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                               color: _tint.withValues(alpha: 0.95),
-                              fontSize: 12),
+                              fontSize: AppTheme.fontFootnote),
                         ),
                     ],
                   ),
@@ -888,11 +889,11 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                         Text(_fmt(posMs),
                             style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.55),
-                                fontSize: 11)),
+                                fontSize: AppTheme.fontCaption)),
                         Text(_fmt(totalMs.toDouble()),
                             style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.55),
-                                fontSize: 11)),
+                                fontSize: AppTheme.fontCaption)),
                       ],
                     ),
                   ),
@@ -1065,7 +1066,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
           children: [
             Icon(icon, color: iconColor, size: 22),
             const SizedBox(height: 3),
-            Text(label, style: TextStyle(color: labelColor, fontSize: 10)),
+            Text(label, style: TextStyle(color: labelColor, fontSize: AppTheme.fontCaption)),
           ],
         ),
       ),

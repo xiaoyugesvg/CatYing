@@ -31,6 +31,7 @@ import '../widgets/book_page_cover.dart';
 import '../widgets/book_page_curl.dart';
 import '../widgets/pomodoro_button.dart';
 import 'book_prefetch_page.dart';
+import '../../common/theme.dart';
 
 /// 图书阅读器固定浅色阅读主题，不跟随全局暗色模式：
 /// 仿真翻页为固定纸张图背景，全局暗色下文字翻白配浅纸看不清。
@@ -1895,7 +1896,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
     final color = (isDark ? Colors.white : Colors.black).withValues(
       alpha: 0.45,
     );
-    final style = TextStyle(fontSize: 11, color: color);
+    final style = TextStyle(fontSize: AppTheme.fontCaption, color: color);
     final hPad = _typo.padding; // 左右边距
     final vPad = _typo.verticalPadding; // 上下边距
     // HUD 上下跟随垂直边距，并比正文留 20px 间距，避免压到首行/末行。
@@ -2002,7 +2003,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: 14,
+                              fontSize: AppTheme.fontBody,
                               fontWeight: FontWeight.w600,
                               color: iconColor,
                             ),
@@ -2012,7 +2013,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                               _currentChapterTitle(),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 11, color: iconColor),
+                              style: TextStyle(fontSize: AppTheme.fontCaption, color: iconColor),
                             ),
                         ],
                       ),
@@ -2048,7 +2049,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         ),
                         Text(
                           _indicatorText(),
-                          style: TextStyle(fontSize: 12, color: iconColor),
+                          style: TextStyle(fontSize: AppTheme.fontFootnote, color: iconColor),
                         ),
                         TextButton(
                           onPressed: _chapterStarts.isNotEmpty
@@ -2308,7 +2309,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                           const Text(
                             '目录',
                             style: TextStyle(
-                              fontSize: 18,
+                              fontSize: AppTheme.fontTitle3,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -2325,7 +2326,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             child: Text(
                               '${chapters.length} 章',
                               style: TextStyle(
-                                fontSize: 11,
+                                fontSize: AppTheme.fontCaption,
                                 color: JellyTheme.primary,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -2382,7 +2383,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontSize: 14,
+                                    fontSize: AppTheme.fontBody,
                                     color: cur ? JellyTheme.primary : textColor,
                                     fontWeight: cur
                                         ? FontWeight.w700
@@ -2446,7 +2447,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         Text(
                           '阅读设置',
                           style: TextStyle(
-                            fontSize: 16,
+                            fontSize: AppTheme.fontHeadline,
                             fontWeight: FontWeight.bold,
                             color: textColor,
                           ),
@@ -2455,7 +2456,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         Text(
                           '独立设置',
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: AppTheme.fontSubhead,
                             color: draftIndependent
                                 ? JellyTheme.primary
                                 : (isDark
@@ -2479,14 +2480,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       ),
                       decoration: BoxDecoration(
                         color: JellyTheme.primary.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
                         draftIndependent
                             ? '本书使用独立设置（阅读模式与排版）'
                             : '当前为全局设置，修改影响所有图书',
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: AppTheme.fontCaption,
                           color: draftIndependent
                               ? JellyTheme.primary
                               : (isDark
@@ -2499,7 +2500,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       children: [
                         Text(
                           '阅读模式',
-                          style: TextStyle(fontSize: 14, color: textColor),
+                          style: TextStyle(fontSize: AppTheme.fontBody, color: textColor),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -2559,14 +2560,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       children: [
                         Text(
                           '翻页反转',
-                          style: TextStyle(fontSize: 14, color: textColor),
+                          style: TextStyle(fontSize: AppTheme.fontBody, color: textColor),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
                             '左点下一页、右点上一页',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: AppTheme.fontFootnote,
                               color: isDark
                                   ? Colors.white54
                                   : JellyTheme.textSecondary,
@@ -2584,14 +2585,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       children: [
                         Text(
                           '双页模式',
-                          style: TextStyle(fontSize: 14, color: textColor),
+                          style: TextStyle(fontSize: AppTheme.fontBody, color: textColor),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
                             '横屏左右并排（上下模式除外）',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: AppTheme.fontFootnote,
                               color: isDark
                                   ? Colors.white54
                                   : JellyTheme.textSecondary,
@@ -2609,14 +2610,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       children: [
                         Text(
                           '信息栏',
-                          style: TextStyle(fontSize: 14, color: textColor),
+                          style: TextStyle(fontSize: AppTheme.fontBody, color: textColor),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
                             '显示时间、页码、进度',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: AppTheme.fontFootnote,
                               color: isDark
                                   ? Colors.white54
                                   : JellyTheme.textSecondary,
@@ -2634,14 +2635,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       children: [
                         Text(
                           '音量键翻页',
-                          style: TextStyle(fontSize: 14, color: textColor),
+                          style: TextStyle(fontSize: AppTheme.fontBody, color: textColor),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
                             '按音量上/下键翻页（会接管音量键）',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: AppTheme.fontFootnote,
                               color: isDark
                                   ? Colors.white54
                                   : JellyTheme.textSecondary,
@@ -2707,13 +2708,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 : (isDark
                       ? Colors.white.withValues(alpha: 0.12)
                       : Colors.black.withValues(alpha: 0.05)),
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(10),
           ),
           alignment: Alignment.center,
           child: Text(
             label,
             style: TextStyle(
-              fontSize: 13,
+              fontSize: AppTheme.fontSubhead,
               color: selected
                   ? Colors.white
                   : (isDark ? Colors.white70 : JellyTheme.textPrimaryLight),
@@ -2947,7 +2948,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
               : (isDark
                     ? Colors.white.withValues(alpha: 0.12)
                     : Colors.black.withValues(alpha: 0.05)),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           border: isAction && !selected
               ? Border.all(
                   color: isDark ? Colors.white24 : Colors.black12,
@@ -2958,7 +2959,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
         child: Text(
           label,
           style: TextStyle(
-            fontSize: 12,
+            fontSize: AppTheme.fontFootnote,
             color: selected
                 ? Colors.white
                 : (isDark ? Colors.white70 : JellyTheme.textPrimaryLight),

@@ -48,6 +48,8 @@ import 'services/rfw_theme_service.dart';
 import 'services/tmdb_service.dart';
 import 'pages/search/controller.dart';
 import 'music/services/library_store.dart';
+import 'widgets/app_toast.dart';
+import 'widgets/video_player_pip.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -244,6 +246,19 @@ void main() async {
   // **故意不 await** —— 同步要走网络（可能好几秒），绝不能卡住启动画面。
   // 内部自带节流（6 小时）与内容指纹比对，重复启动不会反复拉。
   unawaited(subSvc.autoSyncOnLaunch());
+
+  // 🔴 注入 AppToast 的 navigatorKey —— 这一步以前**从来没有被调用过**！
+  //
+  // `AppToast.show()` 内部是：
+  //     final overlay = _key?.currentState?.overlay;
+  //     if (overlay == null) return;      // ← _key 一直是 null，直接 return
+  // 所以阅读模块所有 AppToast 提示（下载完成、保存失败等）
+  // **一条都没有显示过**，而且是完全静默的 —— 不报错、不提示，
+  // 排查时会以为是"业务逻辑没走到"。
+  //
+  // 用 App 已有的 `VideoPlayerPip.navigatorKey`（就是 GetMaterialApp 的
+  // navigatorKey），这样气泡挂在 root Overlay 上，浮在所有路由之上。
+  AppToast.init(VideoPlayerPip.navigatorKey);
 
   runApp(const TVBoxApp());
 }

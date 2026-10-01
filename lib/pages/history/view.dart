@@ -124,11 +124,11 @@ class _HistoryPageState extends State<HistoryPage> {
                 cursorColor: AppTheme.accentColor,
                 cursorWidth: 2,
                 onChanged: _onSearchChanged,
-                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontSubhead),
                 decoration: InputDecoration(
                   hintText: '搜索历史…',
                   hintStyle:
-                      TextStyle(color: AppTheme.textTertiary, fontSize: 13),
+                      TextStyle(color: AppTheme.textTertiary, fontSize: AppTheme.fontSubhead),
                   border: InputBorder.none,
                   isDense: true,
                   contentPadding: EdgeInsets.zero,
@@ -178,7 +178,7 @@ class _HistoryPageState extends State<HistoryPage> {
                   Text('切换布局',
                       style: TextStyle(
                           color: AppTheme.textPrimary,
-                          fontSize: 16,
+                          fontSize: AppTheme.fontHeadline,
                           fontWeight: FontWeight.w600)),
                 ],
               ),

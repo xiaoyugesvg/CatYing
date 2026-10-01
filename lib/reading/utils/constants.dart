@@ -1,7 +1,18 @@
-import 'package:flutter/material.dart';
-
-/// 应用常量配置
-class AppConstants {
+/// **cmbok（阅读模块前身）的常量**。
+///
+/// ── ⚠️ 为什么叫 CmbokConstants 而不是 AppConstants ──────────────
+/// `lib/common/constants.dart` 里**已经有一个 `AppConstants`**
+/// （装的是 SharedPreferences 的 key 字符串）。两个同名不同物的类
+/// 会让"同时 import 两边"的文件直接报 `ambiguous_import`
+/// —— `about_page.dart` 就撞过这个坑，当时用 `as reading_consts` 前缀绕过。
+///
+/// 现在改名从根上消除冲突，那个前缀也就不需要了。
+///
+/// ── 另外删掉了本文件里的 `AppTheme` ────────────────────────────
+/// 它只有 4 个成员（radius/cardElevation/padding/cardPadding），
+/// 与 `common/theme.dart` 的 `AppTheme` **同名冲突**，
+/// 而且经核实**全项目 0 处引用**（纯死代码）。需要圆角/间距请用 `AppTheme`。
+class CmbokConstants {
   static const String appName = 'Cmbok';
   static const String version = '2.0.3';
 
@@ -49,12 +60,4 @@ class AppConstants {
   /// 分享网盘下载地址（找不到安装包时回退）
   static const String shareUrl =
       'https://1812475725.share.123pan.cn/123pan/GSy8Vv-DupEv';
-}
-
-/// 主题配置
-class AppTheme {
-  static const double radius = 12.0;
-  static const double cardElevation = 2.0;
-  static const EdgeInsets padding = EdgeInsets.all(16.0);
-  static const EdgeInsets cardPadding = EdgeInsets.all(12.0);
 }
