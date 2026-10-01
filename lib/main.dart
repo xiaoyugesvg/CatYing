@@ -32,6 +32,7 @@ import 'music/services/player_manager.dart';
 import 'common/appearance_sync.dart';
 import 'common/module_theme_store.dart';
 import 'common/module_theme_sync.dart';
+import 'common/theme_mode_store.dart';
 import 'music/theme/music_theme.dart';
 import 'reading/services/book_favorites_service.dart';
 import 'reading/services/favorites_service.dart';
@@ -46,6 +47,7 @@ import 'services/player_prefs.dart';
 import 'services/rfw_theme_service.dart';
 import 'services/tmdb_service.dart';
 import 'pages/search/controller.dart';
+import 'music/services/library_store.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -141,11 +143,32 @@ void main() async {
   // 音乐调色板桥：音乐模块要读"用户在统一主题页给它选的方案"
   MusicPaletteBridge.register(
       () => ModuleThemeStore.instance.paletteFor(ModuleThemeStore.music));
+
+  // ── 全局主题明暗同步（三模块统一开关，以阅读为基准）────────────
+  //
+  // 注册双向同步回调：
+  //   · 全局 ThemeModeStore 变了 → 推给音乐和阅读
+  //   · 音乐 / 阅读自己的开关被用户拨动 → 回写 ThemeModeStore（已在模块侧实现）
+  GlobalThemeSync.registerMusic((mode) {
+    MusicThemeStore.instance.applyFromGlobal(mode);
+  });
+  GlobalThemeSync.registerReading((mode) {
+    SettingsService().applyThemeModeFromGlobal(mode);
+  });
+  // 启动后立刻同步一次：以阅读当前的明暗为基准，把音乐和全局拉齐
+  final readingMode = SettingsService().themeFollowSystem
+      ? ThemeMode.system
+      : (SettingsService().isDarkMode ? ThemeMode.dark : ThemeMode.light);
+  ThemeModeStore.set(readingMode);
+
   // 启动外观协调：让"谁在前台谁说话"的规则生效。
   // 必须放在 MainTabController 注册之后（sync 里读它判断当前 tab）。
   AppearanceSync.start();
   await MusicPlayerSkin.instance.init();
-  await MusicPlayerManager.instance.init();
+  // #4/#5：音乐库（最近播放 + 收藏）—— 要在 PlayerManager 之前
+    // 准备好，否则第一首播放时 addRecent 还在 init 中
+    await MusicLibraryStore.instance.init();
+    await MusicPlayerManager.instance.init();
 
   // 首页导航栏功能开关与顺序（设置 → 主页页面）
   await NavFeatureService.instance.load();

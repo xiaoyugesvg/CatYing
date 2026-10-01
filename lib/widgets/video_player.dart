@@ -14,6 +14,7 @@ import '../common/theme.dart';
 import 'video_player_pip.dart';
 import 'window_fullscreen.dart';
 import 'danmaku.dart';
+import '../services/audio_focus.dart';
 part 'video_player_helpers.dart';
 
 /// 视频画面比例 - 对应 Swift VideoFitType
@@ -385,6 +386,26 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
     // 启动电池监听 (iOS / Android / 桌面端都支持, 失败时静默忽略)
     _initBatteryMonitor();
+
+    // 注册到全局音频焦点协调器：音乐/直播要出声时会调这里的 pause()。
+    //
+    // ⚠️ 这里原来**完全没有互斥** —— 原来的 `LiveService.pauseLivePlayer`
+    // 只覆盖「点播 ⇄ 直播」，音乐不在体系内，所以"看视频时音乐还在响"。
+    // 现在三方都注册到 AudioFocus，任一方出声都让另两方闭嘴。
+    // 用闭包而不是直接传方法引用：initState 时 `_player` 可能还没建好，
+    // 闭包在真正被调用时才去取它。
+    AudioFocus.register('video', () async {
+      try {
+        // 守卫：没在播就不动它（避免无谓的暂停调用打乱播放器状态）。
+        // ⚠️ 字段名是 `state.playing`，不是 `state.isPlaying`
+        //（`AppPlayerStateView` 上的 getter 就叫 playing）；
+        // 另外 `_player` 是 `late final`（非空），不需要空判断。
+        if (!_player.state.playing) return;
+        await _player.pause();
+      } catch (e) {
+        /* 暂停失败不影响其它方 */
+      }
+    });
 
     if (widget.player != null) {
       _player = widget.player!;
@@ -1199,7 +1220,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (_player.state.playing) {
       _player.pause();
     } else {
-      _player.play();
+      AudioFocus.request('video');
+    _player.play();
     }
     _scheduleHideControls();
   }
@@ -1272,7 +1294,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (mounted) _onWindowFullScreenChanged();
     try {
       if (!_player.state.playing) {
-        await _player.play();
+        await AudioFocus.request('video');
+    await _player.play();
       }
     } catch (e) {
         AppLog.instance.log('[video_player] swallowed: $e');
@@ -1308,7 +1331,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (mounted) _onWindowFullScreenChanged();
     try {
       if (!_player.state.playing) {
-        await _player.play();
+        await AudioFocus.request('video');
+    await _player.play();
       }
     } catch (e) {
         AppLog.instance.log('[video_player] swallowed: $e');
@@ -1434,6 +1458,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   @override
   void dispose() {
+    AudioFocus.unregister('video');
     WidgetsBinding.instance.removeObserver(this);
     WindowFullScreen.instance.activeNotifier.removeListener(
       _onWindowFullScreenChanged,
@@ -3283,7 +3308,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           await _player.seek(resume);
         }
         await Future<void>.delayed(const Duration(milliseconds: 120));
-        await _player.play();
+        await AudioFocus.request('video');
+    await _player.play();
       } catch (e) {
         AppLog.instance.log('[video_player] resume after pip failed: $e');
       }
@@ -3312,7 +3338,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       }
         }
         try {
-          _player.play();
+          AudioFocus.request('video');
+    _player.play();
         } catch (e) {
         AppLog.instance.log('[video_player] swallowed: $e');
       }
@@ -3352,7 +3379,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       );
       if (!entered) {
         try {
-          _player.play();
+          AudioFocus.request('video');
+    _player.play();
         } catch (e) {
         AppLog.instance.log('[video_player] swallowed: $e');
       }
@@ -3428,7 +3456,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (!entered) {
         setState(() => _pipActive = false);
         try {
-          _player.play();
+          AudioFocus.request('video');
+    _player.play();
         } catch (e) {
         AppLog.instance.log('[video_player] swallowed: $e');
       }

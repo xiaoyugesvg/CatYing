@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -56,8 +57,16 @@ class _SearchPageState extends State<SearchPage>
     focus.addListener(() => setState(() {}));
   }
 
+  /// #10：搜索防抖定时器（300ms）
+  ///
+  /// 原来 `onChanged` 只 `setState({})` —— **输入时不搜索**，必须按回车。
+  /// 现在改成"停止输入 300ms 后自动搜"，同时**防抖**：
+  /// 快速打字只会在最后一次停顿后发一次请求，不会每个字符都发。
+  Timer? _debounce;
+
   @override
   void dispose() {
+    _debounce?.cancel(); // 不取消的话：页面已销毁，定时器仍会触发网络请求
     ctrl.dispose();
     focus.dispose();
     super.dispose();
@@ -185,7 +194,18 @@ class _SearchPageState extends State<SearchPage>
                       focusNode: focus,
                       textInputAction: TextInputAction.search,
                       onSubmitted: _run,
-                      onChanged: (_) => setState(() {}),
+                      onChanged: (v) {
+                        // 只重建（清空按钮/空状态要跟着变）
+                        setState(() {});
+                        // 防抖后再真搜（300ms）
+                        _debounce?.cancel();
+                        final k = v.trim();
+                        if (k.isEmpty) return; // 清空时回到落地页，不发请求
+                        _debounce = Timer(const Duration(milliseconds: 300), () {
+                          if (!mounted) return;
+                          unawaited(_run(k));
+                        });
+                      },
                       style: TextStyle(
                           color: MusicTheme.label, fontSize: 15),
                       cursorColor: MusicTheme.tint,

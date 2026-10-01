@@ -7,6 +7,21 @@ import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
 import '../pages/player_page.dart';
 
+/// 迷你播放器的布局常量（#8）。
+///
+/// 抽成常量是为了让"它和导航栏的间距关系"有个明确的名字 ——
+/// 之前是裸的 `6`，看代码看不出来它到底是"和导航栏的间距"
+/// 还是"给 Home 指示条留的位置"（后者应该由导航栏的 SafeArea 负责）。
+class MusicMiniPlayerLayout {
+  MusicMiniPlayerLayout._();
+
+  /// 迷你播放器与悬浮导航栏之间的间距
+  static const double gapAboveNavBar = 6;
+
+  /// 左右外边距（与导航栏的 sideMargin 视觉对齐）
+  static const double sideMargin = 10;
+}
+
 /// 底部迷你播放器 —— 移植自 Beans 的 `MiniPlayerView.swift`（dock 形态）。
 ///
 /// 视觉规格照搬：
@@ -30,7 +45,22 @@ class MiniPlayer extends StatelessWidget {
         if (song == null) return const SizedBox.shrink();
 
         return Padding(
-          padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+          // #8：这里是迷你播放器与**下方悬浮导航栏**之间的间距。
+          //
+          // 说明清楚：`RootView` 里两者是**同一个 Column 的兄弟**，
+          // 顺序是 `[MiniPlayer, _navBar()]`，`Column` 整体
+          // `Positioned(bottom: 0)` —— 所以**结构上不可能重叠**，
+          // 唯一要保证的就是这个间距（原来写死 6，语义看不出来）。
+          //
+          // 用具名常量 + 只在"上方与左右"给外边距：
+          // 底部**不给**外边距，否则会和导航栏自己的
+          // `bottomMargin`（FloatingNavSpec.bottomMargin = 30）叠加。
+          padding: const EdgeInsets.fromLTRB(
+            MusicMiniPlayerLayout.sideMargin,
+            0,
+            MusicMiniPlayerLayout.sideMargin,
+            MusicMiniPlayerLayout.gapAboveNavBar,
+          ),
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: onOpen,
@@ -193,9 +223,17 @@ Future<void> openMusicPlayer(BuildContext context) =>
 /// 供 RootView 复用的「当前是否在播」判断
 bool get hasCurrentMusic => MusicPlayerManager.instance.currentSong != null;
 
-/// 预取：进入音乐 tab 时把常用列表拉一次（失败静默，不打扰）
-Future<void> warmUpMusicData() async {
+/// 预取：进入音乐 tab 时把常用列表拉一次（失败不打扰，但**要能知道**）
+///
+/// #14：原来返回 `void` 且 `catch (_) {}` **把失败完全吞掉** ——
+/// 调用方无法区分"成功"和"网络不通"，于是预热失败时
+/// 音乐页就是一片空白，用户不知道是"没数据"还是"加载失败"。
+/// 现在返回 bool，由 `RootView` 决定是否给"点击重试"。
+Future<bool> warmUpMusicData() async {
   try {
     await MusicApi.instance.hotSearch();
-  } catch (_) {}
+    return true;
+  } catch (_) {
+    return false;
+  }
 }

@@ -9,6 +9,8 @@ import 'music_api.dart';
 import 'settings_store.dart';
 import 'unblock_service.dart';
 import '../../services/audio_focus.dart';
+import '../../services/app_log.dart';
+import 'library_store.dart';
 
 /// 播放模式（对齐 Beans 的循环/随机语义）
 enum PlayMode {
@@ -92,7 +94,13 @@ class MusicPlayerManager extends ChangeNotifier {
   Future<void> init() async {
     // 注册到全局音频焦点协调器：影视/直播要出声时会调这里的 pause()。
     // ⚠️ 不注册的话「看视频时音乐还在响」—— 音乐完全不在互斥体系里。
-    AudioFocus.register('music', pause);
+    // ⚠️ 包一层守卫：AudioFocus 调暂停时**不区分对方是否在播**，
+    // 直接调 pause() 会走 init() 建播放器（还可能发网络请求）。
+    // 只在真在播时才停，避免"音乐明明没在播却被初始化一遍"。
+    AudioFocus.register('music', () async {
+      if (!isPlaying.value) return;
+      await pause();
+    });
     if (_inited) return;
     _inited = true;
     _player = Player();
@@ -173,6 +181,98 @@ class MusicPlayerManager extends ChangeNotifier {
     _queue.add(song);
     notifyListeners();
   }
+
+  // ============================================================
+  // #11 队列管理（原来只有内部增删，用户看不到也改不了）
+  // ============================================================
+
+  /// 跳到队列里的第 [index] 首并播放
+  Future<void> playAt(int index) async {
+    await init();
+    if (index < 0 || index >= _queue.length) return;
+    await _load(index, autoplay: true);
+  }
+
+  /// 从队列移除第 [index] 首。
+  ///
+  /// ── ⚠️ 三种情况必须分清（很容易写错）──────────────────────
+  ///   1. 移除的是**当前播放**那首 → 移除后原位置变成下一首：
+  ///      后面还有歌就直接播新的第 index 首；否则退到最后一首；空了停止。
+  ///   2. 移除的在**当前之前** → 当前下标要 **-1**（否则会跳歌）
+  ///   3. 移除的在**当前之后** → 下标不变
+  ///
+  /// 写错第 2 条的表现就是"删了列表上面一首，结果当前歌莫名跳了"。
+  Future<void> removeAt(int index) async {
+    await init();
+    if (index < 0 || index >= _queue.length) return;
+
+    final removingCurrent = index == _index;
+    _queue.removeAt(index);
+
+    if (_queue.isEmpty) {
+      _index = -1;
+      _currentSong = null;
+      await _player.stop();
+      isPlaying.value = false;
+      notifyListeners();
+      return;
+    }
+
+    if (removingCurrent) {
+      final next = index < _queue.length ? index : _queue.length - 1;
+      await _load(next, autoplay: true);
+    } else {
+      if (index < _index) _index--; // 情况 2
+      notifyListeners();
+    }
+    unawaited(MusicLibraryStore.instance.saveQueue(_queue, _index));
+  }
+
+  /// 把第 [from] 首移到第 [to] 首的位置（拖动排序）
+  ///
+  /// ⚠️ 关键点：**当前播放的下标要按"对象"重新定位**，
+  /// 不能靠旧的数字推算 —— from/to 跨过 _index 时推算极易错，
+  /// 表现是"拖一下列表，当前播放的歌跟丢了"。
+  Future<void> moveInQueue(int from, int to) async {
+    await init();
+    if (from < 0 || from >= _queue.length) return;
+    if (to < 0 || to >= _queue.length) return;
+    if (from == to) return;
+
+    final current = _currentSong; // 记住正在播的是哪一首（按对象）
+    final song = _queue.removeAt(from);
+    _queue.insert(to, song);
+
+    if (current != null) {
+      final i = _queue.indexWhere((s) => identical(s, current));
+      if (i >= 0) _index = i;
+    } else if (_index >= _queue.length) {
+      _index = _queue.length - 1;
+    }
+
+    notifyListeners();
+    unawaited(MusicLibraryStore.instance.saveQueue(_queue, _index));
+  }
+
+  /// 清空队列。**保留正在播的那首** ——
+  /// 用户点"清空列表"不该把音乐也停掉。
+  Future<void> clearQueue() async {
+    await init();
+    final current = _currentSong;
+    if (current == null) {
+      _queue.clear();
+      _index = -1;
+      notifyListeners();
+      return;
+    }
+    _queue
+      ..clear()
+      ..add(current);
+    _index = 0;
+    notifyListeners();
+    unawaited(MusicLibraryStore.instance.saveQueue(_queue, _index));
+  }
+
 
   Future<void> _load(int index, {required bool autoplay}) async {
     if (index < 0 || index >= _queue.length) return;
@@ -260,22 +360,39 @@ class MusicPlayerManager extends ChangeNotifier {
       // 音乐要出声了 → 让影视/直播先闭嘴（互斥的核心：
     // 看视频时音乐还在响 / 听音乐时点视频两边一起响，都是缺这一步）
     if (autoplay) await AudioFocus.request('music');
-    await _player.open(Media(url), play: autoplay);
-    } catch (e) {
-      lastError.value = '播放失败：$e';
+      await _player.open(Media(url), play: autoplay);
+    } catch (e, st) {
+      // #15：**不要把异常 toString 直接给用户看** ——
+      // 它可能包含堆栈、完整 URL、内部实现细节（用户看不懂，也不该看到）。
+      // 技术细节只写日志（方便排查），界面给可读的提示。
+      AppLog.instance.log('[Music] 播放失败 url=$url err=$e\n$st');
+      lastError.value = _friendlyPlayError(e);
       isPlaying.value = false;
       return;
     }
 
     // 3) 取歌词（失败不影响播放）
     unawaited(_loadLyric(song.id));
+
+    // #4：记入最近播放（新的在前、按 identityKey 去重、上限 100）。
+    // 放在"真正开始播"之后 —— 只是点开列表不算听过。
+    // 不 await：本地写盘不该拖慢起播。
+    unawaited(MusicLibraryStore.instance.addRecent(song));
+    // #11：队列变化时持久化，下次启动恢复
+    unawaited(MusicLibraryStore.instance.saveQueue(_queue, _index));
   }
 
   Future<void> _loadLyric(int id) async {
     try {
       final l = await MusicApi.instance.lyric(id);
       if (l == null) return;
-      lyrics.value = LyricParser.parse(l.lyric, translation: l.translation);
+      // #9：**优先逐字歌词（YRC）**，拿不到再回落到标准 LRC。
+      // 两条路的 `LyricLine.text` 都是一行原文，
+      // 所以 UI 侧不用关心用的是哪种 —— 只看 `hasWords` 决定要不要逐字高亮。
+      final yrc = LyricParser.parseYrc(l.yrc);
+      lyrics.value = yrc.isNotEmpty
+          ? yrc
+          : LyricParser.parse(l.lyric, translation: l.translation);
       lyricIndex.value = LyricParser.indexAt(
         lyrics.value,
         position.value + Duration(milliseconds: lyricOffset.value),
@@ -361,6 +478,26 @@ class MusicPlayerManager extends ChangeNotifier {
     await seek(target < Duration.zero ? Duration.zero : target);
   }
 
+  /// 把异常翻译成用户能看懂的话（#15）。
+  ///
+  /// 异常对象**不进 UI** —— 只用于判断归类，原文写日志。
+  String _friendlyPlayError(Object e) {
+    final s = e.toString().toLowerCase();
+    if (s.contains('socket') ||
+        s.contains('connection') ||
+        s.contains('network') ||
+        s.contains('timed out')) {
+      return '网络连接失败，请检查网络后重试';
+    }
+    if (s.contains('404') || s.contains('403') || s.contains('not found')) {
+      return '这首歌暂时无法播放（可能已下架或需要会员）';
+    }
+    if (s.contains('format') || s.contains('codec') || s.contains('decode')) {
+      return '音频格式不支持，换一首试试';
+    }
+    return '播放失败，请重试或换一首';
+  }
+
   Future<void> setVolume(double v) async {
     await init();
     volume.value = v.clamp(0, 100);
@@ -376,36 +513,6 @@ class MusicPlayerManager extends ChangeNotifier {
     final all = PlayMode.values;
     setMode(all[(all.indexOf(mode.value) + 1) % all.length]);
   }
-
-  /// 从队列移除
-  Future<void> removeAt(int index) async {
-    if (index < 0 || index >= _queue.length) return;
-    final wasCurrent = index == _index;
-    _queue.removeAt(index);
-    if (_queue.isEmpty) {
-      _currentSong = null;
-      _index = -1;
-      await _player.stop();
-      notifyListeners();
-      return;
-    }
-    if (wasCurrent) {
-      await _load(index.clamp(0, _queue.length - 1), autoplay: isPlaying.value);
-    } else if (index < _index) {
-      _index--;
-    }
-    notifyListeners();
-  }
-
-  Future<void> clearQueue() async {
-    _queue.clear();
-    _index = -1;
-    _currentSong = null;
-    lyrics.value = const [];
-    await _player.stop();
-    notifyListeners();
-  }
-
   /// 设置歌词偏移并立刻重算高亮
   void setLyricOffset(int ms) {
     lyricOffset.value = ms;

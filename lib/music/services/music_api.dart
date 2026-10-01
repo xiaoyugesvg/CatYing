@@ -61,7 +61,16 @@ class MusicLyric {
   final String? lyric;
   final String? translation;
 
-  const MusicLyric({this.lyric, this.translation});
+  /// 逐字歌词（YRC）。
+  ///
+  /// #9：接口**本来就返回这个字段**，但之前只取了 `lyric`/`tlyric`，
+  /// 于是永远只能整行高亮。有 yrc 时优先用它（逐字高亮）。
+  final String? yrc;
+
+  const MusicLyric({this.lyric, this.translation, this.yrc});
+
+  /// 有逐字数据
+  bool get hasYrc => yrc != null && yrc!.trim().isNotEmpty;
 }
 
 /// 第三方音源解析结果
@@ -342,6 +351,8 @@ class MusicApi {
     return MusicLyric(
       lyric: m['lyric']?.toString(),
       translation: m['tlyric']?.toString(),
+      // #9：逐字歌词字段（网易云叫 yrc，有的实现叫 klyric）
+      yrc: (m['yrc'] ?? m['klyric'])?.toString(),
     );
   }
 

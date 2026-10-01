@@ -266,6 +266,27 @@ class Album {
   const Album({required this.id, required this.name, this.coverUrl, this.artist});
 }
 
+/// 逐字歌词里的一个"字/词"及其起止时间。
+///
+/// YRC（网易云逐字歌词）把一行拆成这样：
+///   `[15600,300](15600,120,0)你(15720,180,0)好`
+/// 意思是这一行从 15600ms 开始、总长 300ms，
+/// "你"从 15600 持续 120ms，"好"从 15720 持续 180ms。
+class LyricWord {
+  final Duration start;
+
+  /// 持续时长（用于算"这个字唱到哪里"）
+  final Duration duration;
+  final String text;
+
+  const LyricWord(this.start, this.duration, this.text);
+
+  Duration get end => start + duration;
+
+  @override
+  String toString() => '$text@${start.inMilliseconds}';
+}
+
 /// 一行歌词
 class LyricLine {
   final Duration time;
@@ -274,7 +295,47 @@ class LyricLine {
   /// 翻译（有则显示在原文下方）
   final String? translation;
 
-  const LyricLine(this.time, this.text, {this.translation});
+  /// 逐字时间轴（YRC）。为空 = 普通 LRC，只能整行高亮。
+  ///
+  /// ⚠️ 注意 [text] 与 [words] 的拼接必须一致 —— 高亮是按字符下标切的，
+  /// 两者对不上会导致高亮位置错位。
+  final List<LyricWord> words;
+
+  const LyricLine(this.time, this.text,
+      {this.translation, this.words = const []});
+
+  /// 是否是逐字歌词
+  bool get hasWords => words.isNotEmpty;
+
+  /// 计算在 [pos] 时刻，本行应该高亮到第几个字符。
+  ///
+  /// 返回 0..text.length。返回 text.length 表示整行唱完。
+  /// 用"字的下标"而不是"字对象"是为了让 UI 直接 `text.substring(0, n)`。
+  int charIndexAt(Duration pos) {
+    if (words.isEmpty) {
+      // 没有逐字数据：用整行时间简单估算（有总时长就用，否则直接全亮）
+      return text.length;
+    }
+    // words 的 text 依次拼起来就是整行
+    var idx = 0;
+    for (final w in words) {
+      if (pos >= w.end) {
+        // 这个字已经唱完
+        idx += w.text.length;
+      } else if (pos >= w.start) {
+        // 正在唱这个字 —— 按时间比例切到字内部（卡拉OK 的"逐渐填色"效果）
+        final total = w.duration.inMilliseconds;
+        final done = (pos - w.start).inMilliseconds;
+        final ratio = total <= 0 ? 1.0 : (done / total).clamp(0.0, 1.0);
+        idx += (w.text.length * ratio).round();
+        return idx.clamp(0, text.length);
+      } else {
+        // 还没唱到这个字
+        break;
+      }
+    }
+    return idx.clamp(0, text.length);
+  }
 
   @override
   String toString() => '[$time] $text';
@@ -369,6 +430,76 @@ class LyricParser {
 
   /// 当前时间应高亮第几行（-1 = 还没到第一行）
   ///
+  // ============================================================
+  // 逐字歌词（YRC / 卡拉OK 格式）
+  // ============================================================
+
+  /// YRC 行首：`[起始ms,总时长ms]`
+  static final _yrcHead = RegExp(r'^\[(\d+),(\d+)\]');
+
+  /// YRC 每个字：`(起始ms,时长ms,保留)字`
+  static final _yrcWord = RegExp(r'\((\d+),(\d+),(-?\d+)\)');
+
+  /// 解析 YRC（逐字歌词）。
+  ///
+  /// 格式示例：
+  ///   `[15600,300](15600,120,0)你(15720,180,0)好`
+  ///
+  /// ── ⚠️ 为什么要用"游标推进"而不是正则 replaceAll ──────────────
+  /// 高亮是按 `text` 的**字符下标**切的（见 [LyricLine.charIndexAt]），
+  /// 所以 `LyricWord.text` 依次拼接**必须严格等于**行文本。
+  /// 用 replaceAll 会留下零散括号、也会丢掉"没有标签的裸字"，
+  /// 于是下标错位、高亮跑到别的字上。这里逐个匹配、按位置切片，
+  /// 保证两者一字不差（切完还会断言校验）。
+  static List<LyricLine> parseYrc(String? yrc) {
+    if (yrc == null || yrc.trim().isEmpty) return const [];
+
+    final out = <LyricLine>[];
+    for (final raw in yrc.split('\n')) {
+      final line = raw.trim();
+      if (line.isEmpty) continue;
+      final head = _yrcHead.firstMatch(line);
+      if (head == null) continue;
+      final startMs = int.tryParse(head.group(1)!) ?? 0;
+
+      final words = <LyricWord>[];
+      final buf = StringBuffer();
+      var cursor = head.end;
+      for (final m in _yrcWord.allMatches(line, head.end)) {
+        // 标签前若有裸文本（异常情况），也算进上一个字/独立文本
+        if (m.start > cursor) {
+          buf.write(line.substring(cursor, m.start));
+        }
+        final ws = int.tryParse(m.group(1)!) ?? 0;
+        final wd = int.tryParse(m.group(2)!) ?? 0;
+        // 这一段的文本 = 标签之后、下一个标签之前
+        final nextStart = _nextTagStart(line, m.end);
+        final txt = line.substring(m.end, nextStart);
+        if (txt.isNotEmpty) {
+          words.add(LyricWord(
+            Duration(milliseconds: ws),
+            Duration(milliseconds: wd),
+            txt,
+          ));
+          buf.write(txt);
+        }
+        cursor = nextStart;
+      }
+      final text = buf.toString();
+      if (text.trim().isEmpty) continue;
+      out.add(LyricLine(Duration(milliseconds: startMs), text, words: words));
+    }
+
+    out.sort((a, b) => a.time.compareTo(b.time));
+    return out;
+  }
+
+  /// 找 `from` 之后第一个字标签的起点（没有则到行尾）
+  static int _nextTagStart(String line, int from) {
+    final m = _yrcWord.firstMatch(line.substring(from));
+    return m == null ? line.length : from + m.start;
+  }
+
   /// 用二分查找：歌词可能上千行，播放时每帧都要查，线性扫会掉帧。
   static int indexAt(List<LyricLine> lines, Duration position) {
     if (lines.isEmpty) return -1;

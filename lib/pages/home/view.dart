@@ -1488,7 +1488,7 @@ class _CatPawLogo extends StatelessWidget {
       height: 34,
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [Color(0xFF6BDC9A), AppTheme.accentColor],
+          colors: [AppTheme.accentColor.withValues(alpha: 0.65), AppTheme.accentColor],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -1573,7 +1573,7 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
               children: [
                 const SizedBox(width: 14),
                 Icon(Icons.search_rounded,
-                    color: isDark ? Colors.white38 : const Color(0xFF9CA3AF),
+                    color: AppTheme.textTertiary,
                     size: 22),
                 const SizedBox(width: 8),
                 Expanded(
@@ -1612,9 +1612,7 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
                       hintText: '搜索影片',
                       hintStyle: TextStyle(
                         fontSize: 15,
-                        color: isDark
-                            ? Colors.white38
-                            : const Color(0xFF9CA3AF),
+                        color: AppTheme.textTertiary,
                       ),
                       border: InputBorder.none,
                       isDense: true,
@@ -1656,7 +1654,7 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
               },
               child: Center(
                 child: Icon(Icons.search_rounded,
-                    color: isDark ? Colors.white38 : const Color(0xFF9CA3AF),
+                    color: AppTheme.textTertiary,
                     size: 22),
               ),
             ),

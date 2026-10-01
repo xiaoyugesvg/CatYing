@@ -20,8 +20,6 @@ import '../../services/tmdb_service.dart';
 import '../../services/detail_page_controller.dart';
 import '../../services/player_fullscreen_controller.dart';
 import '../../services/player_prefs.dart';
-import '../../services/main_tab_controller.dart';
-import '../../widgets/glass.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/app_player.dart';
 import '../../widgets/ios_av_player.dart';
@@ -620,108 +618,13 @@ class _DetailPageState extends State<DetailPage> {
                     child: _buildBody(),
                   )
                 // 普通模式: 播放器贴顶（不再预留 AppBar/状态栏高度）
-                : Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      _buildBody(),
-                      _buildFloatingNavBar(context),
-                    ],
-                  ),
+                : _buildBody(),
           ),
         ],
       );
     });
   }
 
-  /// 详情页底部悬浮导航栏 - 与根 ContentView 悬浮栏同款
-  /// 详情页是 Get.toNamed push 的独立路由, 盖在根界面之上;
-  /// 这里复刻同一套 GlassPanel 悬浮栏, 让详情页也能一键切回主 tab。
-  Widget _buildFloatingNavBar(BuildContext context) {
-    final bottomInset = MediaQuery.of(context).padding.bottom;
-    const navSideGap = 32.0;
-    const navFloatGap = 8.0;
-    return Positioned(
-      left: navSideGap,
-      right: navSideGap,
-      bottom: bottomInset + navFloatGap,
-      child: Obx(() {
-        final current = MainTabController.instance.selectedTab.value;
-        return GlassPanel(
-          radius: 30,
-          // **真悬浮轻玻璃 (2026-09-26)**：与首页底栏同款 glassTintClear
-          // (alpha≈2%)，毛玻璃+细描边+高光，内容滚过其下依旧清晰可见。
-          blur: true,
-          tint: AppTheme.glassTintClear,
-          borderColor: AppTheme.glassBorder,
-          borderWidth: 0.8,
-          highlightStrength: 0.2,
-          shadow: true,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _floatingNavItem(
-                Icons.home_outlined, Icons.home, '首页', 0, current),
-              // 直播：第 5 个 tab（选中联动高亮，修复详情页直播写死高亮）
-              _floatingNavItem(
-                Icons.live_tv, Icons.live_tv, '直播', 4, current),
-              // 「史藏」= 历史 + 收藏（原两项合并）
-              _floatingNavItem(
-                Icons.schedule_outlined, Icons.schedule, '史藏', 1, current),
-              _floatingNavItem(
-                Icons.settings_outlined, Icons.settings, '设置', 3, current),
-            ],
-          ),
-        );
-      }),
-    );
-  }
-
-  Widget _floatingNavItem(
-      IconData icon, IconData activeIcon, String label, int index, int current) {
-    final isSelected = current == index;
-    return GestureDetector(
-      onTap: () {
-        // 切 tab 并返回根界面
-        MainTabController.instance.select(index);
-        Get.back();
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? AppTheme.accentColor.withValues(alpha: 0.12)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              isSelected ? activeIcon : icon,
-              size: 18,
-              color: isSelected
-                  ? AppTheme.accentColor
-                  : Colors.white.withValues(alpha: 0.35),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w500,
-                color: isSelected
-                    ? AppTheme.accentColor
-                    : Colors.white.withValues(alpha: 0.35),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
   /// build 的 body 部分（视频区域 + 信息 + 选集 + 简介）
   /// isFull / isPip 必须在本方法内自己读 Rx，闭包捕获的旧值会让全屏态卡死
   Widget _buildBody() {
@@ -769,15 +672,12 @@ class _DetailPageState extends State<DetailPage> {
         return _buildScrapedBody(info, isFull: isFull, isPip: isPip);
       }
 
-      // 悬浮导航栏占位高度: 滚动内容底部少量留白, 让最后一项
-      // (选集/简介) 滚动到底时能完全滚出悬浮栏上方 (真悬浮, 非全局预留)
+      // 底部留白：滚动内容底部留少量空间，避免最后一项贴底
       final mediaPad = MediaQuery.of(context).padding;
       final bottomInset = mediaPad.bottom;
       // 与直播页一致：状态栏高度黑边，状态栏压在黑边上，不与画面重叠
       final topBar = mediaPad.top > 0 ? mediaPad.top : 0.0;
-      const navFloatGap = 8.0;
-      const navBarHeight = 51.0;
-      final navReserve = bottomInset + navFloatGap + navBarHeight + 22.0;
+      final bottomPadding = bottomInset + 32.0;
 
       // 正常模式：视频 + 视频信息 + 选集 + 简介
       return SingleChildScrollView(
@@ -801,9 +701,8 @@ class _DetailPageState extends State<DetailPage> {
             //    （简介 tab 内含 播放源/画质/合集 线路列表卡片；推荐/快搜 不显示）
             _buildVideoInfo(),
 
-            // 底部间距 - 预留悬浮导航栏高度, 让内容能完整滚出悬浮栏
-            // (不再被底部悬浮菜单栏挡住最后一行内容)
-            SizedBox(height: navReserve),
+            // 底部间距
+            SizedBox(height: bottomPadding),
           ],
         ),
       );
@@ -820,10 +719,7 @@ class _DetailPageState extends State<DetailPage> {
   Widget _buildScrapedBody(VodInfo info,
       {required bool isFull, required bool isPip}) {
     final mediaPad = MediaQuery.of(context).padding;
-    const navFloatGap = 8.0;
-    const navBarHeight = 51.0;
-    final navReserve =
-        mediaPad.bottom + navFloatGap + navBarHeight + 22.0;
+    final bottomPadding = mediaPad.bottom + 32.0;
 
     // 头图：按「海报展示样式」在候选池里挑（固定 / 随机 / 轮播）。
     // 未刮削到多张海报时回落原图，不会显示空白。
@@ -1019,7 +915,7 @@ class _DetailPageState extends State<DetailPage> {
               ),
             ),
 
-          SizedBox(height: navReserve),
+          SizedBox(height: bottomPadding),
         ],
       ),
     );
@@ -2307,8 +2203,8 @@ class _DetailPageState extends State<DetailPage> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: AppTheme.spacingMD),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF5CB67B), Color(0xFF7DCEA0)],
+            gradient: LinearGradient(
+              colors: [AppTheme.accentColor, AppTheme.accentColor.withValues(alpha: 0.75)],
             ),
             borderRadius: BorderRadius.circular(AppTheme.radiusMD),
           ),

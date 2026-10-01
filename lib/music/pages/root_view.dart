@@ -67,11 +67,22 @@ class _MusicRootViewState extends State<MusicRootView> {
   //
   // 阅读那边同理：5 项（漫画/图书/书架/收藏/我的），长按「我的」回影视。
 
+  /// #14：预热是否失败（true 时在顶部显示"加载失败，点击重试"）
+  bool _warmUpFailed = false;
+
   @override
   void initState() {
     super.initState();
-    // 进音乐 tab 就把数据预热起来（失败静默，不挡界面）
-    warmUpMusicData();
+    // 进音乐 tab 就把数据预热起来（不挡界面）
+    _warmUp();
+  }
+
+  /// 预热；失败则显示重试条（原来失败是**完全静默**的，
+  /// 用户进音乐页看到空白也不知道怎么回事）
+  Future<void> _warmUp() async {
+    final ok = await warmUpMusicData();
+    if (!mounted) return;
+    setState(() => _warmUpFailed = !ok);
   }
 
   @override
@@ -101,6 +112,51 @@ class _MusicRootViewState extends State<MusicRootView> {
                     ],
                   ),
                 ),
+                // #14：预热失败提示条（可点重试）
+                // 放在顶部，不遮挡底部播放器与导航栏
+                if (_warmUpFailed)
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    top: MediaQuery.of(context).padding.top + 8,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () {
+                          setState(() => _warmUpFailed = false);
+                          _warmUp();
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: MusicTheme.fill,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.cloud_off_rounded,
+                                  size: 16, color: MusicTheme.secondary),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '音乐数据加载失败（可能是网络不通）',
+                                  style: TextStyle(
+                                      color: MusicTheme.label, fontSize: 13),
+                                ),
+                              ),
+                              Text('点击重试',
+                                  style: TextStyle(
+                                      color: MusicTheme.tint,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 // 底部：迷你播放器 + 悬浮导航栏
                 Positioned(
                   left: 0,

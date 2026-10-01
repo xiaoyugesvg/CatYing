@@ -2,8 +2,12 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../common/module_theme_sync.dart';
+import '../../common/theme_mode_store.dart';
 import '../theme/jelly_palette.dart';
 import '../theme/jelly_theme.dart';
 import '../utils/constants.dart';
@@ -782,7 +786,21 @@ class SettingsService extends ChangeNotifier {
     } catch (e) {
       _log('保存暗色模式失败: $e');
     }
+    // 同步回全局主题存储（非跟随系统时才回写，跟随系统由系统驱动）
+    if (!_themeFollowSystem && !_syncingTheme) {
+      _syncingTheme = true;
+      try {
+        await ThemeModeStore.notifyModuleChanged(
+          value ? ThemeMode.dark : ThemeMode.light,
+        );
+      } finally {
+        _syncingTheme = false;
+      }
+    }
   }
+
+  /// 防止递归：全局 → 阅读 → 全局
+  bool _syncingTheme = false;
 
   /// 设置：主题背景动画开关
   Future<void> setBackgroundAnimation(bool value) async {
@@ -829,6 +847,54 @@ class SettingsService extends ChangeNotifier {
     } catch (e) {
       _log('保存主题跟随系统失败: $e');
     }
+    // 同步回全局主题存储（以阅读为基准，阅读变了全局跟着变）
+    if (!_syncingTheme) {
+      _syncingTheme = true;
+      try {
+        final mode = value
+            ? ThemeMode.system
+            : (isDarkMode ? ThemeMode.dark : ThemeMode.light);
+        await ThemeModeStore.notifyModuleChanged(mode);
+      } finally {
+        _syncingTheme = false;
+      }
+    }
+  }
+
+  /// 从全局主题同步进来（统一主题设置页改了明暗时调用）。
+  ///
+  /// 不走 [setDarkMode] / [setThemeFollowSystem] 避免递归。
+  Future<void> applyThemeModeFromGlobal(ThemeMode mode) async {
+    if (_syncingTheme) return;
+    _syncingTheme = true;
+    try {
+      final followSystem = mode == ThemeMode.system;
+      final dark = switch (mode) {
+        ThemeMode.dark => true,
+        ThemeMode.light => false,
+        ThemeMode.system =>
+          WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+              Brightness.dark,
+      };
+      if (_themeFollowSystem == followSystem &&
+          _isDarkMode == dark) {
+        return;
+      }
+      _themeFollowSystem = followSystem;
+      _isDarkMode = dark;
+      notifyListeners();
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(_kThemeFollowSystemKey, followSystem);
+        if (!followSystem) {
+          await prefs.setBool(_kDarkModeKey, dark);
+        }
+      } catch (e) {
+        _log('保存主题同步失败: $e');
+      }
+    } finally {
+      _syncingTheme = false;
+    }
   }
 
   /// 设置：主题预设（内置 jelly/pink/green/ocean/sunset/sky，或 custom_* 自定义；
@@ -845,6 +911,9 @@ class SettingsService extends ChangeNotifier {
     } catch (e) {
       _log('保存主题预设失败: $e');
     }
+    // 同步到 ModuleThemeStore：以阅读为基准，阅读改了
+    // 选了"跟随阅读"的模块（影视/音乐默认都是）会跟着变
+    syncReadingPresetToModules(v);
   }
 
   /// id 是否为已知主题（内置预设或已存自定义）。

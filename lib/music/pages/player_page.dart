@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:async';
 import 'dart:ui';
 
@@ -9,6 +10,8 @@ import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
 import 'player_settings_sheet.dart';
+import '../services/library_store.dart';
+import 'queue_page.dart';
 
 /// 全屏播放器 —— 移植自 Beans 的 `PlayerView.swift`（4447 行，这里取其主干）。
 ///
@@ -55,6 +58,24 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
       vsync: this,
       duration: const Duration(seconds: 24),
     );
+    // #18：氛围层（浮尘/星点）的脉冲时钟。
+    //
+    // ── ⚠️ 先说明能做到什么、做不到什么 ─────────────────────────
+    // **做不到**：真正"跟随 bass 跳动"。那需要拿到音频频谱
+    //   （FFT），而当前链路是 media_kit 直接把音频交给系统输出，
+    //   Dart 侧拿不到 PCM 数据。要做必须动原生层，不是这一批的范围。
+    //
+    // **做到的是**：给粒子一个**呼吸般的节拍脉冲** ——
+    //   半径/透明度随时间起伏、整体轻微上下浮动，
+    //   暂停时脉冲也停（与 `_spin` 一起同步），
+    //   于是"音乐在动 → 画面在动；暂停 → 画面静止"。
+    // 观感上比原来完全静止的装饰好很多，且不假装是频谱。
+    //
+    // 周期 1.6s ≈ 中等速度歌曲的一拍半，呼吸感比较自然。
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1600),
+    );
     showLyric = MusicPlayerSkin.instance.showLyricFirst.value;
     player.addListener(_onPlayerChanged);
     player.isPlaying.addListener(_syncSpin);
@@ -67,21 +88,70 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
     player.removeListener(_onPlayerChanged);
     player.isPlaying.removeListener(_syncSpin);
     _spin.dispose();
+    _pulse.dispose();
     _lyricScroll.dispose();
     super.dispose();
   }
 
+  /// #18：氛围层脉冲时钟（见 initState 里的说明）
+  late final AnimationController _pulse;
+
+  /// 上一次已处理的歌曲标识（用于"只在换歌时才重建/取色"）
+  int _lastSongId = -1;
+
+  /// 播放器变化回调。
+  ///
+  /// ── ⚠️ 这里原来是 `setState(() {}) + _extractTint()`，有两个问题 ──
+  /// `MusicPlayerManager extends ChangeNotifier`，而 `notifyListeners()`
+  /// 在**很多**地方被调用 —— 包括**每秒一次的 position 更新**。
+  /// 于是：
+  ///
+  ///   #7  **每秒整页 setState 一次**。这页面里有封面旋转、歌词滚动、
+  ///       进度条、氛围层（CustomPaint）—— 全在同一棵树里，
+  ///       每秒重建一次纯属浪费。
+  ///   #6  **每次变化都调一次 `_extractTint()`**。它内部虽然有 url 判断，
+  ///       但每次都要跑一遍函数（还可能命中异步取色）。
+  ///
+  /// 而本页**已经**为高频项单独做了 `ValueListenableBuilder`：
+  ///   position / duration / isPlaying / lyrics / lyricIndex / mode
+  /// 所以这里真正需要重建的只剩 **`currentSong` 变了**（换歌）。
+  ///
+  /// 现在：只有歌曲标识变化时才 setState + 取色。
+  /// position 每秒 tick 时这个回调直接 return，不再触发任何重建。
   void _onPlayerChanged() {
     if (!mounted) return;
+    final song = player.currentSong;
+    final id = song?.id ?? -1;
+    if (id == _lastSongId) return; // 同一首歌（进度/缓冲等高频通知）→ 不重建
+    _lastSongId = id;
     setState(() {});
     unawaited(_extractTint());
   }
 
+  /// 黑胶旋转：播放时转，暂停时**减速停下**（#17）。
+  ///
+  /// 原来是 `_spin.stop()` —— **硬停**，像被谁按住了唱片。
+  /// 真实黑胶的停转是慢慢减速的，所以这里改成
+  /// `animateTo(下一个整圈)` + `Curves.decelerate`：
+  /// 从当前角度平滑转到下一个整圈后自然停止（不会倒转、也不会突变）。
   void _syncSpin() {
+    // #18：脉冲与唱片同步启停（暂停时画面静止，不空转耗电）
+    if (player.isPlaying.value) {
+      if (!_pulse.isAnimating) _pulse.repeat(reverse: true);
+    } else {
+      _pulse.stop();
+    }
     if (player.isPlaying.value) {
       _spin.repeat();
     } else {
-      _spin.stop();
+      // 从当前角度减速到"下一个整圈"，视觉上就是转完这一圈慢慢停住
+      final v = _spin.value; // 0~1
+      final target = v <= 0 ? 0.0 : 1.0;
+      _spin.animateTo(
+        target,
+        duration: const Duration(milliseconds: 900),
+        curve: Curves.decelerate,
+      );
     }
   }
 
@@ -157,11 +227,18 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                   return const SizedBox.shrink();
                 }
                 return IgnorePointer(
-                  child: CustomPaint(
-                    painter: _AmbientPainter(
-                      mode: mode,
-                      tint: _tint,
-                      seed: player.currentSong?.id ?? 0,
+                  // #18：用 AnimatedBuilder 监听脉冲时钟重绘。
+                  // 只重绘这一层 CustomPaint —— 不会带动整页重建
+                  //（这也是 #7 想达到的效果：高频变化只影响最小范围）。
+                  child: AnimatedBuilder(
+                    animation: _pulse,
+                    builder: (context, ___) => CustomPaint(
+                      painter: _AmbientPainter(
+                        mode: mode,
+                        tint: _tint,
+                        seed: player.currentSong?.id ?? 0,
+                        pulse: _pulse.value,
+                      ),
                     ),
                   ),
                 );
@@ -200,6 +277,64 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
   // 顶部
   // ============================================================
 
+  /// #16：音量面板
+  ///
+  /// 系统音量键调的是**设备音量**；这里调的是**播放器自身音量**
+  /// （`MusicPlayerManager.setVolume`，0~100），两者互不影响。
+  /// 用 `player.volume` 作为 ValueListenable 监听，滑动即时生效。
+  void _showVolumeSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: MusicTheme.background,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('音量',
+                  style: TextStyle(
+                      color: MusicTheme.label,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(Icons.volume_mute_rounded,
+                      size: 18, color: MusicTheme.secondary),
+                  Expanded(
+                    child: ValueListenableBuilder<double>(
+                      valueListenable: player.volume,
+                      builder: (_, v, __) => Slider(
+                        value: v.clamp(0, 100),
+                        max: 100,
+                        activeColor: MusicTheme.tint,
+                        inactiveColor: MusicTheme.secondary
+                            .withValues(alpha: 0.3),
+                        onChanged: (nv) => player.setVolume(nv),
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.volume_up_rounded,
+                      size: 18, color: MusicTheme.secondary),
+                ],
+              ),
+              Text(
+                '提示：这里调的是播放器音量；手机侧边键调的是系统音量。',
+                style: TextStyle(color: MusicTheme.secondary, fontSize: 12),
+              ),
+              const SizedBox(height: 6),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _topBar(dynamic song) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -237,10 +372,38 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
               ],
             ),
           ),
+          // #11：播放队列入口。
+          // 原来队列只在 manager 内部存在，用户看不到"接下来播什么"。
+          IconButton(
+            tooltip: '播放队列',
+            icon: const Icon(Icons.queue_music_rounded,
+                color: Colors.white, size: 24),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const MusicQueuePage(),
+              ),
+            ),
+          ),
+          // #16：音量入口。
+          //
+          // `MusicPlayerManager` 一直有 `volume`（0~100）和 `setVolume()`，
+          // 但**播放器页没有任何入口** —— 功能存在却用不到，
+          // 用户想调音量只能按物理键（那调的是系统音量，不是播放器音量）。
+          IconButton(
+            icon: Icon(
+              player.volume.value <= 0
+                  ? Icons.volume_off_rounded
+                  : (player.volume.value < 50
+                      ? Icons.volume_down_rounded
+                      : Icons.volume_up_rounded),
+              color: Colors.white,
+              size: 24,
+            ),
+            onPressed: () => _showVolumeSheet(),
+          ),
           IconButton(
             icon: const Icon(Icons.more_horiz, color: Colors.white, size: 24),
-            onPressed: () => showSongActions(context, song),
-          ),
+            onPressed: () => showSongActions(context, song),          ),
         ],
       ),
     );
@@ -321,13 +484,18 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
               height: 246,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF141416),
+                color: MusicTheme.isDark
+                    ? const Color(0xFF141416)
+                    : const Color(0xFF2A2A2D),
                 // 唱片纹路：几道同心圆描边
                 border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.06), width: 0.8),
+                    color: MusicTheme.isDark
+                        ? Colors.white.withValues(alpha: 0.06)
+                        : Colors.white.withValues(alpha: 0.10),
+                    width: 0.8),
                 boxShadow: [
                   BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.5),
+                      color: Colors.black.withValues(alpha: 0.4),
                       blurRadius: 24,
                       offset: const Offset(0, 8)),
                 ],
@@ -344,9 +512,11 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                   Container(
                     width: 12,
                     height: 12,
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Color(0xFF0A0A0C),
+                      color: MusicTheme.isDark
+                          ? const Color(0xFF0A0A0C)
+                          : const Color(0xFF1A1A1D),
                     ),
                   ),
                 ],
@@ -411,7 +581,9 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                   height: 54,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: const Color(0xFF0A0A0C),
+                    color: MusicTheme.isDark
+                        ? const Color(0xFF0A0A0C)
+                        : const Color(0xFF1A1A1D),
                     border: Border.all(
                         color: Colors.white.withValues(alpha: 0.18),
                         width: 1),
@@ -575,22 +747,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(
-                        line.text,
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: active
-                              ? Colors.white
-                              : Colors.white.withValues(
-                                  alpha: li < idx ? 0.45 : 0.3),
-                          fontSize: active ? 17 : 15,
-                          fontWeight:
-                              active ? FontWeight.w600 : FontWeight.w400,
-                          height: 1.25,
-                        ),
-                      ),
+                      _buildLyricText(line, active, li, idx),
                       if (active &&
                           line.translation != null &&
                           line.translation!.isNotEmpty)
@@ -609,6 +766,76 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
               },
             );
           },
+        );
+      },
+    );
+  }
+
+  /// 歌词行渲染（#9：支持逐字高亮）。
+  ///
+  /// ── 三种情况 ──────────────────────────────────────────────────
+  ///   1. 非当前行 → 普通 Text（灰）
+  ///   2. 当前行但没有逐字数据（普通 LRC）→ 普通 Text（白，整行高亮）
+  ///   3. 当前行**且有逐字数据** → 已唱部分主题色、未唱部分白色，
+  ///      边界由 `charIndexAt` 按时间比例算到**字内部**
+  ///
+  /// ── 实现为什么用两段 TextSpan（而不是 ShaderMask/WidgetSpan）──
+  /// `WidgetSpan` 会参与布局约束，包在歌词上会**改变换行行为**
+  /// （长歌词本该折两行，包了之后可能不折或溢出）。
+  /// 而 `charIndexAt` 已经会按时间比例切到**字内部**
+  /// （`(w.text.length * ratio).round()`），中文单字即一字符，
+  /// 于是"正在唱的字逐渐填色"这个效果天然就有了，
+  /// 不需要额外的 ShaderMask。
+  Widget _buildLyricText(LyricLine line, bool active, int li, int idx) {
+    final baseStyle = TextStyle(
+      color: active
+          ? Colors.white
+          : Colors.white.withValues(alpha: li < idx ? 0.45 : 0.3),
+      fontSize: active ? 17 : 15,
+      fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+      height: 1.25,
+    );
+
+    // 情况 1、2：不需要逐字
+    if (!active || !line.hasWords) {
+      return Text(
+        line.text,
+        textAlign: TextAlign.center,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: baseStyle,
+      );
+    }
+
+    // 情况 3：逐字。position 变化要实时重绘，所以在这里再挂一层监听。
+    return ValueListenableBuilder<Duration>(
+      valueListenable: player.position,
+      builder: (context, pos, __) {
+        // ⚠️ 偏移必须与 `player.lyricIndex` 的计算一致
+        //（`_posSub` 里同样加了 lyricOffset），否则高亮会和"当前行"错位。
+        final shifted = pos + Duration(milliseconds: player.lyricOffset.value);
+        final n = line.charIndexAt(shifted).clamp(0, line.text.length);
+        final sung = line.text.substring(0, n);
+        final rest = line.text.substring(n);
+
+        return Text.rich(
+          TextSpan(
+            style: baseStyle,
+            children: [
+              if (sung.isNotEmpty)
+                TextSpan(
+                  text: sung,
+                  style: baseStyle.copyWith(
+                    color: MusicTheme.tint,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              if (rest.isNotEmpty) TextSpan(text: rest),
+            ],
+          ),
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
         );
       },
     );
@@ -750,6 +977,39 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
           label: player.mode.value.label,
           onTap: () => setState(() => player.cycleMode()),
         ),
+        // #5：收藏（红心）。原来音乐模块**完全没有收藏功能** ——
+        // 听到喜欢的歌没法存，下次只能靠记忆搜。
+        // 用 ListenableBuilder 监听 store，点一下立刻变实心。
+        ListenableBuilder(
+          listenable: MusicLibraryStore.instance,
+          builder: (context, _) {
+            final song = player.currentSong;
+            final fav = song != null &&
+                MusicLibraryStore.instance.isFavorite(song);
+            if (song == null) return const SizedBox.shrink();
+            return _actionBtn(
+              icon: fav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+              label: fav ? '已收藏' : '收藏',
+              // 收藏时用主题色，未收藏保持默认灰白
+              color: fav ? MusicTheme.tint : null,
+              onTap: () {
+                // 用 unawaited 包一层：onTap 要求 VoidCallback，
+                // 不能直接给 async 闭包（返回 Future）。
+                unawaited(() async {
+                  final now =
+                      await MusicLibraryStore.instance.toggleFavorite(song);
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(now ? '已加入我的收藏' : '已取消收藏'),
+                      duration: const Duration(seconds: 1),
+                    ),
+                  );
+                }());
+              },
+            );
+          },
+        ),
         _actionBtn(
           icon: Icons.skip_previous_rounded,
           label: '上一首',
@@ -785,7 +1045,16 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
     required IconData icon,
     required String label,
     required VoidCallback onTap,
+
+    /// 图标/文字颜色覆盖（#5：已收藏时用主题色）。
+    /// 为 null 时用默认的"白色半透明"，与其它按钮一致。
+    Color? color,
   }) {
+    final c = color;
+    final iconColor =
+        c?.withValues(alpha: 0.95) ?? Colors.white.withValues(alpha: 0.75);
+    final labelColor =
+        c?.withValues(alpha: 0.85) ?? Colors.white.withValues(alpha: 0.45);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
@@ -794,11 +1063,9 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: Colors.white.withValues(alpha: 0.75), size: 22),
+            Icon(icon, color: iconColor, size: 22),
             const SizedBox(height: 3),
-            Text(label,
-                style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.45), fontSize: 10)),
+            Text(label, style: TextStyle(color: labelColor, fontSize: 10)),
           ],
         ),
       ),
@@ -814,11 +1081,24 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
 /// 位置由 `seed`（歌曲 id）决定：**同一首歌每次进来粒子位置一致**，
 /// 换歌才换花样。否则每次重建都在跳，看着很乱。
 class _AmbientPainter extends CustomPainter {
-  _AmbientPainter({required this.mode, required this.tint, required this.seed});
+  _AmbientPainter({
+    required this.mode,
+    required this.tint,
+    required this.seed,
+    this.pulse = 0,
+  });
 
   final MusicDustMode mode;
   final Color tint;
   final int seed;
+
+  /// #18：节拍脉冲 0~1（由 `_pulse` 控制器给出，0→1→0 往返）。
+  ///
+  /// ⚠️ 它**不是音频频谱**（见 `initState` 里那段说明），
+  /// 只是一个让粒子"呼吸"的时间函数。
+  /// 位置仍然只由 [seed] 决定（同首歌粒子位置稳定），
+  /// `pulse` 只影响**半径/透明度/位移**，所以不会"每次重建都在跳"。
+  final double pulse;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -834,13 +1114,23 @@ class _AmbientPainter extends CustomPainter {
       // 星点更小更亮；浮尘更大更淡
       final r = isStars ? 0.6 + base * 1.1 : 1.2 + base * 2.2;
       final a = isStars ? 0.25 + base * 0.5 : 0.06 + base * 0.10;
-      paint.color = (isStars ? Colors.white : tint).withValues(alpha: a);
-      canvas.drawCircle(Offset(x, y), r, paint);
+
+      // #18：脉冲 —— 每颗粒子按自身相位偏移，错开起伏（不会整片一起闪）
+      // phase 只由 base 决定（稳定），pulse 提供时间变化。
+      final phase = (base + pulse) * 6.28318530718; // 2π
+      final wobble = 0.5 + 0.5 * math.sin(phase); // 0~1
+      final rP = r * (1.0 + (isStars ? 0.35 : 0.55) * wobble);
+      final aP = a * (0.65 + 0.35 * wobble);
+      // 轻微上下浮动（幅度按粒子大小走，大颗粒飘得明显些）
+      final dy = math.sin(phase * 0.5) * (isStars ? 1.2 : 2.4);
+
+      paint.color = (isStars ? Colors.white : tint).withValues(alpha: aP);
+      canvas.drawCircle(Offset(x, y + dy), rP, paint);
 
       // 星点加一点十字光芒（只给最亮的几颗，避免太花）
       if (isStars && base > 0.86) {
         final sp = Paint()
-          ..color = Colors.white.withValues(alpha: a * 0.7)
+          ..color = Colors.white.withValues(alpha: aP * 0.7)
           ..strokeWidth = 0.7;
         canvas.drawLine(Offset(x - r * 3, y), Offset(x + r * 3, y), sp);
         canvas.drawLine(Offset(x, y - r * 3), Offset(x, y + r * 3), sp);
@@ -850,7 +1140,10 @@ class _AmbientPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_AmbientPainter old) =>
-      old.mode != mode || old.tint != tint || old.seed != seed;
+      old.mode != mode ||
+      old.tint != tint ||
+      old.seed != seed ||
+      old.pulse != pulse;
 }
 
 /// 轻量确定性随机（线性同余）。

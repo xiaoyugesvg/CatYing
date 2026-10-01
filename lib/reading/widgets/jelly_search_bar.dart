@@ -62,8 +62,7 @@ class _JellySearchBarState extends State<JellySearchBar> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final hintColor = isDark ? Colors.white38 : const Color(0xFF9CA3AF);
+    final hintColor = JellyTheme.textSecondary;
 
     // 外层间距由调用方控制，便于与其他控件（如视图切换）并排
     return Container(

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/models.dart';
+import '../services/library_store.dart';
 import '../services/music_api.dart';
 import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
@@ -176,51 +176,41 @@ class _LibraryPageState extends State<LibraryPage>
   }
 }
 
-/// 本机收藏（存在 SharedPreferences，**不需要登录**）。
+/// 本机收藏 —— **薄委托**到 `MusicLibraryStore`（统一存储）。
 ///
-/// Beans 的收藏是云端同步的（`FavoritesStore` 走账号）；
-/// 这里退化成纯本地 —— 功能可用，只是换设备不同步。
+/// ── 🔴 为什么必须改成委托（这是一个真实的数据覆盖 bug）──────────
+/// 原来这个类自己直连 SharedPreferences，键是 `music.favorites.v1`。
+/// 而播放页的红心走的是 `MusicLibraryStore.favorites`，
+/// **两者的键完全相同**，且都是"读全量 → 改一份 → 写回全量"。
+///
+/// 后果：
+///   · 两个 store 各持一份**内存副本**，谁后写谁覆盖对方
+///   · 于是"在播放页收藏了，音乐库页看不到"；
+///     反过来在音乐库页取消收藏，也可能被播放页的旧副本写回去
+///
+/// 保留这个类名是为了**不改 3 个调用点**（`library_page.dart` 里的
+/// `FavoriteStore.instance.all()/isFavorite()/toggle()`）——
+/// 与阅读搜索框的"薄委托"是同一个手法：
+/// **实现只有一份，调用点不用动**。
 class FavoriteStore {
   FavoriteStore._();
   static final FavoriteStore instance = FavoriteStore._();
 
-  static const _key = 'music.favorites.v1';
-
-  final revision = ValueNotifier<int>(0);
+  /// 转发 `MusicLibraryStore` 的 revision（收藏变化时列表要刷新）
+  ValueNotifier<int> get revision => MusicLibraryStore.instance.revisionProxy;
 
   Future<List<Song>> all() async {
-    try {
-      return await _cache();
-    } catch (_) {
-      return const [];
-    }
-  }
-
-  Future<List<Song>> _cache() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_key);
-    if (raw == null || raw.isEmpty) return const [];
-    return Song.listFromJson(raw);
+    await MusicLibraryStore.instance.init();
+    return MusicLibraryStore.instance.favorites;
   }
 
   Future<bool> isFavorite(Song s) async {
-    final list = await _cache();
-    return list.any((e) => e.identityKey == s.identityKey);
+    await MusicLibraryStore.instance.init();
+    return MusicLibraryStore.instance.isFavorite(s);
   }
 
+  /// 返回**操作后**是否已收藏（与原签名兼容 —— 原实现返回 void）
   Future<void> toggle(Song s) async {
-    final list = List<Song>.of(await _cache());
-    final i = list.indexWhere((e) => e.identityKey == s.identityKey);
-    if (i >= 0) {
-      list.removeAt(i);
-    } else {
-      list.insert(0, s);
-    }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _key,
-      Song.listToJson(list),
-    );
-    revision.value++;
+    await MusicLibraryStore.instance.toggleFavorite(s);
   }
 }

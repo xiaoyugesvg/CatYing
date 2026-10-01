@@ -10,6 +10,12 @@ import 'theme.dart';
 /// - 背景决定文字明暗（方案 A）：选到皎月白这类浅色底时自动切浅色文字。
 ///   推导由 BackgroundService 负责，结果通过 [applyLightFromBackground] 推过来。
 /// - 用户手动选 = 打开手动覆盖标记，之后背景变化不再自动改文字颜色。
+///
+/// ── 三模块全局同步 ──────────────────────────────────────────────
+/// 改 [set] 时，会通过 [GlobalThemeSync] 同步推给音乐和阅读模块，
+/// 做到"一个开关，三处同时变"。
+/// 音乐 / 阅读模块自己的开关如果被用户拨动，也会通过
+/// [notifyModuleChanged] 回写到这里，保持全局一致。
 class ThemeModeStore {
   static ValueNotifier<ThemeMode> notifier =
       ValueNotifier(ThemeMode.dark);
@@ -20,6 +26,9 @@ class ThemeModeStore {
   /// 会立刻把明暗改回系统亮度，背景推导结果会被覆盖掉。
   static bool get followBackground => _followBackground;
   static bool _followBackground = false;
+
+  /// 防止递归：同步到模块 → 模块回调 notifyModuleChanged → 再 set 回去
+  static bool _syncing = false;
 
   static ThemeMode get mode => notifier.value;
 
@@ -48,6 +57,7 @@ class ThemeModeStore {
   }
 
   static Future<void> set(ThemeMode m) async {
+    if (notifier.value == m && !_followBackground) return;
     _followBackground = false;
     notifier.value = m;
     _syncBrightness(m);
@@ -63,6 +73,28 @@ class ThemeModeStore {
       );
     } catch (e) {
       /* ignore */
+    }
+    // 同步到音乐和阅读模块（全局统一开关）
+    if (!_syncing) {
+      _syncing = true;
+      try {
+        GlobalThemeSync.pushToModules(m);
+      } finally {
+        _syncing = false;
+      }
+    }
+  }
+
+  /// 由音乐/阅读模块的开关回调（用户在模块内改了明暗），
+  /// 回写到全局存储，保持三处一致。
+  static Future<void> notifyModuleChanged(ThemeMode m) async {
+    if (_syncing) return;
+    if (notifier.value == m && !_followBackground) return;
+    _syncing = true;
+    try {
+      await set(m);
+    } finally {
+      _syncing = false;
     }
   }
 
@@ -88,4 +120,34 @@ class ThemeModeStore {
 
   /// 外观亮度监听（App 外层包一层，浅/深色 getter 变更后整体重建）
   static ValueNotifier<bool> get brightnessListenable => AppBrightness.isLight;
+}
+
+/// 全局主题同步桥。
+///
+/// 把 [ThemeModeStore] 的明暗变更推给音乐和阅读模块，
+/// 做到"一个开关，三处同时变"。
+///
+/// 为什么用回调桥：
+///   · `lib/common` 不该直接依赖 `lib/music` / `lib/reading`
+///   · 由 `main.dart` 在启动时注册真实实现
+///   · 依赖方向保持：上层 → 各模块，底层干净
+class GlobalThemeSync {
+  GlobalThemeSync._();
+
+  static void Function(ThemeMode mode)? _pushMusic;
+  static void Function(ThemeMode mode)? _pushReading;
+
+  /// 由 main.dart 注册音乐模块的明暗设置回调
+  static void registerMusic(void Function(ThemeMode mode) fn) =>
+      _pushMusic = fn;
+
+  /// 由 main.dart 注册阅读模块的明暗设置回调
+  static void registerReading(void Function(ThemeMode mode) fn) =>
+      _pushReading = fn;
+
+  /// 把新的模式推给所有已注册的模块
+  static void pushToModules(ThemeMode mode) {
+    _pushMusic?.call(mode);
+    _pushReading?.call(mode);
+  }
 }

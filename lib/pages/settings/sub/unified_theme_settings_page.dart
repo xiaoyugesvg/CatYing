@@ -190,20 +190,9 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
           ),
           const SizedBox(height: 12),
           Builder(builder: (context) {
-            // ── 三个选项：浅色 / 深色 / 跟随系统 ──────────────────
-            //
-            // ⚠️ 这里原来**只有两个**（浅色/深色）——
-            // 旧版 AppearanceSettingsPage 是有「跟随系统」的，统一页漏了。
-            //
-            // 而且旧版的「跟随系统」是**假的**：它底层写
-            //   `selected == ThemeMode.light ? light : dark`
-            // —— ThemeMode.system 会被当成 **dark**（壁纸也跟着错）。
-            //
-            // 正确做法：`ThemeModeStore` 本来就能存/读 'system'
-            // （它的 _syncBrightness 会用平台亮度），
-            // 所以这里存 system，并按**当前平台亮度**去选壁纸那一套
-            // （AppearanceMode 枚举只有 light/dark —— 壁纸只有两套，
-            //   没有"跟随系统"这一套，这是有意的）。
+            // 三个选项：浅色 / 深色 / 跟随系统
+            // 由 ThemeModeStore 统一管理，set() 内部会通过 GlobalThemeSync
+            // 同步给音乐和阅读模块，做到"一个开关，三处同时变"。
             final m = ThemeModeStore.mode;
             final sel = switch (m) {
               ThemeMode.light => 0,
@@ -219,7 +208,6 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
                   1 => ThemeMode.dark,
                   _ => ThemeMode.system,
                 };
-                await ThemeModeStore.set(target);
                 // 壁纸那套按"实际该显示的明暗"选：
                 //   浅色→light；深色→dark；跟随系统→看平台亮度
                 final wantLight = switch (target) {
@@ -229,9 +217,13 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
                     MediaQuery.of(context).platformBrightness ==
                         Brightness.light,
                 };
+                // 1) 改全局明暗（内部会自动同步给音乐/阅读）
+                await ThemeModeStore.set(target);
+                // 2) 改壁纸外观模式（壁纸只有 light/dark 两套）
                 await BackgroundService.instance.setAppearanceMode(
                   wantLight ? AppearanceMode.light : AppearanceMode.dark,
                 );
+                // 3) 立刻刷新当前页面 UI
                 if (mounted) setState(() {});
               },
             );
@@ -398,7 +390,13 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
   }) {
     return GestureDetector(
       onTap: () async {
-        await store.setPreset(module, presetId);
+        if (module == '__reading__') {
+          // 阅读模块：直接调 SettingsService，它内部会同步给
+          // ModuleThemeStore，选了"跟随阅读"的模块会跟着变
+          await SettingsService().setThemePreset(presetId);
+        } else {
+          await store.setPreset(module, presetId);
+        }
         await _afterPresetChanged();
       },
       child: Column(
@@ -450,81 +448,73 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
   }
 
   // ============================================================
-  // 阅读：只给入口（它有自己的完整主题页）
+  // 阅读：和影视/音乐一样直接选 7 套主题 + "更多设置"入口
   // ============================================================
 
   Widget _readingSection() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-      decoration: BoxDecoration(
-        color: AppTheme.backgroundSecondary,
-        borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.menu_book_outlined,
-                  size: 18, color: AppTheme.accentColor),
-              const SizedBox(width: 8),
-              Text('阅读',
-                  style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary)),
-              // #14：和上面三个「可调」分区区分开。
-              // 上面三个分区下面是**配色圆点**（能直接点着改）；
-              // 阅读这一块只能**跳转**去它自己的主题页 ——
-              // 原来两者长得一样，用户会以为这里也能直接改，
-              // 点进去才发现跳页了。
-              //
-              // 这里加一个明确的「入口」徽标 + 用箭头图标表达"要跳走"。
-              const SizedBox(width: 6),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppTheme.accentColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(6),
+    final readingPreset = SettingsService().themePreset;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppTheme.spacingMD),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundSecondary,
+          borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.menu_book_outlined,
+                    size: 18, color: AppTheme.accentColor),
+                const SizedBox(width: 8),
+                Text('阅读',
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary)),
+                const Spacer(),
+                Text(
+                  _presetName(readingPreset),
+                  style: TextStyle(fontSize: 12, color: AppTheme.textTertiary),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.open_in_new_rounded,
-                        size: 10, color: AppTheme.accentColor),
-                    const SizedBox(width: 3),
-                    Text('入口',
-                        style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.accentColor)),
-                  ],
-                ),
-              ),
-              const Spacer(),
-              Text(_presetName(store.readingPreset),
-                  style: TextStyle(fontSize: 12, color: AppTheme.textTertiary)),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            // 说清为什么这页不直接改阅读：它那边有更多东西（自定义颜色、
-            // 背景动画、图片背景），搬过来会丢功能。
-            '阅读有独立主题页（含自定义颜色、背景动画、图片背景），请到「阅读 → 我的 → 主题风格」调整',
-            style: TextStyle(
-                fontSize: 12, height: 1.5, color: AppTheme.textTertiary),
-          ),
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => Get.to(() => const _ReadingThemeHintPage()),
-              icon: const Icon(Icons.open_in_new_rounded, size: 16),
-              label: const Text('去阅读主题风格'),
+              ],
             ),
-          ),
-        ],
+            const SizedBox(height: 4),
+            Text(
+              '以阅读的 7 套主题为基准；影视、音乐默认跟随阅读',
+              style: TextStyle(fontSize: 12, color: AppTheme.textTertiary),
+            ),
+            const SizedBox(height: 12),
+            // 7 套预设（直接选，和影视/音乐同款）
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                for (final p in readingThemePresets)
+                  _presetDot(
+                    module: '__reading__',
+                    presetId: p.id,
+                    name: p.name,
+                    selected: readingPreset == p.id,
+                    palette: p.palette,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            // 阅读独有高级功能的入口
+            Row(
+              children: [
+                TextButton.icon(
+                  onPressed: () => Get.to(() => const _ReadingThemeHintPage()),
+                  icon: const Icon(Icons.tune, size: 16),
+                  label: const Text('更多设置（自定义颜色 / 背景动画 / 图片背景）'),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
