@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/player_engine.dart';
 import '../common/constants.dart';
+import '../common/theme.dart';
 
 /// 全局播放内核与各内核选项（设置页写入，播放器实时读取）
 class PlayerPrefs {
@@ -145,9 +146,14 @@ class PlayerPrefs {
 
     final q = prefs.getInt('play_default_quality') ?? 0;
     defaultQuality.value = q == 1 ? 1 : 0;
-    final fs = prefs.getDouble('ui_font_scale') ?? 0;
-    fontScale.value =
-        (fs >= 0.85 && fs <= 1.30) ? fs : 1.0;
+    // #10：字号缩放的**持久化与入口都移到 AppTheme** 了
+    // （它是外观设置，不属于播放器）。
+    //   · 读取入口：AppTheme.fontScale（ValueNotifier）
+    //   · 加载：main.dart 启动时 AppTheme.loadFontScale()（在本方法之前）
+    //   · 写入：AppTheme.setFontScale()
+    // 这个 .obs 字段只是**兼容壳**：全项目已无人读它，
+    // 保留是为了不破坏外部可能的引用。可以随时删。
+    fontScale.value = AppTheme.fontScale.value;
     scrapedDetailLayout.value = prefs.getBool('detail_scraped_layout') ?? false;
 
     // 首页列表外观
@@ -361,11 +367,9 @@ class PlayerPrefs {
     await prefs.setInt('play_default_quality', defaultQuality.value);
   }
 
-  /// 设置全局字号缩放
+  /// 设置全局字号缩放（委托给 AppTheme —— #10 字号是外观设置）
   Future<void> setFontScale(double s) async {
-    final v = s.clamp(0.85, 1.30);
-    fontScale.value = v;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble('ui_font_scale', v);
+    await AppTheme.setFontScale(s);
+    fontScale.value = AppTheme.fontScale.value; // 兼容壳同步
   }
 }

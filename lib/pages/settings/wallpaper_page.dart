@@ -538,7 +538,7 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                   border: Border.all(color: AppTheme.accentColor, width: 2.5),
                   borderRadius: BorderRadius.circular(AppTheme.radiusMD),
                 ),
-                child: const Align(
+                child: Align(
                   alignment: Alignment.topRight,
                   child: Padding(
                     padding: EdgeInsets.all(4),

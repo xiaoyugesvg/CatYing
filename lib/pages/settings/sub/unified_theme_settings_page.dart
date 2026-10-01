@@ -6,6 +6,7 @@ import '../../../common/module_theme_sync.dart';
 import '../../../common/theme.dart';
 import '../../../common/theme_mode_store.dart';
 import '../../../services/background_service.dart';
+import '../../../reading/services/settings_service.dart';
 import '../../../reading/theme/jelly_palette.dart';
 import '../wallpaper_page.dart';
 import 'settings_shared.dart';
@@ -78,7 +79,81 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
 
         const SizedBox(height: AppTheme.spacingMD),
         _resetCard(),
+        const SizedBox(height: AppTheme.spacingSM),
+
+        // ── 还原默认主题（#16）────────────────────────────────
+        //
+        // 和上面那个「恢复跟随阅读」是**两回事**：
+        //   · 恢复跟随阅读 = 三个模块都跟着阅读走（阅读自己的配色不动）
+        //   · 还原默认主题 = 全部回到出厂状态（水墨书香 + 深色 + 默认壁纸）
+        // 原来只有前者，用户改乱了之后没有"一键回出厂"的入口。
+        _factoryResetCard(),
       ],
+    );
+  }
+
+  /// #16：还原默认主题（真·出厂恢复）
+  Widget _factoryResetCard() {
+    return Align(
+      alignment: Alignment.center,
+      child: TextButton.icon(
+        onPressed: () async {
+          final ok = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('还原默认主题'),
+              content: const Text(
+                '会把外观恢复到初始状态：\n\n'
+                '· 阅读配色 → 水墨书香\n'
+                '· 影视 / 直播 / 音乐 → 跟随阅读\n'
+                '· 明暗模式 → 深色\n'
+                '· 壁纸 → 默认（深邃黑）\n\n'
+                '你自己新建的自定义配色**不会被删除**，'
+                '只是不再被选中。',
+                style: TextStyle(fontSize: 13, height: 1.7),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('还原'),
+                ),
+              ],
+            ),
+          );
+          if (ok != true) return;
+          await _factoryReset();
+        },
+        icon: const Icon(Icons.settings_backup_restore_rounded, size: 16),
+        label: const Text('还原默认主题（出厂状态）'),
+      ),
+    );
+  }
+
+  /// 执行还原：阅读配色 + 各模块跟随 + 明暗 + 壁纸
+  ///
+  /// 顺序讲究：先改配色（会刷新调色板），再改明暗（会换壁纸那一套），
+  /// 最后统一 apply 一次 —— 避免中间态被渲染出来又立刻被覆盖。
+  Future<void> _factoryReset() async {
+    // 1) 阅读配色回水墨书香（'ink' 是默认 preset id）
+    await SettingsService().setThemePreset('ink');
+    // 2) 三个模块恢复「跟随阅读」
+    await store.resetAll();
+    // 3) 明暗回深色（与出厂的默认壁纸「深邃黑」配套）
+    await ThemeModeStore.set(ThemeMode.dark);
+    await BackgroundService.instance
+        .setAppearanceMode(AppearanceMode.dark);
+    // 4) 统一把调色板推给 AppTheme + 音乐
+    await _afterPresetChanged();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('已还原默认主题'),
+        duration: Duration(seconds: 2),
+      ),
     );
   }
 
@@ -87,7 +162,6 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
   // ============================================================
 
   Widget _modeCard() {
-    final mode = AppBrightness.isLight.value;
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: BoxDecoration(
@@ -115,22 +189,53 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
             style: TextStyle(fontSize: 12, color: AppTheme.textTertiary),
           ),
           const SizedBox(height: 12),
-          _chips(
-            labels: const ['浅色', '深色'],
-            selectedIndex: mode ? 0 : 1,
-            onPick: (i) async {
-              // 复用影视既有的外观链路（ThemeModeStore + BackgroundService）：
-              // 它同时管"文字明暗"与"用哪套背景"，只改 AppBrightness
-              // 会导致壁纸联动失效。
-              await ThemeModeStore.set(
-                i == 0 ? ThemeMode.light : ThemeMode.dark,
-              );
-              await BackgroundService.instance.setAppearanceMode(
-                i == 0 ? AppearanceMode.light : AppearanceMode.dark,
-              );
-              if (mounted) setState(() {});
-            },
-          ),
+          Builder(builder: (context) {
+            // ── 三个选项：浅色 / 深色 / 跟随系统 ──────────────────
+            //
+            // ⚠️ 这里原来**只有两个**（浅色/深色）——
+            // 旧版 AppearanceSettingsPage 是有「跟随系统」的，统一页漏了。
+            //
+            // 而且旧版的「跟随系统」是**假的**：它底层写
+            //   `selected == ThemeMode.light ? light : dark`
+            // —— ThemeMode.system 会被当成 **dark**（壁纸也跟着错）。
+            //
+            // 正确做法：`ThemeModeStore` 本来就能存/读 'system'
+            // （它的 _syncBrightness 会用平台亮度），
+            // 所以这里存 system，并按**当前平台亮度**去选壁纸那一套
+            // （AppearanceMode 枚举只有 light/dark —— 壁纸只有两套，
+            //   没有"跟随系统"这一套，这是有意的）。
+            final m = ThemeModeStore.mode;
+            final sel = switch (m) {
+              ThemeMode.light => 0,
+              ThemeMode.dark => 1,
+              ThemeMode.system => 2,
+            };
+            return _chips(
+              labels: const ['浅色', '深色', '跟随系统'],
+              selectedIndex: sel,
+              onPick: (i) async {
+                final target = switch (i) {
+                  0 => ThemeMode.light,
+                  1 => ThemeMode.dark,
+                  _ => ThemeMode.system,
+                };
+                await ThemeModeStore.set(target);
+                // 壁纸那套按"实际该显示的明暗"选：
+                //   浅色→light；深色→dark；跟随系统→看平台亮度
+                final wantLight = switch (target) {
+                  ThemeMode.light => true,
+                  ThemeMode.dark => false,
+                  ThemeMode.system =>
+                    MediaQuery.of(context).platformBrightness ==
+                        Brightness.light,
+                };
+                await BackgroundService.instance.setAppearanceMode(
+                  wantLight ? AppearanceMode.light : AppearanceMode.dark,
+                );
+                if (mounted) setState(() {});
+              },
+            );
+          }),
         ],
       ),
     );
@@ -368,6 +473,35 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.textPrimary)),
+              // #14：和上面三个「可调」分区区分开。
+              // 上面三个分区下面是**配色圆点**（能直接点着改）；
+              // 阅读这一块只能**跳转**去它自己的主题页 ——
+              // 原来两者长得一样，用户会以为这里也能直接改，
+              // 点进去才发现跳页了。
+              //
+              // 这里加一个明确的「入口」徽标 + 用箭头图标表达"要跳走"。
+              const SizedBox(width: 6),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppTheme.accentColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.open_in_new_rounded,
+                        size: 10, color: AppTheme.accentColor),
+                    const SizedBox(width: 3),
+                    Text('入口',
+                        style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.accentColor)),
+                  ],
+                ),
+              ),
               const Spacer(),
               Text(_presetName(store.readingPreset),
                   style: TextStyle(fontSize: 12, color: AppTheme.textTertiary)),
@@ -400,6 +534,32 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
       alignment: Alignment.center,
       child: TextButton.icon(
         onPressed: () async {
+          // ⚠️ 原来点一下**直接生效**，没有确认 —— 误触就把三个模块的
+          // 配色全改了，而且用户不一定记得原来选的是什么。
+          // 这里加二次确认，并把"会改什么"写清楚。
+          final ok = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('恢复「跟随阅读」'),
+              content: const Text(
+                '影视 · 直播 · 音乐 三个模块的配色会全部改为「跟随阅读」，'
+                '也就是与阅读当前的配色一致。\n\n'
+                '阅读自己的配色不会被改动。',
+                style: TextStyle(fontSize: 13, height: 1.6),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('恢复'),
+                ),
+              ],
+            ),
+          );
+          if (ok != true) return;
           await store.resetAll();
           await _afterPresetChanged();
         },

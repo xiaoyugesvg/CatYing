@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import '../common/theme.dart';
 import 'app_log.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,12 +13,19 @@ import 'package:path_provider/path_provider.dart';
 
 /// 背景选择类型
 enum BackgroundChoice {
-  /// 4 个内置渐变(1-4) + 皎月白
+  /// 4 个**深色**内置渐变（深邃黑/极光紫/赛博蓝/暖阳橙）
   builtin1,
   builtin2,
   builtin3,
   builtin4,
+
+  /// ── 浅色内置渐变（#5：原来只有「皎月白」1 套，深色有 4 套）──
+  /// ⚠️ `moonWhite` 的名字**不能改** —— 它已经写进用户 prefs 了
+  /// （`wallpaper_scene_light` 里存的 choice 名字），改名会让老配置读不回来。
   moonWhite,
+  mistBlue,
+  sageGreen,
+  sandBeige,
 
   /// 用户上传的自定义图片
   custom,
@@ -436,6 +444,27 @@ class BackgroundService extends GetxService {
     Color(0xFFD9D4C8),
   ];
 
+  /// 晨雾蓝：#5 补的浅色渐变之一
+  static const List<Color> _mistBlue = [
+    Color(0xFFF2F6FA),
+    Color(0xFFE2EBF3),
+    Color(0xFFCFDCE8),
+  ];
+
+  /// 竹青：#5 补的浅色渐变之二
+  static const List<Color> _sageGreen = [
+    Color(0xFFF3F7F1),
+    Color(0xFFE4EDE0),
+    Color(0xFFD2DFCC),
+  ];
+
+  /// 暖沙：#5 补的浅色渐变之三
+  static const List<Color> _sandBeige = [
+    Color(0xFFFAF6F0),
+    Color(0xFFF0E8DB),
+    Color(0xFFE2D6C3),
+  ];
+
   List<Color> _getGradientForChoice(BackgroundChoice c) {
     switch (c) {
       case BackgroundChoice.builtin1:
@@ -448,6 +477,12 @@ class BackgroundService extends GetxService {
         return _builtin4;
       case BackgroundChoice.moonWhite:
         return _moonWhite;
+      case BackgroundChoice.mistBlue:
+        return _mistBlue;
+      case BackgroundChoice.sageGreen:
+        return _sageGreen;
+      case BackgroundChoice.sandBeige:
+        return _sandBeige;
       case BackgroundChoice.custom:
         return _builtin1;
     }
@@ -638,40 +673,45 @@ class BackgroundService extends GetxService {
         return '暖阳橙';
       case BackgroundChoice.moonWhite:
         return '皎月白';
+      case BackgroundChoice.mistBlue:
+        return '晨雾蓝';
+      case BackgroundChoice.sageGreen:
+        return '竹青';
+      case BackgroundChoice.sandBeige:
+        return '暖沙';
       case BackgroundChoice.custom:
         return '自定义图片';
     }
   }
 
-  /// 获取所有内置背景的 preview 色 (用于设置页的预览小方块)
+  /// 内置背景的预览色（设置页的预览小方块用）。
+  ///
+  /// #5：按**当前明暗**只列出对应那 4 套 ——
+  /// 深色列深邃黑/极光紫/赛博蓝/暖阳橙，浅色列皎月白/晨雾蓝/竹青/暖沙。
+  /// 混着列没意义：浅色界面套一个深色壁纸，文字对比会很难看。
   static List<({String name, BackgroundChoice choice, List<Color> colors})>
       get builtinPreviews {
+    if (AppBrightness.isLight.value) {
+      return [
+        (name: '皎月白', choice: BackgroundChoice.moonWhite, colors: _moonWhite),
+        (name: '晨雾蓝', choice: BackgroundChoice.mistBlue, colors: _mistBlue),
+        (
+          name: '竹青',
+          choice: BackgroundChoice.sageGreen,
+          colors: _sageGreen
+        ),
+        (
+          name: '暖沙',
+          choice: BackgroundChoice.sandBeige,
+          colors: _sandBeige
+        ),
+      ];
+    }
     return [
-      (
-        name: '深邃黑',
-        choice: BackgroundChoice.builtin1,
-        colors: _builtin1,
-      ),
-      (
-        name: '极光紫',
-        choice: BackgroundChoice.builtin2,
-        colors: _builtin2,
-      ),
-      (
-        name: '赛博蓝',
-        choice: BackgroundChoice.builtin3,
-        colors: _builtin3,
-      ),
-      (
-        name: '暖阳橙',
-        choice: BackgroundChoice.builtin4,
-        colors: _builtin4,
-      ),
-      (
-        name: '皎月白',
-        choice: BackgroundChoice.moonWhite,
-        colors: _moonWhite,
-      ),
+      (name: '深邃黑', choice: BackgroundChoice.builtin1, colors: _builtin1),
+      (name: '极光紫', choice: BackgroundChoice.builtin2, colors: _builtin2),
+      (name: '赛博蓝', choice: BackgroundChoice.builtin3, colors: _builtin3),
+      (name: '暖阳橙', choice: BackgroundChoice.builtin4, colors: _builtin4),
     ];
   }
 }

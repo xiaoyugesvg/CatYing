@@ -59,7 +59,7 @@ class AboutSettingsPage extends StatelessWidget {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.play_circle_filled,
+            Icon(Icons.play_circle_filled,
                 color: AppTheme.accentColor, size: 48),
             const SizedBox(height: AppTheme.spacingLG),
             Text(
@@ -91,7 +91,7 @@ class AboutSettingsPage extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('确定',
+            child: Text('确定',
                 style: TextStyle(color: AppTheme.accentColor)),
           ),
         ],

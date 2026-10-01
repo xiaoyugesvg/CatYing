@@ -2710,7 +2710,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   fontSize: 13,
                 ),
               ),
-              if (selected) ...[const Spacer(), const Icon(Icons.check, color: AppTheme.accentColor, size: 16)],
+              if (selected) ...[const Spacer(), Icon(Icons.check, color: AppTheme.accentColor, size: 16)],
             ],
           ),
         );
@@ -2763,7 +2763,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   fontSize: 13,
                 ),
               ),
-              if (selected) ...[const Spacer(), const Icon(Icons.check, color: AppTheme.accentColor, size: 16)],
+              if (selected) ...[const Spacer(), Icon(Icons.check, color: AppTheme.accentColor, size: 16)],
             ],
           ),
         );

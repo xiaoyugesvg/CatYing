@@ -86,7 +86,7 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const SizedBox(
+            SizedBox(
               width: 24,
               height: 24,
               child: CircularProgressIndicator(
@@ -901,7 +901,7 @@ class _HomePageState extends State<HomePage> {
                             WidgetsBinding.instance.addPostFrameCallback((_) {
                               _controller.loadMore();
                             });
-                            return const Center(
+                            return Center(
                               child: Padding(
                                 padding: EdgeInsets.all(8.0),
                                 child: SizedBox(
@@ -1487,7 +1487,7 @@ class _CatPawLogo extends StatelessWidget {
       width: 34,
       height: 34,
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           colors: [Color(0xFF6BDC9A), AppTheme.accentColor],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,

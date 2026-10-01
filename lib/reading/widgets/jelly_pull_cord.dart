@@ -28,6 +28,7 @@ class JellyPullCord extends StatefulWidget {
     this.onTap,
     this.tooltip,
     this.enabled = true,
+    this.height,
   });
 
   /// 点击回调（通常是"切换到书源界面"）。为 null 时只作装饰。
@@ -36,6 +37,15 @@ class JellyPullCord extends StatefulWidget {
 
   /// 关掉时整根绳变淡（例如当前页没有可切换的目标）
   final bool enabled;
+
+  /// 在**父级**眼里占多高。
+  ///
+  /// ⚠️ 为 null 时会把绳子的自然高度（50）传给父级 —— 放在标题行的
+  /// `Row` 里会把整行撑到 50，导致同排的搜索框/圆图标垂直错位、
+  /// 圆环探出到相邻控件上。所以**放进任何 Row 时都应该传这个值**
+  /// （一般取同行按钮的高度，例如 40）。
+  /// 绳子本身仍按 50 画，超出的部分被裁掉（视觉上就是垂进下面）。
+  final double? height;
 
   @override
   State<JellyPullCord> createState() => _JellyPullCordState();
@@ -69,15 +79,38 @@ class _JellyPullCordState extends State<JellyPullCord> {
       cord = Tooltip(message: widget.tooltip!, child: cord);
     }
 
-    if (widget.onTap == null) return cord;
+    if (widget.onTap == null) return _constrain(cord);
 
-    return GestureDetector(
+    return _constrain(GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) => setState(() => _pressed = false),
       onTapCancel: () => setState(() => _pressed = false),
       onTap: widget.enabled ? widget.onTap : null,
       child: cord,
+    ));
+  }
+
+  /// 把绳子限制在给定高度内。
+  ///
+  /// ── ⚠️ 这里修的是一个真实的布局 bug ──────────────────────────
+  /// `CustomPaint` 的 `size` 是**硬性尺寸**。原来固定 `(16, 50)`，
+  /// 放进标题行的 `Row` 里时 —— Row 的高度取最大子项 ——
+  /// **整行被强行撑到 50px**，而搜索框、圆形图标按钮都只有 ~40px：
+  ///   · 它们被垂直居中到 50px 里 → 与左侧标题基线错位
+  ///   · 绳子比行高，圆环探出到相邻控件上 → 表现为"圆环压在搜索框上"
+  ///
+  /// 修法：**只在本组件内部限制高度**，不把 50px 传给父级。
+  /// `ClipRect` 让超出的绳尾自然裁掉（视觉上就是"绳子垂进下面"），
+  /// 父级拿到的高度是 [height]。
+  Widget _constrain(Widget child) {
+    if (widget.height == null) return child;
+    return SizedBox(
+      height: widget.height,
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: ClipRect(child: child),
+      ),
     );
   }
 }

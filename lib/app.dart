@@ -7,9 +7,9 @@ import 'common/constants.dart';
 import 'services/app_state.dart';
 import 'services/app_log.dart';
 import 'services/background_service.dart';
-import 'services/player_prefs.dart';
 import 'pages/home/view.dart';
 import 'pages/shelf/view.dart';
+import 'reading/widgets/jelly_nav_bar.dart';
 import 'services/nav_feature_service.dart';
 import 'pages/live/view.dart';
 // cmbok 的 App 骨架入口也叫 HomePage，与影视侧 pages/home/view.dart 的
@@ -30,6 +30,11 @@ import 'common/appearance_sync.dart';
 import 'common/floating_nav_spec.dart';
 import 'common/theme_mode_store.dart';
 import 'services/main_tab_controller.dart';
+
+/// 上一次打过的外观签名 —— 用**顶层变量**而不是实例字段：
+/// [TVBoxApp] 是 StatelessWidget，不能持有可变状态；
+/// 而日志去重本身是"进程级"的（同一时刻只会有一个 App 实例在跑）。
+String? _lastAppearanceSig;
 
 class TVBoxApp extends StatelessWidget {
   const TVBoxApp({super.key});
@@ -101,13 +106,30 @@ class TVBoxApp extends StatelessWidget {
                 );
               });
             }
-            AppLog.instance.log(
-                '[Appearance] themeMode=$themeMode platformLight=$platformLight '
-                'followBg=${ThemeModeStore.followBackground} '
-                'isLight(theme)=$isLightNow effectiveLight=$effectiveLight');
-            // 全局字号缩放（设置 → 外观 → 界面字号），用 Obx 监听
-            return Obx(() {
-              final scale = PlayerPrefs.instance.fontScale.value;
+            // ⚠️ 这行原来**每次 build 都打日志**。
+            // build 极其频繁（动画/交互/任何 setState 都会触发），
+            // 结果是 AppLog 被这行刷屏、日志文件膨胀，而内容和上一次
+            // 往往一模一样 —— 排查问题时反而被淹没。
+            //
+            // 改成**只在明暗真的变化时**打一条（静态字段记住上次的签名）。
+            {
+              final sig = '$themeMode|$platformLight|'
+                  '${ThemeModeStore.followBackground}|$effectiveLight';
+              if (sig != _lastAppearanceSig) {
+                _lastAppearanceSig = sig;
+                AppLog.instance.log(
+                    '[Appearance] themeMode=$themeMode platformLight=$platformLight '
+                    'followBg=${ThemeModeStore.followBackground} '
+                    'isLight(theme)=$isLightNow effectiveLight=$effectiveLight');
+              }
+            }
+            // 全局字号缩放（设置 → 外观 → 界面字号）。
+            // #10：字号是外观设置，读 AppTheme.fontScale（ValueNotifier）
+            // 而不是 PlayerPrefs —— 后者只是兼容壳。
+            // 用 ValueListenableBuilder 监听（ValueNotifier 不能进 Obx）。
+            return ValueListenableBuilder<double>(
+              valueListenable: AppTheme.fontScale,
+              builder: (context, scale, _) {
               // ⚠️ 配色方案版本号必须用 ValueListenableBuilder 监听，
               // **不能**在 Obx 里读 `AppTheme.paletteRevision.value` ——
               // 它是普通 ValueNotifier 而非 GetX observable，
@@ -382,7 +404,7 @@ class _ContentViewState extends State<ContentView>
                   height: 100,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    gradient: const LinearGradient(
+                    gradient: LinearGradient(
                       colors: [
                         AppTheme.accentColor,
                         AppTheme.accentLightColor,
@@ -454,7 +476,7 @@ class _ContentViewState extends State<ContentView>
                   child: Row(
                     children: [
                       const SizedBox(width: 14),
-                      const Icon(Icons.link,
+                      Icon(Icons.link,
                           color: AppTheme.accentColor, size: 20),
                       const SizedBox(width: 10),
                       Expanded(
@@ -474,7 +496,7 @@ class _ContentViewState extends State<ContentView>
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.content_paste,
+                        icon: Icon(Icons.content_paste,
                             color: AppTheme.accentColor, size: 20),
                         onPressed: _pasteFromClipboard,
                       ),
@@ -835,84 +857,59 @@ class _ContentViewState extends State<ContentView>
               if (DetailPageController.instance.isOpen) {
                 return const SizedBox.shrink();
               }
-              // ── 与阅读 JellyNavBar 完全同规格的悬浮胶囊 ──────────────
+              // ── 直接用阅读的 JellyNavBar（用户要求"以阅读为基准"）──
               //
-              // 原来是 `GlassPanel(blur: true, tint: glassTintClear, ...)`
-              // —— 用户明确要求"整体都不要这个液态玻璃了"，
-              // 且"影视和音乐的悬浮菜单栏的尺寸、高度颜色要和阅读一样"。
+              // ── 为什么不再自己画一遍 ──────────────────────────────
+              // 这里原来是**又写了一遍**胶囊（Container + 阴影 + Row +
+              // AnimatedContainer 选中块）。后果是影视/音乐只有"背景色淡入"
+              // （300ms），而阅读有**果冻弹性滑动指示器**（850ms ElasticOut）
+              // 和**毛玻璃模糊**（BackdropFilter）——
+              // 三条栏的交互风格和质感都不一样。
               //
-              // 现在改成与阅读/音乐**同一套参数**（全部来自 FloatingNavSpec）：
-              //   高度 72 / 圆角 32 / 距底 30 / 底色 白或深卡 95% /
-              //   阴影 blur12 offset(0,4) / 无边框 / 无高光
-              // 不做 BackdropFilter：阅读那边只在"背景动画关闭"时才模糊，
-              // 而三条栏统一为纯色胶囊更稳（也省 GPU）。
-              final navLight = AppBrightness.isLight.value;
-              return Container(
-                height: FloatingNavSpec.barHeight,
-                decoration: BoxDecoration(
-                  color: (navLight
-                          ? AppTheme.palette.cardLight
-                          : AppTheme.palette.cardDark)
-                      .withValues(alpha: FloatingNavSpec.barAlpha),
-                  borderRadius:
-                      BorderRadius.circular(FloatingNavSpec.radius),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(
-                          alpha: FloatingNavSpec.shadowAlpha),
-                      blurRadius: FloatingNavSpec.shadowBlur,
-                      offset: FloatingNavSpec.shadowOffset,
-                    ),
+              // 上面那段旧注释还写着"不做 BackdropFilter，纯色胶囊更稳"，
+              // 那是我当时自己的取舍；用户明确要求**按阅读来**，所以
+              // 现在直接复用 `JellyNavBar`：一次拿到
+              //   ① 果冻弹性指示器  ② 毛玻璃模糊  ③ 自适应宽度
+              //   ④ 与阅读完全一致的边距/圆角/阴影/字号
+              //
+              // 只保留影视特有的两件事：
+              //   · 项来自 `NavFeatureService.enabled`（可开关 + 拖动排序）
+              //   · 长按「设置」= 返回影视顶层（阅读/音乐是从这边进去的）
+              return Obx(() {
+                final features = NavFeatureService.instance.enabled;
+                final cur = MainTabController.instance.selectedTab.value;
+                return JellyNavBar(
+                  // ⚠️ 必须显式传影视的调色板 —— JellyNavBar 默认用
+                  // 阅读的 JellyTheme.palette，切影视配色时那个不会变，
+                  // 会导致影视栏颜色错（静默 bug）。
+                  palette: AppTheme.palette,
+                  currentIndex:
+                      features.indexWhere((f) => f.tabIndex == cur).clamp(
+                            0,
+                            features.isEmpty ? 0 : features.length - 1,
+                          ),
+                  floating: true,
+                  items: [
+                    for (final f in features)
+                      JellyNavItem(
+                        icon: f.activeIcon,
+                        label: f.label,
+                      ),
                   ],
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: FloatingNavSpec.innerPadH,
-                  vertical: FloatingNavSpec.innerPadV,
-                ),
-                // 底栏项目由「设置 → 主页页面」控制（开关 + 拖动排序）。
-                // Obx 监听，改完设置立刻生效，不必重启。
-                child: Obx(() {
-                  final features = NavFeatureService.instance.enabled;
-                  return Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      for (final f in features) _navItemFor(f),
-                    ],
-                  );
-                }),
-              );
+                  onTap: (i) {
+                    if (i < 0 || i >= features.length) return;
+                    MainTabController.instance.select(features[i].tabIndex);
+                  },
+                  onLongPress: (_) =>
+                      MainTabController.instance.backToVideo(),
+                );
+              });
             }),
           ),
         ],
       ),
     );
   }
-
-  /// 把一个 NavFeature 渲染成底栏按钮（图标/文案/对应 IndexedStack 下标）
-  Widget _navItemFor(NavFeature f) {
-    switch (f) {
-      case NavFeature.home:
-        return _navItem(Icons.home_outlined, Icons.home, f.label, 0);
-      case NavFeature.live:
-        return _navItem(Icons.live_tv, Icons.live_tv, f.label, 4);
-      case NavFeature.books:
-        return _navItem(
-            Icons.menu_book_outlined, Icons.menu_book, f.label, 6);
-      case NavFeature.music:
-        return _navItem(
-            Icons.library_music_outlined, Icons.library_music, f.label, 5);
-      case NavFeature.shelf:
-        return _navItem(
-            Icons.schedule_outlined, Icons.schedule, f.label, 1);
-      case NavFeature.settings:
-        return _navItem(
-            Icons.settings_outlined, Icons.settings, f.label, 3);
-      // 以下功能暂未落到独立 tab 页，先复用最接近的入口，避免点了没反应
-      case NavFeature.search:
-        return _navItem(Icons.search, Icons.search, f.label, 0);
-    }
-  }
-
   /// 处理 showAboutOnLaunch - 启动时显示免责声明
   /// 对应 Swift .sheet(isPresented: $appState.showAboutOnLaunch)
   /// 用户可勾选"不再提示"，勾选后持久化到 SharedPreferences
@@ -932,77 +929,6 @@ class _ContentViewState extends State<ContentView>
   Future<void> _showDisclaimerDialog() async {
     await showAppDisclaimerDialog(context);
   }
-
-
-  /// 直播：第 5 个底部 tab（选中才高亮，修复"首页+直播同时高亮"）
-
-  /// 导航栏项 - 对应 Swift navBarItem
-  Widget _navItem(
-      IconData icon, IconData activeIcon, String label, int index) {
-    final isSelected = MainTabController.instance.selectedTab.value == index;
-    // ── 未选中项的取色必须**随明暗变** ──────────────────────────
-    // ⚠️ 原来写死 `Colors.white.withValues(alpha: 0.35)` —— 那是
-    // "深色底栏"时代的写法。换成水墨书香（浅色底 + 白胶囊）后，
-    // 白色图标在白胶囊上**完全看不见**，表现为"底栏图标消失了"。
-    // 现在对齐阅读 JellyNavBar 的规则：
-    //   深色 → Colors.white54（暗底上用白）
-    //   浅色 → 调色板的 navUnselected（墨灰，白胶囊上清晰）
-    final isDark = !AppBrightness.isLight.value;
-    // 取色统一走 FloatingNavSpec —— 与阅读/音乐同一套规则，
-    // 改一处三条栏一起变（用户要求"颜色要和阅读一样"）。
-    final unselectedColor =
-        FloatingNavSpec.unselectedColor(isDark, AppTheme.palette);
-    final selectedColor =
-        FloatingNavSpec.selectedColor(isDark, AppTheme.palette);
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          MainTabController.instance.selectedTab.value = index;
-        });
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(
-          horizontal: FloatingNavSpec.itemPadH,
-          vertical: FloatingNavSpec.itemPadV,
-        ),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? FloatingNavSpec.selectedItemBg(isDark, AppTheme.palette)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(FloatingNavSpec.itemRadius),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              isSelected ? activeIcon : icon,
-              // 与阅读/音乐统一 21（原 18，三条栏大小不一）
-              size: FloatingNavSpec.iconSize,
-              color: isSelected ? selectedColor : unselectedColor,
-            ),
-            const SizedBox(height: FloatingNavSpec.iconLabelGap),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: FloatingNavSpec.labelSize,
-                fontWeight: FloatingNavSpec.labelWeight,
-                color: isSelected ? selectedColor : unselectedColor,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
-  // 网络状态横幅 - 对应 Swift networkStatusBanner
-  // ============================================================
-
   Widget _buildNetworkStatusBanner() {
     final appState = Get.find<AppState>();
 

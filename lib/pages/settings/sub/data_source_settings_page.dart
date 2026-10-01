@@ -297,7 +297,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                         return Padding(
                           padding:
                               const EdgeInsets.only(top: AppTheme.spacingSM),
-                          child: const Text(
+                          child: Text(
                             '配置加载成功',
                             style: TextStyle(
                                 color: AppTheme.accentColor,
@@ -325,7 +325,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                               controller.loadConfig();
                               Navigator.pop(ctx);
                             },
-                      child: const Text('加载',
+                      child: Text('加载',
                           style: TextStyle(color: AppTheme.accentColor)),
                     )),
               ],
@@ -381,7 +381,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                       ),
                     ),
                     trailing: isHome
-                        ? const Icon(Icons.check_circle,
+                        ? Icon(Icons.check_circle,
                             color: AppTheme.accentColor, size: 16)
                         : null,
                     onTap: () {
@@ -428,7 +428,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.check_circle,
+            Icon(Icons.check_circle,
                 color: AppTheme.accentColor, size: 48),
             const SizedBox(height: 12),
             Text(
@@ -454,7 +454,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx2),
-            child: const Text('知道了',
+            child: Text('知道了',
                 style: TextStyle(color: AppTheme.accentColor)),
           ),
         ],

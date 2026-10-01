@@ -13,7 +13,7 @@ class AppLoading extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const CircularProgressIndicator(color: AppTheme.accentColor),
+          CircularProgressIndicator(color: AppTheme.accentColor),
           const SizedBox(height: AppTheme.spacingMD),
           Text(
             message,
@@ -42,7 +42,7 @@ class AppError extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.error_outline,
               size: 40,
               color: AppTheme.accentColor,
@@ -566,7 +566,7 @@ class SelectionModal<T> extends StatelessWidget {
                           ),
                         ),
                         trailing: isSelected
-                            ? const Icon(Icons.check_circle, color: AppTheme.accentColor)
+                            ? Icon(Icons.check_circle, color: AppTheme.accentColor)
                             : null,
                         onTap: () => onSelect(item),
                       ),

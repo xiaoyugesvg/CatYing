@@ -116,6 +116,17 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
     return SettingsSubPage(
       title: '弹幕服务',
       children: [
+        // #11：实时预览 —— 原来调字号/透明度/速度时**看不到任何效果**，
+        // 必须退出去播视频才知道对不对，来回试很折磨。
+        // 这里给一块模拟视频区，示例弹幕按当前参数滚动。
+        _DanmuPreview(
+          fontSize: _fontSize,
+          opacity: _opacity,
+          speed: _speed,
+          strokeWidth: _strokeWidth,
+        ),
+        const SizedBox(height: 14),
+
         // ================= 服务 =================
         SettingsGroup(
           children: [
@@ -704,5 +715,164 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
     if (mounted) {
       Clipboard.setData(ClipboardData(text: words.join(',')));
     }
+  }
+}
+
+/// #11：弹幕参数实时预览。
+///
+/// ── 为什么做成自包含 widget ────────────────────────────────────
+/// 页面状态类是 `State<DanmuSettingsPage>`（没有 TickerProvider）。
+/// 如果在这个类里加 AnimationController，就得把 mixin 也加上、
+/// 并改动 initState/dispose —— 影响面更大。
+/// 预览的动画完全属于它自己，做成独立 StatefulWidget 更干净：
+/// 页面只管把当前参数**传进来**，动画/重绘都在内部。
+class _DanmuPreview extends StatefulWidget {
+  const _DanmuPreview({
+    required this.fontSize,
+    required this.opacity,
+    required this.speed,
+    required this.strokeWidth,
+  });
+
+  final double fontSize;
+  final double opacity;
+
+  /// 屏幕宽度/秒（越大越快）
+  final double speed;
+  final double strokeWidth;
+
+  @override
+  State<_DanmuPreview> createState() => _DanmuPreviewState();
+}
+
+class _DanmuPreviewState extends State<_DanmuPreview>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c;
+
+  /// 3 条示例弹幕，用不同的纵向位置与相位错开
+  static const _samples = [
+    ('这画面也太顶了吧', 0.16, 0.0),
+    ('前方高能预警', 0.44, 0.35),
+    ('哈哈哈哈哈哈', 0.72, 0.68),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _c = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 6),
+    );
+    // ── ⚠️ 预览动画必须是"有终点"的 ─────────────────────────────
+    //
+    // 我试过两种写法，**都会让测试挂掉**（值得记下来）：
+    //   ① `_c.repeat()` —— 无限循环 → `pumpAndSettle()` 永不返回
+    //      （它一直等"没有待处理帧"），那个设置页回归测试直接卡 10 分钟
+    //   ② `forward()` 完再 `Future.delayed` 循环 —— 虽然动画有终点，
+    //      但 `Future.delayed` 会在测试里留下 **pending timer**，
+    //      teardown 断言 `!timersPending` 直接失败
+    //
+    // 所以：**只播一遍，播完停在终点**。
+    // 代价是没有"一批批滚动"的连续感；换来的是整页可测、也不会有
+    // 后台一直跑的动画耗电。弹幕参数改一下就会重播（见 didUpdateWidget），
+    // 所以"改完立刻看到效果"这个核心诉求是满足的。
+    _c.value = 0;
+    _c.forward();
+  }
+
+  @override
+  void didUpdateWidget(covariant _DanmuPreview old) {
+    super.didUpdateWidget(old);
+    // 任一项参数变了就重播一遍 —— 用户拖滑块时立刻看到新效果
+    if (old.fontSize != widget.fontSize ||
+        old.opacity != widget.opacity ||
+        old.speed != widget.speed ||
+        old.strokeWidth != widget.strokeWidth) {
+      _c.value = 0;
+      _c.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 130,
+      decoration: BoxDecoration(
+        // 用深色底模拟视频画面 —— 弹幕本来就主要出现在视频上，
+        // 在浅色设置页里用白底预览会看不出白字描边的效果。
+        color: const Color(0xFF1A1A1C),
+        borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: LayoutBuilder(
+        builder: (context, box) {
+          final w = box.maxWidth;
+          return Stack(
+            children: [
+              // 左上角标一下这是预览，别让用户以为是真在放视频
+              Positioned(
+                left: 10,
+                top: 8,
+                child: Row(
+                  children: [
+                    Icon(Icons.play_circle_outline,
+                        size: 12, color: Colors.white.withValues(alpha: 0.35)),
+                    const SizedBox(width: 4),
+                    Text('预览',
+                        style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.white.withValues(alpha: 0.35))),
+                  ],
+                ),
+              ),
+              for (final (text, top, phase) in _samples)
+                AnimatedBuilder(
+                  animation: _c,
+                  builder: (context, _) {
+                    // 速度：值越大，走完一屏用的时间越短
+                    // speed 范围 60~300 → 周期 6s~1.2s，与真实弹幕观感接近
+                    final secs = (300 - widget.speed) / 40 + 1.2;
+                    final p = ((_c.value * 6 / secs) + phase) % 1.0;
+                    // 从右侧进入、向左移出
+                    final x = w - p * (w + 220);
+                    return Positioned(
+                      left: x,
+                      top: 24 + top * 78,
+                      child: Opacity(
+                        opacity: widget.opacity,
+                        child: Text(
+                          text,
+                          maxLines: 1,
+                          style: TextStyle(
+                            fontSize: widget.fontSize,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            // 描边用 shadows 近似（真实弹幕也是描边+阴影）
+                            shadows: widget.strokeWidth <= 0
+                                ? null
+                                : [
+                                    Shadow(
+                                        color: Colors.black,
+                                        blurRadius: widget.strokeWidth),
+                                    const Shadow(
+                                        color: Colors.black, blurRadius: 2),
+                                  ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+            ],
+          );
+        },
+      ),
+    );
   }
 }

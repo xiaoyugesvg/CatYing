@@ -81,13 +81,20 @@ class GlassPanel extends StatelessWidget {
       width: borderWidth,
     );
     final tintColor = tint ?? AppTheme.glassTint;
+    // #6：投影原来是**纯黑 40% + 大偏移**，在浅色背景上显得很脏、很重。
+    // 浅色界面里这种重投影会让卡片像"浮在脏玻璃上"。
+    // 现在按明暗给不同强度：
+    //   深色 → 保持原来的重投影（深色底上黑色投影本来就弱，需要更实）
+    //   浅色 → 更淡、更小的偏移（浅背景上一点点灰就够）
     final shadows = boxShadow ??
         (shadow
-            ? const [
+            ? [
                 BoxShadow(
-                  color: Color(0x66000000),
-                  blurRadius: 28,
-                  offset: Offset(0, 10),
+                  color: AppBrightness.isLight.value
+                      ? const Color(0x1A000000) // 浅色：10%
+                      : const Color(0x66000000), // 深色：40%（原值）
+                  blurRadius: AppBrightness.isLight.value ? 18 : 28,
+                  offset: Offset(0, AppBrightness.isLight.value ? 6 : 10),
                 ),
               ]
             : null);

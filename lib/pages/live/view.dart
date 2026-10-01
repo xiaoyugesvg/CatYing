@@ -298,7 +298,7 @@ class _LivePageState extends State<LivePage> {
                                             width: 0.8),
                                       ),
                                       child: loading
-                                          ? const SizedBox(
+                                          ? SizedBox(
                                               width: 14,
                                               height: 14,
                                               child:

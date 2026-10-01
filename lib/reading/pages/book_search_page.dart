@@ -902,6 +902,10 @@ class _BookSearchPageState extends State<BookSearchPage>
                         // 它是**挂饰**不是普通按钮，所以不带底色、
                         // 也不参与右侧图标的横排/展开逻辑。
                         JellyPullCord(
+                          // ⚠️ 必须限高：绳子的 CustomPaint 自然高 50，
+                          // 不限的话这一行会被撑到 50px，同排的搜索框/圆图标
+                          // 垂直错位、圆环还会探出压到搜索框上。
+                          height: 40,
                           tooltip: '切换到书源',
                           onTap: () => Navigator.push(
                             context,

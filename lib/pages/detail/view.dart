@@ -1540,7 +1540,7 @@ class _DetailPageState extends State<DetailPage> {
                               color: AppTheme.borderLight,
                             ),
                           ),
-                          child: const Icon(Icons.swap_horiz,
+                          child: Icon(Icons.swap_horiz,
                               size: 18, color: AppTheme.accentColor),
                         ),
                       );
@@ -1560,7 +1560,7 @@ class _DetailPageState extends State<DetailPage> {
                             color: AppTheme.borderLight,
                           ),
                         ),
-                        child: const Icon(Icons.auto_fix_high,
+                        child: Icon(Icons.auto_fix_high,
                             size: 18, color: AppTheme.accentColor),
                       ),
                     ),
@@ -1584,13 +1584,13 @@ class _DetailPageState extends State<DetailPage> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.theaters_outlined,
+                        Icon(Icons.theaters_outlined,
                             size: 12, color: AppTheme.accentColor),
                         const SizedBox(width: 4),
                         Flexible(
                           child: Text(
                             sourceName,
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: AppTheme.accentColor,
                               fontSize: AppTheme.fontCaption,
                               fontWeight: FontWeight.w500,
@@ -2190,7 +2190,7 @@ class _DetailPageState extends State<DetailPage> {
                 children: [
                   Text(
                     _isDescriptionExpanded ? '收起' : '展开',
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppTheme.accentColor,
                       fontSize: AppTheme.fontFootnote,
                       fontWeight: FontWeight.w500,

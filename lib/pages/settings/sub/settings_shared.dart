@@ -40,7 +40,7 @@ class SettingsDialogs {
                 title: Text(labelBuilder(o),
                     style: TextStyle(color: AppTheme.textSecondary)),
                 trailing: selected == o
-                    ? const Icon(Icons.check, color: AppTheme.accentColor)
+                    ? Icon(Icons.check, color: AppTheme.accentColor)
                     : null,
                 onTap: () => Navigator.pop(ctx, o),
               ),

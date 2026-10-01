@@ -167,6 +167,8 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                     color: _titleColor)),
             const SizedBox(width: 4),
             JellyPullCord(
+              // ⚠️ 限高，否则绳子把整行撑到 50px 导致同排控件错位
+              height: 40,
               tooltip: '切换到图书',
               // 书源页是 push 进来的，所以"切回图书"就是 pop。
               // 用 pop 而不是再 push 一个图书页：否则连点几下会在栈里

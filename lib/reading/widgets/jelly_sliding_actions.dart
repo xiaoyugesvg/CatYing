@@ -4,23 +4,37 @@ import 'package:flutter/material.dart';
 
 import '../theme/jelly_theme.dart';
 
-/// 右上角「滑动图标组」。
+/// 右上角「环形滑动图标组」。
 ///
-/// ── 行为（用户截图指定）──────────────────────────────────────
-///   · **点按**：在图标之间「滑动切换」—— 圆角指示器滑到被点的图标上
-///   · **长按**：展开成**竖列**，每个图标变成独立圆形按钮（如截图那样）
-///   · 空白处点一下 / 再点已选中的图标：收起
+/// ── 行为（用户指定）──────────────────────────────────────────
+///   · **横向拖动**：图标**循环拨动**（像转盘）—— 拨过最后一个会接回
+///     第一个，**没有尽头**，不是滑到头就停
+///   · **松手**：吸附到最近的槽位；带水平速度时按惯性多拨几格
+///   · **点按**：选中该图标并执行它的动作
+///   · **长按**：展开成**竖列**，每个图标变成独立圆形按钮
+///   · 空白处点一下 / 再点已选中：收起
 ///
-/// ── 为什么要做成一整块可以"形变"的东西 ────────────────────────
+/// ── 「环形」是怎么做出来的（关键）───────────────────────────
+/// 每个图标相对**连续位置**算一个**环形最短距离**：
+/// ```
+/// d = ((i - spin) mod n)   再折到 [-n/2, n/2)
+/// ```
+/// `d` 就是"往左/往右拨几格"的最短走法。于是最后一项的左边天然是
+/// 第一项，拨动无限循环，**不需要真的复制两份图标**。
+///
+/// ⚠️ 滑块式的旧实现是 `left = i * (itemSize + gap)`：
+/// 宽度随图标数增长、到末尾就停住（用户反馈"应该能循环拨动"）。
+///
+/// ── 为什么用普通 double 而不是 AnimationController.value ──────
+/// `AnimationController` 的 value 会被 **clamp 在 lowerBound..upperBound**。
+/// 环形位置要能变成任意实数（拨过头到 -3、+7 都合法）——
+/// 所以位置存在普通字段 [_spin] 里，控制器只当**重绘时钟**用。
+/// （我第一版就是直接把位置写进 controller.value，被 clamp 卡住。）
+///
+/// ── 为什么位置/背景/间距都按进度插值 ──────────────────────────
 /// 如果横排和竖列各写一套图标，展开时会**瞬间跳变**（旧的消失、新的出现），
-/// 看起来像两个无关的控件。
-/// 这里只创建 **一份** 图标，位置/背景/间距全部**按进度插值**：
-///   位置 = lerp(横排槽位, 竖列槽位, t)
-///   背景 = lerp(指示器胶囊, 实心圆, t)
-/// 于是展开/收起就是同一批图标在**连续移动**，和截图里的观感一致。
-///
-/// 关键点：必须**固定**「横排槽位」的坐标（[width] 要等于未展开时的宽度），
-/// 否则展开后宽度变了，收起时会从错误的位置滑回去。
+/// 看起来像两个无关的控件。这里只创建**一份**图标，
+/// `位置 = lerp(环形槽位, 竖列槽位, t)`，于是展开就是同一批图标在连续移动。
 class JellySlidingActions extends StatefulWidget {
   const JellySlidingActions({
     super.key,
@@ -39,11 +53,11 @@ class JellySlidingActions extends StatefulWidget {
   final List<JellyAction> actions;
   final bool isDark;
 
-  /// 未展开时整块的宽度（固定值，见上面的说明）
+  /// 未展开时整块的宽度（固定值：环形拨动不改变宽度）
   final double width;
   final double itemSize;
 
-  /// 横排图标之间的基础间距（点按滑动用）
+  /// 横排图标之间的间距（环形槽位用它算步长）
   final double gap;
 
   /// 每个按钮比图标大出来的部分
@@ -60,7 +74,7 @@ class JellySlidingActions extends StatefulWidget {
 }
 
 class _JellySlidingActionsState extends State<JellySlidingActions>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   // ⚠️ 这里**不能**写成 `late final ... = AnimationController(...)`。
   // 那样是"首次访问才创建"。而 build 在 actions 为空时会提前返回，
   // 于是 controller 从未被创建 —— 等到 dispose() 再访问它，
@@ -69,8 +83,27 @@ class _JellySlidingActionsState extends State<JellySlidingActions>
   // 正确做法：在 initState 里**无条件**创建。
   late final AnimationController _c;
 
-  int _selected = 0;
+  /// 环形拨动的**连续位置**（可为任意实数，含负数）。
+  ///
+  /// 0 = 第 0 项在中心；1.7 = 第 1 项向第 2 项拨了 70%。
+  /// 存在普通字段里是因为 [AnimationController] 会把 value clamp 到
+  /// lowerBound..upperBound，装不下"拨过头"的位置。
+  double _spin = 0;
+
+  /// 拖动基准：按下瞬间的 _spin（拖动中用它 + 累计位移）
+  double? _dragBase;
+  double _dragDelta = 0;
+
   bool get _expanded => _c.value > 0.5;
+
+  int get _n => widget.actions.length;
+
+  /// 中心是哪一项（环形取模，负数也正确）
+  int get _sel {
+    if (_n == 0) return 0;
+    final r = _spin.round() % _n;
+    return r < 0 ? r + _n : r;
+  }
 
   @override
   void initState() {
@@ -79,13 +112,21 @@ class _JellySlidingActionsState extends State<JellySlidingActions>
       vsync: this,
       duration: const Duration(milliseconds: 260),
     );
+    _c.addListener(_onTick);
+  }
+
+  void _onTick() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _c.removeListener(_onTick);
     _c.dispose();
     super.dispose();
   }
+
+  // ── 展开 / 收起 ──────────────────────────────────────────────
 
   void _toggle() {
     if (_expanded) {
@@ -95,39 +136,122 @@ class _JellySlidingActionsState extends State<JellySlidingActions>
     }
   }
 
+  // ── 环形拨动（动画到某个位置）───────────────────────────────
+
+  AnimationController? _spinCtrl;
+
+  /// 从当前位置平滑拨到 [to]
+  ///
+  /// 用**独立**的临时 controller（每次拨动新建、结束即 dispose）：
+  /// 主 `_c` 只管展开进度，两个动画能同时跑（边展开边拨）。
+  void _animateSpinTo(double to) {
+    _spinCtrl?.dispose();
+    final from = _spin;
+    if ((to - from).abs() < 0.001) {
+      _spin = to;
+      if (mounted) setState(() {});
+      return;
+    }
+    // 时长随距离增长（拨 3 格比 1 格慢一点，但不线性）
+    final ms = (170 + (to - from).abs() * 70).round().clamp(120, 480);
+    final ctrl = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: ms),
+    );
+    _spinCtrl = ctrl;
+    final anim = Tween<double>(begin: from, end: to).animate(
+      CurvedAnimation(parent: ctrl, curve: Curves.easeOutCubic),
+    );
+    anim.addListener(() {
+      if (!mounted) return;
+      setState(() => _spin = anim.value);
+    });
+    ctrl.addStatusListener((s) {
+      if (s == AnimationStatus.completed || s == AnimationStatus.dismissed) {
+        if (identical(_spinCtrl, ctrl)) _spinCtrl = null;
+        ctrl.dispose();
+      }
+    });
+    ctrl.forward();
+  }
+
   void _onTap(int index) {
     if (_expanded) {
-      setState(() => _selected = index);
       widget.actions[index].onPressed();
       _c.reverse();
-    } else {
-      // 未展开：点按 = 滑动切换选中项（并执行它）
-      setState(() => _selected = index);
-      widget.actions[index].onPressed();
+      return;
     }
+    // 未展开：点按 = 拨到这一项并执行它的动作
+    widget.actions[index].onPressed();
+    // 取环形最近的等价位置（例如当前 0、点第 3 项且 n=4 → 拨 -1 更近）
+    _animateSpinTo(_nearestEquivalent(index));
   }
+
+  /// 把 [index] 映射成"离当前 _spin 最近的等价位置"
+  ///
+  /// n=4、_spin=0、index=3 时：3 和 -1 是同一项，选 -1（只拨 1 格，
+  /// 而不是往回拨 3 格）。这就是"环形"在动画上的体现。
+  double _nearestEquivalent(int index) {
+    if (_n == 0) return _spin;
+    final base = _spin.roundToDouble();
+    // 在 base 附近找与 index 同余（mod n）的位置
+    final k = ((base - index) / _n).round();
+    return index + k * _n.toDouble();
+  }
+
+  // ── 拖动 ────────────────────────────────────────────────────
+
+  void _onDragStart(DragStartDetails d) {
+    _spinCtrl?.dispose();
+    _spinCtrl = null;
+    _dragBase = _spin;
+    _dragDelta = 0;
+  }
+
+  void _onDragUpdate(DragUpdateDetails d) {
+    final base = _dragBase;
+    if (base == null) return;
+    final step = widget.itemSize + widget.gap;
+    if (step <= 0) return;
+    // 手指往左移（primaryDelta < 0）= 内容跟手往前拨
+    _dragDelta += -(d.primaryDelta ?? 0) / step;
+    setState(() => _spin = base + _dragDelta);
+  }
+
+  /// 松手：吸附到最近槽位；有水平速度就按惯性多拨几格
+  void _onDragEnd(DragEndDetails d) {
+    _dragBase = null;
+    final v = d.velocity.pixelsPerSecond.dx;
+    final step = widget.itemSize + widget.gap;
+    // 惯性格数：速度 / 每格像素，限幅 ±3
+    final fling = step <= 0 ? 0 : (-v / 900).round().clamp(-3, 3);
+    _animateSpinTo(_spin.roundToDouble() + fling);
+  }
+
+  void _onDragCancel() {
+    _dragBase = null;
+    _animateSpinTo(_spin.roundToDouble());
+  }
+
+  // ── 渲染 ────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final n = widget.actions.length;
+    final n = _n;
     // 空列表（例如按权限过滤后没剩动作）：退化成零尺寸，不要渲染空 Stack
     if (n == 0) {
       return const SizedBox(key: Key('jelly-sliding-actions-empty'));
     }
 
     final itemSize = widget.itemSize;
-    // 图标在未展开时的位置：整块居中排布
-    final colHeight = n * (itemSize + widget.buttonExtra) +
-        (n - 1) * widget.expandedSpacing;
-
-    // 未展开时的高度用 itemSize（紧凑），展开后要能容纳竖列
+    final colHeight =
+        n * (itemSize + widget.buttonExtra) + (n - 1) * widget.expandedSpacing;
     final width = math.max(widget.width, itemSize + widget.buttonExtra);
 
     return AnimatedBuilder(
       animation: _c,
       builder: (context, _) {
         final t = Curves.easeOutCubic.transform(_c.value);
-        // 高度随展开增长（保证父级 Row/Stack 不会把展开的竖列裁掉）
         final height = itemSize + (colHeight - itemSize) * t;
 
         return SizedBox(
@@ -136,10 +260,13 @@ class _JellySlidingActionsState extends State<JellySlidingActions>
           child: GestureDetector(
             behavior: HitTestBehavior.deferToChild,
             onLongPress: _toggle,
+            onHorizontalDragStart: _onDragStart,
+            onHorizontalDragUpdate: _onDragUpdate,
+            onHorizontalDragEnd: _onDragEnd,
+            onHorizontalDragCancel: _onDragCancel,
             child: Stack(
               clipBehavior: Clip.none,
               children: [
-                // 展开时点击空白处收起
                 if (t > 0.01)
                   Positioned(
                     left: -400,
@@ -152,7 +279,8 @@ class _JellySlidingActionsState extends State<JellySlidingActions>
                       child: const SizedBox.expand(),
                     ),
                   ),
-                for (int i = 0; i < n; i++) _buildItem(i, t, n, itemSize, width),
+                for (int i = 0; i < n; i++)
+                  _buildItem(i, t, n, itemSize, width),
               ],
             ),
           ),
@@ -164,10 +292,30 @@ class _JellySlidingActionsState extends State<JellySlidingActions>
   Widget _buildItem(int i, double t, int n, double itemSize, double width) {
     final a = widget.actions[i];
     final btn = itemSize + widget.buttonExtra;
+    final step = itemSize + widget.gap;
+    final half = n / 2;
 
-    // ── 横排槽位 ──
-    final collapsedLeft =
-        (width - (n * itemSize + (n - 1) * widget.gap)) / 2 + i * (itemSize + widget.gap);
+    // ── 环形槽位 ────────────────────────────────────────────────
+    // 相对连续位置 _spin 的环形最短距离，落在 [-half, half)
+    //
+    // ⚠️ 偶数个图标时"正对面"那一项（dist == ±half）会算到同一个位置，
+    // 两个图标重叠。这里加一个 tie-break：**对面统一算到正的一侧**，
+    // 于是它只画一次、不会和另一项叠在一起。
+    var dist = (i - _spin) % n.toDouble();
+    if (dist < 0) dist += n.toDouble();
+    if (dist > half) dist -= n.toDouble();
+
+    // ⚠️ 可见性判定必须在 tie-break **之前**。
+    // 我第一版先做 tie-break（把 -half 改成 +half）再判可见性：
+    // `abs() > half` 于是不再成立（2 > 2 为 false）→ 正对面那一项被画出来，
+    // 而且与真正的 +half 那项**位置重合**（测试里表现为 4 个图标全在）。
+    //
+    // 环形是转盘：一次只看得到**半个环**（含中心）。超出的一律不画 ——
+    // 这是"能无限循环拨动"的固有代价，不是 bug。
+    if (dist.abs() >= half) return const SizedBox.shrink();
+
+    final collapsedLeft = (width - itemSize) / 2 + dist * step;
+
     // ── 竖列槽位（右对齐）──
     final expandedLeft = width - btn;
     final expandedTop = i * (btn + widget.expandedSpacing);
@@ -175,8 +323,12 @@ class _JellySlidingActionsState extends State<JellySlidingActions>
     final left = _lerp(collapsedLeft, expandedLeft, t);
     final top = _lerp(0.0, expandedTop, t);
 
+    // 越靠环边缘越淡（让位给中间那个）
+    final edgeFade =
+        t > 0.5 ? 1.0 : (1.0 - (dist.abs() / half) * 0.75).clamp(0.25, 1.0);
+
     final bg = Color.lerp(
-      _selectedBg(a),
+      _selectedBg(a, i),
       widget.isDark ? const Color(0xFF3A3A3C) : const Color(0xFF2C2C2E),
       t,
     )!;
@@ -184,27 +336,33 @@ class _JellySlidingActionsState extends State<JellySlidingActions>
     return Positioned(
       left: left,
       top: top,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(t > 0.5 ? btn / 2 : itemSize / 2.6),
-          onTap: () => _onTap(i),
-          onLongPress: _toggle,
-          child: Container(
-            width: t > 0.5 ? btn : itemSize,
-            height: t > 0.5 ? btn : itemSize,
-            decoration: BoxDecoration(
-              color: bg,
-              shape: t > 0.5 ? BoxShape.circle : BoxShape.rectangle,
-              borderRadius:
-                  t > 0.5 ? null : BorderRadius.circular(itemSize / 2.6),
-            ),
-            child: Icon(
-              a.icon,
-              size: widget.iconSize,
-              color: t > 0.5
-                  ? Colors.white
-                  : (widget.isDark ? Colors.white : JellyTheme.textPrimaryLight),
+      child: Opacity(
+        opacity: edgeFade,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius:
+                BorderRadius.circular(t > 0.5 ? btn / 2 : itemSize / 2.6),
+            onTap: () => _onTap(i),
+            onLongPress: _toggle,
+            child: Container(
+              width: t > 0.5 ? btn : itemSize,
+              height: t > 0.5 ? btn : itemSize,
+              decoration: BoxDecoration(
+                color: bg,
+                shape: t > 0.5 ? BoxShape.circle : BoxShape.rectangle,
+                borderRadius:
+                    t > 0.5 ? null : BorderRadius.circular(itemSize / 2.6),
+              ),
+              child: Icon(
+                a.icon,
+                size: widget.iconSize,
+                color: t > 0.5
+                    ? Colors.white
+                    : (widget.isDark
+                        ? Colors.white
+                        : JellyTheme.textPrimaryLight),
+              ),
             ),
           ),
         ),
@@ -212,9 +370,14 @@ class _JellySlidingActionsState extends State<JellySlidingActions>
     );
   }
 
-  /// 未展开时：只有选中项有底色（滑动指示器）
-  Color _selectedBg(JellyAction a) {
-    if (a.highlight || a.icon == widget.actions[_selected].icon) {
+  /// 未展开时**只有中心那一项**有底色。
+  ///
+  /// ⚠️ 旧实现是 `a.icon == widget.actions[_selected].icon` ——
+  /// **用图标比较**。一旦两个动作用了同一个图标（很常见，比如两处都
+  /// 放"下载"），两个都会亮，`_selected` 指向哪个也说不清。
+  /// 现在用**下标**判定，与环形中心一致。
+  Color _selectedBg(JellyAction a, int i) {
+    if (a.highlight || i == _sel) {
       return widget.isDark ? const Color(0xFF3A3A3C) : const Color(0xFFD9D9D9);
     }
     return Colors.transparent;

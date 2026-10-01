@@ -1001,10 +1001,18 @@ class _BookshelfPageState extends State<BookshelfPage>
                   // 不跟着改的后果：标题行下面多出 ~50px 空白，
                   // 分类栏被顶下去，看起来"标题和标签之间空了一大块"。
                   SizedBox(
-                    // 无 tab 切换时不需要这一行（保持原行为）
-                    height: contentTabs.length < 2
-                        ? 0.0
-                        : (widget.showBackButton ? 0.0 : 48.0),
+                    // ⚠️ 这里曾有一个高度 bug：
+                    //   原式 = `contentTabs.length < 2 ? 0
+                    //           : (widget.showBackButton ? 0 : 48)`
+                    // 也就是 **showBackButton == true 时高度给 0**，
+                    // 但下面 Stack 里的标题行只在 `!showBackButton` 时渲染、
+                    // 胶囊是**无条件**渲染的 —— 高度 0 + 内容还在
+                    // → 胶囊**溢出容器**，压到下面的分类栏上
+                    //（用户截图里"书架上方的胶囊和下面的标签叠在一起"）。
+                    //
+                    // 只有**两个 tab 都没有**时这一行才真该消失
+                    //（那种情况下标题行和胶囊都不渲染）。
+                    height: contentTabs.length < 2 ? 0.0 : 48.0,
                     child: Stack(
                       children: [
                         // ── 标题行（一行内全部左对齐，右侧只放闪电）──────

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../common/floating_nav_spec.dart';
 import '../services/settings_service.dart';
+import '../theme/jelly_palette.dart';
 import '../theme/jelly_theme.dart';
 
 /// 果冻风格底部导航栏（支持悬浮胶囊样式，果冻弹性指示器）
@@ -11,6 +12,17 @@ class JellyNavBar extends StatefulWidget {
   final List<JellyNavItem> items;
   final bool floating;
 
+  /// 取色调色板。为 null 时用阅读自己的 [JellyTheme.palette]。
+  ///
+  /// ── ⚠️ 为什么必须有这个参数 ──────────────────────────────────
+  /// 三条栏现在**共用**这个组件（影视/音乐直接复用，不再各自画）。
+  /// 但取色不能都固定用 JellyTheme（阅读的）：
+  ///   · 影视栏要跟 AppTheme.palette（切影视配色时它变）
+  ///   · 音乐栏要跟 MusicTheme.palette（切音乐配色时它变）
+  /// 如果都写死 JellyTheme，切影视/音乐配色时栏的颜色**不会变**，
+  /// 又是一个"看起来改了点开没变"的静默 bug。
+  final JellyPalette? palette;
+
   const JellyNavBar({
     super.key,
     required this.currentIndex,
@@ -18,6 +30,7 @@ class JellyNavBar extends StatefulWidget {
     this.onLongPress,
     required this.items,
     this.floating = false,
+    this.palette,
   }) : assert(
           items.length >= 2 && items.length <= 6,
           // ── 为什么上限从 5 放宽到 6 ────────────────────────────────
@@ -49,6 +62,9 @@ class JellyNavBar extends StatefulWidget {
 
 class _JellyNavBarState extends State<JellyNavBar>
     with SingleTickerProviderStateMixin {
+  /// 当前栏的取色调色板（可被 widget.palette 覆盖）
+  JellyPalette get _pal => widget.palette ?? JellyTheme.palette;
+
   late AnimationController _controller;
   int _previousIndex = 0;
 
@@ -151,7 +167,11 @@ class _JellyNavBarState extends State<JellyNavBar>
       child: LayoutBuilder(
         builder: (context, constraints) {
           final screenWidth = MediaQuery.of(context).size.width;
-          final horizontalMargin = (screenWidth * 0.045).clamp(12.0, 60.0);
+          // #5：边距原来按屏宽比例算 `(屏宽×0.045).clamp(12,60)` ——
+          // 手机上约 17.5px，iPad 上会到 60px，**和影视/音乐的固定
+          // 边距对不上**（那两条是 FloatingNavSpec.sideMargin = 12）。
+          // 现在统一用规格里的固定值，三条栏左右边距完全一致。
+          final horizontalMargin = FloatingNavSpec.sideMargin;
           // ── 每项宽度：必须"按可用宽度反算"，不能只按屏宽比例算 ──────
           //
           // 之前的算法是 `(屏宽 × 0.2).clamp(80, 120)`：
@@ -187,7 +207,7 @@ class _JellyNavBarState extends State<JellyNavBar>
           final navBody = Container(
             height: JellyNavBar.floatingBarHeight,
             decoration: BoxDecoration(
-              color: FloatingNavSpec.barColor(isDark, JellyTheme.palette)
+              color: FloatingNavSpec.barColor(isDark, _pal)
                   .withValues(alpha: bgAnim ? FloatingNavSpec.barAlpha : 0.8),
               borderRadius: BorderRadius.circular(_floatingRadius),
             ),
@@ -195,9 +215,14 @@ class _JellyNavBarState extends State<JellyNavBar>
               padding: const EdgeInsets.symmetric(vertical: _floatingTopPad),
               child: _buildNavContent(
                 height: JellyNavBar.floatingBarHeight - _floatingTopPad * 2,
-                // 纯图标 —— 与用户截图一致（5 项：漫画/图书/书架/收藏/我的）。
-                // 回影视靠长按「我的」，不需要第 6 项。
-                iconOnly: true,
+                // #1：**显示文字标签**（与影视/音乐一致）。
+                //
+                // 原来是硬编码 `iconOnly: true`（纯图标）—— 那是
+                // "5 项：漫画/图书/书架/收藏/我的"时期的写法。
+                // 现在三条栏要以阅读为基准统一，而影视/音乐都是
+                // 图标+文字，阅读只有图标就"光秃秃的"，而且
+                // 漫画/图书/书架 三个图标辨识度本来就低。
+                iconOnly: false,
                 iconSize: _floatingIconSize,
               ),
             ),
@@ -213,12 +238,14 @@ class _JellyNavBarState extends State<JellyNavBar>
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(_floatingRadius),
                 boxShadow: [
+                  // #6：原来深色下用主色 15%（带颜色），而影视/音乐是纯黑 6%
+                  // —— 三条栏阴影不一致。现在统一走规格里的 shadowAlpha
+                  // （明暗都用同一个值，与 FloatingNavSpec 完全一致）。
                   BoxShadow(
-                    color: isDark
-                        ? JellyTheme.primary.withValues(alpha: 0.15)
-                        : Colors.black.withValues(alpha: 0.06),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
+                    color: Colors.black
+                        .withValues(alpha: FloatingNavSpec.shadowAlpha),
+                    blurRadius: FloatingNavSpec.shadowBlur,
+                    offset: FloatingNavSpec.shadowOffset,
                   ),
                 ],
               ),
@@ -301,6 +328,7 @@ class _JellyNavBarState extends State<JellyNavBar>
                       onLongPress: widget.onLongPress != null
                           ? () => widget.onLongPress!(index)
                           : null,
+                      palette: _pal,
                       iconOnly: iconOnly,
                       iconSize: iconSize,
                     ),
@@ -323,11 +351,13 @@ class _JellyNavItem extends StatelessWidget {
   final VoidCallback? onLongPress;
   final bool iconOnly;
   final double iconSize;
+  final JellyPalette palette;
 
   const _JellyNavItem({
     required this.item,
     required this.isSelected,
     required this.onTap,
+    required this.palette,
     this.onLongPress,
     this.iconOnly = false,
     this.iconSize = 22.0,
@@ -339,8 +369,8 @@ class _JellyNavItem extends StatelessWidget {
     // 取色走 FloatingNavSpec —— 与影视/音乐同一套规则，
     // 这样三条栏的"选中/未选中颜色"永远一致（用户要求颜色统一）。
     final color = isSelected
-        ? FloatingNavSpec.selectedColor(isDark, JellyTheme.palette)
-        : FloatingNavSpec.unselectedColor(isDark, JellyTheme.palette);
+        ? FloatingNavSpec.selectedColor(isDark, palette)
+        : FloatingNavSpec.unselectedColor(isDark, palette);
 
     return InkWell(
       onTap: onTap,

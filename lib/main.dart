@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'common/theme.dart';
 import 'package:get/get.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:media_kit/media_kit.dart';
@@ -61,7 +62,9 @@ void main() async {
   Hive.init(appDir.path);
 
   // 播放内核与选项
-  await PlayerPrefs.instance.load();
+  // #10：字号缩放是外观设置，由 AppTheme 负责加载（PlayerPrefs 是兼容壳）
+    await AppTheme.loadFontScale();
+    await PlayerPrefs.instance.load();
 
 
 

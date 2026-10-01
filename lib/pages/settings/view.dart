@@ -5,7 +5,6 @@ import '../../widgets/common_widgets.dart';
 import '../../widgets/glass.dart';
 import 'controller.dart';
 import 'sub/about_settings_page.dart';
-import 'sub/appearance_settings_page.dart';
 import 'sub/unified_theme_settings_page.dart';
 import 'sub/cache_settings_page.dart';
 import 'sub/danmu_settings_page.dart';

@@ -1,25 +1,64 @@
+import 'package:flutter/material.dart';
 import 'dart:convert';
 
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 底部导航栏可管理的一项
+/// 底部导航栏可管理的一项。
+///
+/// ── ⚠️ 图标与 tab 下标为什么放在枚举里 ──────────────────────────
+/// 原来这两样散在 `app.dart` 的 `_navItemFor()` 里（一个 switch），
+/// 而**顺序**在 `NavFeatureService.enabled` 里、**下标**又在那个 switch 里
+/// —— 三处各写一遍，改顺序时极易漏。
+///
+/// 现在合成一处：枚举自己带 `icon` / `activeIcon` / `tabIndex`。
+/// ⚠️ 加新项（或在列表里插入项）时**必须同步 `_tabPages` 的数组位置**，
+/// 否则点它会跳到错的页面。
 enum NavFeature {
-  home('home', '首页', true), // required
-  live('live', '直播', false),
-  music('music', '音乐', false),
-  books('books', '阅读', false),
-  shelf('shelf', '史藏', false),
-  settings('settings', '设置', true), // required
-  search('search', '搜索', false);
+  home('home', '首页', true, tabIndex: 0),
+  live('live', '直播', false, tabIndex: 4),
+  music('music', '音乐', false, tabIndex: 5),
+  books('books', '阅读', false, tabIndex: 6),
+  shelf('shelf', '史藏', false, tabIndex: 1),
+  settings('settings', '设置', true, tabIndex: 3),
+  search('search', '搜索', false, tabIndex: 0);
 
-  const NavFeature(this.id, this.label, this.required);
+  const NavFeature(this.id, this.label, this.required,
+      {required this.tabIndex});
 
   final String id;
   final String label;
 
   /// 必需页面：不能关闭（首页 / 设置）
   final bool required;
+
+  /// 对应 `app.dart` 里 `_tabPages` 的**真实下标**（不是底栏位置！）
+  ///
+  /// 底栏顺序由 `NavFeatureService.enabled` 决定，而下标是这里固定的。
+  /// 两者**故意解耦**：用户拖动排序底栏时，不能把页面顺序也改了。
+  final int tabIndex;
+
+  /// 未选中图标
+  IconData get icon => switch (this) {
+        NavFeature.home => Icons.home_outlined,
+        NavFeature.live => Icons.live_tv,
+        NavFeature.music => Icons.library_music_outlined,
+        NavFeature.books => Icons.menu_book_outlined,
+        NavFeature.shelf => Icons.schedule_outlined,
+        NavFeature.settings => Icons.settings_outlined,
+        NavFeature.search => Icons.search,
+      };
+
+  /// 选中图标
+  IconData get activeIcon => switch (this) {
+        NavFeature.home => Icons.home,
+        NavFeature.live => Icons.live_tv,
+        NavFeature.music => Icons.library_music,
+        NavFeature.books => Icons.menu_book,
+        NavFeature.shelf => Icons.schedule,
+        NavFeature.settings => Icons.settings,
+        NavFeature.search => Icons.search,
+      };
 }
 
 /// 首页导航栏的功能开关与顺序。

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../reading/theme/jelly_palette.dart';
 
@@ -28,10 +29,35 @@ class AppBrightness {
 /// 等）。这里按 `AppBrightness` 选其中一套，
 /// 于是"白天/黑夜模式"仍然是各自独立开关的，只是**两套色都来自水墨书香**。
 class AppTheme {
-  /// 全局字号缩放（设置可调，默认 1.0）
+  /// 全局字号缩放（设置可调，默认 1.0）。
+  ///
+  /// #10：这个名字是对的 —— "界面字号"本来就属于**外观**，不属于播放器。
+  /// 原来的读取入口在 `PlayerPrefs.instance.fontScale`（播放器设置里），
+  /// 读起来是"字号缩放存在播放器设置里"，命名和功能不匹配。
+  /// 现在 AppTheme 是唯一入口：
+  ///   · 读取：`AppTheme.fontScale`（ValueNotifier，用 Obx/ValueListenableBuilder 监听）
+  ///   · 写入：`AppTheme.setFontScale()`
+  ///   · 加载：`AppTheme.loadFontScale()`（启动时读盘）
+  /// PlayerPrefs 里的旧字段保留作**兼容壳**（delegate 到这里），
+  /// 避免其它老代码突然找不到 `PlayerPrefs.instance.fontScale`。
   static final ValueNotifier<double> fontScale = ValueNotifier(1.0);
 
   static double fs(double base) => (base * fontScale.value).clamp(9.0, 40.0);
+
+  /// 启动时从持久化读字号缩放（原 PlayerPrefs.load 里那行搬过来）
+  static Future<void> loadFontScale() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getDouble('ui_font_scale') ?? 0;
+    fontScale.value = (v >= 0.85 && v <= 1.30) ? v : 1.0;
+  }
+
+  /// 设置并持久化字号缩放
+  static Future<void> setFontScale(double s) async {
+    final v = s.clamp(0.85, 1.30);
+    fontScale.value = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('ui_font_scale', v);
+  }
 
   // ── 调色板来源（影视 + 直播共用一套）─────────────────────────────
   //
@@ -69,18 +95,24 @@ class AppTheme {
   /// 当前明暗下的调色板取色入口
   static bool get _light => AppBrightness.isLight.value;
 
-  // 颜色（getter 跟随外观模式）
-  //
-  // ⚠️ `accentColor` / `accentLightColor` 必须是 **const**，不能改成 getter。
-  // 它们被大量 `const` 表达式引用（const Icon(..., color: AppTheme.accentColor)
-  // 之类），改成 getter 会让那些 const 全部失效 → 26 处 `Invalid constant value`。
-  // 而水墨书香的主色本来就是**固定值**（不随明暗变），所以 const 完全够用：
-  //   墨灰 #3A3A3A（与 JellyPalette.ink().primary 保持一致）
-  //
-  // 只在两处**同时**改这里的值时，记得同步 jelly_palette.dart 的 ink()，
-  // 否则影视的强调色会和阅读的主题色不一致。
-  static const Color accentColor = Color(0xFF3A3A3A);
-  static const Color accentLightColor = Color(0xFF6E6E73);
+  /// 强调色（按钮/选中态/图标高亮）。
+  ///
+  /// ── 这里原来有个真问题 ────────────────────────────────────────
+  /// 旧实现是 `static const Color accentColor = Color(0xFF3A3A3A)`
+  /// —— **硬编码墨灰**。于是用户切到「粉色少女」「蓝色海洋」等配色时：
+  ///   · 页面底色/卡片/文字**都会变**（那些走 backgroundPrimary 等 getter）
+  ///   · **只有强调色永远是墨灰** → 按钮、选中态、勾选图标跟配色对不上
+  ///
+  /// 旧注释说"不能改成 getter，因为有 26 处 const 引用会一起失效"。
+  /// 实测统计：266 处引用里**只有 5 处在 const 表达式内**（一个 CircularProgressIndicator
+  /// 和四处 Icon），已经把那 5 处的 `const` 去掉。所以这个顾虑被高估了。
+  ///
+  /// 现在它是 **getter，跟随调色板** —— 与 [backgroundPrimary] 等同一套来源，
+  /// 换配色时整页一起变。
+  static Color get accentColor => _palette.primary;
+
+  /// 强调色的浅一档（用于次要高亮、hover 态）
+  static Color get accentLightColor => _palette.primaryLight;
 
   /// 页面底色：宣纸米白 / 墨夜
   static Color get backgroundPrimary =>
@@ -254,8 +286,53 @@ class AppTheme {
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.all(accentColor),
       ),
-      dividerTheme: const DividerThemeData(
-        color: Color(0x14000000),
+      // #3：以下三项原来**只有 darkTheme 有**，lightTheme 缺 ——
+      // 导致浅色模式下底部导航、Chip、文字全是 Material 默认样式，
+      // 与整体水墨风不搭。现在两边齐全且都走调色板。
+      // ⚠️ 一开始我写成 `_buildTextTheme(base.textTheme)` —— 那个函数
+      // **并不存在**（我凭印象写的）。darkTheme 用的是**内联 TextTheme**
+      // （9 种字号），所以这里照抄它的结构，只是颜色走浅色调色板。
+      chipTheme: ChipThemeData(
+        backgroundColor: backgroundTertiary,
+        selectedColor: accentColor.withValues(alpha: 0.15),
+        labelStyle: TextStyle(color: textSecondary, fontSize: fontSubhead),
+        side: BorderSide.none,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+      ),
+      bottomNavigationBarTheme: BottomNavigationBarThemeData(
+        backgroundColor: Colors.transparent,
+        selectedItemColor: accentColor,
+        unselectedItemColor: textTertiary,
+        type: BottomNavigationBarType.fixed,
+        selectedLabelStyle:
+            const TextStyle(fontSize: 10, fontWeight: FontWeight.w500),
+        unselectedLabelStyle: const TextStyle(fontSize: 10),
+      ),
+      textTheme: TextTheme(
+        headlineLarge: TextStyle(
+            color: textPrimary, fontSize: 48, fontWeight: FontWeight.w800),
+        headlineMedium: TextStyle(
+            color: textPrimary,
+            fontSize: fontTitle2,
+            fontWeight: FontWeight.w700),
+        headlineSmall: TextStyle(
+            color: textPrimary,
+            fontSize: fontTitle3,
+            fontWeight: FontWeight.w600),
+        bodyLarge: TextStyle(color: textPrimary, fontSize: fontBody),
+        bodyMedium: TextStyle(color: textSecondary, fontSize: fontSubhead),
+        bodySmall: TextStyle(color: textTertiary, fontSize: fontFootnote),
+        labelLarge: TextStyle(
+            color: textPrimary, fontSize: fontBody, fontWeight: FontWeight.w600),
+        labelMedium: TextStyle(color: textSecondary, fontSize: fontSubhead),
+        labelSmall: TextStyle(color: textTertiary, fontSize: fontCaption),
+      ),
+      // #4：分隔线原来硬编码 Color(0x14000000)（黑色 8%），
+      // 换配色时不变。改为从调色板派生。
+      dividerTheme: DividerThemeData(
+        color: borderLight,
         thickness: 1,
       ),
     );

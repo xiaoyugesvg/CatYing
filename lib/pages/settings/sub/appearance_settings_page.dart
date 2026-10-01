@@ -4,7 +4,6 @@ import 'package:get/get.dart';
 import '../../../common/theme.dart';
 import '../../../common/theme_mode_store.dart';
 import '../../../services/background_service.dart';
-import '../../../services/player_prefs.dart';
 import '../../../services/rfw_theme_service.dart';
 import '../../../widgets/common_widgets.dart';
 import '../rfw_theme_page.dart';
@@ -48,7 +47,7 @@ class _AppearanceSettingsPageState extends State<AppearanceSettingsPage> {
   }
 
   Future<void> _pickFontScale() async {
-    var v = PlayerPrefs.instance.fontScale.value;
+    var v = AppTheme.fontScale.value;
     final saved = await showDialog<double>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -98,7 +97,7 @@ class _AppearanceSettingsPageState extends State<AppearanceSettingsPage> {
       ),
     );
     if (saved == null) return;
-    await PlayerPrefs.instance.setFontScale(saved);
+    await AppTheme.setFontScale(saved);
     if (mounted) setState(() {});
   }
 
@@ -138,7 +137,7 @@ class _AppearanceSettingsPageState extends State<AppearanceSettingsPage> {
                   icon: Icons.text_fields,
                   title: '界面字号',
                   value:
-                      '${(PlayerPrefs.instance.fontScale.value * 100).round()}%',
+                      '${(AppTheme.fontScale.value * 100).round()}%',
                   onTap: _pickFontScale,
                 )),
             Obx(() => SettingsRow(

@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../reading/services/settings_service.dart';
-import '../services/background_service.dart';
 import '../services/main_tab_controller.dart';
 import 'theme.dart';
 import 'theme_mode_store.dart';
