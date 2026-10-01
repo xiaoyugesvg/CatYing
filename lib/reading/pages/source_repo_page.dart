@@ -12,6 +12,7 @@
 
 import 'dart:convert';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/settings_service.dart';
@@ -613,12 +614,13 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
     if (iconUrl != null && iconUrl.isNotEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(10),
-        child: Image.network(
-          iconUrl,
+        // 用带磁盘缓存的图片：源仓库列表滚动时不重复下载图标
+        child: CachedNetworkImage(
+          imageUrl: iconUrl,
           width: size,
           height: size,
           fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => _initialAvatar(src, size),
+          errorWidget: (_, _, _) => _initialAvatar(src, size),
         ),
       );
     }

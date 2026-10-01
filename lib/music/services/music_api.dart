@@ -104,11 +104,91 @@ class MusicApi {
   final _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 12),
     receiveTimeout: const Duration(seconds: 20),
+    // 复用连接：首页要连发 5~6 个请求（推荐/新歌/榜单…），
+    // 每次新建 TCP+TLS 握手会明显拖慢首屏
+    persistentConnection: true,
   ));
 
   bool _loggedPortWarned = false;
 
+  // ============================================================
+  // 响应缓存 + 并发去重
+  // ============================================================
+
+  /// 缓存条目：数据 + 写入时间
+  final Map<String, _CacheEntry> _cache = {};
+
+  /// 进行中的同 key 请求（并发去重）
+  ///
+  /// ── 为什么必须要这个 ──────────────────────────────────────────
+  /// 发现页会同时拉「推荐歌单 / 新歌速递 / 榜单」，而这些接口彼此独立；
+  /// 但用户来回切换 Tab 时，**同一个请求会在上一发还没回来时再发一次**。
+  /// 没有去重就会看到：网络请求数翻倍、后到的旧响应把新响应覆盖掉。
+  /// 这里让同 key 的第二个调用直接复用第一个的 Future。
+  final Map<String, Future<dynamic>> _inflight = {};
+
+  /// 哪些 action 值得缓存、缓存多久。
+  ///
+  /// 判断依据是**数据变化速度**：
+  ///   · 排行榜/歌单/专辑/歌手信息：分钟级甚至天级才变 → 缓存收益大
+  ///   · 搜索/歌曲URL/评论：必须实时（尤其 URL 会过期）→ 绝不缓存
+  static const Map<String, Duration> _cacheTtl = {
+    'topLists': Duration(minutes: 10),
+    'personalized': Duration(minutes: 5),
+    'playlistCatlist': Duration(hours: 6),
+    'playlistDetail': Duration(minutes: 5),
+    'playlistSquare': Duration(minutes: 5),
+    'hotSearch': Duration(minutes: 30),
+    'newSongs': Duration(minutes: 10),
+    'artistAlbums': Duration(minutes: 30),
+    'albumSongs': Duration(minutes: 30),
+    'artistSongs': Duration(minutes: 30),
+    'searchArtists': Duration(minutes: 10),
+    'searchAlbums': Duration(minutes: 10),
+  };
+
+  /// 缓存容量上限。
+  /// 不设上限的话，长时间用下来会把所有歌单详情都留在内存里。
+  static const int _cacheLimit = 60;
+
+  String _cacheKey(Map<String, dynamic> body) {
+    // body 很小（action + 几个 id/limit），排序后拼串即可稳定做 key
+    final keys = body.keys.toList()..sort();
+    return keys.map((k) => '$k=${body[k]}').join('&');
+  }
+
   Future<dynamic> _call(Map<String, dynamic> body) async {
+    final action = (body['action'] ?? '').toString();
+    final ttl = _cacheTtl[action];
+    final key = ttl == null ? null : _cacheKey(body);
+
+    // 1) 命中缓存
+    if (key != null) {
+      final hit = _cache[key];
+      if (hit != null && !hit.isExpired) return hit.data;
+      if (hit != null) _cache.remove(key); // 过期就丢掉，别留着占内存
+    }
+
+    // 2) 并发去重：同一个请求已经在路上，直接等它
+    if (key != null) {
+      final running = _inflight[key];
+      if (running != null) return running;
+    }
+
+    final future = _doCall(body, key, ttl);
+    if (key != null) {
+      _inflight[key] = future;
+      // 无论成功失败都要清掉，否则失败的请求会永远"在途"
+      future.whenComplete(() => _inflight.remove(key));
+    }
+    return future;
+  }
+
+  Future<dynamic> _doCall(
+    Map<String, dynamic> body,
+    String? cacheKey,
+    Duration? ttl,
+  ) async {
     final port = NodeJSManager.instance.managementPort;
     if (port <= 0) {
       if (!_loggedPortWarned) {
@@ -123,11 +203,38 @@ class MusicApi {
         data: body,
         options: Options(contentType: Headers.jsonContentType),
       );
-      return res.data;
+      final data = res.data;
+      // 只缓存成功结果。失败的（网络抖动/接口临时挂）不缓存 ——
+      // 否则用户点"重试"会拿到同一个失败结果，以为永远好不了。
+      if (cacheKey != null && ttl != null && _isOk(data)) {
+        _putCache(cacheKey, data, ttl);
+      }
+      return data;
     } catch (e) {
       return {'ok': false, 'error': '请求失败：${_short(e)}'};
     }
   }
+
+  bool _isOk(dynamic data) {
+    if (data is! Map) return false;
+    return data['ok'] != false;
+  }
+
+  void _putCache(String key, dynamic data, Duration ttl) {
+    _cache[key] = _CacheEntry(data, DateTime.now().add(ttl));
+    // 超容量时丢掉最早过期的那批（简单 LRU 近似，够用且便宜）
+    if (_cache.length > _cacheLimit) {
+      final sorted = _cache.entries.toList()
+        ..sort((a, b) => a.value.expireAt.compareTo(b.value.expireAt));
+      for (var i = 0; i < sorted.length - _cacheLimit; i++) {
+        _cache.remove(sorted[i].key);
+      }
+    }
+  }
+
+  /// 手动清缓存（下拉刷新时调用）
+  void clearCache() => _cache.clear();
+
 
   String _short(Object e) {
     if (e is DioException) {
@@ -385,4 +492,12 @@ class MusicApi {
     final r = await _call({'action': 'albumSongs', 'id': albumId});
     return _listOf(r, 'list').map(Song.fromJson).toList();
   }
+}
+
+/// 缓存条目：数据 + 过期时刻
+class _CacheEntry {
+  _CacheEntry(this.data, this.expireAt);
+  final dynamic data;
+  final DateTime expireAt;
+  bool get isExpired => DateTime.now().isAfter(expireAt);
 }

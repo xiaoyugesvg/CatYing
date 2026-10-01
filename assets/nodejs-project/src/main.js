@@ -37,6 +37,20 @@ async function getMusicSource() {
     return musicSourceCache;
 }
 
+// ── 小说书源引擎（Legado 格式）────────────────────────────────
+//
+// 为什么要惰性加载而不是顶层 import：
+// 顶层 import 会在 Node 启动时立刻求值，而 `process.on('uncaughtException')`
+// 是后面才装的 —— 万一引擎顶层抛错，Node 会直接挂掉（也就是整个 App 挂掉）。
+// 惰性加载把风险限制在"真正请求书源接口"那一刻。
+let bookSourceCache = null;
+
+async function getBookSource() {
+    if (bookSourceCache) return bookSourceCache;
+    bookSourceCache = await import('./book_source.js');
+    return bookSourceCache;
+}
+
 let nodeLogFile = null;
 if (NODE_LOG_ENABLED) try {
     const fs = require('fs');
@@ -411,6 +425,77 @@ const mgmtServer = createServer((req, res) => {
             } catch (e) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: e.message }));
+            }
+        });
+        return;
+    }
+
+    // ── 小说书源：搜索 / 详情 / 目录 / 正文 ──────────────────
+    //
+    // body: { action:'bsSearch'|'bsBookInfo'|'bsToc'|'bsContent',
+    //         source:{...Legado 书源...}, keyword?, bookUrl?, tocUrl?, chapterUrl?, page? }
+    //
+    // 执行逻辑全在 book_source.js（Legado 规则求值 + 变量语法），
+    // 这里只做转发 —— 与既有做法一致（影视源/音乐都走这条思路）。
+    if (req.url === '/book/source') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            try {
+                const data = JSON.parse(body || '{}');
+                const bs = await getBookSource();
+                const action = String(data.action || '');
+                let r;
+                switch (action) {
+                    case 'bsSearch':
+                        r = await bs.bsSearch({
+                            source: data.source,
+                            keyword: data.keyword,
+                            page: data.page || 1,
+                        });
+                        break;
+                    case 'bsBookInfo':
+                        r = await bs.bsBookInfo({
+                            source: data.source,
+                            bookUrl: data.bookUrl,
+                        });
+                        break;
+                    case 'bsToc':
+                        r = await bs.bsToc({
+                            source: data.source,
+                            tocUrl: data.tocUrl,
+                        });
+                        break;
+                    case 'bsContent':
+                        r = await bs.bsContent({
+                            source: data.source,
+                            chapterUrl: data.chapterUrl,
+                        });
+                        break;
+                    // 书源登录：拿到 Cookie 由 Dart 侧写进 source.header
+                    case 'bsLogin':
+                        r = await bs.bsLogin({
+                            url: data.url,
+                            method: data.method,
+                            body: data.body,
+                            contentType: data.contentType,
+                            headers: data.headers,
+                        });
+                        break;
+                    default:
+                        r = { ok: false, error: '未知 action: ' + action };
+                }
+                res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify(r));
+            } catch (e) {
+                console.error('ERROR in /book/source:', (e && e.stack) || e);
+                try {
+                    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+                    res.end(JSON.stringify({
+                        ok: false,
+                        error: '书源接口异常：' + ((e && e.message) || String(e)),
+                    }));
+                } catch (_) { /* 响应已开始写出，忽略二次写入错误 */ }
             }
         });
         return;

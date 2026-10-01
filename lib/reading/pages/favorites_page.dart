@@ -20,9 +20,13 @@ import '../widgets/jelly_comic_list_tile.dart';
 import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_segmented_toggle.dart';
+import '../widgets/jelly_sliding_actions.dart';
 import '../widgets/staggered_entrance.dart';
 import '../widgets/source_cover_image.dart';
 import 'book_detail_page.dart';
+import 'browse_history_page.dart';
+import 'download_page.dart';
+import 'source_repo_page.dart';
 import 'comic_detail_page.dart';
 
 /// 收藏页面（顶部 Tab：漫画收藏 / 图书收藏）
@@ -231,8 +235,50 @@ class _FavoritesPageState extends State<FavoritesPage>
                                   ),
                                 ),
                                 const Spacer(),
-                                if (contentTabs.length < 2)
-                                  _buildSearchButton(size: 36),
+                                // 右上角滑动图标组（点按切换 / 长按展开成竖列）
+                                JellySlidingActions(
+                                  isDark: isDark,
+                                  width: contentTabs.length < 2 ? 168 : 130,
+                                  actions: [
+                                    JellyAction(
+                                      icon: Icons.search_rounded,
+                                      tooltip: '搜索',
+                                      onPressed: () =>
+                                          _buildSearchButton(size: 36),
+                                    ),
+                                    JellyAction(
+                                      icon: Icons.history_rounded,
+                                      tooltip: '浏览记录',
+                                      onPressed: () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => const BrowseHistoryPage(
+                                              showTabs: false),
+                                        ),
+                                      ),
+                                    ),
+                                    JellyAction(
+                                      icon: Icons.file_download_rounded,
+                                      tooltip: '下载',
+                                      onPressed: () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => const DownloadPage(),
+                                        ),
+                                      ),
+                                    ),
+                                    JellyAction(
+                                      icon: Icons.source_rounded,
+                                      tooltip: '漫画源仓库',
+                                      onPressed: () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => const SourceRepoPage(),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ],
                             ),
                           ),

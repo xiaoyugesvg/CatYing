@@ -216,7 +216,7 @@ class _MePageState extends State<MePage> {
                           icon: Icons.source_rounded,
                           iconBg: JellyTheme.primary,
                           title: '漫画源仓库',
-                          subtitle: '漫画源 · 导入 · 云端配置',
+                          subtitle: '启用源 · 云端配置',
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -242,7 +242,7 @@ class _MePageState extends State<MePage> {
                           icon: Icons.library_books_rounded,
                           iconBg: JellyTheme.primary,
                           title: '书源仓库',
-                          subtitle: '小说源 · 导入 · 排序',
+                          subtitle: '导入书源 · 口令 · 排序',
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -332,7 +332,135 @@ class _MePageState extends State<MePage> {
               },
             ),
             const SizedBox(height: 12),
+            // ── 捐赠与支持 ────────────────────────────────────────
+            // 按 cmbok V2.0.8 截图恢复：咸鱼店铺 · 微信 / 支付宝扫码。
+            // （之前清理"作者推广"时把这段也删了，属于删过头 ——
+            //   捐赠入口是原作者明确保留的功能，位置在页面最底部。）
+            _buildDonateCard(isDark),
+            const SizedBox(height: 24),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// 捐赠与支持卡片（咸鱼店铺 / 微信 / 支付宝）
+  Widget _buildDonateCard(bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.favorite_rounded,
+                    size: 17, color: JellyTheme.primary),
+                const SizedBox(width: 6),
+                Text(
+                  '捐赠与支持',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '咸鱼店铺 · 微信 / 支付宝扫码',
+              style: TextStyle(fontSize: 12, color: JellyTheme.textSecondary),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _donateItem(
+                    isDark,
+                    'assets/images/weixin.jpg',
+                    '微信',
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _donateItem(
+                    isDark,
+                    'assets/images/zhifubao.jpg',
+                    '支付宝',
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 单个收款码：缩略图可点，点开看大图（扫码用）
+  Widget _donateItem(bool isDark, String asset, String label) {
+    return Column(
+      children: [
+        GestureDetector(
+          onTap: () => _showQr(asset, label),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.asset(
+              asset,
+              height: 120,
+              width: double.infinity,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => Container(
+                height: 120,
+                alignment: Alignment.center,
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.black.withValues(alpha: 0.04),
+                child: Text('图片缺失',
+                    style: TextStyle(
+                        fontSize: 12, color: JellyTheme.textSecondary)),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(label,
+            style: TextStyle(fontSize: 12, color: JellyTheme.textSecondary)),
+      ],
+    );
+  }
+
+  /// 点开二维码看大图（长按二维码在手机上不好扫，放大更好用）
+  void _showQr(String asset, String label) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.white,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(label,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 12),
+              Image.asset(asset, fit: BoxFit.contain),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('关闭'),
+              ),
+            ],
+          ),
         ),
       ),
     );

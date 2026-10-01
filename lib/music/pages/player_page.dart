@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
@@ -464,11 +465,12 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
               borderRadius: BorderRadius.circular(20),
               child: ImageFiltered(
                 imageFilter: ImageFilter.blur(sigmaX: 26, sigmaY: 26),
-                child: Image.network(url,
+                child: CachedNetworkImage(
+                imageUrl: url,
                     width: 280,
                     height: 300,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const SizedBox()),
+                    errorWidget: (_, __, ___) => const SizedBox()),
               ),
             ),
           // 压暗一层，让中间的小封面跳出来

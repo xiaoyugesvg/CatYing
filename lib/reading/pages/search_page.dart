@@ -18,9 +18,12 @@ import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_comic_list_tile.dart';
 import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_segmented_toggle.dart';
+import '../widgets/jelly_sliding_actions.dart';
 import '../widgets/staggered_entrance.dart';
 import 'browse_history_page.dart';
 import 'comic_detail_page.dart';
+import 'download_page.dart';
+import 'favorites_page.dart';
 import 'source_repo_page.dart';
 
 /// 日志工具
@@ -675,29 +678,6 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   }
 
   /// 浏览历史按钮（进入浏览记录页，仅漫画）
-  Widget _buildBrowseHistoryButton(bool isDark) {
-    return Material(
-      color: JellyTheme.primary,
-      shape: const CircleBorder(),
-      elevation: 4,
-      shadowColor: JellyTheme.primary.withValues(alpha: 0.4),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const BrowseHistoryPage(showTabs: false),
-          ),
-        ),
-        child: const SizedBox(
-          width: 36,
-          height: 36,
-          child: Icon(Icons.history_rounded, color: Colors.white, size: 20),
-        ),
-      ),
-    );
-  }
-
   /// 打开分类筛选弹窗（多维度单选，多组叠加 AND，底部重置/确定）
   Future<void> _openCategorySheet(bool isDark) async {
     if (_categorySheetOpening) return; // 防连点：拉取/弹窗期间禁用
@@ -1015,17 +995,53 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
           ? AppBar(
               title: const Text('漫画'),
               actions: [
-                IconButton(
-                  icon: const Icon(Icons.history_rounded),
-                  tooltip: '浏览记录',
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const BrowseHistoryPage(showTabs: false),
+                JellySlidingActions(
+                  isDark: Theme.of(context).brightness == Brightness.dark,
+                  actions: [
+                    JellyAction(
+                      icon: Icons.history_rounded,
+                      tooltip: '浏览记录',
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              const BrowseHistoryPage(showTabs: false),
+                        ),
+                      ),
                     ),
-                  ),
+                    JellyAction(
+                      icon: Icons.favorite_rounded,
+                      tooltip: '收藏',
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const FavoritesPage(),
+                        ),
+                      ),
+                    ),
+                    JellyAction(
+                      icon: Icons.file_download_rounded,
+                      tooltip: '下载',
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const DownloadPage(),
+                        ),
+                      ),
+                    ),
+                    JellyAction(
+                      icon: Icons.source_rounded,
+                      tooltip: '漫画源仓库',
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const SourceRepoPage(),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 12),
               ],
             )
           : null,
@@ -1071,7 +1087,52 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                     Positioned(
                       top: 6,
                       right: 12,
-                      child: _buildBrowseHistoryButton(isDark),
+                      child: JellySlidingActions(
+                        isDark: isDark,
+                        actions: [
+                          JellyAction(
+                            icon: Icons.history_rounded,
+                            tooltip: '浏览记录',
+                            onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    const BrowseHistoryPage(showTabs: false),
+                              ),
+                            ),
+                          ),
+                          JellyAction(
+                            icon: Icons.favorite_rounded,
+                            tooltip: '收藏',
+                            onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const FavoritesPage(),
+                              ),
+                            ),
+                          ),
+                          JellyAction(
+                            icon: Icons.file_download_rounded,
+                            tooltip: '下载',
+                            onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const DownloadPage(),
+                              ),
+                            ),
+                          ),
+                          JellyAction(
+                            icon: Icons.source_rounded,
+                            tooltip: '漫画源仓库',
+                            onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const SourceRepoPage(),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   // 控件组：水平居中，间距大（往下错开，层次感）
                   Positioned(
@@ -1162,14 +1223,16 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // ⚠️ 文案与图标按 cmbok V2.0.8 截图对齐：
+            //   锁图标 + 「漫画源已锁定」+ 原因说明 + 「去漫画源仓库」按钮
             Icon(
-              Icons.cloud_off_rounded,
+              Icons.lock_outline_rounded,
               size: 64,
               color: JellyTheme.textSecondary,
             ),
             const SizedBox(height: 16),
             Text(
-              '暂无漫画源',
+              '漫画源已锁定',
               style: TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.bold,
@@ -1178,7 +1241,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             ),
             const SizedBox(height: 8),
             Text(
-              '请到「漫画源仓库」填入云端地址并更新',
+              '漫画源已锁定：未能连接密钥服务器，请检查网络后重启软件',
               style: TextStyle(fontSize: 13, color: JellyTheme.textSecondary),
               textAlign: TextAlign.center,
             ),
@@ -1188,8 +1251,8 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 context,
                 MaterialPageRoute(builder: (_) => const SourceRepoPage()),
               ),
-              icon: const Icon(Icons.cloud_download_rounded, size: 18),
-              label: const Text('去添加漫画源'),
+              icon: const Icon(Icons.settings_rounded, size: 18),
+              label: const Text('去漫画源仓库'),
             ),
           ],
         ),

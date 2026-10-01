@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
@@ -104,8 +105,11 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
           children: [
             // 背景：封面模糊放大（Beans 的 CoverBlurBackground）
             if ((_pl?.coverUrl ?? '').isNotEmpty)
-              Image.network(_pl!.coverUrl!, fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const SizedBox()),
+              CachedNetworkImage(
+                imageUrl: _pl!.coverUrl!,
+                fit: BoxFit.cover,
+                errorWidget: (_, __, ___) => const SizedBox(),
+              ),
             DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(

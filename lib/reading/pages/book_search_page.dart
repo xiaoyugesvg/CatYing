@@ -16,8 +16,13 @@ import '../widgets/jelly_book_card.dart';
 import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_segmented_toggle.dart';
+import '../widgets/jelly_sliding_actions.dart';
 import '../widgets/staggered_entrance.dart';
 import 'book_detail_page.dart';
+import 'book_source_search_page.dart';
+import 'browse_history_page.dart';
+import 'download_page.dart';
+import 'favorites_page.dart';
 import 'zlibrary_auth_page.dart';
 
 /// 日志工具
@@ -887,6 +892,61 @@ class _BookSearchPageState extends State<BookSearchPage>
                           ),
                         ),
                         const Spacer(),
+                        // 右上角滑动图标组（点按切换 / 长按展开成竖列）。
+                        // 头像保留在最右 —— 它是 Z-Library 账号入口，不能去掉。
+                        JellySlidingActions(
+                          isDark: isDark,
+                          width: 168,
+                          actions: [
+                            JellyAction(
+                              icon: Icons.history_rounded,
+                              tooltip: '浏览记录',
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      const BrowseHistoryPage(showTabs: false),
+                                ),
+                              ),
+                            ),
+                            JellyAction(
+                              icon: Icons.favorite_rounded,
+                              tooltip: '收藏',
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const FavoritesPage(),
+                                ),
+                              ),
+                            ),
+                            JellyAction(
+                              icon: Icons.file_download_rounded,
+                              tooltip: '下载',
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const DownloadPage(),
+                                ),
+                              ),
+                            ),
+                            // 「搜索书源图书」入口（用户截图中图书页左侧那个拉绳的位置）。
+                            // 带上当前关键词：用户在 Z-Library 搜不到时，
+                            // 点这里可以立刻用同一关键词去书源里搜，不用重打一遍。
+                            JellyAction(
+                              icon: Icons.manage_search_rounded,
+                              tooltip: '搜索书源图书',
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => BookSourceSearchPage(
+                                    initialKeyword: _keyword.trim(),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(width: 8),
                         _buildAvatar(isDark),
                       ],
                     ),
@@ -1174,15 +1234,42 @@ class _BookSearchPageState extends State<BookSearchPage>
       );
     }
 
-    // 未搜索 = 初始界面（分类模式除外）
+    // 未搜索 = 初始界面（分类模式除外）。
+    //
+    // ⚠️ 文案按 cmbok V2.0.8 截图对齐：进页面时是在**拉推荐**，
+    // 所以显示「正在获取推荐...」+ 转圈，而不是"请输入关键词"。
+    // 拉取结束（_isSearching 结束）仍无数据时，退回可操作的提示 ——
+    // 否则用户会以为一直卡在加载中。
     if (_result.items.isEmpty && _keyword.isEmpty && !_categoryMode) {
-      return const Center(
+      if (_isSearching) {
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: JellyTheme.primary),
+              const SizedBox(height: 16),
+              Text(
+                '正在获取推荐...',
+                style: TextStyle(color: JellyTheme.textSecondary),
+              ),
+            ],
+          ),
+        );
+      }
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.book_rounded, size: 64, color: Colors.grey),
-            SizedBox(height: 16),
-            Text('输入关键词开始搜索图书', style: TextStyle(color: Colors.grey)),
+            const SizedBox(height: 16),
+            const Text('暂无推荐内容',
+                style: TextStyle(color: Colors.grey)),
+            const SizedBox(height: 16),
+            TextButton.icon(
+              onPressed: _doCategorySearch,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('重新获取'),
+            ),
           ],
         ),
       );

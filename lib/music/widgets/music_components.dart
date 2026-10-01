@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
@@ -15,6 +16,14 @@ import '../theme/music_theme.dart';
 
 /// 歌曲/歌单封面。取不到图时给一个带音符的渐变占位，
 /// **不留空白格** —— Bean 的做法也是必给占位。
+///
+/// ── 用 CachedNetworkImage 而不是 Image.network（性能关键）────────
+/// `Image.network` **只有内存缓存，没有磁盘缓存**：
+///   · 退出页面 → 内存缓存被清 → 再进列表**所有封面重新下载**
+///   · 音乐库/搜索列表滚动时反复重建 → 每次都发请求
+/// 表现就是"滚动卡、流量还费"。封面图恰恰是最不该重复下载的东西
+/// （同一首歌的封面永远是同一张）。
+/// 项目里阅读模块早就在用 `cached_network_image`，这里统一过来。
 class CoverImage extends StatelessWidget {
   const CoverImage({
     super.key,
@@ -37,14 +46,20 @@ class CoverImage extends StatelessWidget {
     if (u.isEmpty) {
       child = _placeholder(radius);
     } else {
-      child = Image.network(
-        u,
+      child = CachedNetworkImage(
+        imageUrl: u,
         width: size,
         height: size,
         fit: BoxFit.cover,
         // 加载失败也退回占位，而不是显示破图图标
-        errorBuilder: (_, __, ___) => _placeholder(radius),
-        loadingBuilder: (c, w, p) => p == null ? w : _placeholder(radius),
+        errorWidget: (_, __, ___) => _placeholder(radius),
+        placeholder: (_, __) => _placeholder(radius),
+        // 淡入让"图从无到有"不那么突兀（列表滚动时尤其明显）
+        fadeInDuration: const Duration(milliseconds: 180),
+        // 网易云的封面有多个尺寸后缀，缓存键用完整 URL 即可
+        memCacheWidth: (size * MediaQuery.devicePixelRatioOf(context))
+            .round()
+            .clamp(1, 2048),
       );
     }
     return ClipRRect(
