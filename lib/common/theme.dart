@@ -200,35 +200,52 @@ class AppTheme {
   /// 暗色主题
 
   /// 浅色主题（设置 → 深色/浅色/跟随系统）
+  ///
+  /// ── ⚠️ 这里曾有一个真 bug ──────────────────────────────────────
+  /// 原来写的是 `scaffoldBackgroundColor: const Color(0xFFF6F6F7)`
+  /// —— 一个**硬编码的 Material 默认灰**。
+  /// 而 `darkTheme` 用的是 `backgroundPrimary`（跟随调色板）。
+  ///
+  /// 后果：**浅色模式完全不听「水墨书香」调色板**。
+  /// 选中水墨书香后，桌面/设置页的页面底色是那块冷灰 `#F6F6F7`，
+  /// 而不是调色板里的宣纸米白 `#F7F5F1` —— 用户看到的就是
+  /// "浅色模式怎么是灰的"。首页因为自己铺了图/渐变层才显得正常，
+  /// 设置页透明底就把它透出来了。
+  ///
+  /// 现在整块改为**跟随调色板**：所有 tab 页的 Scaffold 都是透明的，
+  /// 它们都透出同一层背景；主题色必须两边一致，否则深/浅切换会
+  /// 出现"深色对、浅色错"这种只错一半的现象。
   static ThemeData get lightTheme {
     final base = ThemeData.light(useMaterial3: true);
     return base.copyWith(
-      scaffoldBackgroundColor: const Color(0xFFF6F6F7),
+      scaffoldBackgroundColor: backgroundPrimary,
       colorScheme: base.colorScheme.copyWith(
         primary: accentColor,
         secondary: accentColor,
-        surface: const Color(0xFFFFFFFF),
-        onSurface: const Color(0xFF1A1A1A),
-        surfaceContainerHighest: const Color(0xFFECECEF),
+        // 卡片/弹层用调色板的卡片色（深色模式下这两者也是分开的）
+        surface: backgroundSecondary,
+        onSurface: textPrimary,
+        // 「次级容器」用它做输入框填充/分隔，跟调色板走
+        surfaceContainerHighest: backgroundTertiary,
       ),
-      appBarTheme: const AppBarTheme(
+      appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        foregroundColor: Color(0xFF1A1A1A),
+        foregroundColor: textPrimary,
       ),
       cardTheme: base.cardTheme.copyWith(
-        color: const Color(0xFFFFFFFF),
+        color: backgroundSecondary,
         elevation: 0,
       ),
       dialogTheme: base.dialogTheme.copyWith(
-        backgroundColor: const Color(0xFFFFFFFF),
+        backgroundColor: backgroundSecondary,
       ),
       bottomSheetTheme: base.bottomSheetTheme.copyWith(
-        backgroundColor: const Color(0xFFFFFFFF),
+        backgroundColor: backgroundSecondary,
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: const Color(0xFFEFEFF2),
+        fillColor: backgroundTertiary,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(glassRadiusSmall),
           borderSide: BorderSide.none,

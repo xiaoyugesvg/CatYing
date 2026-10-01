@@ -189,10 +189,14 @@ function startEngine() {
         const bi = await call({ action: 'bsBookInfo', source, bookUrl: sl[0].bookUrl });
         line(`  [详情]  ${bi && bi.ok !== false ? '✓' : '✗'}`);
         if (bi && bi.error) line(`      错误: ${String(bi.error).slice(0, 160)}`);
-        const tocUrl = (bi && (bi.tocUrl || bi.bookUrl)) || sl[0].bookUrl;
+        // ⚠️ bookInfo 返回的是 { ok, info: {...} } —— 我第一版读成
+        // bi.name 了，于是"详情全空"，白排查了好几轮。
+        const info = (bi && bi.info) || {};
+        const tocUrl = info.tocUrl || sl[0].bookUrl;
         if (bi) {
-            line(`      书名=${bi.name || '-'} 作者=${bi.author || '-'}`);
-            line(`      封面=${String(bi.coverUrl || '-').slice(0, 90)}`);
+            line(`      书名=${info.name || '-'} 作者=${info.author || '-'}`);
+            line(`      分类=${info.kind || '-'} 简介=${String(info.intro || '-').slice(0, 40)}`);
+            line(`      封面=${String(info.coverUrl || '-').slice(0, 90)}`);
         }
 
         // 3) 目录

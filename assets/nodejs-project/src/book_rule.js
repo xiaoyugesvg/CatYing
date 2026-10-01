@@ -99,77 +99,102 @@ function splitRule(rule) {
 }
 
 // ============================================================
-// TVBox / CatVod 选择器前缀 → CSS
+// Legado 步骤归一化（class. / tag. / id. + 位置）
 // ============================================================
 
 /**
- * 把 TVBox/CatVod 风格的 `class.xxx` / `tag.xxx` / `id.xxx` 前缀
- * 转成标准 CSS。
+ * 归一化一个「取值步骤」—— Legado 官方语法（阅读 3.0）。
  *
- * ── 为什么需要这个 ────────────────────────────────────────────
- * Legado 书源用**标准 CSS**（`div.block_txt2 p.1@text`、`.book-list li`）。
- * 但还有一大批源（尤其漫画 / TVBox 生态）用另一种写法：
+ * ── 官方原文（celeter.github.io 书源规则说明）──────────────────
+ *   `@`为分隔符,用来分隔获取规则
+ *   每段规则可分为3段
+ *   第一段是类型,如 **class,id,tag**,text,children等
+ *   第二段是名称
+ *   第三段是位置,class,tag,id等会获取到多个,所以要加位置
+ *   位置正着数从0开始,0是第一个,如为负数则是取倒着数的值,-1为倒数第一个
  *
- *   class.comics-detail__author@text
- *   class.comics-card pure-u-1-2 pure-u-md-1-4@tag.a@href
- *   tag.amp-img.0@src
- *   id.content@text
- *
- * 这些**不是** Legado 标准。原引擎不认，于是整串被当成一个 CSS 选择器：
- *   `class.comics-card …` → 解析成"标签名 class、类名 comics-card …"
- *   → 匹配 0 条，而且**不报错**。
- * 表现是"这个源搜什么都空"，极难查 —— 用户只会以为源坏了。
+ * ── ⚠️ 我在这里犯过一个严重的错 ────────────────────────────────
+ * 我一开始以为 `class.xxx` / `tag.xxx` 是 **TVBox/CatVod** 的方言，
+ * 还跟用户说"你这个源不是 Legado 标准写法"。
+ * **这是错的** —— 它就是 Legado 官方语法，是我的引擎只实现了子集。
+ * 判断反了，而且把责任推给了用户的源。特此记录，避免以后再犯。
  *
  * ── 转换规则 ──────────────────────────────────────────────────
- *   class.a b c      → .a.b.c          （空格分隔的多个类）
- *   tag.amp-img      → amp-img
- *   tag.amp-img.0    → amp-img         （`.0` 是第 N 个，交给后续取值处理）
+ *   class.a b.0      → .a.b:eq(0)      多类名用点连，位置转 :eq()
+ *   class.item.-1    → .item:eq(-1)    官方：-1 是倒数第一个
+ *   tag.a.0          → a:eq(0)
  *   id.content       → #content
- *   .a.b             → .a.b            （已经是 CSS，原样）
+ *   harf             → href            （少数源的错拼，真实存在）
  *
- * 只在**整段以这些前缀开头**时转换；中间出现的 `@tag.a` 由
- * splitRule 的 walkParts 处理（那边是"取值步骤"不是选择器）。
+ * 标准 CSS（`.a>b`、`@css:`）、JSONPath（`$.a`）、XPath（`//div`）
+ * **一律原样返回** —— 不能误改。
+ *
+ * ── 为什么 `tag.a` 要加 `:not(.__none__)` ─────────────────────
+ * walkParts 里有个分支把"纯小写字母"当作**属性名**（用来处理 `@data-src`）。
+ * 而 `a` 正好全是小写字母 → 会被当成"取属性 a" → 属性不存在 →
+ * **返回空串且不报错**。这正是 bookUrl 一直为空、点进去白页的原因。
+ * 加个永不匹配的 `:not()` 让它明确走"选择器"分支。
  */
-function tvboxPrefixToCss(sel) {
-  const raw = String(sel).trim();
-  if (!/^(class|tag|id)\./i.test(raw)) return raw;
+function normLegadoStep(step) {
+  let s = String(step).trim();
+  if (!s) return s;
 
-  // ⚠️ 关键：**只转换选择器主体，`@` 之后的取值步骤原样保留**。
-  //
-  // 我第一版用 /^class\.(.+)$/ 贪婪匹配整串，于是
-  //   class.comics-card pure-u-1-2@tag.a@href
-  // 被转成
-  //   .comics-card.pure-u-1-2@tag.a@href   ← `@tag.a` 被当成类名 → 非法 CSS
-  // 结果列表能匹配到（选择器主体还在）但 **bookUrl 取不到**，
-  // 于是详情/目录/正文全断 —— 表现是"搜索有结果但点进去全空"。
-  //
-  // 正确做法：在第一个 `@` 处切开，前面是选择器、后面是取值链。
-  const at = raw.indexOf('@');
-  const head = at < 0 ? raw : raw.slice(0, at);
-  const tail = at < 0 ? '' : raw.slice(at);
+  // 错拼纠正（包子漫画的 tocUrl 里就有 @harf）
+  if (s === 'harf') return 'href';
 
-  // 去掉末尾的 `.N`（取第 N 个节点），它不是类名
-  const body = head.replace(/\.\d+$/, '').trim();
+  // 不含 class./tag./id. 前缀 → 原样返回（标准 CSS / JSONPath / XPath）
+  const m0 = /^(class|tag|id)\.([\s\S]+)$/i.exec(s);
+  if (!m0) return s;
+  const kind = m0[1].toLowerCase();
+  let rest = m0[2];
 
-  let css;
-  let m = /^class\.(.+)$/i.exec(head.replace(/\.\d+$/, '').trim());
-  if (m) {
-    css = m[1]
+  // ── 1) 位置：末尾 `.N` 或 `.-N` ──────────────────────────────
+  let eq = '';
+  const pm = /\.(-?\d+)\s*$/.exec(rest);
+  if (pm) {
+    eq = `:eq(${+pm[1]})`;
+    rest = rest.slice(0, pm.index).trim();
+  }
+
+  // ── 2) 名称 ─────────────────────────────────────────────────
+  if (kind === 'class') {
+    // 多类名（空格分隔）→ .a.b.c
+    const css = rest
       .trim()
       .split(/\s+/)
       .filter(Boolean)
       .map((c) => '.' + c)
       .join('');
-  } else {
-    m = /^tag\.(.+)$/i.exec(body);
-    if (m) {
-      css = m[1].trim().split(/\s+/)[0] || '';
-    } else {
-      m = /^id\.(.+)$/i.exec(body);
-      css = m ? '#' + m[1].trim().split(/\s+/)[0] : head;
-    }
+    return (css || rest) + eq;
   }
-  return css + tail;
+  if (kind === 'tag') {
+    const tag = rest.trim().split(/\s+/)[0] || '';
+    // ⚠️ 加 :not(.__none__) 避开 walkParts 的"纯小写字母=属性名"分支
+    return tag ? `${tag}:not(.__none__)${eq}` : s;
+  }
+  // id
+  const id = rest.trim().split(/\s+/)[0] || '';
+  return id ? `#${id}${eq}` : s;
+}
+
+/** 归一化整条规则的 @@ 取值链（保持 @ 分隔结构） */
+function normLegadoChain(rule) {
+  const raw = String(rule);
+  // `##正则##替换` 要保留在末尾，不能参与归一化
+  const hash = raw.indexOf('##');
+  const body = hash < 0 ? raw : raw.slice(0, hash);
+  const tail = hash < 0 ? '' : raw.slice(hash);
+  // 首个 @ 之前是选择器，之后是取值步骤
+  const at = body.indexOf('@');
+  if (at < 0) return normLegadoStep(body) + tail;
+  const head = body.slice(0, at);
+  const steps = body.slice(at + 1).split('@');
+  return (
+    normLegadoStep(head) +
+    '@' +
+    steps.map(normLegadoStep).join('@') +
+    tail
+  );
 }
 
 // ============================================================
@@ -445,7 +470,7 @@ function runJs(expr, ctx) {
        */
       getElements: (sel) => {
         if (!_cheerio) return [];
-        const css = tvboxPrefixToCss(String(sel));
+        const css = normLegadoStep(String(sel));
         try {
           const $ = _cheerio;
           let found;
@@ -679,9 +704,9 @@ function evalRule({ rule, input, vars = {}, ctx = {}, isList = false }) {
   // TVBox 风格前缀（class./tag./id.）先转成标准 CSS —— 与 evalList
   // 同一处理。不转的话 `class.comics-detail__author@text` 会被当成
   // "标签名 class"，静默取到空串。
-  const _tvboxConverted = tvboxPrefixToCss(sel);
-  const _wasTvbox = _tvboxConverted !== sel.trim();
-  sel = _tvboxConverted;
+  const _conv = normLegadoStep(sel);
+  const _wasConverted = _conv !== sel.trim();
+  sel = _conv;
 
   // 判断是不是 XPath：
   //   显式前缀 / 以 / 或 . 开头 / 含 `/@attr` 或 `/text()` 这类 XPath 语法
@@ -768,7 +793,8 @@ function evalRule({ rule, input, vars = {}, ctx = {}, isList = false }) {
   }
 
   // 继续按 @ 分段走
-  return walkParts($, nodes, rest, isList);
+  // Legado 取值步骤归一化（@tag.a.0 → a:eq(0)、@harf → href）
+  return walkParts($, nodes, rest.map(normLegadoStep), isList);
 }
 
 /** 从节点取指定内容 */
@@ -923,9 +949,9 @@ function evalList({ rule, input, vars, ctx }) {
     scope = null;
   }
   let sel = parts[0];
-  // TVBox 风格前缀（class./tag./id.）先转成标准 CSS —— 不转的话
+  // Legado 步骤归一化（class./tag./id. + 位置）—— 不转的话
   // `class.comics-card …` 会被当成"标签名 class"，静默匹配 0 条。
-  sel = tvboxPrefixToCss(sel);
+  sel = normLegadoStep(sel);
   // ⚠️ 这里**不能**只看"是否以 . 开头"就送去 XPath 转换：
   // `.book-list li` 是合法 CSS 类选择器，但 xpathToCss 会把前导点吃掉，
   // 返回 `book-list li`（当成标签名）→ 匹配 0 条。

@@ -323,8 +323,16 @@ class BookSourceService {
     return (ok: true, error: null, list: out);
   }
 
-  /// 正文（返回纯文本；图片章节会带 [图片] 占位说明）
-  Future<({bool ok, String? error, String content})> content(
+  /// 正文。
+  ///
+  /// ── 两种形态（Legado 的 bookSourceType）────────────────────────
+  ///   · 小说（0）：`content` 是文字，`images` 为空
+  ///   · **漫画（2）：`images` 是图片 URL 列表，`content` 为空**
+  ///
+  /// ⚠️ 我原来只返回 content，把漫画的 images 丢了 → 漫画源一片空白。
+  /// 所以这里两个都返回，由阅读器按 `images.isNotEmpty` 决定怎么渲染。
+  Future<({bool ok, String? error, String content, List<String> images})>
+      content(
     BookSource source,
     String chapterUrl,
   ) async {
@@ -333,14 +341,41 @@ class BookSourceService {
       'source': source.raw,
       'chapterUrl': chapterUrl,
     });
-    // 引擎可能直接返回字符串，也可能包成 {ok, content}
-    if (raw is String) return (ok: true, error: null, content: raw);
+    // 引擎可能直接返回字符串，也可能包成 {ok, content} 或 {ok,type,images}
+    if (raw is String) {
+      return (ok: true, error: null, content: raw, images: const <String>[]);
+    }
     final m = _asMap(raw);
     if (m['ok'] == false) {
-      return (ok: false, error: (m['error'] ?? '未知错误').toString(), content: '');
+      return (
+        ok: false,
+        error: (m['error'] ?? '未知错误').toString(),
+        content: '',
+        images: const <String>[],
+      );
     }
+
+    // ⚠️ 漫画书源（bookSourceType=2）的正文是**图片列表**，不是文字。
+    // 引擎返回 `{ok:true, type:'images', images:[...]}` ——
+    // 我原来只读 `m['content']`，把 images 直接丢掉了，
+    // 于是所有漫画源在阅读器里都是一片空白（还不报错）。
+    final imgs = m['images'];
+    if (imgs is List && imgs.isNotEmpty) {
+      return (
+        ok: true,
+        error: null,
+        content: '',
+        images: imgs.map((e) => e.toString()).where((e) => e.isNotEmpty).toList(),
+      );
+    }
+
     final c = m['content'] ?? m['text'] ?? '';
-    return (ok: true, error: null, content: c.toString());
+    return (
+      ok: true,
+      error: null,
+      content: c.toString(),
+      images: const <String>[],
+    );
   }
 
   // ============================================================

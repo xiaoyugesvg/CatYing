@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +13,7 @@ import '../models/reading_settings.dart';
 import '../services/book_paginator.dart';
 import '../services/book_source_service.dart';
 import '../services/tts_service.dart';
+import '../source/image_cache_manager.dart';
 import '../widgets/book_page_curl.dart';
 import '../widgets/pomodoro_button.dart';
 import 'tts_engine_page.dart';
@@ -100,6 +102,17 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 分页结果（上下模式为空 —— 那个模式不分页）
   List<BookPage> _pages = const [];
+
+  // ── 漫画（Legado bookSourceType=2）───────────────────────────
+  //
+  // 漫画源的正文规则返回的是**图片 URL 列表**，不是文字。
+  // 引擎返回 `{ok:true, type:'images', images:[...]}`；
+  // `BookSourceService.content()` 已把它带出来。
+  //
+  // 渲染策略：**纵向连续滚动**（不是一图一页）。
+  // 理由：手机窄屏下单张漫画图通常比屏幕高，一图一页要额外缩放，
+  // 而纵向滚动是主流漫画 App 的做法，也省掉分页度量。
+  List<String> _images = const [];
   /// 当前页下标（分页模式下用，与 _index 章节下标区分）
   int _pageIndex = 0;
   /// 分页进行中
@@ -326,12 +339,29 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         }
         return;
       }
+      // 漫画源：正文是图片列表，不是文字
+      if (r.images.isNotEmpty) {
+        _cache[i] = const []; // 文本缓存置空，避免上一本的文字残留
+        if (!prefetchOnly) {
+          setState(() {
+            _images = r.images;
+            _paragraphs = const [];
+            _pages = const [];
+            _loading = false;
+            _error = null;
+          });
+          await _saveProgress();
+        }
+        _prefetch(i + 1);
+        return;
+      }
       final paras = _splitParagraphs(r.content);
       _cache[i] = paras;
       _evictIfNeeded();
       if (!prefetchOnly) {
         setState(() {
           _paragraphs = paras;
+          _images = const []; // 切回文字章节要把漫画图清掉
           _loading = false;
           _error = null;
         });
@@ -465,6 +495,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   }
 
   Widget _contentArea(Color fg) {
+    // ── 漫画模式：正文是图片列表 ──────────────────────────────
+    //
+    // 放在最前面判断 —— 漫画源根本没有 _paragraphs，
+    // 走后面的"这一章没有正文"分支会显示成空目录。
+    if (_images.isNotEmpty) return _mangaView(fg);
+
     if (_loading) {
       return Center(
         child: Column(
@@ -509,8 +545,21 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     }
     if (_paragraphs.isEmpty) {
       return Center(
-        child: Text('这一章没有正文',
-            style: TextStyle(fontSize: 13, color: fg.withValues(alpha: 0.6))),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.article_outlined,
+                size: 40, color: fg.withValues(alpha: 0.3)),
+            const SizedBox(height: 12),
+            Text('这一章没有正文',
+                style: TextStyle(
+                    fontSize: 13, color: fg.withValues(alpha: 0.6))),
+            const SizedBox(height: 6),
+            Text('（如果是漫画源，检查 ruleContent.content 是否返回图片）',
+                style: TextStyle(
+                    fontSize: 11.5, color: fg.withValues(alpha: 0.45))),
+          ],
+        ),
       );
     }
     // 用 LayoutBuilder 拿到真实视口 —— 分页度量必须和渲染用同一个尺寸，
@@ -626,6 +675,143 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           ],
         );
       },
+    );
+  }
+
+  /// 漫画章节的图片请求头。
+  ///
+  /// ⚠️ 漫画图床**基本都要 Referer**，没有就是 403 / 空图。
+  /// 这里用「书源 header + 以书源站点为 Referer」——
+  /// 与项目里 `reader_page.dart` 的 `_imageHeaders` 同一思路
+  /// （那边是 MangaSource.imageHeaders + refererForChapter）。
+  Map<String, String> get _mangaHeaders {
+    final h = <String, String>{};
+    final raw = widget.source.raw['header'];
+    Map<dynamic, dynamic>? m;
+    if (raw is Map) {
+      m = raw;
+    } else if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        final d = jsonDecode(raw);
+        if (d is Map) m = d;
+      } catch (_) {}
+    }
+    m?.forEach((k, v) => h['$k'] = '$v');
+    // 补 Referer（大多数图床以此判防盗链）
+    final site = widget.source.url;
+    if (site.isNotEmpty && !h.keys.any((k) => k.toLowerCase() == 'referer')) {
+      h['Referer'] = site;
+    }
+    // 再兜一层 UA：源没配 header 时很多站直接拒
+    if (!h.keys.any((k) => k.toLowerCase() == 'user-agent')) {
+      h['User-Agent'] =
+          'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) '
+          'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 '
+          'Mobile/15E148 Safari/604.1';
+    }
+    return h;
+  }
+
+  /// 漫画渲染：**纵向连续滚动**（一图一行）。
+  ///
+  /// ── 为什么不做"一图一页"的分页 ────────────────────────────────
+  /// 手机窄屏下单张漫画图通常比屏幕高，一图一页还得额外缩放；
+  /// 纵向滚动是主流漫画 App 的做法，也省掉分页度量。
+  /// （横向分页/双页/仿真那套留给**文字**阅读，见 _contentArea。）
+  Widget _mangaView(Color fg) {
+    final headers = _mangaHeaders;
+    return GestureDetector(
+      // 点屏幕中间的 1/3 显隐工具栏；左右 1/3 翻章
+      onTapUp: (d) {
+        final w = MediaQuery.of(context).size.width;
+        final x = d.localPosition.dx;
+        if (x < w / 3) {
+          _prevPageOrChapter();
+        } else if (x > w * 2 / 3) {
+          _nextPageOrChapter();
+        } else {
+          setState(() => _showBar = !_showBar);
+        }
+      },
+      child: ListView.builder(
+        padding: EdgeInsets.only(
+            top: _padTop, bottom: _padBottom + 40),
+        // 图片数量 + 1（末尾放"下一章"）
+        itemCount: _images.length + 1,
+        itemBuilder: (c, i) {
+          if (i == _images.length) {
+            // 末尾：本章读完 → 下一章
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 40),
+              child: Center(
+                child: FilledButton.icon(
+                  onPressed: () => _nextPageOrChapter(),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: fg.withValues(alpha: 0.9),
+                    foregroundColor: _bgs[_bgIndex][0],
+                  ),
+                  icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                  label: Text(
+                    _index + 1 < widget.chapters.length
+                        ? '下一章：${widget.chapters[_index + 1].name}'
+                        : '已是最后一章',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+              ),
+            );
+          }
+          return Padding(
+            padding: EdgeInsets.symmetric(horizontal: _padLeft / 4),
+            child: CachedNetworkImage(
+              imageUrl: _images[i],
+              // ⚠️ 参数名是 httpHeaders（不是 headers）；
+              // 并且复用项目共享的 comicImageCacheManager ——
+              // 漫画图很大，另建一个 cacheManager 会重复占盘。
+              httpHeaders: headers,
+              cacheManager: comicImageCacheManager,
+              fit: BoxFit.fitWidth,
+              width: double.infinity,
+              // 加载中占位：给个和屏幕同比例的空块，避免滚动条乱跳
+              placeholder: (c, u) => Container(
+                height: 280,
+                alignment: Alignment.center,
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: fg.withValues(alpha: 0.35),
+                  ),
+                ),
+              ),
+              // 失败：显示序号 + 重试（**不静默空白** —— 空白最难查）
+              errorWidget: (c, u, e) => Container(
+                height: 200,
+                margin: const EdgeInsets.symmetric(vertical: 6),
+                decoration: BoxDecoration(
+                  color: fg.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.broken_image_outlined,
+                        size: 30, color: fg.withValues(alpha: 0.4)),
+                    const SizedBox(height: 8),
+                    Text('第 ${i + 1} 张加载失败',
+                        style: TextStyle(
+                            fontSize: 12, color: fg.withValues(alpha: 0.6))),
+                    Text('（图床可能需要 Referer，或该图已失效）',
+                        style: TextStyle(
+                            fontSize: 11, color: fg.withValues(alpha: 0.45))),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 
