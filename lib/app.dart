@@ -30,6 +30,7 @@ import 'common/appearance_sync.dart';
 import 'common/floating_nav_spec.dart';
 import 'common/theme_mode_store.dart';
 import 'services/main_tab_controller.dart';
+import 'pages/content_view.dart';
 
 /// 上一次打过的外观签名 —— 用**顶层变量**而不是实例字段：
 /// [TVBoxApp] 是 StatelessWidget，不能持有可变状态；
@@ -195,5 +196,5 @@ class TVBoxApp extends StatelessWidget {
     );
   }
 }
-import 'pages/content_view.dart';
+
 
