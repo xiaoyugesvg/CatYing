@@ -1,24 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 import '../models/book_source.dart';
 import '../services/book_source_service.dart';
 import '../theme/jelly_theme.dart';
 
-/// 书源登录页（cmbok V2.0.7 的「书源登录」）。
+/// 书源登录（截图 IMG_8113）。
 ///
-/// ── 为什么需要登录 ────────────────────────────────────────────
-/// 不少小说站把正文藏起来，未登录只能看到"请登录后阅读"。
-/// 登录成功后我们拿到 Cookie，写进书源的 `header`，引擎发请求时会自动带上。
+/// ── 与旧版的区别 ──────────────────────────────────────────────
+/// 旧版是两个 tab（Cookie 直填 / 表单登录）。截图的形态是**单页**：
 ///
-/// ── 为什么提供两种方式 ────────────────────────────────────────
-///   · **Cookie 直填**：最通用。用户在系统浏览器里登录该站，
-///     复制 Cookie 粘进来即可。不依赖站点的登录接口长什么样。
-///   · **表单登录**：POST 账号密码到登录接口，自动收 Set-Cookie。
-///     省事，但每个站的登录地址/字段名都不同，需要用户自己填。
+///   ⚡📂猫眼看书登录                                    ✕
+///   ┌──────────────────────────────────────┐ ┌──┐
+///   │ 网页登录后在此回显采集到的 Cookie      │ │📋│
+///   └──────────────────────────────────────┘ └──┘
+///   ┌───────────────────────────────────────────┐
+///   │ Cookie、书源变量与登录请求会按此书源保存。 │
+///   └───────────────────────────────────────────┘
 ///
-/// 默认给出 Cookie 直填 —— 它对用户更"一定能成"，
-/// 而表单登录更像"给愿意折腾的人用的快捷方式"。
+///   清除登录态                      [ 网页登录 ]
+///
+/// 关键差别：**Cookie 框是"回显"用的**（从网页登录自动采集），
+/// 不是让用户手填。表单登录那条路径被"网页登录"取代了 ——
+/// 网页登录更通用（不依赖站点登录接口长什么样）。
+///
+/// 「清除登录态」= 把 Cookie 从 header 里摘掉（[applyCookie] 传空串）。
 class BookSourceLoginPage extends StatefulWidget {
   const BookSourceLoginPage({super.key, required this.source});
 
@@ -29,378 +36,401 @@ class BookSourceLoginPage extends StatefulWidget {
 }
 
 class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
-  final store = BookSourceStore.instance;
-  final svc = BookSourceService.instance;
-
-  final _cookieCtrl = TextEditingController();
-  final _loginUrlCtrl = TextEditingController();
-  final _userCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
-  final _userFieldCtrl = TextEditingController(text: 'username');
-  final _passFieldCtrl = TextEditingController(text: 'password');
-
-  int _tab = 0; // 0 = Cookie 直填，1 = 表单登录
-  bool _busy = false;
+  final _ctrl = TextEditingController();
+  final _svc = BookSourceService.instance;
   String _status = '';
 
   @override
   void initState() {
     super.initState();
-    // 回填已登录的 Cookie，方便用户核对/替换
-    _cookieCtrl.text = svc.currentCookie(widget.source);
-    if (_cookieCtrl.text.isNotEmpty) {
-      _status = '当前已保存 Cookie（${_cookieCtrl.text.length} 字符）';
+    final c = _svc.currentCookie(widget.source);
+    _ctrl.text = c;
+    if (c.isNotEmpty) {
+      _status = '已保存 Cookie（${c.length} 字符）';
     }
   }
 
   @override
   void dispose() {
-    _cookieCtrl.dispose();
-    _loginUrlCtrl.dispose();
-    _userCtrl.dispose();
-    _passCtrl.dispose();
-    _userFieldCtrl.dispose();
-    _passFieldCtrl.dispose();
+    _ctrl.dispose();
     super.dispose();
   }
 
-  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
-  Color get _card => _isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
-  Color get _titleColor =>
-      _isDark ? Colors.white : JellyTheme.textPrimaryLight;
-
-  void _toast(String m) {
+  /// 保存 Cookie 到书源 header
+  Future<void> _save(String cookie) async {
+    final next = _svc.applyCookie(widget.source, cookie);
+    await BookSourceStoreBridge.save(next);
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(m),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ));
-  }
-
-  /// 把 Cookie 保存到书源
-  Future<void> _saveCookie(String cookie) async {
-    final updated = svc.applyCookie(widget.source, cookie);
-    final r = await store.addAll([updated]);
-    if (!mounted) return;
-    _toast(r.updated > 0 ? '已保存登录状态' : '已保存');
-    Navigator.pop(context, true);
-  }
-
-  Future<void> _doFormLogin() async {
-    final url = _loginUrlCtrl.text.trim();
-    if (url.isEmpty) {
-      _toast('请填登录接口地址');
-      return;
-    }
-    final user = _userCtrl.text.trim();
-    final pass = _passCtrl.text;
-    if (user.isEmpty || pass.isEmpty) {
-      _toast('请填账号和密码');
-      return;
-    }
     setState(() {
-      _busy = true;
-      _status = '正在登录...';
+      _ctrl.text = cookie.trim();
+      _status = cookie.trim().isEmpty ? '已清除登录态' : '已保存';
     });
-    final uf = _userFieldCtrl.text.trim();
-    final pf = _passFieldCtrl.text.trim();
-    final r = await svc.loginWithForm(
-      url: url,
-      fields: {
-        (uf.isEmpty ? 'username' : uf): user,
-        (pf.isEmpty ? 'password' : pf): pass,
-      },
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(_status), duration: const Duration(seconds: 1)),
     );
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _status = r.ok ? '登录成功，已获取 Cookie' : (r.error ?? '登录失败');
-    });
-    if (r.ok && r.cookie != null && r.cookie!.isNotEmpty) {
-      _cookieCtrl.text = r.cookie!;
-    }
   }
+
+  /// 「网页登录」→ 打开内嵌浏览器，登录后采集 Cookie
+  Future<void> _webLogin() async {
+    final url = _loginUrlOf(widget.source);
+    if (url.isEmpty) {
+      // 没有登录地址就退到站点首页 —— 多数站点的登录入口在首页
+      final home = widget.source.url;
+      if (home.isEmpty) {
+        _toast('这个书源没有填写源地址，无法网页登录');
+        return;
+      }
+      await _openWeb(home);
+      return;
+    }
+    await _openWeb(url);
+  }
+
+  /// 登录地址：Legado 书源的 `loginUrl`，没有就用源地址
+  String _loginUrlOf(BookSource s) {
+    final v = s.readPath('loginUrl');
+    return (v ?? '').toString().trim();
+  }
+
+  Future<void> _openWeb(String url) async {
+    final cookie = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WebLoginPage(
+          url: url,
+          title: widget.source.name,
+        ),
+      ),
+    );
+    if (cookie == null || cookie.isEmpty) return;
+    await _save(cookie);
+  }
+
+  void _toast(String m) => ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(m), duration: const Duration(seconds: 2)),
+      );
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final label = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    final card = isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
     return Scaffold(
       backgroundColor:
-          _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
-      appBar: AppBar(
-        title: Text('书源登录',
-            style: TextStyle(fontSize: 18, color: _titleColor)),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-        children: [
-          // 是哪个源在登录 —— 别让用户在多个源之间搞混
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: _card,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.menu_book_rounded,
-                    size: 20, color: JellyTheme.primary),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(widget.source.name,
-                          style: TextStyle(
-                              fontSize: 14.5,
-                              fontWeight: FontWeight.w600,
-                              color: _titleColor)),
-                      Text(widget.source.url,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 11.5,
-                              color: JellyTheme.textSecondary)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          _tabBar(),
-          const SizedBox(height: 14),
-          if (_tab == 0) ..._cookieTab() else ..._formTab(),
-          if (_status.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: JellyTheme.primary.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(10),
-              ),
+          isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // ── 标题行 ────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 8, 10),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline_rounded,
-                      size: 16, color: JellyTheme.primary),
-                  const SizedBox(width: 8),
                   Expanded(
-                    child: Text(_status,
+                    child: Text(
+                      '⚡📂${widget.source.name}登录',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                          color: label),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: Icon(Icons.close_rounded,
+                        size: 22, color: label),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                children: [
+                  // ── Cookie 回显框 + 复制 ────────────────────
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: card,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _ctrl,
+                            maxLines: 3,
+                            minLines: 1,
+                            style: TextStyle(
+                                fontSize: 13, height: 1.5, color: label),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              filled: false,
+                              hintText: '网页登录后在此回显采集到的 Cookie',
+                              hintStyle: TextStyle(
+                                  fontSize: 13,
+                                  color: JellyTheme.textSecondary),
+                              border: InputBorder.none,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        IconButton(
+                          tooltip: '复制',
+                          onPressed: () async {
+                            await Clipboard.setData(
+                                ClipboardData(text: _ctrl.text));
+                            _toast('已复制 Cookie');
+                          },
+                          icon: Icon(Icons.copy_rounded,
+                              size: 19, color: JellyTheme.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  // ── 说明框 ──────────────────────────────────
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: card,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      'Cookie、书源变量与登录请求会按此书源保存。',
+                      style: TextStyle(
+                          fontSize: 12.5,
+                          height: 1.6,
+                          color: JellyTheme.textSecondary),
+                    ),
+                  ),
+                  if (_status.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Text(_status,
                         style: TextStyle(
-                            fontSize: 12,
-                            height: 1.5,
-                            color: _titleColor)),
+                            fontSize: 12.5,
+                            color: JellyTheme.textSecondary)),
+                  ],
+                ],
+              ),
+            ),
+            // ── 底部：清除登录态 · 网页登录 ──────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+              child: Row(
+                children: [
+                  TextButton(
+                    onPressed: () => _save(''),
+                    child: Text('清除登录态',
+                        style: TextStyle(
+                            fontSize: 14,
+                            color: JellyTheme.textSecondary)),
+                  ),
+                  const Spacer(),
+                  FilledButton(
+                    onPressed: _webLogin,
+                    style: FilledButton.styleFrom(
+                      backgroundColor:
+                          isDark ? Colors.white : JellyTheme.primary,
+                      foregroundColor:
+                          isDark ? JellyTheme.backgroundDark : Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 40, vertical: 14),
+                    ),
+                    child: const Text('网页登录'),
                   ),
                 ],
               ),
             ),
           ],
-        ],
-      ),
-    );
-  }
-
-  Widget _tabBar() {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          _tabBtn(0, 'Cookie 直填', Icons.cookie_rounded),
-          _tabBtn(1, '表单登录', Icons.login_rounded),
-        ],
-      ),
-    );
-  }
-
-  Widget _tabBtn(int i, String label, IconData icon) {
-    final on = _tab == i;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _tab = i),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 9),
-          decoration: BoxDecoration(
-            color: on
-                ? (_isDark ? Colors.white.withValues(alpha: 0.1) : Colors.white)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(9),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon,
-                  size: 16,
-                  color: on ? JellyTheme.primary : JellyTheme.textSecondary),
-              const SizedBox(width: 6),
-              Text(label,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: on ? FontWeight.w600 : FontWeight.normal,
-                    color: on ? _titleColor : JellyTheme.textSecondary,
-                  )),
-            ],
-          ),
         ),
       ),
     );
   }
+}
 
-  List<Widget> _cookieTab() => [
-        Text(
-          '在系统浏览器里登录这个网站，然后复制 Cookie 粘到下面。\n'
-          '这是最通用的方式：不依赖站点登录接口的具体形态。',
+/// 网页登录页（截图 IMG_8114）。
+///
+///   ‹  ⚡📂猫眼看书 · 网页登录   ⟳            [ 完成 ]
+///
+/// 用户在页面里登录站点，点「完成」时把 WebView 里的 Cookie 取出来
+/// 返回给上一页。
+class WebLoginPage extends StatefulWidget {
+  const WebLoginPage({super.key, required this.url, required this.title});
+
+  final String url;
+  final String title;
+
+  @override
+  State<WebLoginPage> createState() => _WebLoginPageState();
+}
+
+class _WebLoginPageState extends State<WebLoginPage> {
+  late final WebViewController _c;
+  bool _loading = true;
+  bool _hasError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setUserAgent(
+          'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) '
+          'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 '
+          'Safari/604.1')
+      ..setNavigationDelegate(NavigationDelegate(
+        onPageStarted: (_) => setState(() {
+          _loading = true;
+          _hasError = false;
+        }),
+        onPageFinished: (_) => setState(() => _loading = false),
+        onWebResourceError: (e) {
+          // 主框架错误才算失败；子资源（图片/广告）失败不提示
+          if (e.isForMainFrame ?? false) {
+            setState(() {
+              _loading = false;
+              _hasError = true;
+            });
+          }
+        },
+      ))
+      ..loadRequest(Uri.parse(widget.url));
+  }
+
+  /// 点「完成」：把 Cookie 取出来
+  Future<void> _done() async {
+    String cookie = '';
+    try {
+      // WebView 的 document.cookie 只有**当前域**的 Cookie。
+      // 跨子域（如 passport.xxx.com 登录后回 www.xxx.com）拿不全 ——
+      // 这是 WebView 的固有限制，不是这里能绕的。
+      final v = await _c.runJavaScriptReturningResult('document.cookie');
+      cookie = v.toString().replaceAll('"', '').trim();
+    } catch (_) {
+      cookie = '';
+    }
+    if (!mounted) return;
+    if (cookie.isEmpty) {
+      // 拿不到就如实说，不假装登录成功
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('没读到 Cookie。可能还没登录，或 Cookie 在其它子域下。'),
+        duration: Duration(seconds: 3),
+      ));
+      return;
+    }
+    Navigator.pop(context, cookie);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final label = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    return Scaffold(
+      backgroundColor:
+          isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
+      appBar: AppBar(
+        centerTitle: true,
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: Icon(Icons.arrow_back_rounded, color: label),
+        ),
+        title: Text(
+          '⚡📂${widget.title} · 网页登录',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
-              fontSize: 12, height: 1.6, color: JellyTheme.textSecondary),
+              fontSize: 16, fontWeight: FontWeight.w600, color: label),
         ),
-        const SizedBox(height: 10),
-        TextField(
-          controller: _cookieCtrl,
-          maxLines: 6,
-          minLines: 4,
-          style: const TextStyle(fontSize: 12.5, height: 1.4),
-          decoration: InputDecoration(
-            hintText: '粘贴 Cookie，形如：\n'
-                'PHPSESSID=abc123; token=xyz789',
-            hintStyle:
-                TextStyle(fontSize: 12.5, color: JellyTheme.textSecondary),
-            filled: true,
-            fillColor: _card,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
+        actions: [
+          IconButton(
+            tooltip: '刷新',
+            onPressed: () => _c.reload(),
+            icon: Icon(Icons.refresh_rounded, size: 22, color: label),
           ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            TextButton.icon(
-              onPressed: () async {
-                final d = await Clipboard.getData('text/plain');
-                final t = d?.text;
-                if (t != null && t.isNotEmpty) {
-                  _cookieCtrl.text = t;
-                  setState(() => _status = '已从剪贴板读取 ${t.length} 字符');
-                }
-              },
-              icon: const Icon(Icons.content_paste_rounded, size: 16),
-              label: const Text('读剪贴板'),
-            ),
-            const Spacer(),
-            if (_cookieCtrl.text.isNotEmpty)
-              TextButton(
-                onPressed: () => _saveCookie(''),
-                child: const Text('退出登录',
-                    style: TextStyle(color: Colors.redAccent)),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: FilledButton(
+              onPressed: _done,
+              style: FilledButton.styleFrom(
+                backgroundColor:
+                    isDark ? Colors.white : JellyTheme.primary,
+                foregroundColor:
+                    isDark ? JellyTheme.backgroundDark : Colors.white,
               ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            onPressed: _busy
-                ? null
-                : () {
-                    final c = _cookieCtrl.text.trim();
-                    if (c.isEmpty) {
-                      _toast('请先粘贴 Cookie');
-                      return;
-                    }
-                    _saveCookie(c);
-                  },
-            child: const Text('保存登录状态'),
-          ),
-        ),
-      ];
-
-  List<Widget> _formTab() => [
-        Text(
-          '填站点的登录接口与字段名，自动获取 Cookie。\n'
-          '注意：每个站的登录地址和字段名都不同，需要自己确认。',
-          style: TextStyle(
-              fontSize: 12, height: 1.6, color: JellyTheme.textSecondary),
-        ),
-        const SizedBox(height: 12),
-        _field('登录接口地址', _loginUrlCtrl, 'https://site.com/user/login',
-            keyboard: TextInputType.url),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(child: _field('账号字段名', _userFieldCtrl, 'username')),
-            const SizedBox(width: 10),
-            Expanded(child: _field('密码字段名', _passFieldCtrl, 'password')),
-          ],
-        ),
-        const SizedBox(height: 10),
-        _field('账号', _userCtrl, ''),
-        const SizedBox(height: 10),
-        _field('密码', _passCtrl, '', obscure: true),
-        const SizedBox(height: 16),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            onPressed: _busy ? null : _doFormLogin,
-            icon: _busy
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.login_rounded, size: 18),
-            label: const Text('登录并获取 Cookie'),
-          ),
-        ),
-        if (_cookieCtrl.text.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              onPressed: () => _saveCookie(_cookieCtrl.text.trim()),
-              child: const Text('保存已获取的 Cookie'),
+              child: const Text('完成'),
             ),
           ),
         ],
-      ];
-
-  Widget _field(
-    String label,
-    TextEditingController ctrl,
-    String hint, {
-    TextInputType? keyboard,
-    bool obscure = false,
-  }) =>
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      ),
+      body: Stack(
         children: [
-          Text(label,
-              style: TextStyle(fontSize: 12, color: JellyTheme.textSecondary)),
-          const SizedBox(height: 4),
-          TextField(
-            controller: ctrl,
-            keyboardType: keyboard,
-            obscureText: obscure,
-            style: const TextStyle(fontSize: 13.5),
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: hint.isEmpty ? null : hint,
-              hintStyle:
-                  TextStyle(fontSize: 13, color: JellyTheme.textSecondary),
-              filled: true,
-              fillColor: _card,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide.none,
-              ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          WebViewWidget(controller: _c),
+          if (_loading)
+            const Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: LinearProgressIndicator(minHeight: 2),
             ),
-          ),
+          if (_hasError)
+            Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.wifi_off_rounded,
+                      size: 40, color: label.withValues(alpha: 0.4)),
+                  const SizedBox(height: 12),
+                  Text('网页打不开',
+                      style: TextStyle(fontSize: 14, color: label)),
+                  const SizedBox(height: 6),
+                  Text('可能是源地址不通，或站点需要代理',
+                      style: TextStyle(
+                          fontSize: 12, color: JellyTheme.textSecondary)),
+                  const SizedBox(height: 14),
+                  TextButton(
+                    onPressed: () => _c.reload(),
+                    child: const Text('重试'),
+                  ),
+                ],
+              ),
+            ),
         ],
-      );
+      ),
+    );
+  }
+}
+
+/// 把改好的书源存回去。
+///
+/// 单独包一层是为了不把 `BookSourceStore` 直接散在各页面里 ——
+/// 存书源的入口只有这里和编辑页，收口好排查。
+class BookSourceStoreBridge {
+  const BookSourceStoreBridge._();
+
+  /// 用 updatePaths 逐字段写回整个 raw。
+  ///
+  /// ⚠️ 不能直接调 `updatePaths(id, s.raw)` —— 那个方法的语义是
+  /// "按点分路径改若干字段"，传一个含嵌套 Map 的 raw 进去，
+  /// 嵌套的 ruleSearch 等会被当成**单个值**覆盖（值类型对不上）。
+  /// 所以这里展平成点分路径再写。
+  static Future<void> save(BookSource s) async {
+    final flat = <String, dynamic>{};
+    void walk(String prefix, Map<dynamic, dynamic> m) {
+      m.forEach((k, v) {
+        final key = prefix.isEmpty ? '$k' : '$prefix.$k';
+        if (v is Map) {
+          walk(key, v);
+        } else {
+          flat[key] = v;
+        }
+      });
+    }
+
+    walk('', s.raw);
+    await BookSourceStore.instance.updatePaths(s.id, flat);
+  }
 }

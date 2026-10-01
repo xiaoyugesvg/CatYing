@@ -152,20 +152,20 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
           _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
       appBar: AppBar(
         titleSpacing: 0,
-        // 标题与「拉绳」并排 —— 拉绳在标题右侧（截图位置）。
-        // 图标组保持原样；页里用 Expanded 包一层避免长标题挤压图标。
+        // ── 标题行（按截图：一行放下全部控件）──────────────────
+        //   书源 ⋮拉绳  [搜索书源图书]  (工具) (历史) (菜单)
+        //
+        // 原来是"AppBar 里只放标题+拉绳+图标组，搜索框在下面单独一行"。
+        // 截图里是一行，所以把搜索框并进 AppBar 的 title。
+        // 用 Expanded 撑开，右侧 actions 才不会被长标题/长搜索框挤掉。
         title: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Flexible(
-              child: Text('书源',
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      color: _titleColor)),
-            ),
-            const SizedBox(width: 6),
+            Text('书源',
+                style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: _titleColor)),
+            const SizedBox(width: 4),
             JellyPullCord(
               tooltip: '切换到图书',
               // 书源页是 push 进来的，所以"切回图书"就是 pop。
@@ -173,6 +173,8 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
               // 堆出一串页面，返回键要按很多次才出得去。
               onTap: () => Navigator.maybePop(context),
             ),
+            const SizedBox(width: 10),
+            Expanded(child: _searchField()),
           ],
         ),
         actions: [
@@ -215,7 +217,8 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       ),
       body: Column(
         children: [
-          _searchBar(),
+          // 搜索框已并入 AppBar 的标题行（按截图的一行布局），
+          // 这里不再重复渲染。
           if (_searching) _progressBar(),
           Expanded(child: _body()),
         ],
@@ -223,10 +226,10 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
     );
   }
 
-  Widget _searchBar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-      child: TextField(
+  /// 搜索框本体（不带外边距）—— 放在 AppBar 的 title 里，
+  /// 由外层 Row 的 Expanded 负责宽度。
+  Widget _searchField() {
+    return TextField(
         controller: _ctrl,
         textInputAction: TextInputAction.search,
         onSubmitted: (_) => _run(),
@@ -252,9 +255,8 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
             borderRadius: BorderRadius.circular(14),
             borderSide: BorderSide.none,
           ),
-          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          contentPadding: const EdgeInsets.symmetric(vertical: 10),
         ),
-      ),
     );
   }
 

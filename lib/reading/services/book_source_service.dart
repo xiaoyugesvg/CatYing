@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
@@ -575,6 +577,54 @@ class BookSourceService {
       return (ok: false, cookie: null, error: (m['error'] ?? '登录失败').toString());
     }
     return (ok: true, cookie: m['cookie']?.toString(), error: null);
+  }
+
+  /// 下载一张图片的字节（图片模式「保存到相册」用）。
+  ///
+  /// ⚠️ 必须**带上书源的 header**（Referer / User-Agent）——
+  /// 大多数漫画/插图图床有防盗链，裸请求会 403。
+  /// 所以我们复用引擎自己的 dio，而不是另起一个 HttpClient。
+  ///
+  /// 返回 null 表示失败（失败原因不在这里抛，调用方给用户提示就行）。
+  Future<Uint8List?> fetchBytes(BookSource source, String url) async {
+    if (url.trim().isEmpty) return null;
+    try {
+      final res = await _dio.get<List<int>>(
+        url,
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: _headersOf(source),
+          // 图片可能较大，给长一点的接收超时
+          receiveTimeout: const Duration(seconds: 30),
+          // 有些图床对 3xx 跳转后的 URL 才给图，dio 默认跟随
+          followRedirects: true,
+          validateStatus: (s) => s != null && s >= 200 && s < 400,
+        ),
+      );
+      final d = res.data;
+      if (d == null || d.isEmpty) return null;
+      return Uint8List.fromList(d);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 取书源的请求头（header 字段是 JSON 文本或 Map 两种形态都吃）
+  Map<String, String> _headersOf(BookSource source) {
+    final h = source.raw['header'];
+    Map<dynamic, dynamic>? m;
+    if (h is Map) {
+      m = h;
+    } else if (h is String && h.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(h);
+        if (decoded is Map) m = decoded;
+      } catch (_) {}
+    }
+    if (m == null) return const {};
+    return {
+      for (final e in m.entries) '${e.key}': '${e.value}',
+    };
   }
 
   /// 把 Cookie 写进书源的 header（其它自定义头保留）。

@@ -107,6 +107,15 @@ class SettingsService extends ChangeNotifier {
   static const _kRememberZoomKey = 'reader_remember_zoom';
   static const _kPinchZoomKey = 'reader_pinch_zoom';
   static const _kSingleHandKey = 'reader_single_hand';
+  // 书架排序方式（按用户截图里的"排序"按钮）
+  static const _kShelfSortKey = 'shelf_sort';
+  // 排序方向（true = 正序 Z→A / 旧→新）与"全局应用"
+  static const _kShelfSortAscKey = 'shelf_sort_asc';
+  static const _kShelfSortGlobalKey = 'shelf_sort_global';
+  // 被隐藏的书架 id 列表（「管理书架」里的眼睛开关）
+  static const _kHiddenShelfIdsKey = 'shelf_hidden_ids';
+  // 从书架移除时是否同时删除本地文件（「书架设置」里的开关）
+  static const _kRemoveDeletesFileKey = 'shelf_remove_deletes_file';
   static const _kScreenSleepKey = 'reader_screen_sleep';
   static const _kAutoAddShelfKey = 'reader_auto_add_shelf';
   static const _kAutoAddShelfForBookKey = 'reader_auto_add_shelf_book';
@@ -211,6 +220,32 @@ class SettingsService extends ChangeNotifier {
   bool _autoAddShelfForManga = true;
   /// 图书在线阅读满 N 章后自动加入「正在读」
   bool _autoAddShelfForBook = true;
+  /// 书架排序方式。
+  ///
+  /// 取值（与用户截图的排序面板一一对应）：
+  ///   `default` 默认 / `title` 书名 / `author` 作者 /
+  ///   `added` 加入时间 / `recent` 最近阅读 / `progress` 阅读进度
+  String _shelfSort = 'default';
+
+  /// 排序方向：false = 倒序（默认，新→旧 / Z→A）；true = 正序
+  bool _shelfSortAsc = false;
+
+  /// 是否对所有书架都应用（截图里那个「全局」开关）
+  ///
+  /// 关闭时只对**当前书架**生效。这里用一个 bool 简化：
+  /// true = 所有书架同一套排序；false = 也只影响当前书架
+  /// （每书架独立存排序的成本较高，而用户几乎不会逐架设不同排序）。
+  bool _shelfSortGlobal = true;
+
+  /// 被隐藏的书架 id。
+  ///
+  /// ⚠️ 预设书架（正在读/想读/已读完/已下载）**也能隐藏** ——
+  /// 用户截图里「正在读」的眼睛就是划线态。
+  /// 一开始我做成"预设不可隐藏"，与截图不符。
+  Set<String> _hiddenShelfIds = {};
+
+  /// 从书架移除时是否同时删除本地文件（含导入的原文件）
+  bool _shelfRemoveDeletesFile = false;
   int _pomodoroLoopCount = defaultPomodoroLoopCount; // 番茄钟循环次数
   int _pomodoroRestMinutes = defaultPomodoroRestMinutes; // 番茄钟每轮休息分钟
 
@@ -295,6 +330,12 @@ class SettingsService extends ChangeNotifier {
   String get screenSleep => _screenSleep;
   bool get autoAddShelfForManga => _autoAddShelfForManga;
   bool get autoAddShelfForBook => _autoAddShelfForBook;
+  String get shelfSort => _shelfSort;
+  bool get shelfSortAsc => _shelfSortAsc;
+  bool get shelfSortGlobal => _shelfSortGlobal;
+  Set<String> get hiddenShelfIds => Set.unmodifiable(_hiddenShelfIds);
+  bool isShelfHidden(String id) => _hiddenShelfIds.contains(id);
+  bool get shelfRemoveDeletesFile => _shelfRemoveDeletesFile;
   bool get inkScreenMode => _inkScreenMode;
   int get pomodoroLoopCount => _pomodoroLoopCount;
   int get pomodoroRestMinutes => _pomodoroRestMinutes;
@@ -493,6 +534,13 @@ class SettingsService extends ChangeNotifier {
         prefs.getBool(_kAutoAddShelfKey) ?? true;
     _autoAddShelfForBook =
         prefs.getBool(_kAutoAddShelfForBookKey) ?? true;
+    _shelfSort = prefs.getString(_kShelfSortKey) ?? 'default';
+    _shelfSortAsc = prefs.getBool(_kShelfSortAscKey) ?? false;
+    _shelfSortGlobal = prefs.getBool(_kShelfSortGlobalKey) ?? true;
+    _hiddenShelfIds =
+        (prefs.getStringList(_kHiddenShelfIdsKey) ?? const []).toSet();
+    _shelfRemoveDeletesFile =
+        prefs.getBool(_kRemoveDeletesFileKey) ?? false;
       _inkScreenMode = prefs.getBool(_kInkScreenModeKey) ?? false;
       // 若默认首页不在可见列表中，自动修正到第一个可见
       if (!_visibleNavTabs.any((t) => t == _defaultHomePage.toNavTab())) {
@@ -1310,6 +1358,46 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kScreenSleepKey, value);
+  }
+
+  /// 切换书架显隐（「管理书架」里的眼睛）。
+  Future<void> toggleShelfHidden(String id) async {
+    if (!_hiddenShelfIds.remove(id)) _hiddenShelfIds.add(id);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_kHiddenShelfIdsKey, _hiddenShelfIds.toList());
+  }
+
+  Future<void> setShelfRemoveDeletesFile(bool value) async {
+    if (_shelfRemoveDeletesFile == value) return;
+    _shelfRemoveDeletesFile = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kRemoveDeletesFileKey, value);
+  }
+
+  Future<void> setShelfSortAsc(bool value) async {
+    if (_shelfSortAsc == value) return;
+    _shelfSortAsc = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kShelfSortAscKey, value);
+  }
+
+  Future<void> setShelfSortGlobal(bool value) async {
+    if (_shelfSortGlobal == value) return;
+    _shelfSortGlobal = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kShelfSortGlobalKey, value);
+  }
+
+  Future<void> setShelfSort(String value) async {
+    if (_shelfSort == value) return;
+    _shelfSort = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kShelfSortKey, value);
   }
 
   Future<void> setAutoAddShelfForManga(bool value) async {

@@ -99,6 +99,80 @@ function splitRule(rule) {
 }
 
 // ============================================================
+// TVBox / CatVod 选择器前缀 → CSS
+// ============================================================
+
+/**
+ * 把 TVBox/CatVod 风格的 `class.xxx` / `tag.xxx` / `id.xxx` 前缀
+ * 转成标准 CSS。
+ *
+ * ── 为什么需要这个 ────────────────────────────────────────────
+ * Legado 书源用**标准 CSS**（`div.block_txt2 p.1@text`、`.book-list li`）。
+ * 但还有一大批源（尤其漫画 / TVBox 生态）用另一种写法：
+ *
+ *   class.comics-detail__author@text
+ *   class.comics-card pure-u-1-2 pure-u-md-1-4@tag.a@href
+ *   tag.amp-img.0@src
+ *   id.content@text
+ *
+ * 这些**不是** Legado 标准。原引擎不认，于是整串被当成一个 CSS 选择器：
+ *   `class.comics-card …` → 解析成"标签名 class、类名 comics-card …"
+ *   → 匹配 0 条，而且**不报错**。
+ * 表现是"这个源搜什么都空"，极难查 —— 用户只会以为源坏了。
+ *
+ * ── 转换规则 ──────────────────────────────────────────────────
+ *   class.a b c      → .a.b.c          （空格分隔的多个类）
+ *   tag.amp-img      → amp-img
+ *   tag.amp-img.0    → amp-img         （`.0` 是第 N 个，交给后续取值处理）
+ *   id.content       → #content
+ *   .a.b             → .a.b            （已经是 CSS，原样）
+ *
+ * 只在**整段以这些前缀开头**时转换；中间出现的 `@tag.a` 由
+ * splitRule 的 walkParts 处理（那边是"取值步骤"不是选择器）。
+ */
+function tvboxPrefixToCss(sel) {
+  const raw = String(sel).trim();
+  if (!/^(class|tag|id)\./i.test(raw)) return raw;
+
+  // ⚠️ 关键：**只转换选择器主体，`@` 之后的取值步骤原样保留**。
+  //
+  // 我第一版用 /^class\.(.+)$/ 贪婪匹配整串，于是
+  //   class.comics-card pure-u-1-2@tag.a@href
+  // 被转成
+  //   .comics-card.pure-u-1-2@tag.a@href   ← `@tag.a` 被当成类名 → 非法 CSS
+  // 结果列表能匹配到（选择器主体还在）但 **bookUrl 取不到**，
+  // 于是详情/目录/正文全断 —— 表现是"搜索有结果但点进去全空"。
+  //
+  // 正确做法：在第一个 `@` 处切开，前面是选择器、后面是取值链。
+  const at = raw.indexOf('@');
+  const head = at < 0 ? raw : raw.slice(0, at);
+  const tail = at < 0 ? '' : raw.slice(at);
+
+  // 去掉末尾的 `.N`（取第 N 个节点），它不是类名
+  const body = head.replace(/\.\d+$/, '').trim();
+
+  let css;
+  let m = /^class\.(.+)$/i.exec(head.replace(/\.\d+$/, '').trim());
+  if (m) {
+    css = m[1]
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((c) => '.' + c)
+      .join('');
+  } else {
+    m = /^tag\.(.+)$/i.exec(body);
+    if (m) {
+      css = m[1].trim().split(/\s+/)[0] || '';
+    } else {
+      m = /^id\.(.+)$/i.exec(body);
+      css = m ? '#' + m[1].trim().split(/\s+/)[0] : head;
+    }
+  }
+  return css + tail;
+}
+
+// ============================================================
 // XPath → CSS 轻量转换
 // ============================================================
 
@@ -319,6 +393,35 @@ function applyVars(str, vars) {
  * 这里按需注入，并且**不给 require/process**。
  */
 function runJs(expr, ctx) {
+  // ── java.getElements（TVBox/CatVod 风格漫画源大量使用）──────────
+  //
+  // 原引擎**没有**这个方法，所以这类源一执行就报
+  // "java.getElements is not a function" —— 漫画取不到图。
+  //
+  // 用法（包子漫画那种）：
+  //   let n = java.getElements('class.comic-contain@amp-img')
+  //   n.forEach(x => x.attr('data-src'))
+  //
+  // 所以它要返回**带 attr() 的节点数组**，而不是字符串。
+  // 这里把 cheerio 的节点包一层：attr / text / html 三个最常用的。
+  const _cheerio = ctx.__cheerio;
+  const _scope = ctx.__nodes;
+
+  function wrapNodes($, nodes) {
+    return nodes.map((el) => {
+      const $el = $(el);
+      return {
+        attr: (name) => $el.attr(name),
+        text: () => $el.text(),
+        html: () => $el.html(),
+        // TVBox 里常见 x.attr('href') 之后再处理
+        toString: () => $.html(el),
+        __el: el,
+        __$: $,
+      };
+    });
+  }
+
   const sandbox = {
     result: ctx.result,
     baseUrl: ctx.baseUrl || '',
@@ -333,6 +436,127 @@ function runJs(expr, ctx) {
         throw new Error('java.ajax 需要同步网络，请改用 @css/@json 或分步规则');
       },
       getString: (s) => (s == null ? '' : String(s)),
+
+      /**
+       * java.getElements(sel) —— 取节点数组（返回带 attr/text/html 的对象）。
+       *
+       * sel 支持 TVBox 的 class./tag. 前缀（内部会转成 CSS）。
+       * 作用域：优先在**当前节点**下找，没有当前节点就从整篇文档找。
+       */
+      getElements: (sel) => {
+        if (!_cheerio) return [];
+        const css = tvboxPrefixToCss(String(sel));
+        try {
+          const $ = _cheerio;
+          let found;
+          if (_scope && _scope.length) {
+            // 在当前节点集合里找
+            found = $(_scope).find(css);
+            if (found.length === 0) found = $(_scope).filter(css);
+          } else {
+            found = $(css);
+          }
+          return wrapNodes($, found.toArray());
+        } catch (_) {
+          return [];
+        }
+      },
+
+      /**
+       * java.t2s(str) —— 繁体转简体。
+       *
+       * ⚠️ 这里**不是完整的繁简映射表**（那需要几千字的字典，且涉及
+       * 一简对多繁的歧义）。只覆盖漫画标题里最常见的几十个字 ——
+       * 目的是"书名能正常显示"，不是做完整转换。
+       * 真正的全文转换需要引入 OpenCC 之类的字典（本项目不引第三方依赖）。
+       */
+      t2s: (s) => {
+        const str = s == null ? '' : String(s);
+        return str.replace(/[麼麽么]/g, '么')
+          .replace(/[們们]/g, '们')
+          .replace(/[這这]/g, '这')
+          .replace(/[來来]/g, '来')
+          .replace(/[對对]/g, '对')
+          .replace(/[後后]/g, '后')
+          .replace(/[裡里裏]/g, '里')
+          .replace(/[與与]/g, '与')
+          .replace(/[為为]/g, '为')
+          .replace(/[國国]/g, '国')
+          .replace(/[學学]/g, '学')
+          .replace(/[會会]/g, '会')
+          .replace(/[說说]/g, '说')
+          .replace(/[時时]/g, '时')
+          .replace(/[間间]/g, '间')
+          .replace(/[見见]/g, '见')
+          .replace(/[現现]/g, '现')
+          .replace(/[實实]/g, '实')
+          .replace(/[無无]/g, '无')
+          .replace(/[愛爱]/g, '爱')
+          .replace(/[戀恋]/g, '恋')
+          .replace(/[龍龙]/g, '龙')
+          .replace(/[劍剑]/g, '剑')
+          .replace(/[書书]/g, '书')
+          .replace(/[畫画]/g, '画')
+          .replace(/[網网]/g, '网')
+          .replace(/[頁页]/g, '页')
+          .replace(/[節节]/g, '节')
+          .replace(/[點点]/g, '点')
+          .replace(/[號号]/g, '号')
+          .replace(/[風风]/g, '风')
+          .replace(/[雲云]/g, '云')
+          .replace(/[語语]/g, '语')
+          .replace(/[話话]/g, '话')
+          .replace(/[東东]/g, '东')
+          .replace(/[車车]/g, '车')
+          .replace(/[門门]/g, '门')
+          .replace(/[馬马]/g, '马')
+          .replace(/[鳥鸟]/g, '鸟')
+          .replace(/[魚鱼]/g, '鱼')
+          .replace(/[體体]/g, '体')
+          .replace(/[頭头]/g, '头')
+          .replace(/[長长]/g, '长')
+          .replace(/[萬万]/g, '万')
+          .replace(/[億亿]/g, '亿')
+          .replace(/[終终]/g, '终')
+          .replace(/[於于]/g, '于')
+          .replace(/[從从]/g, '从')
+          .replace(/[將将]/g, '将')
+          .replace(/[給给]/g, '给')
+          .replace(/[還还]/g, '还')
+          .replace(/[過过]/g, '过')
+          .replace(/[開开]/g, '开')
+          .replace(/[關关]/g, '关')
+          .replace(/[應应]/g, '应')
+          .replace(/[該该]/g, '该')
+          .replace(/[卻却]/g, '却')
+          .replace(/[種种]/g, '种')
+          .replace(/[類类]/g, '类')
+          .replace(/[數数]/g, '数')
+          .replace(/[語语]/g, '语')
+          .replace(/[樂乐]/g, '乐')
+          .replace(/[讀读]/g, '读')
+          .replace(/[寫写]/g, '写')
+          .replace(/[聽听]/g, '听')
+          .replace(/[覺觉]/g, '觉')
+          .replace(/[麗丽]/g, '丽')
+          .replace(/[華华]/g, '华')
+          .replace(/[漢汉]/g, '汉')
+          .replace(/[軍军]/g, '军')
+          .replace(/[戰战]/g, '战')
+          .replace(/[爭争]/g, '争')
+          .replace(/[勝胜]/g, '胜')
+          .replace(/[敗败]/g, '败')
+          .replace(/[殺杀]/g, '杀')
+          .replace(/[血血]/g, '血')
+          .replace(/[靈灵]/g, '灵')
+          .replace(/[魂魂]/g, '魂')
+          .replace(/[夢梦]/g, '梦')
+          .replace(/[園园]/g, '园')
+          .replace(/[樹树]/g, '树')
+          .replace(/[葉叶]/g, '叶')
+          .replace(/[花蕐]/g, '花');
+      },
+
       base64Decode: (s) => Buffer.from(String(s), 'base64').toString('utf8'),
       base64Encode: (s) => Buffer.from(String(s), 'utf8').toString('base64'),
       md5Encode: (s) =>
@@ -419,7 +643,13 @@ function evalRule({ rule, input, vars = {}, ctx = {}, isList = false }) {
 
   // ── @js: ──────────────────────────────────────────────
   if (prefix === 'js') {
-    const out = runJs(parts[0], { ...ctx, result: input });
+    const out = runJs(parts[0], {
+    ...ctx,
+    result: input,
+    // java.getElements 要用到当前文档与作用域节点
+    __cheerio: input && input.__cheerio ? input.__cheerio : ctx.__cheerio,
+    __nodes: input && input.__nodes ? input.__nodes : ctx.__nodes,
+  });
     return out;
   }
 
@@ -445,6 +675,13 @@ function evalRule({ rule, input, vars = {}, ctx = {}, isList = false }) {
   // ── @css: / 默认（XPath 或 CSS）────────────────────────
   let sel = parts[0];
   let rest = parts.slice(1);
+
+  // TVBox 风格前缀（class./tag./id.）先转成标准 CSS —— 与 evalList
+  // 同一处理。不转的话 `class.comics-detail__author@text` 会被当成
+  // "标签名 class"，静默取到空串。
+  const _tvboxConverted = tvboxPrefixToCss(sel);
+  const _wasTvbox = _tvboxConverted !== sel.trim();
+  sel = _tvboxConverted;
 
   // 判断是不是 XPath：
   //   显式前缀 / 以 / 或 . 开头 / 含 `/@attr` 或 `/text()` 这类 XPath 语法
@@ -652,7 +889,13 @@ function evalList({ rule, input, vars, ctx }) {
   const { prefix, parts } = splitRule(r);
 
   if (prefix === 'js') {
-    const out = runJs(parts[0], { ...ctx, result: input });
+    const out = runJs(parts[0], {
+    ...ctx,
+    result: input,
+    // java.getElements 要用到当前文档与作用域节点
+    __cheerio: input && input.__cheerio ? input.__cheerio : ctx.__cheerio,
+    __nodes: input && input.__nodes ? input.__nodes : ctx.__nodes,
+  });
     if (Array.isArray(out)) return out;
     if (out == null) return [];
     return [out];
@@ -680,6 +923,9 @@ function evalList({ rule, input, vars, ctx }) {
     scope = null;
   }
   let sel = parts[0];
+  // TVBox 风格前缀（class./tag./id.）先转成标准 CSS —— 不转的话
+  // `class.comics-card …` 会被当成"标签名 class"，静默匹配 0 条。
+  sel = tvboxPrefixToCss(sel);
   // ⚠️ 这里**不能**只看"是否以 . 开头"就送去 XPath 转换：
   // `.book-list li` 是合法 CSS 类选择器，但 xpathToCss 会把前导点吃掉，
   // 返回 `book-list li`（当成标签名）→ 匹配 0 条。

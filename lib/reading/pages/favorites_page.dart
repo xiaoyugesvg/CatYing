@@ -20,13 +20,9 @@ import '../widgets/jelly_comic_list_tile.dart';
 import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_segmented_toggle.dart';
-import '../widgets/jelly_sliding_actions.dart';
 import '../widgets/staggered_entrance.dart';
 import '../widgets/source_cover_image.dart';
 import 'book_detail_page.dart';
-import 'browse_history_page.dart';
-import 'download_page.dart';
-import 'source_repo_page.dart';
 import 'comic_detail_page.dart';
 
 /// 收藏页面（顶部 Tab：漫画收藏 / 图书收藏）
@@ -127,6 +123,43 @@ class _FavoritesPageState extends State<FavoritesPage>
     super.dispose();
   }
 
+  /// 通用圆形图标按钮（浅灰底 + 近黑图标）—— 与书架页同款。
+  ///
+  /// 收藏页标题行右侧那个搜索按钮用它（截图里是浅灰圆 + 近黑放大镜，
+  /// 不是原来的"深色圆 + 白图标"）。
+  Widget _buildCircleIcon({
+    required bool isDark,
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+    double size = 36,
+  }) {
+    return Material(
+      color: isDark
+          ? Colors.white.withValues(alpha: 0.10)
+          : Colors.black.withValues(alpha: 0.05),
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            width: size,
+            height: size,
+            child: Center(
+              child: Icon(
+                icon,
+                size: 20,
+                color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSearchButton({double size = 50}) {
     final iconSize = size <= 40 ? 20.0 : 22.0;
     return Material(
@@ -211,12 +244,23 @@ class _FavoritesPageState extends State<FavoritesPage>
                   top: !widget.showBackButton,
                   bottom: false,
                   child: SizedBox(
+                    // 高度跟着布局走：原来是"标题行 + 控件行"两行(105)，
+                    // 现在只有一行(48)。不改的话标题下会多出约 50px 空白。
                     height: contentTabs.length < 2
-                        ? (widget.showBackButton ? 0.0 : 50.0)
-                        : (widget.showBackButton ? 70.0 : 105.0),
+                        ? 0.0
+                        : (widget.showBackButton ? 0.0 : 48.0),
                     child: Stack(
                       children: [
-                        // 标题：左上角，间距小（AppBar 模式下由 AppBar 承担）
+                        // ── 标题行（按截图：收藏 [漫画|图书] ······ (搜索)）──
+                        //
+                        // 原来这里是「标题 + JellySlidingActions（搜索/历史/下载/源仓库）」
+                        // 的滑动图标组，而胶囊切换在**第二行居中**。
+                        // 用户截图里是**一行**：标题 / 胶囊在左，右侧只有 1 个搜索圆按钮。
+                        //
+                        // ⚠️ 顺带修了一个真 bug：原来滑动组里的搜索动作写成
+                        //   `onPressed: () => _buildSearchButton(size: 36)`
+                        // —— 调用的是"构建按钮"而非"打开搜索"，
+                        // 点了什么都不会发生（只 new 了一个不挂载的 Widget）。
                         if (!widget.showBackButton)
                           Positioned(
                             top: 6,
@@ -234,89 +278,46 @@ class _FavoritesPageState extends State<FavoritesPage>
                                         : JellyTheme.textPrimaryLight,
                                   ),
                                 ),
+                                const SizedBox(width: 10),
+                                // 胶囊切换挪进标题行（与书架页同一位置）
+                                if (contentTabs.length >= 2)
+                                  AnimatedBuilder(
+                                    animation: _tabController.animation!,
+                                    builder: (context, _) =>
+                                        JellySegmentedToggle(
+                                          index:
+                                              _tabController.animation!.value,
+                                          // 收藏页没有 _switchTab，
+                                          // 原来第二行控件组也是直接 animateTo
+                                          onChanged: (i) =>
+                                              _tabController.animateTo(i),
+                                          segmentWidth: tabSegWidth,
+                                          segments: contentTabs
+                                              .map(
+                                                (t) => JellySegmentData(
+                                                  icon: t == NavTab.manga
+                                                      ? Icons.palette_rounded
+                                                      : Icons.book_rounded,
+                                                ),
+                                              )
+                                              .toList(),
+                                        ),
+                                  ),
                                 const Spacer(),
-                                // 右上角滑动图标组（点按切换 / 长按展开成竖列）
-                                JellySlidingActions(
-                                  isDark: isDark,
-                                  width: contentTabs.length < 2 ? 168 : 130,
-                                  actions: [
-                                    JellyAction(
-                                      icon: Icons.search_rounded,
-                                      tooltip: '搜索',
-                                      onPressed: () =>
-                                          _buildSearchButton(size: 36),
-                                    ),
-                                    JellyAction(
-                                      icon: Icons.history_rounded,
-                                      tooltip: '浏览记录',
-                                      onPressed: () => Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => const BrowseHistoryPage(
-                                              showTabs: false),
-                                        ),
-                                      ),
-                                    ),
-                                    JellyAction(
-                                      icon: Icons.file_download_rounded,
-                                      tooltip: '下载',
-                                      onPressed: () => Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => const DownloadPage(),
-                                        ),
-                                      ),
-                                    ),
-                                    JellyAction(
-                                      icon: Icons.source_rounded,
-                                      tooltip: '漫画源仓库',
-                                      onPressed: () => Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => const SourceRepoPage(),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                // 右侧只有 1 个搜索按钮（浅灰圆 + 近黑图标）
+                                if (contentTabs.length >= 2)
+                                  _buildCircleIcon(
+                                    isDark: isDark,
+                                    icon: Icons.search_rounded,
+                                    tooltip: '搜索',
+                                    onTap: _openSearch,
+                                  ),
                               ],
                             ),
                           ),
-                        // 控件组：水平居中，间距大（往下错开，层次感）
-                        Positioned(
-                          top: widget.showBackButton ? 6 : 45,
-                          left: 12,
-                          right: 12,
-                          child: Row(
-                            children: [
-                              const Spacer(),
-                              if (contentTabs.length >= 2)
-                                AnimatedBuilder(
-                                  animation: _tabController.animation!,
-                                  builder: (context, _) => JellySegmentedToggle(
-                                    index: _tabController.animation!.value,
-                                    onChanged: (i) =>
-                                        _tabController.animateTo(i),
-                                    segmentWidth: tabSegWidth,
-                                    segments: contentTabs
-                                        .map(
-                                          (t) => JellySegmentData(
-                                            icon: t == NavTab.manga
-                                                ? Icons.palette_rounded
-                                                : Icons.book_rounded,
-                                          ),
-                                        )
-                                        .toList(),
-                                  ),
-                                ),
-                              if (contentTabs.length >= 2) ...[
-                                const SizedBox(width: 8),
-                                _buildSearchButton(),
-                              ],
-                              const Spacer(),
-                            ],
-                          ),
-                        ),
+                        // 第二行已删除：胶囊与搜索都挪进标题行（按用户截图）。
+                        // 保留这个注释是为了说明"这里曾经有一行"，
+                        // 避免以后有人以为漏写了控件组。
                       ],
                     ),
                   ),

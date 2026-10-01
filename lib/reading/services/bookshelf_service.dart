@@ -451,6 +451,31 @@ class BookshelfService extends ChangeNotifier {
 
   // ========== 内部方法 ==========
 
+  /// 按给定的 id 顺序重排书架（供「管理书架」的拖动排序用）。
+  ///
+  /// 实现要点：不直接依赖传入列表的顺序去改 `_bookshelves` 的位置，
+  /// 而是**按新顺序重写每条的 sortOrder**，再 `_sortShelves()`。
+  /// 这样即使传入的 id 列表与内部列表顺序不同、或含未知 id，
+  /// 结果也一定是稳定的（未知 id 忽略，未列出的保持原相对位置）。
+  Future<void> reorderShelves(List<String> orderedIds) async {
+    final pos = <String, int>{};
+    for (var i = 0; i < orderedIds.length; i++) {
+      pos[orderedIds[i]] = i;
+    }
+    // 未出现在新顺序里的（理论上不会有）排到后面，保持原相对次序
+    var tail = orderedIds.length;
+    for (final s in _bookshelves) {
+      pos.putIfAbsent(s.id, () => tail++);
+    }
+    for (var i = 0; i < _bookshelves.length; i++) {
+      final s = _bookshelves[i];
+      _bookshelves[i] = s.copyWith(sortOrder: pos[s.id] ?? i);
+    }
+    _sortShelves();
+    notifyListeners();
+    await _persistShelves();
+  }
+
   void _sortShelves() {
     _bookshelves.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
   }

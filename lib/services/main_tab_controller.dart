@@ -27,6 +27,11 @@ class MainTabController extends GetxController {
   /// 影视首页（也是「返回影视」的目标）
   static const int videoTabIndex = 0;
 
+  /// 「史藏」= 历史 + 收藏（索引 1）。
+  /// 阅读里的「已下载」入口要跳到这里 —— 下载好的漫画/图书
+  /// 都归在史藏的书架里，没有独立的"下载页"tab。
+  static const int bookshelfTabIndex = 1;
+
   /// 音乐模块
   static const int musicTabIndex = 5;
 

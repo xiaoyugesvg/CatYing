@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../common/floating_nav_spec.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
 
@@ -35,8 +36,8 @@ class JellyNavBar extends StatefulWidget {
   /// 悬浮导航栏总占用高度（高度 + 底部外边距），用于页面 FAB 等避让
   static const double floatingTotalHeight =
       floatingBarHeight + floatingBottomMargin;
-  static const double floatingBarHeight = 72.0;
-  static const double floatingBottomMargin = 30.0;
+  static const double floatingBarHeight = FloatingNavSpec.barHeight;
+  static const double floatingBottomMargin = FloatingNavSpec.bottomMargin;
 
   /// 内容底部避让高度：悬浮导航栏开启时返回总高+8，否则 0
   static double get contentBottomAvoid =>
@@ -63,9 +64,9 @@ class _JellyNavBarState extends State<JellyNavBar>
   static const _indicatorRatio = 1.25;
 
   // 悬浮模式尺寸（高度/边距在 Widget 类中公开定义，供外部避让使用）
-  static const _floatingRadius = 32.0; // 悬浮胶囊圆角
-  static const _floatingTopPad = 12.0; // 悬浮时上下内边距
-  static const _floatingIconSize = 26.0; // 悬浮时图标尺寸
+  static const _floatingRadius = FloatingNavSpec.radius; // 悬浮胶囊圆角
+  static const _floatingTopPad = FloatingNavSpec.innerPadV; // 悬浮时上下内边距
+  static const _floatingIconSize = FloatingNavSpec.iconSize; // 与影视/音乐统一
   // 悬浮每项宽度随屏宽自适应（宽屏适当加宽），见 _buildFloatingNavBar
   static const _floatingItemMin = 80.0; // 每项最小宽度（手机保底）
   static const _floatingItemMax = 120.0; // 每项最大宽度（宽屏上限）
@@ -186,15 +187,16 @@ class _JellyNavBarState extends State<JellyNavBar>
           final navBody = Container(
             height: JellyNavBar.floatingBarHeight,
             decoration: BoxDecoration(
-              color: (isDark ? JellyTheme.cardDark : Colors.white).withValues(
-                alpha: bgAnim ? 0.95 : 0.8,
-              ),
+              color: FloatingNavSpec.barColor(isDark, JellyTheme.palette)
+                  .withValues(alpha: bgAnim ? FloatingNavSpec.barAlpha : 0.8),
               borderRadius: BorderRadius.circular(_floatingRadius),
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: _floatingTopPad),
               child: _buildNavContent(
                 height: JellyNavBar.floatingBarHeight - _floatingTopPad * 2,
+                // 纯图标 —— 与用户截图一致（5 项：漫画/图书/书架/收藏/我的）。
+                // 回影视靠长按「我的」，不需要第 6 项。
                 iconOnly: true,
                 iconSize: _floatingIconSize,
               ),
@@ -277,7 +279,8 @@ class _JellyNavBarState extends State<JellyNavBar>
                         color: isDark
                             ? JellyTheme.navSelectedFg
                             : JellyTheme.navSelectedBg,
-                        borderRadius: BorderRadius.circular(18),
+                        borderRadius:
+                            BorderRadius.circular(FloatingNavSpec.itemRadius),
                       ),
                     ),
                   ),
@@ -333,9 +336,11 @@ class _JellyNavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    // 取色走 FloatingNavSpec —— 与影视/音乐同一套规则，
+    // 这样三条栏的"选中/未选中颜色"永远一致（用户要求颜色统一）。
     final color = isSelected
-        ? (isDark ? Colors.white : JellyTheme.navSelectedFg)
-        : (isDark ? Colors.white54 : JellyTheme.navUnselected);
+        ? FloatingNavSpec.selectedColor(isDark, JellyTheme.palette)
+        : FloatingNavSpec.unselectedColor(isDark, JellyTheme.palette);
 
     return InkWell(
       onTap: onTap,
@@ -350,13 +355,22 @@ class _JellyNavItem extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _buildIcon(color),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: FloatingNavSpec.iconLabelGap),
                   Text(
                     item.label,
+                    // ⚠️ 必须限一行 + 省略号。
+                    // 阅读栏可能到 6 项，每项宽度只有
+                    // (屏宽 - 边距) / 项数 ≈ 65px。
+                    // 标签一旦折成两行，总高度就会超过胶囊可用高度
+                    // （72 - 上下内边距），表现为文字被切一半或溢出条纹。
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                       color: color,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
+                      fontSize: FloatingNavSpec.labelSize,
+                      // w600 = 音乐/影视的文字权重，统一后不会有一处偏粗
+                      fontWeight: FloatingNavSpec.labelWeight,
                     ),
                   ),
                 ],

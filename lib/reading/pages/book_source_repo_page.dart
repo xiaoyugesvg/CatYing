@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 
 import '../models/book_source.dart';
 import '../services/book_source_service.dart';
+import 'book_source_editor_page.dart';
 import 'book_source_login_page.dart';
 import '../theme/jelly_theme.dart';
 
@@ -51,6 +52,21 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   bool _autoImportHandled = false;
   final Set<String> _selected = {};
 
+  // ── 主列表的筛选与分组（按截图）────────────────────────────
+  /// 顶部「筛选已导入的书源」输入框
+  final _filterCtrl = TextEditingController();
+  String _filter = '';
+  /// 分组 chip 当前选中项：null = 「全部」
+  String? _pickedGroup;
+  /// 被「隐藏组」的组名（不显示其书源）
+  final Set<String> _hiddenGroups = {};
+
+  /// 书源体检结果（id → 健康度）。「体检」按钮跑完填这里，
+  /// 卡片上会显示徽标 —— 不用逐个点进去看。
+  final Map<String, BookSourceHealth> _health = {};
+  /// 体检进行中（按钮转圈 + 禁用重复点击）
+  bool _healthChecking = false;
+
   @override
   void initState() {
     super.initState();
@@ -76,6 +92,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   void dispose() {
     _searchCtrl.dispose();
     _urlCtrl.dispose();
+    _filterCtrl.dispose();
     super.dispose();
   }
 
@@ -456,57 +473,375 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   // 列表
   // ============================================================
 
-  Widget _sourceList(List<BookSource> list) {
-    final groups = <String, List<BookSource>>{};
-    for (final s in list) {
-      groups.putIfAbsent(s.group, () => []).add(s);
+  /// 主列表（按截图）：
+  ///   共 N 个 + 清空  →  筛选输入框  →  分组 chip 行  →  书源卡片
+  Widget _sourceList(List<BookSource> all) {
+    // 1) 按"隐藏组"和"选中分组"过滤
+    var list = all
+        .where((s) => !_hiddenGroups.contains(s.group))
+        .toList();
+    if (_pickedGroup != null) {
+      list = list.where((s) => s.group == _pickedGroup).toList();
     }
-    final out = <Widget>[];
-    final on = list.where((e) => e.enabled).length;
-    out.add(Padding(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
-      child: Row(
-        children: [
-          // 截图只显示「共 N 个」；启用数放在按钮文案里体现
-          // （"全部停用"就意味着当前全启用），不再挤在同一行
-          Text('共 ${list.length} 个',
-              style: TextStyle(fontSize: 12.5, color: JellyTheme.textSecondary)),
-          const Spacer(),
-          if (!_selectMode) ...[
-            TextButton(
-              onPressed: () => store.setAllEnabled(on != list.length),
-              child: Text(on == list.length ? '全部停用' : '全部启用',
-                  style: const TextStyle(fontSize: 12)),
-            ),
-          ],
-        ],
-      ),
-    ));
-
-    if (groups.length <= 1) {
-      out.addAll(list.map(_sourceTile));
-    } else {
-      groups.forEach((g, items) {
-        out.add(Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 6),
-          child: Text('$g（${items.length}）',
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: JellyTheme.primary)),
-        ));
-        out.addAll(items.map(_sourceTile));
-      });
+    // 2) 分组统计（用过滤后的全集算，chip 上的数字才对）
+    final base = all.where((s) => !_hiddenGroups.contains(s.group)).toList();
+    final counts = <String, int>{};
+    for (final s in base) {
+      counts[s.group] = (counts[s.group] ?? 0) + 1;
     }
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 90),
-      children: out,
+      children: [
+        // ── 共 N 个 + 清空 ────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 8, 0, 6),
+          child: Row(
+            children: [
+              Text('共 ${base.length} 个',
+                  style: TextStyle(
+                      fontSize: 12.5, color: JellyTheme.textSecondary)),
+              const Spacer(),
+              TextButton(
+                onPressed: () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (c) => AlertDialog(
+                      title: const Text('清空书源'),
+                      content: Text('将删除全部 ${base.length} 个书源，不可恢复。'),
+                      actions: [
+                        TextButton(
+                            onPressed: () => Navigator.pop(c, false),
+                            child: const Text('取消')),
+                        TextButton(
+                            onPressed: () => Navigator.pop(c, true),
+                            child: const Text('清空',
+                                style: TextStyle(color: Colors.redAccent))),
+                      ],
+                    ),
+                  );
+                  if (ok == true) {
+                    // removeAll() 无参（清空全部）；这里要删的是
+                    // "未被隐藏的组"里的源，所以逐个 remove
+                    for (final s in base) {
+                      await store.remove(s.id);
+                    }
+                  }
+                },
+                child: const Text('清空', style: TextStyle(fontSize: 12.5)),
+              ),
+            ],
+          ),
+        ),
+        // ── 筛选已导入的书源 ──────────────────────────────────
+        Container(
+          height: 40,
+          decoration: BoxDecoration(
+            color: _card,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: TextField(
+            controller: _filterCtrl,
+            onChanged: (v) => setState(() => _filter = v.trim().toLowerCase()),
+            style: TextStyle(fontSize: 13.5, color: _titleColor),
+            decoration: InputDecoration(
+              isDense: true,
+              filled: false,
+              hintText: '筛选已导入的书源',
+              hintStyle: TextStyle(
+                  fontSize: 13.5, color: JellyTheme.textSecondary),
+              prefixIcon: Icon(Icons.search_rounded,
+                  size: 19, color: JellyTheme.textSecondary),
+              prefixIconConstraints:
+                  const BoxConstraints(minWidth: 38, minHeight: 38),
+              suffixIcon: _filter.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: Icon(Icons.clear_rounded,
+                          size: 17, color: JellyTheme.textSecondary),
+                      onPressed: () {
+                        _filterCtrl.clear();
+                        setState(() => _filter = '');
+                      },
+                    ),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 10),
+            ),
+          ),
+        ),
+        // ── 分组 chip 行 ──────────────────────────────────────
+        //
+        // 截图：最左是「排序/分组设置」圆钮 + 「＋」新建分组，
+        // 接着是「∞ 全部 N」「未分组 N」「通常书源 N」…
+        Padding(
+          padding: const EdgeInsets.only(top: 10, bottom: 4),
+          child: SizedBox(
+            height: 34,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                _groupActionBtn(Icons.tune_rounded, '分组设置', _showManageGroups),
+                const SizedBox(width: 8),
+                _groupActionBtn(Icons.add_box_outlined, '新建分组', _showNewGroup),
+                const SizedBox(width: 8),
+                _groupChip('全部', base.length, _pickedGroup == null,
+                    () => setState(() => _pickedGroup = null)),
+                for (final e in counts.entries) ...[
+                  const SizedBox(width: 8),
+                  _groupChip(e.key, e.value, _pickedGroup == e.key,
+                      () => setState(() => _pickedGroup = e.key)),
+                ],
+                const SizedBox(width: 8),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        // ── 书源卡片 ──────────────────────────────────────────
+        for (final s in list) _sourceTile(s),
+      ],
     );
   }
 
+  /// 分组 chip 行左侧的小圆钮（分组设置 / 新建分组）
+  Widget _groupActionBtn(IconData icon, String tip, VoidCallback onTap) {
+    return Tooltip(
+      message: tip,
+      child: Material(
+        color: _isDark
+            ? Colors.white.withValues(alpha: 0.08)
+            : Colors.black.withValues(alpha: 0.04),
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            width: 34,
+            height: 34,
+            child: Icon(icon, size: 18, color: JellyTheme.textSecondary),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 一个分组 chip（选中=深色实底白字，未选=浅底灰字）
+  Widget _groupChip(String label, int count, bool on, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: on
+              ? (_isDark ? Colors.white : JellyTheme.primary)
+              : (_isDark
+                  ? Colors.white.withValues(alpha: 0.07)
+                  : Colors.black.withValues(alpha: 0.04)),
+          borderRadius: BorderRadius.circular(17),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 「全部」前面有个 ∞ 标记（截图如此）
+            if (label == '全部') ...[
+              Icon(Icons.all_inclusive_rounded,
+                  size: 14,
+                  color: on
+                      ? (_isDark ? JellyTheme.backgroundDark : Colors.white)
+                      : JellyTheme.textSecondary),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              '$label $count',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: on ? FontWeight.w600 : FontWeight.normal,
+                color: on
+                    ? (_isDark ? JellyTheme.backgroundDark : Colors.white)
+                    : JellyTheme.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 「新建分组」对话框（截图：标题 + 输入框 + 取消/确定）
+  Future<void> _showNewGroup() async {
+    final ctrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: _card,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        title: Text('新建分组',
+            style: TextStyle(fontSize: 17, color: _titleColor)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: InputDecoration(
+            hintText: '输入分组名称',
+            filled: true,
+            fillColor: _isDark
+                ? Colors.white.withValues(alpha: 0.06)
+                : Colors.black.withValues(alpha: 0.04),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(c, ctrl.text.trim()),
+              child: const Text('确定')),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    // 新建分组本身不产生书源 —— 它只是个"待用"的分组名。
+    // 这里把它落成一个空分组的可见占位：取消隐藏它并选中，
+    // 用户随后可以给书源改分组（截图里的「设置分组」）。
+    setState(() {
+      _hiddenGroups.remove(name);
+      _pickedGroup = name;
+    });
+    _toast('已创建分组「$name」，可在书源上点「设置分组」归入');
+  }
+
+  /// 「管理分组」弹层（截图：管理分组 + 设置/新建/批量删除 + 拖动/眼睛）
+  Future<void> _showManageGroups() async {
+    final all = store.sorted();
+    final names = <String>{for (final s in all) s.group}.toList();
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Container(
+          constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.7),
+          decoration: BoxDecoration(
+            color: _card,
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  margin: const EdgeInsets.only(top: 8, bottom: 6),
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: JellyTheme.textSecondary.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 6, 8, 6),
+                  child: Row(
+                    children: [
+                      Text('管理分组',
+                          style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                              color: _titleColor)),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: '新建分组',
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _showNewGroup();
+                        },
+                        icon: Icon(Icons.create_new_folder_outlined,
+                            size: 21, color: _titleColor),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Flexible(
+                  child: names.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.all(40),
+                          child: Text('还没有分组',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  color: JellyTheme.textSecondary)),
+                        )
+                      : ListView(
+                          shrinkWrap: true,
+                          children: [
+                            for (final g in names)
+                              ListTile(
+                                leading: Icon(Icons.drag_handle_rounded,
+                                    size: 20,
+                                    color: JellyTheme.textSecondary),
+                                title: Text(
+                                  g,
+                                  style: TextStyle(
+                                      fontSize: 15.5, color: _titleColor),
+                                ),
+                                subtitle: Text(
+                                  '${all.where((s) => s.group == g).length} 个源',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: JellyTheme.textSecondary),
+                                ),
+                                // 眼睛 = 该组是否显示在列表里
+                                trailing: IconButton(
+                                  tooltip: _hiddenGroups.contains(g)
+                                      ? '当前隐藏，点击显示'
+                                      : '当前显示，点击隐藏',
+                                  onPressed: () => setSheet(() {
+                                    setState(() {
+                                      if (!_hiddenGroups.remove(g)) {
+                                        _hiddenGroups.add(g);
+                                      }
+                                    });
+                                  }),
+                                  icon: Icon(
+                                    _hiddenGroups.contains(g)
+                                        ? Icons.visibility_off_outlined
+                                        : Icons.visibility_outlined,
+                                    size: 20,
+                                    color: JellyTheme.textSecondary,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
+  /// 一个书源卡片（按截图）：
+  ///   [复选框] [首字头像] 名称 / 分组   ......  [启用开关]
+  ///
+  /// 与旧版的区别：
+  ///   · 左侧由"书本图标"改为**名称首字头像**（截图如此，一眼能认出是哪个源）
+  ///   · subtitle 由"URL / 分组"改为**只看分组**（URL 在详情页里看）
+  ///   · 非选择模式下也显示**复选框**（截图里常驻），点它进选择模式
   Widget _sourceTile(BookSource s) {
     final sel = _selected.contains(s.id);
+    // 首字头像：取名称第一个字符（中文取一字，英文取首字母大写）
+    final initial = s.name.isEmpty
+        ? '?'
+        : s.name.characters.first.toUpperCase();
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -514,69 +849,326 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         borderRadius: BorderRadius.circular(14),
         border: sel ? Border.all(color: JellyTheme.primary, width: 1.2) : null,
       ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.fromLTRB(14, 2, 6, 2),
-        leading: Container(
-          width: 38,
-          height: 38,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: JellyTheme.primary.withValues(alpha: 0.13),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(Icons.menu_book_rounded,
-              size: 19, color: JellyTheme.primary),
-        ),
-        title: Text(
-          s.name,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            color: s.enabled ? _titleColor : JellyTheme.textSecondary,
-          ),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              s.url.isEmpty ? s.group : s.url,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, color: JellyTheme.textSecondary),
-            ),
-            // 体检过就在卡片上标出来，不用点进去看
-            if (_health[s.id] != null) _healthBadge(_health[s.id]!),
-          ],
-        ),
-        onTap: _selectMode
-            ? () => setState(() {
-                  if (sel) {
-                    _selected.remove(s.id);
-                  } else {
-                    _selected.add(s.id);
-                  }
-                })
-            : () => _showDetail(s),
-        trailing: _selectMode
-            ? Icon(
-                sel ? Icons.check_circle : Icons.circle_outlined,
-                color: sel ? JellyTheme.primary : JellyTheme.textSecondary,
+      child: Row(
+        children: [
+          // 复选框（常驻）
+          Padding(
+            padding: const EdgeInsets.only(left: 10),
+            child: GestureDetector(
+              onTap: () => setState(() {
+                if (sel) {
+                  _selected.remove(s.id);
+                } else {
+                  _selected.add(s.id);
+                  // 勾选即进入选择模式（顶栏出现"选中 N"）
+                  _selectMode = true;
+                }
+                if (_selected.isEmpty) _selectMode = false;
+              }),
+              child: Icon(
+                sel ? Icons.check_box : Icons.check_box_outline_blank,
                 size: 22,
-              )
-            : Switch(
+                color: sel ? JellyTheme.primary : JellyTheme.textSecondary,
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListTile(
+              contentPadding: const EdgeInsets.fromLTRB(8, 2, 6, 2),
+              leading: Container(
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: JellyTheme.primary.withValues(alpha: 0.13),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  initial,
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: s.enabled
+                        ? (_isDark ? Colors.white : JellyTheme.textPrimaryLight)
+                        : JellyTheme.textSecondary,
+                  ),
+                ),
+              ),
+              title: Text(
+                s.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: s.enabled ? _titleColor : JellyTheme.textSecondary,
+                ),
+              ),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    s.group.isEmpty ? '未分组' : s.group,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 12, color: JellyTheme.textSecondary),
+                  ),
+                  if (_health[s.id] != null) _healthBadge(_health[s.id]!),
+                ],
+              ),
+              onTap: _selectMode
+                  ? () => setState(() {
+                        if (sel) {
+                          _selected.remove(s.id);
+                        } else {
+                          _selected.add(s.id);
+                        }
+                        if (_selected.isEmpty) _selectMode = false;
+                      })
+                  : () => _showSourceMenu(s),
+              onLongPress: () => _showSourceMenu(s),
+              trailing: Switch(
                 value: s.enabled,
                 activeThumbColor: JellyTheme.primary,
                 onChanged: (v) => store.setEnabled(s.id, v),
               ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  // ============================================================
-  // 导入：地址 / 口令 / 本地文件（截图原文的三种方式）
+  /// 点书源卡片弹出的底部菜单（按截图）：
+  ///   顶部：源名 + 分组名 + ✏编辑 / ⬆置顶 / 🗑删除
+  ///   列表：代理设置（跟随全局）/ 设置分组
+  Future<void> _showSourceMenu(BookSource s) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: _card,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 10),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: JellyTheme.textSecondary.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              // 标题行：源名/分组 + 三个圆钮
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 16, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(s.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                  color: _titleColor)),
+                          const SizedBox(height: 3),
+                          Text(s.group.isEmpty ? '未分组' : s.group,
+                              style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: JellyTheme.textSecondary)),
+                        ],
+                      ),
+                    ),
+                    _groupActionBtn(Icons.edit_outlined, '编辑',
+                        () async {
+                      Navigator.pop(ctx);
+                      // 打开 7-tab 完整编辑页（源变量/基础/搜索/发现/详情/目录/正文）
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => BookSourceEditorPage(source: s),
+                        ),
+                      );
+                      if (mounted) setState(() {});
+                    }),
+                    const SizedBox(width: 8),
+                    _groupActionBtn(Icons.vertical_align_top_rounded, '置顶',
+                        () {
+                      Navigator.pop(ctx);
+                      // 置顶 = 把它排到最前（store 有 order 字段）
+                      store.reorder([s.id]);
+                    }),
+                    const SizedBox(width: 8),
+                    // ⚠️ 这个「登录」圆钮必须有：BookSourceLoginPage 原来的
+                    // 唯一入口是被我删掉的 _showDetail。删了它登录页就成了
+                    // 孤儿页面（代码在但用户进不去）——等于弄丢功能。
+                    // 截图里圆钮位置只画了 3 个，但登录是必需功能，
+                    // 多一个不影响主流程。
+                    _groupActionBtn(
+                        Icons.login_rounded,
+                        '登录',
+                        () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => BookSourceLoginPage(source: s),
+                          ),
+                        )),
+                    const SizedBox(width: 8),
+                    _groupActionBtn(
+                        Icons.delete_outline_rounded, '删除', () async {
+                      Navigator.pop(ctx);
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder: (c) => AlertDialog(
+                          title: const Text('删除书源'),
+                          content: Text('删除「${s.name}」？不可恢复。'),
+                          actions: [
+                            TextButton(
+                                onPressed: () => Navigator.pop(c, false),
+                                child: const Text('取消')),
+                            TextButton(
+                                onPressed: () => Navigator.pop(c, true),
+                                child: const Text('删除',
+                                    style:
+                                        TextStyle(color: Colors.redAccent))),
+                          ],
+                        ),
+                      );
+                      if (ok == true) await store.remove(s.id);
+                    }),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              // 代理设置
+              ListTile(
+                leading: Icon(Icons.vpn_key_outlined,
+                    size: 22, color: _titleColor),
+                title: Text('代理设置',
+                    style: TextStyle(fontSize: 15, color: _titleColor)),
+                subtitle: Text('跟随全局（当前直连）',
+                    style: TextStyle(
+                        fontSize: 12.5, color: JellyTheme.textSecondary)),
+                trailing: Icon(Icons.chevron_right_rounded,
+                    size: 20, color: JellyTheme.textSecondary),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _toast('单个源的代理暂未支持，请在「通用设置」里配置全局代理');
+                },
+              ),
+              // 设置分组
+              ListTile(
+                leading:
+                    Icon(Icons.folder_outlined, size: 22, color: _titleColor),
+                title: Text('设置分组',
+                    style: TextStyle(fontSize: 15, color: _titleColor)),
+                subtitle: Text(s.group.isEmpty ? '未分组' : s.group,
+                    style: TextStyle(
+                        fontSize: 12.5, color: JellyTheme.textSecondary)),
+                trailing: Icon(Icons.chevron_right_rounded,
+                    size: 20, color: JellyTheme.textSecondary),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showPickGroup(s);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 「设置分组」：给单个书源选一个已有分组，或新建
+  Future<void> _showPickGroup(BookSource s) async {
+    final names = <String>{for (final x in store.sorted()) x.group}.toList();
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: _card,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 14),
+              Text('设置分组',
+                  style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: _titleColor)),
+              const SizedBox(height: 8),
+              for (final g in names)
+                ListTile(
+                  title: Text(g,
+                      style: TextStyle(fontSize: 15, color: _titleColor)),
+                  trailing: s.group == g
+                      ? Icon(Icons.check_rounded,
+                          size: 20, color: JellyTheme.primary)
+                      : null,
+                  onTap: () => Navigator.pop(ctx, g),
+                ),
+              ListTile(
+                leading: Icon(Icons.add_rounded,
+                    size: 20, color: JellyTheme.textSecondary),
+                title: Text('新建分组…',
+                    style: TextStyle(
+                        fontSize: 15, color: JellyTheme.textSecondary)),
+                onTap: () => Navigator.pop(ctx, '__new__'),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null) return;
+    var target = picked;
+    if (picked == '__new__') {
+      final ctrl = TextEditingController();
+      final name = await showDialog<String>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('新建分组'),
+          content: TextField(
+            controller: ctrl,
+            autofocus: true,
+            decoration: const InputDecoration(hintText: '输入分组名称'),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c), child: const Text('取消')),
+            TextButton(
+                onPressed: () => Navigator.pop(c, ctrl.text.trim()),
+                child: const Text('确定')),
+          ],
+        ),
+      );
+      if (name == null || name.isEmpty) return;
+      target = name;
+    }
+    await store.setGroup(s.id, target);
+    _toast('已归入「$target」');
+  }
+
   // ============================================================
 
   Future<void> _showImportSheet() async {
@@ -1054,152 +1646,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   // 详情 / 删除
   // ============================================================
 
-  void _showDetail(BookSource s) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: _card,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        top: false,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(s.name,
-                  style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: _titleColor)),
-              const SizedBox(height: 14),
-              _kv('分组', s.group),
-              _kv('网址', s.url.isEmpty ? '（未配置）' : s.url),
-              if (s.comment.isNotEmpty) _kv('备注', s.comment),
-              _kv('状态', s.enabled ? '已启用' : '已停用'),
-              _kv('字段数', '${s.raw.length}'),
-              // 登录状态：让用户一眼知道这个源有没有登录过
-              _kv(
-                '登录',
-                BookSourceService.instance.currentCookie(s).isEmpty
-                    ? '未登录'
-                    : '已登录（Cookie ${BookSourceService.instance.currentCookie(s).length} 字符）',
-              ),
-              const SizedBox(height: 12),
-              // 书源登录 / 段评（V2.0.7 功能）
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () async {
-                        Navigator.pop(ctx);
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => BookSourceLoginPage(source: s),
-                          ),
-                        );
-                        if (mounted) setState(() {});
-                      },
-                      icon: const Icon(Icons.login_rounded, size: 17),
-                      label: const Text('登录'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _showCommentsInfo(s);
-                      },
-                      icon: const Icon(Icons.forum_outlined, size: 17),
-                      label: const Text('段评'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _showEditSheet(s);
-                      },
-                      icon: const Icon(Icons.edit_rounded, size: 17),
-                      label: const Text('编辑'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(
-                          text: const JsonEncoder.withIndent('  ')
-                              .convert(s.toJson()),
-                        ));
-                        Navigator.pop(ctx);
-                        _toast('已复制这个书源的 JSON');
-                      },
-                      icon: const Icon(Icons.copy_rounded, size: 17),
-                      label: const Text('复制'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () async {
-                        Navigator.pop(ctx);
-                        await store.remove(s.id);
-                        _toast('已删除「${s.name}」');
-                      },
-                      icon: const Icon(Icons.delete_outline, size: 17),
-                      label: const Text('删除',
-                          style: TextStyle(color: Colors.redAccent)),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _kv(String k, String v) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 56,
-              child: Text(k,
-                  style: TextStyle(
-                      fontSize: 12, color: JellyTheme.textSecondary)),
-            ),
-            Expanded(
-              child: Text(v,
-                  style: TextStyle(
-                      fontSize: 12.5, height: 1.5, color: _titleColor)),
-            ),
-          ],
-        ),
-      );
-
-  // ============================================================
-  // 书源体检（V2.0.7 的「书源体检」）
-  // ============================================================
-
-  bool _healthChecking = false;
-
-  /// 源 id → 体检结果
-  final Map<String, BookSourceHealth> _health = {};
-
   Future<void> _runHealthCheck() async {
     final targets = _visible;
     if (targets.isEmpty) return;
@@ -1272,212 +1718,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   /// 只给表单：Legado 有几十个规则字段，全列出来表单会失控。
   /// 所以常用字段（名称/网址/分组）走表单，其余走 JSON —— 两段都改得动，
   /// 且互相同步（改表单会写回 JSON）。
-  Future<void> _showEditSheet(BookSource s) async {
-    final nameCtrl = TextEditingController(text: s.name);
-    final urlCtrl = TextEditingController(text: s.url);
-    final groupCtrl = TextEditingController(text: s.group);
-    final jsonCtrl = TextEditingController(
-      text: const JsonEncoder.withIndent('  ').convert(s.toJson()),
-    );
-    var error = '';
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: _card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => SafeArea(
-          top: false,
-          child: Padding(
-            padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('编辑书源',
-                      style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: _titleColor)),
-                  const SizedBox(height: 14),
-                  _editField('名称', nameCtrl, 'bookSourceName'),
-                  const SizedBox(height: 10),
-                  _editField('网址', urlCtrl, 'bookSourceUrl',
-                      keyboard: TextInputType.url),
-                  const SizedBox(height: 10),
-                  _editField('分组', groupCtrl, 'bookSourceGroup'),
-                  const SizedBox(height: 14),
-                  Text('完整 JSON（规则字段在这里改）',
-                      style: TextStyle(
-                          fontSize: 12, color: JellyTheme.textSecondary)),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: jsonCtrl,
-                    maxLines: 10,
-                    minLines: 6,
-                    style: const TextStyle(fontSize: 12, height: 1.4),
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: _isDark
-                          ? Colors.white.withValues(alpha: 0.05)
-                          : Colors.black.withValues(alpha: 0.04),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                  if (error.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(error,
-                        style: const TextStyle(
-                            fontSize: 12, color: Colors.redAccent)),
-                  ],
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      const Spacer(),
-                      TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        child: const Text('取消'),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: () async {
-                          // 表单 → JSON：以表单值为准覆盖三个常用字段，
-                          // 这样用户改了名字不会因为 JSON 没同步而白改
-                          dynamic decoded;
-                          try {
-                            decoded = jsonDecode(jsonCtrl.text);
-                          } catch (e) {
-                            setSheet(() => error = 'JSON 格式错误：$e');
-                            return;
-                          }
-                          if (decoded is! Map) {
-                            setSheet(() => error = 'JSON 顶层必须是对象 {...}');
-                            return;
-                          }
-                          final m = decoded.cast<String, dynamic>();
-                          final nm = nameCtrl.text.trim();
-                          final ur = urlCtrl.text.trim();
-                          if (nm.isEmpty && ur.isEmpty) {
-                            setSheet(() => error = '名称和网址至少要填一个');
-                            return;
-                          }
-                          m['bookSourceName'] = nm;
-                          m['bookSourceUrl'] = ur;
-                          m['bookSourceGroup'] = groupCtrl.text.trim();
-
-                          final updated = BookSource.fromJson(m);
-                          if (updated == null) {
-                            setSheet(() => error = '解析失败，检查必填字段');
-                            return;
-                          }
-                          // id 变化时（网址改了）要删掉旧条目再插入，
-                          // 否则会留下一条永远删不掉的孤儿源
-                          if (updated.id != s.id) {
-                            await store.remove(s.id);
-                          }
-                          await store.addAll([updated]);
-                          if (!ctx.mounted) return;
-                          Navigator.pop(ctx);
-                          _toast('已保存「${updated.name}」');
-                        },
-                        child: const Text('保存'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    nameCtrl.dispose();
-    urlCtrl.dispose();
-    groupCtrl.dispose();
-    jsonCtrl.dispose();
-  }
-
-  Widget _editField(
-    String label,
-    TextEditingController ctrl,
-    String hint, {
-    TextInputType? keyboard,
-  }) =>
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label,
-              style: TextStyle(fontSize: 12, color: JellyTheme.textSecondary)),
-          const SizedBox(height: 4),
-          TextField(
-            controller: ctrl,
-            keyboardType: keyboard,
-            style: const TextStyle(fontSize: 13.5),
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: hint,
-              hintStyle:
-                  TextStyle(fontSize: 13, color: JellyTheme.textSecondary),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 10),
-            ),
-          ),
-        ],
-      );
-
-  // ============================================================
-  // 段评（V2.0.7 的「在线书源：阅读段评功能」）
-  // ============================================================
-
-  /// 段评说明。
-  ///
-  /// ── 为什么不直接做出来 ────────────────────────────────────────
-  /// 「段评」是**特定站点**的能力（把评论按段落挂到正文上）。
-  /// Legado 书源标准里**没有**段评的规则字段（ruleComment 不是标准），
-  /// 所以：
-  ///   · 源里没配 `ruleComment` → 这个源**根本没有段评数据**，
-  ///     硬做一个空列表是骗人；
-  ///   · 源里配了 `ruleComment` → 才能在阅读器里按段落展示。
-  ///
-  /// 这里如实告知用户当前源的情况，并说明怎么打开 ——
-  /// 比"点了没反应"或"显示空列表"都诚实。
-  void _showCommentsInfo(BookSource s) {
-    final hasRule = s.raw['ruleComment'] != null;
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('段评', style: TextStyle(fontSize: 16)),
-        content: Text(
-          hasRule
-              ? '这个书源配置了 ruleComment，阅读时会在对应段落显示评论。\n\n'
-                  '如果某章没有评论，通常是该章确实还没有人评论。'
-              : '这个书源没有配置段评规则（ruleComment）。\n\n'
-                  '段评不是 Legado 书源的标准字段，只有部分站点支持。\n'
-                  '想要段评，需要导入带 ruleComment 的书源。\n\n'
-                  '当前源：${s.name}',
-          style: const TextStyle(fontSize: 13, height: 1.6),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('知道了'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _deleteSelected() async {
     final n = _selected.length;
     final ok = await showDialog<bool>(

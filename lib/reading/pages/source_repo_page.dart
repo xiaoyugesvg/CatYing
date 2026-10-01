@@ -37,6 +37,21 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
   late final TextEditingController _urlCtrl;
   bool _busy = false;
 
+  /// 当前是否深色。build 里有同名局部变量（优先用那个），
+  /// 但 _clearAll / _shareSelected 等**不接收 BuildContext 的方法**
+  /// 也要用它，所以补一个 getter。
+  bool get _isDarkNow => Theme.of(context).brightness == Brightness.dark;
+  Color get _cardNow =>
+      _isDarkNow ? JellyTheme.cardDark : JellyTheme.cardLight;
+
+  /// 批量选择：勾选的源 id
+  final Set<String> _selected = {};
+  /// 「筛选已注册的漫画源」
+  final _filterCtrl = TextEditingController();
+  String _filter = '';
+  /// 拖动排序用的本地顺序（与 SourceManager 同步）
+  List<MangaSource> _order = [];
+
   @override
   void initState() {
     super.initState();
@@ -94,37 +109,301 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
       body: ListenableBuilder(
         listenable: SourceManager(),
         builder: (context, _) {
-          final sources = SourceManager().sources;
-          return ListView(
-            padding: const EdgeInsets.all(16),
+          final sources = _visibleSources;
+          return Column(
             children: [
-              // 按 cmbok V2.0.8 截图：**只有一张卡片**「云端仓库」，
-              // 地址框 + 两个按钮（导入文件 / 从云端更新）。
-              // 原来我把"手动导入"单独做成一张卡，图里没有 —— 已合并。
-              _buildCloudCard(isDark),
-              const SizedBox(height: 14),
-              Padding(
+            Expanded(
+            child: ReorderableListView.builder(
+            padding: const EdgeInsets.all(16),
+            // 拖动排序：把新顺序交给 SourceManager
+            onReorder: (o, n) {
+              if (n > o) n -= 1; // Flutter 约定：newIndex 是"插入到之前"
+              final ids = _order.map((e) => e.id).toList();
+              final moved = ids.removeAt(o);
+              ids.insert(n, moved);
+              _order = [for (final id in ids) ..._order.where((e) => e.id == id)];
+              SourceManager().reorder(ids);
+              setState(() {});
+            },
+            itemCount: sources.length + (sources.isEmpty ? 0 : 0) + 2,
+            itemBuilder: (context, i) {
+              // 前两块固定：云端卡片 + 计数/筛选/清空
+              if (i == 0) {
+                return Column(
+                  key: const ValueKey('head'),
+                  children: [
+                    _buildCloudCard(isDark),
+                    const SizedBox(height: 14),
+                Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  // 截图原文就是「共 N 个」
-                  '共 ${sources.length} 个',
+                child: Row(
+                  children: [
+                    Text('共 ${SourceManager().sources.length} 个',
+                        style: TextStyle(
+                            fontSize: 12.5, color: JellyTheme.textSecondary)),
+                    const Spacer(),
+                    if (SourceManager().sources.isNotEmpty)
+                      TextButton(
+                        onPressed: _clearAll,
+                        child: const Text('清空',
+                            style: TextStyle(fontSize: 12.5)),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+              // 筛选已注册的漫画源
+              Container(
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: TextField(
+                  controller: _filterCtrl,
+                  onChanged: (v) => setState(() => _filter = v),
                   style: TextStyle(
-                    fontSize: 12.5,
-                    color: JellyTheme.textSecondary,
+                      fontSize: 13.5,
+                      color:
+                          isDark ? Colors.white : JellyTheme.textPrimaryLight),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    filled: false,
+                    hintText: '筛选已注册的漫画源',
+                    hintStyle: TextStyle(
+                        fontSize: 13.5, color: JellyTheme.textSecondary),
+                    prefixIcon: Icon(Icons.search_rounded,
+                        size: 19, color: JellyTheme.textSecondary),
+                    prefixIconConstraints:
+                        const BoxConstraints(minWidth: 38, minHeight: 38),
+                    suffixIcon: _filter.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: Icon(Icons.clear_rounded,
+                                size: 17, color: JellyTheme.textSecondary),
+                            onPressed: () {
+                              _filterCtrl.clear();
+                              setState(() => _filter = '');
+                            },
+                          ),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
                   ),
                 ),
               ),
-              const SizedBox(height: 8),
-              if (sources.isEmpty) _buildEmptyState(isDark),
-              for (final s in sources) ...[
-                _buildSourceCard(isDark, s),
-                const SizedBox(height: 10),
-              ],
-            ],
+              const SizedBox(height: 10),
+                  ],
+                );
+              }
+              // 空态
+              if (sources.isEmpty) {
+                return Padding(
+                  key: const ValueKey('empty'),
+                  padding: const EdgeInsets.only(top: 40),
+                  child: _buildEmptyState(isDark),
+                );
+              }
+              final s = sources[i - 1];
+              return Container(
+                key: ValueKey('src-${s.id}'),
+                child: _buildSourceCard(isDark, s),
+              );
+            },
+          ),
+          ),
+          // ── 多选底部操作栏（截图 IMG_8050）──────────────────
+          if (_selected.isNotEmpty) _buildSelectBar(isDark),
+          ],
           );
         },
       ),
     );
+  }
+
+  /// 清空全部漫画源（带二次确认）
+  Future<void> _clearAll() async {
+    final n = SourceManager().sources.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清空漫画源'),
+        content: Text('将删除全部 $n 个漫画源，不可恢复。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('清空',
+                  style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    // SourceConfigStore 没有 removeById —— 它的 API 是
+    // loadLocal / saveLocal 这一对，所以读出来过滤再写回。
+    final left = (await SourceConfigStore().loadLocal())
+        .where((d) => !SourceManager().sources.any((s) => s.id == d.id))
+        .toList();
+    await SourceConfigStore().saveLocal(left);
+    await SourceManager().reload();
+    if (mounted) setState(() {});
+  }
+
+  /// 多选底部操作栏（截图 IMG_8050）：
+  ///   已选 N 项 | 全选 | [开关] [分享] [删除] [✕]
+  Widget _buildSelectBar(bool isDark) {
+    final all = _visibleSources;
+    final allPicked = _selected.length == all.length && all.isNotEmpty;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: _cardNow,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.10),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Text('已选 ${_selected.length} 项',
+              style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : JellyTheme.textPrimaryLight)),
+          const SizedBox(width: 10),
+          TextButton(
+            onPressed: () => setState(() {
+              if (allPicked) {
+                _selected.clear();
+              } else {
+                _selected
+                  ..clear()
+                  ..addAll(all.map((e) => e.id));
+              }
+            }),
+            child: Text(allPicked ? '取消全选' : '全选',
+                style: const TextStyle(fontSize: 13)),
+          ),
+          const Spacer(),
+          // 批量启用/停用：若已选的都启用 → 点它全停用，反之全启用
+          _barBtn(
+            icon: Icons.toggle_on_outlined,
+            tooltip: '启用/停用选中',
+            onTap: () async {
+              final anyOff = _selected.any((id) => !SourceManager().isEnabled(id));
+              await SourceManager().setEnabledAll(_selected, anyOff);
+              if (mounted) setState(() {});
+            },
+          ),
+          _barBtn(
+            icon: Icons.ios_share_rounded,
+            tooltip: '分享选中',
+            onTap: _shareSelected,
+          ),
+          _barBtn(
+            icon: Icons.delete_outline_rounded,
+            tooltip: '删除选中',
+            onTap: _deleteSelected,
+          ),
+          _barBtn(
+            icon: Icons.close_rounded,
+            tooltip: '退出多选',
+            onTap: () => setState(() => _selected.clear()),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _barBtn({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: IconButton(
+        onPressed: onTap,
+        icon: Icon(icon, size: 21, color: JellyTheme.textSecondary),
+      ),
+    );
+  }
+
+  /// 分享选中的源（按书源仓库同一做法：JSON 复制到剪贴板）。
+  ///
+  /// ⚠️ 我原来写的是"写临时文件 + share_plus 系统分享"，
+  /// 但本页没 import `dart:io` / `path_provider` / `share_plus`，
+  /// 而且书源仓库那边早就用 Clipboard 这套了 ——
+  /// **同一件事不要有两种做法**（多一条依赖路径就多一处会坏的地方）。
+  Future<void> _shareSelected() async {
+    final picked =
+        SourceManager().sources.where((s) => _selected.contains(s.id)).toList();
+    if (picked.isEmpty) return;
+    // ConfigMangaSource 的配置在 `site` 上（不是 rawConfig —— 我先写错了）
+    final arr = [
+      for (final s in picked)
+        if (s is ConfigMangaSource)
+          {'type': 'config', 'config': s.site.toJson()}
+        else
+          {'type': 'builtin', 'id': s.id},
+    ];
+    final text = const JsonEncoder.withIndent('  ').convert(arr);
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('已复制 ${picked.length} 个漫画源',
+            style: const TextStyle(fontSize: 16)),
+        content: const Text(
+          'JSON 已复制到剪贴板，可直接粘贴分享给别人。\n\n'
+          '对方用「导入文件」或粘贴导入即可。',
+          style: TextStyle(fontSize: 13, height: 1.6),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 批量删除选中的源
+  Future<void> _deleteSelected() async {
+    final n = _selected.length;
+    if (n == 0) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除选中漫画源'),
+        content: Text('将删除选中的 $n 个漫画源，不可恢复。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('删除')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final ids = Set.of(_selected);
+    final left = (await SourceConfigStore().loadLocal())
+        .where((d) => !ids.contains(d.id))
+        .toList();
+    await SourceConfigStore().saveLocal(left);
+    _selected.clear();
+    await SourceManager().reload();
+    if (mounted) setState(() {});
   }
 
   /// 手动导入卡片。
@@ -447,18 +726,54 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
     );
   }
 
+  /// 一个漫画源卡片（按截图 IMG_8047）：
+  ///   [≡拖动] [复选框] [首字头像] 名称 / 标识   ......  [启用开关]
+  ///
+  /// 与旧版的区别：
+  ///   · 左侧加了**拖动把手**（截图里那三条横线）—— 长按可拖动排序
+  ///   · 加了**复选框**（批量选择用，与书源仓库一致）
+  ///   · subtitle 用 `src.id` 里的短标识（如 copymanga），不再写
+  ///     "需要魔法（代理/VPN）"整句 —— 那句话挤占了名称行，
+  ///     魔法需求改用图标表达（已有的 magic_stick）
   Widget _buildSourceCard(bool isDark, MangaSource src) {
     final enabled = SourceManager().isEnabled(src.id);
+    final sel = _selected.contains(src.id);
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(6, 8, 8, 8),
       decoration: BoxDecoration(
         color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         borderRadius: BorderRadius.circular(16),
+        border: sel ? Border.all(color: JellyTheme.primary, width: 1.2) : null,
       ),
       child: Row(
         children: [
+          // 拖动把手（长按拖动排序，用的是 ReorderableListView 的
+          // ReorderableDragStartListener —— 见 _buildList）
+          ReorderableDragStartListener(
+            index: _orderedIndex(src),
+            child: Icon(Icons.drag_handle_rounded,
+                size: 20, color: JellyTheme.textSecondary),
+          ),
+          const SizedBox(width: 2),
+          // 复选框（批量选择）
+          GestureDetector(
+            onTap: () => setState(() {
+              if (sel) {
+                _selected.remove(src.id);
+              } else {
+                _selected.add(src.id);
+              }
+            }),
+            child: Icon(
+              sel ? Icons.check_box : Icons.check_box_outline_blank,
+              size: 21,
+              color: sel ? JellyTheme.primary : JellyTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(width: 8),
           _buildSourceIcon(src),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -468,12 +783,16 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                     Flexible(
                       child: Text(
                         src.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: isDark
-                              ? Colors.white
-                              : JellyTheme.textPrimaryLight,
+                          fontWeight: FontWeight.w600,
+                          color: enabled
+                              ? (isDark
+                                  ? Colors.white
+                                  : JellyTheme.textPrimaryLight)
+                              : JellyTheme.textSecondary,
                         ),
                       ),
                     ),
@@ -489,7 +808,11 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  src.needsMagic ? '需要魔法（代理/VPN）' : src.id,
+                  // 标识：优先取 config 里的短名（如 copymanga / zaimanhua），
+                  // 没有就用 id（book 源常见 "config:某某漫画" 这种形式）
+                  _sourceShortId(src),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 12,
                     color: JellyTheme.textSecondary,
@@ -505,7 +828,8 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
               SourceManager().setEnabled(src.id, v);
             },
           ),
-          // 删除：能导入就得能删，否则用户导错一个源没法收拾
+          // 单个删除：能导入就得能删，否则用户导错一个源没法收拾
+          // （批量删除走底部的多选栏）
           IconButton(
             tooltip: '删除这个源',
             icon: Icon(Icons.delete_outline,
@@ -515,6 +839,43 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
         ],
       ),
     );
+  }
+
+  /// 取源的"短标识"用于列表副标题。
+  ///
+  /// 截图里显示的是 `copymanga` / `zaimanhua` / `manhuaren` 这种，
+  /// 而不是完整的 url 或 "config:某某漫画"。优先从 config 里取
+  /// 常见字段（id / key / name 的英文形式），都没有再退回 src.id。
+  String _sourceShortId(MangaSource src) {
+    // ⚠️ `MangaSource` 是抽象类，只有 id / name / lang 等 getter，
+    // **没有 config**（那是我误以为的字段）。所以这里只用 id：
+    //   · 'copymanga'      → copymanga
+    //   · 'config:瓜子漫画' → 瓜子漫画
+    return src.id.startsWith('config:')
+        ? src.id.substring('config:'.length)
+        : src.id;
+  }
+
+  /// 源在"当前显示列表"里的下标（拖动排序要用）
+  int _orderedIndex(MangaSource src) {
+    final i = _visibleSources.indexWhere((e) => e.id == src.id);
+    return i < 0 ? 0 : i;
+  }
+
+  /// 当前显示的源（按筛选词过滤；拖动排序后按 _order 排列）
+  List<MangaSource> get _visibleSources {
+    final all = SourceManager().sources;
+    // 首次或源数量变化时重建顺序表
+    if (_order.length != all.length) {
+      _order = List.of(all);
+    }
+    final kw = _filter.trim().toLowerCase();
+    if (kw.isEmpty) return _order;
+    return _order
+        .where((s) =>
+            s.name.toLowerCase().contains(kw) ||
+            s.id.toLowerCase().contains(kw))
+        .toList();
   }
 
   /// 删除一个源（从本地配置里摘掉，然后 reload）。

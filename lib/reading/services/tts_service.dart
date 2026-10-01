@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -170,6 +171,66 @@ class TtsService extends GetxService {
     } catch (e) {
       lastError.value = '朗读失败：$e';
       isSpeaking.value = false;
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // 平台能力（复用同一个原生 TtsEngine.swift，**不新增原生文件**）
+  // ══════════════════════════════════════════════════════════════
+  //
+  // ⚠️ 为什么不各开一个新 channel：
+  //   新增 Swift 文件必须改 `ios/Runner.xcodeproj/project.pbxproj`
+  //   的 Build Phase —— 那是在 Windows 上改 Xcode 工程，风险极高
+  //   （UUID 写错整个项目打不开）。
+  //   `TtsEngine.swift` **已经在 pbxproj 里注册过**，所以往它的
+  //   `handle` switch 里加 case 是纯增量、零工程文件改动。
+  //   一个 channel 支持任意多个方法名，不需要开新 channel。
+
+  /// 禁止息屏（阅读器的「永不息屏」）
+  ///
+  /// ⚠️ 用完**必须** [allowSleep]，否则用户离开阅读器后屏幕永远不灭。
+  Future<void> keepAwake() async {
+    try {
+      await _ch.invokeMethod('keepAwake');
+    } catch (_) {}
+  }
+
+  /// 恢复系统息屏
+  Future<void> allowSleep() async {
+    try {
+      await _ch.invokeMethod('allowSleep');
+    } catch (_) {}
+  }
+
+  /// 电量百分比（取不到返回 null）。
+  ///
+  /// ⚠️ 别写 `MethodChannel('dsh/battery')` 这种想当然的频道名 ——
+  /// 原生端没注册的话 invokeMethod 会抛 MissingPluginException，
+  /// 界面上永远显示不出值，而且不容易发现是这个原因。
+  Future<int?> batteryLevel() async {
+    try {
+      return await _ch.invokeMethod<int>('battery');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 把一张图片的字节存进相册。
+  ///
+  /// Dart 侧负责下载（要带 Referer/UA 才能过某些图床的防盗链），
+  /// 原生只做「解码 + 写相册」。
+  /// 返回 (ok, error)。
+  Future<({bool ok, String? error})> saveImageToAlbum(
+      List<int> bytes) async {
+    try {
+      await _ch.invokeMethod('saveImage', {
+        'bytes': base64Encode(bytes),
+      });
+      return (ok: true, error: null);
+    } on PlatformException catch (e) {
+      return (ok: false, error: e.message ?? e.code);
+    } catch (e) {
+      return (ok: false, error: '$e');
     }
   }
 

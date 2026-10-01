@@ -28,6 +28,7 @@ import 'reading/models/book_source.dart';
 import 'reading/services/tts_service.dart';
 import 'music/services/settings_store.dart';
 import 'music/services/player_manager.dart';
+import 'common/appearance_sync.dart';
 import 'common/module_theme_store.dart';
 import 'common/module_theme_sync.dart';
 import 'music/theme/music_theme.dart';
@@ -132,6 +133,14 @@ void main() async {
   });
   // 立刻落地一次，让影视/直播/音乐一启动就是用户选的方案
   await applyModuleThemes();
+  // 音乐明暗桥：AppearanceSync 要问音乐当前是深是浅
+  MusicBrightnessBridge.register(() => MusicTheme.isDark);
+  // 音乐调色板桥：音乐模块要读"用户在统一主题页给它选的方案"
+  MusicPaletteBridge.register(
+      () => ModuleThemeStore.instance.paletteFor(ModuleThemeStore.music));
+  // 启动外观协调：让"谁在前台谁说话"的规则生效。
+  // 必须放在 MainTabController 注册之后（sync 里读它判断当前 tab）。
+  AppearanceSync.start();
   await MusicPlayerSkin.instance.init();
   await MusicPlayerManager.instance.init();
 

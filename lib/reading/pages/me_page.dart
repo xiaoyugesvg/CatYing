@@ -91,6 +91,31 @@ class _MePageState extends State<MePage> {
                     ),
                   ),
                   const Spacer(),
+                  // ── 右上角三个圆形图标（按用户截图的位置与顺序）──────
+                  //   1. 扫码     → 去「书源仓库」扫码/口令导入
+                  //   2. 主题风格 → 直接开主题预设面板（与下面那张卡同一入口）
+                  //   3. 明暗切换 → 月亮/太阳（跟随系统时点它=退出跟随并反转）
+                  //
+                  // 顺序不能反：截图里从左到右就是 扫码 / 星标 / 月亮。
+                  _buildCircleIcon(
+                    isDark: isDark,
+                    icon: Icons.qr_code_scanner_rounded,
+                    tooltip: '扫码导入书源',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const BookSourceRepoPage(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildCircleIcon(
+                    isDark: isDark,
+                    icon: Icons.auto_awesome_rounded,
+                    tooltip: '主题风格',
+                    onTap: _showThemePresetSheet,
+                  ),
+                  const SizedBox(width: 8),
                   _buildThemeToggle(isDark),
                 ],
               ),
@@ -338,6 +363,44 @@ class _MePageState extends State<MePage> {
   }
 
   // -------------------- 暗色模式切换 --------------------
+
+  /// 右上角的通用圆形图标按钮（扫码 / 主题风格 用）。
+  ///
+  /// 与 [_buildThemeToggle] 同一套外观：38×38 白色圆 + 居中图标，
+  /// 这样三个图标并排时尺寸一致（截图里它们是一样大的圆）。
+  /// 明暗切换那个不能复用本方法 —— 它要挂 `_themeToggleKey` 做
+  /// 圆形扩散动画的起点，所以单独实现。
+  Widget _buildCircleIcon({
+    required bool isDark,
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: isDark ? JellyTheme.cardDark : Colors.white,
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            width: 38,
+            height: 38,
+            child: Center(
+              child: Icon(
+                icon,
+                size: 20,
+                // 与截图一致：图标是近黑/白（不是强调色），
+                // 只有月亮那个带蓝紫色
+                color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   /// 右上角明暗模式切换图标：暗色显太阳、亮色显月亮（内置图标），颜色区分明暗
   Widget _buildThemeToggle(bool isDark) {

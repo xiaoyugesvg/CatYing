@@ -54,6 +54,66 @@ class BookSource {
   String get comment =>
       (raw['bookSourceComment'] ?? raw['comment'] ?? '').toString();
 
+  /// 按**点分路径**读字段，如 `ruleSearch.name` / `enabled` / `header`。
+  ///
+  /// 路径写法与编辑页的 7 个 tab 一一对应（字段名取自真实书源 JSON，
+  /// 不是猜的 —— 见对话里那份 `不死神王书城` 样例）：
+  ///   基础：bookSourceName / bookSourceUrl / bookSourceGroup /
+  ///         bookSourceComment / header / enabled / enabledExplore /
+  ///         enabledCookieJar
+  ///   搜索：searchUrl + ruleSearch.{name,author,bookList,bookUrl,
+  ///         checkKeyWord,intro,lastChapter,wordCount}
+  ///   发现：exploreUrl + ruleExplore.*
+  ///   详情：ruleBookInfo.*
+  ///   目录：ruleToc.*
+  ///   正文：ruleContent.*
+  ///
+  /// 中间层不存在时返回 null（不会造出空对象 —— 那会让导出的 JSON
+  /// 多出一堆 `"ruleBookInfo": {}`，用户看着莫名其妙）。
+  dynamic readPath(String path) {
+    final parts = path.split('.');
+    dynamic cur = raw;
+    for (final p in parts) {
+      if (cur is Map && cur.containsKey(p)) {
+        cur = cur[p];
+      } else {
+        return null;
+      }
+    }
+    return cur;
+  }
+
+  /// 按点分路径写字段（中间层不存在会自动创建 Map）。
+  ///
+  /// 返回新实例（BookSource 不可变）；路径非法时返回原实例。
+  BookSource writePath(String path, dynamic value) {
+    final parts = path.split('.');
+    if (parts.isEmpty) return this;
+    final next = Map<String, dynamic>.from(raw);
+    var cur = next;
+    for (var i = 0; i < parts.length - 1; i++) {
+      final p = parts[i];
+      final child = cur[p];
+      // 中间层不是 Map（或缺）就换成新 Map —— 否则写下去会抛
+      final copy = child is Map ? Map<String, dynamic>.from(child) : <String, dynamic>{};
+      cur[p] = copy;
+      cur = copy;
+    }
+    if (value == null || (value is String && value.isEmpty)) {
+      // 空值 = 删掉这个键，而不是留一个 ""。
+      // 留空串会让书源引擎拿到 "" 当规则用，比"没这条规则"更容易出错。
+      cur.remove(parts.last);
+    } else {
+      cur[parts.last] = value;
+    }
+    // ⚠️ id 由 bookSourceUrl 派生（见 _decode / id getter），
+    // 所以改 url 时必须把 id 一起更新 —— 否则改完 URL 后
+    // 这条书源的 id 还是旧的，删除/启用都会找错对象。
+    final newId = (next['bookSourceUrl'] ?? next['url'] ?? next['bookSourceName'] ?? '')
+        .toString();
+    return BookSource(raw: next, id: newId.isEmpty ? id : newId);
+  }
+
   BookSource copyWith({bool? enabled, int? order, String? group}) {
     final m = Map<String, dynamic>.of(raw);
     if (enabled != null) m['enabled'] = enabled;
@@ -196,6 +256,39 @@ class BookSourceStore {
   }
 
   /// 批量启停（"全选/全不选"用）
+  /// 改某个书源的分组（「设置分组」用）。
+  ///
+  /// 直接替换成 `copyWith(group: g)` 的新实例并持久化 ——
+  /// 与 [setEnabled] 同一模式（BookSource 是不可变的，改字段靠 copyWith）。
+  /// 按点分路径改某个书源的字段（编辑页保存时用）。
+  Future<void> updatePath(String id, String path, dynamic value) async {
+    final i = _items.indexWhere((s) => s.id == id);
+    if (i < 0) return;
+    _items[i] = _items[i].writePath(path, value);
+    revision.value++;
+    await _persist();
+  }
+
+  /// 一次性写多个路径（避免每改一个字段就写一次盘）。
+  Future<void> updatePaths(String id, Map<String, dynamic> values) async {
+    final i = _items.indexWhere((s) => s.id == id);
+    if (i < 0) return;
+    var s = _items[i];
+    values.forEach((k, v) => s = s.writePath(k, v));
+    _items[i] = s;
+    revision.value++;
+    await _persist();
+  }
+
+  Future<void> setGroup(String id, String group) async {
+    final i = _items.indexWhere((s) => s.id == id);
+    if (i < 0) return;
+    if (_items[i].group == group) return;
+    _items[i] = _items[i].copyWith(group: group);
+    revision.value++;
+    await _persist();
+  }
+
   Future<void> setAllEnabled(bool enabled) async {
     for (var i = 0; i < _items.length; i++) {
       _items[i] = _items[i].copyWith(enabled: enabled);

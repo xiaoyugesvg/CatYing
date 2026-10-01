@@ -2,6 +2,8 @@ import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../reading/theme/jelly_palette.dart';
+
 /// 音乐模块主题体系 —— 移植自 Beans-Music 的 `Theme.swift`。
 ///
 /// 设计要点（照搬 Beans 的克制配色）：
@@ -86,6 +88,18 @@ enum MusicThemeMode {
 /// 用法与 Beans 的 `Color.beansAmber` 等一一对应。
 class MusicTheme {
   MusicTheme._();
+
+  /// 当前生效的调色板（水墨书香 / 或用户在「主题与外观」里给音乐选的方案）。
+  ///
+  /// 为什么不直接 `JellyPalette.ink()` 写死：
+  /// 统一主题设置页允许给音乐单独选 7 套预设之一，
+  /// 那套选择经 `ModuleThemeStore` 落地 —— 这里读的就是那个结果，
+  /// 保证悬浮栏、卡片等用的颜色与用户选的方案一致。
+  ///
+  /// 不 import `ModuleThemeStore` 是为了不让 `lib/music` 反向依赖
+  /// `lib/common` 的存储层；用注入的方式（见 `MusicPaletteBridge`）。
+  static JellyPalette get palette =>
+      MusicPaletteBridge.current() ?? const JellyPalette.ink();
 
   /// 当前明暗。由 MusicThemeStore 在启动/切换时写入。
   static bool _isDark = false;
@@ -340,4 +354,19 @@ class MusicPlayerSkin {
     showLyricFirst.value = v;
     (await SharedPreferences.getInstance()).setBool(_kShowLyricFirst, v);
   }
+}
+
+/// 音乐调色板的注入桥。
+///
+/// `lib/common` 是影视侧底层，不该被 `lib/music` 反向依赖；
+/// 而音乐又需要知道"用户在统一主题页给音乐选了哪套预设"。
+/// 用一个注入回调解决：`main.dart` 启动时把读取实现注册进来。
+class MusicPaletteBridge {
+  MusicPaletteBridge._();
+
+  static JellyPalette? Function()? _get;
+
+  static void register(JellyPalette? Function() fn) => _get = fn;
+
+  static JellyPalette? current() => _get?.call();
 }

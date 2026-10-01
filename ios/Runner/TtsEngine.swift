@@ -1,5 +1,7 @@
 import AVFoundation
 import Flutter
+import Photos
+import UIKit
 
 /// 语音朗读（TTS）原生实现
 ///
@@ -64,8 +66,85 @@ class TtsEngine: NSObject, AVSpeechSynthesizerDelegate {
       // 但没有中文语音包时会用默认语音念，这里不视为不可用。
       result(true)
 
+    // MARK: 屏幕休眠（阅读设置里的 默认 / 10分钟 / 永不息屏）
+    //
+    // 「永不息屏」= UIApplication.isIdleTimerDisabled = true。
+    // 这里**不需要 wakelock_plus 之类的插件** —— 它是 UIKit 的一个布尔量。
+    //
+    // ⚠️ 必须提供 allowSleep 让调用方在退出阅读器时**关掉它**，
+    // 否则用户离开阅读器后屏幕永远不灭（那是很严重的耗电问题）。
+    case "keepAwake":
+      DispatchQueue.main.async {
+        UIApplication.shared.isIdleTimerDisabled = true
+      }
+      result(true)
+
+    case "allowSleep":
+      DispatchQueue.main.async {
+        UIApplication.shared.isIdleTimerDisabled = false
+      }
+      result(true)
+
+    // MARK: 电量（阅读器信息栏的「电量」项）
+    //
+    // UIDevice.batteryLevel 需要先开 isBatteryMonitoringEnabled，
+    // 否则恒返回 -1。
+    case "battery":
+      UIDevice.current.isBatteryMonitoringEnabled = true
+      let lvl = UIDevice.current.batteryLevel
+      // -1 = 取不到（模拟器/权限），返回 null 让 Dart 显示 "--%"
+      result(lvl < 0 ? nil : Int((lvl * 100).rounded()))
+
+    // MARK: 保存图片到相册（图片模式的「保存」）
+    //
+    // 走系统 Photos 框架，同样不需要插件。
+    // Dart 侧已经把图片下载好并以 base64 传进来（避免原生再做一次网络请求，
+    // 那样就要处理重定向 / 请求头 / 超时一堆事）。
+    //
+    // Info.plist 里已有 NSPhotoLibraryUsageDescription
+    //（"请允许APP保存图片到相册"），所以首次会正常弹权限框。
+    case "saveImage":
+      let b64 = args["bytes"] as? String ?? ""
+      guard let data = Data(base64Encoded: b64), !data.isEmpty else {
+        result(FlutterError(code: "bad_data", message: "图片数据为空", details: nil))
+        return
+      }
+      guard let image = UIImage(data: data) else {
+        result(FlutterError(code: "decode_failed", message: "图片解码失败", details: nil))
+        return
+      }
+      saveToAlbum(image: image, result: result)
+
     default:
       result(FlutterMethodNotImplemented)
+    }
+  }
+
+  /// 存一张图到相册（先申请权限，再写入）
+  private func saveToAlbum(image: UIImage, result: @escaping FlutterResult) {
+    // 只请求「添加」权限就够 —— 不需要读用户整个相册（权限最小化）
+    PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+      guard status == .authorized || status == .limited else {
+        DispatchQueue.main.async {
+          result(FlutterError(code: "denied",
+                              message: "没有相册权限，请在系统设置里允许",
+                              details: nil))
+        }
+        return
+      }
+      PHPhotoLibrary.shared().performChanges({
+        PHAssetChangeRequest.creationRequestForAsset(from: image)
+      }) { ok, err in
+        DispatchQueue.main.async {
+          if ok {
+            result(true)
+          } else {
+            result(FlutterError(code: "save_failed",
+                                message: err?.localizedDescription ?? "保存失败",
+                                details: nil))
+          }
+        }
+      }
     }
   }
 

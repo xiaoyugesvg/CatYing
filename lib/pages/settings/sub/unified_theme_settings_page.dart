@@ -7,6 +7,7 @@ import '../../../common/theme.dart';
 import '../../../common/theme_mode_store.dart';
 import '../../../services/background_service.dart';
 import '../../../reading/theme/jelly_palette.dart';
+import '../wallpaper_page.dart';
 import 'settings_shared.dart';
 
 /// 统一主题设置 —— 一个页面里分别调**影视/直播、音乐、阅读**的风格。
@@ -44,6 +45,16 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
       children: [
         // ── 全局：明暗模式（自绘三选一，与下方配色分区同一套视觉）──
         _modeCard(),
+        const SizedBox(height: AppTheme.spacingMD),
+
+        // ── 壁纸与背景 ────────────────────────────────────────
+        //
+        // ⚠️ 这个入口**必须留在这里**。
+        // 我上一轮把设置页的「外观与壁纸」改指到本页时漏搬了它，
+        // 结果壁纸功能代码全在、用户却点不到 ——
+        // 表现就是"我原先的壁纸功能呢？"。
+        // 统合页面时漏搬入口是典型事故，所以这里单列一张卡 + 加注释。
+        _wallpaperCard(),
         const SizedBox(height: AppTheme.spacingMD),
 
         // ── 影视 · 直播 ───────────────────────────────────────
@@ -121,6 +132,56 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
             },
           ),
         ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // 壁纸与背景（跳回原壁纸设置页 —— 它有 29KB，含内置渐变/本地图片/
+  // 网络图片/自定义接口/不透明度/模糊，不适合搬进来重写）
+  // ============================================================
+
+  Widget _wallpaperCard() {
+    final bg = BackgroundService.instance;
+    return GestureDetector(
+      onTap: () => Get.to(() => const WallpaperSettingsPage()),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundSecondary,
+          borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.wallpaper_outlined,
+                size: 18, color: AppTheme.accentColor),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('壁纸与背景',
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary)),
+                  const SizedBox(height: 4),
+                  // 与旧「外观」页一样显示当前壁纸名（Obx 跟随变化）
+                  Obx(() => Text(
+                        bg.wallpaperDisplayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 12, color: AppTheme.textTertiary),
+                      )),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded,
+                size: 20, color: AppTheme.textTertiary),
+          ],
+        ),
       ),
     );
   }

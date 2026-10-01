@@ -95,6 +95,15 @@ class SelectableChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // ── 去掉描边（用户要求：不要"描边那一列"，直接用纯灰胶囊）────────
+    //
+    // 原来选中态是「强调色 14% 底 + 强调色 45% 描边 + 文字加粗」，
+    // 未选中是「浅灰底 + 极淡白描边」——
+    // 两者都带边框，选中那个在浅色下尤其像"被框起来的一列"。
+    //
+    // 现在：**两种状态都不画边框**，选中只靠底色深浅区分。
+    // 这样一行的芯片看起来是同一套胶囊，只有当前项稍深。
+    final light = AppBrightness.isLight.value;
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -103,20 +112,22 @@ class SelectableChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
           color: isSelected
-              ? AppTheme.accentColor.withValues(alpha: 0.14)
-              : AppTheme.backgroundTertiary,
+              // 选中：比未选中深一档的灰（深色模式下用更高的白色透明度）
+              ? (light
+                  ? Colors.black.withValues(alpha: 0.10)
+                  : Colors.white.withValues(alpha: 0.16))
+              : (light
+                  ? Colors.black.withValues(alpha: 0.045)
+                  : Colors.white.withValues(alpha: 0.07)),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isSelected
-                ? AppTheme.accentColor.withValues(alpha: 0.45)
-                : Colors.white.withValues(alpha: 0.06),
-            width: isSelected ? 1 : 0.5,
-          ),
+          // 不设 border —— 见上方注释
         ),
         child: Text(
           title,
           style: TextStyle(
-            color: isSelected ? AppTheme.accentColor : AppTheme.textSecondary,
+            // 选中不再用强调色（那会带色彩倾向，与黑白灰的水墨调不符），
+            // 改用主文字色；未选中用次要文字色
+            color: isSelected ? AppTheme.textPrimary : AppTheme.textSecondary,
             fontSize: AppTheme.fontSubhead,
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
           ),
@@ -142,16 +153,17 @@ class EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: GlassPanel(
+      // ── 空态卡片也去掉液态玻璃 ──────────────────────────────────
+      // 原来是 GlassPanel(tint: glassTintDeep + borderColor + highlight)，
+      // 浅色下会在页面中央糊出一块发灰的玻璃块。
+      // 与 AppCard 统一改成**实底 + 圆角**（水墨书香的做法）。
+      child: Container(
         margin: const EdgeInsets.all(
             AppTheme.spacingXXL + AppTheme.spacingLG),
-        radius: 30,
-        blur: false,
-        tint: AppTheme.glassTintDeep,
-        borderColor: AppTheme.glassBorderSoft,
-        borderWidth: 0.8,
-        highlightStrength: 0.5,
-        shadow: false,
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundSecondary,
+          borderRadius: BorderRadius.circular(30),
+        ),
         padding: const EdgeInsets.all(
             AppTheme.spacingXXL + AppTheme.spacingLG),
         child: Column(
@@ -267,21 +279,55 @@ class AppCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GlassPanel(
-      radius: cornerRadius,
-      blur: blur,
-      tint: AppTheme.glassTintDeep,
-      borderColor: AppTheme.glassBorderSoft,
-      borderWidth: 0.8,
-      highlightStrength: blur ? 0.8 : 0.5,
-      shadow: shadow,
-      padding: padding ??
-          (dense
-              ? const EdgeInsets.symmetric(
-                  horizontal: AppTheme.spacingMD,
-                  vertical: AppTheme.spacingXS)
-              : const EdgeInsets.all(AppTheme.spacingLG)),
-      child: child,
+    // ── 改成**纯色卡片**（水墨书香风格）────────────────────────────
+    //
+    // 原来这里包的是 `GlassPanel`：
+    //   tint: glassTintDeep（墨色 5~12% 透明，叠在页面上就发灰）
+    //   borderColor + highlightStrength（玻璃高光与描边）
+    //   blur（可选毛玻璃）
+    // 结果是浅色模式下卡片灰、还带一圈高光 ——
+    // 用户对比截图后明确要求"去掉 iOS27 液态玻璃样式，就按水墨书香来"。
+    //
+    // 现在改成**实底 + 圆角**，与阅读模块的卡片做法一致
+    // （阅读那边等价于 `Material(color: cardLight, borderRadius: 16)`，
+    //   没有任何玻璃层）：
+    //   浅色 = 纯白卡片浮在宣纸米白底上
+    //   深色 = #2A2A2C 卡片浮在墨夜底上
+    // 靠"底色差"分层，而不是靠高光/描边 —— 这正是水墨书香的取向。
+    //
+    // 注：`blur` 参数保留但已不参与渲染（调用方仍可传，不必改签名）。
+    final light = AppBrightness.isLight.value;
+    final radius = BorderRadius.circular(cornerRadius);
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundSecondary,
+        borderRadius: radius,
+        // 深色下卡片与底的对比本来就弱，留一条极淡描边避免糊在一起；
+        // 浅色下不给 —— 白卡片在米白底上已经够分明，
+        // 再加边框就又回到"玻璃描边"的观感了。
+        border: light ? null : Border.all(color: AppTheme.borderLight, width: 0.8),
+        boxShadow: shadow
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: light ? 0.05 : 0.22),
+                  blurRadius: 14,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : null,
+      ),
+      child: ClipRRect(
+        borderRadius: radius,
+        child: Padding(
+          padding: padding ??
+              (dense
+                  ? const EdgeInsets.symmetric(
+                      horizontal: AppTheme.spacingMD,
+                      vertical: AppTheme.spacingXS)
+                  : const EdgeInsets.all(AppTheme.spacingLG)),
+          child: child,
+        ),
+      ),
     );
   }
 }

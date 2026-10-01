@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/player_manager.dart';
 import '../services/settings_store.dart';
+import '../../common/floating_nav_spec.dart';
 import '../../services/main_tab_controller.dart';
 import '../theme/music_theme.dart';
 import '../widgets/mini_player.dart';
@@ -38,8 +39,8 @@ class MusicRootView extends StatefulWidget {
 /// `floatingBarHeight` / `_floatingRadius` 相同，否则音乐和阅读的
 /// 悬浮栏看起来是两个不同组件（用户要求统一成阅读那种）。
 /// 以后改阅读的圆角，这里要跟着改。
-const double _floatingBarHeight = 72.0;
-const double _floatingRadius = 32.0;
+const double _floatingBarHeight = FloatingNavSpec.barHeight;
+const double _floatingRadius = FloatingNavSpec.radius;
 
 class _MusicRootViewState extends State<MusicRootView> {
   int _tab = 0;
@@ -57,11 +58,15 @@ class _MusicRootViewState extends State<MusicRootView> {
       icon: Icons.person_outline_rounded,
       active: Icons.person_rounded,
     ),
-    // 「影视」是**跳出音乐模块**的入口，不是本模块的 tab ——
-    // 点了会切到影视主 tab（音乐/阅读自带悬浮栏，影视底栏在我们的 tab 上是隐藏的，
-    // 所以必须给一条回去的路，否则用户进了音乐就出不去）。
-    (label: '影视', icon: Icons.movie_outlined, active: Icons.movie_rounded),
   ];
+  // 音乐底栏 = **4 项**（主页 / 搜索 / 音乐库 / 我的）。
+  //
+  // 原先第 5 项是「影视」—— 它不是本模块的 tab，只是"跳出音乐"的入口：
+  // 永远不高亮、点了行为与别人不同，本质上是个假 tab。
+  // 用户要求改为**长按「我的」**回影视（见下方 onLongPress）：
+  // 既不占底栏位置、也不会误触，底栏回到 4 项的干净形态。
+  //
+  // 阅读那边同理：5 项（漫画/图书/书架/收藏/我的），长按「我的」回影视。
 
   @override
   void initState() {
@@ -143,9 +148,12 @@ class _MusicRootViewState extends State<MusicRootView> {
       top: false,
       bottom: true,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 30),
+        padding: const EdgeInsets.fromLTRB(FloatingNavSpec.sideMargin, 0,
+            FloatingNavSpec.sideMargin, FloatingNavSpec.bottomMargin),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          padding: const EdgeInsets.symmetric(
+              horizontal: FloatingNavSpec.innerPadH,
+              vertical: FloatingNavSpec.innerPadV),
           decoration: BoxDecoration(
             // ── 对齐阅读 JellyNavBar 的悬浮胶囊规格 ──────────────
             // 圆角 32（原 22）、高 72、白底 95%、阴影 blur 12 / offset(0,4)。
@@ -155,68 +163,81 @@ class _MusicRootViewState extends State<MusicRootView> {
             //
             // 同时**去掉原来那圈 0.5px 边框**：阅读栏没有边框，
             // 它是靠阴影 + 半透明底和背景分离的；多一圈边框会显得更"硬"。
-            color: MusicTheme.card.withValues(alpha: 0.95),
+            color: FloatingNavSpec.barColor(
+                MusicTheme.isDark, MusicTheme.palette),
             borderRadius: BorderRadius.circular(_floatingRadius),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.06),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
+                color: Colors.black
+                    .withValues(alpha: FloatingNavSpec.shadowAlpha),
+                blurRadius: FloatingNavSpec.shadowBlur,
+                offset: FloatingNavSpec.shadowOffset,
               ),
             ],
           ),
           child: SizedBox(
             // 高度对齐阅读的 72（减掉上下各 6 的 padding）
-            height: _floatingBarHeight - 12,
+            height: _floatingBarHeight - FloatingNavSpec.innerPadV * 2,
             child: Row(
               children: List.generate(_tabs.length, (i) {
                 final t = _tabs[i];
                 final active = i == _tab;
                 // 最后一个（影视）是"跳出去"而不是本模块的 tab ——
                 // 它永远不高亮，点了就切到影视主 tab。
-                final isExit = t.label == '影视';
                 return Expanded(
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onTap: () {
-                      if (isExit) {
-                        MainTabController.instance.backToVideo();
-                        return;
-                      }
-                      setState(() => _tab = i);
-                    },
+                    onTap: () => setState(() => _tab = i),
+                    // 长按「我的」= 返回影视。
+                    // 为什么用长按而不是加第 6 项：见 _tabs 上方的注释 ——
+                    // 音乐是独立模块，影视底栏在这里被隐藏，需要一个出口；
+                    // 但加 tab 会改变底栏外观，与截图不符。
+                    onLongPress: t.label == '我的'
+                        ? () => MainTabController.instance.backToVideo()
+                        : null,
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 180),
-                      padding: const EdgeInsets.symmetric(vertical: 7),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: FloatingNavSpec.itemPadV),
                       decoration: BoxDecoration(
-                        color: active && !isExit
-                            ? MusicTheme.tint.withValues(alpha: 0.14)
+                        // 选中底色也走规格（与阅读/影视同一套 alpha/圆角）
+                        color: active
+                            ? FloatingNavSpec.selectedItemBg(
+                                MusicTheme.isDark, MusicTheme.palette)
                             : Colors.transparent,
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(
+                            FloatingNavSpec.itemRadius),
                       ),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            active && !isExit ? t.active : t.icon,
-                            size: 21,
-                            color: isExit
-                                ? MusicTheme.secondary
-                                : (active
-                                      ? MusicTheme.tint
-                                      : MusicTheme.secondary),
+                            active ? t.active : t.icon,
+                            size: FloatingNavSpec.iconSize,
+                            // 取色规则与阅读/影视完全一致 ——
+                            // 用户要求三条栏"颜色要和阅读一样"。
+                            color: active
+                                ? FloatingNavSpec.selectedColor(
+                                    MusicTheme.isDark, MusicTheme.palette)
+                                : FloatingNavSpec.unselectedColor(
+                                    MusicTheme.isDark, MusicTheme.palette),
                           ),
-                          const SizedBox(height: 2),
+                          const SizedBox(
+                              height: FloatingNavSpec.iconLabelGap),
                           Text(
                             t.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: active && !isExit
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                              color: active && !isExit
-                                  ? MusicTheme.tint
-                                  : MusicTheme.secondary,
+                              fontSize: FloatingNavSpec.labelSize,
+                              // 三条栏统一 w600（原来未选中是 w400，
+                              // 看起来比另两条栏"细"，也是不一致的一种）
+                              fontWeight: FloatingNavSpec.labelWeight,
+                              color: active
+                                  ? FloatingNavSpec.selectedColor(
+                                      MusicTheme.isDark, MusicTheme.palette)
+                                  : FloatingNavSpec.unselectedColor(
+                                      MusicTheme.isDark, MusicTheme.palette),
                             ),
                           ),
                         ],

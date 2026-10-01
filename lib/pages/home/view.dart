@@ -144,9 +144,12 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
-          const Spacer(),
-          // 右：可伸长搜索（小框 → 展开输入）
-          _ExpandableSearch(
+          const SizedBox(width: 12),
+          // 右：搜索 —— 收起时是圆形按钮，展开时**撑满剩余宽度**
+          // （用 Expanded 而不是原来的"固定屏宽 52%"：截图里阅读的搜索框
+          //   是占满中间的胶囊；固定百分比在窄屏上会挤，宽屏上又留白）
+          Expanded(
+            child: _ExpandableSearch(
             onSubmitted: (v) {
               if (v.trim().isNotEmpty) {
                 Get.toNamed('/search', arguments: v.trim());
@@ -156,13 +159,14 @@ class _HomePageState extends State<HomePage> {
                 Get.toNamed('/search');
               }
             },
-            onOpenFull: () {
-              if (widget.onSearchTap != null) {
-                widget.onSearchTap!();
-              } else {
-                Get.toNamed('/search');
-              }
-            },
+              onOpenFull: () {
+                if (widget.onSearchTap != null) {
+                  widget.onSearchTap!();
+                } else {
+                  Get.toNamed('/search');
+                }
+              },
+            ),
           ),
         ],
       ),
@@ -236,7 +240,7 @@ class _HomePageState extends State<HomePage> {
       final filters = _controller.currentFilters;
       final hasAny = filters.isNotEmpty;
       final picked = _controller.selectedFilters.entries
-          .where((e) => (e.value ?? '').isNotEmpty)
+          .where((e) => e.value.isNotEmpty)
           .length;
       return Padding(
         padding: const EdgeInsets.only(left: 6, right: 2),
@@ -682,7 +686,7 @@ class _HomePageState extends State<HomePage> {
                       const Spacer(),
                       Obx(() {
                         final picked = _controller.selectedFilters.entries
-                            .where((e) => (e.value ?? '').isNotEmpty)
+                            .where((e) => e.value.isNotEmpty)
                             .length;
                         if (picked == 0) return const SizedBox.shrink();
                         return TextButton(
@@ -1533,42 +1537,45 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
     // - 收起 = 圆形玻璃按钮；点击展开成胶囊输入框（宽度动画）
     // - 底色/描边/文字色全部走 AppTheme，切外观自动跟随
     //   （原描边写死 Colors.white.withValues(0.10)，浅色模式下几乎看不见边框）
-    final maxW = MediaQuery.of(context).size.width;
-    final expandedW = (maxW * 0.52).clamp(140.0, 220.0);
+    // ── 与阅读 JellySearchBar 完全同规格 ──────────────────────────
+    //
+    // 原来这里是"半透明玻璃底 + 展开时强调色描边 + 强调色光晕"，
+    // 与阅读的白底胶囊差异明显（用户要求"弄成和阅读一样的样式"）。
+    //
+    // 阅读那边的规格（照抄 lib/reading/widgets/jelly_search_bar.dart）：
+    //   高 50 / 圆角 25（= 高的一半，胶囊）/ 底色 白 或 深色卡 /
+    //   **无描边** / 黑色柔和阴影 blur12 offset(0,4) /
+    //   图标 22 / 字号 15 / prefixIcon 约束 44
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return AnimatedContainer(
       duration: AppTheme.motionBase,
       curve: AppTheme.motionCurve,
-      width: _expanded ? expandedW : 40,
-      height: 36,
+      // 收起 = 44 圆钮（与阅读的 prefixIcon 尺寸一致）；
+      // 展开 = 撑满父级给的 Expanded 宽度
+      width: _expanded ? null : 44,
+      height: 50,
       decoration: BoxDecoration(
-        // 收起时用略深的玻璃底，展开时提亮一点，形成"进入输入态"的层次
-        color: _expanded
-            ? AppTheme.backgroundElevated
-            : AppTheme.backgroundTertiary,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: _expanded
-              ? AppTheme.accentColor.withValues(alpha: 0.45)
-              : AppTheme.glassBorder,
-          width: _expanded ? 1 : 0.8,
-        ),
-        boxShadow: _expanded
-            ? [
-                BoxShadow(
-                  color: AppTheme.accentColor.withValues(alpha: 0.18),
-                  blurRadius: 10,
-                  offset: const Offset(0, 2),
-                ),
-              ]
-            : null,
+        color: isDark ? AppTheme.palette.cardDark : Colors.white,
+        borderRadius: BorderRadius.circular(25),
+        // 不加描边 —— 阅读的搜索栏靠阴影与底色分离，没有边框
+        boxShadow: [
+          BoxShadow(
+            color: isDark
+                ? Colors.black.withValues(alpha: 0.30)
+                : Colors.black.withValues(alpha: 0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: _expanded
           ? Row(
               children: [
-                const SizedBox(width: 12),
-                Icon(Icons.search,
-                    color: AppTheme.textTertiary, size: 15),
-                const SizedBox(width: 6),
+                const SizedBox(width: 14),
+                Icon(Icons.search_rounded,
+                    color: isDark ? Colors.white38 : const Color(0xFF9CA3AF),
+                    size: 22),
+                const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
                     controller: _ctrl,
@@ -1578,7 +1585,10 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
                     cursorWidth: 2,
                     cursorRadius: const Radius.circular(1),
                     style: TextStyle(
-                        color: AppTheme.textPrimary, fontSize: 13),
+                      fontSize: 15,
+                      height: 1.0,
+                      color: AppTheme.textPrimary,
+                    ),
                     textInputAction: TextInputAction.search,
                     onSubmitted: (v) {
                       setState(() {
@@ -1599,9 +1609,13 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
                       }
                     },
                     decoration: InputDecoration(
-                      hintText: '搜索影片...',
+                      hintText: '搜索影片',
                       hintStyle: TextStyle(
-                          color: AppTheme.textTertiary, fontSize: 13),
+                        fontSize: 15,
+                        color: isDark
+                            ? Colors.white38
+                            : const Color(0xFF9CA3AF),
+                      ),
                       border: InputBorder.none,
                       isDense: true,
                       contentPadding: EdgeInsets.zero,
@@ -1640,8 +1654,11 @@ class _ExpandableSearchState extends State<_ExpandableSearch> {
                 setState(() => _expanded = true);
                 _focus.requestFocus();
               },
-              child: Icon(Icons.search,
-                  color: AppTheme.textSecondary, size: 18),
+              child: Center(
+                child: Icon(Icons.search_rounded,
+                    color: isDark ? Colors.white38 : const Color(0xFF9CA3AF),
+                    size: 22),
+              ),
             ),
     );
   }

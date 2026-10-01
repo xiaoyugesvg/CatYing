@@ -24,9 +24,10 @@ import 'router/app_pages.dart';
 import 'services/detail_page_controller.dart';
 import 'services/player_fullscreen_controller.dart';
 import 'widgets/video_player_pip.dart';
-import 'widgets/glass.dart';
 import 'widgets/disclaimer_dialog.dart';
 import 'widgets/app_loading_view.dart';
+import 'common/appearance_sync.dart';
+import 'common/floating_nav_spec.dart';
 import 'common/theme_mode_store.dart';
 import 'services/main_tab_controller.dart';
 
@@ -85,13 +86,19 @@ class TVBoxApp extends StatelessWidget {
             // 两者若不同步，就会出现「背景是浅色、文字却是白色」这类颜色不统一
             // （用户实测截图：皎月白壁纸 + 白字）。
             // 这里在构建前把 AppBrightness 强制对齐到 effectiveLight。
-            if (AppBrightness.isLight.value != effectiveLight) {
+            //
+            // ⚠️ 但要先问过 AppearanceSync：在阅读/音乐模块里，明暗该由
+            // **那个模块自己的设置**决定。用户实测"阅读的主题跟随系统
+            // 不生效"，根因就是 AppBrightness 只被影视这套驱动，
+            // 阅读的开关改了 SettingsService 却没人读。
+            // sync 会看当前 tab：非影视 tab 用模块设置覆盖这个 target。
+            {
               // 用 microtask 避免在 build 中直接改 notifier 触发的重入
               final target = effectiveLight;
               Future<void>.microtask(() {
-                if (AppBrightness.isLight.value != target) {
-                  AppBrightness.isLight.value = target;
-                }
+                AppearanceSync.applyForCurrentModule(
+                  videoEffectiveLight: target,
+                );
               });
             }
             AppLog.instance.log(
@@ -735,8 +742,12 @@ class _ContentViewState extends State<ContentView>
     // 底栏底色已改为近透明玻璃, 内容滚过其下方时依旧清晰可见。
     final bottomInset = MediaQuery.of(context).padding.bottom;
     const navSideGap = 32.0;
-    const navFloatGap = 8.0;
-    const navBarHeight = 51.0;
+    // 距底部距离统一用 FloatingNavSpec.bottomMargin（30）。
+    // 原来是 8 —— 底栏紧贴 Home Indicator，与音乐/阅读（都是 30）
+    // 明显不一致（用户一眼就看出来了："三种悬浮栏…距离底部的距离也不一样"）。
+    // 注意 bottomInset（Home Indicator 安全区）是**额外**叠加的，
+    // 所以真机上总距离 = 30 + 安全区，不会压到指示条。
+    const navFloatGap = FloatingNavSpec.bottomMargin;
 
     return Scaffold(
       body: Stack(
@@ -824,21 +835,40 @@ class _ContentViewState extends State<ContentView>
               if (DetailPageController.instance.isOpen) {
                 return const SizedBox.shrink();
               }
-              // **真悬浮轻玻璃 (2026-09-26)**：底色用近透明 glassTintClear
-              // (alpha≈2%)，只保留毛玻璃模糊+细描边+高光，几乎不遮内容。
-              // 内容滚过底栏下方时依旧清晰可见，真正"沉浸式悬浮"。
-              return GlassPanel(
-                // 圆角对齐阅读 JellyNavBar 的 _floatingRadius = 32
-                // （原来是 30；用户要求所有悬浮菜单栏统一成阅读那种）
-                radius: 32,
-                blur: true,
-                tint: AppTheme.glassTintClear,
-                borderColor: AppTheme.glassBorder,
-                borderWidth: 0.8,
-                highlightStrength: 0.2,
-                shadow: true,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              // ── 与阅读 JellyNavBar 完全同规格的悬浮胶囊 ──────────────
+              //
+              // 原来是 `GlassPanel(blur: true, tint: glassTintClear, ...)`
+              // —— 用户明确要求"整体都不要这个液态玻璃了"，
+              // 且"影视和音乐的悬浮菜单栏的尺寸、高度颜色要和阅读一样"。
+              //
+              // 现在改成与阅读/音乐**同一套参数**（全部来自 FloatingNavSpec）：
+              //   高度 72 / 圆角 32 / 距底 30 / 底色 白或深卡 95% /
+              //   阴影 blur12 offset(0,4) / 无边框 / 无高光
+              // 不做 BackdropFilter：阅读那边只在"背景动画关闭"时才模糊，
+              // 而三条栏统一为纯色胶囊更稳（也省 GPU）。
+              final navLight = AppBrightness.isLight.value;
+              return Container(
+                height: FloatingNavSpec.barHeight,
+                decoration: BoxDecoration(
+                  color: (navLight
+                          ? AppTheme.palette.cardLight
+                          : AppTheme.palette.cardDark)
+                      .withValues(alpha: FloatingNavSpec.barAlpha),
+                  borderRadius:
+                      BorderRadius.circular(FloatingNavSpec.radius),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(
+                          alpha: FloatingNavSpec.shadowAlpha),
+                      blurRadius: FloatingNavSpec.shadowBlur,
+                      offset: FloatingNavSpec.shadowOffset,
+                    ),
+                  ],
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: FloatingNavSpec.innerPadH,
+                  vertical: FloatingNavSpec.innerPadV,
+                ),
                 // 底栏项目由「设置 → 主页页面」控制（开关 + 拖动排序）。
                 // Obx 监听，改完设置立刻生效，不必重启。
                 child: Obx(() {
@@ -918,12 +948,12 @@ class _ContentViewState extends State<ContentView>
     //   深色 → Colors.white54（暗底上用白）
     //   浅色 → 调色板的 navUnselected（墨灰，白胶囊上清晰）
     final isDark = !AppBrightness.isLight.value;
-    final unselectedColor = isDark
-        ? Colors.white.withValues(alpha: 0.54)
-        : AppTheme.palette.navUnselected;
-    // 选中态：浅色用 accentColor（墨灰）；深色下墨灰在暗底栏上会糊，
-    // 改用白色（与阅读栏 `isDark ? Colors.white : navSelectedFg` 同理）
-    final selectedColor = isDark ? Colors.white : AppTheme.accentColor;
+    // 取色统一走 FloatingNavSpec —— 与阅读/音乐同一套规则，
+    // 改一处三条栏一起变（用户要求"颜色要和阅读一样"）。
+    final unselectedColor =
+        FloatingNavSpec.unselectedColor(isDark, AppTheme.palette);
+    final selectedColor =
+        FloatingNavSpec.selectedColor(isDark, AppTheme.palette);
     return GestureDetector(
       onTap: () {
         setState(() {
@@ -933,28 +963,33 @@ class _ContentViewState extends State<ContentView>
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOutCubic,
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(
+          horizontal: FloatingNavSpec.itemPadH,
+          vertical: FloatingNavSpec.itemPadV,
+        ),
         decoration: BoxDecoration(
           color: isSelected
-              ? AppTheme.accentColor.withValues(alpha: isDark ? 0.22 : 0.12)
+              ? FloatingNavSpec.selectedItemBg(isDark, AppTheme.palette)
               : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(FloatingNavSpec.itemRadius),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               isSelected ? activeIcon : icon,
-              size: 18,
+              // 与阅读/音乐统一 21（原 18，三条栏大小不一）
+              size: FloatingNavSpec.iconSize,
               color: isSelected ? selectedColor : unselectedColor,
             ),
-            const SizedBox(height: 3),
+            const SizedBox(height: FloatingNavSpec.iconLabelGap),
             Text(
               label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w500,
+                fontSize: FloatingNavSpec.labelSize,
+                fontWeight: FloatingNavSpec.labelWeight,
                 color: isSelected ? selectedColor : unselectedColor,
               ),
             ),

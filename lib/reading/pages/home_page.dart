@@ -114,9 +114,17 @@ class _HomePageState extends State<HomePage> {
       case NavTab.book:
         _resumeLastBook();
         break;
+      case NavTab.me:
+        // 长按「我的」= 返回影视。
+        // 为什么放这里而不是加第 6 个 tab：
+        //   阅读是独立模块，进来后影视底栏被 app.dart 的
+        //   inEmbeddedModule 隐藏，需要一个出口；
+        //   但加 tab 会把 5 项挤成 6 项、每项从 ~98px 掉到 ~65px，
+        //   与用户截图不符。长按不占位置、也不怕误触。
+        MainTabController.instance.backToVideo();
+        break;
       case NavTab.bookshelf:
       case NavTab.favorites:
-      case NavTab.me:
         // 其他 tab 暂无长按动作
         break;
     }
@@ -327,11 +335,12 @@ class _HomePageState extends State<HomePage> {
             // 为什么必须加：阅读自带 5-tab 悬浮栏，进入阅读后影视底栏会被隐藏
             // （见 app.dart 的 inEmbeddedModule），
             // 没有这条就**没有任何途径回到影视**。
-            .toList()
-          ..add(const JellyNavItem(
-            icon: Icons.movie_outlined,
-            label: '影视',
-          ));
+            .toList();
+        // ⚠️ 底栏**不追加**「影视」入口。
+        // 用户的截图里阅读底栏就是 5 项（漫画/图书/书架/收藏/我的），
+        // 加第 6 项会让每项宽度从 ~98px 掉到 ~65px，外观明显不同。
+        // 回影视的入口改为**长按「我的」**（见 _onNavLongPress）——
+        // 既不占位置，也不会误触。
         final pages = visible
             .map((t) => _buildPageFor(t, t == _currentTab))
             .toList(growable: false);
@@ -362,14 +371,8 @@ class _HomePageState extends State<HomePage> {
               bottomNavigationBar: JellyNavBar(
                 currentIndex: currentIndex,
                 floating: floating,
-                onTap: (index) {
-                  // 最后一项是「影视」：跳出阅读模块回到影视
-                  if (index == visible.length) {
-                    MainTabController.instance.backToVideo();
-                    return;
-                  }
-                  setState(() => _currentTab = visible[index]);
-                },
+                onTap: (index) =>
+                    setState(() => _currentTab = visible[index]),
                 onLongPress: _onNavLongPress,
                 items: navItems,
               ),

@@ -6,6 +6,7 @@ import '../models/book.dart';
 import '../models/book_category.dart';
 import '../models/search_result.dart';
 import '../services/book_download_service.dart';
+import '../../services/main_tab_controller.dart';
 import '../services/book_view_mode.dart';
 import '../services/browse_history_service.dart';
 import '../services/search_history_service.dart';
@@ -21,6 +22,7 @@ import '../widgets/jelly_sliding_actions.dart';
 import '../widgets/staggered_entrance.dart';
 import 'book_detail_page.dart';
 import 'book_source_search_page.dart';
+import 'douban_ranking_page.dart';
 import 'browse_history_page.dart';
 import 'download_page.dart';
 import 'favorites_page.dart';
@@ -874,30 +876,31 @@ class _BookSearchPageState extends State<BookSearchPage>
               padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
               child: Column(
                 children: [
-                  // 标题 + 头像（AppBar 模式下由 AppBar 承担，头像移入 AppBar.actions）
+                  // ── 标题行（按截图：一行放下全部控件）──────────────
+                  //   图书 ⋮拉绳  [搜索图书]  (视图切换)  (下载) ··· 其他
+                  //
+                  // 原来是**两行**：第一行「标题 + 拉绳 + 滑动图标组 + 头像」，
+                  // 第二行「搜索框 + 视图切换」。截图里是一行，
+                  // 所以把搜索框、视图切换、下载都并进来。
+                  //
+                  // 拉绳紧跟标题（截图位置），不再被 Spacer 推到右侧。
                   if (!widget.showBackButton)
                     Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Padding(
-                          padding: const EdgeInsets.only(left: 4),
-                          child: Text(
-                            '图书',
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: isDark
-                                  ? Colors.white
-                                  : JellyTheme.textPrimaryLight,
-                            ),
+                        Text(
+                          '图书',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color: isDark
+                                ? Colors.white
+                                : JellyTheme.textPrimaryLight,
                           ),
                         ),
-                        const Spacer(),
-                        // 「拉绳」：标题右边那根挂着的小绳（点它切到书源界面）。
-                        //
-                        // 位置就按截图放在标题右侧、图标组左侧 ——
-                        // 它是个**挂饰**不是普通按钮，所以不带底色、不参与
-                        // 图标组的横排/展开逻辑。
+                        const SizedBox(width: 4),
+                        // 「拉绳」：标题右边那根挂着的小绳（点它切到书源）。
+                        // 它是**挂饰**不是普通按钮，所以不带底色、
+                        // 也不参与右侧图标的横排/展开逻辑。
                         JellyPullCord(
                           tooltip: '切换到书源',
                           onTap: () => Navigator.push(
@@ -909,9 +912,31 @@ class _BookSearchPageState extends State<BookSearchPage>
                             ),
                           ),
                         ),
+                        const SizedBox(width: 10),
+                        // 搜索框占据剩余宽度（Expanded 让右侧图标始终贴边）
+                        Expanded(child: _buildSearchBar(isDark)),
                         const SizedBox(width: 8),
-                        // 右上角滑动图标组（点按切换 / 长按展开成竖列）。
-                        // 头像保留在最右 —— 它是 Z-Library 账号入口，不能去掉。
+                        // 视图切换（网格 / 列表）
+                        _buildViewToggle(isDark),
+                        const SizedBox(width: 8),
+                        // 下载：进「史藏 → 图书」看已下载的书
+                        // （阅读模块没有独立的图书下载页，史藏就是它的列表）
+                        _buildCircleIcon(
+                          isDark: isDark,
+                          icon: Icons.file_download_outlined,
+                          tooltip: '已下载的图书',
+                          onTap: () => MainTabController.instance.select(
+                            MainTabController.bookshelfTabIndex,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // 分类筛选（年份 / 语言 / 格式）。原来在第二行，
+                        // 并进标题行后仍保留 —— 它是真实功能，
+                        // 不能因为重排布局就丢掉。
+                        _buildCategoryButton(isDark),
+                        const SizedBox(width: 8),
+                        // 其余动作（浏览记录 / 收藏 / 下载记录 / 豆瓣排行榜）
+                        // 保持滑动图标组：点按切换、长按展开成竖列。
                         JellySlidingActions(
                           isDark: isDark,
                           width: 168,
@@ -947,18 +972,16 @@ class _BookSearchPageState extends State<BookSearchPage>
                                 ),
                               ),
                             ),
-                            // 「搜索书源图书」入口（用户截图中图书页左侧那个拉绳的位置）。
-                            // 带上当前关键词：用户在 Z-Library 搜不到时，
-                            // 点这里可以立刻用同一关键词去书源里搜，不用重打一遍。
+                            // 第 4 个图标：**豆瓣图书排行榜**
+                            // （按用户要求：图书页的这个位置放豆瓣排行榜，
+                            //   不是漫画源仓库 —— 那是漫画页的）
                             JellyAction(
-                              icon: Icons.manage_search_rounded,
-                              tooltip: '搜索书源图书',
+                              icon: Icons.leaderboard_rounded,
+                              tooltip: '豆瓣图书排行榜',
                               onPressed: () => Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (_) => BookSourceSearchPage(
-                                    initialKeyword: _keyword.trim(),
-                                  ),
+                                  builder: (_) => const DoubanRankingPage(),
                                 ),
                               ),
                             ),
@@ -968,45 +991,9 @@ class _BookSearchPageState extends State<BookSearchPage>
                         _buildAvatar(isDark),
                       ],
                     ),
-                  const SizedBox(height: 8),
-                  // 搜索框 + 视图切换
-                  Row(
-                    children: [
-                      const Spacer(),
-                      SizedBox(
-                        width: MediaQuery.of(context).size.width * 0.5,
-                        child: JellySearchBar(
-                          controller: _searchController,
-                          hintText: '搜索图书',
-                          onFocusChange: (f) => setState(() {
-                            if (f && _searchController.text.isEmpty) {
-                              _historyVisible = true;
-                            }
-                          }),
-                          onCleared: () =>
-                              setState(() => _historyVisible = false),
-                          onSubmitted: (value) => _runSearch(value),
-                          onChanged: (value) => setState(() {}),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      AnimatedBuilder(
-                        animation: _tabController.animation!,
-                        builder: (context, _) => JellySegmentedToggle(
-                          index: _tabController.animation!.value,
-                          onChanged: (i) => _tabController.animateTo(i),
-                          segments: const [
-                            JellySegmentData(icon: Icons.grid_view_rounded),
-                            JellySegmentData(icon: Icons.view_list_rounded),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _buildCategoryButton(isDark),
-                      const Spacer(),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
+                  // 第二行（搜索框 + 视图切换 + 分类按钮）已删除 ——
+                  // 它们都并进了上面那一个标题行（按用户截图的一行布局）。
+                  const SizedBox(height: 6),
                   // 格式小标签（常见类型）
                   _buildFormatChips(isDark),
                 ],
@@ -1020,6 +1007,79 @@ class _BookSearchPageState extends State<BookSearchPage>
   }
 
   /// 右上角头像（登录态显示用户图标，未登录显示登录图标）
+  /// 搜索框（标题行内用 Expanded 撑开）
+  Widget _buildSearchBar(bool isDark) {
+    return JellySearchBar(
+      controller: _searchController,
+      hintText: '搜索图书',
+      onFocusChange: (f) => setState(() {
+        if (f && _searchController.text.isEmpty) {
+          _historyVisible = true;
+        }
+      }),
+      onCleared: () => setState(() => _historyVisible = false),
+      onSubmitted: (value) => _runSearch(value),
+      onChanged: (value) => setState(() {}),
+    );
+  }
+
+  /// 网格 / 列表 视图切换。
+  ///
+  /// ⚠️ 这里原来接的是 `_tabController` —— **那是分类标签的控制器**
+  /// （推荐/全部/EPUB…，length 2）。点视图切换只会让分类标签换一个，
+  /// 网格/列表**根本没变**（真 bug）。
+  ///
+  /// 视图模式有独立的状态与持久化：`BookViewMode().isGrid`
+  /// （services/book_view_mode.dart）。这里改接它，并且用
+  /// ListenableBuilder 监听 —— 否则别处改了模式本按钮不会跟着动。
+  Widget _buildViewToggle(bool isDark) {
+    return ListenableBuilder(
+      listenable: BookViewMode(),
+      builder: (context, _) => JellySegmentedToggle(
+        index: BookViewMode().isGrid ? 0 : 1,
+        onChanged: (i) => BookViewMode().set(i == 0),
+        segments: const [
+          JellySegmentData(icon: Icons.grid_view_rounded),
+          JellySegmentData(icon: Icons.view_list_rounded),
+        ],
+      ),
+    );
+  }
+
+  /// 通用圆形图标按钮（浅灰底 + 近黑图标）—— 与书架/收藏页同款
+  Widget _buildCircleIcon({
+    required bool isDark,
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+    double size = 36,
+  }) {
+    return Material(
+      color: isDark
+          ? Colors.white.withValues(alpha: 0.10)
+          : Colors.black.withValues(alpha: 0.05),
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            width: size,
+            height: size,
+            child: Center(
+              child: Icon(
+                icon,
+                size: 20,
+                color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildAvatar(bool isDark) {
     final z = ZlibraryService();
     final logged = z.isLoggedIn;
@@ -1944,21 +2004,49 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
               ),
             ),
             const Divider(height: 1),
-            // 底部按钮：重置 / 确定
+            // ── 底部按钮：重置 / 确认（按截图：两个等宽并排的圆角按钮）──
+            //
+            // 原来是「TextButton(重置) + Spacer + FilledButton(确定)」——
+            // 左文字按钮、右实心按钮、大小不一。
+            // 截图里是两个**等宽**的圆角按钮并排：
+            //   左=重置（描边/浅底），右=确认（实心；未选子分类时禁用并
+            //   把文案换成「请选择子分类」）
             Padding(
-              padding: const EdgeInsets.fromLTRB(8, 6, 12, 6),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
               child: Row(
                 children: [
-                  TextButton(onPressed: _reset, child: const Text('重置')),
-                  const Spacer(),
-                  FilledButton(
-                    onPressed: _selectedChild != null ? _confirm : null,
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 4,
+                  // 重置
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _reset,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: BorderSide(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.22)
+                              : Colors.black.withValues(alpha: 0.16),
+                        ),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        foregroundColor: labelColor,
                       ),
-                      child: Text('确定'),
+                      child: const Text('重置'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // 确认
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _selectedChild != null ? _confirm : null,
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: Text(
+                        // 没选子分类时说清"缺什么"，而不是让按钮灰着不解释
+                        _selectedChild != null ? '确定' : '请选择子分类',
+                      ),
                     ),
                   ),
                 ],

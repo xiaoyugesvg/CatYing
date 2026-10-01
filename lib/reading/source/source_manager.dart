@@ -169,6 +169,47 @@ class SourceManager extends ChangeNotifier {
 
   /// 设置源启用/禁用（持久化 + notify）。
   /// 禁用当前源时自动切到首个启用源；全部禁用时回退保留当前，避免无可用源。
+  /// 批量启用/停用（「多选书源」底部那个开关按钮用）。
+  ///
+  /// 逐个调 [setEnabled] 会造成 N 次持久化 + N 次通知 ——
+  /// 勾了 100 个源就是 100 次写盘。这里合并成一次。
+  Future<void> setEnabledAll(Iterable<String> ids, bool enabled) async {
+    final list = ids.toList();
+    if (list.isEmpty) return;
+    for (final id in list) {
+      if (enabled) {
+        _disabledIds.remove(id);
+      } else {
+        _disabledIds.add(id);
+      }
+    }
+    notifyListeners();
+    // 复用 setEnabled 的持久化路径（它内部按 _disabledIds 全量写，
+    // 所以这里只要触发一次即可）
+    await setEnabled(list.first, enabled);
+  }
+
+  /// 按给定 id 顺序重排源（「拖动排序」用）。
+  ///
+  /// `_sources` 是 Map，本身有插入顺序；重建它能改顺序，
+  /// 但**顺序不持久化**（下次 reload 会回到 sources.json 的顺序）。
+  /// 所以这里明确说明：本方法只影响本次会话的显示顺序。
+  void reorder(List<String> orderedIds) {
+    final next = <String, MangaSource>{};
+    for (final id in orderedIds) {
+      final s = _sources[id];
+      if (s != null) next[id] = s;
+    }
+    // 未列出的（理论上不会有）保持原样接在后面
+    for (final e in _sources.entries) {
+      next.putIfAbsent(e.key, () => e.value);
+    }
+    _sources
+      ..clear()
+      ..addAll(next);
+    notifyListeners();
+  }
+
   Future<void> setEnabled(String id, bool enabled) async {
     final changed = enabled ? _disabledIds.remove(id) : _disabledIds.add(id);
     if (!changed) return;

@@ -507,6 +507,29 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   }
 
   /// 漫画源切换小标签（横向滚动居中，样式同图书搜索页格式标签）
+  /// 搜索框本体（不带外边距）—— 放在标题行的 Expanded 里。
+  ///
+  /// 原来是用 `SizedBox(width: 屏宽*0.4)` 居中放的，改为 Expanded 撑满中间，
+  /// 这样右侧图标组不会被挤压，与图书/书源页的布局一致。
+  Widget _searchField() {
+    return JellySearchBar(
+      controller: _searchController,
+      onFocusChange: (f) => setState(() {
+        if (f) {
+          if (_searchController.text.isEmpty) {
+            _historyVisible = true;
+          }
+        } else {
+          // 失焦即收起历史（只有手动点击搜索框才获焦弹历史）
+          _historyVisible = false;
+        }
+      }),
+      onCleared: () => setState(() => _historyVisible = false),
+      onSubmitted: (value) => _runSearch(value),
+      onChanged: (value) => setState(() {}),
+    );
+  }
+
   Widget _buildSourceChips(bool isDark) {
     final sources = SourceManager().enabledSources;
     final currentId = SourceManager().current.id;
@@ -1063,131 +1086,115 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             top: !widget.showBackButton,
             bottom: false,
             child: SizedBox(
-              height: widget.showBackButton ? 115 : 152,
+              // 高度跟着布局走：原来是"标题行 + 居中的搜索行"两行(152)，
+              // 现在只有一行(56)。不改会留约 100px 空白。
+              height: widget.showBackButton ? 60 : 56,
               child: Stack(
                 children: [
-                  // 标题：左上角，间距小（AppBar 模式下由 AppBar 承担）
+                  // ── 标题行（一行放下：标题 / 搜索框 / 图标组）────────
+                  //
+                  // 原来是两行：第一行「标题 + 滑动图标组」，
+                  // 第二行「居中的搜索框」。按用户截图重排成一行。
+                  //
+                  // ⚠️ 漫画页**不加拉绳**：图书/书源那根拉绳是"切到另一个
+                  // 搜索界面"的开关，而漫画页没有可切换的目标。
+                  // （用户漫画截图里标题右侧那根竖线是 iOS 的页面指示器，
+                  //   不是拉绳 —— 别误加。）
                   if (!widget.showBackButton)
                     Positioned(
                       top: 6,
                       left: 16,
-                      child: Text(
-                        '漫画',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: isDark
-                              ? Colors.white
-                              : JellyTheme.textPrimaryLight,
-                        ),
-                      ),
-                    ),
-                  // 浏览历史按钮：右上角（AppBar 模式下放 AppBar.actions）
-                  if (!widget.showBackButton)
-                    Positioned(
-                      top: 6,
                       right: 12,
-                      child: JellySlidingActions(
-                        isDark: isDark,
-                        actions: [
-                          JellyAction(
-                            icon: Icons.history_rounded,
-                            tooltip: '浏览记录',
-                            onPressed: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    const BrowseHistoryPage(showTabs: false),
-                              ),
+                      child: Row(
+                        children: [
+                          Text(
+                            '漫画',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: isDark
+                                  ? Colors.white
+                                  : JellyTheme.textPrimaryLight,
                             ),
                           ),
-                          JellyAction(
-                            icon: Icons.favorite_rounded,
-                            tooltip: '收藏',
-                            onPressed: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const FavoritesPage(),
-                              ),
+                          const SizedBox(width: 10),
+                          // 搜索框占满中间（原来固定屏宽 40% 且居中）
+                          Expanded(child: _searchField()),
+                          const SizedBox(width: 8),
+                          // 视图切换（网格/列表）
+                          AnimatedBuilder(
+                            animation: _tabController.animation!,
+                            builder: (context, _) => JellySegmentedToggle(
+                              index: _tabController.animation!.value,
+                              onChanged: (i) {
+                                FocusScope.of(context).unfocus();
+                                _tabController.animateTo(i);
+                              },
+                              segments: const [
+                                JellySegmentData(icon: Icons.grid_view_rounded),
+                                JellySegmentData(icon: Icons.view_list_rounded),
+                              ],
                             ),
                           ),
-                          JellyAction(
-                            icon: Icons.file_download_rounded,
-                            tooltip: '下载',
-                            onPressed: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const DownloadPage(),
+                          const SizedBox(width: 8),
+                          _buildCategoryButton(isDark),
+                          const SizedBox(width: 8),
+                          JellySlidingActions(
+                            isDark: isDark,
+                            actions: [
+                              JellyAction(
+                                icon: Icons.history_rounded,
+                                tooltip: '浏览记录',
+                                onPressed: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const BrowseHistoryPage(
+                                      showTabs: false,
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                          JellyAction(
-                            icon: Icons.source_rounded,
-                            tooltip: '漫画源仓库',
-                            onPressed: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const SourceRepoPage(),
+                              JellyAction(
+                                icon: Icons.favorite_rounded,
+                                tooltip: '收藏',
+                                onPressed: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const FavoritesPage(),
+                                  ),
+                                ),
                               ),
-                            ),
+                              JellyAction(
+                                icon: Icons.file_download_rounded,
+                                tooltip: '下载',
+                                onPressed: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const DownloadPage(),
+                                  ),
+                                ),
+                              ),
+                              JellyAction(
+                                icon: Icons.source_rounded,
+                                tooltip: '漫画源仓库',
+                                onPressed: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const SourceRepoPage(),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
                     ),
-                  // 控件组：水平居中，间距大（往下错开，层次感）
+                  // 第二行（搜索框 + 视图切换 + 分类按钮）已删除 ——
+                  // 搜索框并进标题行（Expanded 撑开），
+                  // 视图切换与分类按钮随图标组放在其右侧。
+                  // 源切换小标签（标题行下方）
                   Positioned(
-                    top: widget.showBackButton ? 6 : 45,
-                    left: 12,
-                    right: 12,
-                    child: Row(
-                      children: [
-                        const Spacer(),
-                        SizedBox(
-                          width: MediaQuery.of(context).size.width * 0.4,
-                          child: JellySearchBar(
-                            controller: _searchController,
-                            onFocusChange: (f) => setState(() {
-                              if (f) {
-                                if (_searchController.text.isEmpty) {
-                                  _historyVisible = true;
-                                }
-                              } else {
-                                // 失焦即收起历史（只有手动点击搜索框才获焦弹历史）
-                                _historyVisible = false;
-                              }
-                            }),
-                            onCleared: () =>
-                                setState(() => _historyVisible = false),
-                            onSubmitted: (value) => _runSearch(value),
-                            onChanged: (value) => setState(() {}),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        AnimatedBuilder(
-                          animation: _tabController.animation!,
-                          builder: (context, _) => JellySegmentedToggle(
-                            index: _tabController.animation!.value,
-                            onChanged: (i) {
-                              FocusScope.of(
-                                context,
-                              ).unfocus(); // 切视图属"其他情况"，主动失焦收起历史与键盘
-                              _tabController.animateTo(i);
-                            },
-                            segments: const [
-                              JellySegmentData(icon: Icons.grid_view_rounded),
-                              JellySegmentData(icon: Icons.view_list_rounded),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        _buildCategoryButton(isDark),
-                        const Spacer(),
-                      ],
-                    ),
-                  ),
-                  // 源切换小标签（搜索框下方，样式同图书搜索页格式标签）
-                  Positioned(
-                    top: widget.showBackButton ? 52 : 96,
+                    top: widget.showBackButton ? 52 : 50,
                     left: 12,
                     right: 12,
                     child: ListenableBuilder(
