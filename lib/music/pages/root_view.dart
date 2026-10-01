@@ -10,7 +10,6 @@ import 'library_page.dart';
 import 'profile_page.dart';
 import 'search_page.dart';
 import '../../reading/widgets/jelly_nav_bar.dart';
-import 'package:get/get.dart';
 
 /// 音乐模块的 App 骨架 —— 移植自 Beans 的 `RootView.swift`。
 ///
@@ -102,7 +101,28 @@ class _MusicRootViewState extends State<MusicRootView> {
               children: [
                 // tab 内容（用 IndexedStack 保留各页滚动位置）
                 Positioned.fill(
+                  // 🔴 #21：这里原来**没有 key，且 children 是 `const [...]`**
+                  //
+                  // `MusicTheme` 与 `AppTheme` 一样是**静态类**：
+                  // 它的颜色 getter 读静态字段 `_isDark`/`_accent`，
+                  // 改了**不会通知任何 widget**。
+                  //
+                  // 外层的 `AnimatedBuilder(revision)` 确实会重建，
+                  // 但 `children: const [...]` 是**同一批 widget 实例** ——
+                  // `Element.updateChild` 比对时判定"widget 没变"，
+                  // 直接 return，**跳过 DiscoverPage 等子页的 build**。
+                  //
+                  // 后果（用户实测截图）：子页里的 `MusicTheme.label`
+                  // 停在旧值（白字），而 `Scaffold(backgroundColor:`
+                  // `MusicTheme.background)` 是直接读的、立刻变了（浅底）
+                  // → **白字浅底、整页灰蒙蒙看不清**。
+                  //
+                  // 修法与影视侧的 `content_view.dart` 完全一致：
+                  // 换 key 强制子页重建。revision 在每次主题变更时 ++，
+                  // 所以拼进 key 就能让子页跟着换色。
                   child: IndexedStack(
+                    key: ValueKey('music-tabs-$_tab-'
+                        '${MusicThemeStore.instance.revision.value}'),
                     index: _tab,
                     children: const [
                       DiscoverPage(),
@@ -200,27 +220,43 @@ class _MusicRootViewState extends State<MusicRootView> {
   /// 保留音乐特有的：**长按「我的」回影视** ——
   /// 音乐是独立模块，影视底栏在这里被隐藏，需要一个出口。
   Widget _navBar() {
-    return Obx(() => JellyNavBar(
-          // ⚠️ 显式传音乐的调色板（JellyNavBar 默认用阅读的 JellyTheme，
-          // 切音乐配色时那个不会变 → 音乐栏颜色错）。
-          palette: MusicTheme.palette,
-          currentIndex: _tab,
-          floating: true,
-          items: [
-            for (final t in _tabs)
-              JellyNavItem(icon: t.active, label: t.label),
-          ],
-          onTap: (i) {
-            if (i < 0 || i >= _tabs.length) return;
-            setState(() => _tab = i);
-          },
-          onLongPress: (i) {
-            if (i < 0 || i >= _tabs.length) return;
-            if (_tabs[i].label == '我的') {
-              MainTabController.instance.backToVideo();
-            }
-          },
-        ));
+    // 🔴 #22：**不要用 `Obx` 包它**（这里踩过坑，写清楚）
+    //
+    // `Obx` 只有在它的 builder 内**读到了至少一个 `.obs`（Rx）变量**时才成立。
+    // 而这个组件里：
+    //   · `JellyNavBar` 是普通 StatefulWidget（不是 GetX 的）
+    //   · `_tab` 是**普通 int**（本页用 `setState` 管理，不是 Rx）
+    //   · `_tabs` 是普通 List
+    // 于是 `Obx` 检测不到任何可观察变量，直接抛：
+    //   "[Get] the improper use of a GetX has been detected"
+    // 而 GetX 的这个异常会让**整棵 Obx 子树被换成 ErrorWidget**
+    //（ErrorWidget 的高度是 100000px，表现就是"底栏不见了 + 多出一块空白"）。
+    //
+    // 用户实测截图："底部没有悬浮胶囊导航栏" —— 就是这条异常造成的。
+    //
+    // 本页是 StatefulWidget + setState，切 tab 已经会重建，
+    // **不需要** Obx。直接返回即可。
+    return JellyNavBar(
+      // ⚠️ 显式传音乐的调色板（JellyNavBar 默认用阅读的 JellyTheme，
+      // 切音乐配色时那个不会变 → 音乐栏颜色错）。
+      palette: MusicTheme.palette,
+      currentIndex: _tab,
+      floating: true,
+      items: [
+        for (final t in _tabs)
+          JellyNavItem(icon: t.active, label: t.label),
+      ],
+      onTap: (i) {
+        if (i < 0 || i >= _tabs.length) return;
+        setState(() => _tab = i);
+      },
+      onLongPress: (i) {
+        if (i < 0 || i >= _tabs.length) return;
+        if (_tabs[i].label == '我的') {
+          MainTabController.instance.backToVideo();
+        }
+      },
+    );
   }
 
 }

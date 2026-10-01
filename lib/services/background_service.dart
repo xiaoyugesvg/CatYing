@@ -537,10 +537,11 @@ class BackgroundService extends GetxService {
               },
             );
           }
-        } else if (sourceType.value == WallpaperSourceType.network &&
-            networkUrl.value.isNotEmpty) {
+        } else if (scene.sourceType == WallpaperSourceType.network &&
+            scene.networkUrl.isNotEmpty) {
+          // 同样必须走场景字段（见上面 scene.choice 的说明）
           image = CachedNetworkImage(
-            imageUrl: networkUrl.value,
+            imageUrl: scene.networkUrl,
             fit: BoxFit.cover,
             placeholder: (_, __) => const SizedBox.shrink(),
             errorWidget: (_, __, ___) => const SizedBox.shrink(),
@@ -552,8 +553,9 @@ class BackgroundService extends GetxService {
             fit: StackFit.expand,
             children: [
               Opacity(
-                opacity: opacity.value.clamp(0.2, 1.0),
-                child: _applyBlur(image),
+                // 用场景的 opacity（不再用全局 opacity.value）
+                opacity: scene.opacity.clamp(0.2, 1.0),
+                child: _applyBlur(image, scene.blur),
               ),
               if (ov > 0)
                 Container(color: overlayColor.withValues(alpha: ov)),
@@ -564,17 +566,24 @@ class BackgroundService extends GetxService {
       }
 
       // ---- 内置渐变（也是图片加载失败/关闭壁纸时的兜底）----
+      //
+      // 🔴 必须用 `scene.choice`（当前场景自己的），**不能用 `choice.value`**：
+      // 那几个 `.value` 是"兼容桥接"的全局字段，只反映**最近一次保存的
+      // 那套场景**。于是"深色下选了某壁纸 → 切浅色"时，
+      // 浅色场景里存的 `moonWhite` 根本读不到，浅色背景就错了
+      //（用户实测："浅色模式的皎月白壁纸没生效"）。
       return _buildGradientBackground(
-        colors: _getGradientForChoice(choice.value),
+        colors: _getGradientForChoice(scene.choice),
         overlayAlpha: ov,
+        overlayColor: overlayColor,
         child: child,
       );
     });
   }
 
   /// 模糊程度 0 时不做任何包装（省一次 saveLayer，iOS 上开销明显）
-  Widget _applyBlur(Widget w) {
-    final b = blur.value;
+  Widget _applyBlur(Widget w, [double? sceneBlur]) {
+    final b = sceneBlur ?? blur.value;
     if (b <= 0.1) return w;
     return ImageFiltered(
       imageFilter: ImageFilter.blur(sigmaX: b, sigmaY: b),
@@ -585,6 +594,14 @@ class BackgroundService extends GetxService {
   Widget _buildGradientBackground({
     required List<Color> colors,
     double overlayAlpha = 0.3,
+    /// 遮罩色：**浅色模式必须传白色**。
+    ///
+    /// 🔴 原来这里写死 `Colors.black`，于是浅色模式（皎月白这类亮壁纸）
+    /// 被压了一层 35% 黑遮罩 → **整页发灰**，而文字又是深色的，
+    /// 结果"灰蒙蒙、什么都看不清"。
+    /// `buildBackground` 里其实已经算好了 `overlayColor`
+    /// （浅色白 / 深色黑），只是**没传进来**。
+    required Color overlayColor,
     Widget? child,
   }) {
     return Stack(
@@ -625,9 +642,9 @@ class BackgroundService extends GetxService {
             color: Colors.white.withValues(alpha: 0.05),
           ),
         ),
-        // 蒙版 (保证文字可读)
+        // 蒙版 (保证文字可读)：颜色跟随明暗 —— 浅色白、深色黑
         if (overlayAlpha > 0)
-          Container(color: Colors.black.withValues(alpha: overlayAlpha)),
+          Container(color: overlayColor.withValues(alpha: overlayAlpha)),
         if (child != null) child,
       ],
     );

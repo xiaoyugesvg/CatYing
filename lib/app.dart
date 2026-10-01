@@ -15,7 +15,6 @@ import 'pages/live/view.dart';
 // cmbok 的 App 骨架入口也叫 HomePage，与影视侧 pages/home/view.dart 的
 // HomePage 重名，所以用前缀导入避免歧义。
 import 'reading/pages/home_page.dart' as reading_app;
-import 'music/pages/root_view.dart';
 import 'pages/settings/view.dart';
 import 'pages/search/view.dart';
 import 'pages/search/controller.dart';
