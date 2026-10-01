@@ -282,7 +282,7 @@ class _HomePageState extends State<HomePage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (ctx) => SafeArea(
+      builder: (ctx) => kbSheet(SafeArea(
         top: false,
         child: StatefulBuilder(
           builder: (ctx, setSheet) => Column(
@@ -326,7 +326,7 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
-      ),
+      )),
     );
   }
 
@@ -362,7 +362,7 @@ class _HomePageState extends State<HomePage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (ctx) => SafeArea(
+      builder: (ctx) => kbSheet(SafeArea(
         top: false,
         child: ConstrainedBox(
           constraints: BoxConstraints(
@@ -409,7 +409,7 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
-      ),
+      )),
     );
   }
 
@@ -425,7 +425,7 @@ class _HomePageState extends State<HomePage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (ctx) => SafeArea(
+      builder: (ctx) => kbSheet(SafeArea(
         top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -481,7 +481,7 @@ class _HomePageState extends State<HomePage> {
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 

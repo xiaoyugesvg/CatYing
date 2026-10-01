@@ -265,7 +265,7 @@ class _DetailPageState extends State<DetailPage> {
     await showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.backgroundPrimary,
-      builder: (ctx) => ListView(
+      builder: (ctx) => kbSheet(ListView(
         padding: const EdgeInsets.all(12),
         children: [
           Text('选择刮削结果',
@@ -292,7 +292,7 @@ class _DetailPageState extends State<DetailPage> {
             );
           }),
         ],
-      ),
+      )),
     );
   }
 
@@ -372,7 +372,7 @@ class _DetailPageState extends State<DetailPage> {
     await showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.backgroundPrimary,
-      builder: (ctx) => ListView(
+      builder: (ctx) => kbSheet(ListView(
         padding: const EdgeInsets.all(12),
         children: [
           Text('选择正确结果',
@@ -403,7 +403,7 @@ class _DetailPageState extends State<DetailPage> {
             );
           }),
         ],
-      ),
+      )),
     );
   }
 
@@ -1067,7 +1067,7 @@ class _DetailPageState extends State<DetailPage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => SafeArea(
+      builder: (ctx) => kbSheet(SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1096,7 +1096,7 @@ class _DetailPageState extends State<DetailPage> {
             const SizedBox(height: 8),
           ],
         ),
-      ),
+      )),
     );
   }
 

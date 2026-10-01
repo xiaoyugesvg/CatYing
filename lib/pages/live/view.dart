@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../widgets/common_widgets.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -1154,7 +1155,7 @@ class _LivePageState extends State<LivePage> {
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.backgroundSecondary,
-      builder: (ctx) => SafeArea(
+      builder: (ctx) => kbSheet(SafeArea(
         child: list.isEmpty
             ? Padding(
                 padding: EdgeInsets.all(24),
@@ -1181,7 +1182,7 @@ class _LivePageState extends State<LivePage> {
                     ),
                 ],
               ),
-      ),
+      )),
     );
   }
 

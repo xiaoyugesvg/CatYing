@@ -101,6 +101,16 @@
 		<key>UIBackgroundModes</key>
 		<array>
 			<string>audio</string>
+			<!-- flutter_foreground_task 需要（它自己 example/Info.plist 里就是这两个键）。
+			     当前 Dart 侧只在 Android 上调用该插件（peer_transfer_service.dart 有
+			     Platform.isAndroid 判断），iOS 上实际用不到；但插件注册时会读
+			     BGTaskSchedulerPermittedIdentifiers，缺了它插件会直接 return。
+			     留着以免以后要用 iOS 后台任务时静默失效。 -->
+			<string>fetch</string>
+		</array>
+		<key>BGTaskSchedulerPermittedIdentifiers</key>
+		<array>
+			<string>com.pravera.flutter_foreground_task.refresh</string>
 		</array>
 		<key>UIStatusBarHidden</key>
 		<false/>
@@ -111,6 +121,11 @@
 			<string>_ssdp._udp</string>
 			<string>_upnp._tcp</string>
 			<string>_http._tcp</string>
+			<!-- 阅读模块「局域网传书」用 bonsoir 广播/发现设备。
+			     iOS 14+ 必须把服务名声明在这里，否则**发现不到任何设备**
+			     （不报错，只是静默失败）。名字来自
+			     reading/services/peer_transfer_service.dart 的 _kServiceType。 -->
+			<string>_cmbok._tcp</string>
 		</array>
 		<!-- 放行任意 http 明文流（TrollStore 侧载，不面向 App Store 审核）
 		     原因：大量影视/直播 m3u8 源是 http://，原生 AVPlayer(画中画) 受 ATS
@@ -121,5 +136,13 @@
 			<key>NSAllowsArbitraryLoads</key>
 			<true/>
 		</dict>
+		<!-- 阅读模块：把 App 沙盒的 Documents 暴露给「文件」App。
+		     不开这两个键，「文件 → 我的 iPhone」里看不到本 App，
+		     用户**没有任何途径**把 TXT/EPUB 放进沙盒 → 阅读功能等于不可用。
+		     （阅读器用的是自实现的文件浏览器，读的就是这个目录） -->
+		<key>UIFileSharingEnabled</key>
+		<true/>
+		<key>LSSupportsOpeningDocumentsInPlace</key>
+		<true/>
 	</dict>
 </plist>

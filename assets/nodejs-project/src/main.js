@@ -13,30 +13,28 @@
 // (swift --node-log-path 参数还会传过来, 但 src 不接, 等于无操作)
 const NODE_LOG_ENABLED = false;
 
-// ── 阅读 3.0 书源执行器 ────────────────────────────────────────
-// ⚠️ 故意**不在这里 import**，改为在 /book/source 路由里动态 import()。
+// ── 可选功能的模块一律**延迟加载** ────────────────────────────
 //
-// 原因（吃了两次亏）：
-//   1. 不能用 `require('./book_source.js')`：本项目 package.json 是
-//      type=module，esbuild 会把内部模块编成 ESM，require() 拿到的是
-//      **空对象**（踩过：bs.bsSearch is not a function）。
-//   2. 也不该用顶层 `import`：那样 book_source.js（连带 book_rule.js、
-//      cheerio 全文解析器、node:vm）会在 **Node 启动时立即求值**。
-//      模块顶层任何一次抛错，都会让 Node 进程直接挂掉 ——
+// 教训（踩过两次）：
+//   1. 不能用 `require('./xxx.js')`：本项目 package.json 是 type=module，
+//      esbuild 会把内部模块编成 ESM，require() 拿到的是**空对象**
+//      （报 "xxx is not a function"，功能整个失效）。
+//   2. 也不该用顶层 `import`：那样模块（连带它的整个依赖树）会在
+//      **Node 启动时立即求值**，顶层任何一次抛错都会让 Node 进程挂掉 ——
 //      而 iOS 的 Node 和 App 是**同一个进程**，Node 崩 = App 闪退。
-//      表现就是"打开 App 正常，一加载源就闪退"。
 //
-// 书源是**可选功能**，不该有权在启动阶段拖垮整个 App。
-// 改成路由内 `await import()` 后：
-//   · esbuild 依然把它打包进 dist/main.js（不依赖运行时文件系统）
-//   · 但只有在真正请求 /book/source 时才求值 → 启动路径零风险
-//
-// 项目里 music_lx.js 本来就是这么做的（见 /music/lx 路由内的 require）。
-let bookSourceCache = null;
-async function getBookSource() {
-    if (bookSourceCache) return bookSourceCache;
-    bookSourceCache = await import('./book_source.js');
-    return bookSourceCache;
+// 所以：一律用「路由内 `await import()`」。
+//   · esbuild 依然会把它打包进 dist/main.js（不依赖运行时文件系统）
+//   · 但只在真正请求对应接口时才求值 → 启动路径零风险
+
+// ── 音乐数据源（公开接口，无需登录）───────────────────────────
+let musicSourceCache = null;
+
+/** 延迟加载音乐数据源（见上：只能用 await import()） */
+async function getMusicSource() {
+    if (musicSourceCache) return musicSourceCache;
+    musicSourceCache = await import('./music_source.js');
+    return musicSourceCache;
 }
 
 let nodeLogFile = null;
@@ -372,85 +370,30 @@ const mgmtServer = createServer((req, res) => {
         return;
     }
 
-    if (req.method === 'POST' && url.pathname === '/music/lx') {
-        // 落雪(LX)自定义音源：执行脚本里的 lx.on('request') handler。
-        // 沙箱在 music_lx.js，这里只负责收 body / 回 JSON。
+    if (req.method === 'POST' && url.pathname === '/music/api') {
+        // 音乐统一接口（公开接口，无需登录）
+        //   body: { action: 'search'|'url'|'lyric', keyword?, id?, limit?, offset?, quality? }
+        //
+        // 实现放在 music_source.js，用**延迟加载**（见文件头的说明）：
+        // 模块只在真正请求时才求值，避免它的顶层代码拖垮 Node 启动。
         let body = '';
         req.on('data', chunk => { body += chunk; });
         req.on('end', async () => {
             try {
                 const data = JSON.parse(body || '{}');
-                if (!data.script) {
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ ok: false, error: 'script is required' }));
-                    return;
-                }
-                const musicLx = require('./music_lx.js');
-                const r = await musicLx.handleMusicRequest({
-                    script: data.script,
-                    action: data.action,
-                    payload: data.payload || {},
-                });
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(r));
-            } catch (e) {
-                console.error('ERROR in /music/lx:', e && e.message);
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ ok: false, error: (e && e.message) || String(e) }));
-            }
-        });
-        return;
-    }
-
-    if (req.method === 'POST' && url.pathname === '/book/source') {
-        // 阅读 3.0 书源：搜索 / 详情 / 目录 / 正文。
-        // body: { action, source, keyword?, page?, bookUrl?, tocUrl?, chapterUrl? }
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', async () => {
-            try {
-                const data = JSON.parse(body || '{}');
-                if (!data.source) {
-                    res.writeHead(400, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ ok: false, error: 'source is required' }));
-                    return;
-                }
-                // 动态加载（见文件头说明）：模块只在真正用到时才求值，
-                // 它的任何初始化错误只会让这一次请求失败，不会拖垮 Node 进程。
-                const bs = await getBookSource();
-                let r;
-                switch (data.action) {
-                    case 'search':
-                        r = await bs.bsSearch({
-                            source: data.source,
-                            keyword: data.keyword || '',
-                            page: data.page || 1,
-                        });
-                        break;
-                    case 'info':
-                        r = await bs.bsBookInfo({ source: data.source, bookUrl: data.bookUrl || '' });
-                        break;
-                    case 'toc':
-                        r = await bs.bsToc({ source: data.source, tocUrl: data.tocUrl || '' });
-                        break;
-                    case 'content':
-                        r = await bs.bsContent({ source: data.source, chapterUrl: data.chapterUrl || '' });
-                        break;
-                    default:
-                        r = { ok: false, error: '未知 action: ' + data.action };
-                }
+                const musicSource = await getMusicSource();
+                const r = await musicSource.handleMusicApi(data);
                 res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
                 res.end(JSON.stringify(r));
             } catch (e) {
-                // 任何异常都只影响这一次请求：书源规则千奇百怪，解析失败是常态。
-                // 绝不能让它冒泡到进程级（Node 崩 = App 闪退）。
-                console.error('ERROR in /book/source:', (e && e.stack) || e);
+                console.error('ERROR in /music/api:', (e && e.stack) || e);
                 try {
                     res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-                    res.end(JSON.stringify({ ok: false, error: (e && e.message) || String(e) }));
-                } catch (_) {
-                    // 响应可能已经开始写出，忽略二次写入错误
-                }
+                    res.end(JSON.stringify({
+                        ok: false,
+                        error: '音乐接口异常：' + ((e && e.message) || String(e)),
+                    }));
+                } catch (_) { /* 响应已开始写出，忽略二次写入错误 */ }
             }
         });
         return;

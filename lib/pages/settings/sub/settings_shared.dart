@@ -25,7 +25,7 @@ class SettingsDialogs {
     return showModalBottomSheet<T>(
       context: context,
       backgroundColor: AppTheme.backgroundSecondary,
-      builder: (ctx) => SafeArea(
+      builder: (ctx) => kbSheet(SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -46,7 +46,7 @@ class SettingsDialogs {
               ),
           ],
         ),
-      ),
+      )),
     );
   }
 

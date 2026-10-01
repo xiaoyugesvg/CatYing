@@ -45,6 +45,21 @@ dependencies:
   # Remote Flutter Widgets：RFW 首页主题引擎（.rfwtxt 主题文件在运行时解析渲染）
   # 由 flutter.dev 官方维护，1.1.4 为近期版本，纯 Dart 实现无原生依赖
   rfw: ^1.1.4
+  gbk_codec: ^0.4.0
+  html: ^0.15.7
+  scrollable_positioned_list: ^0.3.8
+  photo_view: ^0.15.0
+  permission_handler: ^13.0.2
+  file_picker: ^13.1.0
+  flutter_pdfview: ^1.4.5
+  bonsoir: ^7.1.5
+  flutter_foreground_task: ^11.0.3
+  url_launcher: ^6.3.2
+  encrypt: ^5.0.3
+  flutter_cache_manager: ^3.4.5
+  flutter_staggered_grid_view: ^0.7.0
+  share_plus: ^13.3.0
+  cached_network_image: 3.3.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -67,6 +82,8 @@ flutter:
     - assets/nodejs-project/src/util/
     # Node.js 运行时的版本元信息（不内嵌 node.exe，启动时按需下载）
     - assets/nodejs-runtime/version.json
+    # 猫爪（猫咪）Logo：用于接口配置引导页主视觉
+    - assets/images/
 
 dependency_overrides:
   media_kit_libs_windows_video:

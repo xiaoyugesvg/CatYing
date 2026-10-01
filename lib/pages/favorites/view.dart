@@ -153,7 +153,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (ctx) => SafeArea(
+      builder: (ctx) => kbSheet(SafeArea(
         top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -190,7 +190,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 )),
           ],
         ),
-      ),
+      )),
     );
   }
 

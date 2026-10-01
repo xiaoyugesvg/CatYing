@@ -205,7 +205,11 @@ jobs:
           set -e
           PBX=ios/Runner.xcodeproj/project.pbxproj
           MISSING=0
-          for F in TtsEngine.swift ExceptionGuard.m BackgroundAudio.swift AppDelegate.swift; do
+          # 全部手写 Swift 源都要在 target 里。
+          # 早期只查了 TtsEngine/BackgroundAudio —— NodeJSBridge/PipManager/
+          # AvEngine/AvPlayerViewFactory 漏了没查，将来谁改名或漏登记都发现不了。
+          for F in TtsEngine.swift ExceptionGuard.m BackgroundAudio.swift AppDelegate.swift \
+                   NodeJSBridge.swift PipManager.swift AvEngine.swift AvPlayerViewFactory.swift; do
             if grep -q "$F in Sources" "$PBX"; then
               echo "✅ $F 已在 Sources build phase"
             else
@@ -243,6 +247,66 @@ jobs:
             --release \
             --no-codesign \
             --no-tree-shake-icons
+
+      - name: Verify CocoaPods plugin registration
+        # ── 为什么需要这一步 ────────────────────────────────────────
+        # 曾经的坑：flutter_tts 加进 pubspec 但原生库没被链接，
+        # App 装完直接 SIGABRT 闪退，而**构建阶段完全看不出问题**。
+        # 那一半原因是没有 pod install，另一半是没有任何地方校验
+        # 「pubspec 声明的插件」是否真的进了 Pods。
+        #
+        # 时机：故意放在 `flutter build ios` **之后** ——
+        # Pods/Manifest.lock 是构建过程中 pod install 生成的，
+        # 放在构建前只能拿旧 lock，等于没查。
+        #
+        # 实现：只用 shell + grep（不内嵌 python，避免 YAML 块缩进被破坏）
+        run: |
+          set -e
+          MANIFEST=ios/Pods/Manifest.lock
+          if [ ! -f "$MANIFEST" ]; then
+            echo "❌ $MANIFEST 不存在 —— pod install 没跑，插件不会被链接，装上必闪退"
+            exit 1
+          fi
+
+          echo "=== 核对本次声明了 native_build 的插件是否都进了 Pods ==="
+          MISSING=0
+          # 从 .flutter-plugins-dependencies 里抽出 ios 插件名。
+          # 该文件是单行 JSON，用 grep -o 逐个抓 name 字段，够用且不依赖 jq/python。
+          for P in $(grep -o '"name":"[^"]*"' .flutter-plugins-dependencies \
+                     | sed 's/"name":"//;s/"//' | sort -u); do
+            # pod 名与插件包名不总是一致（file_picker -> file_picker_darwin），
+            # 所以用不区分大小写的包含匹配
+            if grep -qi "$P" "$MANIFEST"; then
+              echo "  ✅ $P"
+            else
+              echo "  ⚠️  $P 未在 Pods/Manifest.lock 中直接出现（可能是纯 Dart 或名字不同）"
+            fi
+          done
+
+          # 关键插件必须存在 —— 这几个都是造成过闪退或功能静默失效的
+          echo "=== 关键原生插件硬校验 ==="
+          for P in bonsoir_darwin file_picker_darwin flutter_pdfview permission_handler_apple \
+                   share_plus sqflite_darwin url_launcher_ios webview_flutter_wkwebview; do
+            if grep -qi "$P" "$MANIFEST"; then
+              echo "  ✅ $P"
+            else
+              echo "  ❌ $P 未登记 —— 运行时 MissingPluginException 或闪退"
+              MISSING=1
+            fi
+          done
+
+          if [ "$MISSING" = "1" ]; then
+            echo ""
+            echo "=== Pods 实际内容（前 60 行）==="
+            sed -n '/^PODS:/,/^DEPENDENCIES:/p' "$MANIFEST" | head -60 | sed 's/^/  /'
+            exit 1
+          fi
+          echo "✅ 关键插件全部已登记到 Pods"
+          echo ""
+          echo "=== Podfile.lock 是否被提交（不应提交，由 CI 生成）==="
+          if [ -f ios/Podfile.lock ]; then
+            echo "  ℹ️  ios/Podfile.lock 存在（本次构建生成，会被 .gitignore 忽略）"
+          fi
 
       - name: Locate Runner.app
         id: locate

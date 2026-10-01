@@ -119,15 +119,21 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
         // ================= 服务 =================
         SettingsGroup(
           children: [
-            Obx(() => unifiedSwitchRow(
-                  icon: Icons.subtitles,
-                  title: '启用弹幕',
-                  value: _enabled,
-                  onChanged: (v) async {
-                    setState(() => _enabled = v);
-                    await _saveBool('danmu_enabled', v);
-                  },
-                )),
+            // ⚠️ 这里原来包了 Obx，但 `_enabled` 是普通 bool（本页用 setState 管理），
+            // Obx 内没有任何可观察变量 → GetX 抛
+            //   "[Get] the improper use of a GetX has been detected"
+            // 该异常会让整棵子树被 ErrorWidget 取代，而 ErrorWidget 的高度是
+            // **100000px** —— 整页变成一块巨大的空白卡（"长白板"的根因）。
+            // 本页是 StatefulWidget + setState，不需要 Obx。
+            unifiedSwitchRow(
+              icon: Icons.subtitles,
+              title: '启用弹幕',
+              value: _enabled,
+              onChanged: (v) async {
+                setState(() => _enabled = v);
+                await _saveBool('danmu_enabled', v);
+              },
+            ),
             unifiedSwitchRow(
               icon: Icons.video_settings,
               title: '优先使用视频返回弹幕数据',

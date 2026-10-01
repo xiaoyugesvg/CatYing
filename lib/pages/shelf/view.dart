@@ -423,7 +423,7 @@ class _ShelfPageState extends State<ShelfPage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (ctx) => SafeArea(
+      builder: (ctx) => kbSheet(SafeArea(
         top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -469,7 +469,7 @@ class _ShelfPageState extends State<ShelfPage> {
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 
@@ -535,7 +535,7 @@ class _ShelfPageState extends State<ShelfPage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (ctx) => SafeArea(
+      builder: (ctx) => kbSheet(SafeArea(
         top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -560,7 +560,7 @@ class _ShelfPageState extends State<ShelfPage> {
             const SizedBox(height: 12),
           ],
         ),
-      ),
+      )),
     );
     if (v == null) return;
     c.setFavSort(v);

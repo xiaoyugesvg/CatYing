@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'common_widgets.dart';
 import 'package:get/get.dart';
 import '../common/theme.dart';
 import '../models/source_bean.dart';
@@ -23,7 +24,7 @@ class SourceSwitchSheet extends StatefulWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => const SourceSwitchSheet(),
+      builder: (_) => kbSheet(const SourceSwitchSheet()),
     );
     return changed == true;
   }

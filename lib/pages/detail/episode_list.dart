@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../widgets/common_widgets.dart';
 import '../../common/theme.dart';
 
 /// 剧集列表组件 - 对应 Swift EpisodeListView
@@ -252,7 +253,7 @@ class _EpisodeListViewState extends State<EpisodeListView> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
+      builder: (ctx) => kbSheet(StatefulBuilder(
         builder: (ctx, setSheetState) => DraggableScrollableSheet(
         initialChildSize: 0.62,
         minChildSize: 0.4,
@@ -376,7 +377,7 @@ class _EpisodeListViewState extends State<EpisodeListView> {
           ),
         ),
       ),
-      ),
+      )),
     );
   }
 }

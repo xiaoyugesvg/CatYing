@@ -166,7 +166,7 @@ class _HistoryPageState extends State<HistoryPage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (ctx) => SafeArea(
+      builder: (ctx) => kbSheet(SafeArea(
         top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -203,7 +203,7 @@ class _HistoryPageState extends State<HistoryPage> {
                 )),
           ],
         ),
-      ),
+      )),
     );
   }
 

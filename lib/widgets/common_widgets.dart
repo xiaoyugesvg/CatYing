@@ -535,3 +535,66 @@ class SelectionModal<T> extends StatelessWidget {
     );
   }
 }
+
+// ============================================================
+// 键盘避让
+// ============================================================
+
+/// 底部安全内边距：**键盘弹起时等于键盘高度**，否则等于系统底部安全区。
+///
+/// ── 为什么需要它 ──────────────────────────────────────────────
+/// `showModalBottomSheet(isScrollControlled: true)` 的 sheet 是**自己控制高度**的，
+/// Flutter 不会替它避让键盘 —— 键盘是从屏幕底部滑上来的，直接盖在 sheet 上，
+/// 于是"输入框被挡住、看不见自己打的字"。
+///
+/// 给 sheet 根节点加 `EdgeInsets.only(bottom: bottomSheetKeyboardInset(context))`
+/// 即可让整块内容抬高到键盘之上。
+///
+/// 注意用 `viewInsets` 而不是 `viewPadding`：后者是刘海/Home 条这类**固定**遮挡，
+/// 不会因键盘变化；前者才是键盘。
+double bottomSheetKeyboardInset(BuildContext context) {
+  final mq = MediaQuery.of(context);
+  final keyboard = mq.viewInsets.bottom;
+  // 键盘没有时不要清零 —— 否则 sheet 会贴到 Home 指示条上，
+  // 底部按钮按不到。所以键盘为 0 时退回系统安全区。
+  return keyboard > 0 ? keyboard : mq.padding.bottom;
+}
+
+/// 把 [child] 包一层键盘避让（给 bottom sheet 用）。
+///
+/// [extraBottom] 用于在避让之外再加一点呼吸间距，默认 12。
+Widget keyboardAwareSheet({
+  Key? key,
+  required BuildContext context,
+  required Widget child,
+  double extraBottom = 12,
+  double extraTop = 0,
+}) {
+  return Padding(
+    key: key,
+    padding: EdgeInsets.only(
+      bottom: bottomSheetKeyboardInset(context) + extraBottom,
+      top: extraTop,
+    ),
+    child: child,
+  );
+}
+
+/// 给 modal bottom sheet 的 builder 结果套键盘避让。
+///
+/// 用法：把 `showModalBottomSheet(context: c, builder: (ctx) => Foo())`
+/// 改成 `builder: (ctx) => kbSheet(Foo())`。
+///
+/// ── 为什么在 builder 层做，而不是改每个 sheet 内部 ──────────────
+/// 全项目 23 个 bottom sheet，根节点有 SafeArea / Container / ListView /
+/// AlertDialog 各种写法，逐个改内部结构既费时又容易把布局改坏。
+/// 统一在 builder 外面包一层 `Padding(bottom: 键盘高度)` 是**纯位移**：
+///   · 不改尺寸 → 不触发 overflow
+///   · 键盘收起时 bottom = 系统安全区 → 视觉无变化
+///   · 键盘弹起时整体抬高 → 输入框不再被挡
+Widget kbSheet(Widget child) => Builder(
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: bottomSheetKeyboardInset(ctx)),
+        child: child,
+      ),
+    );

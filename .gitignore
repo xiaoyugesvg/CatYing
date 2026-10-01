@@ -165,3 +165,7 @@ build/
 /ANGLE.7z
 
 test*
+# CocoaPods lock：本项目由 CI 在 macOS 上跑 pod install 生成。
+# 不要提交它 —— 之前提交的那份是从别的项目变体抄来的（锁了 16 个无关 pod、
+# 缺 4 个新插件），会误导 pod install 装错依赖版本。
+ios/Podfile.lock

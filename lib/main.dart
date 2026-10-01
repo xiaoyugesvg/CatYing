@@ -18,10 +18,25 @@ import 'services/app_state.dart';
 import 'services/background_service.dart';
 import 'services/epg_service.dart';
 import 'services/live_service.dart';
-import 'services/book_service.dart';
-import 'services/tts_service.dart';
-import 'services/music_service.dart';
-import 'pages/music/player_controller.dart';
+import 'reading/services/book_download_service.dart';
+import 'reading/services/book_font_service.dart';
+import 'reading/services/settings_service.dart';
+import 'reading/services/reader_override_service.dart';
+import 'reading/services/bookshelf_service.dart';
+import 'reading/services/book_reading_progress_service.dart';
+import 'reading/services/tts_service.dart';
+import 'music/services/settings_store.dart';
+import 'music/services/player_manager.dart';
+import 'music/theme/music_theme.dart';
+import 'reading/services/book_favorites_service.dart';
+import 'reading/services/favorites_service.dart';
+import 'reading/services/browse_history_service.dart';
+import 'reading/services/download_service.dart';
+import 'reading/services/reading_progress_service.dart';
+import 'reading/services/trim_preset_service.dart';
+import 'reading/services/view_mode.dart';
+import 'reading/services/book_view_mode.dart';
+import 'reading/source/source_manager.dart';
 import 'services/player_prefs.dart';
 import 'services/rfw_theme_service.dart';
 import 'services/tmdb_service.dart';
@@ -63,16 +78,45 @@ void main() async {
   // 注册 TvSearchController 为永久实例 - 避免在 SearchPage 中 Get.put 创建新实例替换
   Get.put<TvSearchController>(TvSearchController(), permanent: true);
 
-  // 语音朗读（听书）
+  // 阅读模块 —— 完整移植 cmbok_app
+  //
+  // 这里的初始化顺序**严格对齐 cmbok 的 main()**：
+  // 书架/收藏/历史/进度之间会在 init 里互相查询（例如书架要为已下载的书
+  // 回填收藏角标），顺序错了会出现"首次启动状态丢失"。改动前先看 cmbok。
+  //
+  // 注意：RemoteConfigService / ZlibraryService 依赖服务端配置与账号，
+  // 本项目不做账号，这两项**故意不初始化**（对应页面也不会被导航到）。
+  await SettingsService().init();
+  await ReaderOverrideService().init();
+  await BookFontService().init();
+  await SourceManager().init();
+  await ViewMode().init();
+  await BookViewMode().init();
+  await FavoritesService().init();
+  await BookFavoritesService().init();
+  await BrowseHistoryService().init();
+  await BookshelfService().init();
+  await DownloadService().init();
+  await TrimPresetService().init();
+  await ReadingProgressService().init();
+  await BookReadingProgressService().init();
+  await BookDownloadService().init();
+  // 听书：走原生 tts_engine channel（系统 AVSpeechSynthesizer，零插件）
   Get.put<TtsService>(TtsService(), permanent: true);
 
-  // 阅读 3.0 书源
-  await BookService.instance.load();
-
-  // 音乐音源（通用 HTTP 协议）
-  await MusicService.instance.load();
-  // 音乐播放器（media_kit 音频，跨页面共享）
-  Get.put<MusicPlayerController>(MusicPlayerController(), permanent: true);
+  // 音乐模块 —— 按 Beans-Music 的结构重建（与影视侧完全独立）
+  //
+  //   · MusicPlayerManager  播放核心（media_kit，复用已有依赖，零新增插件）
+  //   · SettingsStore       音质 / 音源开关等偏好
+  //   · MusicThemeStore     明暗 + 9 种强调色（音乐模块自己的主题体系）
+  //   · MusicPlayerSkin     封面形态 / 背景氛围
+  //
+  // 顺序：SettingsStore.init 里连带初始化 ThirdPartySourceStore（音源列表），
+  // 所以它要排在主题之前，保证首帧就有正确的强调色与音源数据。
+  await SettingsStore.instance.init();
+  await MusicThemeStore.instance.init();
+  await MusicPlayerSkin.instance.init();
+  await MusicPlayerManager.instance.init();
 
   // 首页导航栏功能开关与顺序（设置 → 主页页面）
   await NavFeatureService.instance.load();

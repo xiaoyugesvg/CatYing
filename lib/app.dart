@@ -12,8 +12,10 @@ import 'pages/home/view.dart';
 import 'pages/shelf/view.dart';
 import 'services/nav_feature_service.dart';
 import 'pages/live/view.dart';
-import 'pages/book/view.dart';
-import 'pages/music/home_page.dart';
+// cmbok 的 App 骨架入口也叫 HomePage，与影视侧 pages/home/view.dart 的
+// HomePage 重名，所以用前缀导入避免歧义。
+import 'reading/pages/home_page.dart' as reading_app;
+import 'music/pages/root_view.dart';
 import 'pages/settings/view.dart';
 import 'pages/search/view.dart';
 import 'pages/search/controller.dart';
@@ -330,8 +332,15 @@ class _ContentViewState extends State<ContentView>
         ),
         child: SafeArea(
         child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 30),
+          // 键盘避让：这一页中间有个接口地址输入框，键盘弹起时若不抬高，
+          // 输入框会被键盘盖住（用户看不到自己在打什么）。
+          // 用 viewInsets（键盘）而不是 padding（刘海/Home 条）。
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 30),
             child: Column(
               children: [
                 const SizedBox(height: 60),
@@ -354,10 +363,19 @@ class _ContentViewState extends State<ContentView>
                       ),
                     ],
                   ),
-                  child: const Icon(
-                    Icons.play_circle_filled,
-                    size: 50,
-                    color: Colors.white,
+                  // 猫猫 Logo（取自 App 图标）。
+                  // 外圈保留原来的强调色渐变圆环 + 光晕，中间放猫猫 ——
+                  // 直接铺满整圆会丢掉原来的"发光圆钮"观感。
+                  child: ClipOval(
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: ClipOval(
+                        child: Image.asset(
+                          'assets/images/cat_logo.png',
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: AppTheme.spacingXL),
@@ -589,7 +607,8 @@ class _ContentViewState extends State<ContentView>
                   ),
                 ],
                 const SizedBox(height: 50),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -660,10 +679,12 @@ class _ContentViewState extends State<ContentView>
     const SettingsPage(),
     // 直播作为第 5 个 tab（选中才高亮，修复"首页+直播同时高亮"）
     const LivePage(),
-    // 音乐（索引 5）
-    const MusicHomePage(),
-    // 阅读（索引 6）
-    const BookShelfPage(),
+    // 音乐（索引 5）—— 按 Beans-Music 的 4-tab 结构重绘
+    // （主页/搜索/音乐库/我的 + 迷你播放器 + 全屏播放器）
+    const MusicRootView(),
+    // 阅读（索引 6）—— 完整移植 cmbok_app 的 5-tab 应用
+    // （漫画 / 图书 / 书架 / 收藏 / 我的），内含它自己的导航栏与主题体系
+    const reading_app.HomePage(),
   ];
 
   Widget _buildMainTabView() {
