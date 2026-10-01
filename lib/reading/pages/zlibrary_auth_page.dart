@@ -25,6 +25,14 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
 
   // 登录表单
   final _emailCtrl = TextEditingController();
+
+  /// Z-Library 服务器地址。
+  ///
+  /// ⚠️ 为什么必须有这一项：cmbok 的域名是**云端配置下发**的
+  /// （`RemoteConfigService.cloudZlibraryUrl`），猫影没有那个服务，
+  /// 所以地址为空时所有图书接口都不可用（会报"图书功能暂不可用"）。
+  /// 用户必须自己填一个可用镜像地址。
+  final _domainCtrl = TextEditingController();
   final _pwdCtrl = TextEditingController();
   bool _obscureLogin = true;
   String? _loginError;
@@ -61,6 +69,8 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
       duration: const Duration(seconds: 12),
     )..repeat();
     _loadLoginHistory();
+    // 回填已保存的服务器地址（没有就是空的，用户得自己填）
+    _domainCtrl.text = ZlibraryService().domain;
   }
 
   Future<void> _loadLoginHistory() async {
@@ -75,6 +85,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
     _removeEmailOverlay();
     _pwdFocus.dispose();
     _emailCtrl.dispose();
+    _domainCtrl.dispose();
     _pwdCtrl.dispose();
     _regEmailCtrl.dispose();
     _regPwdCtrl.dispose();
@@ -92,6 +103,19 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
       setState(() => _loginError = '请输入邮箱和密码');
       return;
     }
+    // 没配服务器地址时登录必然失败 —— 提前拦住并说清原因，
+    // 否则用户只会看到"登录失败，请检查邮箱与密码"，方向完全错了
+    final domain = _domainCtrl.text.trim();
+    if (domain.isEmpty) {
+      setState(() => _loginError = '请先填写 Z-Library 服务器地址');
+      return;
+    }
+    final domainOk = await ZlibraryService().setDomain(domain);
+    if (!domainOk) {
+      setState(() => _loginError = '服务器地址格式不对，应形如 zh.zlibrary.by');
+      return;
+    }
+
     setState(() => _loginError = null);
     final ok = await ZlibraryService().login(email, pwd);
     if (!mounted) return;
@@ -543,6 +567,8 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
       key: const ValueKey('login'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        StaggeredEntrance(index: 0, child: _buildDomainCard(isDark)),
+        const SizedBox(height: 14),
         StaggeredEntrance(index: 0, child: _buildBenefitsCard(isDark)),
         const SizedBox(height: 16),
         StaggeredEntrance(
@@ -871,6 +897,106 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
         ),
       ),
     );
+  }
+
+  /// 服务器地址卡片（登录前置条件）。
+  ///
+  /// 独立的卡片而不是塞进表单里，因为它是**基础设施配置**而非账号信息，
+  /// 且需要"测试连接"按钮来区分"地址错"和"账号错"。
+  Widget _buildDomainCard(bool isDark) {
+    final svc = ZlibraryService();
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.05)
+            : Colors.black.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: JellyTheme.primary.withValues(alpha: 0.25),
+          width: 0.8,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.dns_outlined, size: 16, color: JellyTheme.primary),
+              const SizedBox(width: 6),
+              Text(
+                '服务器地址',
+                style: TextStyle(
+                  color: JellyTheme.textPrimaryLight,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              if (svc.hasDomain)
+                Row(
+                  children: [
+                    Icon(Icons.check_circle,
+                        size: 13, color: JellyTheme.success),
+                    const SizedBox(width: 3),
+                    Text('已配置',
+                        style: TextStyle(
+                            color: JellyTheme.success, fontSize: 11)),
+                  ],
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _flatField(
+            _domainCtrl,
+            '如 zh.zlibrary.by（不要带 https://）',
+            icon: Icons.link_rounded,
+            keyboardType: TextInputType.url,
+            suffix: IconButton(
+              icon: const Icon(Icons.wifi_tethering_rounded, size: 20),
+              tooltip: '测试连接',
+              color: JellyTheme.primary,
+              onPressed: _testDomain,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            svc.hasDomain
+                ? '当前使用：${svc.domain}'
+                : '未配置时图书搜索/详情/下载都不可用（需要你自己填一个可用镜像）',
+            style: TextStyle(
+              color: svc.hasDomain
+                  ? JellyTheme.textSecondary
+                  : JellyTheme.warning,
+              fontSize: 11,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 测试连接：只验地址可达，不验账号 ——
+  /// 目的是让用户能区分"地址填错了"和"账号密码错了"。
+  Future<void> _testDomain() async {
+    final raw = _domainCtrl.text.trim();
+    if (raw.isEmpty) {
+      setState(() => _loginError = '请先填写服务器地址');
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(
+      content: Text('正在测试连接…'),
+      duration: Duration(seconds: 1),
+    ));
+    final r = await ZlibraryService().probeDomain(raw);
+    if (!mounted) return;
+    setState(() {
+      _loginError = r.ok ? null : r.message;
+      if (r.ok) _domainCtrl.text = ZlibraryService().domain;
+    });
+    messenger.showSnackBar(SnackBar(content: Text(r.message)));
   }
 }
 

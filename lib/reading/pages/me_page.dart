@@ -1,22 +1,13 @@
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
-import '../services/platform_service.dart';
 import '../services/settings_service.dart';
 import '../services/theme_switch.dart';
-import '../services/update_service.dart';
 import '../theme/jelly_palette.dart';
 import '../theme/jelly_theme.dart';
-import '../utils/constants.dart';
 import '../widgets/bookshelf_icon.dart';
 import '../widgets/jelly_nav_bar.dart';
 import '../widgets/staggered_entrance.dart';
-import '../widgets/update_dialog.dart';
-import 'about_page.dart';
 import 'book_search_page.dart';
 import 'bookshelf_page.dart';
 import 'browse_history_page.dart';
@@ -27,6 +18,7 @@ import 'download_settings_page.dart';
 import 'favorites_page.dart';
 import 'reading_settings_page.dart';
 import 'search_page.dart';
+import 'book_source_repo_page.dart';
 import 'source_repo_page.dart';
 
 /// "我的"页：菜单（下载设置等）+ 右上角暗色模式切换 + 版本信息
@@ -66,7 +58,6 @@ class _MePageState extends State<MePage> {
               t != NavTab.me && !SettingsService().visibleNavTabs.contains(t),
         )
         .toList();
-    final hc = hiddenTabs.length;
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: SafeArea(
@@ -129,26 +120,6 @@ class _MePageState extends State<MePage> {
                             subtitle: '关闭后需登录才能下载',
                             value: SettingsService().useBuiltinAccount,
                             onChanged: SettingsService().setUseBuiltinAccount,
-                          ),
-                        ),
-                      ),
-                    ),
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_1'),
-                      index: 1,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: ListenableBuilder(
-                          listenable: SettingsService(),
-                          builder: (context, _) => _buildSwitchTile(
-                            isDark,
-                            icon: Icons.system_update_rounded,
-                            iconBg: JellyTheme.primary,
-                            title: '启动检查更新',
-                            subtitle: '仅新版本才弹窗提示',
-                            value: SettingsService().checkUpdateOnStartup,
-                            onChanged:
-                                SettingsService().setCheckUpdateOnStartup,
                           ),
                         ),
                       ),
@@ -233,7 +204,8 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 漫画源仓库（启用/禁用源 + 云端配置）
+                    // 漫画源仓库 —— 服务**漫画**（SiteConfig 网页源，取图片）
+                    // 与下面的「书源仓库」是两个独立体系，别合并
                     StaggeredEntrance(
                       key: ValueKey('${_session}_source_repo'),
                       index: 6,
@@ -244,11 +216,37 @@ class _MePageState extends State<MePage> {
                           icon: Icons.source_rounded,
                           iconBg: JellyTheme.primary,
                           title: '漫画源仓库',
-                          subtitle: '启用源 · 云端配置',
+                          subtitle: '漫画源 · 导入 · 云端配置',
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
                               builder: (_) => const SourceRepoPage(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // 小说书源仓库 —— 服务**小说**（Legado BookSource，取文字）
+                    //
+                    // 与「漫画源仓库」是**两套独立体系**：
+                    //   漫画源 = SiteConfig（取图片）
+                    //   书源   = Legado BookSource（取文字，一个 JSON 描述一个小说站）
+                    // 老桌面版也是分开的两项，这里保持一致。
+                    StaggeredEntrance(
+                      key: ValueKey('${_session}_book_source_repo'),
+                      index: 6,
+                      child: SizedBox(
+                        width: itemWidth,
+                        child: _buildMenuItem(
+                          isDark,
+                          icon: Icons.library_books_rounded,
+                          iconBg: JellyTheme.primary,
+                          title: '书源仓库',
+                          subtitle: '小说源 · 导入 · 排序',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const BookSourceRepoPage(),
                             ),
                           ),
                         ),
@@ -329,111 +327,11 @@ class _MePageState extends State<MePage> {
                           child: _buildHiddenTabItem(isDark, hiddenTabs[i]),
                         ),
                       ),
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_6'),
-                      index: 9 + hc,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.update_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '检查更新',
-                          subtitle: '获取 GitHub 最新版本',
-                          onTap: _checkUpdate,
-                        ),
-                      ),
-                    ),
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_7'),
-                      index: 10 + hc,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.info_outline_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '关于',
-                          subtitle: '免责声明',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const AboutPage(),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
                   ],
                 );
               },
             ),
-            // 底部快捷区：GitHub / QQ群 / 分享软件（图标 + 文字）
-            Padding(
-              padding: const EdgeInsets.only(top: 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  StaggeredEntrance(
-                    key: ValueKey('${_session}_8'),
-                    index: 10 + hc,
-                    child: _buildQuickAction(
-                      isDark
-                          ? 'assets/icons/github_dark.png'
-                          : 'assets/icons/github.png',
-                      Icons.code_rounded,
-                      'GitHub',
-                      () => _launchUrl(AppConstants.githubUrl),
-                    ),
-                  ),
-                  StaggeredEntrance(
-                    key: ValueKey('${_session}_9'),
-                    index: 11 + hc,
-                    child: _buildQuickAction(
-                      'assets/icons/qq.png',
-                      Icons.group_rounded,
-                      'QQ群',
-                      _openQqGroup,
-                    ),
-                  ),
-                  StaggeredEntrance(
-                    key: ValueKey('${_session}_10'),
-                    index: 12 + hc,
-                    child: _buildQuickAction(
-                      'assets/icons/tt-station.png',
-                      Icons.language_rounded,
-                      '甜甜的小站',
-                      () => _launchUrl(AppConstants.blogUrl),
-                    ),
-                  ),
-                  StaggeredEntrance(
-                    key: ValueKey('${_session}_11'),
-                    index: 13 + hc,
-                    child: _buildQuickAction(
-                      'assets/icons/share.png',
-                      Icons.share_rounded,
-                      '分享软件',
-                      _shareApp,
-                    ),
-                  ),
-                ],
-              ),
-            ),
             const SizedBox(height: 12),
-            StaggeredEntrance(
-              key: ValueKey('${_session}_12'),
-              index: 14 + hc,
-              child: Center(
-                child: Text(
-                  '当前版本：${AppConstants.appName} V${AppConstants.version}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: JellyTheme.textSecondary,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -490,146 +388,16 @@ class _MePageState extends State<MePage> {
 
   // -------------------- 检查更新 --------------------
 
-  Future<void> _checkUpdate() async {
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) =>
-          Center(child: CircularProgressIndicator(color: JellyTheme.primary)),
-    );
-    final result = await UpdateService.check();
-    if (!mounted) return;
-    Navigator.of(context).pop(); // 关闭 loading
-
-    if (result.error != null) {
-      _toast(result.error!);
-      return;
-    }
-    if (!result.hasUpdate) {
-      _toast('已是最新版本 V${AppConstants.version}');
-      return;
-    }
-    showUpdateAvailableDialog(context, result);
-  }
 
   // -------------------- 分享软件 --------------------
 
-  Future<void> _shareApp() async {
-    final apkPath = await PlatformService.getApkPath();
-    File? tmp;
-    if (apkPath != null && await File(apkPath).exists()) {
-      if (!mounted) return;
-      // 复制到缓存目录（确保 share_plus 的 FileProvider 可访问）
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) =>
-            Center(child: CircularProgressIndicator(color: JellyTheme.primary)),
-      );
-      try {
-        final tmpDir = await getTemporaryDirectory();
-        tmp = File(
-          '${tmpDir.path}/${AppConstants.appName}_V${AppConstants.version}.apk',
-        );
-        await tmp.writeAsBytes(await File(apkPath).readAsBytes(), flush: true);
-      } catch (_) {
-        tmp = null;
-      }
-      if (!mounted) return;
-      Navigator.of(context).pop(); // 关闭 loading
-    }
-    if (!mounted) return;
-
-    if (tmp != null && await tmp.exists()) {
-      await Share.shareXFiles([
-        XFile(tmp.path),
-      ], subject: '${AppConstants.appName} V${AppConstants.version}');
-    } else {
-      await Share.share(
-        '${AppConstants.appName} V${AppConstants.version} 下载地址：${AppConstants.shareUrl}',
-      );
-    }
-  }
 
   // -------------------- 通用 --------------------
 
-  Future<void> _launchUrl(String url) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null) {
-      _toast('链接无效');
-      return;
-    }
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok) _toast('无法打开链接');
-  }
 
-  void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(msg),
-          duration: const Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-  }
 
   /// 打开 QQ 群名片（带加入按钮）；未安装 QQ 则复制群号
-  Future<void> _openQqGroup() async {
-    final uri = Uri.parse(
-      'mqqapi://card/show_pslcard?src_type=internal&version=1&card_type=group&source=qrcode&uin=${AppConstants.qqGroupNumber}',
-    );
-    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!launched) {
-      await Clipboard.setData(ClipboardData(text: AppConstants.qqGroupNumber));
-      _toast('未检测到QQ，已复制群号 ${AppConstants.qqGroupNumber}');
-    }
-  }
 
-  /// 底部快捷区项：图标（assets/icons 彩色图标，缺省回退 Material 图标） + 文字
-  Widget _buildQuickAction(
-    String asset,
-    IconData fallbackIcon,
-    String label,
-    VoidCallback onTap,
-  ) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: JellyTheme.primary.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Center(
-                child: Image.asset(
-                  asset,
-                  width: 24,
-                  height: 24,
-                  errorBuilder: (_, _, _) =>
-                      Icon(fallbackIcon, color: JellyTheme.primary, size: 22),
-                ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: TextStyle(fontSize: 12, color: JellyTheme.textSecondary),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _buildMenuItem(
     bool isDark, {
@@ -709,9 +477,7 @@ class _MePageState extends State<MePage> {
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (sheetCtx) {
-        return SafeArea(
-          top: false,
-          child: StatefulBuilder(
+        return StatefulBuilder(
           builder: (sheetCtx, setSheetState) {
             final isDark = Theme.of(sheetCtx).brightness == Brightness.dark;
             final switching = _switchingTo != null;
@@ -926,7 +692,6 @@ class _MePageState extends State<MePage> {
               },
             );
           },
-        ),
         );
       },
     );

@@ -63,10 +63,15 @@ class _LibraryPageState extends State<LibraryPage>
     if (_loading) {
       return Center(child: CircularProgressIndicator(color: MusicTheme.tint));
     }
-    return RefreshIndicator(
-      color: MusicTheme.tint,
-      onRefresh: _load,
-      child: ListView(
+    // ⚠️ 必须包 SafeArea(top)：列表第一项"音乐库"标题原来紧贴状态栏，
+    // 在刘海机上会被状态栏文字/时间压住（用户实测反馈）。
+    // bottom: false —— 底部导航栏自己有 SafeArea，这里再来一层会多留白。
+    return SafeArea(
+      bottom: false,
+      child: RefreshIndicator(
+        color: MusicTheme.tint,
+        onRefresh: _load,
+        child: ListView(
         padding: const EdgeInsets.only(bottom: 160),
         children: [
           Padding(
@@ -94,8 +99,9 @@ class _LibraryPageState extends State<LibraryPage>
                       size: 18, color: MusicTheme.secondary),
                   onTap: () => openPlaylist(context, t.id, t.name),
                 )),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

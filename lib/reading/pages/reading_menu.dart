@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../../widgets/common_widgets.dart';
 
 import '../theme/jelly_theme.dart';
-import 'about_page.dart';
 import 'display_settings_page.dart';
 import 'reading_settings_page.dart';
 
@@ -13,6 +12,11 @@ import 'reading_settings_page.dart';
 /// `update_service` / `url_launcher`（原生插件）—— 本项目按硬约束
 /// **没有引入**，所以不移植它。
 /// 阅读相关的设置改成从**书架右上角**进，路径更短也更贴合使用场景。
+///
+/// ⚠️ 按用户要求**去掉了「关于」入口**：
+/// 原 cmbok 的「我的」页里还有 分享软件 / 检查更新 / 启动检查更新 /
+/// GitHub / QQ群 / 甜甜的小站 等一堆外链，那些是原作者的推广与自更新通道，
+/// 在猫影里没有意义（反而会跳转到别人的仓库/群），已全部移除。
 Future<void> showReadingMenu(BuildContext context) {
   return showModalBottomSheet<void>(
     context: context,
@@ -46,13 +50,6 @@ Future<void> showReadingMenu(BuildContext context) {
             title: '显示设置',
             subtitle: '书架布局 / 导航栏 / 默认内容',
             page: () => const DisplaySettingsPage(),
-          ),
-          _item(
-            ctx,
-            icon: Icons.info_outline,
-            title: '关于',
-            subtitle: '版本与说明',
-            page: () => const AboutPage(),
           ),
           const SizedBox(height: 8),
         ],

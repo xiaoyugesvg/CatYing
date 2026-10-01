@@ -252,14 +252,19 @@ jobs:
         # ── 为什么需要这一步 ────────────────────────────────────────
         # 曾经的坑：flutter_tts 加进 pubspec 但原生库没被链接，
         # App 装完直接 SIGABRT 闪退，而**构建阶段完全看不出问题**。
-        # 那一半原因是没有 pod install，另一半是没有任何地方校验
+        # 这一半原因是没有 pod install，另一半是没有任何地方校验
         # 「pubspec 声明的插件」是否真的进了 Pods。
         #
         # 时机：故意放在 `flutter build ios` **之后** ——
         # Pods/Manifest.lock 是构建过程中 pod install 生成的，
         # 放在构建前只能拿旧 lock，等于没查。
         #
-        # 实现：只用 shell + grep（不内嵌 python，避免 YAML 块缩进被破坏）
+        # ── 关于噪声（第一版写得太吵，已修）────────────────────────
+        # `.flutter-plugins-dependencies` 会列出**所有平台**的插件，
+        # 包括 `*_android` / `*_linux` / `*_windows` / `*_web` ——
+        # 那些**本来就不该**出现在 iOS 的 Pods 里。
+        # 第一版把它们全打出来，满屏 ⚠️，真正的问题反而被淹没。
+        # 现在用排除法：去掉平台后缀后若父插件在 Pods 中，就认定"不需要 iOS pod"。
         run: |
           set -e
           MANIFEST=ios/Pods/Manifest.lock
@@ -268,22 +273,40 @@ jobs:
             exit 1
           fi
 
-          echo "=== 核对本次声明了 native_build 的插件是否都进了 Pods ==="
+          # 非 iOS 平台后缀：这些插件在当前平台不需要 pod
+          NON_IOS='_android|_linux|_windows|_web'
+
+          echo "=== 核对需要 iOS pod 的插件是否都已登记 ==="
           MISSING=0
-          # 从 .flutter-plugins-dependencies 里抽出 ios 插件名。
-          # 该文件是单行 JSON，用 grep -o 逐个抓 name 字段，够用且不依赖 jq/python。
-          for P in $(grep -o '"name":"[^"]*"' .flutter-plugins-dependencies \
-                     | sed 's/"name":"//;s/"//' | sort -u); do
-            # pod 名与插件包名不总是一致（file_picker -> file_picker_darwin），
-            # 所以用不区分大小写的包含匹配
+          while read -r P; do
+            [ -z "$P" ] && continue
+            # 已在 Pods 里 → 通过
             if grep -qi "$P" "$MANIFEST"; then
               echo "  ✅ $P"
-            else
-              echo "  ⚠️  $P 未在 Pods/Manifest.lock 中直接出现（可能是纯 Dart 或名字不同）"
+              continue
             fi
-          done
+            # 非 iOS 平台插件 → 跳过（不该出现，不是问题）
+            if echo "$P" | grep -qE "$NON_IOS"; then
+              continue
+            fi
+            # 跨平台插件的父包在 Pods 里 → 该平台版无需 pod
+            PARENT=$(echo "$P" | sed -E 's/_(android|linux|windows|web|macos|ios|darwin|foundation|apple)$//')
+            if [ "$PARENT" != "$P" ] && grep -qi "$PARENT" "$MANIFEST"; then
+              echo "  ✅ $P（父包 $PARENT 已登记）"
+              continue
+            fi
+            # 纯 Dart 包（无 podspec）→ 给个明确说明，不算失败
+            if grep -q "path_provider\|window_manager\|screen_retriever\|jni\|path\b" <<< "$P"; then
+              echo "  ℹ️  $P 不需要 iOS pod（纯 Dart / FFI）"
+              continue
+            fi
+            echo "  ❌ $P 未登记到 Pods —— 运行时 MissingPluginException 或闪退"
+            MISSING=1
+          done < <(grep -o '"name":"[^"]*"' .flutter-plugins-dependencies \
+                   | sed 's/"name":"//;s/"//' | sort -u)
 
-          # 关键插件必须存在 —— 这几个都是造成过闪退或功能静默失效的
+          # ── 关键插件硬校验（这几个造成过闪退或功能静默失效）──
+          echo ""
           echo "=== 关键原生插件硬校验 ==="
           for P in bonsoir_darwin file_picker_darwin flutter_pdfview permission_handler_apple \
                    share_plus sqflite_darwin url_launcher_ios webview_flutter_wkwebview; do
@@ -301,12 +324,8 @@ jobs:
             sed -n '/^PODS:/,/^DEPENDENCIES:/p' "$MANIFEST" | head -60 | sed 's/^/  /'
             exit 1
           fi
-          echo "✅ 关键插件全部已登记到 Pods"
           echo ""
-          echo "=== Podfile.lock 是否被提交（不应提交，由 CI 生成）==="
-          if [ -f ios/Podfile.lock ]; then
-            echo "  ℹ️  ios/Podfile.lock 存在（本次构建生成，会被 .gitignore 忽略）"
-          fi
+          echo "✅ 插件全部已登记到 Pods（pod install 正常，原生库已链接）"
 
       - name: Locate Runner.app
         id: locate

@@ -194,7 +194,11 @@ class MusicPlayerManager extends ChangeNotifier {
     var quality = '';
     var fromSource = '';
 
-    final r = await MusicApi.instance.songUrl(song.id);
+    // ⚠️ 必须把用户在设置里选的音质传过去。
+    // 之前是 `songUrl(song.id)` —— 它会退到默认 exhigh(320K)，
+    // 于是"音质"设置能选能存却**从未生效**（典型的假设置）。
+    final wantQuality = SettingsStore.instance.audioQuality.value;
+    final r = await MusicApi.instance.songUrl(song.id, quality: wantQuality);
     if (r.ok && r.url.isNotEmpty) {
       url = r.url;
       quality = r.qualityText;

@@ -126,7 +126,11 @@ class _DiscoverPageState extends State<DiscoverPage>
                     ? '下午好'
                     : '晚上好';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      // ⚠️ 顶部内边距必须 ≥ 状态栏高度，否则问候语会被状态栏盖住。
+      // 这里直接用 viewPadding.top 而不是硬编码数字 —— 刘海机/非刘海机
+      // 高度不同，硬编码必然在其中一种上出错。
+      padding: EdgeInsets.fromLTRB(
+          16, MediaQuery.viewPaddingOf(context).top + 8, 16, 4),
       child: Row(
         children: [
           Expanded(

@@ -120,6 +120,78 @@ class ZlibraryService extends ChangeNotifier {
   bool _quotaExceeded = false;
 
   String get domain => _domain;
+
+  /// 是否已经配置了可用的服务器地址。
+  ///
+  /// 为什么要这个判断：cmbok 的域名来自**云端配置下发**
+  /// （`RemoteConfigService.cloudZlibraryUrl`），猫影没有那个服务，
+  /// 所以首次使用时 `_domain` 是空的 —— 此时所有图书接口都不可用。
+  /// 用户必须自己填一个地址才能用（见 `zlibrary_auth_page` 的服务器设置）。
+  bool get hasDomain => _domain.trim().isNotEmpty;
+
+  /// 手动设置 Z-Library 服务器地址。
+  ///
+  /// 接受多种写法：`zh.zlibrary.by` / `https://zh.zlibrary.by/` /
+  /// `https://zh.zlibrary.by/somepath` —— 统一归一化成 `host` 形式
+  /// （服务内部拼 URL 时用 `https://$_domain$path`）。
+  ///
+  /// 传空字符串 = 清除（回到"未配置"状态）。
+  Future<bool> setDomain(String raw) async {
+    var s = raw.trim();
+    if (s.isEmpty) {
+      _domain = '';
+      await _persistDomain();
+      notifyListeners();
+      return true;
+    }
+    // 去掉 scheme
+    if (s.startsWith('http://')) {
+      s = s.substring('http://'.length);
+    } else if (s.startsWith('https://')) {
+      s = s.substring('https://'.length);
+    }
+    // 去掉路径与查询
+    final slash = s.indexOf('/');
+    if (slash >= 0) s = s.substring(0, slash);
+    s = s.trim();
+    if (s.isEmpty || !s.contains('.')) {
+      return false; // 明显不是域名
+    }
+    _domain = s;
+    await _persistDomain();
+    notifyListeners();
+    return true;
+  }
+
+  /// 探测地址是否可达（登录页"测试连接"用）。
+  ///
+  /// 只做一次 GET，判断能不能拿到 HTML —— 不验证账号，
+  /// 目的是区分"地址填错了"和"账号密码错了"，否则用户无法判断问题在哪。
+  Future<({bool ok, String message})> probeDomain(String raw) async {
+    final saved = _domain;
+    final okSet = await setDomain(raw);
+    if (!okSet) return (ok: false, message: '地址格式不对（应形如 zh.zlibrary.by）');
+    try {
+      final res = await _dio.get(
+        'https://$_domain/',
+        options: Options(
+          followRedirects: true,
+          validateStatus: (c) => c != null && c < 500,
+          receiveTimeout: const Duration(seconds: 12),
+          sendTimeout: const Duration(seconds: 12),
+        ),
+      );
+      if (res.statusCode == 200) {
+        return (ok: true, message: '连接成功（$_domain）');
+      }
+      return (ok: false, message: '服务器返回 HTTP ${res.statusCode}');
+    } catch (e) {
+      _domain = saved; // 探测失败就回滚，别把用户配好的地址弄坏
+      await _persistDomain();
+      return (ok: false, message: '连不上：${e.toString().split('\n').first}');
+    }
+  }
+
   String get email => _email;
   String get username => _username;
   String get remixUserid => _remixUserid;

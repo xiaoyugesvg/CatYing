@@ -12,7 +12,6 @@ import 'source_manager_page.dart';
 ///   1. **个性化外观**：明暗模式 / 9 种强调色 / 自定义色
 ///   2. **播放设置**：音质 / 封面形态 / 背景氛围（在播放器设置里也有）
 ///   3. **音源管理**：导入/启用/删除第三方音源（Beans 的"音源"入口）
-///   4. 关于
 ///
 /// ── 裁掉的部分（说明理由）────────────────────────────────────
 /// Beans 的 ProfileView 里最大一块是**账号**（登录/会员/云盘/等级），
@@ -80,31 +79,6 @@ class ProfilePage extends StatelessWidget {
                 )),
               );
             },
-          ),
-
-          // ── 关于 ────────────────────────────────────────────
-          const _GroupTitle('关于'),
-          ListTile(
-            leading: _iconBox(Icons.info_outline_rounded),
-            title: Text('关于音乐模块',
-                style: TextStyle(color: MusicTheme.label, fontSize: 15)),
-            subtitle: Text('界面与功能参照 Beans-Music 重绘',
-                style: TextStyle(color: MusicTheme.secondary, fontSize: 12)),
-            onTap: () => showAboutDialog(
-              context: context,
-              applicationName: '猫影 · 音乐',
-              applicationVersion: '1.0',
-              children: [
-                Text(
-                  '界面与交互按 Beans-Music（SwiftUI）逐页用 Flutter 重绘。\n\n'
-                  '音源使用公开可用的接口，不需要登录；\n'
-                  '会员/独家曲目可能没有免费音源，播放器会明确提示。\n\n'
-                  '支持导入第三方音源（模板法 / LX 脚本法）。',
-                  style: TextStyle(
-                      color: MusicTheme.secondary, fontSize: 13, height: 1.6),
-                ),
-              ],
-            ),
           ),
         ],
       ),

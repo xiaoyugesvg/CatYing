@@ -24,6 +24,7 @@ import 'reading/services/settings_service.dart';
 import 'reading/services/reader_override_service.dart';
 import 'reading/services/bookshelf_service.dart';
 import 'reading/services/book_reading_progress_service.dart';
+import 'reading/models/book_source.dart';
 import 'reading/services/tts_service.dart';
 import 'music/services/settings_store.dart';
 import 'music/services/player_manager.dart';
@@ -100,6 +101,8 @@ void main() async {
   await TrimPresetService().init();
   await ReadingProgressService().init();
   await BookReadingProgressService().init();
+  // 小说书源（Legado 格式）：导入 / 管理在「阅读 → 我的 → 书源仓库」
+  await BookSourceStore.instance.init();
   await BookDownloadService().init();
   // 听书：走原生 tts_engine channel（系统 AVSpeechSynthesizer，零插件）
   Get.put<TtsService>(TtsService(), permanent: true);

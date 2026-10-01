@@ -671,6 +671,14 @@ class _ContentViewState extends State<ContentView>
   // 主标签视图 - 对应 Swift mainTabView
   // ============================================================
 
+  /// 音乐 / 阅读在 IndexedStack 里的下标。
+  ///
+  /// 这两个模块**自带导航栏**，所以影视底栏要在它们选中时隐藏
+  /// （否则两条栏重叠 —— 用户实测反馈过）。
+  /// 写成常量而不是散落的字面量 5/6，改 _tabPages 顺序时不容易漏。
+  static const int _musicTabIndex = 5;
+  static const int _booksTabIndex = 6;
+
   final List<Widget> _tabPages = [
     const HomePage(),
     // 「史藏」= 历史 + 收藏（统一页，顶部 tab 切换）
@@ -774,6 +782,14 @@ class _ContentViewState extends State<ContentView>
             bottom: bottomInset + navFloatGap,
             child: Obx(() {
               if (PlayerFullscreenController.instance.isFullscreen.value) {
+                return const SizedBox.shrink();
+              }
+              // ⚠️ 音乐 / 阅读 两个模块**自带悬浮导航栏**，
+              // 影视底栏必须让位，否则两条栏叠在一起（用户实测反馈）。
+              //   索引 5 = 音乐（MusicRootView 自绘 4-tab 栏）
+              //   索引 6 = 阅读（cmbok 的 JellyNavBar 5-tab 栏）
+              final tab = MainTabController.instance.selectedTab.value;
+              if (tab == _musicTabIndex || tab == _booksTabIndex) {
                 return const SizedBox.shrink();
               }
               // **真悬浮轻玻璃 (2026-09-26)**：底色用近透明 glassTintClear
