@@ -56,19 +56,19 @@ class _SettingsPageState extends State<SettingsPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-              Text(
-                '设置',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: AppTheme.fontTitle3,
-                  fontWeight: FontWeight.bold,
+              Center(
+                child: Text(
+                  '设置',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontTitle3,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
               const SizedBox(height: AppTheme.spacingXXL),
 
               // 主页面只列分类，点进去各页修改（对齐参考图的分类列表样式）
-              const SectionHeader(title: '外观'),
-              const SizedBox(height: AppTheme.spacingSM),
               _categoryTile(
                 icon: Icons.brightness_6_outlined,
                 // 指向**统一主题页**（影视/直播/音乐 分区可调 + 阅读入口）。
@@ -86,8 +86,6 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: AppTheme.spacingXXL),
 
               // 数据源
-              const SectionHeader(title: '数据源'),
-              const SizedBox(height: AppTheme.spacingSM),
               _categoryTile(
                 icon: Icons.movie_outlined,
                 title: '订阅与数据源',
@@ -96,8 +94,6 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: AppTheme.spacingXXL),
 
               // 播放
-              const SectionHeader(title: '播放'),
-              const SizedBox(height: AppTheme.spacingSM),
               _categoryTile(
                 icon: Icons.play_circle_outline,
                 title: '播放设置',
@@ -112,8 +108,6 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: AppTheme.spacingXXL),
 
               // 内容增强
-              const SectionHeader(title: '内容增强'),
-              const SizedBox(height: AppTheme.spacingSM),
               _categoryTile(
                 icon: Icons.subtitles,
                 title: '弹幕',
@@ -128,8 +122,6 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: AppTheme.spacingXXL),
 
               // 存储与信息
-              const SectionHeader(title: '存储与信息'),
-              const SizedBox(height: AppTheme.spacingSM),
               _categoryTile(
                 icon: Icons.cleaning_services_outlined,
                 title: '缓存',

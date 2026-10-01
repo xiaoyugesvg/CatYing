@@ -398,7 +398,7 @@ class SectionTitle extends StatelessWidget {
           Text(title,
               style: TextStyle(
                   color: MusicTheme.label,
-                  fontSize: 17,
+                  fontSize: 18,
                   fontWeight: FontWeight.w700)),
           const Spacer(),
           if (action != null)

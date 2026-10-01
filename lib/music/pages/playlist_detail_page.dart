@@ -6,6 +6,7 @@ import '../services/music_api.dart';
 import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
+import '../../widgets/app_page_loading.dart';
 
 /// 歌单/榜单详情 —— 对齐 Beans 的 `PlaylistView` + 详情页。
 ///
@@ -63,7 +64,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       child: Scaffold(
         backgroundColor: MusicTheme.background,
         body: _loading
-            ? Center(child: CircularProgressIndicator(color: MusicTheme.tint))
+            ? AppPageLoading(color: MusicTheme.tint)
             : CustomScrollView(
                 slivers: [
                   _header(name),

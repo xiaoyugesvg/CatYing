@@ -7,6 +7,7 @@ import '../services/music_api.dart';
 import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
+import '../../widgets/app_page_loading.dart';
 
 /// 搜索页 —— 移植自 Beans 的 `SearchView.swift`（1127 行，取其主干）。
 ///
@@ -410,7 +411,7 @@ class _SearchPageState extends State<SearchPage>
 
   Widget _results() {
     if (_loading) {
-      return Center(child: CircularProgressIndicator(color: MusicTheme.tint));
+      return AppPageLoading(color: MusicTheme.tint);
     }
     if (_error.isNotEmpty) {
       return Center(

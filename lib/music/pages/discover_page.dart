@@ -6,6 +6,8 @@ import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
 import 'playlist_detail_page.dart';
+import '../../widgets/app_page_loading.dart';
+import '../../widgets/app_empty_view.dart';
 
 /// 发现页（主页）—— 移植自 Beans 的 `DiscoverView.swift`（2074 行，取其主干）。
 ///
@@ -91,9 +93,7 @@ class _DiscoverPageState extends State<DiscoverPage>
   Widget build(BuildContext context) {
     super.build(context);
     if (_loading) {
-      return Center(
-        child: CircularProgressIndicator(color: MusicTheme.tint),
-      );
+      return AppPageLoading(color: MusicTheme.tint);
     }
     return RefreshIndicator(
       color: MusicTheme.tint,
@@ -383,14 +383,13 @@ class _QuickSearchDelegate extends SearchDelegate<void> {
       future: MusicApi.instance.search(query, limit: 30),
       builder: (c, snap) {
         if (!snap.hasData) {
-          return Center(
-              child: CircularProgressIndicator(color: MusicTheme.tint));
+          return AppPageLoading(color: MusicTheme.tint);
         }
         final r = snap.data!;
         if (!r.ok || r.list.isEmpty) {
-          return Center(
-            child: Text(r.message.isEmpty ? '没有找到结果' : r.message,
-                style: TextStyle(color: MusicTheme.secondary, fontSize: 13)),
+          return AppEmptyView(
+            icon: Icons.search_off_rounded,
+            title: r.message.isEmpty ? '没有找到结果' : r.message,
           );
         }
         return ListView.builder(

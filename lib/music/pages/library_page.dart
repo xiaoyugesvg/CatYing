@@ -7,6 +7,7 @@ import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
 import 'playlist_detail_page.dart';
+import '../../widgets/app_page_loading.dart';
 
 /// 音乐库 —— 移植自 Beans 的 `LibraryView.swift`（817 行，取其主干）。
 ///
@@ -61,7 +62,7 @@ class _LibraryPageState extends State<LibraryPage>
   Widget build(BuildContext context) {
     super.build(context);
     if (_loading) {
-      return Center(child: CircularProgressIndicator(color: MusicTheme.tint));
+      return AppPageLoading(color: MusicTheme.tint);
     }
     // ⚠️ 必须包 SafeArea(top)：列表第一项"音乐库"标题原来紧贴状态栏，
     // 在刘海机上会被状态栏文字/时间压住（用户实测反馈）。

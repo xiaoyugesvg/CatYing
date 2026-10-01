@@ -46,8 +46,14 @@
 | 模块 | 加载态 | 空态 | 错误提示 |
 |---|---|---|---|
 | 影视/直播 | `AppLoadingView`（`lib/widgets/app_loading_view.dart`）+ 散落 `CircularProgressIndicator` | 直播 `_EmptyLive`（`live/view.dart:1476`）、`_EmptyRow`（`settings_view.dart:425`） | `ScaffoldMessenger.showSnackBar`（detail 页 10+ 处） |
-| 音乐 | `CircularProgressIndicator(color: MusicTheme.tint)`（5 处：search/library/playlist_detail/discover×2） | 待盘点 | `lastError` ValueNotifier（`player_manager.dart:77`）+ 播放器内友好文案 |
-| 阅读 | `CircularProgressIndicator(strokeWidth: 2)`（若干） | 待盘点 | `AppToast.show(...)`（download_service 等）+ 部分 SnackBar 混用 |
+| 音乐 | `CircularProgressIndicator(color: MusicTheme.tint)`（5 处：search/library/playlist_detail/discover×2） | **散落文字提示**（搜索无结果 `discover_page.dart:390-392`、收藏空 `library_page.dart:143-154`），无统一 EmptyView | `lastError` ValueNotifier（`player_manager.dart:77`）+ 播放器内友好文案 |
+| 阅读 | `CircularProgressIndicator(strokeWidth: 2)`（若干） | **`_buildEmpty` 私有方法**（`bookshelf_page.dart:2635` 漫画、`:2982` 图书，图标+文字），其余散落 Text | `AppToast.show(...)`（download_service 等）+ 部分 SnackBar 混用 |
+
+**统一边界（用户确认）**：只统一**通用整页级**的加载 / 空态 / 错误提示；各模块**独特加载态保留各自实现**——
+- 音乐：播放器音源切换加载（`lastError` 展示）、封面/歌曲行占位（`CoverImage._placeholder`）
+- 阅读：阅读器翻页/章节加载、书源仓库 spinner、封面占位
+- 影视：播放器缓冲 spinner、海报图占位
+这些有模块专属语义与视觉，**不并入统一组件**。
 
 **建议路径**（将来做）：
 1. 抽一个全局 `AppLoadingView` / `AppEmptyView` / `AppToast` 到 `lib/widgets/`，三模块引用同一组件（颜色走 palette）
@@ -60,6 +66,12 @@
 - 三模块实际散落值：10 / 11 / 12 / 13 / 14 / 15 / 16 / 17 / 18 / 20 / 22（**132KB grep 输出，几百处字面量**）
 - 主要差异点：音乐用 15/17（如 `music_components.dart:202,289` fontSize 15、`:401` 17）；影视/阅读用 14/16/18 阶梯
 - 全局 `fontScale`（`theme.dart` fs() + textScaler）已统一缩放——**用户手动调字体是全局生效的**
+
+**统一边界（用户确认）**：只统一**通用整页级**的加载 / 空态 / 错误提示；各模块**独特加载态保留各自实现**——
+- 音乐：播放器音源切换加载（`lastError` 展示）、封面/歌曲行占位（`CoverImage._placeholder`）
+- 阅读：阅读器翻页/章节加载、书源仓库 spinner、封面占位
+- 影视：播放器缓冲 spinner、海报图占位
+这些有模块专属语义与视觉，**不并入统一组件**。
 
 **建议路径**（将来做）：
 - **不要一次性替换全部字面量**（几百处，回归风险极高）

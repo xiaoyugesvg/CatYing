@@ -20,6 +20,7 @@ import '../../widgets/ios_av_player.dart';
 import '../../widgets/video_player_pip.dart';
 import 'controller.dart';
 import '../../services/audio_focus.dart';
+import '../../widgets/app_empty_view.dart';
 
 /// 直播主界面（对照参考图）
 /// 上：视频区 + LIVE 角标 + 小窗/全屏
@@ -1479,24 +1480,15 @@ class _EmptyLive extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.live_tv, color: AppTheme.textTertiary, size: 48),
-          SizedBox(height: 12),
-          Text('暂无直播频道',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
-          SizedBox(height: 6),
-          Text('在订阅 JSON 的 lives 配置，或导入 m3u',
-              style: TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
-          SizedBox(height: 16),
-          OutlinedButton(
-            onPressed: onReload,
-            child: Text('导入直播源',
-                style: TextStyle(color: AppTheme.accentColor)),
-          ),
-        ],
+    return AppEmptyView(
+      icon: Icons.live_tv,
+      title: '暂无直播频道',
+      subtitle: '在订阅 JSON 的 lives 配置，或导入 m3u',
+      iconColor: AppTheme.textTertiary,
+      action: OutlinedButton(
+        onPressed: onReload,
+        child: Text('导入直播源',
+            style: TextStyle(color: AppTheme.accentColor)),
       ),
     );
   }

@@ -33,6 +33,7 @@ import 'book_detail_page.dart';
 import 'book_reader_page.dart';
 import 'comic_detail_page.dart';
 import 'reader_page.dart';
+import '../../widgets/app_empty_view.dart';
 
 /// 书架页面
 class BookshelfPage extends StatefulWidget {
@@ -3594,20 +3595,11 @@ void _showShelfItemMenu(BuildContext context, String shelfId, _ShelfEntry e) {
 // 公用组件
 // ============================================================
 Widget _buildEmpty(BuildContext context, String text, IconData icon) {
-  return Center(
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(icon, size: 64, color: Colors.grey),
-        const SizedBox(height: 16),
-        Text(text, style: const TextStyle(color: Colors.grey)),
-        const SizedBox(height: 8),
-        const Text(
-          '去详情页加入书架吧',
-          style: TextStyle(color: Colors.grey, fontSize: 12),
-        ),
-      ],
-    ),
+  return AppEmptyView(
+    title: text,
+    subtitle: '去详情页加入书架吧',
+    icon: icon,
+    iconColor: JellyTheme.primary.withValues(alpha: 0.5),
   );
 }
 

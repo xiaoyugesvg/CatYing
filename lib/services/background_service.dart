@@ -437,11 +437,12 @@ class BackgroundService extends GetxService {
     Color(0xFFEA580C),
   ];
 
-  /// 皎月白
+  /// 皎月白 —— 已统一为「宣纸色系」（跟随水墨书香调色板，浅色底色不再发灰）
+  /// #F7F5F1 宣纸米白 → #F1EDE3 → #E9E3D6，与 JellyPalette.backgroundLight 同源观感。
   static const List<Color> _moonWhite = [
-    Color(0xFFF7F4EF),
-    Color(0xFFE8E4DC),
-    Color(0xFFD9D4C8),
+    Color(0xFFF7F5F1),
+    Color(0xFFF1EDE3),
+    Color(0xFFE9E3D6),
   ];
 
   /// 晨雾蓝：#5 补的浅色渐变之一

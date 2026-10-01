@@ -190,11 +190,12 @@ class AppTheme {
 
   static Color get textPrimary => _light ? _palette.textPrimaryLight : _palette.textPrimaryDark;
 
-  /// 次要文字：原先是半透明黑/白；这里用调色板的中灰 + 同等的"弱化"强度
+  /// 次要文字：原先是半透明黑/白；这里用调色板的中灰 + 同等的"弱化"强度。
+  /// 2026-10-01 提高深浅两档透明度（列表/卡片文字对比度不足：深色下太暗、浅色宣纸底上太浅）
   static Color get textSecondary =>
-      _palette.textSecondary.withValues(alpha: _light ? 0.85 : 0.75);
+      _palette.textSecondary.withValues(alpha: _light ? 0.92 : 0.84);
   static Color get textTertiary =>
-      _palette.textSecondary.withValues(alpha: _light ? 0.55 : 0.50);
+      _palette.textSecondary.withValues(alpha: _light ? 0.68 : 0.64);
 
   static Color get borderLight =>
       _palette.primary.withValues(alpha: _light ? 0.10 : 0.12);

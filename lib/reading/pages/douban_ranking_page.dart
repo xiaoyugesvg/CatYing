@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/jelly_theme.dart';
+import '../../widgets/app_page_loading.dart';
 
 /// 豆瓣图书排行榜。
 ///
@@ -293,7 +294,7 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
     final loading = _loading[b.tag] == true;
 
     if (items.isEmpty && loading) {
-      return const Center(child: CircularProgressIndicator());
+      return AppPageLoading(color: JellyTheme.primary);
     }
     if (items.isEmpty && err.isNotEmpty) {
       return _emptyState(
