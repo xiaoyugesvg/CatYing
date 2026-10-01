@@ -19,6 +19,7 @@ import '../../widgets/app_player.dart';
 import '../../widgets/ios_av_player.dart';
 import '../../widgets/video_player_pip.dart';
 import 'controller.dart';
+import '../../services/audio_focus.dart';
 
 /// 直播主界面（对照参考图）
 /// 上：视频区 + LIVE 角标 + 小窗/全屏
@@ -76,17 +77,24 @@ class _LivePageState extends State<LivePage> {
         }
       }
     });
-    // 点播详情打开时也会强制暂停直播
-    LiveService.pauseLivePlayer = () {
+    // 点播/音乐要出声时会通过 AudioFocus 让直播暂停。
+    //
+    // ⚠️ 原来这里注册的是 `LiveService.pauseLivePlayer` ——
+    // 那个回调**只覆盖「点播 ⇄ 直播」**，音乐完全没参与，
+    // 于是"听音乐时打开视频"/"看视频时音乐还在响"两边一起出声。
+    // 现在统一走 AudioFocus（三方都注册），任一方出声都会让另两方闭嘴。
+    AudioFocus.register('live', () async {
       try {
-        _player?.pause();
-      } catch (e) { /* ignore */ }
-    };
+        await _player?.pause();
+      } catch (e) {
+        /* 暂停失败不影响其它方，AudioFocus 会记日志 */
+      }
+    });
   }
 
   @override
   void dispose() {
-    LiveService.pauseLivePlayer = null;
+    AudioFocus.unregister('live');
     _tabWorker?.dispose();
     _errSub?.cancel();
     _switchReadySub?.cancel();
@@ -101,6 +109,8 @@ class _LivePageState extends State<LivePage> {
 
   /// 播放当前选中频道；无地址则跳过
   void _autoplayCurrent() {
+    // 直播要出声了 → 让音乐/点播先闭嘴（用户能直接听到的"双声"问题）
+    unawaited(AudioFocus.request('live'));
     final url = _controller.currentChannel?.playUrl ?? '';
     if (url.isEmpty) return;
     _playChannel(url);

@@ -8,6 +8,7 @@ import '../models/third_party_source.dart';
 import 'music_api.dart';
 import 'settings_store.dart';
 import 'unblock_service.dart';
+import '../../services/audio_focus.dart';
 
 /// 播放模式（对齐 Beans 的循环/随机语义）
 enum PlayMode {
@@ -89,6 +90,9 @@ class MusicPlayerManager extends ChangeNotifier {
   VoidCallback? onCompleted;
 
   Future<void> init() async {
+    // 注册到全局音频焦点协调器：影视/直播要出声时会调这里的 pause()。
+    // ⚠️ 不注册的话「看视频时音乐还在响」—— 音乐完全不在互斥体系里。
+    AudioFocus.register('music', pause);
     if (_inited) return;
     _inited = true;
     _player = Player();
@@ -253,7 +257,10 @@ class MusicPlayerManager extends ChangeNotifier {
 
     // 2) 播放
     try {
-      await _player.open(Media(url), play: autoplay);
+      // 音乐要出声了 → 让影视/直播先闭嘴（互斥的核心：
+    // 看视频时音乐还在响 / 听音乐时点视频两边一起响，都是缺这一步）
+    if (autoplay) await AudioFocus.request('music');
+    await _player.open(Media(url), play: autoplay);
     } catch (e) {
       lastError.value = '播放失败：$e';
       isPlaying.value = false;
@@ -295,6 +302,7 @@ class MusicPlayerManager extends ChangeNotifier {
 
   Future<void> resume() async {
     await init();
+    await AudioFocus.request('music');
     await _player.play();
   }
 
@@ -411,6 +419,7 @@ class MusicPlayerManager extends ChangeNotifier {
 
   @override
   void dispose() {
+    AudioFocus.unregister('music');
     _posSub?.cancel();
     _durSub?.cancel();
     _playSub?.cancel();
