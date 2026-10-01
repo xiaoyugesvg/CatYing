@@ -6,6 +6,7 @@ import '../../widgets/glass.dart';
 import 'controller.dart';
 import 'sub/about_settings_page.dart';
 import 'sub/appearance_settings_page.dart';
+import 'sub/unified_theme_settings_page.dart';
 import 'sub/cache_settings_page.dart';
 import 'sub/danmu_settings_page.dart';
 import 'sub/data_source_settings_page.dart';
@@ -71,8 +72,11 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: AppTheme.spacingSM),
               _categoryTile(
                 icon: Icons.brightness_6_outlined,
-                title: '外观与壁纸',
-                onTap: () => Get.to(() => const AppearanceSettingsPage()),
+                // 指向**统一主题页**（影视/直播/音乐 分区可调 + 阅读入口）。
+                // 原来的「外观」页只有浅色/深色/跟随系统，**没有配色方案** ——
+                // 这就是"外观设置只有三种模式、很单调"的原因。
+                title: '主题与外观',
+                onTap: () => Get.to(() => const UnifiedThemeSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingSM),
               _categoryTile(

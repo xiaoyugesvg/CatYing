@@ -17,6 +17,7 @@ import '../../models/cache_store.dart';
 import '../../models/cache_ttl.dart';
 import '../../services/background_service.dart';
 import '../../services/tmdb_service.dart';
+import '../../services/detail_page_controller.dart';
 import '../../services/player_fullscreen_controller.dart';
 import '../../services/player_prefs.dart';
 import '../../services/main_tab_controller.dart';
@@ -146,6 +147,15 @@ class _DetailPageState extends State<DetailPage> {
   @override
   void initState() {
     super.initState();
+    // 告诉全局底栏"详情页开了" —— 底栏是在 app.dart 全局渲染的，
+    // 详情页要隐藏它只能通过这个响应式标志（详见 DetailPageController 注释）。
+    // ⚠️ 用引用计数：详情页里还能再进详情页（点另一个视频），
+    // 用 bool 的话内层 dispose 会提前把标志清掉，外层还在前台底栏就冒出来了。
+    if (Get.isRegistered<DetailPageController>()) {
+      DetailPageController.instance.enter();
+    } else {
+      Get.put(DetailPageController()).enter();
+    }
     // 打开点播时停掉直播，避免双路声音
     LiveService.pauseLivePlayer?.call();
     _loadPrefs();
@@ -419,6 +429,15 @@ class _DetailPageState extends State<DetailPage> {
 
   @override
   void dispose() {
+    // 与 initState 的 enter() 配对：告诉全局底栏"详情页关了"。
+    // 必须放在 dispose 的**最早处**：下面还有一堆收尾逻辑
+    // （落进度、停播放器、注销监听）可能抛异常，
+    // 万一中途中断就漏掉了 exit —— 底栏会一直藏着出不来。
+    try {
+      if (Get.isRegistered<DetailPageController>()) {
+        DetailPageController.instance.exit();
+      }
+    } catch (_) {}
     // 退出页先落一次进度，避免暂停中返回丢进度（_persistHistoryIfNeeded 只在播放中写）
     try {
       _persistHistoryIfNeeded(force: true);

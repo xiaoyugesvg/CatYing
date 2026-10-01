@@ -15,7 +15,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 语言（浅灰底 + 琥珀暖金强调 + 毛玻璃）和影视侧差异很大，混用会两头不像。
 
 /// 强调色方案（Beans 的 `BeansAccent`）
+///
+/// ⚠️ `ink`（水墨书香）必须排第一：它是**默认**方案，
+/// 且用户明确要求音乐模块与阅读的水墨书香风格一致。
+/// 其余 8 个是 Beans 原有的可选强调色，**保留不动**（那是功能，不是风格）。
 enum MusicAccent {
+  /// 水墨书香的强调色：墨灰 → 深墨。
+  ///
+  /// 注意它**没有配色相**（R≈G≈B）：水墨调里唯一的暖色是赭石，
+  /// 而赭石是用在阅读侧的小面积点缀（印章/落款），
+  /// 音乐这里大面积用在播放键/进度条上，用墨灰更协调。
+  ink('水墨书香', Color(0xFF3A3A3A), Color(0xFF1F1F1F)),
   amber('琥珀暖金', Color(0xFFF2A33C), Color(0xFFC07A0A)),
   mint('青碧湖绿', Color(0xFF6BC79E), Color(0xFF298C6B)),
   pink('莓粉', Color(0xFFF58FB3), Color(0xFFD15E8F)),
@@ -50,7 +60,8 @@ enum MusicAccent {
 
   static MusicAccent fromKey(String? k) => MusicAccent.values.firstWhere(
         (a) => a.name == k,
-        orElse: () => MusicAccent.amber,
+        // 默认回落到水墨书香（而不是 Beans 的琥珀金）
+        orElse: () => MusicAccent.ink,
       );
 }
 
@@ -82,7 +93,8 @@ class MusicTheme {
   static void setDark(bool v) => _isDark = v;
 
   /// 当前强调色方案
-  static MusicAccent _accent = MusicAccent.amber;
+  // 默认水墨书香（与阅读一致）；其余 8 个仍是用户可选项
+  static MusicAccent _accent = MusicAccent.ink;
   static MusicAccent get accent => _accent;
 
   /// 用户自定义强调色（覆盖 accent；null = 用预设）
@@ -104,29 +116,47 @@ class MusicTheme {
   }
 
   // ── 基础色（对应 Beans 的 beansBackground / beansCard / ...）──────────
+  //
+  // ⚠️ 这五组值已按**水墨书香**调整（用户要求音乐与阅读风格一致）：
+  //   · 浅色底 = 宣纸米白 #F7F5F1（Beans 原来是中性浅灰 #F2F2F7）
+  //   · 深色底 = 墨夜 #1C1C1E（原来是 #0A0A0C 近纯黑，太久看会累）
+  //   · 卡片：白 / #2A2A2C，保持"卡片浮在底上"的层次
+  //   · 文字：近黑 #1F1F1F / #EDEDED，次要文字用 #8E8E93
+  // 与 `JellyPalette.ink()` 的对应字段**保持同值**，
+  // 这样音乐和阅读并排看时不会一个偏暖一个偏冷。
 
   /// 页面背景
   static Color get background =>
-      _isDark ? const Color(0xFF0A0A0C) : const Color(0xFFF2F2F7);
+      _isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF7F5F1);
 
   /// 卡片背景
   static Color get card =>
-      _isDark ? const Color(0xFF1C1C1E) : const Color(0xFFFFFFFF);
+      _isDark ? const Color(0xFF2A2A2C) : const Color(0xFFFFFFFF);
 
   /// 主文字
-  static Color get label => _isDark ? Colors.white : Colors.black;
+  static Color get label =>
+      _isDark ? const Color(0xFFEDEDED) : const Color(0xFF1F1F1F);
 
   /// 次要文字
+  ///
+  /// ⚠️ 明暗两套**必须是不同的值**。我一度两边都写成 #8E8E93，
+  /// 结果是"切到深色后次要文字颜色没变" —— 测试
+  /// 「主题明暗切换真的影响色值」当场抓到。
+  /// 深色下要提亮：#8E8E93 在近黑底上偏暗，读起来吃力。
   static Color get secondary =>
-      _isDark ? const Color(0xFF98989F) : const Color(0xFF6C6C70);
+      _isDark ? const Color(0xFFA1A1A6) : const Color(0xFF8E8E93);
 
   /// 鼠尾草绿（Beans 的次要强调，用于"已下载/已完成"等状态）
+  ///
+  /// 它带绿色相 —— 在水墨调里是少数允许的彩色之一（状态色）。
+  /// 降了饱和，避免在黑白底色上跳出来。
   static Color get sage =>
       _isDark ? const Color(0xFF8FA67A) : const Color(0xFF627B4F);
 
   /// 玻璃卡片填充（半透明，配合 BackdropFilter 做毛玻璃）
-  static Color get glassFill =>
-      _isDark ? const Color(0x0FFFFFFF).withValues(alpha: 0.07) : Colors.white.withValues(alpha: 0.55);
+  static Color get glassFill => _isDark
+      ? const Color(0x0FFFFFFF).withValues(alpha: 0.07)
+      : Colors.white.withValues(alpha: 0.55);
 
   /// 强调色（用户自定义优先）
   static Color get tint {

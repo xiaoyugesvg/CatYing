@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../models/book_source.dart';
 import '../services/book_source_service.dart';
 import '../theme/jelly_theme.dart';
+import '../widgets/jelly_pull_cord.dart';
 import '../widgets/jelly_sliding_actions.dart';
 import 'book_source_detail_page.dart';
 import 'book_source_repo_page.dart';
@@ -151,9 +152,29 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
           _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
       appBar: AppBar(
         titleSpacing: 0,
-        title: Text('书源',
-            style: TextStyle(
-                fontSize: 20, fontWeight: FontWeight.w700, color: _titleColor)),
+        // 标题与「拉绳」并排 —— 拉绳在标题右侧（截图位置）。
+        // 图标组保持原样；页里用 Expanded 包一层避免长标题挤压图标。
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text('书源',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: _titleColor)),
+            ),
+            const SizedBox(width: 6),
+            JellyPullCord(
+              tooltip: '切换到图书',
+              // 书源页是 push 进来的，所以"切回图书"就是 pop。
+              // 用 pop 而不是再 push 一个图书页：否则连点几下会在栈里
+              // 堆出一串页面，返回键要按很多次才出得去。
+              onTap: () => Navigator.maybePop(context),
+            ),
+          ],
+        ),
         actions: [
           JellySlidingActions(
             isDark: _isDark,

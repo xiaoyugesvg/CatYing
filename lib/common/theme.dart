@@ -1,78 +1,148 @@
 import 'package:flutter/material.dart';
 
+import '../reading/theme/jelly_palette.dart';
+
 /// 全局明暗：外观模式切换后 AppTheme 颜色跟着变（深色/浅色/跟随系统）
 class AppBrightness {
   /// true = 浅色界面
   static final ValueNotifier<bool> isLight = ValueNotifier(false);
 }
 
-/// 主题配置 - 匹配 tvbox-Swift 设计系统 + iOS 27 Liquid Glass 玻璃体系
+/// 主题配置 —— 取色统一来自**水墨书香**调色板（`JellyPalette.ink()`）。
+///
+/// ── 为什么改成"读调色板"而不是继续写字面量 ────────────────────
+/// 用户要求影视/直播/音乐的 UI 风格与阅读一致，**功能不变**。
+/// `AppTheme` 是影视侧所有颜色的唯一源头（各页面都写 `AppTheme.xxx`），
+/// 所以只要这里取色变了，**整个影视模块立刻换风格，且一行业务代码都不用动** ——
+/// 这是在"只换视觉、不动功能"的约束下最安全的改法。
+///
+/// ── 与阅读模块的关系（重要）──────────────────────────────────
+/// 两边**各自独立**，不能互相干扰：
+///   · 影视：`AppBrightness.isLight` 决定明暗（由 theme_mode_store 设置）
+///   · 阅读：`SettingsService.isDarkMode` 决定明暗（可跟随系统）
+/// 这里**直接持有** `JellyPalette.ink()`，不去调 `JellyTheme.apply()`
+/// —— 后者是阅读模块的全局单例，动它会把阅读的主题也改掉。
+///
+/// ── 关于"取同一个调色板，深浅却不同"────────────────────────────
+/// 调色板里本身就有 light/dark 两套值（`backgroundLight` / `backgroundDark`
+/// 等）。这里按 `AppBrightness` 选其中一套，
+/// 于是"白天/黑夜模式"仍然是各自独立开关的，只是**两套色都来自水墨书香**。
 class AppTheme {
   /// 全局字号缩放（设置可调，默认 1.0）
   static final ValueNotifier<double> fontScale = ValueNotifier(1.0);
 
   static double fs(double base) => (base * fontScale.value).clamp(9.0, 40.0);
 
+  // ── 调色板来源（影视 + 直播共用一套）─────────────────────────────
+  //
+  // ⚠️ 为什么影视和直播能共用一套，而音乐/阅读要各自独立：
+  //   `_tabPages` 里影视(0~3)与直播(4)在**同一个 PageView**中，
+  //   永远不会同屏显示 —— 共用调色板没有任何视觉冲突。
+  //   而音乐(5)/阅读(6)是独立 tab 且各自有完整主题体系，互不干扰。
+  //
+  // `AppTheme.` 在全项目被引用 1017 处，**不能**改成"每处传 module 参数"。
+  // 所以这里的做法是：调色板换成"可由设置切换"，取色入口保持零改动
+  // （1017 处调用一行都不用动）。
+
+  /// 当前生效的调色板。默认水墨书香；由 `ModuleThemeStore` 驱动切换。
+  static JellyPalette _palette = const JellyPalette.ink();
+
+  /// 当前是哪个模块在用它（用于区分影视/直播各自的设置）
+  static String _activeModule = 'video';
+
+  static JellyPalette get palette => _palette;
+  static String get activeModule => _activeModule;
+
+  /// 由 store / 设置页调用：换调色板并通知重建
+  ///
+  /// 注意这里**不碰** `JellyTheme`（阅读模块的全局单例），
+  /// 否则会把阅读的主题也一起改掉。
+  static void applyPalette(JellyPalette p, {String? module}) {
+    _palette = p;
+    if (module != null) _activeModule = module;
+    paletteRevision.value++;
+  }
+
+  /// 调色板变更通知（页面监听后重建即可换色）
+  static final ValueNotifier<int> paletteRevision = ValueNotifier<int>(0);
+
+  /// 当前明暗下的调色板取色入口
+  static bool get _light => AppBrightness.isLight.value;
+
   // 颜色（getter 跟随外观模式）
-  static const Color accentColor = Color(0xFF5CB67B);
-  static const Color accentLightColor = Color(0xFF7DCEA0);
+  //
+  // ⚠️ `accentColor` / `accentLightColor` 必须是 **const**，不能改成 getter。
+  // 它们被大量 `const` 表达式引用（const Icon(..., color: AppTheme.accentColor)
+  // 之类），改成 getter 会让那些 const 全部失效 → 26 处 `Invalid constant value`。
+  // 而水墨书香的主色本来就是**固定值**（不随明暗变），所以 const 完全够用：
+  //   墨灰 #3A3A3A（与 JellyPalette.ink().primary 保持一致）
+  //
+  // 只在两处**同时**改这里的值时，记得同步 jelly_palette.dart 的 ink()，
+  // 否则影视的强调色会和阅读的主题色不一致。
+  static const Color accentColor = Color(0xFF3A3A3A);
+  static const Color accentLightColor = Color(0xFF6E6E73);
+
+  /// 页面底色：宣纸米白 / 墨夜
   static Color get backgroundPrimary =>
-      AppBrightness.isLight.value ? const Color(0xFFF6F6F7) : const Color(0xFF0F0F0F);
+      _light ? _palette.backgroundLight : _palette.backgroundDark;
+
+  /// 卡片/次级底色
   static Color get backgroundSecondary =>
-      AppBrightness.isLight.value ? const Color(0xFFFFFFFF) : const Color(0xFF1A1A1A);
-  static Color get backgroundTertiary => AppBrightness.isLight.value
-      ? const Color(0x0F000000)
-      : const Color(0x0FFFFFFF);
-  static Color get backgroundElevated => AppBrightness.isLight.value
-      ? const Color(0x14000000)
-      : const Color(0x14FFFFFF);
+      _light ? _palette.cardLight : _palette.cardDark;
+
+  static Color get backgroundTertiary =>
+      _palette.primary.withValues(alpha: _light ? 0.06 : 0.10);
+  static Color get backgroundElevated =>
+      _palette.primary.withValues(alpha: _light ? 0.08 : 0.12);
 
   // ===== 半透明卡片色 =====
-  static Color get backgroundCard => AppBrightness.isLight.value
-      ? const Color(0xCCFFFFFF)
-      : const Color(0xCC1A1A1A);
-  static Color get backgroundCardElevated => AppBrightness.isLight.value
-      ? const Color(0xE6FFFFFF)
-      : const Color(0xE61A1A1A);
-  static Color get backgroundNavBar => AppBrightness.isLight.value
-      ? const Color(0xCCFFFFFF)
-      : const Color(0xCC1C1C1E);
+  // 用调色板的卡片色 + 不同 alpha，保持"同一套色、多层透明"的观感
+  static Color get backgroundCard =>
+      (_light ? _palette.cardLight : _palette.cardDark).withValues(alpha: 0.80);
+  static Color get backgroundCardElevated =>
+      (_light ? _palette.cardLight : _palette.cardDark).withValues(alpha: 0.90);
+  static Color get backgroundNavBar =>
+      (_light ? _palette.cardLight : _palette.cardDark).withValues(alpha: 0.80);
 
   // ===== iOS 27 Liquid Glass 玻璃体系 =====
-  // 玻璃底色: 跟随明暗，避免浅色模式下玻璃过脏
+  // 玻璃底色仍用"墨色低透明度"来表达（而不是灰），
+  // 这样玻璃面板在水墨底色上不会显脏。
   static Color get glassTint =>
-      AppBrightness.isLight.value ? const Color(0x14000000) : const Color(0x1AFFFFFF);
-  // 深色玻璃底: 供列表内高频卡片模拟玻璃 (不开 blur 保性能)
+      _palette.primary.withValues(alpha: _light ? 0.06 : 0.10);
   static Color get glassTintDeep =>
-      AppBrightness.isLight.value ? const Color(0x0F0F1013) : const Color(0x18181A1F);
-  /// 浅玻璃底（悬浮栏用）：alpha≈4%
+      _palette.primary.withValues(alpha: _light ? 0.05 : 0.12);
+  /// 浅玻璃底（悬浮栏用）
   static Color get glassTintLight =>
-      AppBrightness.isLight.value ? const Color(0x08000000) : const Color(0x0A0F1013);
-  /// 超浅玻璃底（沉浸式底栏用）：alpha≈2%
+      _palette.primary.withValues(alpha: _light ? 0.03 : 0.05);
+  /// 超浅玻璃底（沉浸式底栏用）
   static Color get glassTintClear =>
-      AppBrightness.isLight.value ? const Color(0x04000000) : const Color(0x050F1013);
-  // 高光层: 顶部镜面高光
-  static Color get glassHighlightTop =>
-      AppBrightness.isLight.value ? const Color(0x33000000) : const Color(0x2EFFFFFF);
-  static Color get glassHighlightMid =>
-      AppBrightness.isLight.value ? const Color(0x14000000) : const Color(0x0FFFFFFF);
-  // 描边: 亮描边增强边缘分离感
+      _palette.primary.withValues(alpha: _light ? 0.02 : 0.03);
+
+  // 高光层: 顶部镜面高光（浅色下是白光、深色下也是白光，只是强弱不同）
+  static Color get glassHighlightTop => _light
+      ? Colors.white.withValues(alpha: 0.55)
+      : Colors.white.withValues(alpha: 0.20);
+  static Color get glassHighlightMid => _light
+      ? Colors.white.withValues(alpha: 0.28)
+      : Colors.white.withValues(alpha: 0.08);
+
+  // 描边：用墨色低透明度，边缘分离感更"干净"
   static Color get glassBorder =>
-      AppBrightness.isLight.value ? const Color(0x14000000) : const Color(0x2EFFFFFF);
+      _palette.primary.withValues(alpha: _light ? 0.10 : 0.20);
   static Color get glassBorderSoft =>
-      AppBrightness.isLight.value ? const Color(0x0F000000) : const Color(0x1FFFFFFF);
+      _palette.primary.withValues(alpha: _light ? 0.06 : 0.12);
 
   // ---- Liquid Glass：内侧双色边缘 ----
   //
   // 玻璃的"厚度感"来自**内侧**两条描边：顶部亮（光从上方来）、
   // 底部暗（玻璃背面吸光）。只有外圈单一描边时，面板看起来像"贴纸"。
   static Color get glassInnerTop =>
-      AppBrightness.isLight.value ? const Color(0x59FFFFFF) : const Color(0x3DFFFFFF);
+      Colors.white.withValues(alpha: _light ? 0.65 : 0.24);
   static Color get glassInnerBottom =>
-      AppBrightness.isLight.value ? const Color(0x0F000000) : const Color(0x1A000000);
+      _palette.primary.withValues(alpha: _light ? 0.06 : 0.10);
   /// 顶部镜面弧线（很窄，模拟折射光带）
   static Color get glassSpecular =>
-      AppBrightness.isLight.value ? const Color(0x40FFFFFF) : const Color(0x52FFFFFF);
+      Colors.white.withValues(alpha: _light ? 0.60 : 0.32);
 
   // 玻璃圆角 —— Liquid Glass 比旧版更圆更柔
   static const double glassRadius = 28; // 面板/弹窗大圆角
@@ -86,17 +156,18 @@ class AppTheme {
   static const Duration motionBase = Duration(milliseconds: 260);
   static const Curve motionCurve = Curves.easeOutCubic;
 
-  static Color get textPrimary =>
-      AppBrightness.isLight.value ? const Color(0xE61A1A1A) : const Color(0xEBEBEBEB);
+  static Color get textPrimary => _light ? _palette.textPrimaryLight : _palette.textPrimaryDark;
+
+  /// 次要文字：原先是半透明黑/白；这里用调色板的中灰 + 同等的"弱化"强度
   static Color get textSecondary =>
-      AppBrightness.isLight.value ? const Color(0x8C1A1A1A) : const Color(0x8CFFFFFF);
+      _palette.textSecondary.withValues(alpha: _light ? 0.85 : 0.75);
   static Color get textTertiary =>
-      AppBrightness.isLight.value ? const Color(0x591A1A1A) : const Color(0x59FFFFFF);
+      _palette.textSecondary.withValues(alpha: _light ? 0.55 : 0.50);
 
   static Color get borderLight =>
-      AppBrightness.isLight.value ? const Color(0x14000000) : const Color(0x14FFFFFF);
+      _palette.primary.withValues(alpha: _light ? 0.10 : 0.12);
   static Color get borderMedium =>
-      AppBrightness.isLight.value ? const Color(0x24000000) : const Color(0x24FFFFFF);
+      _palette.primary.withValues(alpha: _light ? 0.16 : 0.18);
 
   // 间距
   static const double spacingXS = 4;

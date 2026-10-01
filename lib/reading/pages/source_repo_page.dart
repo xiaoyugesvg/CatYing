@@ -13,6 +13,9 @@
 import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:archive/archive.dart';
+import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/settings_service.dart';
@@ -95,21 +98,24 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              // 按 cmbok V2.0.8 截图：**只有一张卡片**「云端仓库」，
+              // 地址框 + 两个按钮（导入文件 / 从云端更新）。
+              // 原来我把"手动导入"单独做成一张卡，图里没有 —— 已合并。
               _buildCloudCard(isDark),
-              const SizedBox(height: 12),
-              _buildManualImportCard(isDark),
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Text(
-                  '已注册源（${sources.length}）· 关闭后不在搜索页显示',
+                  // 截图原文就是「共 N 个」
+                  '共 ${sources.length} 个',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 12.5,
                     color: JellyTheme.textSecondary,
                   ),
                 ),
               ),
               const SizedBox(height: 8),
+              if (sources.isEmpty) _buildEmptyState(isDark),
               for (final s in sources) ...[
                 _buildSourceCard(isDark, s),
                 const SizedBox(height: 10),
@@ -132,205 +138,6 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
   ///   1. 单个源：      {"type":"config","config":{"name":"...","url":"...", ...}}
   ///   2. 完整文件：    {"version":1,"sources":[ ... ]}
   ///   3. 纯数组：      [ {...}, {...} ]
-  Widget _buildManualImportCard(bool isDark) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.add_link_rounded, size: 18, color: JellyTheme.primary),
-              const SizedBox(width: 6),
-              Text(
-                '手动导入漫画源',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 2),
-          Text(
-            '粘贴漫画源 JSON（单个源对象 / 完整 sources.json / 数组都行）',
-            style: TextStyle(fontSize: 12, color: JellyTheme.textSecondary),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _busy ? null : _showImportSheet,
-              icon: const Icon(Icons.content_paste_rounded, size: 18),
-              label: const Text('粘贴导入'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 导入弹层：粘贴框 + 格式提示 + 导入按钮。
-  ///
-  /// 键盘避让用 viewInsets（和全项目其它弹窗一致）——
-  /// 这个框要输入很长的 JSON，被键盘盖住会完全没法用。
-  Future<void> _showImportSheet() async {
-    final ctrl = TextEditingController();
-    var error = '';
-    var busy = false;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: isDarkNow() ? JellyTheme.cardDark : JellyTheme.cardLight,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          Future<void> doImport() async {
-            final text = ctrl.text.trim();
-            if (text.isEmpty) {
-              setSheet(() => error = '请先粘贴漫画源 JSON');
-              return;
-            }
-            setSheet(() {
-              busy = true;
-              error = '';
-            });
-            final r = await _importJson(text);
-            if (!ctx.mounted) return;
-            if (r.ok) {
-              Navigator.pop(ctx);
-              _toast(r.message);
-              if (mounted) setState(() {});
-            } else {
-              setSheet(() {
-                busy = false;
-                error = r.message;
-              });
-            }
-          }
-
-          return Padding(
-            // 键盘避让
-            padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: JellyTheme.textSecondary.withValues(alpha: 0.35),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Text(
-                      '导入漫画源',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: isDarkNow() ? Colors.white : JellyTheme.textPrimaryLight,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '支持三种格式：\n'
-                      '· 单个源 {"type":"config","config":{...}}\n'
-                      '· 完整文件 {"version":1,"sources":[...]}\n'
-                      '· 纯数组 [{...},{...}]\n'
-                      'type=config 是通用网页源（提供 DOM 选择器）；'
-                      'type=api 复用内置引擎。',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        height: 1.5,
-                        color: JellyTheme.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: ctrl,
-                      maxLines: 7,
-                      minLines: 4,
-                      style: const TextStyle(fontSize: 13),
-                      decoration: InputDecoration(
-                        hintText: '在此粘贴漫画源 JSON…',
-                        hintStyle: TextStyle(
-                            fontSize: 13, color: JellyTheme.textSecondary),
-                        filled: true,
-                        fillColor: isDarkNow()
-                            ? Colors.white.withValues(alpha: 0.05)
-                            : Colors.black.withValues(alpha: 0.04),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                    ),
-                    if (error.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        error,
-                        style: const TextStyle(
-                            fontSize: 12, color: Colors.redAccent),
-                      ),
-                    ],
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        TextButton.icon(
-                          onPressed: () async {
-                            final d = await Clipboard.getData('text/plain');
-                            final s = d?.text;
-                            if (s != null && s.isNotEmpty) {
-                              ctrl.text = s;
-                              setSheet(() => error = '');
-                            }
-                          },
-                          icon: Icon(Icons.content_paste_rounded,
-                              size: 16, color: JellyTheme.primary),
-                          label: Text('粘贴剪贴板',
-                              style: TextStyle(
-                                  fontSize: 13, color: JellyTheme.primary)),
-                        ),
-                        const Spacer(),
-                        FilledButton(
-                          onPressed: busy ? null : doImport,
-                          child: busy
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2))
-                              : const Text('导入'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-    ctrl.dispose();
-  }
-
   /// 解析并写入本地源配置。
   ///
   /// 合并策略：**同 id 覆盖、新 id 追加**，其余保留 ——
@@ -444,49 +251,195 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
           Text(
             '云端仓库',
             style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.bold,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
               color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
             ),
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 3),
           Text(
-            '填写云端 sources.json 地址，更新后覆盖本地源配置',
+            // 截图原文。这句同时回答了用户两个疑问：
+            // "会不会把我已有的源冲掉"（不会）+"多个地址怎么处理"（合并去重）
+            '导入按地址合并去重，不会覆盖已有源',
             style: TextStyle(fontSize: 12, color: JellyTheme.textSecondary),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _urlCtrl,
+            style: TextStyle(
+              fontSize: 13.5,
+              color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+            ),
+            keyboardType: TextInputType.url,
             decoration: InputDecoration(
-              isDense: true,
-              hintText: 'https://example.com/sources.json',
+              hintText: '书源地址（json / zip / 仓库索引）',
               hintStyle: TextStyle(
-                fontSize: 13,
+                fontSize: 13.5,
                 color: JellyTheme.textSecondary,
               ),
+              filled: true,
+              fillColor: isDark
+                  ? Colors.white.withValues(alpha: 0.05)
+                  : Colors.black.withValues(alpha: 0.035),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
               ),
               contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
+                horizontal: 14,
+                vertical: 13,
               ),
             ),
-            style: const TextStyle(fontSize: 13),
           ),
           const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerRight,
-            child: FilledButton.icon(
-              onPressed: _busy ? null : _updateFromCloud,
-              icon: _busy
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.cloud_download_rounded, size: 18),
-              label: const Text('从云端更新'),
+          // 两个按钮并排（截图布局）
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : _importFromFile,
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    side: BorderSide(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.22)
+                          : Colors.black.withValues(alpha: 0.16),
+                    ),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    foregroundColor:
+                        isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                  ),
+                  icon: const Icon(Icons.file_upload_outlined, size: 17),
+                  label: const Text('导入文件',
+                      style: TextStyle(fontSize: 13.5)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _busy ? null : _updateFromCloud,
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  icon: _busy
+                      ? const SizedBox(
+                          width: 15,
+                          height: 15,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.cloud_download_rounded, size: 17),
+                  label: const Text('从云端更新',
+                      style: TextStyle(fontSize: 13.5)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 从本地文件导入漫画源。
+  ///
+  /// 支持 `.json` / `.txt` / `.zip` —— 漫画源的分发同样是压缩包居多，
+  /// 不认 zip 的话用户只会看到"解析失败"而看不出原因。
+  Future<void> _importFromFile() async {
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['json', 'txt', 'zip'],
+      );
+      if (result.isEmpty) return;
+      final f = result.first;
+      final bytes = await f.readAsBytes();
+      if (bytes.isEmpty) {
+        _toast('文件是空的');
+        return;
+      }
+
+      // zip 魔数 PK\x03\x04
+      final isZip = bytes.length > 4 &&
+          bytes[0] == 0x50 &&
+          bytes[1] == 0x4B &&
+          (bytes[2] == 0x03 || bytes[2] == 0x05 || bytes[2] == 0x07);
+
+      if (!isZip) {
+        // ⚠️ 必须 utf8.decode，不能用 String.fromCharCodes ——
+        // 后者按"码元"直译，任何非 ASCII（中文源名）都会变乱码，
+        // 症状是"导入成功但源名全是问号"。
+        await _applyImportedText(utf8.decode(bytes, allowMalformed: true));
+        return;
+      }
+
+      final archive = ZipDecoder().decodeBytes(bytes);
+      var tried = 0;
+      for (final zf in archive) {
+        if (!zf.isFile) continue;
+        final lower = zf.name.toLowerCase();
+        if (!lower.endsWith('.json') && !lower.endsWith('.txt')) continue;
+        tried++;
+        final data = zf.content;
+        final zb = data is Uint8List
+            ? data
+            : Uint8List.fromList(List<int>.from(data as List));
+        await _applyImportedText(utf8.decode(zb, allowMalformed: true));
+      }
+      if (tried == 0) _toast('压缩包里没有 json / txt 文件');
+    } catch (e) {
+      _toast('导入失败：${e.toString().split('\n').first}');
+    }
+  }
+
+  /// 把导入的文本交给 [_importJson]。
+  ///
+  /// 复用而不是重写：`_importJson` 已经处理了全部形态
+  /// （单对象 / 数组 / `{"sources":[…]}` / 裸 SiteConfig）、
+  /// 字段校验、同 id 覆盖合并、saveLocal + reload。
+  /// 再写一遍只会分叉出第二套解析逻辑，以后改一处漏一处。
+  Future<void> _applyImportedText(String text) async {
+    final r = await _importJson(text);
+    if (!mounted) return;
+    if (r.ok) setState(() {});
+    _toast(r.message);
+  }
+
+  /// 空态（按截图：还没有漫画源 + 说明怎么导）
+  Widget _buildEmptyState(bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 60),
+      child: Column(
+        children: [
+          Icon(
+            Icons.folder_open_rounded,
+            size: 56,
+            color: JellyTheme.textSecondary.withValues(alpha: 0.55),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            '还没有漫画源',
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
+              // 截图原文。注意"加密的"三个字 —— V2.0.8 的云端地址是密文，
+              // 直接填明文地址是拉不到的（这点必须如实告诉用户，
+              // 否则他会以为"我填了地址怎么没用"）。
+              '粘贴加密的云端地址后点「从云端更新」，或导入密文文件',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.6,
+                color: JellyTheme.textSecondary,
+              ),
             ),
           ),
         ],

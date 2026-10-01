@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'models.dart';
 import 'manga_source.dart';
 import 'zaimanhua_config.dart';
+import '../utils/safe_num.dart';
 
 void _log(String message) {
   if (kDebugMode) {
@@ -97,7 +98,7 @@ class ZaimanhuaSource extends MangaSource {
           cover: (item[f['cover']] ?? '').toString(),
           author: (item[f['authors']] ?? '').toString(),
           status: (item[f['status']] ?? '').toString(),
-          popular: (item[f['hot']] as num?)?.toInt(),
+          popular: asIntOrNull(item[f['hot']]),
           url: config.base,
         ),
       );
@@ -186,7 +187,7 @@ class ZaimanhuaSource extends MangaSource {
         ),
       );
     }
-    final total = (data[cat.totalField] as num?)?.toInt();
+    final total = asIntOrNull(data[cat.totalField]);
     _log('分类筛选: $query, 第${page + 1}页 ${items.length} 条, 共 $total');
     return MangasPage(
       items: items,
@@ -214,14 +215,14 @@ class ZaimanhuaSource extends MangaSource {
       final arr = (group[d.groupDataField] as List?) ?? const [];
       for (final ch in arr) {
         if (ch is! Map<String, dynamic>) continue;
-        final ts = (ch[cf['updateTime']] as num?)?.toInt();
+        final ts = asIntOrNull(ch[cf['updateTime']]);
         chapters.add(
           CChapter(
             id: '${ch[cf['id']]}',
             sourceId: id,
             mangaId: manga.id,
             name: (ch[cf['title']] ?? '').toString(),
-            order: (ch[cf['order']] as num?)?.toInt() ?? 0,
+            order: asInt(ch[cf['order']]),
             groupId: groupId,
             groupName: groupName,
             createTime: ts != null

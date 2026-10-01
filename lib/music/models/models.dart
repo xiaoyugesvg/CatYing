@@ -1,5 +1,51 @@
 import 'dart:convert';
 
+// ============================================================
+// 宽容的数值转换
+// ============================================================
+//
+// ── 为什么需要这个（踩过的坑）─────────────────────────────────
+// Node 侧的引擎**有时把数字转成字符串**再返回（例如 mapTrack 里
+// `id: String(id)`），而 Dart 写 `j['id'] as num?` 在运行时遇到 String
+// 会**直接抛异常**：
+//     type 'String' is not a subtype of type 'num?' in type cast
+// 症状极难定位 —— 整个页面只显示这一行英文报错，看不出是哪个字段。
+//
+// `as num?` 还漏了一种情况：JSON 里同一字段可能是 int 也可能是 double
+// （比如 0 和 0.0），强转本身没问题，但一旦是 String 就崩。
+//
+// 所以统一用这两个函数：**能转就转，转不了给默认值**，
+// 让"某个字段类型不对"退化成"这个字段显示 0"，而不是整页崩掉。
+
+/// 任意值 → int（字符串数字也能转，失败返回 0）
+int asInt(dynamic v) {
+  if (v == null) return 0;
+  if (v is int) return v;
+  if (v is double) return v.toInt();
+  if (v is num) return v.toInt();
+  if (v is bool) return v ? 1 : 0;
+  return int.tryParse(v.toString().trim()) ?? 0;
+}
+
+/// 任意值 → double（字符串数字也能转，失败返回 0）
+double asDouble(dynamic v) {
+  if (v == null) return 0;
+  if (v is double) return v;
+  if (v is int) return v.toDouble();
+  if (v is num) return v.toDouble();
+  return double.tryParse(v.toString().trim()) ?? 0;
+}
+
+/// 可空的 int（区分"没有"和"是 0"）
+int? asIntOrNull(dynamic v) {
+  if (v == null) return null;
+  if (v is int) return v;
+  if (v is num) return v.toInt();
+  final s = v.toString().trim();
+  if (s.isEmpty) return null;
+  return int.tryParse(s);
+}
+
 /// 音乐模块数据模型。
 ///
 /// 移植自 Beans-Music 的 `Models.swift`（Swift）。
@@ -116,14 +162,19 @@ class Song {
       };
 
   factory Song.fromJson(Map<String, dynamic> j) => Song(
-        id: (j['id'] as num?)?.toInt() ?? 0,
+        // ⚠️ 绝不能用 `(j['id'] as num?)`！
+        // Node 侧 mapTrack 输出的是 `id: String(id)`（字符串），
+        // 而 Dart 的 `as num?` 在运行时遇到 String 会**直接抛**
+        //   type 'String' is not a subtype of type 'num?' in type cast
+        // 表现就是"整个搜索页只显示这行报错"。用 asInt 宽容转换。
+        id: asInt(j['id']),
         name: (j['name'] ?? '').toString(),
         artists: (j['artists'] ?? '').toString(),
         album: (j['album'] ?? '').toString(),
         coverUrl: j['coverUrl']?.toString(),
-        duration: (j['duration'] as num?)?.toDouble() ?? 0,
+        duration: asDouble(j['duration']),
         source: SongSource.fromKey(j['source']?.toString()),
-        fee: (j['fee'] as num?)?.toInt() ?? 0,
+        fee: asInt(j['fee']),
       );
 
   static String listToJson(List<Song> list) =>
@@ -172,10 +223,10 @@ class Playlist {
   });
 
   factory Playlist.fromJson(Map<String, dynamic> j) => Playlist(
-        id: (j['id'] as num?)?.toInt() ?? 0,
+        id: asInt(j['id']),
         name: (j['name'] ?? '').toString(),
         coverUrl: j['coverUrl']?.toString(),
-        trackCount: (j['trackCount'] as num?)?.toInt() ?? 0,
+        trackCount: asInt(j['trackCount']),
         description: j['description']?.toString(),
         creator: j['creator']?.toString(),
       );
@@ -362,8 +413,8 @@ class SongComment {
         user: (j['user'] ?? '').toString(),
         avatarUrl: j['avatarUrl']?.toString(),
         content: (j['content'] ?? '').toString(),
-        likedCount: (j['likedCount'] as num?)?.toInt() ?? 0,
-        time: (j['time'] as num?)?.toInt() ?? 0,
+        likedCount: asInt(j['likedCount']),
+        time: asInt(j['time']),
       );
 }
 
@@ -381,7 +432,7 @@ class PlayRecord {
 
   factory PlayRecord.fromJson(Map<String, dynamic> j) => PlayRecord(
         song: Song.fromJson(Map<String, dynamic>.from(j['song'] as Map)),
-        playedAt: (j['playedAt'] as num?)?.toInt() ?? 0,
+        playedAt: asInt(j['playedAt']),
       );
 }
 

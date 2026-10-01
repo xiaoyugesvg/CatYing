@@ -17,7 +17,20 @@ class JellyNavBar extends StatefulWidget {
     this.onLongPress,
     required this.items,
     this.floating = false,
-  }) : assert(items.length >= 2 && items.length <= 5);
+  }) : assert(
+          items.length >= 2 && items.length <= 6,
+          // ── 为什么上限从 5 放宽到 6 ────────────────────────────────
+          // cmbok 原生是 5 项（漫画/图书/书架/收藏/我的）。
+          // 猫影把阅读嵌进了影视 App，阅读自带悬浮栏而影视底栏被隐藏，
+          // 所以**必须在阅读栏里给一条回影视的路**（第 6 项「影视」）。
+          //
+          // ⚠️ 只放宽上限是不够的：项数一变，宽度算法必须能跟着缩。
+          // 原来的 `perItem = (屏宽×0.2).clamp(80,120)` 在 6 项时
+          // 需要 480~600px 而手机只有 ~350px 可用 → 必然溢出。
+          // 宽度算法已改成"按可用宽度反算"（见 _buildFloatingNavBar），
+          // 那里才是让 6 项能安全容纳的关键。
+          '导航项数需在 2~6 之间（5 项是 cmbok 原生，第 6 项是「返回影视」）',
+        );
 
   /// 悬浮导航栏总占用高度（高度 + 底部外边距），用于页面 FAB 等避让
   static const double floatingTotalHeight =
@@ -138,17 +151,34 @@ class _JellyNavBarState extends State<JellyNavBar>
         builder: (context, constraints) {
           final screenWidth = MediaQuery.of(context).size.width;
           final horizontalMargin = (screenWidth * 0.045).clamp(12.0, 60.0);
-          // 每项宽度随屏宽自适应（宽屏加宽，限制在 [min, max]），胶囊宽度 = 每项 × 项数，不超过可用宽度
-          final perItem = (screenWidth * _floatingItemFactor).clamp(
+          // ── 每项宽度：必须"按可用宽度反算"，不能只按屏宽比例算 ──────
+          //
+          // 之前的算法是 `(屏宽 × 0.2).clamp(80, 120)`：
+          //   5 项 → 400~600px，6 项 → 480~600px
+          // 而手机可用宽度只有 (屏宽 - 2×边距 - 2×内边距) ≈ 350~400px。
+          // **一旦项数×每项宽度 > 可用宽度就必然溢出**（黄黑条纹）。
+          // 项数从 5 变 6 时（加「影视」入口）就直接炸了。
+          //
+          // 正确做法：先算"可用宽度 / 项数"得到上限，再在其中取理想值。
+          // 这样**无论几项都不会溢出** —— 项数增加只会让每项变窄。
+          // 可用宽度 = 屏宽 - 两侧外边距（外层 Padding 只加了 horizontalMargin；
+          // sidePad 是"内容比可用宽度窄时"的补足量，不算进上限）
+          final available =
+              (constraints.maxWidth - horizontalMargin * 2).clamp(1.0, constraints.maxWidth);
+          final ideal = (screenWidth * _floatingItemFactor).clamp(
             _floatingItemMin,
             _floatingItemMax,
           );
-          final contentWidth = (widget.items.length * perItem).clamp(
-            0.0,
-            constraints.maxWidth,
+          final perItem = (available / widget.items.length).clamp(
+            // 保底 44px：小于这个宽度手指点不准（Apple HIG 的最小可点区域）
+            44.0,
+            ideal,
           );
+          final contentWidth = widget.items.length * perItem;
           // 胶囊居中：在屏幕边距基础上补足左右内边距，垂直结构保持不变（仍贴底部）
-          final sidePad = (constraints.maxWidth - contentWidth) / 2;
+          final sidePad =
+              ((constraints.maxWidth - contentWidth) / 2 - horizontalMargin)
+                  .clamp(0.0, double.infinity);
           // 背景动画开启时跳过 BackdropFilter：底层每帧重绘下，高斯模糊逐帧采样
           // 是 GPU 主力开销；改用更高不透明度纯色（动效透出可接受，图标仍清晰）。
           // 动画关闭时底层静止，模糊成本低，保留玻璃质感。

@@ -21,6 +21,7 @@ import 'pages/search/view.dart';
 import 'pages/search/controller.dart';
 import 'pages/settings/controller.dart';
 import 'router/app_pages.dart';
+import 'services/detail_page_controller.dart';
 import 'services/player_fullscreen_controller.dart';
 import 'widgets/video_player_pip.dart';
 import 'widgets/glass.dart';
@@ -40,6 +41,13 @@ class TVBoxApp extends StatelessWidget {
     // 全局主 Tab 控制器: 底部悬浮导航选中项全局共享,
     // 详情页也能渲染同样的悬浮栏并切回对应 tab.
     Get.put(MainTabController(), permanent: true);
+    // 详情页可见性控制器。
+    // ⚠️ 必须在这里**提前注册**：底栏的判断里读 `DetailPageController.instance`，
+    // 而 `instance` 是 `Get.find()` —— 没 put 过就抛
+    // "DetailPageController not found"。底栏是**每个 tab 页都会构建**的，
+    // 所以这个异常会出现在首页，而不是详情页，
+    // 排查时会以为是首页的问题。permanent 保证不被自动回收。
+    Get.put(DetailPageController(), permanent: true);
 
     // 外观模式是**唯一来源**（方向已反转：外观主导，背景跟着外观走）。
     // BackgroundService 改变外观时通过回调推给 ThemeModeStore，
@@ -93,7 +101,15 @@ class TVBoxApp extends StatelessWidget {
             // 全局字号缩放（设置 → 外观 → 界面字号），用 Obx 监听
             return Obx(() {
               final scale = PlayerPrefs.instance.fontScale.value;
-              return GetMaterialApp(
+              // ⚠️ 配色方案版本号必须用 ValueListenableBuilder 监听，
+              // **不能**在 Obx 里读 `AppTheme.paletteRevision.value` ——
+              // 它是普通 ValueNotifier 而非 GetX observable，
+              // Obx 读不到任何 .obs 时会抛
+              // "[Get] the improper use of a GetX has been detected"，
+              // 整棵子树会被换成 ErrorWidget（也就是大白屏）。
+              return ValueListenableBuilder<int>(
+                valueListenable: AppTheme.paletteRevision,
+                builder: (context, paletteRev, _) => GetMaterialApp(
                 title: '猫影',
                 theme: AppTheme.lightTheme,
                 darkTheme: AppTheme.darkTheme,
@@ -107,7 +123,13 @@ class TVBoxApp extends StatelessWidget {
                 // 不在 Obx 内的部分（筛选面板、搜索栏等）会一直用旧颜色，
                 // 表现为"切了外观但筛选背景没变"。
                 // 换 key 强制重建整棵页面树，颜色才会跟着走。
-                home: ContentView(key: ValueKey('root-$effectiveLight')),
+                //
+                // paletteRev 同理：切「主题与外观」里的配色方案时，
+                // AppTheme 内部换了调色板，但它是静态类不会通知任何人 ——
+                // 不把 paletteRevision 拼进 key 就会"选了新配色界面没反应"。
+                home: ContentView(
+                  key: ValueKey('root-$effectiveLight-$paletteRev'),
+                ),
                 getPages: AppPages.pages,
                 debugShowCheckedModeBanner: false,
                 builder: (context, child) {
@@ -128,11 +150,14 @@ class TVBoxApp extends StatelessWidget {
                   return ValueListenableBuilder<bool>(
                     valueListenable: AppBrightness.isLight,
                     builder: (context, isLight, __) => KeyedSubtree(
-                      key: ValueKey('appearance-$isLight'),
+                      // paletteRev 也拼进来：配色方案一变，
+                      // 连同挂在 Overlay 上的弹窗一起重建。
+                      key: ValueKey('appearance-$isLight-$paletteRev'),
                       child: out,
                     ),
                   );
                 },
+                ),
               );
             });
           },
@@ -676,8 +701,6 @@ class _ContentViewState extends State<ContentView>
   /// 这两个模块**自带导航栏**，所以影视底栏要在它们选中时隐藏
   /// （否则两条栏重叠 —— 用户实测反馈过）。
   /// 写成常量而不是散落的字面量 5/6，改 _tabPages 顺序时不容易漏。
-  static const int _musicTabIndex = 5;
-  static const int _booksTabIndex = 6;
 
   final List<Widget> _tabPages = [
     const HomePage(),
@@ -788,15 +811,26 @@ class _ContentViewState extends State<ContentView>
               // 影视底栏必须让位，否则两条栏叠在一起（用户实测反馈）。
               //   索引 5 = 音乐（MusicRootView 自绘 4-tab 栏）
               //   索引 6 = 阅读（cmbok 的 JellyNavBar 5-tab 栏）
-              final tab = MainTabController.instance.selectedTab.value;
-              if (tab == _musicTabIndex || tab == _booksTabIndex) {
+              // 判断条件收在 MainTabController.inEmbeddedModule 里 ——
+              // 那边同时管着"回影视"按钮的目标索引，改顺序时只有一处要动。
+              if (MainTabController.instance.inEmbeddedModule) {
+                return const SizedBox.shrink();
+              }
+              // 影视**详情页**也不要底栏：详情页是全屏内容页（海报 + 剧集
+              // + 播放器），底栏会压住剧集列表的最后一行。
+              // 详情页是通过 Get.toNamed('/detail') 推入的路由，
+              // 这里的 Obx 读 DetailPageController 的计数（响应式），
+              // 详情页 initState/dispose 时自动开关。
+              if (DetailPageController.instance.isOpen) {
                 return const SizedBox.shrink();
               }
               // **真悬浮轻玻璃 (2026-09-26)**：底色用近透明 glassTintClear
               // (alpha≈2%)，只保留毛玻璃模糊+细描边+高光，几乎不遮内容。
               // 内容滚过底栏下方时依旧清晰可见，真正"沉浸式悬浮"。
               return GlassPanel(
-                radius: 30,
+                // 圆角对齐阅读 JellyNavBar 的 _floatingRadius = 32
+                // （原来是 30；用户要求所有悬浮菜单栏统一成阅读那种）
+                radius: 32,
                 blur: true,
                 tint: AppTheme.glassTintClear,
                 borderColor: AppTheme.glassBorder,
@@ -876,6 +910,20 @@ class _ContentViewState extends State<ContentView>
   Widget _navItem(
       IconData icon, IconData activeIcon, String label, int index) {
     final isSelected = MainTabController.instance.selectedTab.value == index;
+    // ── 未选中项的取色必须**随明暗变** ──────────────────────────
+    // ⚠️ 原来写死 `Colors.white.withValues(alpha: 0.35)` —— 那是
+    // "深色底栏"时代的写法。换成水墨书香（浅色底 + 白胶囊）后，
+    // 白色图标在白胶囊上**完全看不见**，表现为"底栏图标消失了"。
+    // 现在对齐阅读 JellyNavBar 的规则：
+    //   深色 → Colors.white54（暗底上用白）
+    //   浅色 → 调色板的 navUnselected（墨灰，白胶囊上清晰）
+    final isDark = !AppBrightness.isLight.value;
+    final unselectedColor = isDark
+        ? Colors.white.withValues(alpha: 0.54)
+        : AppTheme.palette.navUnselected;
+    // 选中态：浅色用 accentColor（墨灰）；深色下墨灰在暗底栏上会糊，
+    // 改用白色（与阅读栏 `isDark ? Colors.white : navSelectedFg` 同理）
+    final selectedColor = isDark ? Colors.white : AppTheme.accentColor;
     return GestureDetector(
       onTap: () {
         setState(() {
@@ -889,7 +937,7 @@ class _ContentViewState extends State<ContentView>
             const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: isSelected
-              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              ? AppTheme.accentColor.withValues(alpha: isDark ? 0.22 : 0.12)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
         ),
@@ -899,9 +947,7 @@ class _ContentViewState extends State<ContentView>
             Icon(
               isSelected ? activeIcon : icon,
               size: 18,
-              color: isSelected
-                  ? AppTheme.accentColor
-                  : Colors.white.withValues(alpha: 0.35),
+              color: isSelected ? selectedColor : unselectedColor,
             ),
             const SizedBox(height: 3),
             Text(
@@ -909,9 +955,7 @@ class _ContentViewState extends State<ContentView>
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.w500,
-                color: isSelected
-                    ? AppTheme.accentColor
-                    : Colors.white.withValues(alpha: 0.35),
+                color: isSelected ? selectedColor : unselectedColor,
               ),
             ),
           ],

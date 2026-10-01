@@ -551,7 +551,7 @@ Future<void> runLxSelfTest(BuildContext context) async {
             children: [
               Text(
                 '超时 ${info['timeoutMs']}ms · '
-                '脚本上限 ${((info['maxScriptChars'] ?? 0) as int) ~/ 1024}KB · '
+                '脚本上限 ${asInt(info['maxScriptChars']) ~/ 1024}KB · '
                 '沙箱已开',
                 style: TextStyle(color: MusicTheme.secondary, fontSize: 11.5),
               ),

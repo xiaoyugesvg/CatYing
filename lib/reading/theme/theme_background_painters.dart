@@ -1504,6 +1504,126 @@ class SkyPainter extends CustomPainter {
       bottomInset != old.bottomInset;
 }
 
+/// 水墨书香背景：宣纸上的墨晕扩散 + 缓浮墨点。
+///
+/// ── 设计取向（与水墨书香调色板一致）───────────────────────────
+/// 这是**默认主题**的背景，用户每天都会看到，所以克制最重要：
+///   · 只画"墨晕"（大而极淡的圆，径向渐变）与少量墨点，
+///     不做山、水、竹那种具象图案 —— 那些抢内容注意力
+///   · 墨晕用**极低透明度**（0.04~0.10），静态时几乎看不见，
+///     只有缓慢呼吸时才察觉 —— 背景该"退到后面去"
+///   · 墨点沿固定轨迹缓慢平移，速度比其它主题（星夜/花瓣）慢，
+///     配合水墨的"静"
+///   · 位置由**确定性伪随机**（种子固定）算出，不用 Random()：
+///     每帧重算才不会跳动，且切换页面回来时图案保持一致
+class InkWashPainter extends CustomPainter {
+  InkWashPainter({
+    required this.animation,
+    required this.isDark,
+    required this.palette,
+    this.topInset = 0,
+    this.bottomInset = 0,
+  }) : super(repaint: animation);
+
+  final Animation<double> animation;
+  final bool isDark;
+  final JellyPalette palette;
+  final double topInset;
+  final double bottomInset;
+
+  /// 墨晕数量。多了就"脏"，5 个刚好铺满又不压抑。
+  static const int _blotchCount = 5;
+
+  /// 墨点数量。点缀用，不宜多。
+  static const int _dotCount = 14;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final t = animation.value;
+    final w = size.width;
+    final h = size.height;
+    if (w <= 0 || h <= 0) return;
+
+    final top = topInset;
+    final bottom = h - bottomInset;
+    final usable = (bottom - top).clamp(1.0, h);
+
+    // 墨色：浅色模式下是深墨（压淡），深色模式下是浅墨
+    final inkBase = isDark ? Colors.white : const Color(0xFF2B2B2B);
+
+    // ── 墨晕：径向渐变，中心略深、边缘全透明 ──
+    for (var i = 0; i < _blotchCount; i++) {
+      final r1 = _rand(i * 7 + 1);
+      final r2 = _rand(i * 7 + 2);
+      final r3 = _rand(i * 7 + 3);
+      final r4 = _rand(i * 7 + 4);
+
+      // 缓慢呼吸：半径在 ±12% 之间起伏，每个墨晕相位不同
+      final phase = t * 2 * 3.1415926 + i * 1.3;
+      final breath = 1.0 + 0.12 * _sin(phase);
+
+      final radius = (w * (0.30 + 0.22 * r3)) * breath;
+      // 位置：横向缓慢漂移（±6% 屏宽），纵向固定
+      final cx = w * (0.12 + 0.76 * r1) + w * 0.06 * _sin(phase * 0.5);
+      final cy = top + usable * (0.08 + 0.84 * r2);
+
+      // 透明度：深色模式稍高（白墨在深底上更不明显）
+      final alpha = (isDark ? 0.075 : 0.055) * (0.6 + 0.4 * r4);
+
+      final rect = Rect.fromCircle(center: Offset(cx, cy), radius: radius);
+      final shader = RadialGradient(
+        colors: [
+          inkBase.withValues(alpha: alpha),
+          inkBase.withValues(alpha: alpha * 0.35),
+          inkBase.withValues(alpha: 0),
+        ],
+        stops: const [0.0, 0.55, 1.0],
+      ).createShader(rect);
+
+      canvas.drawCircle(Offset(cx, cy), radius, Paint()..shader = shader);
+    }
+
+    // ── 墨点：小、慢、极淡 ──
+    final dotPaint = Paint()..style = PaintingStyle.fill;
+    for (var i = 0; i < _dotCount; i++) {
+      final r1 = _rand(100 + i * 5);
+      final r2 = _rand(101 + i * 5);
+      final r3 = _rand(102 + i * 5);
+
+      final baseX = w * r1;
+      final baseY = top + usable * r2;
+      // 横向缓慢往返（周期比墨晕慢，避免整体像在"流动"）
+      final drift = _sin(t * 2 * 3.1415926 * (0.25 + 0.25 * r3) + i) * (w * 0.035);
+
+      final radius = 1.2 + 2.4 * r3;
+      final alpha = (isDark ? 0.16 : 0.13) * (0.5 + 0.5 * r2);
+      dotPaint.color = inkBase.withValues(alpha: alpha);
+      canvas.drawCircle(Offset(baseX + drift, baseY), radius, dotPaint);
+    }
+  }
+
+  /// 确定性伪随机（0~1）：同一 index 永远同一值。
+  ///
+  /// 为什么不用 `Random()`：每帧 new 一个 Random 会得到不同序列 →
+  /// 图案每帧乱跳；而用固定种子的 Random 又要维护状态。
+  /// 这个哈希式写法无状态、纯函数，最省事也最稳。
+  static double _rand(int seed) {
+    final x = (seed * 1103515245 + 12345) & 0x7FFFFFFF;
+    return (x % 10000) / 10000.0;
+  }
+
+  static double _sin(double x) {
+    // 用 dart:math 的 sin：这里包一层只是为了上面几处调用更短
+    return math.sin(x);
+  }
+
+  @override
+  bool shouldRepaint(covariant InkWashPainter old) =>
+      old.isDark != isDark || old.palette != palette;
+}
+
+
+
 /// 按主题预设 id 取背景动画 painter。
 ///
 /// 内置 6 套预设各有专属动画：green = 植物生长；jelly = 梦幻星夜；pink = 樱花飘落；
@@ -1519,6 +1639,14 @@ CustomPainter? backgroundPainterFor(
   int cycle = 0,
 }) {
   switch (presetId) {
+    case 'ink':
+      return InkWashPainter(
+        animation: animation,
+        isDark: isDark,
+        palette: palette,
+        topInset: topInset,
+        bottomInset: bottomInset,
+      );
     case 'green':
       return GreenGrowthPainter(
         animation: animation,

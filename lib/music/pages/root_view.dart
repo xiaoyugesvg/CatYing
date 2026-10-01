@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/player_manager.dart';
 import '../services/settings_store.dart';
+import '../../services/main_tab_controller.dart';
 import '../theme/music_theme.dart';
 import '../widgets/mini_player.dart';
 import 'discover_page.dart';
@@ -31,6 +32,15 @@ class MusicRootView extends StatefulWidget {
   State<MusicRootView> createState() => _MusicRootViewState();
 }
 
+/// 悬浮导航栏规格 —— 与阅读 `JellyNavBar` 保持一致。
+///
+/// 这两个值必须和 `lib/reading/widgets/jelly_nav_bar.dart` 里的
+/// `floatingBarHeight` / `_floatingRadius` 相同，否则音乐和阅读的
+/// 悬浮栏看起来是两个不同组件（用户要求统一成阅读那种）。
+/// 以后改阅读的圆角，这里要跟着改。
+const double _floatingBarHeight = 72.0;
+const double _floatingRadius = 32.0;
+
 class _MusicRootViewState extends State<MusicRootView> {
   int _tab = 0;
 
@@ -40,13 +50,17 @@ class _MusicRootViewState extends State<MusicRootView> {
     (
       label: '音乐库',
       icon: Icons.library_music_outlined,
-      active: Icons.library_music_rounded
+      active: Icons.library_music_rounded,
     ),
     (
       label: '我的',
       icon: Icons.person_outline_rounded,
-      active: Icons.person_rounded
+      active: Icons.person_rounded,
     ),
+    // 「影视」是**跳出音乐模块**的入口，不是本模块的 tab ——
+    // 点了会切到影视主 tab（音乐/阅读自带悬浮栏，影视底栏在我们的 tab 上是隐藏的，
+    // 所以必须给一条回去的路，否则用户进了音乐就出不去）。
+    (label: '影视', icon: Icons.movie_outlined, active: Icons.movie_rounded),
   ];
 
   @override
@@ -115,69 +129,104 @@ class _MusicRootViewState extends State<MusicRootView> {
   }
 
   Widget _navBar() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-      decoration: BoxDecoration(
-        color: MusicTheme.card.withValues(alpha: 0.96),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: MusicTheme.label.withValues(alpha: 0.06),
-          width: 0.5,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.10),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        top: false,
-        bottom: true,
-        child: Row(
-          children: List.generate(_tabs.length, (i) {
-            final t = _tabs[i];
-            final active = i == _tab;
-            return Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => setState(() => _tab = i),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  padding: const EdgeInsets.symmetric(vertical: 7),
-                  decoration: BoxDecoration(
-                    color: active
-                        ? MusicTheme.tint.withValues(alpha: 0.14)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        active ? t.active : t.icon,
-                        size: 21,
-                        color: active ? MusicTheme.tint : MusicTheme.secondary,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        t.label,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight:
-                              active ? FontWeight.w600 : FontWeight.w400,
-                          color:
-                              active ? MusicTheme.tint : MusicTheme.secondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+    // ── 底部安全区与悬浮间距（这里踩过坑，写清楚）──────────────────
+    // 正确顺序是 **SafeArea 包在外，悬浮间距在里**：
+    //     SafeArea(bottom: true) → Padding(bottom: 30) → 胶囊
+    // 这样胶囊离屏幕底边 = Home 指示条高度 + 30，视觉上是"悬浮"的。
+    //
+    // ❌ 之前的写法是 Container(margin: bottom 8) → SafeArea(bottom: true)，
+    //    间距只有 8px，胶囊紧贴 Home 指示条，
+    //    看起来像"没做安全区适配"，而不是悬浮栏。
+    //    阅读模块的 JellyNavBar 一直是对的（SafeArea 在外 + 30px），
+    //    这里对齐它，两条栏手感才一致。
+    return SafeArea(
+      top: false,
+      bottom: true,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 30),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          decoration: BoxDecoration(
+            // ── 对齐阅读 JellyNavBar 的悬浮胶囊规格 ──────────────
+            // 圆角 32（原 22）、高 72、白底 95%、阴影 blur 12 / offset(0,4)。
+            // 数值照抄 `JellyNavBar._floatingRadius`、`floatingBarHeight`
+            // 与它 Container 的 decoration，目的是让音乐和阅读的悬浮栏
+            // 看起来像同一个组件（用户要求"所有悬浮菜单栏按阅读的来"）。
+            //
+            // 同时**去掉原来那圈 0.5px 边框**：阅读栏没有边框，
+            // 它是靠阴影 + 半透明底和背景分离的；多一圈边框会显得更"硬"。
+            color: MusicTheme.card.withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(_floatingRadius),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
               ),
-            );
-          }),
+            ],
+          ),
+          child: SizedBox(
+            // 高度对齐阅读的 72（减掉上下各 6 的 padding）
+            height: _floatingBarHeight - 12,
+            child: Row(
+              children: List.generate(_tabs.length, (i) {
+                final t = _tabs[i];
+                final active = i == _tab;
+                // 最后一个（影视）是"跳出去"而不是本模块的 tab ——
+                // 它永远不高亮，点了就切到影视主 tab。
+                final isExit = t.label == '影视';
+                return Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      if (isExit) {
+                        MainTabController.instance.backToVideo();
+                        return;
+                      }
+                      setState(() => _tab = i);
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.symmetric(vertical: 7),
+                      decoration: BoxDecoration(
+                        color: active && !isExit
+                            ? MusicTheme.tint.withValues(alpha: 0.14)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            active && !isExit ? t.active : t.icon,
+                            size: 21,
+                            color: isExit
+                                ? MusicTheme.secondary
+                                : (active
+                                      ? MusicTheme.tint
+                                      : MusicTheme.secondary),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            t.label,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: active && !isExit
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                              color: active && !isExit
+                                  ? MusicTheme.tint
+                                  : MusicTheme.secondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
         ),
       ),
     );

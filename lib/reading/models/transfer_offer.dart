@@ -1,3 +1,5 @@
+import '../utils/safe_num.dart';
+
 /// 一笔待传文件描述。
 class TransferFile {
   const TransferFile({
@@ -32,7 +34,7 @@ class TransferFile {
 
   factory TransferFile.fromJson(Map<String, dynamic> j) => TransferFile(
     name: j['name'] as String,
-    size: (j['size'] as num).toInt(),
+    size: asInt(j['size']),
     mime: j['mime'] as String?,
     kind: j['kind'] as String? ?? 'file',
   );

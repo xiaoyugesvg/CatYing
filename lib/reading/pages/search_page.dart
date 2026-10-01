@@ -1216,23 +1216,39 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   }
 
   /// 无可用源空状态：提示去漫画源仓库添加云端地址并更新。
+  /// 无可用源时的空态。
+  ///
+  /// ── 为什么有两种文案（用户给了两张图，它们不矛盾而是两个场景）──
+  /// cmbok 这里其实是**两种状态**，用户截图各拍到一种：
+  ///   · **一个源都没有**（还没配过）
+  ///       → 「暂无漫画源 / 请到「漫画源仓库」填入云端地址并更新」+「去添加漫画源」
+  ///         这是"引导"，语气中性
+  ///   · **有源但都连不上**（配过，但云端/密钥服务器拉不到）
+  ///       → 「漫画源已锁定 / 未能连接密钥服务器，请检查网络后重启软件」+「去漫画源仓库」
+  ///         这是"故障"，必须说清原因，否则用户以为自己没配
+  ///
+  /// 用**已注册源数量**区分：注册过就说明是"故障"而非"没配"。
   Widget _buildEmptySourceState(bool isDark) {
+    // 已注册的源（含被停用的）—— 区分"没配过"和"配了但连不上"
+    final registered = SourceManager().sources.length;
+    final hasConfigured = registered > 0;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // ⚠️ 文案与图标按 cmbok V2.0.8 截图对齐：
-            //   锁图标 + 「漫画源已锁定」+ 原因说明 + 「去漫画源仓库」按钮
             Icon(
-              Icons.lock_outline_rounded,
+              hasConfigured
+                  ? Icons.lock_outline_rounded
+                  : Icons.cloud_off_rounded,
               size: 64,
               color: JellyTheme.textSecondary,
             ),
             const SizedBox(height: 16),
             Text(
-              '漫画源已锁定',
+              hasConfigured ? '漫画源已锁定' : '暂无漫画源',
               style: TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.bold,
@@ -1241,7 +1257,9 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             ),
             const SizedBox(height: 8),
             Text(
-              '漫画源已锁定：未能连接密钥服务器，请检查网络后重启软件',
+              hasConfigured
+                  ? '漫画源已锁定：未能连接密钥服务器，请检查网络后重启软件'
+                  : '请到「漫画源仓库」填入云端地址并更新',
               style: TextStyle(fontSize: 13, color: JellyTheme.textSecondary),
               textAlign: TextAlign.center,
             ),
@@ -1251,8 +1269,13 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 context,
                 MaterialPageRoute(builder: (_) => const SourceRepoPage()),
               ),
-              icon: const Icon(Icons.settings_rounded, size: 18),
-              label: const Text('去漫画源仓库'),
+              icon: Icon(
+                hasConfigured
+                    ? Icons.settings_rounded
+                    : Icons.add_circle_outline_rounded,
+                size: 18,
+              ),
+              label: Text(hasConfigured ? '去漫画源仓库' : '去添加漫画源'),
             ),
           ],
         ),

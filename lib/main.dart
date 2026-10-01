@@ -28,6 +28,8 @@ import 'reading/models/book_source.dart';
 import 'reading/services/tts_service.dart';
 import 'music/services/settings_store.dart';
 import 'music/services/player_manager.dart';
+import 'common/module_theme_store.dart';
+import 'common/module_theme_sync.dart';
 import 'music/theme/music_theme.dart';
 import 'reading/services/book_favorites_service.dart';
 import 'reading/services/favorites_service.dart';
@@ -118,6 +120,18 @@ void main() async {
   // 所以它要排在主题之前，保证首帧就有正确的强调色与音源数据。
   await SettingsStore.instance.init();
   await MusicThemeStore.instance.init();
+
+  // ── 统一主题（影视/直播/音乐/阅读 分模块配色）─────────────────
+  // 顺序要求：必须在 SettingsService().init() 之后 ——
+  // 因为要读它当前的阅读主题 id 来解析"跟随阅读"。
+  await ModuleThemeStore.instance.init();
+  ModuleThemeStore.instance.syncReadingPreset(SettingsService().themePreset);
+  // 音乐模块的强调色由统一主题驱动：注册桥接（写在音乐侧，避免反向依赖）
+  MusicThemeBridge.register((primary) {
+    MusicTheme.setCustomAccent(primary);
+  });
+  // 立刻落地一次，让影视/直播/音乐一启动就是用户选的方案
+  await applyModuleThemes();
   await MusicPlayerSkin.instance.init();
   await MusicPlayerManager.instance.init();
 

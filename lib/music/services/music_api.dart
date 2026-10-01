@@ -51,7 +51,7 @@ class MusicUrlInfo {
         url: (j['url'] ?? '').toString(),
         reason: (j['reason'] ?? '').toString(),
         message: (j['error'] ?? j['message'] ?? '').toString(),
-        bitrate: (j['br'] as num?)?.toInt() ?? 0,
+        bitrate: asInt(j['br']),
         type: (j['type'] ?? '').toString(),
       );
 }
@@ -284,7 +284,7 @@ class MusicApi {
       ok: true,
       list: _listOf(r, 'list')
           .map((e) => Artist(
-                id: (e['id'] as num?)?.toInt() ?? 0,
+                id: asInt(e['id']),
                 name: (e['name'] ?? '').toString(),
                 avatarUrl: e['avatarUrl']?.toString(),
               ))
@@ -300,7 +300,7 @@ class MusicApi {
       ok: true,
       list: _listOf(r, 'list')
           .map((e) => Album(
-                id: (e['id'] as num?)?.toInt() ?? 0,
+                id: asInt(e['id']),
                 name: (e['name'] ?? '').toString(),
                 coverUrl: (e['cover'] ?? e['picUrl'])?.toString(),
                 artist: e['artist']?.toString(),
@@ -395,7 +395,7 @@ class MusicApi {
     final r = await _call({'action': 'topLists'});
     return _listOf(r, 'list')
         .map((e) => TopList(
-              id: (e['id'] as num?)?.toInt() ?? 0,
+              id: asInt(e['id']),
               name: (e['name'] ?? '').toString(),
               coverUrl: e['cover']?.toString(),
               updateFrequency: e['updateFrequency']?.toString(),
@@ -444,10 +444,10 @@ class MusicApi {
     final p = m['playlist'];
     final pl = p is Map
         ? Playlist(
-            id: (p['id'] as num?)?.toInt() ?? id,
+            id: asInt(p['id']),
             name: (p['name'] ?? '').toString(),
             coverUrl: p['cover']?.toString(),
-            trackCount: (p['trackCount'] as num?)?.toInt() ?? 0,
+            trackCount: asInt(p['trackCount']),
             description: p['description']?.toString(),
             creator: p['creator']?.toString(),
           )
@@ -480,7 +480,7 @@ class MusicApi {
     final r = await _call({'action': 'artistAlbums', 'id': artistId, 'limit': limit});
     return _listOf(r, 'list')
         .map((e) => Album(
-              id: (e['id'] as num?)?.toInt() ?? 0,
+              id: asInt(e['id']),
               name: (e['name'] ?? '').toString(),
               coverUrl: e['cover']?.toString(),
               artist: e['artist']?.toString(),

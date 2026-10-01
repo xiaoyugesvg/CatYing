@@ -15,6 +15,7 @@ import '../services/settings_service.dart';
 import '../widgets/jelly_book_card.dart';
 import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_search_bar.dart';
+import '../widgets/jelly_pull_cord.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/jelly_sliding_actions.dart';
 import '../widgets/staggered_entrance.dart';
@@ -892,6 +893,23 @@ class _BookSearchPageState extends State<BookSearchPage>
                           ),
                         ),
                         const Spacer(),
+                        // 「拉绳」：标题右边那根挂着的小绳（点它切到书源界面）。
+                        //
+                        // 位置就按截图放在标题右侧、图标组左侧 ——
+                        // 它是个**挂饰**不是普通按钮，所以不带底色、不参与
+                        // 图标组的横排/展开逻辑。
+                        JellyPullCord(
+                          tooltip: '切换到书源',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => BookSourceSearchPage(
+                                initialKeyword: _keyword.trim(),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         // 右上角滑动图标组（点按切换 / 长按展开成竖列）。
                         // 头像保留在最右 —— 它是 Z-Library 账号入口，不能去掉。
                         JellySlidingActions(

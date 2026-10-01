@@ -12,6 +12,7 @@ import '../services/download_service.dart';
 import '../services/favorites_service.dart';
 import '../services/reading_progress_service.dart';
 import '../services/remote_config_service.dart';
+import '../../services/main_tab_controller.dart';
 import '../services/settings_service.dart';
 import '../services/update_service.dart';
 import '../source/adapter.dart';
@@ -322,7 +323,15 @@ class _HomePageState extends State<HomePage> {
 
         final navItems = visible
             .map((t) => _tabNavItems[t]!)
-            .toList(growable: false);
+            // 「影视」是**跳出阅读模块**的入口，不是阅读的 tab。
+            // 为什么必须加：阅读自带 5-tab 悬浮栏，进入阅读后影视底栏会被隐藏
+            // （见 app.dart 的 inEmbeddedModule），
+            // 没有这条就**没有任何途径回到影视**。
+            .toList()
+          ..add(const JellyNavItem(
+            icon: Icons.movie_outlined,
+            label: '影视',
+          ));
         final pages = visible
             .map((t) => _buildPageFor(t, t == _currentTab))
             .toList(growable: false);
@@ -354,6 +363,11 @@ class _HomePageState extends State<HomePage> {
                 currentIndex: currentIndex,
                 floating: floating,
                 onTap: (index) {
+                  // 最后一项是「影视」：跳出阅读模块回到影视
+                  if (index == visible.length) {
+                    MainTabController.instance.backToVideo();
+                    return;
+                  }
                   setState(() => _currentTab = visible[index]);
                 },
                 onLongPress: _onNavLongPress,

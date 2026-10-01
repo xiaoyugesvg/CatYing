@@ -158,6 +158,40 @@ class JellyPalette {
       textPrimaryDark = const Color(0xFFEAF1F5),
       textSecondary = const Color(0xFF8A9CA8);
 
+  /// 水墨书香（默认主题）—— 黑白灰的水墨调，**无彩色倾向**。
+  ///
+  /// ── 为什么是这套值（"水墨 + 书香"两个意象）────────────────────
+  /// 用户在主题风格里选中的就是这一项（色块为「墨 / 灰 / 白」三色），
+  /// 所以配色要同时满足两个意象：
+  ///   · **书香** → 浅色底用暖米白（#F7F5F1），是"宣纸/旧书页"的观感。
+  ///     不能用纯白：纯白是屏幕色，不是纸色，而且 OLED 上刺眼
+  ///   · **水墨** → 主色用墨灰（#3A3A3A）。不能用纯黑：
+  ///     纯黑作主色/图标色太硬，而且与正文文字同色会失去层次
+  ///   · 深色模式取墨夜深灰（#1C1C1E），不是纯黑 —— 纯黑配白字对比过强，
+  ///     长时间阅读疲劳（iOS 系统深色也这么做）
+  ///
+  /// 强调色用**低饱和赭石**（#B08D57）：水墨画里唯一的暖色是印章与落款，
+  /// 所以整体无彩色，只留这一处暖色做点缀。
+  const JellyPalette.ink()
+    : primary = const Color(0xFF3A3A3A),
+      primaryLight = const Color(0xFF6E6E73),
+      primaryDark = const Color(0xFF1F1F1F),
+      accent = const Color(0xFFB08D57),
+      success = const Color(0xFF6B9E78),
+      warning = const Color(0xFFD4A853),
+      error = const Color(0xFFC25B5B),
+      blue = const Color(0xFF5A7D9A),
+      backgroundLight = const Color(0xFFF7F5F1),
+      backgroundDark = const Color(0xFF1C1C1E),
+      cardLight = Colors.white,
+      cardDark = const Color(0xFF2A2A2C),
+      navSelectedBg = const Color(0xFFE6E3DD),
+      navSelectedFg = const Color(0xFF3A3A3A),
+      navUnselected = const Color(0xFF232325),
+      textPrimaryLight = const Color(0xFF1F1F1F),
+      textPrimaryDark = const Color(0xFFEDEDED),
+      textSecondary = const Color(0xFF8E8E93);
+
   final Color primary;
   final Color primaryLight;
   final Color primaryDark;
@@ -286,6 +320,12 @@ class JellyPalette {
   /// 自定义主题的解析见 [SettingsService._resolvePalette]。
   factory JellyPalette.fromPreset(String id) {
     switch (id) {
+      // ⚠️ 这个 case 绝不能漏：漏了会 fall through 到 default=jelly，
+      // 于是选了「水墨书香」却拿到「魅力紫色」的配色 —— **不报错**，
+      // 只是全 App 颜色不对（最难查的那种）。
+      // jelly_palette 的测试里专门有一条锁住它。
+      case 'ink':
+        return const JellyPalette.ink();
       case 'pink':
         return const JellyPalette.pink();
       case 'green':
@@ -408,6 +448,8 @@ class ThemePresetInfo {
 
 /// 全部主题预设（顺序即展示顺序）
 const List<ThemePresetInfo> themePresets = [
+  // 水墨书香排第一：它是默认主题（截图里也是第一项且选中）
+  ThemePresetInfo('ink', '水墨书香', JellyPalette.ink()),
   ThemePresetInfo('jelly', '魅力紫色', JellyPalette.jelly()),
   ThemePresetInfo('pink', '粉色少女', JellyPalette.pink()),
   ThemePresetInfo('green', '清新护眼', JellyPalette.green()),

@@ -102,6 +102,14 @@ class SettingsService extends ChangeNotifier {
   static const _kShowReaderHudKey = 'reader_show_hud';
   // 音量键翻页：阅读时按音量上/下键翻页（默认关，会接管音量键）
   static const _kVolumeKeyTurnKey = 'reader_volume_key_turn';
+  // ── 以下 5 项按 cmbok V2.0.8「阅读设置」截图补齐 ──────────────
+  static const _kCheckShelfUpdateKey = 'check_shelf_update_on_start';
+  static const _kRememberZoomKey = 'reader_remember_zoom';
+  static const _kPinchZoomKey = 'reader_pinch_zoom';
+  static const _kSingleHandKey = 'reader_single_hand';
+  static const _kScreenSleepKey = 'reader_screen_sleep';
+  static const _kAutoAddShelfKey = 'reader_auto_add_shelf';
+  static const _kAutoAddShelfForBookKey = 'reader_auto_add_shelf_book';
   // 墨水屏模式：漫画黑白显示 + 柔和浅灰底（默认关）
   static const _kInkScreenModeKey = 'reader_ink_screen_mode';
   // 番茄钟：循环次数 / 每轮休息分钟
@@ -166,7 +174,7 @@ class SettingsService extends ChangeNotifier {
   bool _checkUpdateOnStartup = true; // 启动时自动检查 app 新版本
   bool _isDarkMode = false; // 暗色模式（首次跟随系统，之后保留用户选择）
   bool _themeFollowSystem = true; // 主题跟随系统明暗；关闭后用上面的手动选择
-  String _themePreset = 'jelly'; // 主题预设：jelly/pink/green 或 custom_*
+  String _themePreset = 'ink'; // 主题预设：ink(水墨书香,默认)/jelly/pink/green/... 或 custom_*
   bool _backgroundAnimation = true; // 主题背景动画开关
   bool _frameRateReduced = true; // 主题动画降帧省电（默认开启，减半重绘）
   List<ThemePresetInfo> _customThemes =
@@ -188,6 +196,21 @@ class SettingsService extends ChangeNotifier {
   bool _showReaderHud = true; // 阅读信息栏（时间/页码/进度）
   bool _volumeKeyTurn = false; // 音量键翻页
   bool _inkScreenMode = false; // 墨水屏模式（漫画黑白 + 柔和浅灰底）
+  // ── 下面 6 项对应 cmbok「阅读设置」里的开关（截图逐项对齐）──
+  /// 启动时自动检查书架/收藏是否有新章节（有更新在封面/导航角标提示）
+  bool _checkShelfUpdateOnStart = true;
+  /// 翻页时保留当前缩放（需先开双指缩放）
+  bool _rememberZoom = false;
+  /// 双指缩放（拼页模式除外；图书仅图片模式）
+  bool _pinchZoom = true;
+  /// 单手模式：屏幕左右点击都是下一页
+  bool _singleHand = false;
+  /// 屏幕休眠：'default' 跟随系统 / '10min' / 'never'
+  String _screenSleep = 'default';
+  /// 漫画在线阅读满 N 话后自动加入「正在读」
+  bool _autoAddShelfForManga = true;
+  /// 图书在线阅读满 N 章后自动加入「正在读」
+  bool _autoAddShelfForBook = true;
   int _pomodoroLoopCount = defaultPomodoroLoopCount; // 番茄钟循环次数
   int _pomodoroRestMinutes = defaultPomodoroRestMinutes; // 番茄钟每轮休息分钟
 
@@ -227,6 +250,7 @@ class SettingsService extends ChangeNotifier {
   /// 返回其 [ThemeBackground]；未知 id 回退纯色。渲染层据此决定画动画/图片/纯色。
   ThemeBackground get currentBackground {
     switch (_themePreset) {
+      case 'ink':
       case 'jelly':
       case 'pink':
       case 'green':
@@ -264,6 +288,13 @@ class SettingsService extends ChangeNotifier {
   bool get doublePage => _doublePage;
   bool get showReaderHud => _showReaderHud;
   bool get volumeKeyTurn => _volumeKeyTurn;
+  bool get checkShelfUpdateOnStart => _checkShelfUpdateOnStart;
+  bool get rememberZoom => _rememberZoom;
+  bool get pinchZoom => _pinchZoom;
+  bool get singleHand => _singleHand;
+  String get screenSleep => _screenSleep;
+  bool get autoAddShelfForManga => _autoAddShelfForManga;
+  bool get autoAddShelfForBook => _autoAddShelfForBook;
   bool get inkScreenMode => _inkScreenMode;
   int get pomodoroLoopCount => _pomodoroLoopCount;
   int get pomodoroRestMinutes => _pomodoroRestMinutes;
@@ -375,9 +406,9 @@ class SettingsService extends ChangeNotifier {
       // 自定义主题：JSON 解析，坏条目跳过（韧性，不阻断启动）
       _customThemes = _loadCustomThemes(prefs.getString(_kCustomThemesKey));
       // 主题预设：默认 jelly；加载后立即应用到 JellyTheme（runApp 前，冷启动即生效）
-      _themePreset = prefs.getString(_kThemePresetKey) ?? 'jelly';
+      _themePreset = prefs.getString(_kThemePresetKey) ?? 'ink';
       // 若存的主题已被删除，回退 jelly
-      if (!_isKnownPreset(_themePreset)) _themePreset = 'jelly';
+      if (!_isKnownPreset(_themePreset)) _themePreset = 'ink';
       JellyTheme.apply(_resolvePalette(_themePreset));
       _backgroundAnimation = prefs.getBool(_kBgAnimationKey) ?? true;
       _frameRateReduced = prefs.getBool(_kFrameRateReducedKey) ?? true;
@@ -452,6 +483,16 @@ class SettingsService extends ChangeNotifier {
       _doublePage = prefs.getBool(_kDoublePageKey) ?? false;
       _showReaderHud = prefs.getBool(_kShowReaderHudKey) ?? true;
       _volumeKeyTurn = prefs.getBool(_kVolumeKeyTurnKey) ?? false;
+    _checkShelfUpdateOnStart =
+        prefs.getBool(_kCheckShelfUpdateKey) ?? true;
+    _rememberZoom = prefs.getBool(_kRememberZoomKey) ?? false;
+    _pinchZoom = prefs.getBool(_kPinchZoomKey) ?? true;
+    _singleHand = prefs.getBool(_kSingleHandKey) ?? false;
+    _screenSleep = prefs.getString(_kScreenSleepKey) ?? 'default';
+    _autoAddShelfForManga =
+        prefs.getBool(_kAutoAddShelfKey) ?? true;
+    _autoAddShelfForBook =
+        prefs.getBool(_kAutoAddShelfForBookKey) ?? true;
       _inkScreenMode = prefs.getBool(_kInkScreenModeKey) ?? false;
       // 若默认首页不在可见列表中，自动修正到第一个可见
       if (!_visibleNavTabs.any((t) => t == _defaultHomePage.toNavTab())) {
@@ -745,7 +786,7 @@ class SettingsService extends ChangeNotifier {
   /// 设置：主题预设（内置 jelly/pink/green/ocean/sunset/sky，或 custom_* 自定义；
   /// 未知值兜底回 jelly）
   Future<void> setThemePreset(String value) async {
-    final v = _isKnownPreset(value) ? value : 'jelly';
+    final v = _isKnownPreset(value) ? value : 'ink';
     if (_themePreset == v) return;
     _themePreset = v;
     JellyTheme.apply(_resolvePalette(v));
@@ -760,7 +801,8 @@ class SettingsService extends ChangeNotifier {
 
   /// id 是否为已知主题（内置预设或已存自定义）。
   bool _isKnownPreset(String id) {
-    if (id == 'jelly' ||
+    if (id == 'ink' ||
+        id == 'jelly' ||
         id == 'pink' ||
         id == 'green' ||
         id == 'ocean' ||
@@ -861,11 +903,11 @@ class SettingsService extends ChangeNotifier {
     }
     if (wasSelected) {
       // 回退 jelly：直接改字段+应用，再走持久化（避免 setThemePreset 的相同 id 短路）
-      _themePreset = 'jelly';
+      _themePreset = 'ink';
       JellyTheme.apply(const JellyPalette.jelly());
       try {
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_kThemePresetKey, 'jelly');
+        await prefs.setString(_kThemePresetKey, 'ink');
       } catch (e) {
         _log('回退主题预设失败: $e');
       }
@@ -1228,6 +1270,64 @@ class SettingsService extends ChangeNotifier {
   }
 
   /// 设置：音量键翻页（阅读时按音量上/下键翻页）
+  // ── 新增 6 项的 setter ──────────────────────────────────────
+
+  Future<void> setCheckShelfUpdateOnStart(bool value) async {
+    if (_checkShelfUpdateOnStart == value) return;
+    _checkShelfUpdateOnStart = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kCheckShelfUpdateKey, value);
+  }
+
+  Future<void> setRememberZoom(bool value) async {
+    if (_rememberZoom == value) return;
+    _rememberZoom = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kRememberZoomKey, value);
+  }
+
+  Future<void> setPinchZoom(bool value) async {
+    if (_pinchZoom == value) return;
+    _pinchZoom = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kPinchZoomKey, value);
+  }
+
+  Future<void> setSingleHand(bool value) async {
+    if (_singleHand == value) return;
+    _singleHand = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kSingleHandKey, value);
+  }
+
+  Future<void> setScreenSleep(String value) async {
+    if (_screenSleep == value) return;
+    _screenSleep = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kScreenSleepKey, value);
+  }
+
+  Future<void> setAutoAddShelfForManga(bool value) async {
+    if (_autoAddShelfForManga == value) return;
+    _autoAddShelfForManga = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kAutoAddShelfKey, value);
+  }
+
+  Future<void> setAutoAddShelfForBook(bool value) async {
+    if (_autoAddShelfForBook == value) return;
+    _autoAddShelfForBook = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kAutoAddShelfForBookKey, value);
+  }
+
   Future<void> setVolumeKeyTurn(bool value) async {
     if (_volumeKeyTurn == value) return;
     _volumeKeyTurn = value;
