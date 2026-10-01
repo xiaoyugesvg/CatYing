@@ -63,10 +63,10 @@ class TVBoxApp extends StatelessWidget {
     bg.onAppearanceChanged = (isLight) {
       ThemeModeStore.applyLightFromBackground(isLight);
     };
-    // 冷启动：直接把持久化的外观模式应用上去
-    ThemeModeStore.set(bg.appearanceMode.value == AppearanceMode.light
-        ? ThemeMode.light
-        : ThemeMode.dark);
+    // 主题模式（含「跟随系统」）在 main() 启动时已从 prefs 加载，
+    // 这里**不再**用 BackgroundService.appearanceMode（只有 light/dark 两值）
+    // 覆盖 —— 旧逻辑每次冷启动都会把 'system' 覆盖成 dark/light，
+    // 导致「跟随系统」重启后丢失。
 
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: ThemeModeStore.notifier,

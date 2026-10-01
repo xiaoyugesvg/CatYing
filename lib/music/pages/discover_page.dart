@@ -313,7 +313,7 @@ class _DiscoverPageState extends State<DiscoverPage>
       context: context,
       backgroundColor: MusicTheme.card,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (ctx) => SafeArea(
         top: false,

@@ -263,7 +263,7 @@ Future<void> showSongActions(
     context: context,
     backgroundColor: MusicTheme.card,
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
     ),
     builder: (ctx) => SafeArea(
       top: false,
@@ -340,7 +340,7 @@ class GlassCard extends StatelessWidget {
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(12),
-    this.radius = 16,
+    this.radius = 20,
     this.onTap,
   });
 
@@ -480,7 +480,7 @@ class CoverCard extends StatelessWidget {
         children: [
           Stack(
             children: [
-              CoverImage(url: coverUrl, size: width, cornerRadius: 12),
+              CoverImage(url: coverUrl, size: width, cornerRadius: 20),
               if (badge != null)
                 Positioned(
                   right: 6,

@@ -65,18 +65,9 @@ class _ContentViewState extends State<ContentView>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // ⚠️ load() 是异步的：它读 theme_mode 会改明暗。外观模式是唯一来源，
-    // 所以读完必须再用 BackgroundService 的外观模式断言一次，
-    // 否则冷启动的明暗会被历史 theme_mode 覆盖。
-    ThemeModeStore.load().then((_) {
-      final bg = Get.isRegistered<BackgroundService>()
-          ? BackgroundService.instance
-          : null;
-      if (bg == null) return;
-      ThemeModeStore.set(bg.appearanceMode.value == AppearanceMode.light
-          ? ThemeMode.light
-          : ThemeMode.dark);
-    });
+    // 主题模式（含「跟随系统」）已在 main() 启动时从 prefs 加载，
+    // 这里不再用 BackgroundService.appearanceMode 覆盖 ——
+    // 旧逻辑每次冷启动都会把 'system' 覆盖成 dark/light（跟随系统丢失）。
     _searchVM = Get.find<TvSearchController>();
     _settingsVM = Get.put(SettingsController());
     // 对应 Swift: .onChange(of: appState.pendingSearchKeyword)

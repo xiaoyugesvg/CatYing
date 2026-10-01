@@ -144,7 +144,7 @@ void main() async {
   MusicPaletteBridge.register(
       () => ModuleThemeStore.instance.paletteFor(ModuleThemeStore.music));
 
-  // ── 全局主题明暗同步（三模块统一开关，以阅读为基准）────────────
+  // ── 全局主题明暗同步（三模块统一开关，以全局 prefs 为基准）────────────
   //
   // 注册双向同步回调：
   //   · 全局 ThemeModeStore 变了 → 推给音乐和阅读
@@ -155,11 +155,20 @@ void main() async {
   GlobalThemeSync.registerReading((mode) {
     SettingsService().applyThemeModeFromGlobal(mode);
   });
-  // 启动后立刻同步一次：以阅读当前的明暗为基准，把音乐和全局拉齐
-  final readingMode = SettingsService().themeFollowSystem
-      ? ThemeMode.system
-      : (SettingsService().isDarkMode ? ThemeMode.dark : ThemeMode.light);
-  ThemeModeStore.set(readingMode);
+  // 启动：从 prefs 加载全局主题模式（含 'system'，不再被覆盖丢失），
+  // 然后以全局为基准把音乐 / 阅读 / 壁纸那一套拉齐。
+  await ThemeModeStore.load();
+  final globalMode = ThemeModeStore.mode;
+  GlobalThemeSync.pushToModules(globalMode);
+  final wantLight = switch (globalMode) {
+    ThemeMode.light => true,
+    ThemeMode.dark => false,
+    ThemeMode.system =>
+      WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+          Brightness.light,
+  };
+  await BackgroundService.instance.setAppearanceMode(
+      wantLight ? AppearanceMode.light : AppearanceMode.dark);
 
   // 启动外观协调：让"谁在前台谁说话"的规则生效。
   // 必须放在 MainTabController 注册之后（sync 里读它判断当前 tab）。
