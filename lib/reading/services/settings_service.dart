@@ -786,12 +786,25 @@ class SettingsService extends ChangeNotifier {
     } catch (e) {
       _log('保存暗色模式失败: $e');
     }
-    // 同步回全局主题存储（非跟随系统时才回写，跟随系统由系统驱动）
-    if (!_themeFollowSystem && !_syncingTheme) {
+    // ── 同步回全局主题存储 ─────────────────────────────────────
+    //
+    // 🔴 这里原来是 `if (!_themeFollowSystem && !_syncingTheme)`，
+    // 而 `_themeFollowSystem` **默认是 true** —— 于是"跟随系统"期间
+    // 用户点明暗图标（`reading/pages/me_page.dart` 的月亮/太阳）
+    // **永远不会回写全局**：本地值改了、全局还是旧的。
+    //
+    // 改成"全局唯一真源"后这个 bug 会立刻变成用户可见的
+    // ——全局是真源，不回写就等于**点击被静默吞掉**。
+    //
+    // 现在无论是否跟随系统都回写：跟随系统时把"跟随"这个意图
+    // 也一并交给全局（用 ThemeMode.system）。
+    if (!_syncingTheme) {
       _syncingTheme = true;
       try {
         await ThemeModeStore.notifyModuleChanged(
-          value ? ThemeMode.dark : ThemeMode.light,
+          _themeFollowSystem
+              ? ThemeMode.system
+              : (value ? ThemeMode.dark : ThemeMode.light),
         );
       } finally {
         _syncingTheme = false;

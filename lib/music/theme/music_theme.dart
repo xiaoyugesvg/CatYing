@@ -263,10 +263,14 @@ class MusicThemeStore {
     await prefs.setString(_kMode, mode.name);
     MusicTheme.setDark(_resolveDark(mode));
     revision.value++;
-    // 同步回全局主题存储，保持三模块一致
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _syncBackToGlobal(mode);
-    });
+    // 同步回全局主题存储，保持三模块一致。
+    //
+    // ⚠️ 原来包在 `addPostFrameCallback` 里 —— 那个回调**只在有帧要绘制时
+    // 才会执行**，用户改完设置马上退出页面时，回写可能始终不执行，
+    // 于是"全局还是旧值"。而现在的模型是**全局唯一真源**，
+    // 不回写 = 用户的选择丢失。直接调用即可（`notifyModuleChanged`
+    // 内部有 `_syncing` 防递归，且不直接触碰 build）。
+    _syncBackToGlobal(mode);
   }
 
   /// 从全局主题存储推过来（统一主题设置页改了明暗时调用）

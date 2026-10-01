@@ -749,7 +749,15 @@ class _LivePageState extends State<LivePage> {
             Center(
               child: Icon(
                 Icons.live_tv,
-                color: AppTheme.textTertiary,
+                // ── ⚠️ 必须是**白色**，不能跟主题走 ────────────────
+                // 这个图标画在 `_buildVideoLayer` 的容器里，而那个容器是
+                // **`color: Colors.black`（视频区永远是黑的）**。
+                //
+                // 原来用 `AppTheme.textTertiary`（= #8E8E93），
+                // **浅色模式下对比度不足、看起来发灰不明显**
+                // （用户实测："直播的播放按钮在浅色模式下应该是白色的"）。
+                // 视频区的图标不该随全局明暗变 —— 背景永远是黑的。
+                color: Colors.white.withValues(alpha: 0.72),
                 size: 56,
               ),
             ),

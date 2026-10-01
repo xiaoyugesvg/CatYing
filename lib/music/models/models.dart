@@ -171,11 +171,40 @@ class Song {
         name: (j['name'] ?? '').toString(),
         artists: (j['artists'] ?? '').toString(),
         album: (j['album'] ?? '').toString(),
-        coverUrl: j['coverUrl']?.toString(),
+        coverUrl: _firstNonEmpty(j, const ['coverUrl', 'cover', 'picUrl']),
         duration: asDouble(j['duration']),
         source: SongSource.fromKey(j['source']?.toString()),
         fee: asInt(j['fee']),
       );
+
+  /// 按顺序取第一个非空字符串字段（兼容不同接口的字段命名）。
+  ///
+  /// ── 🔴 为什么需要它（真实 bug：歌单/搜索里的歌全都没封面）────────
+  /// Node 的 `mapTrack()`（`music_source.js`）输出的是
+  ///     `cover: album.picUrl || s.picUrl || ''`
+  /// 而 `Song.fromJson` 原来**只读 `coverUrl`** —— 名字对不上 → 永远 null。
+  ///
+  /// 后果：**所有走 `Song.fromJson` 的接口都没有封面**：
+  ///   search / newSongs / playlistDetail(列表) / simiSongs /
+  ///   artistSongs / albumSongs
+  ///
+  /// 而 `searchAlbums` / `personalized` / 歌单本身的封面是**手动 map**
+  /// 的（`e['cover']`），所以那些地方显示正常 —— 正好解释了
+  /// "有的地方有封面、有的地方没有"（用户实测："顺便修复没有封面呢"）。
+  ///
+  /// 兜底顺序：
+  ///   · `coverUrl` —— 本模型的序列化字段（本地收藏/队列持久化用）
+  ///   · `cover`    —— Node 接口的原始字段名
+  ///   · `picUrl`   —— 网易云原始字段名（部分接口直接用）
+  static String? _firstNonEmpty(Map<String, dynamic> j, List<String> keys) {
+    for (final k in keys) {
+      final v = j[k];
+      if (v == null) continue;
+      final s = v.toString().trim();
+      if (s.isNotEmpty) return s;
+    }
+    return null;
+  }
 
   static String listToJson(List<Song> list) =>
       jsonEncode(list.map((e) => e.toJson()).toList());

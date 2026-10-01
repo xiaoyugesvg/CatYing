@@ -27,6 +27,7 @@ import 'download_page.dart';
 import 'favorites_page.dart';
 import 'source_repo_page.dart';
 import '../../common/theme.dart';
+import '../../widgets/app_page_header.dart';
 
 /// 日志工具
 void _log(String message) {
@@ -1104,22 +1105,13 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                   //   不是拉绳 —— 别误加。）
                   if (!widget.showBackButton)
                     Positioned(
-                      top: 6,
-                      left: 16,
-                      right: 12,
+                      top: AppTheme.headerTop,
+                      left: AppTheme.headerSide,
+                      right: AppTheme.headerSide,
                       child: Row(
                         children: [
-                          Text(
-                            '漫画',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontPageTitle,
-                              fontWeight: FontWeight.bold,
-                              color: isDark
-                                  ? Colors.white
-                                  : JellyTheme.textPrimaryLight,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
+                          AppPageTitle('漫画', isDark: isDark),
+                          const SizedBox(width: AppTheme.headerTitleGap),
                           // 搜索框占满中间（原来固定屏宽 40% 且居中）
                           Expanded(child: _searchField()),
                           const SizedBox(width: 8),

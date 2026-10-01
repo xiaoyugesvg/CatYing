@@ -1,15 +1,16 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../common/theme.dart';
 import 'app_log.dart';
+import 'wallpaper_random_service.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
-
 
 /// 背景选择类型
 enum BackgroundChoice {
@@ -103,9 +104,38 @@ class BackgroundService extends GetxService {
   /// 场景版本号：改动配置后自增，让依赖它的 UI 重建
   final _sceneVersion = 0.obs;
 
+  /// 「当前是不是浅色」—— **唯一判据**，所有调用方都用它。
+  ///
+  /// ── 🔴 为什么读 [AppBrightness] 而不是 [appearanceMode] ─────────
+  /// [appearanceMode] 是 `BackgroundService` 自己的枚举，**只有三处会写它**：
+  /// `main.dart` 启动、音乐页的「外观模式」、以及「设置 → 明暗模式」页。
+  /// 而用户在**「设置 → 主题与外观 → 明暗模式」**切浅色时
+  /// **只改 `ThemeModeStore`** —— 两者会不同步。
+  ///
+  /// 后果（修复前的真实 bug）：背景层一直按 dark 那套渲染
+  /// （深色壁纸 + **黑遮罩**），而那些 Scaffold 是 `Colors.transparent`
+  /// 的页面（11 个设置子页 + 阅读各页）**全被罩成黑底** ——
+  /// 用户实测："全是浅色模式下的真实情况，底色是黑色的"。
+  ///
+  /// [AppBrightness.isLight] 由 `ThemeModeStore` 统一驱动（含"跟随系统"
+  /// 与壁纸联动），是真正的单一事实来源。
+  bool get isLight => AppBrightness.isLight.value;
+
   /// 当前外观模式对应的场景 key
-  String get _sceneKeyForCurrentAppearance =>
-      appearanceMode.value == AppearanceMode.light ? 'light' : 'dark';
+  ///
+  /// ── 🔴 必须读全局真源 [AppBrightness]，不能读 [appearanceMode] ──────
+  ///
+  /// 原来这里判的是 `appearanceMode.value == AppearanceMode.light`，
+  /// 而那个枚举**只有音乐页的「外观模式」会推**（`profile_page.dart` 里
+  /// 调 `setAppearanceMode`）；用户在**「设置 → 主题与外观 → 明暗模式」**
+  /// 切浅色时**只改 `ThemeModeStore`，从不碰这个枚举** ——
+  /// 两者不同步 → 背景层一直按 **dark 那套场景**渲染（深色壁纸 + 黑遮罩）。
+  ///
+  /// 而所有设置子页 / 阅读页的 Scaffold 都是 `Colors.transparent`
+  /// （见 `settings_shared.dart` 的说明："透出全局壁纸层"），
+  /// 于是**透明页面全被这层黑背景罩住** ——
+  /// 用户实测："全是浅色模式下的真实情况，底色是黑色的"。
+  String get _sceneKeyForCurrentAppearance => isLight ? 'light' : 'dark';
 
   /// 当前模式那套配置
   WallpaperConfig get activeScene =>
@@ -121,8 +151,10 @@ class BackgroundService extends GetxService {
     _sceneVersion.value++;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('$_sceneKeyPrefix$modeKey', jsonEncode(cfg.toJson()));
-    AppLog.instance.log('[BackgroundService] 保存 $modeKey 背景: '
-        'choice=${cfg.choice.name} source=${cfg.sourceType.name}');
+    AppLog.instance.log(
+      '[BackgroundService] 保存 $modeKey 背景: '
+      'choice=${cfg.choice.name} source=${cfg.sourceType.name}',
+    );
   }
 
   /// 改当前模式那套配置
@@ -203,8 +235,9 @@ class BackgroundService extends GetxService {
 
     // ---- 外观模式（主导者）----
     final ap = prefs.getString(_appearanceKey);
-    appearanceMode.value =
-        ap == 'light' ? AppearanceMode.light : AppearanceMode.dark;
+    appearanceMode.value = ap == 'light'
+        ? AppearanceMode.light
+        : AppearanceMode.dark;
 
     // ---- 全局 ----
     enabled.value = prefs.getBool(_enabledKey) ?? true;
@@ -218,7 +251,8 @@ class BackgroundService extends GetxService {
           final decoded = jsonDecode(raw);
           if (decoded is Map) {
             _scenes[key] = WallpaperConfig.fromJson(
-                decoded.cast<String, Object?>());
+              decoded.cast<String, Object?>(),
+            );
             continue;
           }
         } catch (e) {
@@ -250,12 +284,14 @@ class BackgroundService extends GetxService {
     _sceneVersion.value++;
     _notifyAppearance();
 
-    AppLog.instance.log('[BackgroundService] 已加载: '
-        'appearance=${appearanceMode.value} enabled=${enabled.value} '
-        'dark(choice=${sceneOf('dark').choice.name}/'
-        '${sceneOf('dark').sourceType.name}) '
-        'light(choice=${sceneOf('light').choice.name}/'
-        '${sceneOf('light').sourceType.name})');
+    AppLog.instance.log(
+      '[BackgroundService] 已加载: '
+      'appearance=${appearanceMode.value} enabled=${enabled.value} '
+      'dark(choice=${sceneOf('dark').choice.name}/'
+      '${sceneOf('dark').sourceType.name}) '
+      'light(choice=${sceneOf('light').choice.name}/'
+      '${sceneOf('light').sourceType.name})',
+    );
   }
 
   // ============================================================
@@ -268,7 +304,9 @@ class BackgroundService extends GetxService {
     _notifyAppearance();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
-        _appearanceKey, m == AppearanceMode.light ? 'light' : 'dark');
+      _appearanceKey,
+      m == AppearanceMode.light ? 'light' : 'dark',
+    );
     AppLog.instance.log('[BackgroundService] 外观模式 → $m（背景随之切换）');
   }
 
@@ -303,12 +341,94 @@ class BackgroundService extends GetxService {
   }
 
   Future<void> setNetworkUrl(String url, {String thumbUrl = ''}) async {
-    await updateActiveScene(activeScene.copyWith(
-      networkUrl: url.trim(),
-      networkThumbUrl: thumbUrl.trim(),
-      sourceType: WallpaperSourceType.network,
-      choice: BackgroundChoice.custom,
-    ));
+    await updateActiveScene(
+      activeScene.copyWith(
+        networkUrl: url.trim(),
+        networkThumbUrl: thumbUrl.trim(),
+        // 切成固定 URL 时清掉随机源，避免两个来源打架
+        randomSourceId: '',
+        sourceType: WallpaperSourceType.network,
+        choice: BackgroundChoice.custom,
+      ),
+    );
+  }
+
+  // ============================================================
+  // 随机图源（每次取一张，所以存 id + 内存里放当前这张的字節）
+  // ============================================================
+
+  /// 当前随机源取回来的图片字节（**只放内存**）。
+  ///
+  /// ── 为什么要有这个缓存 ────────────────────────────────────────
+  /// `buildBackground()` 是**每次重建都会跑**的（它包在
+  /// `ValueListenableBuilder` + `Obx` 里）。如果在那里直接发网络请求，
+  /// 会变成"每帧一个请求"。所以取图在**设置时/启动时**做一次，
+  /// 结果放这里，`buildBackground` 只读内存。
+  Uint8List? _randomImageBytes;
+
+  /// 当前随机源 id（与 [WallpaperConfig.randomSourceId] 对应）
+  String _randomSourceId = '';
+
+  /// 取图中
+  bool _randomLoading = false;
+  bool get randomLoading => _randomLoading;
+
+  /// 当前这张随机图（设置页预览用；null = 还没取到）
+  Uint8List? get randomImagePreview => _randomImageBytes;
+
+  /// 选一个随机图源：设好类型，并**立刻取一张**。
+  /// 返回是否取图成功（UI 据此提示）。
+  Future<bool> setRandomSource(String sourceId) async {
+    _randomSourceId = sourceId;
+    await updateActiveScene(
+      activeScene.copyWith(
+        randomSourceId: sourceId,
+        sourceType: WallpaperSourceType.network,
+        choice: BackgroundChoice.custom,
+        networkUrl: '',
+        networkThumbUrl: '',
+      ),
+    );
+    return refreshRandomImage();
+  }
+
+  /// 重新取一张随机图（切源 / 用户点"换一张" / 启动时调用）
+  Future<bool> refreshRandomImage() async {
+    final id =
+        _randomSourceId.isNotEmpty ? _randomSourceId : activeScene.randomSourceId;
+    if (id.isEmpty) return false;
+    final src = RandomImageCatalog.byId(id);
+    if (src == null) {
+      AppLog.instance.log('[Background] 未知随机源 id=$id');
+      return false;
+    }
+    _randomLoading = true;
+    _sceneVersion.value++;
+    try {
+      final r = await WallpaperRandomService.instance.fetchOne(src);
+      if (r.ok && r.bytes != null) {
+        _randomImageBytes = r.bytes;
+        _randomSourceId = id;
+        AppLog.instance.log(
+            '[Background] 随机源 ${src.name} 取图成功 ${r.bytes!.length} bytes');
+        return true;
+      }
+      AppLog.instance.log('[Background] 随机源 ${src.name} 取图失败: ${r.error}');
+      // 失败**保留上一张**（不清空），避免背景突然变空
+      return false;
+    } finally {
+      _randomLoading = false;
+      _sceneVersion.value++;
+    }
+  }
+
+  /// 启动时调用：若当前场景配的是随机源，取一张新的
+  ///（于是每次冷启动背景都不一样）
+  Future<void> warmUpRandomImageIfNeeded() async {
+    final id = activeScene.randomSourceId;
+    if (id.isEmpty) return;
+    _randomSourceId = id;
+    await refreshRandomImage();
   }
 
   Future<void> setOpacity(double v) async {
@@ -327,12 +447,16 @@ class BackgroundService extends GetxService {
 
   /// 设置内置背景（渐变）
   Future<void> setBuiltin(BackgroundChoice c) async {
-    await updateActiveScene(activeScene.copyWith(
-      choice: c,
-      sourceType: WallpaperSourceType.gradient,
-    ));
-    AppLog.instance.log('[BackgroundService] setBuiltin: $c '
-        '(${_sceneKeyForCurrentAppearance} 模式)');
+    await updateActiveScene(
+      activeScene.copyWith(
+        choice: c,
+        sourceType: WallpaperSourceType.gradient,
+      ),
+    );
+    AppLog.instance.log(
+      '[BackgroundService] setBuiltin: $c '
+      '(${_sceneKeyForCurrentAppearance} 模式)',
+    );
   }
 
   /// 设置自定义背景 - 复制到应用文档目录并保存路径
@@ -354,14 +478,18 @@ class BackgroundService extends GetxService {
         try {
           final f = File(oldPath);
           if (f.existsSync()) f.deleteSync();
-        } catch (e) { /* ignore */ }
+        } catch (e) {
+          /* ignore */
+        }
       }
 
-      await updateActiveScene(activeScene.copyWith(
-        customPath: destPath,
-        choice: BackgroundChoice.custom,
-        sourceType: WallpaperSourceType.local,
-      ));
+      await updateActiveScene(
+        activeScene.copyWith(
+          customPath: destPath,
+          choice: BackgroundChoice.custom,
+          sourceType: WallpaperSourceType.local,
+        ),
+      );
       AppLog.instance.log('[BackgroundService] setCustomImage: $destPath');
       return true;
     } catch (e) {
@@ -377,15 +505,19 @@ class BackgroundService extends GetxService {
       try {
         final f = File(oldPath);
         if (f.existsSync()) f.deleteSync();
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        /* ignore */
+      }
     }
-    await updateActiveScene(activeScene.copyWith(
-      customPath: '',
-      choice: BackgroundChoice.builtin1,
-      sourceType: WallpaperSourceType.gradient,
-      networkUrl: '',
-      networkThumbUrl: '',
-    ));
+    await updateActiveScene(
+      activeScene.copyWith(
+        customPath: '',
+        choice: BackgroundChoice.builtin1,
+        sourceType: WallpaperSourceType.gradient,
+        networkUrl: '',
+        networkThumbUrl: '',
+      ),
+    );
   }
 
   /// 弹出图片选择器 - 选完图后自动 setCustomImage
@@ -499,86 +631,112 @@ class BackgroundService extends GetxService {
     double overlayAlpha = 0.3,
     Widget? child,
   }) {
-    return Obx(() {
-      // 当前模式那套配置（外观主导：浅色/深色各有独立的墙纸与效果参数）
-      final scene = activeScene;
-      final isLight = appearanceMode.value == AppearanceMode.light;
-      // 遮罩色跟着明暗走：
-      // - 深色界面 → 黑色遮罩（压暗壁纸，保证浅色文字可读）
-      // - 浅色界面 → 白色遮罩（提亮壁纸，保证深色文字可读）
-      //
-      // 遮罩值取自当前模式那套配置（浅色默认更重），
-      // 所以「浅色界面 + 亮壁纸」不会再出现深色文字看不清。
-      final ov = scene.overlay;
-      final overlayColor =
-          isLight ? const Color(0xFFFFFFFF) : const Color(0xFF000000);
-      final enabledNow = enabled.value;
+    // ── ⚠️ 这里原来是 `Obx(() { ... })`，换成 ValueListenableBuilder ──
+    //
+    // 原因：明暗现在读 [AppBrightness.isLight]，它是**普通 `ValueNotifier`**
+    // 而不是 GetX observable。`Obx` 读不到任何 `.obs` 时会抛
+    // "[Get] the improper use of a GetX has been detected"，
+    // 整棵子树会变成 ErrorWidget（整个背景层消失）。
+    //
+    // 场景数据（`_scenes`）仍由 `_sceneVersion` 驱动，所以两层嵌套：
+    // 外层听明暗、内层听场景版本。
+    return ValueListenableBuilder<bool>(
+      valueListenable: AppBrightness.isLight,
+      builder: (context, isLightNow, __) => Obx(() {
+        // 当前模式那套配置（外观主导：浅色/深色各有独立的墙纸与效果参数）
+        final scene = activeScene;
+        final isLight = isLightNow;
+        // 遮罩色跟着明暗走：
+        // - 深色界面 → 黑色遮罩（压暗壁纸，保证浅色文字可读）
+        // - 浅色界面 → 白色遮罩（提亮壁纸，保证深色文字可读）
+        //
+        // 遮罩值取自当前模式那套配置（浅色默认更重），
+        // 所以「浅色界面 + 亮壁纸」不会再出现深色文字看不清。
+        final ov = scene.overlay;
+        final overlayColor = isLight
+            ? const Color(0xFFFFFFFF)
+            : const Color(0xFF000000);
+        final enabledNow = enabled.value;
 
-      // ---- 图片类壁纸（本地 / 网络）----
-      if (enabledNow) {
-        Widget? image;
-        if (scene.sourceType == WallpaperSourceType.local &&
-            scene.customPath.isNotEmpty) {
-          final file = File(scene.customPath);
-          if (file.existsSync()) {
-            // 用 LayoutBuilder 取实际可用宽度做解码降采样：
-            // 选图时允许 4096×4096（约 64MB 位图），按原尺寸常驻内存叠加
-            // 视频播放器在 iOS 上有 OOM 风险。
-            image = LayoutBuilder(
-              builder: (context, constraints) {
-                final dpr = MediaQuery.maybeOf(context)?.devicePixelRatio ?? 1.0;
-                final budget = (constraints.maxWidth * dpr).round();
-                return Image.file(
-                  file,
-                  fit: BoxFit.cover,
-                  cacheWidth: budget > 0 ? budget : null,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                );
-              },
+        // ---- 图片类壁纸（本地 / 网络）----
+        if (enabledNow) {
+          Widget? image;
+          if (scene.sourceType == WallpaperSourceType.local &&
+              scene.customPath.isNotEmpty) {
+            final file = File(scene.customPath);
+            if (file.existsSync()) {
+              // 用 LayoutBuilder 取实际可用宽度做解码降采样：
+              // 选图时允许 4096×4096（约 64MB 位图），按原尺寸常驻内存叠加
+              // 视频播放器在 iOS 上有 OOM 风险。
+              image = LayoutBuilder(
+                builder: (context, constraints) {
+                  final dpr =
+                      MediaQuery.maybeOf(context)?.devicePixelRatio ?? 1.0;
+                  final budget = (constraints.maxWidth * dpr).round();
+                  return Image.file(
+                    file,
+                    fit: BoxFit.cover,
+                    cacheWidth: budget > 0 ? budget : null,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  );
+                },
+              );
+            }
+          } else if (_randomImageBytes != null &&
+              _randomImageBytes!.isNotEmpty &&
+              scene.randomSourceId.isNotEmpty) {
+            // ── 随机图源：用内存里那张（取图在设置时/启动时做过）────────
+            // ⚠️ 这里**绝不能**发网络请求：buildBackground 每次重建都会跑，
+            // 发了就是"每帧一个请求"。所以只读内存里的字节。
+            image = Image.memory(
+              _randomImageBytes!,
+              fit: BoxFit.cover,
+              gaplessPlayback: true, // 换图时不留白
+              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            );
+          } else if (scene.sourceType == WallpaperSourceType.network &&
+              scene.networkUrl.isNotEmpty) {
+            // 同样必须走场景字段（见上面 scene.choice 的说明）
+            image = CachedNetworkImage(
+              imageUrl: scene.networkUrl,
+              fit: BoxFit.cover,
+              placeholder: (_, __) => const SizedBox.shrink(),
+              errorWidget: (_, __, ___) => const SizedBox.shrink(),
             );
           }
-        } else if (scene.sourceType == WallpaperSourceType.network &&
-            scene.networkUrl.isNotEmpty) {
-          // 同样必须走场景字段（见上面 scene.choice 的说明）
-          image = CachedNetworkImage(
-            imageUrl: scene.networkUrl,
-            fit: BoxFit.cover,
-            placeholder: (_, __) => const SizedBox.shrink(),
-            errorWidget: (_, __, ___) => const SizedBox.shrink(),
-          );
+
+          if (image != null) {
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                Opacity(
+                  // 用场景的 opacity（不再用全局 opacity.value）
+                  opacity: scene.opacity.clamp(0.2, 1.0),
+                  child: _applyBlur(image, scene.blur),
+                ),
+                if (ov > 0)
+                  Container(color: overlayColor.withValues(alpha: ov)),
+                if (child != null) child,
+              ],
+            );
+          }
         }
 
-        if (image != null) {
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              Opacity(
-                // 用场景的 opacity（不再用全局 opacity.value）
-                opacity: scene.opacity.clamp(0.2, 1.0),
-                child: _applyBlur(image, scene.blur),
-              ),
-              if (ov > 0)
-                Container(color: overlayColor.withValues(alpha: ov)),
-              if (child != null) child,
-            ],
-          );
-        }
-      }
-
-      // ---- 内置渐变（也是图片加载失败/关闭壁纸时的兜底）----
-      //
-      // 🔴 必须用 `scene.choice`（当前场景自己的），**不能用 `choice.value`**：
-      // 那几个 `.value` 是"兼容桥接"的全局字段，只反映**最近一次保存的
-      // 那套场景**。于是"深色下选了某壁纸 → 切浅色"时，
-      // 浅色场景里存的 `moonWhite` 根本读不到，浅色背景就错了
-      //（用户实测："浅色模式的皎月白壁纸没生效"）。
-      return _buildGradientBackground(
-        colors: _getGradientForChoice(scene.choice),
-        overlayAlpha: ov,
-        overlayColor: overlayColor,
-        child: child,
-      );
-    });
+        // ---- 内置渐变（也是图片加载失败/关闭壁纸时的兜底）----
+        //
+        // 🔴 必须用 `scene.choice`（当前场景自己的），**不能用 `choice.value`**：
+        // 那几个 `.value` 是"兼容桥接"的全局字段，只反映**最近一次保存的
+        // 那套场景**。于是"深色下选了某壁纸 → 切浅色"时，
+        // 浅色场景里存的 `moonWhite` 根本读不到，浅色背景就错了
+        //（用户实测："浅色模式的皎月白壁纸没生效"）。
+        return _buildGradientBackground(
+          colors: _getGradientForChoice(scene.choice),
+          overlayAlpha: ov,
+          overlayColor: overlayColor,
+          child: child,
+        );
+      }),
+    );
   }
 
   /// 模糊程度 0 时不做任何包装（省一次 saveLayer，iOS 上开销明显）
@@ -594,6 +752,7 @@ class BackgroundService extends GetxService {
   Widget _buildGradientBackground({
     required List<Color> colors,
     double overlayAlpha = 0.3,
+
     /// 遮罩色：**浅色模式必须传白色**。
     ///
     /// 🔴 原来这里写死 `Colors.black`，于是浅色模式（皎月白这类亮壁纸）
@@ -649,7 +808,6 @@ class BackgroundService extends GetxService {
       ],
     );
   }
-
 
   Widget _buildCircle({required double size, required Color color}) {
     return Container(
@@ -708,21 +866,13 @@ class BackgroundService extends GetxService {
   /// 深色列深邃黑/极光紫/赛博蓝/暖阳橙，浅色列皎月白/晨雾蓝/竹青/暖沙。
   /// 混着列没意义：浅色界面套一个深色壁纸，文字对比会很难看。
   static List<({String name, BackgroundChoice choice, List<Color> colors})>
-      get builtinPreviews {
+  get builtinPreviews {
     if (AppBrightness.isLight.value) {
       return [
         (name: '皎月白', choice: BackgroundChoice.moonWhite, colors: _moonWhite),
         (name: '晨雾蓝', choice: BackgroundChoice.mistBlue, colors: _mistBlue),
-        (
-          name: '竹青',
-          choice: BackgroundChoice.sageGreen,
-          colors: _sageGreen
-        ),
-        (
-          name: '暖沙',
-          choice: BackgroundChoice.sandBeige,
-          colors: _sandBeige
-        ),
+        (name: '竹青', choice: BackgroundChoice.sageGreen, colors: _sageGreen),
+        (name: '暖沙', choice: BackgroundChoice.sandBeige, colors: _sandBeige),
       ];
     }
     return [
@@ -734,7 +884,6 @@ class BackgroundService extends GetxService {
   }
 }
 
-
 /// 单个外观模式下的壁纸配置。
 ///
 /// 深浅两套各自独立，所以「切换外观 → 背景整组跟着换」不需要额外分支。
@@ -744,6 +893,13 @@ class WallpaperConfig {
   final String customPath;
   final String networkUrl;
   final String networkThumbUrl;
+
+  /// **随机图源 id**（见 `RandomImageCatalog`）。
+  ///
+  /// 随机图 API 每次请求返回不同的图，所以不能把 URL 存下来当结果 ——
+  /// 存的是"源 id"，每次启动/点刷新时重新取一张，于是每次开 App
+  /// 背景都不一样。
+  final String randomSourceId;
   final double opacity;
   final double blur;
   final double overlay;
@@ -754,6 +910,7 @@ class WallpaperConfig {
     this.customPath = '',
     this.networkUrl = '',
     this.networkThumbUrl = '',
+    this.randomSourceId = '',
     this.opacity = 1.0,
     this.blur = 0.0,
     this.overlay = 0.3,
@@ -765,6 +922,7 @@ class WallpaperConfig {
     String? customPath,
     String? networkUrl,
     String? networkThumbUrl,
+    String? randomSourceId,
     double? opacity,
     double? blur,
     double? overlay,
@@ -775,6 +933,7 @@ class WallpaperConfig {
       customPath: customPath ?? this.customPath,
       networkUrl: networkUrl ?? this.networkUrl,
       networkThumbUrl: networkThumbUrl ?? this.networkThumbUrl,
+      randomSourceId: randomSourceId ?? this.randomSourceId,
       opacity: opacity ?? this.opacity,
       blur: blur ?? this.blur,
       overlay: overlay ?? this.overlay,
@@ -782,20 +941,20 @@ class WallpaperConfig {
   }
 
   Map<String, Object?> toJson() => {
-        'choice': choice.name,
-        'sourceType': sourceType.name,
-        'customPath': customPath,
-        'networkUrl': networkUrl,
-        'networkThumbUrl': networkThumbUrl,
-        'opacity': opacity,
-        'blur': blur,
-        'overlay': overlay,
-      };
+    'choice': choice.name,
+    'sourceType': sourceType.name,
+    'customPath': customPath,
+    'networkUrl': networkUrl,
+    'networkThumbUrl': networkThumbUrl,
+    'randomSourceId': randomSourceId,
+    'opacity': opacity,
+    'blur': blur,
+    'overlay': overlay,
+  };
 
   static WallpaperConfig fromJson(Map<String, Object?>? json) {
     if (json == null) return const WallpaperConfig();
-    double d(Object? v, double fallback) =>
-        v is num ? v.toDouble() : fallback;
+    double d(Object? v, double fallback) => v is num ? v.toDouble() : fallback;
     String s(Object? v) => v is String ? v : '';
     return WallpaperConfig(
       choice: BackgroundChoice.values.firstWhere(
@@ -809,6 +968,7 @@ class WallpaperConfig {
       customPath: s(json['customPath']),
       networkUrl: s(json['networkUrl']),
       networkThumbUrl: s(json['networkThumbUrl']),
+      randomSourceId: s(json['randomSourceId']),
       opacity: d(json['opacity'], 1.0).clamp(0.2, 1.0),
       blur: d(json['blur'], 0.0).clamp(0.0, 30.0),
       overlay: d(json['overlay'], 0.3).clamp(0.0, 0.8),

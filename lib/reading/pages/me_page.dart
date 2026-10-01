@@ -23,6 +23,8 @@ import 'book_source_repo_page.dart';
 import 'source_repo_page.dart';
 import 'zlibrary_auth_page.dart';
 import '../../common/theme.dart';
+import '../../widgets/app_icon_button.dart';
+import '../../widgets/app_page_header.dart';
 
 /// "我的"页：菜单（下载设置等）+ 右上角暗色模式切换 + 版本信息
 class MePage extends StatefulWidget {
@@ -82,17 +84,9 @@ class _MePageState extends State<MePage> {
               padding: const EdgeInsets.only(top: 6, bottom: 12),
               child: Row(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.only(left: 4),
-                    child: Text(
-                      '我的',
-                      style: TextStyle(
-                        fontSize: AppTheme.fontPageTitle,
-                        fontWeight: FontWeight.bold,
-                        color: titleColor,
-                      ),
-                    ),
-                  ),
+                  // 标题：坐标与其它顶栏页对齐（原来这里多包了一层
+                  // `Padding(left: 4)`，于是「我的」比别页标题右移 4px）
+                  AppPageTitle('我的', color: titleColor),
                   const Spacer(),
                   // ── 右上角三个圆形图标（按用户截图的位置与顺序）──────
                   //   1. 扫码     → 去「书源仓库」扫码/口令导入
@@ -549,35 +543,26 @@ class _MePageState extends State<MePage> {
   /// 这样三个图标并排时尺寸一致（截图里它们是一样大的圆）。
   /// 明暗切换那个不能复用本方法 —— 它要挂 `_themeToggleKey` 做
   /// 圆形扩散动画的起点，所以单独实现。
+  /// 顶栏右上角那三个图标按钮。
+  ///
+  /// ⚠️ 实现已抽到 [AppIconButton]（B 档：图标按钮统一）。
+  ///
+  /// 这里原来用的是 **`JellyTheme.cardDark` 实底**，而其余三个页面
+  /// （书架/图书搜索/收藏）用的是**白 10% 淡底** —— 同一个概念两种观感。
+  /// 现在统一成淡底（`AppIconButton` 的默认形态）。
+  /// 尺寸仍是 38（比别处的 36 大一档，是「我的」页原本的规格，保留）。
   Widget _buildCircleIcon({
     required bool isDark,
     required IconData icon,
     required String tooltip,
     required VoidCallback onTap,
   }) {
-    return Material(
-      color: isDark ? JellyTheme.cardDark : Colors.white,
-      shape: const CircleBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: Tooltip(
-        message: tooltip,
-        child: InkWell(
-          onTap: onTap,
-          child: SizedBox(
-            width: 38,
-            height: 38,
-            child: Center(
-              child: Icon(
-                icon,
-                size: 20,
-                // 与截图一致：图标是近黑/白（不是强调色），
-                // 只有月亮那个带蓝紫色
-                color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-              ),
-            ),
-          ),
-        ),
-      ),
+    return AppIconButton(
+      icon: icon,
+      tooltip: tooltip,
+      onTap: onTap,
+      isDark: isDark,
+      size: 38,
     );
   }
 

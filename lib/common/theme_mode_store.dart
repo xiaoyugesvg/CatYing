@@ -116,6 +116,23 @@ class ThemeModeStore {
     AppBrightness.isLight.value = platformLight;
     // 触发 ValueListenableBuilder / 外观相关重建
     notifier.value = ThemeMode.system;
+
+    // ── ⚠️ 还要推给音乐 / 阅读 ──────────────────────────────────
+    //
+    // 这里原先只改了 `AppBrightness` 和 notifier，**没有通知模块**。
+    // 后果：选「跟随系统」时，用户在系统设置里切了深色，App 的整体明暗
+    // 跟着变了（AppTheme 会变），但**音乐自己的皮肤不会变** ——
+    // `MusicTheme._isDark` 停在旧值，于是浅色页面里配着深色文字。
+    //
+    // `set()` 那条路径本来就会推，但系统亮度变化**不走 set()**。
+    if (!_syncing) {
+      _syncing = true;
+      try {
+        GlobalThemeSync.pushToModules(ThemeMode.system);
+      } finally {
+        _syncing = false;
+      }
+    }
   }
 
   /// 外观亮度监听（App 外层包一层，浅/深色 getter 变更后整体重建）

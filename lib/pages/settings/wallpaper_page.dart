@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 
 import '../../common/theme.dart';
 import '../../services/background_service.dart';
+import '../../services/wallpaper_random_service.dart';
 import '../../services/wallpaper_api_service.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/app_toast.dart';
@@ -271,6 +272,161 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
     );
   }
 
+
+  // ============================================================
+  // 随机图源
+  // ============================================================
+
+  /// 当前选中的随机源（null = 没选）
+  RandomImageSource? get _currentRandomSource {
+    final id = _bg.activeScene.randomSourceId;
+    if (id.isEmpty) return null;
+    return RandomImageCatalog.byId(id);
+  }
+
+  Widget _buildRandomSourceRow(BackgroundService bg) {
+    final cur = _currentRandomSource;
+    final loading = bg.randomLoading;
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: _pickRandomSource,
+            icon: const Icon(Icons.explore_outlined, size: 18),
+            label: Text(
+              cur == null ? '选择随机图源' : '${cur.group} · ${cur.name}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.accentColor,
+              minimumSize: const Size(0, 40),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        // 「换一张」：只在选了源时可用
+        FilledButton(
+          onPressed: (cur == null || loading)
+              ? null
+              : () async {
+                  final ok = await bg.refreshRandomImage();
+                  if (!mounted) return;
+                  setState(() {});
+                  AppToast.message(ok ? '已换一张' : '取图失败，已保留上一张',
+                      isError: !ok);
+                },
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.accentColor,
+            minimumSize: const Size(0, 40),
+          ),
+          child: loading
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white),
+                )
+              : const Text('换一张'),
+        ),
+      ],
+    );
+  }
+
+  /// 预览：当前随机源取回来的那张（内存里的字节）
+  Widget _buildRandomThumb(BackgroundService bg) {
+    final bytes = bg.randomImagePreview;
+    if (bytes == null || bytes.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+          child: SizedBox(
+            height: 150,
+            width: double.infinity,
+            child: Image.memory(bytes, fit: BoxFit.cover),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text('当前这张（点「换一张」可刷新）',
+            style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontCaption)),
+      ],
+    );
+  }
+
+  /// 选源：底部弹窗，按分组列出全部目录项
+  Future<void> _pickRandomSource() async {
+    final groups = RandomImageCatalog.grouped();
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.6,
+          maxChildSize: 0.9,
+          builder: (_, scrollCtrl) => ListView(
+            controller: scrollCtrl,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Text('选择随机图源',
+                    style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontTitle3,
+                        fontWeight: FontWeight.w600)),
+              ),
+              for (final e in groups.entries) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+                  child: Text(e.key,
+                      style: TextStyle(
+                          color: AppTheme.textTertiary,
+                          fontSize: AppTheme.fontCaption,
+                          fontWeight: FontWeight.w600)),
+                ),
+                for (final s in e.value)
+                  ListTile(
+                    title: Text(s.name,
+                        style: TextStyle(color: AppTheme.textPrimary)),
+                    subtitle: s.note.isEmpty
+                        ? null
+                        : Text(s.note,
+                            style: TextStyle(
+                                color: AppTheme.textTertiary,
+                                fontSize: AppTheme.fontCaption)),
+                    // ⚠️ 把"实测不稳定"标出来，用户点之前就知道
+                    trailing: s.reliable
+                        ? null
+                        : Icon(Icons.info_outline,
+                            size: 16, color: AppTheme.textTertiary),
+                    onTap: () => Navigator.pop(ctx, s.id),
+                  ),
+              ],
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null) return;
+    final ok = await _bg.setRandomSource(picked);
+    if (!mounted) return;
+    setState(() {});
+    final src = RandomImageCatalog.byId(picked);
+    AppToast.message(
+      ok ? '已设置：${src?.name ?? picked}' : '取图失败（服务端可能限流，可点「换一张」再试）',
+      isError: !ok,
+    );
+  }
+
   // ============================================================
   // 网络图片
   // ============================================================
@@ -378,6 +534,30 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
                     ),
                   ),
               ],
+            ],
+          ),
+        ),
+
+        // ---------- 随机图源（每次取一张，每次开 App 都不一样）----------
+        const SizedBox(height: 16),
+        const SectionHeader(title: '随机图源'),
+        AppCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '这些 API 每次请求返回一张随机图。选一个源后会立刻取一张，'
+                '以后每次打开 App 自动换一张；也可以点「换一张」立刻换。',
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 10),
+              _buildRandomSourceRow(bg),
+              const SizedBox(height: 6),
+              _buildRandomThumb(bg),
             ],
           ),
         ),
@@ -706,7 +886,7 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
 
   /// 顶部提示：当前模式 + 在哪里切换
   Widget _buildCurrentSceneBanner(BackgroundService bg) {
-    final isLight = bg.appearanceMode.value == AppearanceMode.light;
+    final isLight = bg.isLight;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -880,7 +1060,7 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
   /// 重置**当前模式**那一套背景（不动另一种模式的配置）
   Future<void> _resetAll() async {
     final bg = _bg;
-    final isLight = bg.appearanceMode.value == AppearanceMode.light;
+    final isLight = bg.isLight;
     await bg.setEnabled(true);
     await bg.clearCustom(); // 清图片/网络，回到渐变
     await bg.setBuiltin(

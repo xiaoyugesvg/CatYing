@@ -16,7 +16,6 @@ import '../services/settings_service.dart';
 import '../widgets/jelly_book_card.dart';
 import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_ring_button.dart';
-import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_pull_cord.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/staggered_entrance.dart';
@@ -28,6 +27,9 @@ import 'download_page.dart';
 import 'favorites_page.dart';
 import 'zlibrary_auth_page.dart';
 import '../../common/theme.dart';
+import '../../widgets/app_icon_button.dart';
+import '../../widgets/app_expandable_search.dart';
+import '../../widgets/app_page_header.dart';
 
 /// 日志工具
 void _log(String message) {
@@ -888,16 +890,7 @@ class _BookSearchPageState extends State<BookSearchPage>
                   if (!widget.showBackButton)
                     Row(
                       children: [
-                        Text(
-                          '图书',
-                          style: TextStyle(
-                            fontSize: AppTheme.fontPageTitle,
-                            fontWeight: FontWeight.bold,
-                            color: isDark
-                                ? Colors.white
-                                : JellyTheme.textPrimaryLight,
-                          ),
-                        ),
+                        AppPageTitle('图书', isDark: isDark),
                         const SizedBox(width: 4),
                         // 「拉绳」：标题右边那根挂着的小绳（点它切到书源）。
                         // 它是**挂饰**不是普通按钮，所以不带底色、
@@ -1044,8 +1037,14 @@ class _BookSearchPageState extends State<BookSearchPage>
 
   /// 右上角头像（登录态显示用户图标，未登录显示登录图标）
   /// 搜索框（标题行内用 Expanded 撑开）
+  ///
+  /// ── 改成「圆形图标 → 点击展开」──────────────────────────────
+  /// 原来是**常驻长条** `JellySearchBar`，占掉一整行宽度。
+  /// 用户给的参考图是：收起只留一个圆形搜索图标，点一下才伸长成输入框。
+  /// 实现在 [AppExpandableSearch]（影视首页原本有一份私有实现，
+  /// 现在抽成公共组件，两个模块共用）。
   Widget _buildSearchBar(bool isDark) {
-    return JellySearchBar(
+    return AppExpandableSearch(
       controller: _searchController,
       hintText: '搜索图书',
       onFocusChange: (f) => setState(() {
@@ -1053,7 +1052,6 @@ class _BookSearchPageState extends State<BookSearchPage>
           _historyVisible = true;
         }
       }),
-      onCleared: () => setState(() => _historyVisible = false),
       onSubmitted: (value) => _runSearch(value),
       onChanged: (value) => setState(() {}),
     );
@@ -1083,6 +1081,11 @@ class _BookSearchPageState extends State<BookSearchPage>
   }
 
   /// 通用圆形图标按钮（浅灰底 + 近黑图标）—— 与书架/收藏页同款
+  /// 顶栏圆形图标按钮。
+  ///
+  /// ⚠️ 实现已抽到 [AppIconButton]（B 档：图标按钮统一）——
+  /// 原来这个方法在 **4 个页面里各写了一份**，实现逐字雷同。
+  /// 这里留薄委托，调用点不动。
   Widget _buildCircleIcon({
     required bool isDark,
     required IconData icon,
@@ -1090,29 +1093,12 @@ class _BookSearchPageState extends State<BookSearchPage>
     required VoidCallback onTap,
     double size = 36,
   }) {
-    return Material(
-      color: isDark
-          ? Colors.white.withValues(alpha: 0.10)
-          : Colors.black.withValues(alpha: 0.05),
-      shape: const CircleBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: Tooltip(
-        message: tooltip,
-        child: InkWell(
-          onTap: onTap,
-          child: SizedBox(
-            width: size,
-            height: size,
-            child: Center(
-              child: Icon(
-                icon,
-                size: 20,
-                color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-              ),
-            ),
-          ),
-        ),
-      ),
+    return AppIconButton(
+      icon: icon,
+      tooltip: tooltip,
+      onTap: onTap,
+      isDark: isDark,
+      size: size,
     );
   }
 

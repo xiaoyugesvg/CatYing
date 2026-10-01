@@ -16,6 +16,7 @@ import 'window_fullscreen.dart';
 import 'danmaku.dart';
 import '../services/audio_focus.dart';
 import 'app_toast.dart';
+import '../pages/settings/sub/danmu_settings_page.dart';
 part 'video_player_helpers.dart';
 
 /// 视频画面比例 - 对应 Swift VideoFitType
@@ -186,6 +187,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   List<DanmuItem> _danmus = [];
   bool _danmuOn = true;
   bool _danmuLoaded = false;
+
+  /// 弹幕**设置**是否已从 prefs 读出来（`_loadDanmuSettings` 是异步的）。
+  /// 首帧它还是 false，此时不能因为 `_danmuApiUrl` 为空就显示成"未配置"
+  /// ——否则按钮会先暗一下再变亮（读盘可能跨帧）。
+  bool _danmuSettingsReady = false;
   String _danmuApiUrl = '';
 
   /// 弹幕拉取代次：换集时递增，过期响应直接丢弃
@@ -918,6 +924,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       }
     } catch (e) {
       AppLog.instance.log('[video_player] swallowed: $e');
+    } finally {
+      // ⚠️ 必须在 finally 里置位（并 setState 通知重建）：
+      // 底部栏的弹幕按钮靠它区分"设置还没读出来"与"确实没配弹幕源"。
+      // 若放在 try 末尾，读盘异常时按钮会永远停在"未加载"的中性态。
+      _danmuSettingsReady = true;
+      if (mounted) setState(() {});
     }
   }
 
@@ -2373,8 +2385,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         setState(() => _showEpisodeSheet = true);
                       },
                     ),
-                  // 弹幕开关：从顶栏移到底部功能栏（设置里配置弹幕 API 后显示）
-                  if (_danmuApiUrl.isNotEmpty) _danmuToggleButton(),
+                  // 弹幕开关：已在底部功能栏（**常显**，不再按是否配置弹幕源隐藏 ——
+                  // 隐藏会让用户完全看不到这个功能。未配置时点击会引导去设置页）
+                  _danmuToggleButton(),
                   // 播放设置入口仅保留标题栏右上角「…」，底部不放齿轮
                   _iconButton(
                     icon: _isNativeFullscreen
@@ -3724,16 +3737,40 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
   }
 
-  /// 顶栏弹幕开关 —— 参考图样式：
+  /// 底部功能栏的弹幕开关 —— 参考图样式：
   /// 圆角方块内一个「弹」字，开启时右下角带绿色对勾角标。
-  /// 关闭时整体变暗（不再用字幕图标，避免与系统字幕混淆）。
+  /// 关闭时整体变暗（不用字幕图标，避免与系统字幕混淆）。
+  ///
+  /// ── ⚠️ 为什么现在**总是显示** ────────────────────────────────
+  /// 原来它在底部栏的条件是 `if (_danmuApiUrl.isNotEmpty)`，
+  /// 结果：**没配过弹幕 API 地址的用户完全看不到这个按钮** ——
+  /// 既不知道播放器支持弹幕，也找不到入口去配。
+  /// 用户实测反馈："这个红框位置不是说加个弹幕的开关图标么？"——
+  /// 位置是对的（底部栏 播放/暂停 的右边、音量的左边），
+  /// 但因为那个条件，它压根没渲染出来。
+  ///
+  /// 现在改成**常显**：没配地址时点它会明确告知并直达设置页，
+  /// 而不是"什么都不发生"或"按钮消失"。
   Widget _danmuToggleButton() {
     final on = _danmuOn;
+    final configured = _danmuApiUrl.isNotEmpty;
+    // 设置还没读出来时，按"中性"显示（不显示成未配置的暗态）
+    final ready = _danmuSettingsReady;
     return _iconButton(
       icon: Icons.subtitles,
       size: 20,
       width: 38,
       onTap: () => _safeTap(() async {
+        if (ready && !configured) {
+          // 没配弹幕源：说清原因 + 把用户送过去配，而不是静默无反应
+          AppToast.message(
+            '还没配置弹幕源：播放器设置 → 弹幕 → 填入弹幕 API 地址',
+            duration: const Duration(seconds: 3),
+            isError: true,
+          );
+          Get.to(() => const DanmuSettingsPage());
+          return;
+        }
         setState(() => _danmuOn = !_danmuOn);
         await _persistDanmuOn();
       }),
@@ -3746,14 +3783,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           Text(
             '弹',
             style: TextStyle(
-              color: on ? Colors.white : Colors.white.withValues(alpha: 0.4),
+              // 没配弹幕源时更暗一档：和"已配置但关闭"区分开
+              color: on && configured
+                  ? Colors.white
+                  : Colors.white.withValues(
+                      alpha: !ready ? 0.4 : (configured ? 0.4 : 0.28)),
               fontSize: AppTheme.fontHeadline,
               fontWeight: FontWeight.w600,
               height: 1.0,
             ),
           ),
           // 开启角标：绿色对勾
-          if (on)
+          if (on && configured)
             Positioned(
               right: -2,
               bottom: -2,

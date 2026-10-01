@@ -16,7 +16,6 @@ import '../services/zlibrary_service.dart';
 import '../source/source_manager.dart';
 import '../utils/list_pagination.dart';
 import '../theme/jelly_theme.dart';
-import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/jelly_select_badge.dart';
 import '../widgets/staggered_entrance.dart';
@@ -25,6 +24,8 @@ import 'book_reader_page.dart';
 import 'reader_page.dart';
 import 'zlibrary_auth_page.dart';
 import '../../common/theme.dart';
+import '../../widgets/app_expandable_search.dart';
+import '../../widgets/app_page_header.dart';
 
 /// 下载页卡片列数自适应：默认每行 1 个，宽度足够时增多
 int _downloadAdaptiveCols(
@@ -786,16 +787,9 @@ class _DownloadPageState extends State<DownloadPage>
           // 标题：左上角，间距小（仅底部 tab 模式）
           if (hasTitle)
             Positioned(
-              top: 6,
-              left: 16,
-              child: Text(
-                '下载',
-                style: TextStyle(
-                  fontSize: AppTheme.fontPageTitle,
-                  fontWeight: FontWeight.bold,
-                  color: titleColor,
-                ),
-              ),
+              top: AppTheme.headerTop,
+              left: AppTheme.headerSide,
+              child: AppPageTitle('下载', color: titleColor),
             ),
           // 右上角：打开下载目录（仅无 AppBar 模式；AppBar 模式由 AppBar.actions 承载）
           if (hasTitle)
@@ -807,19 +801,20 @@ class _DownloadPageState extends State<DownloadPage>
             right: 12,
             child: Row(
               children: [
-                const Spacer(),
-                SizedBox(
-                  width: MediaQuery.of(context).size.width * 0.42,
-                  child: JellySearchBar(
+                // 搜索框：**可伸长**（收起 = 圆形图标，点击展开成输入框）。
+                // 原来是常驻 `JellySearchBar` 且写死"屏宽 42%"，占地方又不灵活。
+                // 用 Expanded 让它展开时能吃掉剩余宽度。
+                Expanded(
+                  child: AppExpandableSearch(
                     controller: _searchController,
                     hintText: _isComicTab ? '搜索漫画' : '搜索图书',
-                    onChanged: (v) => setState(() {
+                    onSubmitted: (v) => setState(() {
                       _searchQuery = v;
                       _comicDisplayCount = ListPagination.pageSize;
                       _bookDisplayCount = ListPagination.pageSize;
                     }),
-                    onCleared: () => setState(() {
-                      _searchQuery = '';
+                    onChanged: (v) => setState(() {
+                      _searchQuery = v;
                       _comicDisplayCount = ListPagination.pageSize;
                       _bookDisplayCount = ListPagination.pageSize;
                     }),

@@ -171,11 +171,31 @@ async function resolveByTemplate(source, song) {
 /**
  * 脚本法解析播放地址。
  *
- * LX 脚本约定的 action 名（Beans 也是这套）：
- *   · musicUrl —— 取播放地址，参数 { musicInfo: { id, name, singer }, quality }
- *     返回 { url } 或 { url, quality }
+ * ── 🔴 解析入口链（移植自 Beans 的 `LXScriptSourceRunner.invokeRequest`）──
  *
- * 返回里带 `tried` 便于排错（用户能看到脚本报了什么）。
+ * **关键修正**：LX 音源脚本最常见的写法是注册 **`request`** 事件
+ * （`lx.on('request', ...)`），而不是 `musicUrl`。
+ * 本引擎原来**只认 `handlers['musicUrl']`** → 看到只注册了 `request` 的脚本
+ * 就报「脚本未实现 musicUrl（它提供：request）」——
+ * **那是把最常见的合法写法误判成不合法**（用户实测就是这个问题）。
+ *
+ * Beans 的判定顺序（照抄）：
+ *   1. `handlers['request']`            → 直接调它，payload 里带 `action`
+ *   2. `module.exports.musicUrl`        → `musicUrl(source, musicInfo, type)`
+ *   3. `module.exports.getMusicUrl`     → `getMusicUrl(source, id, type)`
+ *   4. 都没有 → 才报"没有可用的音乐地址解析入口"
+ *
+ * ── payload 结构（照 Beans，比原来丰富得多）──────────────────────
+ *   {
+ *     action: 'musicUrl',
+ *     source: 'wy' | 'tx' | 'kg',       ← 平台码，LX 脚本靠它分派
+ *     info: { type: '320k', musicInfo: {…} },
+ *     _types: {}, meta: {},             ← LX 脚本会读这两个，不能省
+ *     …musicInfo 的字段也平铺一份（很多脚本直接读 payload.id / payload.name）
+ *   }
+ *
+ * 参数 { musicInfo: { id, name, singer }, quality } 的**旧结构保留**，
+ * 因为已按那个结构写的脚本不能弄坏（两者同时在 payload 里）。
  */
 async function resolveByScript(source, song, action = 'musicUrl') {
     const script = String(source.script || '');
@@ -188,45 +208,152 @@ async function resolveByScript(source, song, action = 'musicUrl') {
         return { ok: false, error: loaded.error };
     }
 
-    // 脚本没实现这个 action 时给出**明确的可用清单**，
-    // 否则用户只会看到"失败"却不知道脚本支持什么
-    if (!loaded.actions || loaded.actions.length === 0) {
+    const handlers = loaded.handlers || {};
+    const actions = loaded.actions || [];
+    if (actions.length === 0) {
         return { ok: false, error: '脚本没有注册任何 action（需用 lx.on 或 module.exports）' };
     }
-    if (!loaded.handlers[action]) {
+
+    // ── 选解析入口（顺序照 Beans）────────────────────────────────
+    // 'request' 排第一：它是 LX 脚本最通用的入口，且 payload 里的
+    // `action: 'musicUrl'` 已经告诉脚本要做什么。
+    let entry = null;
+    if (typeof handlers.request === 'function') {
+        entry = { kind: 'request', fn: handlers.request };
+    } else if (typeof handlers[action] === 'function') {
+        entry = { kind: action, fn: handlers[action] };
+    } else if (typeof handlers.getMusicUrl === 'function') {
+        entry = { kind: 'getMusicUrl', fn: handlers.getMusicUrl };
+    }
+
+    if (!entry) {
         return {
             ok: false,
-            error: `脚本未实现 ${action}（它提供：${loaded.actions.join(', ')}）`,
+            error:
+                `脚本没有可用的音乐地址解析入口（它提供：${actions.join(', ')}）；` +
+                `需要 lx.on('request', …)（推荐）或 lx.on('musicUrl', …) 或 module.exports = { musicUrl }`,
         };
     }
 
-    const payload = {
-        musicInfo: {
-            id: song && song.id != null ? String(song.id) : '',
-            name: song && song.name ? String(song.name) : '',
-            singer: song && song.artists ? String(song.artists) : '',
-            album: song && song.album ? String(song.album) : '',
-        },
-        quality: source.quality || '320k',
+    const provider = providerCodeOf(song && song.source);
+    const quality = (source && source.quality) || '320k';
+    const id = song && song.id != null ? String(song.id) : '';
+    const name = song && song.name ? String(song.name) : '';
+    const singers = song && song.artists ? String(song.artists) : '';
+    const album = song && song.album ? String(song.album) : '';
+
+    const musicInfo = {
+        id,
+        songId: id,
+        musicId: id,
+        name,
+        songName: name,
+        singer: singers,
+        artist: singers,
+        artists: singers ? singers.split(/[、/,&]/).map((s) => s.trim()).filter(Boolean) : [],
+        album,
+        albumName: album,
+        source: provider,
     };
 
-    const r = await runAction(loaded.handlers, action, payload);
+    // 旧结构（已按 {musicInfo, quality} 写的脚本靠它）
+    // + 新结构（Beans / LX 通用写法）
+    const payload = Object.assign({}, musicInfo, {
+        action: action,
+        source: provider,
+        quality,
+        musicInfo,
+        info: { type: quality, musicInfo },
+        _types: {},
+        meta: {},
+    });
+
+    const r = await runAction({ [entry.kind]: entry.fn }, entry.kind, payload);
     if (!r.ok) {
         return { ok: false, error: r.error };
     }
 
-    const out = r.result;
-    let url;
-    if (typeof out === 'string') {
-        url = out;
-    } else if (out && typeof out === 'object') {
-        url = out.url || out.src || out.play_url || findUrlDeep(out);
-    }
-
-    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
-        return { ok: false, error: '脚本没有返回有效的播放地址' };
+    const url = extractPlayableUrl(r.result);
+    if (!url) {
+        return {
+            ok: false,
+            error: '脚本执行成功，但没从返回值里找到播放地址（支持 url/musicUrl/data.url/result.url 等 20+ 种字段）',
+        };
     }
     return { ok: true, url };
+}
+
+/** 平台码：网易 wy / QQ tx / 酷狗 kg（LX 脚本按这个分派） */
+function providerCodeOf(songSource) {
+    const s = String(songSource || '').toLowerCase();
+    if (s.includes('qq') || s === 'tx') return 'tx';
+    if (s.includes('kugou') || s === 'kg') return 'kg';
+    if (s.includes('netease') || s === 'wy' || s === '163') return 'wy';
+    return s || 'wy';
+}
+
+/**
+ * 从脚本返回值里挖出播放地址。
+ *
+ * 移植自 Beans 的 `extractURLString`：它试了 **26 条字段路径**，
+ * 而本引擎原来只有 `url / src / play_url` 三条 ——
+ * 很多脚本返回 `{ data: { musicUrl } }` 或 `{ result: { url } }`，
+ * 原来会误报"脚本没有返回有效的播放地址"。
+ *
+ * ⚠️ 只在**明确的载荷容器**（data/result/response/body/payload）里递归，
+ * 避免把封面 URL 当成播放地址。
+ */
+function extractPlayableUrl(raw, depth = 0) {
+    if (raw == null || depth > 6) return null;
+
+    if (typeof raw === 'string') {
+        const s = raw.trim();
+        if (/^https?:\/\//i.test(s)) return s;
+        if (s.startsWith('//')) return 'https:' + s;
+        // 脚本有时返回 JSON 字符串
+        if (s.startsWith('{') || s.startsWith('[')) {
+            try {
+                return extractPlayableUrl(JSON.parse(s), depth + 1);
+            } catch (_) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    if (Array.isArray(raw)) {
+        for (const item of raw) {
+            const u = extractPlayableUrl(item, depth + 1);
+            if (u) return u;
+        }
+        return null;
+    }
+
+    if (typeof raw === 'object') {
+        const paths = [
+            'url', 'musicUrl', 'musicurl', 'music', 'play_url', 'playUrl', 'src',
+            'audioUrl', 'audio_url', 'link', 'purl',
+            'data.url', 'data.musicUrl', 'data.musicurl', 'data.music',
+            'data.play_url', 'data.playUrl', 'data.src', 'data.audioUrl',
+            'data.audio_url', 'data.link', 'data.purl',
+            'result.url', 'result.musicUrl', 'result.musicurl', 'result.music',
+            'result.play_url', 'result.playUrl', 'result.src', 'result.audioUrl',
+            'result.link', 'result.purl',
+        ];
+        for (const p of paths) {
+            const v = pickByPath(raw, p);
+            const u = extractPlayableUrl(v, depth + 1);
+            if (u) return u;
+        }
+        // 只在这几个"载荷容器"里继续找，避免误取封面
+        for (const k of ['data', 'result', 'response', 'body', 'payload', 'info']) {
+            if (raw[k] !== undefined) {
+                const u = extractPlayableUrl(raw[k], depth + 1);
+                if (u) return u;
+            }
+        }
+    }
+    return null;
 }
 
 /**

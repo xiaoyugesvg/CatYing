@@ -12,6 +12,7 @@ import '../source/webview_image_fetcher.dart';
 import 'builtin_accounts.dart';
 import 'remote_config_service.dart';
 import 'settings_service.dart';
+import '../utils/constants.dart';
 
 void _log(String message) {
   if (kDebugMode) debugPrint('[Zlibrary] $message');
@@ -46,7 +47,39 @@ enum _TokenState { valid, invalid, unavailable }
 /// 对应 cmbook service/zlibrary_client.py + service/cmbok_service.py 图书部分。
 /// 已登录自有账号时优先用自有 token，否则轮询内置账号。
 class ZlibraryService extends ChangeNotifier {
-  ZlibraryService._();
+  ZlibraryService._() {
+    // ── 🔴 懒初始化（修"图书功能开箱即不可用"）──────────────────────
+    //
+    // 原来 [init] **全项目没有任何调用点**（只在 main.dart 之外被定义），
+    // 于是 `_domain` 与 `_candidates` 一直是初始值（空串 / 空表）。
+    // 而所有请求都走 `_send()` → `_candidateOrder()`：
+    //   候选为空 → 内层 for 一次都不进 → 直接 `_setUnavailable(true)`
+    //   → 返回 `{success:false, unavailable:true}`
+    //   → UI 显示"所有 z-library 节点不可用，图书功能暂不可用"
+    //
+    // **图书搜索 / 登录 / 下载全部走这条路，所以整个图书功能都是死的。**
+    //
+    // 现在：单例一被构造就触发一次（fire-and-forget），
+    // 且 `init()` 里会先把本地默认候选写进 `_candidates`，
+    // 让"构造完就能发请求"，随后探测结果再替换成最快节点。
+    _bootstrap();
+  }
+
+  /// 懒初始化入口（只跑一次）。构造时自动调用。
+  void _bootstrap() {
+    if (_bootstrapped) return;
+    _bootstrapped = true;
+    // 立即播种：让构造完的**第一个请求**就有域名可用（不等探测）
+    if (_candidates.isEmpty) {
+      _candidates.addAll(CmbokConstants.zLibraryDefaultDomains);
+    }
+    if (_domain.isEmpty && _candidates.isNotEmpty) {
+      _domain = _candidates.first;
+    }
+    // 读持久化 + 探测选最优（异步，不阻塞构造）
+    unawaited(init());
+  }
+
   static final ZlibraryService _instance = ZlibraryService._();
   factory ZlibraryService() => _instance;
 
@@ -84,6 +117,21 @@ class ZlibraryService extends ChangeNotifier {
   );
 
   String _domain = ''; // 不含 scheme，如 zh.zlibrary.by
+
+  /// 是否已跑过 [init]（懒初始化只跑一次）
+  bool _bootstrapped = false;
+
+  /// [_domain] 是否来自**用户的持久化设定**（而非懒初始化播种）。
+  /// 只有用户设定过才阻止本地探测选优。
+  bool _domainPersisted = false;
+
+  /// 是否启用「定时健康检查」（默认开）。
+  ///
+  /// widget 测试里请设为 `false` —— 否则 `Timer.periodic` 会在测试结束时报
+  /// `A Timer is still pending even after the widget tree was disposed`。
+  /// ⚠️ 仅供测试使用，业务代码不要动它。
+  @visibleForTesting
+  static bool healthTimerEnabled = true;
   String _email = '';
   String _username = '';
   String _remixUserid = '';
@@ -212,14 +260,48 @@ class ZlibraryService extends ChangeNotifier {
   List<String> get candidates => List.unmodifiable(_candidates);
 
   /// 初始化：加载登录态、域名、每日计数
+  ///
+  /// ⚠️ **幂等**：重复调用直接返回。
+  ///
+  /// 原来这个方法每次调用都会 `Timer.periodic(_kHealthInterval, ...)`
+  /// —— 而它现在会被**懒初始化**触发（单例构造时），若外部再调一次
+  /// 就会建出**第二个周期定时器**（一小时一次的健康检查跑两遍），
+  /// 而且在 widget 测试里会留下 pending timer 直接让测试失败
+  ///（`A Timer is still pending even after the widget tree was disposed`）。
+  bool _inited = false;
   Future<void> init() async {
+    if (_inited) return;
+    _inited = true;
     final prefs = await SharedPreferences.getInstance();
-    _domain = prefs.getString(_kDomain) ?? _defaultDomain();
+    // ⚠️ 不能直接用 `_defaultDomain()` 覆盖已有值：懒初始化已经播过种，
+    // 而这个方法的默认值来自 `CmbokConstants.zLibraryApiUrl`（**已失效**）。
+    final persistedDomain = prefs.getString(_kDomain);
+    if (persistedDomain != null && persistedDomain.isNotEmpty) {
+      _domain = persistedDomain;
+      _domainPersisted = true; // 用户设定过 → 尊重它，不自动改
+    } else if (_domain.isEmpty) {
+      _domain = _defaultDomain();
+    }
     _email = prefs.getString(_kEmail) ?? '';
     _username = prefs.getString(_kUsername) ?? '';
     _remixUserid = prefs.getString(_kRemixUserid) ?? '';
     _remixUserkey = prefs.getString(_kRemixUserkey) ?? '';
     _candidates = _decodeCandidates(prefs.getString(_kCandidates));
+
+    // ── 🔴 种子候选：本地默认节点（修"开箱即不可用"）────────────────
+    //
+    // 原来候选只有两个来源：本地持久化 + **云端** `url_config.json`。
+    // 全新安装时两者都没有 → `_candidates` 为空 →
+    // `_pickBestCandidate([])` 直接返回 null → **图书功能整个不可用**
+    //（而云端那份配置的托管地址在国内也常拉不到）。
+    //
+    // 这里把 `CmbokConstants.zLibraryDefaultDomains` 追加进来做兜底：
+    //   · 已有的（持久化/云端/用户手填）**保持在前**，优先级不变
+    //   · 只补那些还没在列表里的
+    // 于是"探测选优"至少有东西可探，开箱即可用。
+    for (final d in CmbokConstants.zLibraryDefaultDomains) {
+      if (d.isNotEmpty && !_candidates.contains(d)) _candidates.add(d);
+    }
     // 当前域名不在候选里则插最前，确保至少有一个候选可用（兼容手动/老配置）
     if (_domain.isNotEmpty && !_candidates.contains(_domain)) {
       _candidates.insert(0, _domain);
@@ -232,12 +314,34 @@ class ZlibraryService extends ChangeNotifier {
     );
     notifyListeners();
     if (isLoggedIn) refreshUserProfile(); // fire-and-forget：校准服务端限额与已下载数
+
+    // ── 定时健康检查：只在**确实有候选节点**时才建 ──────────────────
+    //
+    // `_healthCheck()` 开头就是 `if (_candidates.isEmpty) return;`
+    // —— 没候选时这个定时器什么都不做，纯浪费。
+    //
+    // 更要紧的是：`ZlibraryService()` 是**懒初始化**的（单例一构造就 init），
+    // 而 widget 测试里渲染「我的页」就会构造它。若无条件建周期定时器，
+    // 测试结束会报 `A Timer is still pending even after the widget tree
+    // was disposed` → 测试失败（这是实测到的回归）。
+    //
+    // 真实运行时候选列表必然非空（上面刚播过种），所以行为不变。
+    //
+    // 另外提供一个**显式的测试开关** [healthTimerEnabled]：widget 测试里
+    // 渲染「我的页」会构造本单例，而周期定时器会让 `flutter_test` 报
+    // `A Timer is still pending even after the widget tree was disposed`。
+    // 在库里猜"是不是测试环境"很脏，让测试自己声明更清楚。
     _healthTimer?.cancel();
-    _healthTimer = Timer.periodic(_kHealthInterval, (_) => _healthCheck());
+    if (_candidates.isNotEmpty && healthTimerEnabled) {
+      _healthTimer = Timer.periodic(_kHealthInterval, (_) => _healthCheck());
+    }
     // 监听云端配置：RemoteConfig 拉到 zlibrary_url 后探测选优
     RemoteConfigService().removeListener(_onRemoteConfigChanged);
     RemoteConfigService().addListener(_onRemoteConfigChanged);
     _applyCloudCandidatesIfAvailable();
+    // ── 本地兜底：云端配置拉不到时，用内置候选列表探测选最优 ──
+    // （上面已经把 CmbokConstants.zLibraryDefaultDomains 播进 _candidates）
+    unawaited(_probeLocalCandidatesIfNeeded());
   }
 
   /// RemoteConfig 变更回调：云端拉到 zlibrary_url 后探测选优。
@@ -250,6 +354,44 @@ class ZlibraryService extends ChangeNotifier {
     if (cloud == null || cloud == _lastAppliedCloud) return;
     _lastAppliedCloud = cloud;
     applyCloudCandidates(cloud); // fire-and-forget
+  }
+
+  /// 用**本地默认候选**做一次探测选优（无云端配置时的兜底）。
+  ///
+  /// ── 🔴 为什么必须有这一步 ────────────────────────────────────────
+  /// 上面把 `CmbokConstants.zLibraryDefaultDomains` 播进了 `_candidates`，
+  /// 但**没有任何代码去探测它们** —— `applyCloudCandidates` 只在
+  /// `RemoteConfigService().cloudZlibraryUrl != null`（即云端配置拉到了）时才跑。
+  ///
+  /// 而云端那份配置托管在 GitHub raw / jsDelivr 上，国内经常拉不到，
+  /// 所以"有候选但从不选优"= 一直用列表里第一个（可能已失效）。
+  ///
+  /// 这里补上本地兜底探测：并发探全部候选，挑**延迟最低的可用节点**，
+  /// 结果写回 `_domain` 并持久化。探测是并发 + <3s 提前返回，不会拖慢。
+  Future<void> _probeLocalCandidatesIfNeeded() async {
+    if (_candidates.isEmpty) return;
+    // 用户在设置页手填过域名（有持久化记录）就尊重它，不擅自改。
+    //
+    // ⚠️ 判据必须是"**从 prefs 读出来的**"，不能是 `_candidates.contains(_domain)`
+    // —— 懒初始化会把 `_candidates.first` 播进 `_domain`，那种情况下
+    // `contains` 恒为 true，探测就被永久跳过了（等于白播种）。
+    if (_domainPersisted) {
+      _log('已有用户设定的域名 $_domain，跳过本地探测选优');
+      return;
+    }
+    final best = await _pickBestCandidate(_candidates);
+    if (best == null) {
+      _log('本地候选全不可用（${_candidates.length} 个）');
+      _setUnavailable(true);
+      return;
+    }
+    if (best != _domain) {
+      _log('本地候选探测选优: $_domain -> $best');
+      _domain = best;
+      await _persistDomain();
+    }
+    _setUnavailable(false);
+    notifyListeners();
   }
 
   static String _defaultDomain() => RemoteConfigService().zlibraryDomain;

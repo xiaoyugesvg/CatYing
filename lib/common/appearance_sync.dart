@@ -51,28 +51,42 @@ class AppearanceSync {
 
   /// 由 `app.dart` 在算出影视的 effectiveLight 后调用。
   ///
-  /// [videoEffectiveLight] 是影视那套算出来的结果；
-  /// 若当前在阅读/音乐里，则忽略它、改用该模块自己的设置。
+  /// [videoEffectiveLight] 是「设置 → 主题与外观」那套算出来的结果。
+  ///
+  /// ── 🔴 这里曾经是「谁在前台谁说话」，已改成「全局说了算」──────
+  ///
+  /// 旧逻辑：
+  ///   在阅读里 → 用 `SettingsService().isDarkMode`
+  ///   在音乐里 → 用 `MusicBrightnessBridge.isDark()`
+  ///   否则     → 用影视那套
+  ///
+  /// 它当初是为了修「阅读的主题跟随系统不生效」。但它有个**致命的副作用**：
+  /// `AppBrightness.isLight` 是**一根全局开关**，而 `ContentView` 的
+  /// `IndexedStack` **同时保留 7 个 tab 的 subtree** ——
+  /// 于是"在音乐里切一下 tab"就会把全局明暗改掉，
+  /// **所有还活着的 tab 跟着一起变色**。
+  ///
+  /// 用户实测到的现象：
+  ///   全局选了浅色，切到音乐/别的页面 → 一堆界面还是深色
+  ///   （音乐自己的 `music.themeMode` 存的是 dark，就把全局覆盖了）
+  ///
+  /// 现在改成**全局唯一真源**：
+  ///   明暗只由「设置 → 主题与外观」的 [ThemeModeStore] 决定。
+  ///
+  /// ⚠️ 但**必须保留 [PlatformDispatcher] 的读取** ——
+  /// 用户选「跟随系统」时，系统亮度变化要能实时反映进来。
+  /// 光看 `ThemeModeStore.mode` 是看不出系统当前是明是暗的
+  /// （它只知道"要跟随系统"），所以 `system` 分支要现读一次。
+  ///
+  /// 音乐/阅读自己那套明暗开关经 `GlobalThemeSync` **写回全局**
+  /// （`ThemeModeStore.set` → 重新走这里），而不是反过来覆盖全局。
   static void applyForCurrentModule({required bool videoEffectiveLight}) {
-    final tab = _tabIndex();
-    final readingIndex = MainTabController.booksTabIndex;
-    final musicIndex = MainTabController.musicTabIndex;
+    _moduleOverride = false;
 
-    bool light;
-    if (tab == readingIndex) {
-      // 阅读：用自己的设置（内部已处理"跟随系统"）
-      //
-      // ⚠️ `isDarkMode` 读的是 `PlatformDispatcher.platformBrightness`，
-      // 所以"跟随系统"时这里拿到的是**系统当前值**，不是启动时的旧值。
-      light = !SettingsService().isDarkMode;
-      _moduleOverride = true;
-    } else if (tab == musicIndex) {
-      light = !MusicBrightnessBridge.isDark();
-      _moduleOverride = true;
-    } else {
-      light = videoEffectiveLight;
-      _moduleOverride = false;
-    }
+    // 跟随系统：现读平台亮度（否则"跟随系统"永远停在启动时的值）
+    final light = ThemeModeStore.mode == ThemeMode.system
+        ? PlatformDispatcher.instance.platformBrightness == Brightness.light
+        : videoEffectiveLight;
 
     set(light);
   }

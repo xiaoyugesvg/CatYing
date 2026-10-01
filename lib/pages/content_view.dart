@@ -24,9 +24,7 @@ import '../services/player_fullscreen_controller.dart';
 import '../widgets/video_player_pip.dart';
 import '../widgets/disclaimer_dialog.dart';
 import '../widgets/app_loading_view.dart';
-import '../common/appearance_sync.dart';
 import '../common/floating_nav_spec.dart';
-import '../common/theme_mode_store.dart';
 import '../services/main_tab_controller.dart';
 
 /// 主内容视图 - 对应 Swift ContentView

@@ -245,6 +245,45 @@ class AppTheme {
   /// 底部导航栏的文字（比 [fontCaption] 还小一档，因为栏内空间紧）。
   static const double fontNavLabel = 10;
 
+  // ============================================================
+  // 页面顶栏（Page Header）统一规格
+  // ============================================================
+  //
+  // ── 为什么需要这个（A 档：统一规格）────────────────────────────
+  // 阅读模块有 **8 个页面各自手写顶栏**（漫画/图书搜索、书架、收藏、
+  // 下载、我的、图书详情、书源登录…），风格照 cmbok 截图排过，
+  // 但**边距各写各的**，实测散成这样：
+  //
+  //   top   : 6（5 处） / 0（1 处）
+  //   left  : 16（3 处） / 12（2 处） / 4（2 处）
+  //   right : 12（3 处） / 16（1 处）
+  //
+  // 后果：**页与页之间标题的起始位置差 4px**，左右滑动切页时看得出来；
+  // 而且两边不对称（left 16 / right 12）会让整行看起来"歪了一点"。
+  //
+  // 这里把规格收成一处，8 个页面都改用它 —— 改一次、8 页同时生效。
+  //
+  // ⚠️ 与 [FloatingNavSpec] 同一思路（那边管底部悬浮栏）。
+  /// 顶栏距安全区顶部的距离
+  static const double headerTop = 8;
+
+  /// 顶栏左右外边距（**左右必须相等**，否则整行视觉偏移）
+  static const double headerSide = 16;
+
+  /// 标题与后续控件之间的间距
+  static const double headerTitleGap = 10;
+
+  /// 顶栏内相邻控件之间的间距
+  static const double headerGap = 8;
+
+  /// 顶栏一行的**标称高度** —— 与分段胶囊
+  /// （`JellySegmentedToggle` 的 `height: 50`）对齐，
+  /// 这样"有胶囊"和"没胶囊"的页面顶栏高度一致。
+  static const double headerSlot = 50;
+
+  /// 撑起顶栏的最小高度（`headerTop + headerSlot` + 下方留白）
+  static const double headerHeight = headerTop + headerSlot + headerGap;
+
   /// 暗色主题
 
   /// 浅色主题（设置 → 深色/浅色/跟随系统）

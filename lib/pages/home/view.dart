@@ -21,6 +21,7 @@ import '../../widgets/source_switch_sheet.dart';
 import '../../widgets/vod_card.dart';
 import '../webview/view.dart';
 import 'controller.dart';
+import '../../widgets/app_expandable_search.dart';
 
 /// 首页 - 对应 Swift HomeView
 class HomePage extends StatefulWidget {
@@ -149,16 +150,17 @@ class _HomePageState extends State<HomePage> {
           // （用 Expanded 而不是原来的"固定屏宽 52%"：截图里阅读的搜索框
           //   是占满中间的胶囊；固定百分比在窄屏上会挤，宽屏上又留白）
           Expanded(
-            child: _ExpandableSearch(
-            onSubmitted: (v) {
-              if (v.trim().isNotEmpty) {
-                Get.toNamed('/search', arguments: v.trim());
-              } else if (widget.onSearchTap != null) {
-                widget.onSearchTap!();
-              } else {
-                Get.toNamed('/search');
-              }
-            },
+            child: AppExpandableSearch(
+              hintText: '搜索影片',
+              onSubmitted: (v) {
+                if (v.trim().isNotEmpty) {
+                  Get.toNamed('/search', arguments: v.trim());
+                } else if (widget.onSearchTap != null) {
+                  widget.onSearchTap!();
+                } else {
+                  Get.toNamed('/search');
+                }
+              },
               onOpenFull: () {
                 if (widget.onSearchTap != null) {
                   widget.onSearchTap!();
@@ -1501,163 +1503,6 @@ class _CatPawLogo extends StatelessWidget {
         ],
       ),
       child: const Icon(Icons.pets, color: Colors.white, size: 20),
-    );
-  }
-}
-
-/// 可伸长搜索：小圆角框 → 点击展开成输入条
-class _ExpandableSearch extends StatefulWidget {
-  final ValueChanged<String> onSubmitted;
-  final VoidCallback onOpenFull;
-
-  const _ExpandableSearch({
-    required this.onSubmitted,
-    required this.onOpenFull,
-  });
-
-  @override
-  State<_ExpandableSearch> createState() => _ExpandableSearchState();
-}
-
-class _ExpandableSearchState extends State<_ExpandableSearch> {
-  bool _expanded = false;
-  final _ctrl = TextEditingController();
-  final _focus = FocusNode();
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    _focus.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // iOS 风格搜索控件：
-    // - 收起 = 圆形玻璃按钮；点击展开成胶囊输入框（宽度动画）
-    // - 底色/描边/文字色全部走 AppTheme，切外观自动跟随
-    //   （原描边写死 Colors.white.withValues(0.10)，浅色模式下几乎看不见边框）
-    // ── 与阅读 JellySearchBar 完全同规格 ──────────────────────────
-    //
-    // 原来这里是"半透明玻璃底 + 展开时强调色描边 + 强调色光晕"，
-    // 与阅读的白底胶囊差异明显（用户要求"弄成和阅读一样的样式"）。
-    //
-    // 阅读那边的规格（照抄 lib/reading/widgets/jelly_search_bar.dart）：
-    //   高 50 / 圆角 25（= 高的一半，胶囊）/ 底色 白 或 深色卡 /
-    //   **无描边** / 黑色柔和阴影 blur12 offset(0,4) /
-    //   图标 22 / 字号 15 / prefixIcon 约束 44
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return AnimatedContainer(
-      duration: AppTheme.motionBase,
-      curve: AppTheme.motionCurve,
-      // 收起 = 44 圆钮（与阅读的 prefixIcon 尺寸一致）；
-      // 展开 = 撑满父级给的 Expanded 宽度
-      width: _expanded ? null : 44,
-      height: 50,
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.palette.cardDark : Colors.white,
-        borderRadius: BorderRadius.circular(25),
-        // 不加描边 —— 阅读的搜索栏靠阴影与底色分离，没有边框
-        boxShadow: [
-          BoxShadow(
-            color: isDark
-                ? Colors.black.withValues(alpha: 0.30)
-                : Colors.black.withValues(alpha: 0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: _expanded
-          ? Row(
-              children: [
-                const SizedBox(width: 14),
-                Icon(Icons.search_rounded,
-                    color: AppTheme.textTertiary,
-                    size: 22),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _ctrl,
-                    focusNode: _focus,
-                    autofocus: true,
-                    cursorColor: AppTheme.accentColor,
-                    cursorWidth: 2,
-                    cursorRadius: const Radius.circular(1),
-                    style: TextStyle(
-                      fontSize: AppTheme.fontHeadline,
-                      height: 1.0,
-                      color: AppTheme.textPrimary,
-                    ),
-                    textInputAction: TextInputAction.search,
-                    onSubmitted: (v) {
-                      setState(() {
-                        _expanded = false;
-                        _ctrl.clear();
-                      });
-                      _focus.unfocus();
-                      widget.onSubmitted(v);
-                    },
-                    onTapOutside: (_) {
-                      // 点输入框外部 → 收起搜索框并清空文字
-                      if (_expanded) {
-                        setState(() {
-                          _expanded = false;
-                          _ctrl.clear();
-                        });
-                        _focus.unfocus();
-                      }
-                    },
-                    decoration: InputDecoration(
-                      hintText: '搜索影片',
-                      hintStyle: TextStyle(
-                        fontSize: AppTheme.fontHeadline,
-                        color: AppTheme.textTertiary,
-                      ),
-                      border: InputBorder.none,
-                      isDense: true,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
-                ),
-                GestureDetector(
-                  onTap: () {
-                    final text = _ctrl.text.trim();
-                    if (text.isNotEmpty) {
-                      // 有输入内容：直接提交搜索（和按回车行为一致）
-                      setState(() {
-                        _expanded = false;
-                        _ctrl.clear();
-                      });
-                      _focus.unfocus();
-                      widget.onSubmitted(text);
-                    } else {
-                      // 无输入内容：打开完整搜索页
-                      setState(() {
-                        _expanded = false;
-                      });
-                      _focus.unfocus();
-                      widget.onOpenFull();
-                    }
-                  },
-                  child: Icon(Icons.search,
-                      color: AppTheme.accentColor, size: 18),
-                ),
-                const SizedBox(width: 8),
-              ],
-            )
-          : GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                setState(() => _expanded = true);
-                _focus.requestFocus();
-              },
-              child: Center(
-                child: Icon(Icons.search_rounded,
-                    color: AppTheme.textTertiary,
-                    size: 22),
-              ),
-            ),
     );
   }
 }

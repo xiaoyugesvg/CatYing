@@ -172,6 +172,14 @@ void main() async {
   await BackgroundService.instance.setAppearanceMode(
       wantLight ? AppearanceMode.light : AppearanceMode.dark);
 
+  // ── 随机图源：启动时取一张（每次冷启动背景都不一样）─────────────
+  //
+  // ⚠️ 必须**不 await**（fire-and-forget）：
+  // 这些随机图 API 实测有 1.4~5.5s 延迟，有的（zylearning）还会先失败再重试。
+  // 阻塞启动会让白屏明显变长。取到之后 `_sceneVersion` 自增，
+  // 背景层会自动换成新图（那之前先显示上一张/渐变，不会空）。
+  unawaited(BackgroundService.instance.warmUpRandomImageIfNeeded());
+
   // 启动外观协调：让"谁在前台谁说话"的规则生效。
   // 必须放在 MainTabController 注册之后（sync 里读它判断当前 tab）。
   AppearanceSync.start();

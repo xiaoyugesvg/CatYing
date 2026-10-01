@@ -249,6 +249,12 @@ class _BookDetailPageState extends State<BookDetailPage> {
           Center(child: _buildCover(isDark)),
           const SizedBox(height: 16),
           // 标题
+          //
+          // ⚠️ 这里**故意不用 `AppPageTitle`**：那是"页面顶栏标题"
+          // （左上角、左对齐、单行）。这个是**详情页的内容标题** ——
+          // 封面下方的书名，居中、可换行、行高 1.3。
+          // 两者字号恰好同档（`fontPageTitle`），但语义与排版都不同，
+          // 强行套用会把居中与行高一起改掉。
           Text(
             book.title,
             textAlign: TextAlign.center,

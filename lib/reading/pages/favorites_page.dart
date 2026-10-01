@@ -25,6 +25,8 @@ import '../widgets/source_cover_image.dart';
 import 'book_detail_page.dart';
 import 'comic_detail_page.dart';
 import '../../common/theme.dart';
+import '../../widgets/app_icon_button.dart';
+import '../../widgets/app_page_header.dart';
 
 /// 收藏页面（顶部 Tab：漫画收藏 / 图书收藏）
 class FavoritesPage extends StatefulWidget {
@@ -128,6 +130,11 @@ class _FavoritesPageState extends State<FavoritesPage>
   ///
   /// 收藏页标题行右侧那个搜索按钮用它（截图里是浅灰圆 + 近黑放大镜，
   /// 不是原来的"深色圆 + 白图标"）。
+  /// 顶栏圆形图标按钮。
+  ///
+  /// ⚠️ 实现已抽到 [AppIconButton]（B 档：图标按钮统一）——
+  /// 原来这个方法在 **4 个页面里各写了一份**，实现逐字雷同。
+  /// 这里留薄委托，调用点不动。
   Widget _buildCircleIcon({
     required bool isDark,
     required IconData icon,
@@ -135,29 +142,12 @@ class _FavoritesPageState extends State<FavoritesPage>
     required VoidCallback onTap,
     double size = 36,
   }) {
-    return Material(
-      color: isDark
-          ? Colors.white.withValues(alpha: 0.10)
-          : Colors.black.withValues(alpha: 0.05),
-      shape: const CircleBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: Tooltip(
-        message: tooltip,
-        child: InkWell(
-          onTap: onTap,
-          child: SizedBox(
-            width: size,
-            height: size,
-            child: Center(
-              child: Icon(
-                icon,
-                size: 20,
-                color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-              ),
-            ),
-          ),
-        ),
-      ),
+    return AppIconButton(
+      icon: icon,
+      tooltip: tooltip,
+      onTap: onTap,
+      isDark: isDark,
+      size: size,
     );
   }
 
@@ -264,22 +254,13 @@ class _FavoritesPageState extends State<FavoritesPage>
                         // 点了什么都不会发生（只 new 了一个不挂载的 Widget）。
                         if (!widget.showBackButton)
                           Positioned(
-                            top: 6,
-                            left: 16,
-                            right: 16,
+                            top: AppTheme.headerTop,
+                            left: AppTheme.headerSide,
+                            right: AppTheme.headerSide,
                             child: Row(
                               children: [
-                                Text(
-                                  '收藏',
-                                  style: TextStyle(
-                                    fontSize: AppTheme.fontPageTitle,
-                                    fontWeight: FontWeight.bold,
-                                    color: isDark
-                                        ? Colors.white
-                                        : JellyTheme.textPrimaryLight,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
+                                AppPageTitle('收藏', isDark: isDark),
+                                const SizedBox(width: AppTheme.headerTitleGap),
                                 // 胶囊切换挪进标题行（与书架页同一位置）
                                 if (contentTabs.length >= 2)
                                   AnimatedBuilder(

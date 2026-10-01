@@ -7,6 +7,7 @@ import '../services/zlibrary_service.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/staggered_entrance.dart';
 import '../../common/theme.dart';
+import '../../widgets/app_page_header.dart';
 
 /// z-library 登录/注册页面（扁平风、内容丰富、灵动）。
 /// 一个全屏页面内用分段切换在「登录 / 注册」间过渡。
@@ -480,14 +481,8 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
           ),
         ),
         const SizedBox(height: 12),
-        Text(
-          'Cmbok',
-          style: TextStyle(
-            fontSize: AppTheme.fontPageTitle,
-            fontWeight: FontWeight.bold,
-            color: titleColor,
-          ),
-        ),
+        // 品牌标题：字号与顶栏标题同一档（走统一组件，避免以后改字号漏这里）
+        AppPageTitle('Cmbok', color: titleColor),
         const SizedBox(height: 2),
         Text(
           '图书账号',

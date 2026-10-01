@@ -315,7 +315,65 @@ Future<void> showImportSheet(BuildContext context) async {
                 style: TextStyle(
                     color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote, height: 1.5),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
+              // ── ⚠️ 协议说明（可展开）──────────────────────────────
+              //
+              // 用户最容易踩的坑：拿一份**只注册了 `request`** 的 LX 脚本
+              // 导进来，播放时报「脚本未实现 musicUrl（它提供：request）」——
+              // 那不是网络问题，是**脚本没注册音乐地址这个 action**。
+              //
+              // LX 里 `request` 是"脚本自己要发 HTTP 请求"的**事件名**，
+              // 而 `musicUrl` 才是**要被引擎调用的 action**；
+              // `lx.request(url, options, cb)` 则是注入给脚本**调用**的
+              // HTTP 客户端（不是要注册的事件）。三者很容易混。
+              //
+              // 把正确写法直接给出来，比让用户去猜有用得多。
+              Theme(
+                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.only(bottom: 6),
+                  iconColor: MusicTheme.secondary,
+                  collapsedIconColor: MusicTheme.secondary,
+                  title: Text(
+                    '脚本要写成什么样？（点开看示例）',
+                    style: TextStyle(
+                        color: MusicTheme.tint,
+                        fontSize: AppTheme.fontFootnote,
+                        fontWeight: FontWeight.w600),
+                  ),
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: MusicTheme.fill,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: SelectableText(
+                        "// ✅ 写法 1：lx.on\n"
+                        "lx.on('musicUrl', async (info) => {\n"
+                        "  return { url: 'https://cdn.example.com/' + info.musicInfo.id + '.mp3' };\n"
+                        "});\n\n"
+                        "// ✅ 写法 2：module.exports\n"
+                        "module.exports = {\n"
+                        "  musicUrl: async (info) => ({ url: 'https://…' })\n"
+                        "};\n\n"
+                        "// ❌ 只注册 request 会报「脚本未实现 musicUrl」\n"
+                        "//    因为 request 是「脚本自己要发请求」的事件名，\n"
+                        "//    而 musicUrl 才是引擎真正要调用的 action。",
+                        style: TextStyle(
+                          color: MusicTheme.label,
+                          fontSize: AppTheme.fontCaption,
+                          height: 1.45,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
               TextField(
                 controller: ctrl,
                 maxLines: 6,

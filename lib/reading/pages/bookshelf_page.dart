@@ -35,6 +35,8 @@ import 'comic_detail_page.dart';
 import 'reader_page.dart';
 import '../../widgets/app_empty_view.dart';
 import '../../common/theme.dart';
+import '../../widgets/app_icon_button.dart';
+import '../../widgets/app_page_header.dart';
 
 /// "全部"虚拟书架 id：聚合当前 tab 可见的所有书架条目（仅浏览，不参与移出等管理操作）
 const String kAllShelfId = '__all__';
@@ -1048,25 +1050,13 @@ class _BookshelfPageState extends State<BookshelfPage>
                         //   书架  [漫画|图书]  (排序)  (搜索) ······  (闪电)
                         if (!widget.showBackButton)
                           Positioned(
-                            top: 6,
-                            left: 12,
-                            right: 12,
+                            top: AppTheme.headerTop,
+                            left: AppTheme.headerSide,
+                            right: AppTheme.headerSide,
                             child: Row(
                               children: [
-                                Padding(
-                                  padding: const EdgeInsets.only(left: 4),
-                                  child: Text(
-                                    '书架',
-                                    style: TextStyle(
-                                      fontSize: AppTheme.fontPageTitle,
-                                      fontWeight: FontWeight.bold,
-                                      color: isDark
-                                          ? Colors.white
-                                          : JellyTheme.textPrimaryLight,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
+                                AppPageTitle('书架', isDark: isDark),
+                                const SizedBox(width: AppTheme.headerTitleGap),
                                 Builder(
                                   builder: (context) {
                                     final tabs = SettingsService()
@@ -1677,6 +1667,11 @@ class _BookshelfPageState extends State<BookshelfPage>
   /// 但搜索按钮在**别处**（如空态里的"去搜索"）仍是深色主色圆，
   /// 所以不能直接改 `_buildSearchButton`，避免影响别处。
   /// 书架头部这一排用本方法统一成浅灰圆。
+  ///
+  /// ⚠️ 实现已抽到 [AppIconButton]（B 档：图标按钮统一）——
+  /// 原来这个方法在 **4 个页面里各写了一份**（书架/图书搜索/收藏/我的），
+  /// 实现逐字雷同、改一处不影响其它三处。现在留这个薄委托，
+  /// 只为让调用点（这一排 2 个按钮）不用改。
   Widget _buildCircleIcon({
     required bool isDark,
     required IconData icon,
@@ -1685,30 +1680,13 @@ class _BookshelfPageState extends State<BookshelfPage>
     VoidCallback? onLongPress,
     double size = 36,
   }) {
-    return Material(
-      color: isDark
-          ? Colors.white.withValues(alpha: 0.10)
-          : Colors.black.withValues(alpha: 0.05),
-      shape: const CircleBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: Tooltip(
-        message: tooltip,
-        child: InkWell(
-          onTap: onTap,
-          onLongPress: onLongPress,
-          child: SizedBox(
-            width: size,
-            height: size,
-            child: Center(
-              child: Icon(
-                icon,
-                size: 20,
-                color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-              ),
-            ),
-          ),
-        ),
-      ),
+    return AppIconButton(
+      icon: icon,
+      tooltip: tooltip,
+      onTap: onTap,
+      onLongPress: onLongPress,
+      isDark: isDark,
+      size: size,
     );
   }
 
