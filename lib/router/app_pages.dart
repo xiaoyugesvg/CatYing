@@ -14,6 +14,8 @@ class AppPages {
   static const String live = '/live';
   static const String liveSettings = '/live/settings';
 
+  /// 路由统一不指定 transition —— 继承 `GetMaterialApp.defaultTransition`
+  /// （iOS 风格右滑进入/左滑返回，全局丝滑一致）。
   static final pages = [
     GetPage(
       name: detail,
@@ -21,8 +23,6 @@ class AppPages {
       page: () => TmdbService.instance.libraryMode.value
           ? MediaLibraryDetailPage()
           : DetailPage(),
-      transition: Transition.fadeIn,
-      transitionDuration: const Duration(milliseconds: 220),
     ),
     GetPage(
       name: search,
@@ -30,26 +30,18 @@ class AppPages {
         // 对应 Swift: 从其他页面传入关键词时自动搜索
         initialKeyword: Get.arguments as String?,
       ),
-      transition: Transition.fadeIn,
-      transitionDuration: const Duration(milliseconds: 220),
     ),
     GetPage(
       name: dlna,
       page: () => const DLNAPage(),
-      transition: Transition.fadeIn,
-      transitionDuration: const Duration(milliseconds: 220),
     ),
     GetPage(
       name: live,
       page: () => const LivePage(),
-      transition: Transition.fadeIn,
-      transitionDuration: const Duration(milliseconds: 220),
     ),
     GetPage(
       name: liveSettings,
       page: () => const LiveSettingsPage(),
-      transition: Transition.fadeIn,
-      transitionDuration: const Duration(milliseconds: 220),
     ),
   ];
 }

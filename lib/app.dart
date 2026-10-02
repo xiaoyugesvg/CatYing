@@ -143,6 +143,9 @@ class _TVBoxAppState extends State<TVBoxApp> with WidgetsBindingObserver {
                 theme: AppTheme.lightTheme,
                 darkTheme: AppTheme.darkTheme,
                 themeMode: effectiveLight ? ThemeMode.light : ThemeMode.dark,
+                // iOS 风格转场：所有 Get 路由右滑进入 / 左滑返回（丝滑不僵硬）
+                defaultTransition: Transition.cupertino,
+                transitionDuration: const Duration(milliseconds: 320),
                 // 把 NavigatorState 暴露给 VideoPlayerPip，让画中画能插入到顶层 Overlay
                 navigatorKey: VideoPlayerPip.navigatorKey,
                 // ── ⚠️ 这里原来会**换 key 销毁重建整个 ContentView** ──────

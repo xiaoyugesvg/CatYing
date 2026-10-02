@@ -307,6 +307,15 @@ class AppTheme {
     final base = ThemeData.light(useMaterial3: true);
     return base.copyWith(
       scaffoldBackgroundColor: backgroundPrimary,
+      // iOS 风格转场：页面右滑进入 / 左滑返回（Navigator.push 的
+      // MaterialPageRoute 全部套用，含 iOS 边缘返回手势）
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.iOS: _CupertinoLikeTransitionsBuilder(),
+          TargetPlatform.macOS: _CupertinoLikeTransitionsBuilder(),
+          TargetPlatform.android: _CupertinoLikeTransitionsBuilder(),
+        },
+      ),
       colorScheme: base.colorScheme.copyWith(
         primary: accentColor,
         secondary: accentColor,
@@ -483,6 +492,14 @@ class AppTheme {
     return ThemeData(
       brightness: Brightness.dark,
       scaffoldBackgroundColor: backgroundPrimary,
+      // iOS 风格转场（与 lightTheme 一致）
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.iOS: _CupertinoLikeTransitionsBuilder(),
+          TargetPlatform.macOS: _CupertinoLikeTransitionsBuilder(),
+          TargetPlatform.android: _CupertinoLikeTransitionsBuilder(),
+        },
+      ),
       colorScheme: ColorScheme.dark(
         primary: accentColor,
         secondary: accentLightColor,
@@ -650,6 +667,36 @@ class AppTheme {
         labelSmall: TextStyle(color: textTertiary, fontSize: fontCaption),
       ),
       useMaterial3: true,
+    );
+  }
+}
+
+/// iOS 风格页面转场（自实现，零依赖）：
+/// 新页面从右侧滑入 + 轻微淡入（easeOutCubic，丝滑不僵硬），
+/// 返回时反向滑出。给 `Navigator.push(MaterialPageRoute)` 的路由用
+/// （Get 路由的 iOS 转场由 `GetMaterialApp.defaultTransition` 提供）。
+class _CupertinoLikeTransitionsBuilder extends PageTransitionsBuilder {
+  const _CupertinoLikeTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    // 首页不转场（避免冷启动闪现）
+    if (route.settings.name == Navigator.defaultRouteName) return child;
+    final curved = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    return SlideTransition(
+      position:
+          Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero).animate(curved),
+      child: FadeTransition(opacity: curved, child: child),
     );
   }
 }
