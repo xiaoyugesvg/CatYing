@@ -56,9 +56,15 @@ class JellyNavBar extends StatefulWidget {
   static const double floatingBarHeight = FloatingNavSpec.barHeight;
   static const double floatingBottomMargin = FloatingNavSpec.bottomMargin;
 
-  /// 内容底部避让高度：悬浮导航栏开启时返回总高+8，否则 0
-  static double get contentBottomAvoid =>
-      SettingsService().navFloating ? floatingTotalHeight + 8 : 0.0;
+  /// 内容底部避让高度：悬浮导航栏开启时返回总高+8+Home 指示器余量，否则 0。
+  ///
+  /// ⚠️ 悬浮模式（extendBody=true）下 body 会延伸到屏幕底部，
+  /// 页面自己必须留出足够底部 padding，否则最后一项会被导航栏
+  /// 或 Home 指示器遮挡（表现为"内容压导航栏、点不到"）。
+  /// +40 用于覆盖 Home 指示器（iPhone 34 / Android 手势条 24~48）。
+  static double get contentBottomAvoid => SettingsService().navFloating
+      ? floatingTotalHeight + 8 + 40
+      : 0.0;
 
   @override
   State<JellyNavBar> createState() => _JellyNavBarState();

@@ -19,9 +19,16 @@ import '../../common/theme.dart';
 ///   · 结果按书聚合去重，同一本书只出现一次（可点开看分别来自哪些源）
 ///   · 顶部显示搜索进度（已 N/M 个源）
 class BookSourceSearchPage extends StatefulWidget {
-  const BookSourceSearchPage({super.key, this.initialKeyword = ''});
+  const BookSourceSearchPage({
+    super.key,
+    this.initialKeyword = '',
+    this.initialSourceId,
+  });
 
   final String initialKeyword;
+
+  /// 指定只搜某一个书源（图书页拉绳「卷帘切源」传入；为空则搜全部启用源）
+  final String? initialSourceId;
 
   @override
   State<BookSourceSearchPage> createState() => _BookSourceSearchPageState();
@@ -79,7 +86,15 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       _toast('请输入书名或作者');
       return;
     }
-    final enabled = store.enabled;
+    final allEnabled = store.enabled;
+    final enabled = widget.initialSourceId == null
+        ? allEnabled
+        : allEnabled.where((s) => s.id == widget.initialSourceId).toList();
+    if (enabled.isEmpty) {
+      _toast('未找到指定书源，请先在书源仓库确认源已启用');
+      setState(() => _searching = false);
+      return;
+    }
     if (enabled.isEmpty) {
       _toast('还没有启用的书源，先去导入');
       return;

@@ -297,7 +297,10 @@ class _HomePageState extends State<HomePage> {
       case NavTab.favorites:
         return FavoritesPage(isActive: isActive);
       case NavTab.bookshelf:
-        return BookshelfPage(isActive: isActive);
+        return BookshelfPage(
+          isActive: isActive,
+          selectTrigger: _shelfSelectTrigger,
+        );
       case NavTab.me:
         return MePage(isActive: isActive);
     }

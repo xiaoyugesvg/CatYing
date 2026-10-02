@@ -18,6 +18,7 @@ import 'display_settings_page.dart';
 import 'download_page.dart';
 import 'download_settings_page.dart';
 import 'favorites_page.dart';
+import 'notes_and_journey_page.dart';
 import 'reading_settings_page.dart';
 import 'search_page.dart';
 import 'book_source_repo_page.dart';
@@ -90,11 +91,7 @@ class _MePageState extends State<MePage> {
             left: 12,
             right: 12,
             top: 0,
-            bottom:
-                8 +
-                (SettingsService().navFloating
-                    ? JellyNavBar.floatingTotalHeight + 8
-                    : 0.0),
+            bottom: 8 + JellyNavBar.contentBottomAvoid,
           ),
           children: [
             // 标题 + 右上角暗色模式切换
@@ -136,6 +133,70 @@ class _MePageState extends State<MePage> {
               ),
             ),
             _buildAccountCard(isDark),
+            // ── 笔记与历程计划（参考 cmbok「我的」页引导 1/5）──────
+            GestureDetector(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const NotesAndJourneyPage(),
+                ),
+              ),
+              child: Container(
+                margin: const EdgeInsets.only(top: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: JellyTheme.primary.withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.timeline_rounded,
+                        color: JellyTheme.primary,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '笔记与历程计划',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: isDark
+                                  ? Colors.white
+                                  : JellyTheme.textPrimaryLight,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '划线笔记 · 每日阅读打卡 · 阅读足迹',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: JellyTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: JellyTheme.textSecondary,
+                    ),
+                  ],
+                ),
+              ),
+            ),
             LayoutBuilder(
               builder: (context, constraints) {
                 final cols = _adaptiveCols(constraints.maxWidth);

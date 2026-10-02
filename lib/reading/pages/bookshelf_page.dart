@@ -69,10 +69,14 @@ class BookshelfPage extends StatefulWidget {
   /// 是否显示返回按钮（从"我的"页面入口进入时为 true）
   final bool showBackButton;
 
+  /// 外部触发进入多选模式（底部导航「书架」上滑时自增，见 home_page）
+  final ValueNotifier<int>? selectTrigger;
+
   const BookshelfPage({
     super.key,
     this.isActive = false,
     this.showBackButton = false,
+    this.selectTrigger,
   });
 
   @override
@@ -130,6 +134,30 @@ class _BookshelfPageState extends State<BookshelfPage>
       }
     });
     _maybeTriggerGuide();
+    // 监听外部多选触发（底部导航「书架」上滑）
+    widget.selectTrigger?.addListener(_onExternalSelectTrigger);
+  }
+
+  /// 外部触发进入多选模式：切换 tab 到书架并进入多选
+  void _onExternalSelectTrigger() {
+    if (!mounted) return;
+    setState(() {
+      _isSelecting = true;
+      _selectedItemIds.clear();
+    });
+    _toast('已进入批量多选：点击条目选择，底部可批量操作');
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
   }
 
   /// 首次激活时展示书架页新手引导（仅一次）
@@ -153,6 +181,7 @@ class _BookshelfPageState extends State<BookshelfPage>
 
   @override
   void dispose() {
+    widget.selectTrigger?.removeListener(_onExternalSelectTrigger);
     SettingsService().removeListener(_onContentTabsChanged);
     _tabController.dispose();
     _comicScrollController.dispose();
@@ -1871,6 +1900,32 @@ class _BookshelfPageState extends State<BookshelfPage>
                     );
                   },
                 ),
+                // ── WebDAV 备份同步（占位入口，参考 cmbok 引导 1/5）──
+                ListTile(
+                  leading: Icon(
+                    Icons.cloud_sync_outlined,
+                    color: JellyTheme.primary,
+                  ),
+                  title: const Text('WebDAV 备份同步'),
+                  subtitle: const Text('把书架/设置备份到 WebDAV 网盘，换机恢复'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showComingSoon('WebDAV 备份同步');
+                  },
+                ),
+                // ── Kindle 推送（占位入口，参考 cmbok 引导 1/5）────
+                ListTile(
+                  leading: Icon(
+                    Icons.menu_book_outlined,
+                    color: JellyTheme.primary,
+                  ),
+                  title: const Text('Kindle 推送'),
+                  subtitle: const Text('通过邮件把图书推送到 Kindle 设备'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showComingSoon('Kindle 推送');
+                  },
+                ),
                 ListTile(
                   leading: Icon(
                     Icons.close_rounded,
@@ -1885,6 +1940,19 @@ class _BookshelfPageState extends State<BookshelfPage>
         );
       },
     );
+  }
+
+  /// 「即将支持」占位提示（WebDAV / Kindle 等功能尚未接入时用）
+  void _showComingSoon(String feature) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('「$feature」功能即将支持，敬请期待'),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
   }
 
   /// 导入本地图书：多选文件 -> 逐本建已完成任务 -> 入"本地图书"书架（Book 类型，固定 id）

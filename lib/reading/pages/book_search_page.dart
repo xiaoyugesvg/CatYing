@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../models/book.dart';
 import '../models/book_category.dart';
+import '../models/book_source.dart';
 import '../models/search_result.dart';
 import '../services/book_download_service.dart';
 import '../../services/main_tab_controller.dart';
@@ -21,6 +22,7 @@ import '../widgets/guide_overlay.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/staggered_entrance.dart';
 import 'book_detail_page.dart';
+import 'book_source_repo_page.dart';
 import 'book_source_search_page.dart';
 import 'douban_ranking_page.dart';
 import 'browse_history_page.dart';
@@ -563,6 +565,179 @@ class _BookSearchPageState extends State<BookSearchPage>
 
   // -------------------- 详情 --------------------
 
+  /// 拉绳「卷帘」：弹出书源层（第一层=当前模式，第二层=已导入书源列表）。
+  /// 点选源 → 单源搜索页；长按源标签 → 登录管理；底部可进书源仓库。
+  void _showSourceLayerSheet(bool isDark) {
+    final store = BookSourceStore.instance;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) {
+        return Container(
+          decoration: BoxDecoration(
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.2)
+                        : Colors.black.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '切换书源',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? Colors.white
+                            : JellyTheme.textPrimaryLight,
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '长按书源可登录管理账号；点选书源进入该书源搜索',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: JellyTheme.textSecondary,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                // 第一层：z-library 图书搜索（当前模式）
+                ListTile(
+                  leading: Icon(
+                    Icons.auto_stories_rounded,
+                    color: JellyTheme.primary,
+                  ),
+                  title: const Text('z-library 图书搜索'),
+                  subtitle: const Text('当前模式：按书名/作者/ISBN 搜索'),
+                  trailing: Icon(
+                    Icons.check_circle_rounded,
+                    color: JellyTheme.primary,
+                    size: 20,
+                  ),
+                  onTap: () => Navigator.pop(sheetCtx),
+                ),
+                // 第二层：已导入书源列表
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '已导入书源（${store.enabled.length}）',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: JellyTheme.textSecondary,
+                      ),
+                    ),
+                  ),
+                ),
+                if (store.enabled.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '暂无书源，去书源仓库导入 Legado 书源',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: JellyTheme.textSecondary,
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: EdgeInsets.zero,
+                      children: [
+                        for (final src in store.enabled)
+                          ListTile(
+                            dense: true,
+                            leading: Icon(
+                              Icons.library_books_outlined,
+                              color: JellyTheme.primary,
+                            ),
+                            title: Text(src.name),
+                            subtitle: Text(
+                              '搜索「${_keyword.trim().isEmpty ? '输入关键词' : _keyword.trim()}」',
+                            ),
+                            onTap: () {
+                              Navigator.pop(sheetCtx);
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => BookSourceSearchPage(
+                                    initialKeyword: _keyword.trim(),
+                                    initialSourceId: src.id,
+                                  ),
+                                ),
+                              );
+                            },
+                            onLongPress: () {
+                              Navigator.pop(sheetCtx);
+                              _showTip('书源「${src.name}」：可在书源仓库管理登录');
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const BookSourceRepoPage(),
+                                ),
+                              );
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.settings_suggest_outlined, size: 18),
+                      label: const Text('管理书源'),
+                      onPressed: () {
+                        Navigator.pop(sheetCtx);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const BookSourceRepoPage(),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   void _openDetail(Book book) async {
     FocusScope.of(context).unfocus(); // 进详情前先收起键盘与历史弹层
     // 分类页来源（hash 是 dl/{slug}，无 eapi hash）：先搜索匹配 bookId 拿 eapi hash
@@ -919,15 +1094,8 @@ class _BookSearchPageState extends State<BookSearchPage>
                           // 不限的话这一行会被撑到 50px，同排的搜索框/圆图标
                           // 垂直错位、圆环还会探出压到搜索框上。
                           height: 40,
-                          tooltip: '切换到书源',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => BookSourceSearchPage(
-                                initialKeyword: _keyword.trim(),
-                              ),
-                            ),
-                          ),
+                          tooltip: '切换书源',
+                          onTap: () => _showSourceLayerSheet(isDark),
                         ),
                         const SizedBox(width: 10),
                         // 搜索框占据剩余宽度（Expanded 让右侧图标始终贴边）
