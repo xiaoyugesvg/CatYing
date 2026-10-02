@@ -55,8 +55,10 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   @override
   Widget build(BuildContext context) {
     final h = MediaQuery.of(context).size.height;
-    // 三分之一屏高度（留一点呼吸，极端屏 clamp 到 28%~40%）
-    final panelHeight = (h / 3).clamp(h * 0.28, h * 0.40);
+    // 面板高度 = 1/3 屏 × 1.2（用户要求"变成现在的 1.2 倍"）：
+    // 1/3 屏时标题+搜索框占掉大半，源网格只剩一点点高（看起来"底部遮住一部分"），
+    // 加高后常规屏 3 行源可以完整显示；矮屏仍可滚动兜底。
+    final panelHeight = (h * 0.4).clamp(h * 0.34, h * 0.48);
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.backgroundSecondary,
@@ -297,23 +299,14 @@ class _ExpandableSearchFieldState extends State<_ExpandableSearchField> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    // 常驻超小胶囊搜索框：占满头部剩余宽度，
-    // 背景/描边跟随外观（原来写死 0xFF2A2A2E，浅色模式下是一块脏黑）。
+    // 透明底小胶囊搜索框：不涂灰色块（用户要求"灰色背景改成透明的，整体统一"），
+    // 只留细边胶囊，与弹窗背景融为一体；深浅模式自动跟随描边色。
     return Container(
       height: 30,
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.palette.cardDark : AppTheme.palette.cardLight,
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(15),
-        boxShadow: [
-          BoxShadow(
-            color: isDark
-                ? Colors.black.withValues(alpha: 0.30)
-                : Colors.black.withValues(alpha: 0.06),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        border: Border.all(color: AppTheme.borderLight, width: 0.5),
       ),
       child: Row(
         children: [

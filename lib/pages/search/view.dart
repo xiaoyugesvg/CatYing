@@ -668,7 +668,7 @@ class _SearchPageState extends State<SearchPage> {
               AppTheme.spacingXL,
               AppTheme.spacingMD,
               AppTheme.spacingXL,
-              80,
+              0, // 底部 padding 归 0（与首页统一：内容显示更多）
             ),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: crossAxisCount,
@@ -721,10 +721,12 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
           ),
-          for (final kw in _hotKeywords) ...[
-            _hotRow(kw),
-            const SizedBox(height: 10),
-          ],
+          // 热门搜索：小胶囊流式排列（不再通栏长条，参考 App 常见样式）
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: _hotKeywords.map((kw) => _hotPill(kw)).toList(),
+          ),
 
           // ---------- 搜索历史 ----------
           if (_searchController.searchHistory.isNotEmpty) ...[
@@ -772,17 +774,17 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  /// 热门搜索行：通栏圆角 + 文字居中（对应参考图，紧凑高度）
-  Widget _hotRow(String keyword) {
+  /// 热门搜索小胶囊：比历史胶囊更醒目（亮底 + 粗一点的字），
+  /// 同为胶囊流，视觉统一。
+  Widget _hotPill(String keyword) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => _runSearch(keyword),
       child: Container(
-        height: 38,
-        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: AppTheme.backgroundCard,
-          borderRadius: BorderRadius.circular(19),
+          borderRadius: BorderRadius.circular(17),
           border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
         ),
         child: Text(
@@ -792,6 +794,7 @@ class _SearchPageState extends State<SearchPage> {
           style: TextStyle(
             color: AppTheme.textPrimary,
             fontSize: AppTheme.fontBody,
+            fontWeight: FontWeight.w500,
           ),
         ),
       ),
@@ -885,13 +888,13 @@ class _SearchSourcePickerState extends State<_SearchSourcePicker> {
   @override
   Widget build(BuildContext context) {
     final h = MediaQuery.of(context).size.height;
-    final panelHeight = (h / 3).clamp(h * 0.28, h * 0.40);
+    // 面板高度 = 1/3 屏 × 1.2（与首页源切换面板一致；矮屏仍可滚动）
+    final panelHeight = (h * 0.4).clamp(h * 0.34, h * 0.48);
     final list = _kw.isEmpty
         ? widget.sites
         : widget.sites
             .where((s) => s.name.toLowerCase().contains(_kw.toLowerCase()))
             .toList();
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.backgroundSecondary,
@@ -933,15 +936,14 @@ class _SearchSourcePickerState extends State<_SearchSourcePicker> {
                   ],
                 ),
               ),
-              // 搜索（小胶囊，与首页/源面板同规格）
+              // 搜索（小胶囊：透明底 + 细边，与首页源切换面板统一，
+              // 不涂灰色块）
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Container(
                   height: 30,
                   decoration: BoxDecoration(
-                    color: isDark
-                        ? AppTheme.palette.cardDark
-                        : AppTheme.palette.cardLight,
+                    color: Colors.transparent,
                     borderRadius: BorderRadius.circular(15),
                     border:
                         Border.all(color: AppTheme.borderLight, width: 0.5),

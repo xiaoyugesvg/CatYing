@@ -871,11 +871,13 @@ class _HomePageState extends State<HomePage> {
                   }),
                 ),
                 SliverPadding(
+                  // 底部 padding 改为 0：内容区下探到底，一屏显示更多卡片
+                  //（用户要求对齐参考图"内容贴底"；原本 80 是给悬浮导航让位，现按用户指示取消）
                   padding: const EdgeInsets.fromLTRB(
                     AppTheme.spacingXL,
                     AppTheme.spacingMD,
                     AppTheme.spacingXL,
-                    80,
+                    0,
                   ),
                   sliver: SliverGrid(
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(

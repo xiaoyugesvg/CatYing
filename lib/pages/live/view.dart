@@ -1730,7 +1730,7 @@ class _LivePageState extends State<LivePage> {
       );
     }
     return ListView.separated(
-      padding: EdgeInsets.fromLTRB(12, 0, 12, 100),
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 0), // 底部 padding 归 0（与首页统一）
       itemCount: channels.length,
       separatorBuilder: (_, __) =>
           Divider(height: 1, color: AppTheme.borderLight),

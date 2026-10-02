@@ -322,7 +322,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
               AppTheme.spacingLG,
               AppTheme.spacingLG,
               AppTheme.spacingLG,
-              100, // 底部预留悬浮导航栏空间
+              0, // 底部 padding 归 0（与首页统一：内容显示更多）
             ),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: crossAxisCount,
