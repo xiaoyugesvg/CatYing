@@ -5,6 +5,7 @@ import '../../common/theme.dart';
 import '../../models/movie.dart';
 import '../../models/source_bean.dart';
 import '../../services/api_config.dart';
+import '../../services/player_prefs.dart';
 import '../../widgets/vod_card.dart';
 import '../../widgets/common_widgets.dart';
 import 'controller.dart';
@@ -651,14 +652,12 @@ class _SearchPageState extends State<SearchPage> {
         );
       }
 
-      // 对应 Swift: LazyVGrid(columns: adaptive)
+      // 网格：列数统一跟随首页（gridColumns，2~4，默认 3），
+      // 海报比例 1.44、文字区 30 —— 与首页卡片/封面尺寸完全一致。
       return LayoutBuilder(
         builder: (context, constraints) {
-          final cardMinWidth = 120.0;
           final crossAxisCount =
-              (constraints.maxWidth / (cardMinWidth + AppTheme.cardSpacing))
-                  .floor()
-                  .clamp(2, 6);
+              PlayerPrefs.instance.gridColumns.value.clamp(2, 4);
           final cardWidth =
               (constraints.maxWidth -
                   AppTheme.cardSpacing * (crossAxisCount - 1)) /
@@ -673,7 +672,7 @@ class _SearchPageState extends State<SearchPage> {
             ),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: crossAxisCount,
-              childAspectRatio: (cardWidth) / (cardWidth / 0.65 + 50),
+              childAspectRatio: cardWidth / (cardWidth * 1.44 + 30),
               crossAxisSpacing: AppTheme.cardSpacing,
               mainAxisSpacing: AppTheme.cardSpacing,
             ),
@@ -682,6 +681,8 @@ class _SearchPageState extends State<SearchPage> {
               final video = results[index];
               return VodCard(
                 video: video,
+                // 海报比例与首页一致（1.44）
+                posterHeightRatio: 1.44,
                 onTap: () => Get.toNamed('/detail', arguments: video),
               );
             },

@@ -2,30 +2,22 @@ import 'package:flutter/material.dart';
 
 import '../common/theme.dart';
 
-/// **首页右上角常驻搜索框**（2026-10-02 重构）
+/// **首页右上角搜索**（2026-10-02 定稿：iOS 风格收起/展开）
 ///
-/// 对齐参考 App（奇优影院）的搜索框样式：**常驻胶囊输入框**，
-/// 不是"收起圆钮、点击才展开"的旧交互——
-/// 用户明确要求"重构首页右上角的搜索UI界面及其搜索位置UI"。
+/// 用户明确要求：
+/// - **正常（收起）** = 一个圆形搜索图标按钮（白底/卡片底 + 放大镜）
+/// - **点击** = 展开成小胶囊输入框，**长度只到参考图那条**（约屏宽 36%，
+///   不撑满整行）；聚焦自动弹键盘
 ///
 /// ── 样式 ──────────────────────────────────────────────
-/// **超小胶囊**（对齐参考 App：高度约一行文字多一点，很扁）：
-/// 高 30 / 圆角 15 / 底色 cardLight·cardDark + 细边（无阴影，干净）/
-/// 左：放大镜图标(14)；中：hint「搜索影片」(12)；右：有内容时才显示 × 清除
-///
-/// ── 与参考图的差异修正（2026-10-02）────────────────────
-/// 参考图（Makka 聚合首页）搜索框只有「放大镜 + 搜索影片」，**没有右侧箭头**。
-/// 旧版在无内容时放了个"→"图标，用户嫌丑，已去掉 —— 无内容点搜索框即进搜索页。
-///
-/// ── 位置与键盘 ─────────────────────────────────────────
-/// 组件放在首页顶栏（外层 SafeArea 内），**永远在状态栏下方**；
-/// 键盘弹起时顶栏不动（页面 Scaffold 默认 resizeToAvoidBottomInset，
-/// 顶栏属于 body 顶部，不受键盘影响），输入框不会被遮。
+/// 收起：直径 32 圆钮；展开：宽 屏宽×0.36 / 高 30 / 圆角 15（胶囊）
+/// 底色 cardLight·cardDark + 细边（无阴影，干净，对齐参考图）
+/// 展开内容：放大镜(14) + hint「搜索影片」(12) + 有内容时 × 清除
 ///
 /// ── 行为 ──────────────────────────────────────────────
-/// · 点击 → 聚焦弹键盘，直接输入
-/// · 键盘搜索键 / 点右侧图标：有内容 → [onSubmitted](带关键词进搜索页)
-/// · 无内容 → [onTapEmpty]（打开完整搜索页）
+/// · 点圆钮 → 展开 + 聚焦
+/// · 键盘搜索键 / 提交：有内容 → [onSubmitted]（带关键词进搜索页）
+/// · 无内容提交 / 点外部失焦 → 收起；空提交同时触发 [onTapEmpty]（打开完整搜索页）
 class HomeSearchBar extends StatefulWidget {
   const HomeSearchBar({
     super.key,
@@ -59,6 +51,8 @@ class HomeSearchBar extends StatefulWidget {
 }
 
 class _HomeSearchBarState extends State<HomeSearchBar> {
+  /// false=收起（圆形搜索图标按钮）；true=展开（小胶囊输入框）
+  bool _expanded = false;
   late final TextEditingController _ctrl;
   late final FocusNode _focus;
   bool _ownsCtrl = false;
@@ -76,6 +70,7 @@ class _HomeSearchBarState extends State<HomeSearchBar> {
     _focus = FocusNode();
     _focus.addListener(() {
       widget.onFocusChange?.call(_focus.hasFocus);
+      if (mounted) setState(() {});
     });
   }
 
@@ -87,85 +82,122 @@ class _HomeSearchBarState extends State<HomeSearchBar> {
     super.dispose();
   }
 
+  void _expand() {
+    setState(() => _expanded = true);
+    _focus.requestFocus();
+  }
+
+  void _collapse() {
+    setState(() => _expanded = false);
+    _focus.unfocus();
+  }
+
   void _submit(String v) {
     final text = v.trim();
     if (text.isEmpty) {
-      _focus.unfocus();
+      _collapse();
       widget.onTapEmpty?.call();
       return;
     }
     _ctrl.clear();
-    _focus.unfocus();
+    _collapse();
     widget.onSubmitted(text);
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
+    // 展开后胶囊长度：参考图"搜索漫画"那条的长度（约屏宽 36%，
+    // 不撑满整行 —— 用户明确要求"长度只需要这个这么长"）
+    final expandedWidth = MediaQuery.of(context).size.width * 0.36;
+    return AnimatedContainer(
+      duration: AppTheme.motionBase,
+      curve: AppTheme.motionCurve,
+      // 收起 = 圆形按钮（直径 32）；展开 = 小胶囊（宽 = 屏宽 36%）
+      width: _expanded ? expandedWidth : 32,
       height: 30,
       decoration: BoxDecoration(
         // 颜色走 AppTheme 调色板，切外观/配色自动跟随
         color: isDark ? AppTheme.palette.cardDark : AppTheme.palette.cardLight,
         borderRadius: BorderRadius.circular(15),
-        // 干净：细边代替阴影（参考图是无阴影的白胶囊）
+        // 干净：细边代替阴影（参考图是无阴影的白胶囊/白圆钮）
         border: Border.all(color: AppTheme.borderLight, width: 0.5),
       ),
-      child: Row(
-        children: [
-          const SizedBox(width: 10),
-          Icon(Icons.search_rounded, color: AppTheme.textTertiary, size: 14),
-          const SizedBox(width: 5),
-          Expanded(
-            child: TextField(
-              controller: _ctrl,
-              focusNode: _focus,
-              cursorColor: AppTheme.accentColor,
-              cursorWidth: 1.5,
-              cursorRadius: const Radius.circular(1),
-              style: TextStyle(
-                fontSize: 12,
-                height: 1.0,
-                color: AppTheme.textPrimary,
-              ),
-              textInputAction: TextInputAction.search,
-              onSubmitted: _submit,
-              onChanged: (v) {
-                setState(() {});
-                widget.onChanged?.call(v);
-              },
-              decoration: InputDecoration(
-                hintText: widget.hintText,
-                hintStyle: TextStyle(
-                  fontSize: 12,
-                  color: AppTheme.textTertiary,
+      child: _expanded
+          ? Row(
+              children: [
+                const SizedBox(width: 10),
+                Icon(Icons.search_rounded,
+                    color: AppTheme.textTertiary, size: 14),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: TextField(
+                    controller: _ctrl,
+                    focusNode: _focus,
+                    autofocus: true,
+                    cursorColor: AppTheme.accentColor,
+                    cursorWidth: 1.5,
+                    cursorRadius: const Radius.circular(1),
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.0,
+                      color: AppTheme.textPrimary,
+                    ),
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: _submit,
+                    onChanged: (v) {
+                      setState(() {});
+                      widget.onChanged?.call(v);
+                    },
+                    onTapOutside: (_) {
+                      if (_expanded && !_focus.hasFocus) _collapse();
+                    },
+                    decoration: InputDecoration(
+                      hintText: widget.hintText,
+                      hintStyle: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textTertiary,
+                      ),
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
                 ),
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
-          ),
-          // 有内容才显示 × 清除（无内容时右侧不放任何图标，对齐参考图）
-          if (_ctrl.text.isNotEmpty)
-            GestureDetector(
+                // 有内容才显示 × 清除（无内容时右侧不放任何图标，对齐参考图）
+                if (_ctrl.text.isNotEmpty)
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      _ctrl.clear();
+                      setState(() {});
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Icon(
+                        Icons.cancel_rounded,
+                        color: AppTheme.textTertiary,
+                        size: 13,
+                      ),
+                    ),
+                  ),
+                const SizedBox(width: 4),
+              ],
+            )
+          // 收起：圆形搜索图标按钮（参考图：白底黑放大镜）
+          : GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: () {
-                _ctrl.clear();
-                setState(() {});
-              },
-              child: Padding(
-                padding: const EdgeInsets.all(8),
+              onTap: _expand,
+              child: Center(
                 child: Icon(
-                  Icons.cancel_rounded,
-                  color: AppTheme.textTertiary,
-                  size: 13,
+                  Icons.search_rounded,
+                  color: isDark
+                      ? AppTheme.textPrimary
+                      : Colors.black87,
+                  size: 16,
                 ),
               ),
             ),
-          const SizedBox(width: 4),
-        ],
-      ),
     );
   }
 }

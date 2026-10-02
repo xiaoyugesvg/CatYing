@@ -132,30 +132,27 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
-          const SizedBox(width: 12),
-          // 右：**常驻搜索框**（重构后不再"收起圆钮/点击才展开"）
-          // 位置固定在顶栏 SafeArea 内 —— 永远在状态栏下方；
-          // 键盘弹起时顶栏不动、输入框不被遮（对齐参考 App 搜索位置）。
-          Expanded(
-            child: HomeSearchBar(
-              hintText: '搜索影片',
-              onSubmitted: (v) {
-                if (v.trim().isNotEmpty) {
-                  Get.toNamed('/search', arguments: v.trim());
-                } else if (widget.onSearchTap != null) {
-                  widget.onSearchTap!();
-                } else {
-                  Get.toNamed('/search');
-                }
-              },
-              onTapEmpty: () {
-                if (widget.onSearchTap != null) {
-                  widget.onSearchTap!();
-                } else {
-                  Get.toNamed('/search');
-                }
-              },
-            ),
+          // 右：搜索 —— 收起=圆形搜索图标，点击展开成小胶囊（长度约屏宽 36%，
+          // 不撑满整行）。Spacer 把它顶到右上角，展开时向左伸展（iOS 风格）。
+          const Spacer(),
+          HomeSearchBar(
+            hintText: '搜索影片',
+            onSubmitted: (v) {
+              if (v.trim().isNotEmpty) {
+                Get.toNamed('/search', arguments: v.trim());
+              } else if (widget.onSearchTap != null) {
+                widget.onSearchTap!();
+              } else {
+                Get.toNamed('/search');
+              }
+            },
+            onTapEmpty: () {
+              if (widget.onSearchTap != null) {
+                widget.onSearchTap!();
+              } else {
+                Get.toNamed('/search');
+              }
+            },
           ),
         ],
       ),

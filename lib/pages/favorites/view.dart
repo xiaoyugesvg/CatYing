@@ -176,12 +176,12 @@ class _FavoritesPageState extends State<FavoritesPage> {
                     spacing: 10,
                     runSpacing: 10,
                     children: [
-                      for (final n in const [2, 3, 4, 5, 6])
+                      for (final n in const [2, 3, 4])
                         SelectableChip(
                           title: '$n 列',
-                          isSelected: prefs.favGridColumns.value == n,
+                          isSelected: prefs.gridColumns.value == n,
                           onTap: () async {
-                            await prefs.setFavGridColumns(n);
+                            await prefs.setGridColumns(n);
                             if (ctx.mounted) Navigator.pop(ctx);
                           },
                         ),
@@ -309,9 +309,10 @@ class _FavoritesPageState extends State<FavoritesPage> {
 
       return LayoutBuilder(
         builder: (context, constraints) {
-          // 列数来自「布局切换」（2~6，默认 4）
+          // 列数统一跟随首页（gridColumns，2~4，默认 3）——
+          // 用户要求"收藏/历史/搜索的卡片与封面尺寸统一成首页尺寸"
           final crossAxisCount =
-              PlayerPrefs.instance.favGridColumns.value.clamp(2, 6);
+              PlayerPrefs.instance.gridColumns.value.clamp(2, 4);
           final cardWidth =
               (constraints.maxWidth - AppTheme.cardSpacing * (crossAxisCount - 1)) /
                   crossAxisCount;
@@ -326,14 +327,9 @@ class _FavoritesPageState extends State<FavoritesPage> {
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: crossAxisCount,
               // 卡片总高 = 图片区 + 标题区(约30)。
-              //
-              // 历史沿革：原式 cardWidth/0.65+50（卡片约196pt）→ 3/4 高
-              // （0.4875+50，约91pt）→ 现按要求把**图片放大到约 1.5 倍**
-              // （0.4875 → 1.015），卡片随之回到约 118pt。
-              //
-              // 图片区具体高度由 VodCard.posterHeightRatio 决定，这里的两者
-              // 必须配套改，否则图片会把标题挤出去。
-              childAspectRatio: cardWidth / (cardWidth * 1.015 + 30),
+              // 海报比例与首页一致（1.44 = 0.72 × 2），卡片尺寸随之统一。
+              // ⚠️ 与下面 VodCard 的 posterHeightRatio 配套，否则图片把标题挤出去。
+              childAspectRatio: cardWidth / (cardWidth * 1.44 + 30),
               crossAxisSpacing: AppTheme.cardSpacing,
               mainAxisSpacing: AppTheme.cardSpacing,
             ),
@@ -352,8 +348,8 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 final editing = shelf.editing.value;
                 return VodCard(
                   video: video,
-                  // 图片区约 1.5 倍高（与上面的 childAspectRatio 配套）
-                  posterHeightRatio: 1.015,
+                  // 海报比例与首页一致（1.44）
+                  posterHeightRatio: 1.44,
                   editMode: editing,
                   selected: shelf.isSelected(key),
                   onToggleSelect: () => shelf.toggleSelect(key),

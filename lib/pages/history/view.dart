@@ -189,12 +189,12 @@ class _HistoryPageState extends State<HistoryPage> {
                     spacing: 10,
                     runSpacing: 10,
                     children: [
-                      for (final n in const [2, 3, 4, 5, 6])
+                      for (final n in const [2, 3, 4])
                         SelectableChip(
                           title: '$n 列',
-                          isSelected: prefs.historyGridColumns.value == n,
+                          isSelected: prefs.gridColumns.value == n,
                           onTap: () async {
-                            await prefs.setHistoryGridColumns(n);
+                            await prefs.setGridColumns(n);
                             if (ctx.mounted) Navigator.pop(ctx);
                           },
                         ),
@@ -295,18 +295,17 @@ class _HistoryPageState extends State<HistoryPage> {
         );
       }
 
-      // 网格布局（列数来自「布局切换」，2~6，默认 4）。
-      // 原来是 ListView 竖排详情行，卡片又高又占地方；改成网格一屏能看更多。
+      // 网格布局（列数统一跟随首页 gridColumns，2~4，默认 3）。
+      // 用户要求"收藏/历史/搜索的卡片与封面尺寸统一成首页尺寸"。
       return LayoutBuilder(
         builder: (context, constraints) {
           final crossAxisCount =
-              PlayerPrefs.instance.historyGridColumns.value.clamp(2, 6);
+              PlayerPrefs.instance.gridColumns.value.clamp(2, 4);
           final cardWidth =
               (constraints.maxWidth - AppTheme.cardSpacing * (crossAxisCount - 1)) /
                   crossAxisCount;
-          // 卡片总高 = 图片区 + 标题区(约30)
-          // 图片约 1.5 倍高（换算与明细见 favorites/view.dart）
-          final aspect = cardWidth / (cardWidth * 1.015 + 30);
+          // 卡片总高 = 图片区 + 标题区(约30)；海报比例与首页一致（1.44）
+          final aspect = cardWidth / (cardWidth * 1.44 + 30);
           final hasMore = all.length > shown;
 
           return GridView.builder(
@@ -370,8 +369,8 @@ class _HistoryPageState extends State<HistoryPage> {
                     //（与首页/收藏角标同款外观）
                     note: item.playNote,
                   ),
-                  // 图片区约 1.5 倍高（与上面的 aspect 配套）
-                  posterHeightRatio: 1.015,
+                  // 海报比例与首页一致（与上面的 aspect 配套）
+                  posterHeightRatio: 1.44,
                   editMode: editing,
                   selected: shelf.isSelected(key),
                   onToggleSelect: () => shelf.toggleSelect(key),
