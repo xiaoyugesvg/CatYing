@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../../../common/theme.dart';
-import '../../../services/player_prefs.dart';
 import '../../../services/tmdb_service.dart';
 import '../../../widgets/common_widgets.dart';
 import 'settings_shared.dart';
@@ -181,23 +180,6 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
                 title: '自动刮削元数据',
                 value: tmdb.autoScrape.value ? '已开启' : '已关闭',
                 onTap: () => tmdb.setAutoScrape(!tmdb.autoScrape.value),
-              ),
-            ),
-            Obx(
-              () => SettingsRow(
-                icon: Icons.dashboard_customize_outlined,
-                title: '详情页样式',
-                value: PlayerPrefs.instance.scrapedDetailLayout.value
-                    ? '媒体库'
-                    : '默认',
-                onTap: () async {
-                  final cur = PlayerPrefs.instance.scrapedDetailLayout.value;
-                  await PlayerPrefs.instance.setScrapedDetailLayout(!cur);
-                  if (!cur) {
-                    // 切到媒体库：解除「默认锁定」，否则会被 forceDefaultDetail 拉回
-                    await PlayerPrefs.instance.setForceDefaultDetail(false);
-                  }
-                },
               ),
             ),
           ],

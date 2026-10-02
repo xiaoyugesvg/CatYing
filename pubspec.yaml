@@ -57,7 +57,6 @@ dependencies:
   encrypt: ^5.0.3
   flutter_cache_manager: ^3.4.5
   flutter_staggered_grid_view: ^0.7.0
-  share_plus: ^13.3.0
   # cached_network_image 3.3.1 已移除（A2）：它与 cached_network_image_ce
   # 是**两条平行的完整实现**（各带 platform_interface / web 子包），
   # 同时编译进 App 且各自维护磁盘缓存 → 同一个网络图在影视和音乐会存两份。

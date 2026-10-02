@@ -87,13 +87,6 @@ class VideoPlayerWidget extends StatefulWidget {
   /// 顶部按钮栏距顶部的额外间距（默认 8，详情页可传大一点让按钮往下挪）
   final double topBarTopPadding;
 
-  /// 媒体库刮削版播放器样式（参考图 IMG_8306）：
-  /// · 顶栏整体下移（topBarTopPadding 由调用方传大值）
-  /// · 底栏上移留安全边距
-  /// · 底栏按钮组 = 播放/后退10/前进10/选集/弹幕/倍速/全屏
-  /// · 缓冲态显示「正在加载...」文字
-  final bool scrapedPlayerStyle;
-
   /// 播放设置弹窗的最大高度（父级传入播放器所在区域高度），见构造函数注释
   final double? sheetMaxHeight;
 
@@ -135,7 +128,6 @@ class VideoPlayerWidget extends StatefulWidget {
     this.skipIntroSeconds = 0,
     this.skipOutroSeconds = 0,
     this.topBarTopPadding = 8.0,
-    this.scrapedPlayerStyle = false,
 
     /// 播放设置弹窗的最大高度（由父级传入播放器所在区域的高度）。
     ///
@@ -1403,6 +1395,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Future<void> _exitDramaMode() async {
     AppLog.instance.log('=== _exitDramaMode: start ===');
+    // 先**同步**清掉短剧模式并刷新按钮/布局：
+    // iOS 上 unlockOrientations（SystemChrome.setPreferredOrientations）
+    // 是异步的，await 它会让视觉退出被拖住 —— 表现就是"点了闪一下
+    // 但模式不退"。先 setState 立即退出模式，再异步解锁方向。
+    if (mounted) setState(() => _dramaMode = false);
     _dramaMode = false;
     if (Platform.isIOS) {
       // 先解锁短剧自己的方向锁，再走通用退出（内部会还原进入前的方向）
@@ -1465,6 +1462,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Future<void> _exitDouyinMode() async {
     AppLog.instance.log('=== _exitDouyinMode: start ===');
+    // 同 _exitDramaMode：先同步清模式刷新，再异步解锁方向/退全屏
+    if (mounted) setState(() => _douyinMode = false);
     _douyinMode = false;
     if (Platform.isIOS) {
       // 先解锁抖音自己的方向锁，再走通用退出
@@ -1537,13 +1536,27 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       return;
     }
     AppLog.instance.log('=== _exitFullScreen: start ===');
-    // 任何方式退出全屏都同步退出短剧/抖音模式
-    _dramaMode = false;
-    _douyinMode = false;
-    _isImmersive = false;
-    _isNativeFullscreen = false;
-    _persisted.isImmersive = false;
-    _persisted.isNativeFullscreen = false;
+    // 任何方式退出全屏都同步退出短剧/抖音模式。
+    // 状态清理必须**同步 setState 刷新**（iOS 上 WindowFullScreen.exit /
+    // unlockOrientations 都是异步/空操作，不等它们视觉上也要立刻退出，
+    // 否则出现"闪一下但布局还是全屏/模式还在"）。
+    if (mounted) {
+      setState(() {
+        _dramaMode = false;
+        _douyinMode = false;
+        _isImmersive = false;
+        _isNativeFullscreen = false;
+        _persisted.isImmersive = false;
+        _persisted.isNativeFullscreen = false;
+      });
+    } else {
+      _dramaMode = false;
+      _douyinMode = false;
+      _isImmersive = false;
+      _isNativeFullscreen = false;
+      _persisted.isImmersive = false;
+      _persisted.isNativeFullscreen = false;
+    }
     widget.onFullScreenChanged?.call(false);
     try {
       await WindowFullScreen.instance.exit();
@@ -1556,6 +1569,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (Platform.isIOS) {
       // 还原进入全屏前记录的方向，而不是无条件写死"竖屏+左右横屏"
       await SystemUiController.unlockOrientations('videoFullscreen');
+      // ⚠️ 退出全屏必须**强制回竖屏**：
+      // unlockOrientations 恢复的是"允许集合"（竖屏 + 左右横屏都允许），
+      // 设备当前物理方向是横屏的话会**滞留横屏** —— 表现为退出全屏后
+      // 整个界面还是横屏。影视 App 常态竖屏（播放器全屏才横屏），
+      // 所以退出后显式锁死竖屏，iOS 会立即转回竖屏。
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+      ]);
     }
     await Future<void>.delayed(const Duration(milliseconds: 100));
     if (mounted) _onWindowFullScreenChanged();
@@ -1781,42 +1802,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
         // 缓冲指示器
         // 缓冲圈：buffering 时显示（换集后旧状态不再挡转圈）
-        // 媒体库刮削版：参考图 IMG_8306 样式 —— 转圈 + 「正在加载...」文字
         if (_isBuffering && !_audioMode)
-          widget.scrapedPlayerStyle
-              ? const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 36,
-                        height: 36,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 3,
-                        ),
-                      ),
-                      SizedBox(height: 12),
-                      Text(
-                        '正在加载...',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: AppTheme.fontCaption,
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              : const Center(
-                  child: SizedBox(
-                    width: 36,
-                    height: 36,
-                    child: CircularProgressIndicator(
-                      color: Colors.white,
-                      strokeWidth: 3,
-                    ),
-                  ),
-                ),
+          const Center(
+            child: SizedBox(
+              width: 36,
+              height: 36,
+              child: CircularProgressIndicator(
+                color: Colors.white,
+                strokeWidth: 3,
+              ),
+            ),
+          ),
 
         // 弹幕层（手势层之上, 不阻挡点击）
         if (_danmuOn && _danmus.isNotEmpty) _buildDanmuLayer(),
@@ -2548,9 +2544,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Widget _buildBottomControls() {
     return Positioned(
-      // 媒体库刮削版：底栏上移留安全边距（参考图 IMG_8306），
-      // 普通模式贴底（控件区贴近画面底边）
-      bottom: widget.scrapedPlayerStyle ? 24 : 0,
+      // 底栏贴底（控件区贴近画面底边）
+      bottom: 0,
       left: 0,
       right: 0,
       child: _gradientBottomContainer(
@@ -2561,120 +2556,68 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 0, 10, 2),
               child: Row(
-                children: widget.scrapedPlayerStyle
-                    ? [
-                        // 参考图底栏：上一集 / 播放 / 下一集 / 选集 / 弹幕 / 倍速 / 全屏
-                        // （没有上一集/下一集就不显示——电影等无剧集场景不显示）
-                        if (widget.canPlayPrevious)
-                          _iconButton(
-                            icon: Icons.skip_previous,
-                            size: 22,
-                            width: 36,
-                            onTap: () {
-                              _scheduleHideControls();
-                              widget.onPlayPrevious?.call();
-                            },
-                          ),
-                        _buildPlayPauseButton(),
-                        if (widget.canPlayNext)
-                          _iconButton(
-                            icon: Icons.skip_next,
-                            size: 22,
-                            width: 36,
-                            onTap: () {
-                              _scheduleHideControls();
-                              widget.onPlayNext?.call();
-                            },
-                          ),
-                        const Spacer(),
-                        if (widget.episodeNames.isNotEmpty)
-                          _iconButton(
-                            icon: Icons.list,
-                            size: 22,
-                            width: 38,
-                            onTap: () {
-                              _scheduleHideControls();
-                              setState(() => _showEpisodeSheet = true);
-                            },
-                          ),
-                        _danmuToggleButton(),
-                        _dramaModeButton(),
-                        _douyinModeButton(),
-                        _buildSpeedMenu(),
-                        _iconButton(
-                          icon: _isNativeFullscreen
-                              ? Icons.fullscreen_exit
-                              : Icons.fullscreen,
-                          size: 24,
-                          width: 42,
-                          onTap: () {
-                            _scheduleHideControls();
-                            _onUserToggleFullscreen();
-                          },
-                        ),
-                      ]
-                    : [
-                        if (widget.canPlayPrevious)
-                          _iconButton(
-                            icon: Icons.skip_previous,
-                            size: 22,
-                            width: 36,
-                            onTap: () {
-                              _scheduleHideControls();
-                              widget.onPlayPrevious?.call();
-                            },
-                          ),
-                        _buildPlayPauseButton(),
-                        if (widget.canPlayNext)
-                          _iconButton(
-                            icon: Icons.skip_next,
-                            size: 22,
-                            width: 36,
-                            onTap: () {
-                              _scheduleHideControls();
-                              widget.onPlayNext?.call();
-                            },
-                          ),
-                        const Spacer(),
-                        _iconButton(
-                          icon: _volume > 0
-                              ? (_volume < 0.33
-                                  ? Icons.volume_down
-                                  : Icons.volume_up)
-                              : Icons.volume_off,
-                          size: 22,
-                          width: 36,
-                          onTap: _toggleMute,
-                        ),
-                        if (widget.episodeNames.isNotEmpty)
-                          _iconButton(
-                            icon: Icons.list,
-                            size: 22,
-                            width: 36,
-                            onTap: () {
-                              _scheduleHideControls();
-                              setState(() => _showEpisodeSheet = true);
-                            },
-                          ),
-                        // 弹幕开关：已在底部功能栏（**常显**，不再按是否配置弹幕源隐藏 ——
-                        // 隐藏会让用户完全看不到这个功能。未配置时点击会引导去设置页）
-                        _danmuToggleButton(),
-                        // 短剧模式：纯竖屏全屏
-                        _dramaModeButton(),
-                        _douyinModeButton(),
-                        // 播放设置入口仅保留标题栏右上角「…」，底部不放齿轮
-                        _iconButton(
-                          icon: _isNativeFullscreen
-                              ? Icons.fullscreen_exit
-                              : Icons.fullscreen,
-                          size: 24,
-                          width: 42,
-                          onTap: () {
-                            _scheduleHideControls();
-                            _onUserToggleFullscreen();
-                          },
-                        ),
-                      ],
+                children: [
+                  if (widget.canPlayPrevious)
+                    _iconButton(
+                      icon: Icons.skip_previous,
+                      size: 22,
+                      width: 36,
+                      onTap: () {
+                        _scheduleHideControls();
+                        widget.onPlayPrevious?.call();
+                      },
+                    ),
+                  _buildPlayPauseButton(),
+                  if (widget.canPlayNext)
+                    _iconButton(
+                      icon: Icons.skip_next,
+                      size: 22,
+                      width: 36,
+                      onTap: () {
+                        _scheduleHideControls();
+                        widget.onPlayNext?.call();
+                      },
+                    ),
+                  const Spacer(),
+                  _iconButton(
+                    icon: _volume > 0
+                        ? (_volume < 0.33
+                            ? Icons.volume_down
+                            : Icons.volume_up)
+                        : Icons.volume_off,
+                    size: 22,
+                    width: 36,
+                    onTap: _toggleMute,
+                  ),
+                  if (widget.episodeNames.isNotEmpty)
+                    _iconButton(
+                      icon: Icons.list,
+                      size: 22,
+                      width: 36,
+                      onTap: () {
+                        _scheduleHideControls();
+                        setState(() => _showEpisodeSheet = true);
+                      },
+                    ),
+                  // 弹幕开关：已在底部功能栏（**常显**，不再按是否配置弹幕源隐藏 ——
+                  // 隐藏会让用户完全看不到这个功能。未配置时点击会引导去设置页）
+                  _danmuToggleButton(),
+                  // 短剧模式：纯竖屏全屏
+                  _dramaModeButton(),
+                  _douyinModeButton(),
+                  // 播放设置入口仅保留标题栏右上角「…」，底部不放齿轮
+                  _iconButton(
+                    icon: _isNativeFullscreen
+                        ? Icons.fullscreen_exit
+                        : Icons.fullscreen,
+                    size: 24,
+                    width: 42,
+                    onTap: () {
+                      _scheduleHideControls();
+                      _onUserToggleFullscreen();
+                    },
+                  ),
+                ],
               ),
             ),
           ],
