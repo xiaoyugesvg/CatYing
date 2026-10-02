@@ -45,6 +45,9 @@ class _LivePageState extends State<LivePage> {
 
   /// 短剧模式：纯竖屏全屏（复用 _fullscreen 全屏布局，方向锁 portraitUp）
   bool _dramaMode = false;
+
+  /// 抖音模式：纯竖屏全屏（与短剧互斥；全屏布局同短剧）
+  bool _douyinMode = false;
   bool _audioMode = false;
   int _activeGroupIndex = 0;
   String? _playError;
@@ -1337,6 +1340,28 @@ class _LivePageState extends State<LivePage> {
                       ),
                     ),
                   ),
+                  // 抖音模式：纯竖屏全屏 + 右侧切换胶囊（「抖」字）
+                  Tooltip(
+                    message: _douyinMode ? '退出抖音' : '抖音模式',
+                    preferBelow: false,
+                    child: GestureDetector(
+                      onTap: _toggleDouyinMode,
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        width: 38,
+                        height: 38,
+                        alignment: Alignment.center,
+                        child: Text(
+                          '抖',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: AppTheme.fontHeadline,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                   _VideoTopIcon(
                     icon: _fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
                     onTap: _toggleFullscreen,
@@ -1705,8 +1730,8 @@ class _LivePageState extends State<LivePage> {
   }
 
   Future<void> _toggleFullscreen() async {
-    // 短剧模式点全屏按钮 → 退出短剧全屏（还原方向）
-    if (_dramaMode) {
+    // 短剧/抖音模式点全屏按钮 → 退出模式全屏（还原方向）
+    if (_dramaMode || _douyinMode) {
       await _leaveFullscreenUi();
       return;
     }
@@ -1727,14 +1752,29 @@ class _LivePageState extends State<LivePage> {
     if (_fullscreen) {
       await _leaveFullscreenUi();
     }
-    await _enterFullscreenUi(portrait: true);
+    await _enterFullscreenUi(portrait: true, douyin: false);
   }
 
-  /// 进入全屏（portrait=false 横屏 / portrait=true 竖屏短剧）
-  Future<void> _enterFullscreenUi({required bool portrait}) async {
+  /// 抖音模式：纯竖屏全屏（与短剧互斥；进入时右侧切换胶囊）
+  Future<void> _toggleDouyinMode() async {
+    if (_douyinMode) {
+      await _leaveFullscreenUi();
+      return;
+    }
+    // 若处于横屏全屏，先退出还原方向，再进竖屏
+    if (_fullscreen) {
+      await _leaveFullscreenUi();
+    }
+    await _enterFullscreenUi(portrait: true, douyin: true);
+  }
+
+  /// 进入全屏（portrait=false 横屏 / portrait=true 竖屏短剧或抖音）
+  Future<void> _enterFullscreenUi(
+      {required bool portrait, bool douyin = false}) async {
     setState(() {
       _fullscreen = true;
-      _dramaMode = portrait;
+      _dramaMode = portrait && !douyin;
+      _douyinMode = portrait && douyin;
     });
     // 通知全局：全屏时隐藏底部悬浮导航栏
     PlayerFullscreenController.instance.enter('live');
@@ -1755,11 +1795,12 @@ class _LivePageState extends State<LivePage> {
     );
   }
 
-  /// 退出全屏 / 短剧（还原**进入前**的方向与系统栏状态）
+  /// 退出全屏 / 短剧 / 抖音（还原**进入前**的方向与系统栏状态）
   Future<void> _leaveFullscreenUi() async {
     setState(() {
       _fullscreen = false;
       _dramaMode = false;
+      _douyinMode = false;
     });
     PlayerFullscreenController.instance.exit('live');
     await SystemUiController.exit('live');

@@ -703,6 +703,12 @@ class TmdbService extends GetxService {
     if (tmdbTitle.isNotEmpty) {
       info.tmdbName = tmdbTitle;
     }
+    // TMDB 原始标题/别名（original_title / original_name——头图副标题）
+    final origTitle =
+        (d['original_title'] ?? d['original_name'] ?? '').toString().trim();
+    if (origTitle.isNotEmpty) {
+      info.tmdbOriginalName = origTitle;
+    }
     // TMDB 播出日期（完整日期，媒体库视图元数据胶囊显示）
     final dateStr =
         (d['release_date'] ?? d['first_air_date'] ?? '').toString().trim();

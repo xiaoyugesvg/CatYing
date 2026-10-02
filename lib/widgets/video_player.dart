@@ -309,6 +309,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// 同样为 true（复用全屏布局/状态栏逻辑）。
   bool _dramaMode = false;
 
+  /// 抖音模式：纯竖屏全屏 + 中间滑动切集 + 右侧竖排切换胶囊
+  /// （↟ 上一集 / ⏩ / ↡ 下一集，抖音风格操作栏）。
+  /// 与短剧模式互斥；同样复用全屏布局/状态栏逻辑。
+  bool _douyinMode = false;
+
   /// 长按倍速中：用于在 UI 上显示 "2X" 提示
   bool _isLongPressingFast = false;
 
@@ -1366,6 +1371,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (WindowFullScreen.instance.isActive || _isImmersive) {
       await _exitFullScreen();
     }
+    // 与抖音模式互斥
+    _douyinMode = false;
     if (Platform.isIOS) {
       await SystemUiController.lockOrientations('videoDrama', const [
         DeviceOrientation.portraitUp,
@@ -1404,6 +1411,68 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     await _exitFullScreen();
   }
 
+  /// 抖音模式切换（点「抖」进入/退出）
+  Future<void> _toggleDouyinMode() async {
+    if (VideoPlayerPip.instance.isActive) {
+      await VideoPlayerPip.instance.exit();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    if (_douyinMode) {
+      await _exitDouyinMode();
+    } else {
+      await _enterDouyinMode();
+    }
+  }
+
+  /// 进入抖音模式：锁竖屏 + immersive 全屏。
+  /// 画面按当前画幅比例居中（横视频上下黑边），与短剧模式互斥。
+  /// 区别：抖音模式右侧有竖排切换胶囊（↟ 上一集/⏩/↡ 下一集），
+  /// 短剧模式只有中间滑动切集。
+  Future<void> _enterDouyinMode() async {
+    AppLog.instance.log('=== _enterDouyinMode: start ===');
+    // 若正处于横屏全屏，先退出还原方向，避免方向锁冲突
+    if (WindowFullScreen.instance.isActive || _isImmersive) {
+      await _exitFullScreen();
+    }
+    if (Platform.isIOS) {
+      await SystemUiController.lockOrientations('videoDouyin', const [
+        DeviceOrientation.portraitUp,
+      ]);
+    }
+    _dramaMode = false;
+    _douyinMode = true;
+    _isImmersive = true;
+    _isNativeFullscreen = true;
+    _persisted.isImmersive = true;
+    _persisted.isNativeFullscreen = true;
+    widget.onFullScreenChanged?.call(true);
+    try {
+      await WindowFullScreen.instance.enter();
+      AppLog.instance.log('=== _enterDouyinMode: WindowFullScreen enter OK ===');
+    } catch (e) {
+      AppLog.instance.log('=== _enterDouyinMode: enter failed: $e ===');
+    }
+    if (mounted) _onWindowFullScreenChanged();
+    try {
+      if (!_player.state.playing) {
+        await AudioFocus.request('video');
+        await _player.play();
+      }
+    } catch (e) {
+      AppLog.instance.log('[video_player] swallowed: $e');
+    }
+  }
+
+  Future<void> _exitDouyinMode() async {
+    AppLog.instance.log('=== _exitDouyinMode: start ===');
+    _douyinMode = false;
+    if (Platform.isIOS) {
+      // 先解锁抖音自己的方向锁，再走通用退出
+      await SystemUiController.unlockOrientations('videoDouyin');
+    }
+    await _exitFullScreen();
+  }
+
   Future<void> _onUserExitFullscreen() async {
     AppLog.instance.log(
       '=== _onUserExitFullscreen: _isNativeFullscreen=$_isNativeFullscreen, isPip=${VideoPlayerPip.instance.isActive} ===',
@@ -1425,8 +1494,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       AppLog.instance.log('=== _enterFullScreen: skip (已处于全屏) ===');
       return;
     }
-    // 进入横屏全屏时退出短剧模式（方向/布局冲突）
+    // 进入横屏全屏时退出短剧/抖音模式（方向/布局冲突）
     _dramaMode = false;
+    _douyinMode = false;
     AppLog.instance.log('=== _enterFullScreen: start ===');
     if (Platform.isIOS) {
       await SystemUiController.lockOrientations('videoFullscreen', const [
@@ -1467,8 +1537,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       return;
     }
     AppLog.instance.log('=== _exitFullScreen: start ===');
-    // 任何方式退出全屏都同步退出短剧模式
+    // 任何方式退出全屏都同步退出短剧/抖音模式
     _dramaMode = false;
+    _douyinMode = false;
     _isImmersive = false;
     _isNativeFullscreen = false;
     _persisted.isImmersive = false;
@@ -1769,7 +1840,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         if (_showControls && !_isLocked) _buildHeaderBar(),
 
         // 锁定按钮
-        if (_showControls || _isLocked) _buildLockButton(),
+        // 锁定按钮：仅全屏/沉浸/抖音模式显示（内嵌播放器不显示，
+        // 避免占左侧垂直居中位导致中间层快退按钮被迫下移不对称）
+        if ((_isNativeFullscreen || _isImmersive) &&
+            (_showControls || _isLocked))
+          _buildLockButton(),
 
         // 画面中间：左右两侧快退/快进（与控件同步显隐，锁定态隐藏）
         if (_showControls && !_isLocked) _buildCenterSeekButtons(),
@@ -2137,9 +2212,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   });
                 }
               } else {
-                // 抖音模式（竖屏短剧）：垂直滑动只用于切集（onPanEnd 判定方向），
-                // 不走亮度/音量手势，避免跟切集冲突
-                if (_dramaMode) {
+                // 短剧/抖音模式（竖屏全屏）：垂直滑动只用于切集
+                // （onPanEnd 判定方向），不走亮度/音量手势，避免跟切集冲突
+                if (_dramaMode || _douyinMode) {
                   _dramaPanDy += dy;
                   return;
                 }
@@ -2167,8 +2242,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             },
             onPanEnd: (_) {
               if (_isLocked) return;
-              // 抖音模式：垂直滑动结束判定方向 → 切换集数/影片
-              if (_dramaMode && _gesturePanAxis == PanAxis.vertical) {
+              // 短剧/抖音模式：垂直滑动结束判定方向 → 切换集数/影片
+              if ((_dramaMode || _douyinMode) &&
+                  _gesturePanAxis == PanAxis.vertical) {
                 final dy = _dramaPanDy;
                 _dramaPanDy = 0;
                 if (dy < -60) {
@@ -2487,11 +2563,29 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               child: Row(
                 children: widget.scrapedPlayerStyle
                     ? [
-                        // 参考图底栏：播放 / 后退10 / 前进10 / 选集 / 弹幕 / 倍速 / 全屏
+                        // 参考图底栏：上一集 / 播放 / 下一集 / 选集 / 弹幕 / 倍速 / 全屏
+                        // （没有上一集/下一集就不显示——电影等无剧集场景不显示）
+                        if (widget.canPlayPrevious)
+                          _iconButton(
+                            icon: Icons.skip_previous,
+                            size: 22,
+                            width: 36,
+                            onTap: () {
+                              _scheduleHideControls();
+                              widget.onPlayPrevious?.call();
+                            },
+                          ),
                         _buildPlayPauseButton(),
-                        // 快退/快进（步长可配置，默认 10s；画面中间层同样有）
-                        _seekStepButton(forward: false),
-                        _seekStepButton(forward: true),
+                        if (widget.canPlayNext)
+                          _iconButton(
+                            icon: Icons.skip_next,
+                            size: 22,
+                            width: 36,
+                            onTap: () {
+                              _scheduleHideControls();
+                              widget.onPlayNext?.call();
+                            },
+                          ),
                         const Spacer(),
                         if (widget.episodeNames.isNotEmpty)
                           _iconButton(
@@ -2505,6 +2599,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                           ),
                         _danmuToggleButton(),
                         _dramaModeButton(),
+                        _douyinModeButton(),
                         _buildSpeedMenu(),
                         _iconButton(
                           icon: _isNativeFullscreen
@@ -2540,9 +2635,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                               widget.onPlayNext?.call();
                             },
                           ),
-                        // 快退/快进（步长可配置，默认 10s；画面中间层同样有）
-                        _seekStepButton(forward: false),
-                        _seekStepButton(forward: true),
                         const Spacer(),
                         _iconButton(
                           icon: _volume > 0
@@ -2569,6 +2661,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         _danmuToggleButton(),
                         // 短剧模式：纯竖屏全屏
                         _dramaModeButton(),
+                        _douyinModeButton(),
                         // 播放设置入口仅保留标题栏右上角「…」，底部不放齿轮
                         _iconButton(
                           icon: _isNativeFullscreen
@@ -4061,34 +4154,77 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
   }
 
-  /// 画面中间层：左右两侧的快退/快进跳转按钮（步长可配置）。
-  /// 与顶栏/底栏同步显隐（跟随 [_showControls] 与锁定态），
-  /// 垂直居中、贴左右边缘（避开中央手势区）。
-  /// 抖音模式（[_dramaMode]）下，右侧变为竖排：⏩ + ↑（上一集/上一部）+ ↓（下一集/下一部）。
+  /// 抖音模式按钮 —— 与「短」同款：圆角方块内一个「抖」字，
+  /// 开启时右下角带对勾角标。点击进入**纯竖屏全屏 + 右侧切换胶囊**
+  /// （↟ 上一集 / ⏩ / ↡ 下一集，抖音风格），再点退出。
+  Widget _douyinModeButton() {
+    return _iconButton(
+      icon: Icons.smart_display,
+      size: 20,
+      width: 38,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          Text(
+            '抖',
+            style: TextStyle(
+              color: _douyinMode
+                  ? Colors.white
+                  : Colors.white.withValues(alpha: 0.72),
+              fontSize: AppTheme.fontHeadline,
+              fontWeight: FontWeight.w600,
+              height: 1.0,
+            ),
+          ),
+          // 开启角标：对勾（与「短」一致）
+          if (_douyinMode)
+            Positioned(
+              right: -2,
+              bottom: -2,
+              child: Container(
+                width: 13,
+                height: 13,
+                decoration: BoxDecoration(
+                  color: AppTheme.accentColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.black54, width: 1),
+                ),
+                child: const Icon(Icons.check, size: 9, color: Colors.white),
+              ),
+            ),
+        ],
+      ),
+      onTap: () => _safeTap(() => _toggleDouyinMode()),
+    );
+  }
+
+  /// 画面中间层：快退/快进跳转按钮（步长可配置）。
+  /// 与顶栏/底栏同步显隐（跟随 [_showControls] 与锁定态）。
+  /// 2026-10-03：以**视频画面正中心为对称轴**、左右对称拉开距离
+  /// （约中心两侧 27% 屏宽处，不贴边缘也不贴中心，视觉美观）；
+  /// 中间 45% 区域留白给双击暂停/手势。
+  /// 抖音模式（[_douyinMode]）下，右侧变为靠右缘竖排：⏩ + ↑（上一集/上一部）+ ↓（下一集/下一部）；
+  /// 短剧模式（[_dramaMode]）无右侧胶囊，保持左右对称（纯滑动切集）。
   Widget _buildCenterSeekButtons() {
-    final leftSafe = MediaQuery.of(context).padding.left;
-    final rightSafe = MediaQuery.of(context).padding.right;
     return Positioned.fill(
       child: Stack(
         children: [
-          // 左：快退 —— 避开锁定按钮（左侧垂直居中），放在锁定下方错开
-          Positioned(
-            left: 14 + leftSafe,
-            top: 0,
-            bottom: 0,
+          // 左：快退 —— 以画面中心为对称轴（中心左侧约 27% 屏宽处）
+          Positioned.fill(
             child: Align(
-              // 左侧垂直居中偏下：锁定按钮（40x40 居中）在上，快退在其下方
-              alignment: const Alignment(-0.92, 0.55),
+              alignment: const Alignment(-0.55, 0),
               child: _seekStepButton(forward: false),
             ),
           ),
-          // 右：快进（抖音模式叠 ↑↓ 切换）
-          Positioned(
-            right: 14 + rightSafe,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: _dramaMode
+          // 右：快进 —— 非抖音模式与左侧对称（中心右侧约 27% 屏宽处）；
+          // 抖音模式靠右缘竖排（↟ 上一集 / ⏩ / ↡ 下一集）
+          Positioned.fill(
+            child: Align(
+              alignment: _douyinMode
+                  ? const Alignment(1, 0)
+                  : const Alignment(0.55, 0),
+              child: _douyinMode
                   ? Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [

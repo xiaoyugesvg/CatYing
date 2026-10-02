@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import '../../services/live_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../common/theme.dart';
 import '../../common/system_ui.dart';
 import '../../models/movie.dart';
@@ -43,6 +44,8 @@ class DetailPage extends StatefulWidget {
 }
 
 class _DetailPageState extends State<DetailPage> {
+  /// 媒体库页剧集条折叠态（👁 眼睛点击切换）
+  bool _libEpisodesCollapsed = false;
   /// 每次进入详情页强制重建 controller（兼容旧版 GetX，无 force 参数）：
   /// 先删除旧实例再重新 put，确保 vodInfo/isPlaying/playUrl 不残留上次状态，
   /// 避免"进详情页像重启/显示旧视频"。
@@ -247,9 +250,13 @@ class _DetailPageState extends State<DetailPage> {
     final video = Get.arguments;
     if (video != null && video is Video) {
       _controller.loadDetail(video).then((_) {
-        // 有历史则恢复续播；无历史则直接自动播放当前选集第一集
+        // 有历史则恢复续播；无历史则直接自动播放当前选集第一集。
+        // 2026-10-03：**媒体库模式不自动播**——头图保持静态背景大图，
+        // 点「立即播放」才进播放器（全屏）。仅默认详情页保持自动播放。
         final restored = _restorePlaybackFromHistory();
-        if (!restored && _controller.currentEpisodes.isNotEmpty) {
+        if (!restored &&
+            _controller.currentEpisodes.isNotEmpty &&
+            !_isScrapedLayout) {
           _controller.selectEpisode(_controller.selectedEpisodeIndex.value);
         }
         _refreshCollectState();
@@ -263,12 +270,19 @@ class _DetailPageState extends State<DetailPage> {
     if (mounted) setState(() {});
   }
 
-  /// TMDB 智能刮削：配置了 Key 且开启自动时，补全海报/简介/演职员
+  /// TMDB 智能刮削：配置了 Key 且开启自动时，补全海报/简介/演职员。
+  ///
+  /// 2026-10-03 修复：**媒体库模式不再依赖「自动刮削」开关**——
+  /// 只要处于媒体库布局（详情页样式=媒体库 / 手动切媒体库），即使
+  /// autoScrape 关闭也会强制刮削（有磁盘缓存直接用缓存），保证媒体库页
+  /// 数据完整（评分/剧照/演员/简介/推荐）。仅默认详情页模式仍受开关控制。
   Future<void> _enrichFromTmdb() async {
     final tmdb = TmdbService.instance;
-    if (!tmdb.configured || !tmdb.autoScrape.value) return;
+    if (!tmdb.configured) return;
     final info = _controller.vodInfo.value;
     if (info == null) return;
+    // 非媒体库模式：受「自动刮削」开关控制（默认行为不变）
+    if (!tmdb.autoScrape.value && !_isScrapedLayout) return;
 
     // 旧版缓存（30 天内写入的）没有 similar/recommendations 字段 —— 直接读缓存
     // 会让「类似作品」永远空着。先探一下缓存是否缺字段，缺则本次强制联网重取，
@@ -837,42 +851,35 @@ class _DetailPageState extends State<DetailPage> {
         : info.name.trim();
     final releaseDate = info.releaseDate.trim();
 
-    return SingleChildScrollView(
+    // 媒体库页背景跟随全局外观主题（明暗 + 调色板，与其余页面统一）
+    return ColoredBox(
+      color: AppTheme.backgroundPrimary,
+      child: SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ===== 头图区：播放器常驻（就绪即出画）/ 背景大图 + 顶部压暗 + 返回/菜单 =====
-          // 媒体库模式播放器**常驻树中**：playUrl 就绪后头图位置即显示画面，
-          // 点「立即播放」/全屏按钮只做布局切换（VideoPlayerWidget 同 key
-          // State 复用），不再「卸载→重挂」→ 横竖屏切换不卡顿、不出黑屏。
+          // ===== 头图区（高 380）：背景大图 + 顶部操作栏 + 底部渐变 + 大标题 =====
+          // 媒体库模式头图保持静态背景大图（不内嵌播放器），点「立即播放」/
+          // 剧集缩略图才进全屏播放器（2026-10-03 用户要求）。全屏（immersive）
+          // 时 _buildBody 顶部单独渲染 _buildPlayerArea。
           SizedBox(
-            height: 360,
+            height: 380,
             child: Stack(
               fit: StackFit.expand,
               children: [
-                // 播放中：内嵌播放器（4:3 内容居中，上下黑边，高度不变 360）
-                // 未播放：头图背景大图
-                Obx(() {
-                  final url = _controller.playUrl.value;
-                  if (url != null && url.isNotEmpty) {
-                    return ColoredBox(
-                      color: Colors.black,
-                      child: Center(child: _buildPlayerArea()),
-                    );
-                  }
-                  if (hero.isNotEmpty)
-                    return CachedNetworkImage(
-                      imageUrl: hero,
-                      fit: BoxFit.cover,
-                      memCacheWidth: 900,
-                      placeholder: (_, __) =>
-                          ColoredBox(color: AppTheme.backgroundSecondary),
-                      errorWidget: (_, __, ___) =>
-                          ColoredBox(color: AppTheme.backgroundSecondary),
-                    );
-                  return ColoredBox(color: AppTheme.backgroundSecondary);
-                }),
-                // 渐隐到底部页面背景，形成融入感（纯装饰，不拦截播放器手势）
+                if (hero.isNotEmpty)
+                  CachedNetworkImage(
+                    imageUrl: hero,
+                    fit: BoxFit.cover,
+                    memCacheWidth: 900,
+                    placeholder: (_, __) =>
+                        ColoredBox(color: AppTheme.backgroundSecondary),
+                    errorWidget: (_, __, ___) =>
+                        ColoredBox(color: AppTheme.backgroundSecondary),
+                  ),
+                if (hero.isEmpty)
+                  ColoredBox(color: AppTheme.backgroundSecondary),
+                // 顶部压暗（状态栏/操作栏可读性）
                 IgnorePointer(
                   child: DecoratedBox(
                     decoration: BoxDecoration(
@@ -880,17 +887,33 @@ class _DetailPageState extends State<DetailPage> {
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          Colors.black.withValues(alpha: 0.45),
-                          Colors.black.withValues(alpha: 0.15),
-                          Colors.black.withValues(alpha: 0.75),
-                          AppTheme.backgroundPrimary.withValues(alpha: 0.98),
+                          Colors.black.withValues(alpha: 0.55),
+                          Colors.transparent,
                         ],
-                        stops: const [0.0, 0.30, 0.70, 1.0],
+                        stops: const [0.0, 0.45],
                       ),
                     ),
                   ),
                 ),
-                // 顶部返回按钮
+                // 底部渐变遮罩：黑渐变（标题区白字可读）→ 页面背景色（融入）
+                IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.3),
+                          Colors.black.withValues(alpha: 0.6),
+                          AppTheme.backgroundPrimary.withValues(alpha: 0.98),
+                        ],
+                        stops: const [0.0, 0.5, 0.8, 1.0],
+                      ),
+                    ),
+                  ),
+                ),
+                // 顶部操作栏：左返回 + 右三图标（搜索 / 分享 / 收藏）
                 Positioned(
                   top: mediaPad.top + 6,
                   left: 8,
@@ -899,40 +922,103 @@ class _DetailPageState extends State<DetailPage> {
                     onTap: () => Navigator.of(context).maybePop(),
                   ),
                 ),
-                // 右上角：「…」菜单（刮削 / 快搜 / 收藏 / 更多）
                 Positioned(
                   top: mediaPad.top + 6,
                   right: 12,
-                  child: _libraryIconButton(
-                    icon: Icons.more_horiz,
-                    onTap: _showLibraryTopMenu,
+                  child: Row(
+                    children: [
+                      // 搜索：自动搜当前片名（复用默认详情页快搜）
+                      _libraryIconButton(
+                        icon: Icons.search,
+                        onTap: _quickSearchCurrent,
+                      ),
+                      const SizedBox(width: 8),
+                      // 分享：系统分享当前片名/简介
+                      _libraryIconButton(
+                        icon: Icons.ios_share,
+                        onTap: _shareCurrent,
+                      ),
+                      const SizedBox(width: 8),
+                      // 收藏：空心/实心切换（复用默认页收藏逻辑）
+                      _libraryIconButton(
+                        icon: CacheStore.instance
+                                .isCollected(info.id, info.sourceKey)
+                            ? Icons.favorite
+                            : Icons.favorite_border,
+                        onTap: _toggleCollectCurrent,
+                      ),
+                    ],
+                  ),
+                ),
+                // 标题区（叠加在底部渐变遮罩上）：主标题 + 副标题
+                Positioned(
+                  left: AppTheme.spacingLG,
+                  right: AppTheme.spacingLG,
+                  bottom: 18,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Text(
+                        tmdbTitle,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black45,
+                              blurRadius: 12,
+                              offset: Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // 副标题：片名原文/别名（TMDB 原名，无则隐藏）
+                      if (info.tmdbOriginalName.trim().isNotEmpty &&
+                          info.tmdbOriginalName.trim() != tmdbTitle) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          info.tmdbOriginalName.trim(),
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.7),
+                            fontSize: 13,
+                            shadows: [
+                              Shadow(
+                                color: Colors.black.withValues(alpha: 0.4),
+                                blurRadius: 8,
+                                offset: const Offset(0, 1),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ],
             ),
           ),
 
-          // ===== 标题 + 元数据（参考图：年份·评分★·集数ep·状态 / 类型）+ 双按钮 =====
-          Transform.translate(
-            offset: const Offset(0, -20),
+          // ===== 元数据 + 双按钮区（参考图：两行元数据 + 蓝实心/蓝描边按钮）=====
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppTheme.spacingLG,
+              AppTheme.spacingMD,
+              AppTheme.spacingLG,
+              0,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  tmdbTitle,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  softWrap: false,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: AppTheme.fontTitle2,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                // 元数据行：2026 · 6.8★ · 47 ep · Returning Series
-                _libraryMetaLine([
+                // 第一行：2026 · 6.8★ · 47 ep · Returning Series（浅灰 12px）
+                _libraryMetaLineDark([
                   if (releaseDate.isNotEmpty)
                     releaseDate.length >= 4
                         ? releaseDate.substring(0, 4)
@@ -946,95 +1032,84 @@ class _DetailPageState extends State<DetailPage> {
                 ]),
                 if (typeName.isNotEmpty) ...[
                   const SizedBox(height: 4),
-                  _libraryMetaLine([typeName]),
+                  // 第二行：剧情 | 家庭（更浅灰 12px）
+                  _libraryMetaLineDark([typeName], dim: true),
                 ],
-                if (runtime > 0) ...[
-                  const SizedBox(height: 4),
-                  _libraryMetaLine(['约 $runtime 分钟']),
-                ],
-                const SizedBox(height: AppTheme.spacingMD),
-
-                // ===== 立即播放 + 选集（参考图双按钮）=====
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: AppTheme.spacingLG),
-                  child: Obx(() {
-                    final idx = _controller.selectedEpisodeIndex.value;
-                    return Row(
-                      children: [
-                        Expanded(
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () => _playFromLibrary(idx),
-                            child: Container(
-                              height: 48,
-                              decoration: BoxDecoration(
-                                color: AppTheme.accentColor,
-                                borderRadius: BorderRadius.circular(26),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(Icons.play_arrow,
-                                      color: Colors.white, size: 24),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    '立即播放',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: AppTheme.fontBody,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
+                const SizedBox(height: 16),
+                // 双按钮：立即播放（蓝实心白字）+ 选集（蓝描边透明蓝字）
+                Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => _playFromLibrary(
+                            _controller.selectedEpisodeIndex.value),
+                        child: Container(
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: AppTheme.accentColor,
+                            borderRadius: BorderRadius.circular(24),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: _scrollToEpisodes,
-                            child: Container(
-                              height: 48,
-                              decoration: BoxDecoration(
-                                color: AppTheme.backgroundTertiary,
-                                borderRadius: BorderRadius.circular(26),
-                                border: Border.all(
-                                  color: AppTheme.glassBorderSoft,
-                                  width: 0.8,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.play_arrow,
+                                  color: Colors.white, size: 24),
+                              const SizedBox(width: 6),
+                              Text(
+                                '立即播放',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
                                 ),
                               ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.list_alt,
-                                      color: AppTheme.textSecondary,
-                                      size: 22),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    '选集',
-                                    style: TextStyle(
-                                      color: AppTheme.textSecondary,
-                                      fontSize: AppTheme.fontBody,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
+                            ],
                           ),
                         ),
-                      ],
-                    );
-                  }),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _scrollToEpisodes,
+                        child: Container(
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: Colors.transparent,
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(
+                              color: AppTheme.accentColor,
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.list_alt,
+                                  color: AppTheme.accentColor, size: 22),
+                              const SizedBox(width: 6),
+                              Text(
+                                '选集',
+                                style: TextStyle(
+                                  color: AppTheme.accentColor,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
 
-          // ===== 剧集区：横向缩略图条（真实剧照 + 集号 + 集标题）=====
+          // ===== 剧集区：横向缩略图条（真实剧照 + 集号 + 集标题，无卡片参考图风格）=====
           if (eps.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(
@@ -1043,42 +1118,78 @@ class _DetailPageState extends State<DetailPage> {
                 AppTheme.spacingLG,
                 0,
               ),
-              child: AppCard(
+              child: Column(
                 key: _episodesKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SectionHeader(
-                      title: '剧集  ${epCountLabel.replaceAll(' ep', '')}集',
-                      icon: Icons.video_library_outlined,
-                    ),
-                    const SizedBox(height: AppTheme.spacingSM),
-                    Obx(() {
-                      // 切线路后 currentEpisodes 会变，这里一并监听 selectedFlag
-                      _controller.selectedFlag.value;
-                      return SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 标题行：左「剧集 X集」粗体16 + 右 👁眼睛（折叠/展开）+ ▾ 下拉箭头
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '剧集  ${epCountLabel.replaceAll(' ep', '')}集',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => setState(
+                            () => _libEpisodesCollapsed =
+                                !_libEpisodesCollapsed),
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
                           child: Row(
                             children: [
-                              for (var i = 0; i < eps.length; i++)
-                                Padding(
-                                  padding: const EdgeInsets.only(
-                                      right: AppTheme.spacingSM),
-                                  child: _episodeThumb(
-                                    eps[i].name,
-                                    i,
-                                    isSelected: i ==
-                                        _controller
-                                            .selectedEpisodeIndex.value,
-                                    stillUrl: info.episodeStills[i + 1],
-                                    title: info.episodeTitles[i + 1],
-                                  ),
-                                ),
+                              Icon(
+                                _libEpisodesCollapsed
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
+                                size: 18,
+                                color: AppTheme.textTertiary,
+                              ),
+                              const SizedBox(width: 2),
+                              Icon(
+                                Icons.keyboard_arrow_down,
+                                size: 20,
+                                color: AppTheme.textTertiary,
+                              ),
                             ],
-                          ));
-                    }),
-                  ],
-                ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppTheme.spacingSM),
+                  if (!_libEpisodesCollapsed)
+                  Obx(() {
+                    // 切线路后 currentEpisodes 会变，这里一并监听 selectedFlag
+                    _controller.selectedFlag.value;
+                    return SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            for (var i = 0; i < eps.length; i++)
+                              Padding(
+                                // 方案：卡片间距 10px
+                                padding:
+                                    const EdgeInsets.only(right: 10),
+                                child: _episodeThumb(
+                                  eps[i].name,
+                                  i,
+                                  isSelected: i ==
+                                      _controller
+                                          .selectedEpisodeIndex.value,
+                                  stillUrl: info.episodeStills[i + 1],
+                                  title: info.episodeTitles[i + 1],
+                                ),
+                              ),
+                          ],
+                        ));
+                  }),
+                ],
               ),
             ),
 
@@ -1086,7 +1197,7 @@ class _DetailPageState extends State<DetailPage> {
           if (info.castList.isEmpty && info.similarList.isEmpty)
             _buildTmdbEmptyHint(),
 
-          // ===== 导演行（参考图：剧集区下、演职员上）=====
+          // ===== 导演行（参考图：剧集区下、演职员上，无卡片直接排版）=====
           if (info.director.trim().isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(
@@ -1095,19 +1206,12 @@ class _DetailPageState extends State<DetailPage> {
                 AppTheme.spacingLG,
                 0,
               ),
-              child: AppCard(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: AppTheme.spacingMD,
-                      vertical: AppTheme.spacingSM),
-                  child: Text(
-                    '导演: ${info.director.trim()}',
-                    style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: AppTheme.fontCaption,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+              child: Text(
+                '导演: ${info.director.trim()}',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ),
@@ -1115,7 +1219,7 @@ class _DetailPageState extends State<DetailPage> {
           // ===== 演职人员 =====
           _buildCastSection(info),
 
-          // ===== 简介 =====
+          // ===== 简介（无卡片，参考图直接排版）=====
           if (info.des.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(
@@ -1124,22 +1228,20 @@ class _DetailPageState extends State<DetailPage> {
                 AppTheme.spacingLG,
                 0,
               ),
-              child: AppCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SectionHeader(title: '简介', icon: Icons.notes),
-                    const SizedBox(height: AppTheme.spacingSM),
-                    Text(
-                      info.des,
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: AppTheme.fontCaption,
-                        height: 1.5,
-                      ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SectionHeader(title: '简介', icon: Icons.notes),
+                  const SizedBox(height: AppTheme.spacingSM),
+                  Text(
+                    info.des,
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 13,
+                      height: 1.5,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
 
@@ -1177,6 +1279,7 @@ class _DetailPageState extends State<DetailPage> {
           SizedBox(height: bottomPadding),
         ],
       ),
+      ),
     );
   }
 
@@ -1196,6 +1299,23 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
+  /// 媒体库页元数据行（跟随外观主题）：次要灰 12px，「·」分隔；
+  /// dim=true 时更浅（类型行，参考图「剧情 | 家庭」）
+  Widget _libraryMetaLineDark(List<String> parts, {bool dim = false}) {
+    final cleaned = parts.where((p) => p.trim().isNotEmpty).toList();
+    if (cleaned.isEmpty) return const SizedBox.shrink();
+    return Text(
+      cleaned.join(' · '),
+      textAlign: TextAlign.center,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: dim ? AppTheme.textTertiary : AppTheme.textSecondary,
+        fontSize: 12,
+      ),
+    );
+  }
+
   /// 「选集」按钮：滚动定位到剧集区（参考图「选集」入口）
   void _scrollToEpisodes() {
     final ctx = _episodesKey.currentContext;
@@ -1206,6 +1326,42 @@ class _DetailPageState extends State<DetailPage> {
       curve: Curves.easeOutCubic,
       alignment: 0.5,
     );
+  }
+
+  /// 头图右上 🔍：自动搜当前片名（复用「快搜」逻辑）
+  void _quickSearchCurrent() {
+    final info = _controller.vodInfo.value;
+    if (info == null) return;
+    Get.toNamed('/search', arguments: info.name);
+  }
+
+  /// 头图右上 ↗：系统分享当前片（片名 + 简介）
+  Future<void> _shareCurrent() async {
+    final info = _controller.vodInfo.value;
+    if (info == null) return;
+    final text = [
+      info.name,
+      if (info.des.trim().isNotEmpty) info.des.trim(),
+    ].join('\n');
+    try {
+      await SharePlus.instance.share(ShareParams(text: text));
+    } catch (e) {
+      debugPrint('[detail] share failed: $e');
+    }
+  }
+
+  /// 头图右上 ♡：收藏切换（空心 ↔ 实心）
+  void _toggleCollectCurrent() async {
+    final info = _controller.vodInfo.value;
+    if (info == null) return;
+    final collected =
+        CacheStore.instance.isCollected(info.id, info.sourceKey);
+    if (collected) {
+      await CacheStore.instance.removeCollect(info.id, info.sourceKey);
+    } else {
+      await CacheStore.instance.addCollect(info.toVideo());
+    }
+    if (mounted) setState(() {});
   }
 
   /// 头图右上「…」菜单：刮削 / 快搜 / 收藏 / 更多（收纳原操作行功能）
@@ -1333,40 +1489,38 @@ class _DetailPageState extends State<DetailPage> {
         AppTheme.spacingLG,
         0,
       ),
-      child: AppCard(
-        child: Padding(
-          padding: const EdgeInsets.all(AppTheme.spacingMD),
-          child: Row(
-            children: [
-              Icon(
-                notConfigured ? Icons.key_outlined : Icons.search_off,
-                size: 20,
-                color: AppTheme.accentColor,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontSubhead,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: AppTheme.fontCaption,
-                      ),
-                    ),
-                  ],
+      // 无卡片，直接排版（参考图无卡片）
+      child: Row(
+        children: [
+          Icon(
+            notConfigured ? Icons.key_outlined : Icons.search_off,
+            size: 20,
+            color: AppTheme.textTertiary,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontSubhead,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-              ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
+                ),
+              ],
+            ),
+          ),
               TextButton(
                 onPressed: notConfigured
                     ? () => Get.to(() => const MetadataSettingsPage())
@@ -1375,9 +1529,7 @@ class _DetailPageState extends State<DetailPage> {
               ),
             ],
           ),
-        ),
-      ),
-    );
+        );
   }
 
   /// 媒体库视图：点播放 → 选集解析 + **直接横屏全屏播放**
@@ -1400,7 +1552,7 @@ class _DetailPageState extends State<DetailPage> {
     final hero = (stillUrl != null && stillUrl.trim().isNotEmpty)
         ? stillUrl.trim()
         : infoBackdropOrPic();
-    // 参考图：缩略图下方显示集标题（TMDB 每集名，如「沈家灭门，嘉兰入林府」）
+    // 参考图：缩略图上叠加集标题（TMDB 每集名，如「沈家灭门，嘉兰入林府」）
     final subtitle = (title != null && title.trim().isNotEmpty)
         ? title.trim()
         : name;
@@ -1408,71 +1560,95 @@ class _DetailPageState extends State<DetailPage> {
       behavior: HitTestBehavior.opaque,
       onTap: () => _playFromLibrary(index),
       child: Container(
-        width: 148,
+        // 参考图横卡：宽 140 × 高 100（剧照铺满 + 底部渐变剧名）
+        width: 140,
+        height: 100,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: isSelected
                 ? AppTheme.accentColor
                 : AppTheme.glassBorderSoft,
             width: isSelected ? 1.5 : 0.6,
           ),
-          color: AppTheme.backgroundTertiary,
         ),
         clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            Expanded(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (hero.isNotEmpty)
-                    CachedNetworkImage(
-                      imageUrl: hero,
-                      fit: BoxFit.cover,
-                      memCacheWidth: 400,
-                      placeholder: (_, __) =>
-                          ColoredBox(color: AppTheme.backgroundTertiary),
-                      errorWidget: (_, __, ___) =>
-                          ColoredBox(color: AppTheme.backgroundTertiary),
-                    )
-                  else
+            // 剧照铺满
+            if (hero.isNotEmpty)
+              CachedNetworkImage(
+                imageUrl: hero,
+                fit: BoxFit.cover,
+                memCacheWidth: 400,
+                placeholder: (_, __) =>
                     ColoredBox(color: AppTheme.backgroundTertiary),
-                  // 集号角标
-                  Positioned(
-                    left: 6,
-                    bottom: 6,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.55),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        'E${index + 1}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
+                errorWidget: (_, __, ___) =>
+                    ColoredBox(color: AppTheme.backgroundTertiary),
+              )
+            else
+              ColoredBox(color: AppTheme.backgroundTertiary),
+            // 底部黑色渐变（放剧名，保证可读）
+            IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.55),
+                      Colors.black.withValues(alpha: 0.85),
+                    ],
+                    stops: const [0.0, 0.5, 1.0],
                   ),
-                ],
+                ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+            // 左下角数字角标（半透明黑底；选中态蓝底白字）
+            Positioned(
+              left: 6,
+              bottom: 6,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? AppTheme.accentColor
+                      : Colors.black.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  '${index + 1}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+            // 剧名：白字 12px，1 行，叠加在底部渐变上（避开左下角标）
+            Positioned(
+              left: 32,
+              right: 6,
+              bottom: 7,
               child: Text(
                 subtitle,
-                maxLines: 2,
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: AppTheme.fontFootnote,
-                  height: 1.2,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  shadows: [
+                    Shadow(
+                      color: Colors.black54,
+                      blurRadius: 6,
+                      offset: Offset(0, 1),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -2230,9 +2406,21 @@ class _DetailPageState extends State<DetailPage> {
           children: [
             Padding(
               padding: const EdgeInsets.only(right: AppTheme.spacingLG),
-              child: const SectionHeader(
-                title: '演职人员',
-                icon: Icons.people_alt_outlined,
+              // 标题跟随外观主题（粗体 16）
+              child: Row(
+                children: [
+                  Icon(Icons.people_alt_outlined,
+                      size: 18, color: AppTheme.textSecondary),
+                  const SizedBox(width: 6),
+                  Text(
+                    '演职员',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: AppTheme.spacingSM),
@@ -2242,8 +2430,8 @@ class _DetailPageState extends State<DetailPage> {
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.only(right: AppTheme.spacingLG),
                 itemCount: info.castList.length,
-                separatorBuilder: (_, __) =>
-                    const SizedBox(width: AppTheme.spacingMD),
+                // 方案：演职员间距 16px
+                separatorBuilder: (_, __) => const SizedBox(width: 16),
                 itemBuilder: (context, index) =>
                     _CastMemberCard(member: info.castList[index]),
               ),
@@ -2275,9 +2463,21 @@ class _DetailPageState extends State<DetailPage> {
           children: [
             Padding(
               padding: const EdgeInsets.only(right: AppTheme.spacingLG),
-              child: const SectionHeader(
-                title: '类似作品',
-                icon: Icons.local_movies_outlined,
+              // 标题跟随外观主题（粗体 16）
+              child: Row(
+                children: [
+                  Icon(Icons.local_movies_outlined,
+                      size: 18, color: AppTheme.textSecondary),
+                  const SizedBox(width: 6),
+                  Text(
+                    '类似作品',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: AppTheme.spacingSM),
@@ -3258,8 +3458,9 @@ class _CastMemberCard extends StatelessWidget {
         children: [
           ClipOval(
             child: SizedBox(
-              width: 68,
-              height: 68,
+              // 参考图：头像直径 64
+              width: 64,
+              height: 64,
               child: url.isEmpty
                   ? _avatarPlaceholder()
                   : CachedNetworkImage(
@@ -3277,9 +3478,10 @@ class _CastMemberCard extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
+            // 名字：主题主文字 12px
             style: TextStyle(
               color: AppTheme.textPrimary,
-              fontSize: AppTheme.fontCaption,
+              fontSize: 12,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -3289,9 +3491,10 @@ class _CastMemberCard extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
+              // 角色名：主题弱文字 11px
               style: TextStyle(
                 color: AppTheme.textTertiary,
-                fontSize: AppTheme.fontFootnote,
+                fontSize: 11,
               ),
             ),
         ],
@@ -3299,7 +3502,7 @@ class _CastMemberCard extends StatelessWidget {
     );
   }
 
-  /// 无头像时的首字占位
+  /// 无头像时的首字占位（跟随外观主题）
   Widget _avatarPlaceholder() {
     return ColoredBox(
       color: AppTheme.backgroundTertiary,
@@ -3388,6 +3591,7 @@ class _SimilarCard extends StatelessWidget {
               item.title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+              // 片名：主题主文字
               style: TextStyle(
                 color: AppTheme.textPrimary,
                 fontSize: AppTheme.fontCaption,
@@ -3396,6 +3600,7 @@ class _SimilarCard extends StatelessWidget {
             if (item.year.isNotEmpty)
               Text(
                 item.year,
+                // 年份：主题弱文字
                 style: TextStyle(
                   color: AppTheme.textTertiary,
                   fontSize: AppTheme.fontFootnote,

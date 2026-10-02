@@ -153,6 +153,10 @@ class VodInfo {
   /// 换源/收藏/历史仍用 Spider 源原名）
   String tmdbName;
 
+  /// TMDB 原始标题/别名（original_title / original_name，
+  /// 媒体库头图副标题显示，参考图英文名行）
+  String tmdbOriginalName;
+
   /// TMDB 播出日期（release_date / first_air_date，完整日期如 2026-09-15）
   String releaseDate;
 
@@ -188,6 +192,7 @@ class VodInfo {
     this.similarList = const [],
     this.episodeStills = const {},
     this.tmdbName = '',
+    this.tmdbOriginalName = '',
     this.releaseDate = '',
     this.tmdbStatus = '',
     this.episodeCount = 0,
