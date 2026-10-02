@@ -15,6 +15,8 @@ import '../../widgets/vod_card.dart';
 import '../webview/view.dart';
 import 'controller.dart';
 import '../../widgets/home_search_bar.dart';
+import '../../services/main_tab_controller.dart';
+import '../../services/nav_feature_service.dart';
 
 /// 首页 - 对应 Swift HomeView
 class HomePage extends StatefulWidget {
@@ -156,6 +158,30 @@ class _HomePageState extends State<HomePage> {
                 Get.toNamed('/search');
               }
             },
+          ),
+          const SizedBox(width: 8),
+          // 史藏按钮：右上角搜索按钮右侧（功能不变，点击进入史藏 tab）
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () =>
+                MainTabController.instance.select(NavFeature.shelf.tabIndex),
+            child: Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? AppTheme.palette.cardDark
+                    : AppTheme.palette.cardLight,
+                borderRadius: BorderRadius.circular(15),
+                border:
+                    Border.all(color: AppTheme.borderLight, width: 0.5),
+              ),
+              child: Icon(
+                Icons.schedule_outlined,
+                size: 16,
+                color: AppTheme.textPrimary,
+              ),
+            ),
           ),
         ],
       ),

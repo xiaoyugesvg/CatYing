@@ -277,7 +277,7 @@ class _SearchPageState extends State<SearchPage> {
             ),
           ),
           const SizedBox(width: AppTheme.spacingSM),
-          // 「搜索」实心按钮（参考图样式：黑色圆角按钮）
+          // 「搜索」实心按钮（主题色胶囊：跟随深浅模式，深色下不再是死黑一团）
           GestureDetector(
             onTap: () {
               final text = _inputController.text.trim();
@@ -291,10 +291,10 @@ class _SearchPageState extends State<SearchPage> {
               padding: const EdgeInsets.symmetric(horizontal: 18),
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: Colors.black,
+                color: AppTheme.accentColor,
                 borderRadius: BorderRadius.circular(17),
               ),
-              child: const Text(
+              child: Text(
                 '搜索',
                 style: TextStyle(
                   color: Colors.white,
@@ -775,8 +775,8 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  /// 热门搜索小胶囊：比历史胶囊更醒目（亮底 + 粗一点的字），
-  /// 同为胶囊流，视觉统一。
+  /// 热门搜索小胶囊：亮底 + 主色文字（primary），比历史胶囊更醒目。
+  /// 与历史胶囊**底色统一**（backgroundCard + 细边），仅文字主次区分。
   Widget _hotPill(String keyword) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -795,14 +795,15 @@ class _SearchPageState extends State<SearchPage> {
           style: TextStyle(
             color: AppTheme.textPrimary,
             fontSize: AppTheme.fontBody,
-            fontWeight: FontWeight.w500,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ),
     );
   }
 
-  /// 搜索历史胶囊
+  /// 搜索历史胶囊：与热门胶囊**同底色**（backgroundCard + 细边），
+  /// 文字用 secondary 弱化一级，形成主次但不割裂的两组。
   Widget _historyPill(String keyword) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -810,7 +811,7 @@ class _SearchPageState extends State<SearchPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
         decoration: BoxDecoration(
-          color: AppTheme.backgroundTertiary,
+          color: AppTheme.backgroundCard,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
         ),
@@ -819,6 +820,7 @@ class _SearchPageState extends State<SearchPage> {
           style: TextStyle(
             color: AppTheme.textSecondary,
             fontSize: AppTheme.fontSubhead,
+            fontWeight: FontWeight.w500,
           ),
         ),
       ),
