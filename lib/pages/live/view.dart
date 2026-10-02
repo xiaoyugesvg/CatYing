@@ -183,8 +183,28 @@ class _LivePageState extends State<LivePage> {
     _playSub?.cancel();
     _switchTimer?.cancel();
     final useAv = Platform.isIOS && _avPlayer != null;
-    final readyStream = useAv ? _avPlayer!.stream : _player!.stream;
-    _errSub = readyStream.error.listen((msg) {
+    // ⚠️ 不能用 `useAv ? _avPlayer!.stream : _player!.stream` 三元：
+    // AppPlayerStreams（video_player）与 PlayerStream（media_kit）没有公共基类，
+    // 三元会把它俩推断成 Object，.error/.position/.playing 全部 undefined（编译失败）。
+    // 按实际在播内核分派，两个内核的 error=Stream<String> / position=Stream<Duration> /
+    // playing=Stream<bool> 类型一致，共用同一套监听逻辑。
+    if (useAv) {
+      final s = _avPlayer!.stream;
+      _bindPlaybackStreams(s.error, s.position, s.playing);
+    } else {
+      final s = _player!.stream;
+      _bindPlaybackStreams(s.error, s.position, s.playing);
+    }
+    setState(() {});
+  }
+
+  /// 订阅播放器流：错误提示 + 「正在加载」遮罩撤销（position 前进 / playing=true）
+  void _bindPlaybackStreams(
+    Stream<String> errors,
+    Stream<Duration> positions,
+    Stream<bool> playings,
+  ) {
+    _errSub = errors.listen((msg) {
       if (!mounted) return;
       setState(() {
         _playError = msg.isEmpty ? '播放失败，点此重试' : msg;
@@ -192,7 +212,7 @@ class _LivePageState extends State<LivePage> {
       });
     });
     // 出画面了就撤掉「加载中」遮罩（position 前进即视为已开播）
-    _switchReadySub = readyStream.position.listen((pos) {
+    _switchReadySub = positions.listen((pos) {
       if (!mounted) return;
       if (_switching && pos > Duration.zero) {
         _switchTimer?.cancel();
@@ -200,14 +220,13 @@ class _LivePageState extends State<LivePage> {
       }
     });
     // 兜底：进入 playing 状态也立刻撤掉「加载中」遮罩
-    _playSub = readyStream.playing.listen((pl) {
+    _playSub = playings.listen((pl) {
       if (!mounted) return;
       if (_switching && pl) {
         _switchTimer?.cancel();
         setState(() => _switching = false);
       }
     });
-    setState(() {});
   }
 
   Future<void> _togglePip() async {
