@@ -55,6 +55,7 @@ class _LivePageState extends State<LivePage> {
   /// 「出画面」监听（position 前进即视为开播）
   StreamSubscription? _switchReadySub;
   StreamSubscription<dynamic>? _errSub;
+  StreamSubscription<bool>? _playSub;
   Worker? _tabWorker;
 
   @override
@@ -104,6 +105,7 @@ class _LivePageState extends State<LivePage> {
     _tabWorker?.dispose();
     _errSub?.cancel();
     _switchReadySub?.cancel();
+    _playSub?.cancel();
     _switchTimer?.cancel();
     _player?.dispose();
     _player = null;
@@ -171,11 +173,18 @@ class _LivePageState extends State<LivePage> {
     if (Platform.isIOS) {
       VideoPlayerPip.instance.prepareIos(url: url, headers: headers);
     }
-    // 订阅播放错误，避免一直转圈无提示
+    // 订阅播放错误，避免一直转圈无提示。
+    // ⚠️ 必须监听**实际在播的那个播放器**：iOS 用 AVPlayer（_avPlayer），
+    // 其它平台用 media_kit（_player）。旧写法一律挂 _player 的流 ——
+    // iOS 上 _player 根本没开流，position/error 永远不触发，
+    // 「正在加载…」只能等 20 秒兜底才消失（视频早就在播了）。
     _errSub?.cancel();
     _switchReadySub?.cancel();
+    _playSub?.cancel();
     _switchTimer?.cancel();
-    _errSub = _player!.stream.error.listen((msg) {
+    final useAv = Platform.isIOS && _avPlayer != null;
+    final readyStream = useAv ? _avPlayer!.stream : _player!.stream;
+    _errSub = readyStream.error.listen((msg) {
       if (!mounted) return;
       setState(() {
         _playError = msg.isEmpty ? '播放失败，点此重试' : msg;
@@ -183,10 +192,17 @@ class _LivePageState extends State<LivePage> {
       });
     });
     // 出画面了就撤掉「加载中」遮罩（position 前进即视为已开播）
-    _switchReadySub?.cancel();
-    _switchReadySub = _player!.stream.position.listen((pos) {
+    _switchReadySub = readyStream.position.listen((pos) {
       if (!mounted) return;
       if (_switching && pos > Duration.zero) {
+        _switchTimer?.cancel();
+        setState(() => _switching = false);
+      }
+    });
+    // 兜底：进入 playing 状态也立刻撤掉「加载中」遮罩
+    _playSub = readyStream.playing.listen((pl) {
+      if (!mounted) return;
+      if (_switching && pl) {
         _switchTimer?.cancel();
         setState(() => _switching = false);
       }
