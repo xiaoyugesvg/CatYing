@@ -53,24 +53,31 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
 
   @override
   Widget build(BuildContext context) {
-    // 高度上限：**不能盖住首页顶部的分类栏**。
+    final mq = MediaQuery.of(context);
+    // ── 高度策略（修复"到顶被状态栏遮住"）────────────────────────
+    // 旧版：固定 35%~62% 屏高 + kbSheet 键盘避让 → 键盘一弹，面板整体
+    // 抬升，面板顶 + 面板高 > 屏高，顶部被顶出屏幕（SafeArea(top:false)
+    // 连状态栏都不避让），表现为"列表顶部被状态栏/屏幕边缘裁掉"。
     //
-    // 分类栏大约在状态栏 + 顶栏(约56) + 幻灯片(196) + 间距(约20) 之后，
-    // 也就是距顶部约 300pt。弹窗从屏幕底部弹出，所以其高度上限 =
-    // 屏幕高 − 该顶部占用，再留一点余量；最长不超过屏幕 62%
-    //（原来固定 72%，在长屏上会把分类栏盖住）。
-    final h = MediaQuery.of(context).size.height;
-    final maxHeight = (h - 300).clamp(h * 0.35, h * 0.62);
+    // 新版：面板高度 = 可用高度（屏高 − 键盘 − 顶部安全区）。
+    //   · 无键盘：面板 ≈ 全屏（参考图风格，两列列表占满）
+    //   · 有键盘：**顶部不动**（标题始终在状态栏下方），底部让给键盘，
+    //     列表被压缩但仍可滚动（Expanded + AlwaysScrollable）。
+    final available = mq.size.height - mq.viewInsets.bottom - mq.padding.top;
+    final maxHeight =
+        available.clamp(mq.size.height * 0.5, mq.size.height - mq.padding.top);
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.backgroundSecondary,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         border: Border.all(color: AppTheme.borderLight, width: 0.5),
       ),
+      // ⚠️ top:true —— 必须避让状态栏，标题永远不被刘海/状态栏遮住
       child: SafeArea(
-        top: false,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: maxHeight),
+        top: true,
+        bottom: false,
+        child: SizedBox(
+          height: maxHeight,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -84,12 +91,30 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              // 头部：左侧「单列/双排」切换，右侧搜索
+              // 头部：标题「搜索源」+ 搜索框 + 单列/双排切换
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
                 child: Row(
                   children: [
-                    // 布局切换按钮（放左边）
+                    Text(
+                      '搜索源',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    // 搜索（占满剩余宽度）
+                    Expanded(
+                      child: _ExpandableSearchField(
+                        controller: _searchController,
+                        keyword: _keyword,
+                        onChanged: (v) => setState(() => _keyword = v.trim()),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // 布局切换按钮
                     GestureDetector(
                       onTap: () => setState(() => _gridMode = !_gridMode),
                       child: Container(
@@ -108,20 +133,11 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    // 搜索（放右边，占满剩余宽度）
-                    Expanded(
-                      child: _ExpandableSearchField(
-                        controller: _searchController,
-                        keyword: _keyword,
-                        onChanged: (v) => setState(() => _keyword = v.trim()),
-                      ),
-                    ),
                   ],
                 ),
               ),
-              // 源列表
-              Flexible(
+              // 源列表：占满剩余空间，随时可滚动（搜索中/键盘弹起时也一样）
+              Expanded(
                 child: Obx(() {
                   final all = ApiConfig.instance.sourceBeanList.value;
                   final selectedKey =
@@ -146,8 +162,8 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   }
                   if (_gridMode) {
                     return GridView.builder(
-                      shrinkWrap: true,
                       padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                      physics: const AlwaysScrollableScrollPhysics(),
                       gridDelegate:
                           const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 2,
@@ -167,8 +183,8 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                     );
                   }
                   return ListView.builder(
-                    shrinkWrap: true,
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                    physics: const AlwaysScrollableScrollPhysics(),
                     itemCount: list.length,
                     itemBuilder: (context, index) {
                       final source = list[index];

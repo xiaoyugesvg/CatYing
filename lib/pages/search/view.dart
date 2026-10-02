@@ -172,61 +172,74 @@ class _SearchPageState extends State<SearchPage> {
     }
     final picked = await showModalBottomSheet<SourceBean>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: AppTheme.backgroundSecondary,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (ctx) => kbSheet(
         SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                child: Row(
-                  children: [
-                    Text(
-                      '选择搜索源',
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontHeadline,
-                        fontWeight: FontWeight.w600,
+          // top:true —— 站点多时列表撑高，避免顶部顶到状态栏后面被遮
+          top: true,
+          bottom: false,
+          child: SizedBox(
+            height: (MediaQuery.of(ctx).size.height -
+                    MediaQuery.of(ctx).viewInsets.bottom -
+                    MediaQuery.of(ctx).padding.top)
+                .clamp(
+              MediaQuery.of(ctx).size.height * 0.5,
+              MediaQuery.of(ctx).size.height -
+                  MediaQuery.of(ctx).padding.top,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                  child: Row(
+                    children: [
+                      Text(
+                        '选择搜索源',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '点选即搜索',
-                      style: TextStyle(
-                        color: AppTheme.textTertiary,
-                        fontSize: AppTheme.fontCaption,
+                      const Spacer(),
+                      Text(
+                        '点选即搜索',
+                        style: TextStyle(
+                          color: AppTheme.textTertiary,
+                          fontSize: AppTheme.fontCaption,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              Flexible(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: sites.length,
-                  itemBuilder: (c, i) => ListTile(
-                    leading: Icon(
-                      Icons.dns_outlined,
-                      size: 18,
-                      color: AppTheme.accentColor,
-                    ),
-                    title: Text(
-                      sites[i].name,
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontSubhead,
-                      ),
-                    ),
-                    onTap: () => Navigator.pop(ctx, sites[i]),
+                    ],
                   ),
                 ),
-              ),
-            ],
+                Expanded(
+                  child: ListView.builder(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    itemCount: sites.length,
+                    itemBuilder: (c, i) => ListTile(
+                      leading: Icon(
+                        Icons.dns_outlined,
+                        size: 18,
+                        color: AppTheme.accentColor,
+                      ),
+                      title: Text(
+                        sites[i].name,
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontSubhead,
+                        ),
+                      ),
+                      onTap: () => Navigator.pop(ctx, sites[i]),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
