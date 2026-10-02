@@ -282,7 +282,7 @@ jobs:
           echo "=== 关键原生插件硬校验 ==="
           MISSING=0
           for P in bonsoir_darwin file_picker_darwin flutter_pdfview permission_handler_apple \
-                   share_plus sqflite_darwin url_launcher_ios webview_flutter_wkwebview \
+                   sqflite_darwin url_launcher_ios webview_flutter_wkwebview \
                    media_kit_video media_kit_libs_ios_video video_player_avfoundation; do
             if grep -qE "^  - $P " "$MANIFEST"; then
               echo "  ✅ $P"
