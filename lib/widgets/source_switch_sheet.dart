@@ -5,12 +5,13 @@ import '../common/theme.dart';
 import '../models/source_bean.dart';
 import '../services/api_config.dart';
 
-/// 源切换弹窗（2026-09-26 新增）
+/// 源切换面板（2026-10-02 二次重构：**三分之一屏**）
 ///
-/// 替代首页左上角原来的 PopupMenuButton 简单菜单，样式对齐参考截图：
-/// - 顶部搜索框（"搜索源..."）实时过滤
-/// - 右上圆形按钮切换 单列列表 / 双排网格
-/// - 源列表可下滑滚动，每项带选中圈（实心=当前源）
+/// 用户明确要求"源切换改成三分之一屏页"：
+/// - 不再全屏路由页，改为底部弹窗，高度 ≈ 屏高 1/3
+/// - 顶部 SafeArea 避让状态栏；标题「搜索源」+ 搜索框（小胶囊）+ 单列/双排切换
+/// - 键盘弹起时：1/3 高面板 + kbSheet 抬高仍不会顶出屏幕（0.33 + 键盘 < 1），
+///   顶部不动、列表压缩但仍可滚动（Expanded + AlwaysScrollable）
 /// - 点击源 → setHomeSource + 关闭弹窗，由调用方刷新首页
 class SourceSwitchSheet extends StatefulWidget {
   /// 选中源并关闭弹窗后回调（用于刷新首页内容）
@@ -53,37 +54,27 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final mq = MediaQuery.of(context);
-    // ── 高度策略（修复"到顶被状态栏遮住"）────────────────────────
-    // 旧版：固定 35%~62% 屏高 + kbSheet 键盘避让 → 键盘一弹，面板整体
-    // 抬升，面板顶 + 面板高 > 屏高，顶部被顶出屏幕（SafeArea(top:false)
-    // 连状态栏都不避让），表现为"列表顶部被状态栏/屏幕边缘裁掉"。
-    //
-    // 新版：面板高度 = 可用高度（屏高 − 键盘 − 顶部安全区）。
-    //   · 无键盘：面板 ≈ 全屏（参考图风格，两列列表占满）
-    //   · 有键盘：**顶部不动**（标题始终在状态栏下方），底部让给键盘，
-    //     列表被压缩但仍可滚动（Expanded + AlwaysScrollable）。
-    final available = mq.size.height - mq.viewInsets.bottom - mq.padding.top;
-    final maxHeight =
-        available.clamp(mq.size.height * 0.5, mq.size.height - mq.padding.top);
+    final h = MediaQuery.of(context).size.height;
+    // 三分之一屏高度（留一点呼吸，极端屏 clamp 到 28%~40%）
+    final panelHeight = (h / 3).clamp(h * 0.28, h * 0.40);
     return Container(
       decoration: BoxDecoration(
         color: AppTheme.backgroundSecondary,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         border: Border.all(color: AppTheme.borderLight, width: 0.5),
       ),
-      // ⚠️ top:true —— 必须避让状态栏，标题永远不被刘海/状态栏遮住
+      // 顶部避让状态栏：标题永远不被刘海/状态栏遮住
       child: SafeArea(
         top: true,
         bottom: false,
         child: SizedBox(
-          height: maxHeight,
+          height: panelHeight,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               // 顶部拖拽指示条
               Container(
-                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                margin: const EdgeInsets.only(top: 10, bottom: 4),
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
@@ -91,9 +82,9 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              // 头部：标题「搜索源」+ 搜索框 + 单列/双排切换
+              // 头部：标题「搜索源」（左）+ 单列/双排切换（右）
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                 child: Row(
                   children: [
                     Text(
@@ -104,22 +95,12 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    // 搜索（占满剩余宽度）
-                    Expanded(
-                      child: _ExpandableSearchField(
-                        controller: _searchController,
-                        keyword: _keyword,
-                        onChanged: (v) => setState(() => _keyword = v.trim()),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // 布局切换按钮
+                    const Spacer(),
                     GestureDetector(
                       onTap: () => setState(() => _gridMode = !_gridMode),
                       child: Container(
-                        width: 34,
-                        height: 34,
+                        width: 30,
+                        height: 30,
                         decoration: BoxDecoration(
                           color: AppTheme.backgroundTertiary,
                           shape: BoxShape.circle,
@@ -128,12 +109,21 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                           _gridMode
                               ? Icons.view_list_outlined
                               : Icons.grid_view_outlined,
-                          size: 17,
+                          size: 15,
                           color: AppTheme.textSecondary,
                         ),
                       ),
                     ),
                   ],
+                ),
+              ),
+              // 搜索（小胶囊，占满宽度）
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _ExpandableSearchField(
+                  controller: _searchController,
+                  keyword: _keyword,
+                  onChanged: (v) => setState(() => _keyword = v.trim()),
                 ),
               ),
               // 源列表：占满剩余空间，随时可滚动（搜索中/键盘弹起时也一样）
@@ -151,7 +141,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                           .toList();
                   if (list.isEmpty) {
                     return Padding(
-                      padding: EdgeInsets.symmetric(vertical: 48),
+                      padding: EdgeInsets.symmetric(vertical: 32),
                       child: Center(
                         child: Text(
                           '未找到匹配的源',
@@ -162,12 +152,12 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                   }
                   if (_gridMode) {
                     return GridView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                       physics: const AlwaysScrollableScrollPhysics(),
                       gridDelegate:
                           const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 2,
-                        mainAxisSpacing: 10,
+                        mainAxisSpacing: 8,
                         crossAxisSpacing: 10,
                         childAspectRatio: 3.4,
                       ),
@@ -183,7 +173,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                     );
                   }
                   return ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                     physics: const AlwaysScrollableScrollPhysics(),
                     itemCount: list.length,
                     itemBuilder: (context, index) {
@@ -279,7 +269,8 @@ class _SourceRow extends StatelessWidget {
   }
 }
 
-/// 可伸缩搜索框：初始只显示搜索图标，点击展开成输入条，失焦自动缩回
+/// 源面板搜索框：**小胶囊**（与首页 HomeSearchBar 同规格）
+/// 高 38 / 圆角 19 / 底色 cardLight·cardDark / 轻阴影无描边
 class _ExpandableSearchField extends StatefulWidget {
   final TextEditingController controller;
   final String keyword;
@@ -306,31 +297,45 @@ class _ExpandableSearchFieldState extends State<_ExpandableSearchField> {
 
   @override
   Widget build(BuildContext context) {
-    // 常驻展开的搜索框（不再缩成一枚图标）：占满头部剩余宽度，
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // 常驻小胶囊搜索框：占满头部剩余宽度，
     // 背景/描边跟随外观（原来写死 0xFF2A2A2E，浅色模式下是一块脏黑）。
     return Container(
-      height: 34,
+      height: 38,
       decoration: BoxDecoration(
-        color: AppTheme.backgroundTertiary,
-        borderRadius: BorderRadius.circular(17),
-        border: Border.all(color: AppTheme.borderLight, width: 0.5),
+        color: isDark ? AppTheme.palette.cardDark : AppTheme.palette.cardLight,
+        borderRadius: BorderRadius.circular(19),
+        boxShadow: [
+          BoxShadow(
+            color: isDark
+                ? Colors.black.withValues(alpha: 0.30)
+                : Colors.black.withValues(alpha: 0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Row(
         children: [
-          const SizedBox(width: 10),
-          Icon(Icons.search, color: AppTheme.textTertiary, size: 15),
+          const SizedBox(width: 12),
+          Icon(Icons.search, color: AppTheme.textTertiary, size: 16),
           const SizedBox(width: 6),
           Expanded(
             child: TextField(
               controller: widget.controller,
               focusNode: _focus,
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontSubhead),
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontBody,
+              ),
               onChanged: widget.onChanged,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
                 hintText: '搜索源…',
-                hintStyle:
-                    TextStyle(color: AppTheme.textTertiary, fontSize: AppTheme.fontSubhead),
+                hintStyle: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontBody,
+                ),
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 8),
@@ -344,7 +349,7 @@ class _ExpandableSearchFieldState extends State<_ExpandableSearchField> {
                 widget.onChanged('');
               },
               child: Padding(
-                padding: const EdgeInsets.all(4),
+                padding: const EdgeInsets.all(6),
                 child: Icon(Icons.cancel,
                     color: AppTheme.textTertiary, size: 15),
               ),

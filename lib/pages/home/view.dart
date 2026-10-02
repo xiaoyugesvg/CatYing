@@ -14,7 +14,7 @@ import '../../widgets/source_switch_sheet.dart';
 import '../../widgets/vod_card.dart';
 import '../webview/view.dart';
 import 'controller.dart';
-import '../../widgets/app_expandable_search.dart';
+import '../../widgets/home_search_bar.dart';
 
 /// 首页 - 对应 Swift HomeView
 class HomePage extends StatefulWidget {
@@ -133,11 +133,11 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           const SizedBox(width: 12),
-          // 右：搜索 —— 收起时是圆形按钮，展开时**撑满剩余宽度**
-          // （用 Expanded 而不是原来的"固定屏宽 52%"：截图里阅读的搜索框
-          //   是占满中间的胶囊；固定百分比在窄屏上会挤，宽屏上又留白）
+          // 右：**常驻搜索框**（重构后不再"收起圆钮/点击才展开"）
+          // 位置固定在顶栏 SafeArea 内 —— 永远在状态栏下方；
+          // 键盘弹起时顶栏不动、输入框不被遮（对齐参考 App 搜索位置）。
           Expanded(
-            child: AppExpandableSearch(
+            child: HomeSearchBar(
               hintText: '搜索影片',
               onSubmitted: (v) {
                 if (v.trim().isNotEmpty) {
@@ -148,7 +148,7 @@ class _HomePageState extends State<HomePage> {
                   Get.toNamed('/search');
                 }
               },
-              onOpenFull: () {
+              onTapEmpty: () {
                 if (widget.onSearchTap != null) {
                   widget.onSearchTap!();
                 } else {
