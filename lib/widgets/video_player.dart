@@ -87,6 +87,13 @@ class VideoPlayerWidget extends StatefulWidget {
   /// 顶部按钮栏距顶部的额外间距（默认 8，详情页可传大一点让按钮往下挪）
   final double topBarTopPadding;
 
+  /// 媒体库刮削版播放器样式（参考图 IMG_8306）：
+  /// · 顶栏整体下移（topBarTopPadding 由调用方传大值）
+  /// · 底栏上移留安全边距
+  /// · 底栏按钮组 = 播放/后退10/前进10/选集/弹幕/倍速/全屏
+  /// · 缓冲态显示「正在加载...」文字
+  final bool scrapedPlayerStyle;
+
   /// 播放设置弹窗的最大高度（父级传入播放器所在区域高度），见构造函数注释
   final double? sheetMaxHeight;
 
@@ -99,6 +106,11 @@ class VideoPlayerWidget extends StatefulWidget {
   final ValueChanged<bool>? onFullScreenChanged;
   final VoidCallback? onPlayNext;
   final VoidCallback? onPlayPrevious;
+
+  /// 抖音模式（短剧模式）下，无剧集可切（电影）时的上/下一部电影回调。
+  /// 有剧集时切集走 [onPlayNext]/[onPlayPrevious]，电影时用这两个。
+  final VoidCallback? onDramaNextMovie;
+  final VoidCallback? onDramaPrevMovie;
   final ValueChanged<int>? onSelectEpisode;
   final VoidCallback? onBack;
   final ValueChanged<int>? onSetSkipIntro;
@@ -123,6 +135,7 @@ class VideoPlayerWidget extends StatefulWidget {
     this.skipIntroSeconds = 0,
     this.skipOutroSeconds = 0,
     this.topBarTopPadding = 8.0,
+    this.scrapedPlayerStyle = false,
 
     /// 播放设置弹窗的最大高度（由父级传入播放器所在区域的高度）。
     ///
@@ -137,6 +150,8 @@ class VideoPlayerWidget extends StatefulWidget {
     this.onFullScreenChanged,
     this.onPlayNext,
     this.onPlayPrevious,
+    this.onDramaNextMovie,
+    this.onDramaPrevMovie,
     this.onSelectEpisode,
     this.onBack,
     this.onSetSkipIntro,
@@ -288,6 +303,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   /// iOS / 移动端 immersive 状态（WindowFullScreen 在 iOS 是 no-op）
   bool _isImmersive = false;
+
+  /// 短剧模式：纯竖屏全屏（锁 portraitUp，画面按原比例居中带黑边，
+  /// 类似媒体库播放器的竖屏）。开启时 _isImmersive/_isNativeFullscreen
+  /// 同样为 true（复用全屏布局/状态栏逻辑）。
+  bool _dramaMode = false;
 
   /// 长按倍速中：用于在 UI 上显示 "2X" 提示
   bool _isLongPressingFast = false;
@@ -1184,6 +1204,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
   }
 
+  /// 持久化快进/快退步长（5 / 10 / 15 / 30 秒）
+  Future<void> _persistSeekStep() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('play_time_step', _userSeekStep);
+    } catch (e) {
+      AppLog.instance.log('[video_player] swallowed: $e');
+    }
+  }
+
   void _startBitrateTimer() {
     _bitrateTimer?.cancel();
     _bitrateTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -1312,6 +1342,68 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
   }
 
+  // ============================================================
+  // 短剧模式：纯竖屏全屏（按钮参考弹幕：「短」字）
+  // ============================================================
+
+  Future<void> _toggleDramaMode() async {
+    if (VideoPlayerPip.instance.isActive) {
+      await VideoPlayerPip.instance.exit();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    if (_dramaMode) {
+      await _exitDramaMode();
+    } else {
+      await _enterDramaMode();
+    }
+  }
+
+  /// 进入短剧模式：锁竖屏 + immersive 全屏。
+  /// 画面按当前画幅比例居中（横视频上下黑边），类似媒体库播放器竖屏。
+  Future<void> _enterDramaMode() async {
+    AppLog.instance.log('=== _enterDramaMode: start ===');
+    // 若正处于横屏全屏，先退出还原方向，避免方向锁冲突
+    if (WindowFullScreen.instance.isActive || _isImmersive) {
+      await _exitFullScreen();
+    }
+    if (Platform.isIOS) {
+      await SystemUiController.lockOrientations('videoDrama', const [
+        DeviceOrientation.portraitUp,
+      ]);
+    }
+    _dramaMode = true;
+    _isImmersive = true;
+    _isNativeFullscreen = true;
+    _persisted.isImmersive = true;
+    _persisted.isNativeFullscreen = true;
+    widget.onFullScreenChanged?.call(true);
+    try {
+      await WindowFullScreen.instance.enter();
+      AppLog.instance.log('=== _enterDramaMode: WindowFullScreen enter OK ===');
+    } catch (e) {
+      AppLog.instance.log('=== _enterDramaMode: enter failed: $e ===');
+    }
+    if (mounted) _onWindowFullScreenChanged();
+    try {
+      if (!_player.state.playing) {
+        await AudioFocus.request('video');
+        await _player.play();
+      }
+    } catch (e) {
+      AppLog.instance.log('[video_player] swallowed: $e');
+    }
+  }
+
+  Future<void> _exitDramaMode() async {
+    AppLog.instance.log('=== _exitDramaMode: start ===');
+    _dramaMode = false;
+    if (Platform.isIOS) {
+      // 先解锁短剧自己的方向锁，再走通用退出（内部会还原进入前的方向）
+      await SystemUiController.unlockOrientations('videoDrama');
+    }
+    await _exitFullScreen();
+  }
+
   Future<void> _onUserExitFullscreen() async {
     AppLog.instance.log(
       '=== _onUserExitFullscreen: _isNativeFullscreen=$_isNativeFullscreen, isPip=${VideoPlayerPip.instance.isActive} ===',
@@ -1333,6 +1425,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       AppLog.instance.log('=== _enterFullScreen: skip (已处于全屏) ===');
       return;
     }
+    // 进入横屏全屏时退出短剧模式（方向/布局冲突）
+    _dramaMode = false;
     AppLog.instance.log('=== _enterFullScreen: start ===');
     if (Platform.isIOS) {
       await SystemUiController.lockOrientations('videoFullscreen', const [
@@ -1373,6 +1467,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       return;
     }
     AppLog.instance.log('=== _exitFullScreen: start ===');
+    // 任何方式退出全屏都同步退出短剧模式
+    _dramaMode = false;
     _isImmersive = false;
     _isNativeFullscreen = false;
     _persisted.isImmersive = false;
@@ -1614,17 +1710,42 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
         // 缓冲指示器
         // 缓冲圈：buffering 时显示（换集后旧状态不再挡转圈）
+        // 媒体库刮削版：参考图 IMG_8306 样式 —— 转圈 + 「正在加载...」文字
         if (_isBuffering && !_audioMode)
-          const Center(
-            child: SizedBox(
-              width: 36,
-              height: 36,
-              child: CircularProgressIndicator(
-                color: Colors.white,
-                strokeWidth: 3,
-              ),
-            ),
-          ),
+          widget.scrapedPlayerStyle
+              ? const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 3,
+                        ),
+                      ),
+                      SizedBox(height: 12),
+                      Text(
+                        '正在加载...',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: AppTheme.fontCaption,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : const Center(
+                  child: SizedBox(
+                    width: 36,
+                    height: 36,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 3,
+                    ),
+                  ),
+                ),
 
         // 弹幕层（手势层之上, 不阻挡点击）
         if (_danmuOn && _danmus.isNotEmpty) _buildDanmuLayer(),
@@ -1649,6 +1770,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
         // 锁定按钮
         if (_showControls || _isLocked) _buildLockButton(),
+
+        // 画面中间：左右两侧快退/快进（与控件同步显隐，锁定态隐藏）
+        if (_showControls && !_isLocked) _buildCenterSeekButtons(),
 
         // 底部控制区域
         if (_showControls && !_isLocked) _buildBottomControls(),
@@ -1976,6 +2100,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               _gestureSeekTemp = _gestureSeekStartMs;
               _gesturePanStartPosition = details.localPosition;
               _gesturePanAxis = null;
+              _dramaPanDy = 0;
               _scheduleHideControls();
             },
             onPanUpdate: (details) {
@@ -2012,6 +2137,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   });
                 }
               } else {
+                // 抖音模式（竖屏短剧）：垂直滑动只用于切集（onPanEnd 判定方向），
+                // 不走亮度/音量手势，避免跟切集冲突
+                if (_dramaMode) {
+                  _dramaPanDy += dy;
+                  return;
+                }
                 if (_gesturePanStartPosition.dx < width / 2) {
                   final newB =
                       (_gestureInitialBrightness - dy / constraints.maxHeight)
@@ -2036,6 +2167,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             },
             onPanEnd: (_) {
               if (_isLocked) return;
+              // 抖音模式：垂直滑动结束判定方向 → 切换集数/影片
+              if (_dramaMode && _gesturePanAxis == PanAxis.vertical) {
+                final dy = _dramaPanDy;
+                _dramaPanDy = 0;
+                if (dy < -60) {
+                  _dramaSwitchTo(forward: false); // 上滑 → 上一集/上一部
+                } else if (dy > 60) {
+                  _dramaSwitchTo(forward: true); // 下滑 → 下一集/下一部
+                }
+                _gesturePanAxis = null;
+                return;
+              }
               if (_gesturePanAxis == PanAxis.horizontal) {
                 _seekTo(Duration(milliseconds: _gestureSeekTemp.round()));
                 setState(() {
@@ -2058,6 +2201,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Offset _gesturePanStartPosition = Offset.zero;
   PanAxis? _gesturePanAxis;
+
+  /// 抖音模式下滑动累计位移：上滑（负值）= 上一集/上一部，下滑 = 下一集/下一部
+  double _dramaPanDy = 0;
 
   /// 水平拖动 seek：手势起点的进度（ms）。拖动中目标 = 本值 + 累计位移换算，
   /// 不能对 _gestureSeekTemp 逐帧累加累计 delta（会变成平方漂移）。
@@ -2326,9 +2472,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Widget _buildBottomControls() {
     return Positioned(
-      // 控件区尽量贴近画面底边（原来 bottom:2 + 渐变层又加了安全区
-      // 底部内边距，导致进度条离底部很远，与下方简介 tab 之间留下大片黑条）。
-      bottom: 0,
+      // 媒体库刮削版：底栏上移留安全边距（参考图 IMG_8306），
+      // 普通模式贴底（控件区贴近画面底边）
+      bottom: widget.scrapedPlayerStyle ? 24 : 0,
       left: 0,
       right: 0,
       child: _gradientBottomContainer(
@@ -2339,62 +2485,103 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 0, 10, 2),
               child: Row(
-                children: [
-                  if (widget.canPlayPrevious)
-                    _iconButton(
-                      icon: Icons.skip_previous,
-                      size: 22,
-                      width: 36,
-                      onTap: () {
-                        _scheduleHideControls();
-                        widget.onPlayPrevious?.call();
-                      },
-                    ),
-                  _buildPlayPauseButton(),
-                  if (widget.canPlayNext)
-                    _iconButton(
-                      icon: Icons.skip_next,
-                      size: 22,
-                      width: 36,
-                      onTap: () {
-                        _scheduleHideControls();
-                        widget.onPlayNext?.call();
-                      },
-                    ),
-                  const Spacer(),
-                  _iconButton(
-                    icon: _volume > 0
-                        ? (_volume < 0.33 ? Icons.volume_down : Icons.volume_up)
-                        : Icons.volume_off,
-                    size: 22,
-                    width: 36,
-                    onTap: _toggleMute,
-                  ),
-                  if (widget.episodeNames.isNotEmpty)
-                    _iconButton(
-                      icon: Icons.list,
-                      size: 22,
-                      width: 36,
-                      onTap: () {
-                        setState(() => _showEpisodeSheet = true);
-                      },
-                    ),
-                  // 弹幕开关：已在底部功能栏（**常显**，不再按是否配置弹幕源隐藏 ——
-                  // 隐藏会让用户完全看不到这个功能。未配置时点击会引导去设置页）
-                  _danmuToggleButton(),
-                  // 播放设置入口仅保留标题栏右上角「…」，底部不放齿轮
-                  _iconButton(
-                    icon: _isNativeFullscreen
-                        ? Icons.fullscreen_exit
-                        : Icons.fullscreen,
-                    size: 24,
-                    width: 42,
-                    onTap: () {
-                      _scheduleHideControls();
-                      _onUserToggleFullscreen();
-                    },
-                  ),
-                ],
+                children: widget.scrapedPlayerStyle
+                    ? [
+                        // 参考图底栏：播放 / 后退10 / 前进10 / 选集 / 弹幕 / 倍速 / 全屏
+                        _buildPlayPauseButton(),
+                        // 快退/快进（步长可配置，默认 10s；画面中间层同样有）
+                        _seekStepButton(forward: false),
+                        _seekStepButton(forward: true),
+                        const Spacer(),
+                        if (widget.episodeNames.isNotEmpty)
+                          _iconButton(
+                            icon: Icons.list,
+                            size: 22,
+                            width: 38,
+                            onTap: () {
+                              _scheduleHideControls();
+                              setState(() => _showEpisodeSheet = true);
+                            },
+                          ),
+                        _danmuToggleButton(),
+                        _dramaModeButton(),
+                        _buildSpeedMenu(),
+                        _iconButton(
+                          icon: _isNativeFullscreen
+                              ? Icons.fullscreen_exit
+                              : Icons.fullscreen,
+                          size: 24,
+                          width: 42,
+                          onTap: () {
+                            _scheduleHideControls();
+                            _onUserToggleFullscreen();
+                          },
+                        ),
+                      ]
+                    : [
+                        if (widget.canPlayPrevious)
+                          _iconButton(
+                            icon: Icons.skip_previous,
+                            size: 22,
+                            width: 36,
+                            onTap: () {
+                              _scheduleHideControls();
+                              widget.onPlayPrevious?.call();
+                            },
+                          ),
+                        _buildPlayPauseButton(),
+                        if (widget.canPlayNext)
+                          _iconButton(
+                            icon: Icons.skip_next,
+                            size: 22,
+                            width: 36,
+                            onTap: () {
+                              _scheduleHideControls();
+                              widget.onPlayNext?.call();
+                            },
+                          ),
+                        // 快退/快进（步长可配置，默认 10s；画面中间层同样有）
+                        _seekStepButton(forward: false),
+                        _seekStepButton(forward: true),
+                        const Spacer(),
+                        _iconButton(
+                          icon: _volume > 0
+                              ? (_volume < 0.33
+                                  ? Icons.volume_down
+                                  : Icons.volume_up)
+                              : Icons.volume_off,
+                          size: 22,
+                          width: 36,
+                          onTap: _toggleMute,
+                        ),
+                        if (widget.episodeNames.isNotEmpty)
+                          _iconButton(
+                            icon: Icons.list,
+                            size: 22,
+                            width: 36,
+                            onTap: () {
+                              _scheduleHideControls();
+                              setState(() => _showEpisodeSheet = true);
+                            },
+                          ),
+                        // 弹幕开关：已在底部功能栏（**常显**，不再按是否配置弹幕源隐藏 ——
+                        // 隐藏会让用户完全看不到这个功能。未配置时点击会引导去设置页）
+                        _danmuToggleButton(),
+                        // 短剧模式：纯竖屏全屏
+                        _dramaModeButton(),
+                        // 播放设置入口仅保留标题栏右上角「…」，底部不放齿轮
+                        _iconButton(
+                          icon: _isNativeFullscreen
+                              ? Icons.fullscreen_exit
+                              : Icons.fullscreen,
+                          size: 24,
+                          width: 42,
+                          onTap: () {
+                            _scheduleHideControls();
+                            _onUserToggleFullscreen();
+                          },
+                        ),
+                      ],
               ),
             ),
           ],
@@ -3283,6 +3470,27 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                             // danmu_api）只有 GET /api/v2/comment 获取接口，
                             // 没有发送单条弹幕的 POST 端点，原实现必然 404/405。
                             const Divider(color: Colors.white12, height: 16),
+                            const _SettingsRowLabel('跳转步长'),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 6,
+                              children: const [5, 10, 15, 30].map((s) {
+                                return _SeekStepChip(
+                                  seconds: s,
+                                  selected: _effectiveSeekStep == s,
+                                  onTap: () {
+                                    refresh(() {
+                                      _userSeekStep = s;
+                                      _persistSeekStep();
+                                    });
+                                  },
+                                );
+                              }).toList(),
+                            ),
+                            const SizedBox(height: 16),
+                            const Divider(color: Colors.white12, height: 0),
+                            const SizedBox(height: 16),
                             const _SettingsRowLabel('倍速'),
                             const SizedBox(height: 8),
                             Wrap(
@@ -3804,6 +4012,255 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  /// 短剧模式按钮 —— 样式参考弹幕按钮：圆角方块内一个「短」字，
+  /// 开启时右下角带绿色对勾角标。点击进入**纯竖屏全屏**（锁 portraitUp，
+  /// 画面按原比例居中带黑边），再点退出。
+  Widget _dramaModeButton() {
+    return _iconButton(
+      icon: Icons.smart_display,
+      size: 20,
+      width: 38,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          Text(
+            '短',
+            style: TextStyle(
+              color: _dramaMode
+                  ? Colors.white
+                  : Colors.white.withValues(alpha: 0.72),
+              fontSize: AppTheme.fontHeadline,
+              fontWeight: FontWeight.w600,
+              height: 1.0,
+            ),
+          ),
+          // 开启角标：绿色对勾（与弹幕一致）
+          if (_dramaMode)
+            Positioned(
+              right: -2,
+              bottom: -2,
+              child: Container(
+                width: 13,
+                height: 13,
+                decoration: BoxDecoration(
+                  color: AppTheme.accentColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.black54, width: 1),
+                ),
+                child: const Icon(Icons.check, size: 9, color: Colors.white),
+              ),
+            ),
+        ],
+      ),
+      onTap: () => _safeTap(() => _toggleDramaMode()),
+    );
+  }
+
+  /// 画面中间层：左右两侧的快退/快进跳转按钮（步长可配置）。
+  /// 与顶栏/底栏同步显隐（跟随 [_showControls] 与锁定态），
+  /// 垂直居中、贴左右边缘（避开中央手势区）。
+  /// 抖音模式（[_dramaMode]）下，右侧变为竖排：⏩ + ↑（上一集/上一部）+ ↓（下一集/下一部）。
+  Widget _buildCenterSeekButtons() {
+    final leftSafe = MediaQuery.of(context).padding.left;
+    final rightSafe = MediaQuery.of(context).padding.right;
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          // 左：快退 —— 避开锁定按钮（左侧垂直居中），放在锁定下方错开
+          Positioned(
+            left: 14 + leftSafe,
+            top: 0,
+            bottom: 0,
+            child: Align(
+              // 左侧垂直居中偏下：锁定按钮（40x40 居中）在上，快退在其下方
+              alignment: const Alignment(-0.92, 0.55),
+              child: _seekStepButton(forward: false),
+            ),
+          ),
+          // 右：快进（抖音模式叠 ↑↓ 切换）
+          Positioned(
+            right: 14 + rightSafe,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: _dramaMode
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // 上一集 / 上一部电影（胶囊：双箭头 + 文字）
+                        _dramaSwitchChip(
+                          icon: Icons.keyboard_double_arrow_up,
+                          label: widget.episodeNames.isNotEmpty
+                              ? '上一集'
+                              : '上一部',
+                          onTap: () =>
+                              _safeTap(() => _dramaSwitchTo(forward: false)),
+                        ),
+                        const SizedBox(height: 10),
+                        _seekStepButton(forward: true),
+                        const SizedBox(height: 10),
+                        // 下一集 / 下一部电影
+                        _dramaSwitchChip(
+                          icon: Icons.keyboard_double_arrow_down,
+                          label: widget.episodeNames.isNotEmpty
+                              ? '下一集'
+                              : '下一部',
+                          onTap: () =>
+                              _safeTap(() => _dramaSwitchTo(forward: true)),
+                        ),
+                      ],
+                    )
+                  : _seekStepButton(forward: true),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 抖音模式切换胶囊按钮：半透明白玻璃底 + 圆角 + 双箭头 + 文字标签，
+  /// 与画面中间层的 ⏪⏩ 同一风格（比纯图标更易识别是"切集"）。
+  Widget _dramaSwitchChip({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.25),
+            width: 0.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white, size: 18),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.92),
+                fontSize: AppTheme.fontCaption,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 抖音模式切换集数/影片：
+  /// · 有剧集（canPlayNext/canPlayPrevious）→ 走 onPlayNext/onPlayPrevious（播放器内无缝切集）
+  /// · 无剧集（电影）→ 走 onDramaNextMovie/onDramaPrevMovie（由详情页提供推荐队列）
+  void _dramaSwitchTo({required bool forward}) {
+    if (forward) {
+      if (widget.canPlayNext && widget.onPlayNext != null) {
+        widget.onPlayNext!();
+        return;
+      }
+      widget.onDramaNextMovie?.call();
+    } else {
+      if (widget.canPlayPrevious && widget.onPlayPrevious != null) {
+        widget.onPlayPrevious!();
+        return;
+      }
+      widget.onDramaPrevMovie?.call();
+    }
+  }
+
+  /// 快进/快退跳转按钮（步长可配置 5/10/15/30 秒）。
+  /// 步长=10 时用系统自带 replay_10/forward_10 圆形图标（与参考图一致）；
+  /// 其他步长用 replay/forward + 右下角数字角标，所见即所跳。
+  Widget _seekStepButton({required bool forward}) {
+    final step = _effectiveSeekStep;
+    final base = forward ? Icons.forward : Icons.replay;
+    final ten = forward ? Icons.forward_10 : Icons.replay_10;
+    return _iconButton(
+      icon: step == 10 ? ten : base,
+      size: 22,
+      width: 38,
+      child: step == 10
+          ? null
+          : Stack(
+              alignment: Alignment.center,
+              children: [
+                Icon(base, color: Colors.white, size: 22),
+                Positioned(
+                  right: 3,
+                  bottom: 3,
+                  child: Text(
+                    '$step',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 8,
+                      fontWeight: FontWeight.w700,
+                      height: 1,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+      onTap: () => _safeTap(
+        () => _seekRelative(Duration(seconds: forward ? step : -step)),
+      ),
+    );
+  }
+}
+
+/// 播放器设置面板里的「跳转步长」选择 chip（与倍速 chips 同款样式）
+class _SeekStepChip extends StatelessWidget {
+  final int seconds;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _SeekStepChip({
+    required this.seconds,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppTheme.accentColor
+              : Colors.white.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Text(
+          '$seconds 秒',
+          style: TextStyle(
+            color: selected ? Colors.white : Colors.white70,
+            fontSize: AppTheme.fontFootnote,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+          ),
+        ),
       ),
     );
   }

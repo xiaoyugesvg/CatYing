@@ -145,6 +145,26 @@ class VodInfo {
   /// 类似作品（similar + recommendations 合并去重），最多 12 条
   List<VodSimilarItem> similarList;
 
+  /// 剧集缩略图（键 = 集号 1 起，值 = TMDB still 图 URL）。
+  /// 媒体库刮削视图「选集缩略图条」用真实剧照，未刮削到则回退海报底。
+  Map<int, String> episodeStills;
+
+  /// TMDB 官方标题（媒体库刮削视图优先显示；不覆盖 info.name，
+  /// 换源/收藏/历史仍用 Spider 源原名）
+  String tmdbName;
+
+  /// TMDB 播出日期（release_date / first_air_date，完整日期如 2026-09-15）
+  String releaseDate;
+
+  /// TMDB 剧集状态（Returning Series / Ended / …，参考图元数据行）
+  String tmdbStatus;
+
+  /// TMDB 总集数（number_of_episodes；参考图 "47 ep"）
+  int episodeCount;
+
+  /// 剧集标题（键 = 集号 1 起，值 = TMDB 每集标题，如「沈家灭门，嘉兰入林府」）
+  Map<int, String> episodeTitles;
+
   VodInfo({
     required this.id,
     this.name = '',
@@ -166,6 +186,12 @@ class VodInfo {
     this.runtime = 0,
     this.castList = const [],
     this.similarList = const [],
+    this.episodeStills = const {},
+    this.tmdbName = '',
+    this.releaseDate = '',
+    this.tmdbStatus = '',
+    this.episodeCount = 0,
+    this.episodeTitles = const {},
   });
 
   /// 当前线路下的剧集

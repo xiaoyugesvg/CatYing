@@ -25,6 +25,9 @@ class TmdbService extends GetxService {
   static const _base = 'https://api.themoviedb.org/3';
   static const _img = 'https://image.tmdb.org/t/p';
 
+  /// 内置默认 Key（用户提供；设置页未填写时自动生效，填写则覆盖）
+  static const _defaultApiKey = '6d6be1a1b3ab89a859e188abc279760a';
+
   /// 总开关（关掉后完全不走 TMDB）
   final enabled = true.obs;
 
@@ -56,6 +59,10 @@ class TmdbService extends GetxService {
 
   final isWorking = false.obs;
 
+  /// 最近一次 enrich 失败原因（供媒体库视图引导卡显示精确原因；
+  /// 未配置 Key / 搜索无结果 / 网络异常 分开提示）
+  final lastEnrichError = RxnString();
+
   Dio? _dioInstance;
   String _dioApiKey = '';
 
@@ -79,6 +86,10 @@ class TmdbService extends GetxService {
   Future<void> loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     apiKey.value = (prefs.getString(_keyApiKey) ?? '').trim();
+    if (apiKey.value.isEmpty) {
+      // 设置页未填写时用内置默认 Key，保证「配好即用」
+      apiKey.value = _defaultApiKey;
+    }
     autoScrape.value = prefs.getBool(_keyAuto) ?? true;
     showCast.value = prefs.getBool(_keyShowCast) ?? true;
     showSimilar.value = prefs.getBool(_keyShowSimilar) ?? true;
@@ -263,13 +274,16 @@ class TmdbService extends GetxService {
 
   Future<bool> enrich(VodInfo info, {bool forceNetwork = false}) async {
     if (!configured) {
+      lastEnrichError.value = '未配置 API Key';
       AppLog.instance.log('[TmdbService] enrich 跳过: 未配置 API Key');
       return false;
     }
     isWorking.value = true;
+    lastEnrichError.value = null;
     try {
       final title = cleanTitle(info.name);
       if (title.isEmpty) {
+        lastEnrichError.value = '片名清洗后为空';
         AppLog.instance.log('[TmdbService] enrich 失败: 清洗后片名为空 (原始="${info.name}")');
         return false;
       }
@@ -288,6 +302,17 @@ class TmdbService extends GetxService {
       if (cached != null && cached.isNotEmpty) {
         final type = cached['__type'] as String? ?? 'movie';
         _apply(info, type, cached);
+        // 恢复剧集剧照 + 集标题（缓存里带 __episode_stills / __episode_titles）
+        final stills = cached['__episode_stills'];
+        if (stills is Map && stills.isNotEmpty) {
+          info.episodeStills = stills.map((k, v) =>
+              MapEntry(int.tryParse('$k') ?? 0, '$v'));
+        }
+        final epTitles = cached['__episode_titles'];
+        if (epTitles is Map && epTitles.isNotEmpty) {
+          info.episodeTitles = epTitles.map(
+              (k, v) => MapEntry(int.tryParse('$k') ?? 0, '$v'));
+        }
         AppLog.instance.log('[TmdbService] enrich 命中磁盘缓存 (type=$type)');
         return true;
       }
@@ -301,6 +326,7 @@ class TmdbService extends GetxService {
       // 简单择优：有年份匹配加分，标题更长更像
       final best = _pickBetter(movie, tv, title, year);
       if (best == null) {
+        lastEnrichError.value = 'TMDB 未收录该片（搜索无结果）';
         AppLog.instance.log(
             '[TmdbService] enrich 失败: movie/tv 均无搜索结果（片名="$title" 年份=${year ?? "无"}）');
         return false;
@@ -308,23 +334,45 @@ class TmdbService extends GetxService {
 
       final detail = await _fetchDetail(best.$1, best.$2);
       if (detail == null) {
+        lastEnrichError.value = 'TMDB 详情接口无响应';
         AppLog.instance.log(
             '[TmdbService] enrich 失败: 详情接口无响应 (type=${best.$1} id=${best.$2})');
         return false;
       }
       _apply(info, best.$1, detail);
+      // 剧集：拉首季剧照+集标题 → 媒体库「剧集缩略图条」用真实剧照与标题（参考图缺口）
+      if (best.$1 == 'tv') {
+        final season = _firstSeasonNumber(detail);
+        final stills = await _fetchSeasonStills(best.$2, season);
+        if (stills.isNotEmpty) {
+          info.episodeStills =
+              stills.map((k, v) => MapEntry(k, v.still));
+          info.episodeTitles =
+              stills.map((k, v) => MapEntry(k, v.title));
+          detail['__episode_stills'] = {
+            for (final e in stills.entries) '${e.key}': e.value.still,
+          };
+          detail['__episode_titles'] = {
+            for (final e in stills.entries) '${e.key}': e.value.title,
+          };
+        }
+      }
       AppLog.instance.log(
           '[TmdbService] enrich 成功: type=${best.$1} id=${best.$2} '
           'rating=${info.rating} runtime=${info.runtime} '
-          'cast=${info.castList.length} similar=${info.similarList.length}');
+          'cast=${info.castList.length} similar=${info.similarList.length} '
+          'stills=${info.episodeStills.length} '
+          'epCount=${info.episodeCount} status=${info.tmdbStatus}');
       try {
         await CacheStore.instance.setJsonCache('tmdb:$ck', {
           ...detail,
           '__type': best.$1,
         });
       } catch (_) {}
+      lastEnrichError.value = null;
       return true;
     } catch (e) {
+      lastEnrichError.value = 'TMDB 连接失败（可检查网络或 API 代理）';
       AppLog.instance.log('[TmdbService] enrich 异常: $e');
       return false;
     } finally {
@@ -419,6 +467,56 @@ class TmdbService extends GetxService {
     } catch (_) {
       return null;
     }
+  }
+
+  /// 第一个有集的季号；seasons 缺数据时兜底 1
+  int _firstSeasonNumber(Map<String, dynamic> detail) {
+    final seasons = detail['seasons'];
+    if (seasons is List) {
+      for (final s in seasons) {
+        if (s is Map) {
+          final n = (s['season_number'] as num?)?.toInt() ?? 0;
+          final cnt = (s['episode_count'] as num?)?.toInt() ?? 0;
+          if (n > 0 && cnt > 0) return n;
+        }
+      }
+    }
+    return 1;
+  }
+
+  /// 拉取某一季的剧集剧照与标题（键 = 集号，值 = still URL + 集标题）。
+  /// 供媒体库刮削视图「剧集缩略图条」使用（参考图：缩略图 + 集标题）；
+  /// 失败静默，不影响刮削主流程。
+  Future<Map<int, ({String still, String title})>> _fetchSeasonStills(
+      String tvId, int season) async {
+    final out = <int, ({String still, String title})>{};
+    try {
+      final res = await _dio.get(
+        '${effectiveApiBase}/tv/$tvId/season/$season',
+        queryParameters: {'language': 'zh-CN'},
+      );
+      final data = Map<String, dynamic>.from(res.data as Map);
+      final eps = data['episodes'];
+      if (eps is List) {
+        for (final e in eps) {
+          if (e is! Map) continue;
+          final n = (e['episode_number'] as num?)?.toInt() ?? 0;
+          final still = (e['still_path'] ?? '').toString();
+          final title = (e['name'] ?? '').toString().trim();
+          if (n > 0) {
+            out[n] = (
+              still: still.isNotEmpty
+                  ? '${effectiveImgBase}/w300$still'
+                  : '',
+              title: title,
+            );
+          }
+        }
+      }
+    } catch (e) {
+      AppLog.instance.log('[TmdbService] 拉取剧集剧照失败: $e');
+    }
+    return out;
   }
 
   /// 解析 similar + recommendations（合并去重，按评分降序，最多 12 条）
@@ -598,6 +696,28 @@ class TmdbService extends GetxService {
     final yearStr = (d['release_date'] ?? d['first_air_date'] ?? '').toString();
     if (yearStr.length >= 4) {
       info.year = yearStr.substring(0, 4);
+    }
+    // TMDB 官方标题（zh-CN 语言下优先返回中文名）——媒体库刮削视图显示用
+    final tmdbTitle =
+        (d['title'] ?? d['name'] ?? '').toString().trim();
+    if (tmdbTitle.isNotEmpty) {
+      info.tmdbName = tmdbTitle;
+    }
+    // TMDB 播出日期（完整日期，媒体库视图元数据胶囊显示）
+    final dateStr =
+        (d['release_date'] ?? d['first_air_date'] ?? '').toString().trim();
+    if (dateStr.isNotEmpty) {
+      info.releaseDate = dateStr;
+    }
+    // TMDB 剧集状态（Returning Series / Ended / …，参考图元数据行）
+    final status = (d['status'] ?? '').toString().trim();
+    if (status.isNotEmpty) {
+      info.tmdbStatus = status;
+    }
+    // TMDB 总集数（参考图 "47 ep"）
+    final epCount = (d['number_of_episodes'] as num?)?.toInt() ?? 0;
+    if (epCount > 0) {
+      info.episodeCount = epCount;
     }
     final genres = (d['genres'] as List?) ?? const [];
     if (genres.isNotEmpty) {

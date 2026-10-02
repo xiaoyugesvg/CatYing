@@ -88,6 +88,10 @@ class PlayerPrefs {
   /// 刮削版仅在已刮削出数据时生效，否则自动回退默认版。
   final scrapedDetailLayout = false.obs;
 
+  /// 用户明确切回默认详情页（媒体库→默认后**持久**锁定，不再被自动刮削
+  /// 拉回媒体库模式；重进详情页依然生效）
+  final forceDefaultDetail = false.obs;
+
   // ============================================================
   // 首页列表外观（筛选菜单里的三项）
   // ============================================================
@@ -155,6 +159,7 @@ class PlayerPrefs {
     // 保留是为了不破坏外部可能的引用。可以随时删。
     fontScale.value = AppTheme.fontScale.value;
     scrapedDetailLayout.value = prefs.getBool('detail_scraped_layout') ?? false;
+    forceDefaultDetail.value = prefs.getBool('detail_force_default') ?? false;
 
     // 首页列表外观
     blockedCategories
@@ -333,6 +338,13 @@ class PlayerPrefs {
     scrapedDetailLayout.value = v;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('detail_scraped_layout', v);
+  }
+
+  /// 持久锁定「默认详情页」（媒体库→默认切换后不再被自动刮削拉回）
+  Future<void> setForceDefaultDetail(bool v) async {
+    forceDefaultDetail.value = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('detail_force_default', v);
   }
 
   Future<void> setWebviewForceLandscape(bool v) async {

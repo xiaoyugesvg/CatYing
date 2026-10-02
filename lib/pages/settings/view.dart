@@ -52,11 +52,13 @@ class _SettingsPageState extends State<SettingsPage> {
           // 与其他页一致：底部延伸到底（不预留 Home Indicator/留白）
           bottom: false,
           child: SingleChildScrollView(
+            // 底部预留悬浮菜单栏高度（barHeight 66 + bottomMargin 20 + 缓冲），
+            // 保证「关于」等卡片能完整滚到悬浮栏之上、不被遮挡
             padding: const EdgeInsets.fromLTRB(
               AppTheme.spacingLG,
               AppTheme.spacingLG,
               AppTheme.spacingLG,
-              0,
+              100,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -79,60 +81,60 @@ class _SettingsPageState extends State<SettingsPage> {
                 // 指向**统一主题页**（影视/直播/音乐 分区可调 + 阅读入口）。
                 // 原来的「外观」页只有浅色/深色/跟随系统，**没有配色方案** ——
                 // 这就是"外观设置只有三种模式、很单调"的原因。
-                title: '主题与外观',
+                title: '外观主题',
                 onTap: () => Get.to(() => const UnifiedThemeSettingsPage()),
               ),
-              const SizedBox(height: AppTheme.spacingSM),
+              const SizedBox(height: AppTheme.spacingMD),
               _categoryTile(
                 icon: Icons.dashboard_customize_outlined,
-                title: '主页页面',
+                title: '菜单设置',
                 onTap: () => Get.to(() => const HomePagesSettingsPage()),
               ),
-              const SizedBox(height: AppTheme.spacingXXL),
+              const SizedBox(height: AppTheme.spacingMD),
 
               // 数据源
               _categoryTile(
                 icon: Icons.movie_outlined,
-                title: '订阅与数据源',
+                title: '数据订阅',
                 onTap: () => Get.to(() => const DataSourceSettingsPage()),
               ),
-              const SizedBox(height: AppTheme.spacingXXL),
+              const SizedBox(height: AppTheme.spacingMD),
 
               // 播放
               _categoryTile(
                 icon: Icons.play_circle_outline,
-                title: '播放设置',
+                title: '播放管理',
                 onTap: () => Get.to(() => const PlaybackSettingsPage()),
               ),
-              const SizedBox(height: AppTheme.spacingSM),
+              const SizedBox(height: AppTheme.spacingMD),
               _categoryTile(
                 icon: Icons.live_tv_outlined,
-                title: '直播源管理',
+                title: '直播管理',
                 onTap: () => Get.toNamed('/live/settings'),
               ),
-              const SizedBox(height: AppTheme.spacingXXL),
+              const SizedBox(height: AppTheme.spacingMD),
 
               // 内容增强
               _categoryTile(
                 icon: Icons.subtitles,
-                title: '弹幕',
+                title: '弹幕管理',
                 onTap: () => Get.to(() => const DanmuSettingsPage()),
               ),
-              const SizedBox(height: AppTheme.spacingSM),
+              const SizedBox(height: AppTheme.spacingMD),
               _categoryTile(
                 icon: Icons.movie_filter_outlined,
-                title: '元数据刮削',
+                title: 'TMDB管理',
                 onTap: () => Get.to(() => const MetadataSettingsPage()),
               ),
-              const SizedBox(height: AppTheme.spacingXXL),
+              const SizedBox(height: AppTheme.spacingMD),
 
               // 存储与信息
               _categoryTile(
                 icon: Icons.cleaning_services_outlined,
-                title: '缓存',
+                title: '缓存管理',
                 onTap: () => Get.to(() => const CacheSettingsPage()),
               ),
-              const SizedBox(height: AppTheme.spacingSM),
+              const SizedBox(height: AppTheme.spacingMD),
               _categoryTile(
                 icon: Icons.info_outline,
                 title: '关于',
@@ -165,10 +167,11 @@ class _SettingsPageState extends State<SettingsPage> {
       child: AppCard(
         dense: true,
         child: Padding(
-          // 按你的要求：不要副标题，行内边距也放开一些，别那么紧
+          // 按你的要求：不要副标题，行内边距也放开一些，别那么紧；
+          // 卡片高度调小（15 → 10），间距统一由外层 SizedBox 控制
           padding: const EdgeInsets.symmetric(
             horizontal: AppTheme.spacingSM,
-            vertical: 15,
+            vertical: 10,
           ),
           child: Row(
             children: [

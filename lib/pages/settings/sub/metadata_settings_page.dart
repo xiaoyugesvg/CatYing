@@ -193,6 +193,10 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
                 onTap: () async {
                   final cur = PlayerPrefs.instance.scrapedDetailLayout.value;
                   await PlayerPrefs.instance.setScrapedDetailLayout(!cur);
+                  if (!cur) {
+                    // 切到媒体库：解除「默认锁定」，否则会被 forceDefaultDetail 拉回
+                    await PlayerPrefs.instance.setForceDefaultDetail(false);
+                  }
                 },
               ),
             ),

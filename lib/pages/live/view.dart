@@ -42,6 +42,9 @@ class _LivePageState extends State<LivePage> {
   /// iOS：与点播共用 IosAvPlayer（AvEngine）
   IosAvPlayer? _avPlayer;
   bool _fullscreen = false;
+
+  /// 短剧模式：纯竖屏全屏（复用 _fullscreen 全屏布局，方向锁 portraitUp）
+  bool _dramaMode = false;
   bool _audioMode = false;
   int _activeGroupIndex = 0;
   String? _playError;
@@ -927,6 +930,8 @@ class _LivePageState extends State<LivePage> {
               initialData: p.state.duration,
               builder: (context, dSnap) {
                 final dur = dSnap.data ?? Duration.zero;
+                // 纯 HLS 直播流 duration ≤0（LIVE 无时长）→ 显示「● 直播」，
+                // 不给进度条（直播不可 seek，画假条是误导）。
                 if (dur <= Duration.zero) {
                   return Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -951,30 +956,8 @@ class _LivePageState extends State<LivePage> {
                     ],
                   );
                 }
-                // ⚠️ 直播流 duration 一般 ≤0；报出**很短的正时长**（<5 分钟）
-                // 说明是测试流/点播片段/解析异常 —— 不放假进度条（会显示
-                // 00:00/00:15 这种假回看条），改成明确提示。
-                //（用户实测 iPTV 占位频道：黑屏 + 15 秒假进度条。）
-                if (dur < const Duration(minutes: 5)) {
-                  return Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        Icons.warning_amber_rounded,
-                        size: 14,
-                        color: Color(0xFFFFC107),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        '疑似非直播源（时长仅 ${_fmtClock(dur)}）',
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  );
-                }
+                // 其余（mp4 直链 / 点播类 m3u8 / DVR 回看等**有时长的流**）
+                // → 保留真实进度条，可拖动 seek（用户拍板：进度条功能保留）
                 return StreamBuilder<Duration>(
                   stream: p.stream.position,
                   initialData: p.state.position,
@@ -1231,21 +1214,24 @@ class _LivePageState extends State<LivePage> {
                         horizontal: 10,
                         vertical: 5,
                       ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                      // 用户要求：去掉 LIVE 角标的胶囊背景（黑/灰底都不要），
+                      // 完全透明，只留 LIVE 文字 + 红点悬浮在画面上。
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
                             'LIVE',
                             style: TextStyle(
-                              // 角标底是半透明黑（:865），文字必须白色
+                              // 无背景盒后文字直接压视频，加黑色阴影保证
+                              // 浅色画面下也看得清
                               color: Colors.white,
                               fontSize: AppTheme.fontCaption,
                               fontWeight: FontWeight.w700,
                               letterSpacing: 0.5,
+                              shadows: const [
+                                Shadow(color: Colors.black, blurRadius: 4),
+                                Shadow(color: Colors.black, blurRadius: 1),
+                              ],
                             ),
                           ),
                           SizedBox(width: 5),
@@ -1328,6 +1314,28 @@ class _LivePageState extends State<LivePage> {
                     icon: Icons.cast,
                     onTap: _toggleCast,
                     tooltip: '投屏',
+                  ),
+                  // 短剧模式：纯竖屏全屏（样式参考弹幕按钮「短」字）
+                  Tooltip(
+                    message: _dramaMode ? '退出短剧' : '短剧模式',
+                    preferBelow: false,
+                    child: GestureDetector(
+                      onTap: _toggleDramaMode,
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        width: 38,
+                        height: 38,
+                        alignment: Alignment.center,
+                        child: Text(
+                          '短',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: AppTheme.fontHeadline,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                   _VideoTopIcon(
                     icon: _fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
@@ -1697,32 +1705,64 @@ class _LivePageState extends State<LivePage> {
   }
 
   Future<void> _toggleFullscreen() async {
-    setState(() => _fullscreen = !_fullscreen);
+    // 短剧模式点全屏按钮 → 退出短剧全屏（还原方向）
+    if (_dramaMode) {
+      await _leaveFullscreenUi();
+      return;
+    }
+    if (_fullscreen) {
+      await _leaveFullscreenUi();
+      return;
+    }
+    await _enterFullscreenUi(portrait: false);
+  }
+
+  /// 短剧模式：纯竖屏全屏（复用全屏布局，方向锁 portraitUp）
+  Future<void> _toggleDramaMode() async {
+    if (_dramaMode) {
+      await _leaveFullscreenUi();
+      return;
+    }
+    // 若处于横屏全屏，先退出还原方向，再进竖屏
+    if (_fullscreen) {
+      await _leaveFullscreenUi();
+    }
+    await _enterFullscreenUi(portrait: true);
+  }
+
+  /// 进入全屏（portrait=false 横屏 / portrait=true 竖屏短剧）
+  Future<void> _enterFullscreenUi({required bool portrait}) async {
+    setState(() {
+      _fullscreen = true;
+      _dramaMode = portrait;
+    });
     // 通知全局：全屏时隐藏底部悬浮导航栏
-    if (_fullscreen) {
-      PlayerFullscreenController.instance.enter('live');
-    } else {
-      PlayerFullscreenController.instance.exit('live');
-    }
-    if (_fullscreen) {
-      await SystemUiController.enter(
-        'live',
-        mode: SystemUiMode.immersiveSticky,
-        // 横屏 + 跟随设备方向，避免只锁左/右横屏时布局错乱
-        orientations: Platform.isIOS
-            ? const [
-                DeviceOrientation.landscapeLeft,
-                DeviceOrientation.landscapeRight,
-              ]
-            : null,
-        // 视频黑底 → 浅色状态栏图标
-        overlayStyle: SystemUiOverlayStyle.light,
-      );
-    } else {
-      // 恢复**进入前**的方向与系统栏状态
-      // （原来无条件写死"竖屏+左右横屏"，会覆盖别的页面设定的方向锁）
-      await SystemUiController.exit('live');
-    }
+    PlayerFullscreenController.instance.enter('live');
+    await SystemUiController.enter(
+      'live',
+      mode: SystemUiMode.immersiveSticky,
+      // 横屏 = 左右横屏；竖屏短剧 = 仅竖屏
+      orientations: Platform.isIOS
+          ? (portrait
+              ? const [DeviceOrientation.portraitUp]
+              : const [
+                  DeviceOrientation.landscapeLeft,
+                  DeviceOrientation.landscapeRight,
+                ])
+          : null,
+      // 视频黑底 → 浅色状态栏图标
+      overlayStyle: SystemUiOverlayStyle.light,
+    );
+  }
+
+  /// 退出全屏 / 短剧（还原**进入前**的方向与系统栏状态）
+  Future<void> _leaveFullscreenUi() async {
+    setState(() {
+      _fullscreen = false;
+      _dramaMode = false;
+    });
+    PlayerFullscreenController.instance.exit('live');
+    await SystemUiController.exit('live');
   }
 
   Future<void> _showEpgSheet(BuildContext context, LiveController c) async {
