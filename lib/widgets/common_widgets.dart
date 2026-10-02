@@ -601,9 +601,11 @@ class SelectionModal<T> extends StatelessWidget {
 double bottomSheetKeyboardInset(BuildContext context) {
   final mq = MediaQuery.of(context);
   final keyboard = mq.viewInsets.bottom;
-  // 键盘没有时不要清零 —— 否则 sheet 会贴到 Home 指示条上，
-  // 底部按钮按不到。所以键盘为 0 时退回系统安全区。
-  return keyboard > 0 ? keyboard : mq.padding.bottom;
+  // 键盘没有时返回 0：底部弹窗**贴到屏幕最底**（Home Indicator 安全区
+  // 也覆盖），一屏显示更多内容 —— 用户要求"所有从下往上的弹窗延伸到底"。
+  // 原实现退回 `mq.padding.bottom`（留 34px 给小白条），弹窗底部总露一截，
+  // 用户实测后要求去掉。
+  return keyboard > 0 ? keyboard : 0;
 }
 
 /// 把 [child] 包一层键盘避让（给 bottom sheet 用）。

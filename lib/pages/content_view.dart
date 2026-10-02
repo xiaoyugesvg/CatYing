@@ -619,22 +619,13 @@ class _ContentViewState extends State<ContentView>
     //   · SafeArea 自动避让 Home Indicator
 
     return Scaffold(
-      // 主界面底部（Home Indicator 小白条下方）不再被灰色背景覆盖：
-      // Scaffold 背景改透明，主体背景由 Stack 底层的 Container 绘制，
-      // 且该 Container **不延伸到底部安全区** —— 小白条下方露出
-      // app.dart 的全局壁纸层（用户要求"小白条下面的灰色背景高度降为 0"）。
+      // 主界面背景全透明：不再画灰色背景层，
+      // 让 app.dart 的全局壁纸层（StackFit.expand）从顶部一路铺到屏幕底
+      //（含 Home Indicator 安全区）—— 用户要求"壁纸也延伸到底"。
+      // 各 tab 页（首页/收藏/历史等）自身 Scaffold 也是透明的，直接透出壁纸。
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
-          // 主界面底色（原来靠 Scaffold 默认背景铺满，含底部安全区；
-          // 现在只画到安全区上方，底部留透明）
-          Positioned(
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: MediaQuery.paddingOf(context).bottom,
-            child: Container(color: AppTheme.backgroundPrimary),
-          ),
           // 全局背景层已**上提到 `app.dart` 的 MaterialApp.builder**
           // （Navigator 之上）。原因：这层原来画在 ContentView 里，而它是
           // Navigator 的**第一条路由**，`MaterialPageRoute` 是 opaque 的 ——
