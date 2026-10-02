@@ -10,13 +10,13 @@ import '../../common/theme.dart';
 ///
 /// ── 为什么放在书架页而不是照搬 cmbok 的「我的」页 ────────────────
 /// cmbok 这三个设置页由 `me_page.dart` 打开，而那个页面依赖
-/// `update_service` / `url_launcher`（原生插件）—— 本项目按硬约束
+/// `url_launcher`（原生插件）—— 本项目按硬约束
 /// **没有引入**，所以不移植它。
 /// 阅读相关的设置改成从**书架右上角**进，路径更短也更贴合使用场景。
 ///
 /// ⚠️ 按用户要求**去掉了「关于」入口**：
-/// 原 cmbok 的「我的」页里还有 分享软件 / 检查更新 / 启动检查更新 /
-/// GitHub / QQ群 / 甜甜的小站 等一堆外链，那些是原作者的推广与自更新通道，
+/// 原 cmbok 的「我的」页里还有 分享软件 / GitHub / QQ群 / 甜甜的小站
+/// 等一堆外链，那些是原作者的推广与自更新通道，
 /// 在猫影里没有意义（反而会跳转到别人的仓库/群），已全部移除。
 Future<void> showReadingMenu(BuildContext context) {
   return showModalBottomSheet<void>(

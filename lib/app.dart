@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'common/theme.dart';
 import 'services/app_log.dart';
+import 'services/background_service.dart';
 import 'router/app_pages.dart';
 import 'services/detail_page_controller.dart';
 import 'services/player_fullscreen_controller.dart';
@@ -203,7 +204,34 @@ class _TVBoxAppState extends State<TVBoxApp> with WidgetsBindingObserver {
                   // `AppTheme.xxx` 且完全不依赖 `Theme.of`，外观变化后它会停在
                   // 旧色，重新打开即正常。要彻底消除需要把 `AppTheme.*` 静态取色
                   // 迁到 `Theme.of(context)` —— 那是全工程级重构。
-                  return out;
+                  // ── 全局壁纸层必须在 Navigator **之上** ────────────────────
+                  //
+                  // 🔴 原来这一层画在 `ContentView` 内部（它是 `home`，也就是
+                  // Navigator 的**第一条路由**）。而 `MaterialPageRoute` 是
+                  // **opaque** 的 —— 路由转场结束后 Flutter 只绘制最上层路由，
+                  // 下面那条（ContentView）根本不会被绘制。
+                  //
+                  // 后果：所有 `Get.to(...)` 推入的页面（设置子页、阅读阅读器、
+                  // 数据源/播放器/弹幕/元数据/缓存/关于…）的 Scaffold 都是
+                  // `Colors.transparent`（见 `settings_shared.dart` 的说明），
+                  // 它们**谁也透不到壁纸**，于是整页渲染成**纯黑**
+                  // （用户实测截图：设置主页面是灰的，点进去的子页全黑）。
+                  //
+                  // 放到这里之后：壁纸在 Navigator 之下、所有路由之上，
+                  // 任何透明 Scaffold 都能透出它，深浅两套场景也由
+                  // `BackgroundService` 按 `AppBrightness` 自动选。
+                  return Stack(
+                    fit: StackFit.expand,
+                    // 用非方向性的 Alignment：避免依赖 Directionality
+                    //（builder 这一层的位置在各 Flutter 版本间略有差异）
+                    alignment: Alignment.topLeft,
+                    children: [
+                      BackgroundService.instance.buildBackground(
+                        overlayAlpha: 0.3,
+                      ),
+                      out,
+                    ],
+                  );
                 },
                 ),
               );

@@ -4,16 +4,14 @@ import 'package:get/get.dart';
 import '../../../common/theme.dart';
 import '../../../common/theme_mode_store.dart';
 import '../../../services/background_service.dart';
-import '../../../services/rfw_theme_service.dart';
 import '../../../widgets/common_widgets.dart';
-import '../rfw_theme_page.dart';
 import '../wallpaper_page.dart';
 import 'settings_shared.dart';
 
 /// 设置 → 外观
 ///
 /// 从原 1807 行的 settings/view.dart 拆出。内容与行为保持一致：
-/// 外观模式 / 壁纸与背景 / 界面字号 / 首页主题。
+/// 外观模式 / 壁纸与背景 / 界面字号。
 class AppearanceSettingsPage extends StatefulWidget {
   const AppearanceSettingsPage({super.key});
 
@@ -38,11 +36,9 @@ class _AppearanceSettingsPageState extends State<AppearanceSettingsPage> {
     );
     if (selected == null) return;
     await ThemeModeStore.set(selected);
-    // 外观模式是唯一来源：它同时决定文字明暗与用哪一套背景。
-    // （旧版还要额外同步"手动覆盖"标记，方向反转后已不需要。）
-    await BackgroundService.instance.setAppearanceMode(
-      selected == ThemeMode.light ? AppearanceMode.light : AppearanceMode.dark,
-    );
+    // 外观模式是唯一来源：它同时决定文字明暗与用哪一套背景
+    //（`BackgroundService.currentSceneKey` 只读 `AppBrightness`，
+    //  所以这里不需要再额外通知壁纸服务）。
     if (mounted) setState(() {});
   }
 
@@ -104,7 +100,6 @@ class _AppearanceSettingsPageState extends State<AppearanceSettingsPage> {
   @override
   Widget build(BuildContext context) {
     final bg = BackgroundService.instance;
-    final rfw = RfwThemeService.instance;
 
     return SettingsSubPage(
       title: '外观',
@@ -131,7 +126,7 @@ class _AppearanceSettingsPageState extends State<AppearanceSettingsPage> {
           ],
         ),
         SettingsGroup(
-          title: '文字与首页',
+          title: '文字',
           children: [
             Obx(() => SettingsRow(
                   icon: Icons.text_fields,
@@ -139,16 +134,6 @@ class _AppearanceSettingsPageState extends State<AppearanceSettingsPage> {
                   value:
                       '${(AppTheme.fontScale.value * 100).round()}%',
                   onTap: _pickFontScale,
-                )),
-            Obx(() => SettingsRow(
-                  icon: Icons.dashboard_customize_outlined,
-                  title: '首页主题',
-                  value: rfw.enabled.value
-                      ? (rfw.currentThemeId.value.isEmpty
-                          ? '未选择主题'
-                          : '已启用')
-                      : '原生首页',
-                  onTap: () => Get.to(() => const RfwThemePage()),
                 )),
           ],
         ),

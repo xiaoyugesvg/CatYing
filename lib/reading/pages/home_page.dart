@@ -11,11 +11,9 @@ import '../services/browse_history_service.dart';
 import '../services/download_service.dart';
 import '../services/favorites_service.dart';
 import '../services/reading_progress_service.dart';
-import '../services/remote_config_service.dart';
 import '../../common/theme.dart';
 import '../../services/main_tab_controller.dart';
 import '../services/settings_service.dart';
-import '../services/update_service.dart';
 import '../source/adapter.dart';
 import '../source/source_manager.dart';
 import '../theme/jelly_theme.dart';
@@ -23,7 +21,6 @@ import '../widgets/bookshelf_icon.dart';
 import '../widgets/jelly_nav_bar.dart';
 import '../widgets/notification_popup.dart';
 import '../widgets/theme_background.dart';
-import '../widgets/update_dialog.dart';
 import 'book_reader_page.dart';
 import 'book_search_page.dart';
 import 'bookshelf_page.dart';
@@ -41,8 +38,10 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  bool _updateDialogShown = false; // 防止重复弹窗
   late NavTab _currentTab; // 当前选中的 tab
+
+  /// 书架页外部触发多选（底部导航「书架」上滑时自增，书架页监听进入多选模式）
+  final ValueNotifier<int> _shelfSelectTrigger = ValueNotifier(0);
 
   // NavTab 与导航项、页面的映射
   static final Map<NavTab, JellyNavItem> _tabNavItems = {
@@ -62,16 +61,12 @@ class _HomePageState extends State<HomePage> {
     _currentTab = SettingsService().defaultHomePage.toNavTab();
     // 监听设置变化（默认首页、可见 tab 变化时响应）
     SettingsService().addListener(_onSettingsChanged);
-    // 监听 RemoteConfigService 的版本检测结果，有新版本时弹窗
-    RemoteConfigService().addListener(_onRemoteConfigChanged);
-    // 首帧后检查一次（可能 init 时后台检测已完成）
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowUpdate());
   }
 
   @override
   void dispose() {
     SettingsService().removeListener(_onSettingsChanged);
-    RemoteConfigService().removeListener(_onRemoteConfigChanged);
+    _shelfSelectTrigger.dispose();
     super.dispose();
   }
 
@@ -83,24 +78,14 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _onRemoteConfigChanged() {
-    _maybeShowUpdate();
-  }
-
-  /// 有新版本且未弹窗过，则弹窗
-  void _maybeShowUpdate() {
-    if (!mounted || _updateDialogShown) return;
-    final service = RemoteConfigService();
-    if (!service.hasNewVersion || service.latestVersion == null) return;
-
-    _updateDialogShown = true;
-    final result = UpdateResult(
-      hasUpdate: true,
-      latestVersion: service.latestVersion,
-      releaseUrl: service.releaseUrl,
-      releaseBody: service.releaseBody,
-    );
-    showUpdateAvailableDialog(context, result);
+  /// 底部导航栏上滑回调：书架 tab 上滑唤起批量多选（参考 cmbok 引导）
+  void _onNavSlideUp(int index) {
+    final visible = SettingsService().visibleNavTabs;
+    if (index < 0 || index >= visible.length) return;
+    final tab = visible[index];
+    if (tab == NavTab.bookshelf) {
+      _shelfSelectTrigger.value += 1;
+    }
   }
 
   /// 底部导航栏长按回调：漫画 tab 续读最近漫画，图书 tab 续读最近图书
@@ -401,6 +386,7 @@ class _HomePageState extends State<HomePage> {
                 onTap: (index) =>
                     setState(() => _currentTab = visible[index]),
                 onLongPress: _onNavLongPress,
+                onSlideUp: _onNavSlideUp,
                 items: navItems,
               ),
             ),

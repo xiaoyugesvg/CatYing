@@ -45,7 +45,6 @@ import 'reading/services/view_mode.dart';
 import 'reading/services/book_view_mode.dart';
 import 'reading/source/source_manager.dart';
 import 'services/player_prefs.dart';
-import 'services/rfw_theme_service.dart';
 import 'services/tmdb_service.dart';
 import 'pages/search/controller.dart';
 import 'music/services/library_store.dart';
@@ -173,15 +172,11 @@ void main() async {
   await ThemeModeStore.load();
   final globalMode = ThemeModeStore.mode;
   GlobalThemeSync.pushToModules(globalMode);
-  final wantLight = switch (globalMode) {
-    ThemeMode.light => true,
-    ThemeMode.dark => false,
-    ThemeMode.system =>
-      WidgetsBinding.instance.platformDispatcher.platformBrightness ==
-          Brightness.light,
-  };
-  await BackgroundService.instance.setAppearanceMode(
-      wantLight ? AppearanceMode.light : AppearanceMode.dark);
+  // ⚠️ 这里原来还会 `await BackgroundService.setAppearanceMode(...)`，
+  // 把明暗**再写给壁纸服务一份** —— 那正是"第二套外观状态"的来源：
+  // 壁纸层会拿这份可能过期的快照去选场景。已彻底删除。
+  // 现在壁纸只读 `AppBrightness`
+  //（见 `BackgroundService.isLight` / `currentSceneKey`）。
 
   // ── 随机图源：启动时取一张（每次冷启动背景都不一样）─────────────
   //
@@ -216,10 +211,6 @@ void main() async {
   // TMDB 智能刮削
   Get.put<TmdbService>(TmdbService(), permanent: true);
   await TmdbService.instance.loadPrefs();
-
-  // RFW 自定义首页主题引擎（.rfwtxt 主题文件管理 + 解析）
-  Get.put<RfwThemeService>(RfwThemeService.instance, permanent: true);
-  await RfwThemeService.instance.init();
 
   // 初始化窗口管理器（桌面端）- 对应 Swift .defaultSize(width: 1200, height: 800)
   try {

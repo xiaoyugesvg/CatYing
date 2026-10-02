@@ -238,7 +238,12 @@ class _LivePageState extends State<LivePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _fullscreen ? Colors.black : AppTheme.backgroundPrimary,
+      // 全屏时纯黑；普通模式**透明**，与首页/史藏/设置/阅读一致 ——
+      // 让 `app.dart` 里那层全局壁纸透出来。
+      // 原来这里写的是不透明的 `AppTheme.backgroundPrimary`，于是
+      // "同一排 tab，直播是米白、其它是壁纸色"，看起来像两个 App
+      //（用户截图对比过）。
+      backgroundColor: _fullscreen ? Colors.black : Colors.transparent,
       body: GetBuilder<LiveController>(
         builder: (c) {
           final groups = c.groups;
@@ -731,6 +736,169 @@ class _LivePageState extends State<LivePage> {
     // 进入听剧时保持播放（后台可续播由 UIBackgroundModes=audio 保证）
   }
 
+  /// iOS 直播专用：本地静音状态（`AppPlayerStreams` 没有 volume 流，
+  /// 所以静音按钮只能记在本地，初始音量从 `state.volume` 读）。
+  bool _iosMuted = false;
+
+  /// iOS 直播的底部工具栏。
+  ///
+  /// ── 为什么必须自己写 ──────────────────────────────────────────
+  /// 直播画面在 iOS 上走 `AppVideoView(player: _avPlayer!)` —— 原生 AVPlayer
+  /// 平台视图；而 media_kit 的 `AdaptiveVideoControls`（进度条 + 工具栏）
+  /// **只挂在非 iOS 的 `Video(...)` 分支上**。于是 iOS 直播是
+  /// "有画面、零控件"：用户实测「直播播放器没有下面的进度条和下部的工具栏」。
+  ///
+  /// ── 直播的"进度条"该怎么显示 ──────────────────────────────────
+  /// 直播流没有可 seek 的时长，画一根假进度条是欺骗：
+  ///   · `duration > 0`（回看 / DVR 窗口）→ 显示真实进度条且可拖动
+  ///   · 否则 → 显示「● 直播」标记
+  /// 播放/暂停与静音对任何直播流都有意义，始终显示。
+  Widget _buildIosLiveControls() {
+    final p = _avPlayer!;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(6, 12, 6, 2),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.transparent,
+            Colors.black.withValues(alpha: 0.62),
+          ],
+        ),
+      ),
+      child: Row(
+        children: [
+          StreamBuilder<bool>(
+            stream: p.stream.playing,
+            initialData: p.state.playing,
+            builder: (context, snap) {
+              final playing = snap.data ?? false;
+              return IconButton(
+                iconSize: 22,
+                color: Colors.white,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
+                tooltip: playing ? '暂停' : '播放',
+                icon: Icon(playing ? Icons.pause : Icons.play_arrow_rounded),
+                onPressed: () => playing ? p.pause() : p.play(),
+              );
+            },
+          ),
+          Expanded(
+            child: StreamBuilder<Duration>(
+              stream: p.stream.duration,
+              initialData: p.state.duration,
+              builder: (context, dSnap) {
+                final dur = dSnap.data ?? Duration.zero;
+                if (dur <= Duration.zero) {
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFFF5252),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const Text(
+                        '直播',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  );
+                }
+                return StreamBuilder<Duration>(
+                  stream: p.stream.position,
+                  initialData: p.state.position,
+                  builder: (context, pSnap) {
+                    final pos = pSnap.data ?? Duration.zero;
+                    final v = (pos.inMilliseconds / dur.inMilliseconds)
+                        .clamp(0.0, 1.0);
+                    return Row(
+                      children: [
+                        Text(
+                          _fmtClock(pos),
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                          ),
+                        ),
+                        Expanded(
+                          child: SliderTheme(
+                            data: SliderThemeData(
+                              trackHeight: 2.5,
+                              thumbShape: const RoundSliderThumbShape(
+                                enabledThumbRadius: 6,
+                              ),
+                              overlayShape: const RoundSliderOverlayShape(
+                                overlayRadius: 12,
+                              ),
+                              activeTrackColor: Colors.white,
+                              inactiveTrackColor:
+                                  Colors.white.withValues(alpha: 0.3),
+                              thumbColor: Colors.white,
+                            ),
+                            child: Slider(
+                              value: v,
+                              onChanged: (x) => p.seek(
+                                Duration(
+                                  milliseconds:
+                                      (dur.inMilliseconds * x).round(),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Text(
+                          _fmtClock(dur),
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          IconButton(
+            iconSize: 20,
+            color: Colors.white,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
+            tooltip: _iosMuted ? '取消静音' : '静音',
+            icon: Icon(
+              _iosMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+            ),
+            onPressed: () {
+              final next = !_iosMuted;
+              setState(() => _iosMuted = next);
+              p.setVolume(next ? 0 : 100);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// mm:ss（超过 1 小时则 h:mm:ss）
+  static String _fmtClock(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+
   /// 全屏：只显示视频画面（横屏铺满），左上返回、右上频道名+退出全屏
   /// 视频层（常驻 Stack 首位）：全屏/普通切换只改外层高度，Video 永不重建
   /// 修复直播全屏后"有声音没画面"（同一 VideoController 反复 attach 黑屏）
@@ -738,22 +906,35 @@ class _LivePageState extends State<LivePage> {
     final pad = MediaQuery.of(context).padding;
     // 画面已在状态栏黑边之下，控件只需少量上边距，不必再吃 safe-area
     final topInset = _fullscreen ? (pad.top > 0 ? pad.top : 12.0) : 8.0;
+
+    // 🔴 iOS 上画面是**原生平台视图**（`AppVideoView` → AVPlayer / WKWebView）。
+    // 平台视图由引擎单独合成到原生视图层级里，被 push 上去的 opaque 路由
+    // （设置子页 / 数据源 / 播放器 / 缓存…）**不会**自动把它摘掉。
+    // 用户实测：「打开直播再进设置，设置页里能看到直播界面」。
+    // 所以只要本页所在路由不再是栈顶，就用 Offstage 把画面从图层树里摘掉
+    //（引擎不再提交该平台视图的图层 → 原生视图被移除）。
+    // 只隐藏画面，**不 dispose 播放器**，音频与播放进度都保留。
+    final routeIsCurrent = ModalRoute.of(context)?.isCurrent ?? true;
+    final isIosAv = Platform.isIOS && _avPlayer != null;
+
     return Container(
       color: Colors.black,
       child: Stack(
         fit: StackFit.expand,
         children: [
           // 视频层常驻（听剧时透明隐藏，不从树上摘掉，保证音轨不断、退出听剧能恢复画面）
-          if ((Platform.isIOS && _avPlayer != null) ||
-              (_videoController != null && current != null))
-            Opacity(
-              opacity: _audioMode ? 0.0 : 1.0,
-              child: (Platform.isIOS && _avPlayer != null)
-                  ? AppVideoView(player: _avPlayer!)
-                  : Video(
-                      controller: _videoController!,
-                      controls: AdaptiveVideoControls,
-                    ),
+          if (isIosAv || (_videoController != null && current != null))
+            Offstage(
+              offstage: !routeIsCurrent,
+              child: Opacity(
+                opacity: _audioMode ? 0.0 : 1.0,
+                child: isIosAv
+                    ? AppVideoView(player: _avPlayer!)
+                    : Video(
+                        controller: _videoController!,
+                        controls: AdaptiveVideoControls,
+                      ),
+              ),
             )
           else
             Center(
@@ -838,6 +1019,16 @@ class _LivePageState extends State<LivePage> {
                   ),
                 ),
               ),
+            ),
+          // iOS 直播：补上原生平台视图**缺失的底部工具栏**
+          //（进度条 / 「直播」标记 + 播放暂停 + 静音）。理由见
+          // `_buildIosLiveControls` 的注释。
+          if (isIosAv && !_audioMode && routeIsCurrent)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: _buildIosLiveControls(),
             ),
           if (_audioMode) _buildAudioModeOverlay(c, current),
           // 普通模式左上：返回 + LIVE 角标

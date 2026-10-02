@@ -5,18 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../common/theme.dart';
 import '../../services/player_prefs.dart';
-import '../shelf/controller.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
-import 'package:rfw/rfw.dart' show DynamicMap;
 import '../../services/api_config.dart';
-import '../../services/app_log.dart';
-import '../../services/rfw_theme_service.dart';
 import '../../models/movie.dart';
 import '../../models/movie_sort.dart';
-import '../../router/app_pages.dart';
-import '../../services/main_tab_controller.dart';
 import '../../widgets/common_widgets.dart';
-import '../../widgets/rfw/rfw_home_view.dart';
 import '../../widgets/source_switch_sheet.dart';
 import '../../widgets/vod_card.dart';
 import '../webview/view.dart';
@@ -36,12 +29,6 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final HomeController _controller = Get.put(HomeController());
   bool _isReconnecting = false;
-
-  /// 筛选面板显隐。
-  ///
-  /// 现在筛选走「分类栏右端筛选按钮 → 底部弹出菜单」（见 _openFilterSheet）。
-  /// 这个字段只作为 RFW 主题数据契约里的开关位保留，供自定义主题使用。
-  bool _showFilters = false;
 
   @override
   void initState() {
@@ -279,7 +266,12 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  /// 三项菜单：分类屏蔽 / 隐藏筛选 / 切换布局
+  /// 弹出的选项菜单：筛选条件 / 分类屏蔽 / 隐藏筛选 / 切换布局
+  ///
+  /// ⚠️ 「筛选条件」这一项是**必须保留的功能入口**：底部筛选菜单
+  /// （[_openFilterSheet]）原来只挂在 RFW 主题的 `toggleFilters` 事件上，
+  /// RFW 主题整套删掉后它就没人调用了。为了"删 RFW 但其余功能不变"，
+  /// 这里给它补了一个原生入口 —— RFW 可以删，筛选能力不能丢。
   Future<void> _openOptionsMenu() async {
     final prefs = PlayerPrefs.instance;
     await showModalBottomSheet<void>(
@@ -302,6 +294,15 @@ class _HomePageState extends State<HomePage> {
                   color: AppTheme.textTertiary.withValues(alpha: 0.35),
                   borderRadius: BorderRadius.circular(2),
                 ),
+              ),
+              // 底部筛选菜单的原生入口（原来只有 RFW 主题能调起来，见方法注释）
+              _optionTile(
+                icon: Icons.tune,
+                label: '筛选条件',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openFilterSheet();
+                },
               ),
               _optionTile(
                 icon: Icons.block,
@@ -753,18 +754,8 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-
   Widget _buildContentArea() {
     return Obx(() {
-      // ---- RFW 自定义首页主题 ----
-      // 启用且有可用主题时，内容区交给主题渲染；主题坏了/没选主题则原样回退。
-      // 放在这里（而不是 build 顶层）的原因：主题只应替换内容区，
-      // 顶部搜索栏、分类 tab、筛选栏仍由 App 提供，保证这些原生入口始终可用。
-      final rfwSource = RfwThemeService.instance.currentThemeSource;
-      if (rfwSource.isNotEmpty) {
-        return _buildRfwContentArea(rfwSource);
-      }
-
       // 全部 Rx 在 Obx 闭包顶部读取，LayoutBuilder 内不再访问 Rx
       final isLoading = _controller.isLoading.value;
       final errorMsg = _controller.errorMessage.value;
@@ -938,189 +929,6 @@ class _HomePageState extends State<HomePage> {
         }),
       );
     });
-  }
-
-  // ============================================================
-  // RFW 自定义首页主题
-  // ============================================================
-
-  /// 用当前主题渲染内容区。
-  ///
-  /// 主题可用的数据见 [RfwDataContract.build]；事件名来自 PeekPro 主题模板
-  /// （openItem / refresh / selectType / selectFilter / openSearch /
-  /// showSourcePicker / openHistory / openFavorite / openPush /
-  /// showCategoryPicker / showDisplayStylePicker / showFilterPicker /
-  /// longPressItem / openRecommend / toggleFilters / showApiConfigPicker /
-  /// navigateBack）。
-  Widget _buildRfwContentArea(String themeSource) {
-    final c = _controller;
-    final videos = c.videos.toList();
-    final sorts = c.sorts.toList();
-    final itemMaps = <Map<String, Object?>>[
-      for (final v in videos)
-        <String, Object?>{
-          'id': v.id,
-          'name': v.name,
-          'pic': v.pic,
-          'remarks': v.note,
-          'year': v.year,
-          'typeName': v.type,
-          'typeId': v.tid,
-          'sourceKey': v.sourceKey,
-        },
-    ];
-    final classMaps = <Map<String, Object?>>[
-      for (final s in sorts)
-        <String, Object?>{
-          'typeId': s.id,
-          'typeName': s.name,
-          'selected': s.id == c.selectedSort.value?.id,
-        },
-    ];
-    final data = RfwDataContract.build(
-      items: itemMaps,
-      classes: classMaps,
-      source: ApiConfig.instance.homeSourceBean.value?.name ?? '',
-      loading: c.isLoading.value,
-      errorMessage: c.errorMessage.value ?? '',
-      isLandscape:
-          MediaQuery.maybeOf(context)?.orientation == Orientation.landscape,
-      selectedTypeId: c.selectedSort.value?.id ?? '',
-      showFilters: _showFilters,
-    );
-
-    return RfwHomeView(
-      themeSource: themeSource,
-      data: data,
-      onEvent: _onRfwEvent,
-      // 主题渲染失败时回退原生网格。
-      // 注意不能递归回 _buildContentArea（会无限递归），所以这里用
-      // 「切回原生」的更简单做法：显示提示 + 让用户关掉主题。
-      fallback: _buildRfwFallback(),
-    );
-  }
-
-  /// 主题不可用时的兜底视图
-  Widget _buildRfwFallback() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.dashboard_customize_outlined,
-                size: 40, color: AppTheme.textTertiary),
-            const SizedBox(height: 12),
-            Text(
-              '当前主题无法渲染',
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontBody),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              RfwThemeService.instance.lastError.value.isEmpty
-                  ? '主题缺少必要组件或 root 定义'
-                  : RfwThemeService.instance.lastError.value,
-              textAlign: TextAlign.center,
-              maxLines: 4,
-              overflow: TextOverflow.ellipsis,
-              style:
-                  TextStyle(color: AppTheme.textTertiary, fontSize: AppTheme.fontFootnote),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 把主题事件映射到 App 的实际动作。
-  ///
-  /// 事件参数用 `args.xxx` 从主题传入；缺失时尽量用当前状态兜底，
-  /// 避免因主题少传参数就整个点不动。
-  void _onRfwEvent(String name, DynamicMap args) {
-    final c = _controller;
-    switch (name) {
-      case 'openItem':
-      case 'openRecommend':
-      case 'longPressItem':
-        final id = '${args['id'] ?? args['vodId'] ?? ''}';
-        final video = c.videos.firstWhereOrNull((v) => v.id == id) ??
-            c.homeVideos.firstWhereOrNull((v) => v.id == id);
-        if (video != null) {
-          Get.toNamed(AppPages.detail, arguments: video);
-        }
-        break;
-
-      case 'refresh':
-        c.refresh();
-        break;
-
-      case 'selectType':
-        final typeId = '${args['typeId'] ?? ''}';
-        final sort = c.sorts.firstWhereOrNull((s) => s.id == typeId);
-        if (sort != null) c.selectSort(sort);
-        break;
-
-      case 'selectFilter':
-        final key = '${args['key'] ?? ''}';
-        final value = '${args['value'] ?? ''}';
-        if (key.isNotEmpty) c.selectFilter(key, value);
-        break;
-
-      case 'toggleFilters':
-        // RFW 主题点了"筛选" → 直接打开底部筛选菜单（与右上筛选按钮一致）
-        setState(() => _showFilters = !_showFilters);
-        _openFilterSheet();
-        break;
-
-      case 'showSourcePicker':
-        // 真实入口：底部源切换弹窗（与顶栏"换源"同一实现）
-        SourceSwitchSheet.show(context);
-        break;
-
-      case 'showCategoryPicker':
-      case 'showFilterPicker':
-        // 主题里的「筛选」→ 打开三项菜单（分类屏蔽/隐藏筛选/切换布局）
-        _openOptionsMenu();
-        break;
-
-      case 'showDisplayStylePicker':
-        // 主题里的「布局」→ 打开列数选择
-        _openLayoutSheet();
-        break;
-
-      case 'showApiConfigPicker':
-        // 暂时没有原生的接口配置选择器，复用「换源」入口，
-        // 避免主题按钮点了完全没反应。
-        SourceSwitchSheet.show(context);
-        break;
-
-      case 'openSearch':
-        Get.toNamed(AppPages.search);
-        break;
-
-      case 'openHistory':
-        // 「史藏」合并页：切到该 tab 并选中内部「播放历史」
-        ShelfController.instance.tab.value = 0;
-        MainTabController.instance.select(1);
-        break;
-
-      case 'openFavorite':
-        // 「史藏」合并页：切到该 tab 并选中内部「我的收藏」
-        ShelfController.instance.tab.value = 1;
-        MainTabController.instance.select(1);
-        break;
-
-      case 'openPush':
-        MainTabController.instance.select(4);
-        break;
-
-      case 'navigateBack':
-        Navigator.of(context).maybePop();
-        break;
-
-      default:
-        AppLog.instance.log('[RFW] 未处理的事件: $name args=$args');
-    }
   }
 
   void _openConfigCenterUrl(Video video) {

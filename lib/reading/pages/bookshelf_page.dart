@@ -23,6 +23,7 @@ import '../services/settings_service.dart';
 import '../utils/list_pagination.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/source_cover_image.dart';
+import '../widgets/guide_overlay.dart';
 import '../widgets/jelly_bookshelf_dialog.dart';
 import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_search_bar.dart';
@@ -95,6 +96,7 @@ class _BookshelfPageState extends State<BookshelfPage>
   // 多选模式
   bool _isSelecting = false;
   final Set<String> _selectedItemIds = {};
+  bool _guideShown = false; // 新手引导已展示标记
 
   // 搜索浮层
   late final AnimationController _searchAnim;
@@ -127,6 +129,16 @@ class _BookshelfPageState extends State<BookshelfPage>
         setState(() => _currentShelfId = shelves.first.id);
       }
     });
+    _maybeTriggerGuide();
+  }
+
+  /// 首次激活时展示书架页新手引导（仅一次）
+  void _maybeTriggerGuide() {
+    if (_guideShown || !widget.isActive) return;
+    _guideShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybeShowGuide(context, GuideGroups.bookshelf);
+    });
   }
 
   @override
@@ -136,6 +148,7 @@ class _BookshelfPageState extends State<BookshelfPage>
       _hasShownEntrance = true;
       setState(() => _session++);
     }
+    if (widget.isActive && !oldWidget.isActive) _maybeTriggerGuide();
   }
 
   @override

@@ -6,7 +6,6 @@ import '../common/theme.dart';
 import '../common/constants.dart';
 import '../services/app_state.dart';
 import '../services/app_log.dart';
-import '../services/background_service.dart';
 import 'home/view.dart';
 import 'shelf/view.dart';
 import '../reading/widgets/jelly_nav_bar.dart';
@@ -622,12 +621,12 @@ class _ContentViewState extends State<ContentView>
     return Scaffold(
       body: Stack(
         children: [
-          // 全局背景层 - 对应 TV-release CustomWallView
-          // 4 个内置渐变 + 用户上传自定义图片, 通过 BackgroundService 切换
-          // 5 个 tab 页背景透明 (后述) 让其透出
-          Positioned.fill(
-            child: BackgroundService.instance.buildBackground(overlayAlpha: 0.3),
-          ),
+          // 全局背景层已**上提到 `app.dart` 的 MaterialApp.builder**
+          // （Navigator 之上）。原因：这层原来画在 ContentView 里，而它是
+          // Navigator 的**第一条路由**，`MaterialPageRoute` 是 opaque 的 ——
+          // 推入子页后 Flutter 不再绘制 ContentView，于是所有透明 Scaffold
+          // 的子页（设置子页/数据源/播放器/缓存/关于…）渲染成**纯黑**。
+          // 放这里只能让 5 个 tab 透出壁纸，管不到被 push 的页面。
           // 5 个 tab 页 - 全屏铺满, 不做底部预留, 悬浮栏浮于其上
           // 关键: IndexedStack 的 index 必须包在 Obx 里, 切 tab 才生效
           //

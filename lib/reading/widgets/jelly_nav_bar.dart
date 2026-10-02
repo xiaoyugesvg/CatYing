@@ -9,6 +9,9 @@ class JellyNavBar extends StatefulWidget {
   final int currentIndex;
   final Function(int) onTap;
   final Function(int)? onLongPress;
+
+  /// 导航项上滑手势（书架 tab 上滑唤起批量多选）
+  final Function(int)? onSlideUp;
   final List<JellyNavItem> items;
   final bool floating;
 
@@ -28,6 +31,7 @@ class JellyNavBar extends StatefulWidget {
     required this.currentIndex,
     required this.onTap,
     this.onLongPress,
+    this.onSlideUp,
     required this.items,
     this.floating = false,
     this.palette,
@@ -328,6 +332,9 @@ class _JellyNavBarState extends State<JellyNavBar>
                       onLongPress: widget.onLongPress != null
                           ? () => widget.onLongPress!(index)
                           : null,
+                      onSlideUp: widget.onSlideUp != null
+                          ? () => widget.onSlideUp!(index)
+                          : null,
                       palette: _pal,
                       iconOnly: iconOnly,
                       iconSize: iconSize,
@@ -349,6 +356,7 @@ class _JellyNavItem extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+  final VoidCallback? onSlideUp;
   final bool iconOnly;
   final double iconSize;
   final JellyPalette palette;
@@ -359,6 +367,7 @@ class _JellyNavItem extends StatelessWidget {
     required this.onTap,
     required this.palette,
     this.onLongPress,
+    this.onSlideUp,
     this.iconOnly = false,
     this.iconSize = 22.0,
   });
@@ -372,39 +381,47 @@ class _JellyNavItem extends StatelessWidget {
         ? FloatingNavSpec.selectedColor(isDark, palette)
         : FloatingNavSpec.unselectedColor(isDark, palette);
 
-    return InkWell(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      splashColor: Colors.transparent,
-      highlightColor: Colors.transparent,
-      child: Center(
-        child: iconOnly
-            ? _buildIcon(color)
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _buildIcon(color),
-                  const SizedBox(height: FloatingNavSpec.iconLabelGap),
-                  Text(
-                    item.label,
-                    // ⚠️ 必须限一行 + 省略号。
-                    // 阅读栏可能到 6 项，每项宽度只有
-                    // (屏宽 - 边距) / 项数 ≈ 65px。
-                    // 标签一旦折成两行，总高度就会超过胶囊可用高度
-                    // （72 - 上下内边距），表现为文字被切一半或溢出条纹。
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: color,
-                      fontSize: FloatingNavSpec.labelSize,
-                      // w600 = 音乐/影视的文字权重，统一后不会有一处偏粗
-                      fontWeight: FloatingNavSpec.labelWeight,
+    return GestureDetector(
+      // 上滑手势：唤起批量多选等（书架 tab 用；与长按并存）
+      onVerticalDragEnd: onSlideUp == null
+          ? null
+          : (details) {
+              if ((details.primaryVelocity ?? 0) < -250) onSlideUp!();
+            },
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        child: Center(
+          child: iconOnly
+              ? _buildIcon(color)
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _buildIcon(color),
+                    const SizedBox(height: FloatingNavSpec.iconLabelGap),
+                    Text(
+                      item.label,
+                      // ⚠️ 必须限一行 + 省略号。
+                      // 阅读栏可能到 6 项，每项宽度只有
+                      // (屏宽 - 边距) / 项数 ≈ 65px。
+                      // 标签一旦折成两行，总高度就会超过胶囊可用高度
+                      // （72 - 上下内边距），表现为文字被切一半或溢出条纹。
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: color,
+                        fontSize: FloatingNavSpec.labelSize,
+                        // w600 = 音乐/影视的文字权重，统一后不会有一处偏粗
+                        fontWeight: FloatingNavSpec.labelWeight,
+                      ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
+        ),
       ),
     );
   }

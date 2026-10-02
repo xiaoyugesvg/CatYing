@@ -6,10 +6,8 @@ import '../../../common/module_theme_sync.dart';
 import '../../../common/theme.dart';
 import '../../../common/theme_mode_store.dart';
 import '../../../services/background_service.dart';
-import '../../../services/rfw_theme_service.dart';
 import '../../../reading/services/settings_service.dart';
 import '../../../reading/theme/jelly_palette.dart';
-import '../rfw_theme_page.dart';
 import '../wallpaper_page.dart';
 import 'settings_shared.dart';
 import '../../../widgets/app_toast.dart';
@@ -62,14 +60,14 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
         _wallpaperCard(),
         const SizedBox(height: AppTheme.spacingMD),
 
-        // ── 文字与首页 ────────────────────────────────────────
+        // ── 文字 ──────────────────────────────────────────────
         //
-        // ⚠️ 这两个入口原本**只**在 `sub/appearance_settings_page.dart` 里，
+        // ⚠️ 这个入口原本**只**在 `sub/appearance_settings_page.dart` 里，
         // 而那个页在设置菜单改指到本页之后就再没有任何导航入口了
         //（全仓库无人 import、无人 `Get.to`）——
-        // 于是"界面字号"和"首页主题"两个已实现的功能在 UI 上**完全点不到**。
+        // 于是"界面字号"这个已实现的功能在 UI 上**完全点不到**。
         // 与 `_wallpaperCard` 上面那段注释是同一类事故，这里一并搬回来。
-        _textAndHomeCard(),
+        _textCard(),
         const SizedBox(height: AppTheme.spacingMD),
 
         // ── 影视 · 直播 ───────────────────────────────────────
@@ -158,7 +156,7 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
     await store.resetAll();
     // 3) 明暗回深色（与出厂的默认壁纸「深邃黑」配套）
     await ThemeModeStore.set(ThemeMode.dark);
-    await BackgroundService.instance.setAppearanceMode(AppearanceMode.dark);
+    // 壁纸会自动切到深色那套（原来的 setAppearanceMode 已删除）
     // 4) 统一把调色板推给 AppTheme + 音乐
     await _afterPresetChanged();
     if (!mounted) return;
@@ -227,21 +225,11 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
                     _ => ThemeMode.system,
                   };
                   // 壁纸那套按"实际该显示的明暗"选：
-                  //   浅色→light；深色→dark；跟随系统→看平台亮度
-                  final wantLight = switch (target) {
-                    ThemeMode.light => true,
-                    ThemeMode.dark => false,
-                    ThemeMode.system =>
-                      MediaQuery.of(context).platformBrightness ==
-                          Brightness.light,
-                  };
-                  // 1) 改全局明暗（内部会自动同步给音乐/阅读）
+                  // 改全局明暗（内部会自动同步给音乐 / 阅读）。
+                  // 壁纸**不需要**单独同步：`BackgroundService.currentSceneKey`
+                  // 只读 `AppBrightness`，这里改完它自动切到对应那套场景。
                   await ThemeModeStore.set(target);
-                  // 2) 改壁纸外观模式（壁纸只有 light/dark 两套）
-                  await BackgroundService.instance.setAppearanceMode(
-                    wantLight ? AppearanceMode.light : AppearanceMode.dark,
-                  );
-                  // 3) 立刻刷新当前页面 UI
+                  // 立刻刷新当前页面 UI
                   if (mounted) setState(() {});
                 },
               );
@@ -316,12 +304,11 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
   }
 
   // ============================================================
-  // 文字与首页（界面字号 / 首页主题）
+  // 文字（界面字号）
   // ============================================================
 
-  /// 从被孤立的旧「外观」页搬回来的两个入口（见 build 里的说明）。
-  Widget _textAndHomeCard() {
-    final rfw = RfwThemeService.instance;
+  /// 从被孤立的旧「外观」页搬回来的入口（见 build 里的说明）。
+  Widget _textCard() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       decoration: BoxDecoration(
@@ -335,14 +322,6 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
             title: '界面字号',
             value: '${(AppTheme.fontScale.value * 100).round()}%',
             onTap: _pickFontScale,
-          ),
-          SettingsRow(
-            icon: Icons.dashboard_customize_outlined,
-            title: '首页主题',
-            value: rfw.enabled.value
-                ? (rfw.currentThemeId.value.isEmpty ? '未选择主题' : '已启用')
-                : '原生首页',
-            onTap: () => Get.to(() => const RfwThemePage()),
           ),
         ],
       ),

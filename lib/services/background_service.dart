@@ -44,16 +44,6 @@ enum WallpaperSourceType {
   gradient,
 }
 
-/// 外观模式。与背景联动时，由背景自动决定文字明暗；
-/// 手动覆盖时用户可强制浅色/深色文字（自定义壁纸明暗不确定，必须能手动切）。
-enum AppearanceMode {
-  /// 深色界面（浅色文字）
-  dark,
-
-  /// 浅色界面（深色文字）
-  light,
-}
-
 /// 全局背景服务 - 对应 TV-release CustomWallView
 ///
 /// 4 个内置渐变(深邃黑/极光紫/赛博蓝/暖阳橙) + 皎月白 + 自定义图片 + 网络图片
@@ -72,10 +62,44 @@ class BackgroundService extends GetxService {
   static const String _opacityKey = 'wallpaper_opacity';
   static const String _blurKey = 'wallpaper_blur';
   static const String _overlayKey = 'wallpaper_overlay';
-  static const String _appearanceKey = 'appearance_mode';
 
   /// 每模式场景的持久化前缀：wallpaper_scene_dark / wallpaper_scene_light
   static const String _sceneKeyPrefix = 'wallpaper_scene_';
+
+  /// 深色专用的 4 套渐变（出现在浅色场景里 = 历史脏数据）
+  static const Set<BackgroundChoice> _darkGradientChoices = {
+    BackgroundChoice.builtin1,
+    BackgroundChoice.builtin2,
+    BackgroundChoice.builtin3,
+    BackgroundChoice.builtin4,
+  };
+
+  /// 浅色专用的 4 套渐变（出现在深色场景里 = 历史脏数据）
+  static const Set<BackgroundChoice> _lightGradientChoices = {
+    BackgroundChoice.moonWhite,
+    BackgroundChoice.mistBlue,
+    BackgroundChoice.sageGreen,
+    BackgroundChoice.sandBeige,
+  };
+
+  /// 纠正"跨模式"的底色：浅色场景里存了深色渐变，或深色场景里存了浅色渐变。
+  ///
+  /// 只处理**渐变**类型；用户选的本地图片 / 网络壁纸不动（那是明确选择）。
+  void _repairCrossModeScene(
+    String modeKey,
+    Set<BackgroundChoice> wrongChoices,
+    BackgroundChoice fallback,
+  ) {
+    final cfg = _scenes[modeKey];
+    if (cfg == null) return;
+    if (cfg.sourceType != WallpaperSourceType.gradient) return;
+    if (!wrongChoices.contains(cfg.choice)) return;
+    _scenes[modeKey] = cfg.copyWith(choice: fallback);
+    AppLog.instance.log(
+      '[BackgroundService] 修正 $modeKey 场景的跨模式底色: '
+      '${cfg.choice.name} → ${fallback.name}',
+    );
+  }
 
   final ImagePicker _picker = ImagePicker();
 
@@ -106,66 +130,35 @@ class BackgroundService extends GetxService {
 
   /// 「当前是不是浅色」—— **唯一判据**，所有调用方都用它。
   ///
-  /// ── 🔴 为什么读 [AppBrightness] 而不是 [appearanceMode] ─────────
-  /// [appearanceMode] 是 `BackgroundService` 自己的枚举，**只有三处会写它**：
-  /// `main.dart` 启动、音乐页的「外观模式」、以及「设置 → 明暗模式」页。
-  /// 而用户在**「设置 → 主题与外观 → 明暗模式」**切浅色时
-  /// **只改 `ThemeModeStore`** —— 两者会不同步。
+  /// 明暗的唯一真源是 `ThemeModeStore` / `AppBrightness`（含「跟随系统」
+  /// 与三模块同步），背景服务只**读**它，用来决定：
+  ///   · 用哪一套场景（浅色套 / 深色套）
+  ///   · 遮罩用白还是黑
   ///
-  /// 后果（修复前的真实 bug）：背景层一直按 dark 那套渲染
-  /// （深色壁纸 + **黑遮罩**），而那些 Scaffold 是 `Colors.transparent`
-  /// 的页面（11 个设置子页 + 阅读各页）**全被罩成黑底** ——
-  /// 用户实测："全是浅色模式下的真实情况，底色是黑色的"。
-  ///
-  /// [AppBrightness.isLight] 由 `ThemeModeStore` 统一驱动（含"跟随系统"
-  /// 与壁纸联动），是真正的单一事实来源。
+  /// 🔴 本服务**不再持有任何"自己的外观状态"**。
+  /// 曾经有个 `appearanceMode` 枚举充当第二真源：用户在「设置 → 明暗模式」
+  /// 切浅色时只改 `ThemeModeStore`，那个枚举不动 → 背景层一直按 dark 那套
+  /// 渲染（深色壁纸 + 黑遮罩）→ 11 个透明 Scaffold 的设置子页全被罩成黑底
+  ///（用户实测："全是浅色模式下的真实情况，底色是黑色的"）。
+  /// 该枚举与 `appearance_mode` 持久化键已**彻底删除**，防止再次分叉。
   bool get isLight => AppBrightness.isLight.value;
 
-  /// 当前外观模式对应的场景 key
+  /// 当前该用哪一套场景 key —— **只由 [isLight] 决定，唯一来源**。
   ///
-  /// ── 🔴 必须读全局真源 [AppBrightness]，不能读 [appearanceMode] ──────
+  /// ⚠️ 这里刻意**不做任何"编辑锁定"**：渲染与壁纸设置页的读写必须用同一个
+  /// key。曾短暂加过一个 `pinEditScene` 覆盖，结果是"页面上调的是 A 套、
+  /// 背景渲染的是 B 套"（尤其「跟随系统」下系统亮暗一变就会发生），已移除。
   ///
-  /// 原来这里判的是 `appearanceMode.value == AppearanceMode.light`，
-  /// 而那个枚举**只有音乐页的「外观模式」会推**（`profile_page.dart` 里
-  /// 调 `setAppearanceMode`）；用户在**「设置 → 主题与外观 → 明暗模式」**
-  /// 切浅色时**只改 `ThemeModeStore`，从不碰这个枚举** ——
-  /// 两者不同步 → 背景层一直按 **dark 那套场景**渲染（深色壁纸 + 黑遮罩）。
+  /// 至于"编辑期间明暗翻转导致写入落到另一套"——那不是 bug：写入读取的是
+  /// 同一时刻的 key 与值，落到哪一套就是在编辑哪一套，页面显示也同步切换。
+  String get currentSceneKey => isLight ? 'light' : 'dark';
+
+  /// 当前明暗对应的那套配置。
   ///
-  /// 而所有设置子页 / 阅读页的 Scaffold 都是 `Colors.transparent`
-  /// （见 `settings_shared.dart` 的说明："透出全局壁纸层"），
-  /// 于是**透明页面全被这层黑背景罩住** ——
-  /// 用户实测："全是浅色模式下的真实情况，底色是黑色的"。
-  /// 壁纸设置页锁定"正在编辑哪一套场景"用的临时覆盖。
-  ///
-  /// 为什么需要：写入目标原来按**当前明暗**反推
-  /// （[updateActiveScene] → `_saveScene(editingSceneKey)`）。
-  /// 用户在壁纸页调滑块期间若明暗发生翻转（系统亮暗变化、别的入口写入），
-  /// 后续写入会静默落到**另一套场景**里 —— 表现为"我在浅色下调的模糊，
-  /// 切到深色发现被改了"。进入设置页时 [pinEditScene] 固定住目标即可。
-  String? _pinnedSceneKey;
-
-  /// 壁纸设置页进入时调用：按进入时的明暗锁定本次编辑的目标场景。
-  String pinEditScene() {
-    _pinnedSceneKey = isLight ? 'light' : 'dark';
-    return _pinnedSceneKey!;
-  }
-
-  /// 壁纸设置页退出时调用：解除锁定，恢复"跟随当前明暗"。
-  void unpinEditScene() => _pinnedSceneKey = null;
-
-  /// 当前正在编辑/读取的场景 key（受 [pinEditScene] 影响）
-  String get editingSceneKey => _pinnedSceneKey ?? (isLight ? 'light' : 'dark');
-
-  /// 正在编辑的场景是否为浅色。
-  /// 壁纸页里凡是要按"当前这套场景"取默认值的地方都必须用它，
-  /// **不要**用 [isLight]（那是"此刻实际显示的明暗"，编辑期间可能已漂移）。
-  bool get editingSceneIsLight => editingSceneKey == 'light';
-
-  String get _sceneKeyForCurrentAppearance => editingSceneKey;
-
-  /// 当前模式那套配置
+  /// 渲染（`buildBackground`）、壁纸设置页的读取、以及所有写入
+  /// **全部**用这一个 getter，保证三者永远指向同一套场景。
   WallpaperConfig get activeScene =>
-      _scenes[_sceneKeyForCurrentAppearance] ?? const WallpaperConfig();
+      _scenes[currentSceneKey] ?? const WallpaperConfig();
 
   /// 取指定模式的配置（设置页切换预览用）
   WallpaperConfig sceneOf(String modeKey) =>
@@ -183,9 +176,9 @@ class BackgroundService extends GetxService {
     );
   }
 
-  /// 改当前模式那套配置
+  /// 改当前场景那套配置
   Future<void> updateActiveScene(WallpaperConfig cfg) =>
-      _saveScene(_sceneKeyForCurrentAppearance, cfg);
+      _saveScene(currentSceneKey, cfg);
 
   // ---- 兼容桥接：让旧的 .value 读法仍可用，并建立 Obx 依赖 ----
   void _touch() => _sceneVersion.value;
@@ -237,18 +230,6 @@ class BackgroundService extends GetxService {
   /// 用户自建壁纸库 API 地址（全局）
   final customApiUrl = ''.obs;
 
-  /// 外观模式（**历史遗留，已不再驱动明暗**）。
-  ///
-  /// 明暗的唯一真源是 `ThemeModeStore` / `AppBrightness`，本服务只**读**它
-  /// （见 [isLight] / [editingSceneKey]）来决定渲染哪一套场景。
-  /// 这个枚举与 `appearance_mode` 持久化键仅为兼容旧数据保留：
-  /// 读它不改变任何行为，写它也不再有任何回调。
-  ///
-  /// ⚠️ 历史：这里曾有一个 `onAppearanceChanged` 回调，由 `app.dart` 接到
-  /// `ThemeModeStore.applyLightFromBackground`，于是壁纸反过来决定全 App 明暗，
-  /// 并永久闩死「跟随系统」。详见 `common/theme_mode_store.dart` 顶部说明。
-  final appearanceMode = AppearanceMode.dark.obs;
-
   /// 启动时调用 - 从 SharedPreferences 加载
   @override
   void onInit() {
@@ -264,15 +245,16 @@ class BackgroundService extends GetxService {
   Future<void> _loadFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // ---- 外观模式（主导者）----
-    final ap = prefs.getString(_appearanceKey);
-    appearanceMode.value = ap == 'light'
-        ? AppearanceMode.light
-        : AppearanceMode.dark;
-
     // ---- 全局 ----
     enabled.value = prefs.getBool(_enabledKey) ?? true;
     customApiUrl.value = prefs.getString(_customApiKey) ?? '';
+
+    // 清掉已废弃的 `appearance_mode` 键：它曾经是壁纸服务的"第二套外观状态"，
+    // 现在明暗只认 `AppBrightness`（见 [isLight] / [currentSceneKey]）。
+    // 留着一个没人读的键，只会让下一个人以为还有第二个真源。
+    try {
+      await prefs.remove('appearance_mode');
+    } catch (_) {}
 
     // ---- 每模式配置 ----
     for (final key in const ['dark', 'light']) {
@@ -312,11 +294,23 @@ class BackgroundService extends GetxService {
       }
     }
 
+    // ── 修掉历史脏数据：浅色场景里存着深色渐变（或反向） ────────────
+    //
+    // 旧版 `clearCustom()` **无条件**把 `choice` 写成 `builtin1`（深邃黑），
+    // 而它写的是"当前场景" —— 于是在浅色模式下点过「移除当前图片」的用户，
+    // 其 `wallpaper_scene_light` 里就**永久存下了一个深色渐变**。
+    // 光把代码改对没用：这个已落盘的坏值仍然生效，浅色模式依旧是深色底
+    //（用户实测截图："改了还是黑的"），所以必须在加载时纠正一次。
+    _repairCrossModeScene(
+        'light', _darkGradientChoices, BackgroundChoice.moonWhite);
+    _repairCrossModeScene(
+        'dark', _lightGradientChoices, BackgroundChoice.builtin1);
+
     _sceneVersion.value++;
 
     AppLog.instance.log(
       '[BackgroundService] 已加载: '
-      'appearance=${appearanceMode.value} enabled=${enabled.value} '
+      'isLight=$isLight enabled=${enabled.value} '
       'dark(choice=${sceneOf('dark').choice.name}/'
       '${sceneOf('dark').sourceType.name}) '
       'light(choice=${sceneOf('light').choice.name}/'
@@ -325,24 +319,7 @@ class BackgroundService extends GetxService {
   }
 
   // ============================================================
-  // 外观模式（主导）
-  // ============================================================
-
-  /// 切换外观模式：文字明暗跟着变，**背景也换成该模式自己那套**。
-  Future<void> setAppearanceMode(AppearanceMode m) async {
-    // 只记录，**不再**回调全局明暗 —— 方向已统一为「外观 → 壁纸」：
-    // 渲染哪一套场景由 [isLight] / [editingSceneKey] 决定，本枚举不再参与决策。
-    appearanceMode.value = m;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _appearanceKey,
-      m == AppearanceMode.light ? 'light' : 'dark',
-    );
-    AppLog.instance.log('[BackgroundService] 外观模式 → $m（背景随之切换）');
-  }
-
-  // ============================================================
-  // 壁纸参数 setter（都只影响当前模式那一套）
+  // 壁纸参数 setter（都只影响当前明暗那一套场景）
   // ============================================================
 
   Future<void> setEnabled(bool v) async {
@@ -481,7 +458,7 @@ class BackgroundService extends GetxService {
     );
     AppLog.instance.log(
       '[BackgroundService] setBuiltin: $c '
-      '(${_sceneKeyForCurrentAppearance} 模式)',
+      '($currentSceneKey 模式)',
     );
   }
 
@@ -673,7 +650,7 @@ class BackgroundService extends GetxService {
     return ValueListenableBuilder<bool>(
       valueListenable: AppBrightness.isLight,
       builder: (context, isLightNow, __) => Obx(() {
-        // 当前模式那套配置（外观主导：浅色/深色各有独立的墙纸与效果参数）
+        // 当前场景配置（与设置页读写、写入目标**同一个** getter）
         final scene = activeScene;
         final isLight = isLightNow;
         // 遮罩色跟着明暗走：
@@ -917,14 +894,6 @@ class BackgroundService extends GetxService {
   static List<({String name, BackgroundChoice choice, List<Color> colors})>
       get builtinPreviews =>
           AppBrightness.isLight.value ? _lightPreviews : _darkPreviews;
-
-  /// 按**正在编辑的场景**取那 4 套 —— 壁纸设置页必须用这个。
-  ///
-  /// 用 [builtinPreviews] 的话，编辑期间明暗一旦翻转，选图列表会跟着
-  /// 换成另一套，用户会把浅色渐变选进深色场景（见 [pinEditScene]）。
-  List<({String name, BackgroundChoice choice, List<Color> colors})>
-      get builtinPreviewsForEditing =>
-          editingSceneIsLight ? _lightPreviews : _darkPreviews;
 }
 
 /// 单个外观模式下的壁纸配置。

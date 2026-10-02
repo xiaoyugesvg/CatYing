@@ -17,6 +17,7 @@ import '../widgets/jelly_book_card.dart';
 import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_ring_button.dart';
 import '../widgets/jelly_pull_cord.dart';
+import '../widgets/guide_overlay.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/staggered_entrance.dart';
 import 'book_detail_page.dart';
@@ -71,6 +72,7 @@ class _BookSearchPageState extends State<BookSearchPage>
   bool _isLoading = false;
   bool _isSearching = false;
   String _keyword = '';
+  bool _guideShown = false; // 新手引导已展示标记
 
   // 分类额外过滤条件：年份/语言仅分类模式用；格式 _filterExtensions 与搜索页小标签
   // 同源联动，关键词/分类模式都用，跨模式保留。
@@ -113,6 +115,22 @@ class _BookSearchPageState extends State<BookSearchPage>
     _wasUnavailable = ZlibraryService().isUnavailable;
     _loadHistory();
     _ensureCategories();
+    _maybeTriggerGuide();
+  }
+
+  /// 首次激活时展示图书页新手引导（仅一次）
+  void _maybeTriggerGuide() {
+    if (_guideShown || !widget.isActive) return;
+    _guideShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybeShowGuide(context, GuideGroups.book);
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant BookSearchPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive && !oldWidget.isActive) _maybeTriggerGuide();
   }
 
   @override

@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/comic.dart';
 import '../models/search_result.dart';
 import '../source/adapter.dart';
@@ -18,11 +20,16 @@ import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_ring_button.dart';
 import '../widgets/jelly_comic_list_tile.dart';
 import '../widgets/jelly_search_bar.dart';
+import '../widgets/guide_overlay.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/jelly_sliding_actions.dart';
 import '../widgets/staggered_entrance.dart';
 import 'browse_history_page.dart';
 import 'comic_detail_page.dart';
+// `ComicAggregateSearchPage`（漫画聚合搜索）在本文件 `_buildAggregateChip` 里用到，
+// 之前缺了这一行 —— 于是 `:607 const ComicAggregateSearchPage()` 报
+// "The name 'ComicAggregateSearchPage' isn't a class"。
+import 'comic_aggregate_search_page.dart';
 import 'download_page.dart';
 import 'favorites_page.dart';
 import 'source_repo_page.dart';
@@ -91,6 +98,12 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
 
   bool _pendingSearch = false; // 搜索中途切源/换词积压，待当前搜索结束后补搜
   bool _categorySheetOpening = false; // 分类筛选弹窗防连点守卫
+  bool _guideShown = false; // 新手引导已展示标记
+
+  // ── 快捷入口叠卡（源管理/历史/收藏/下载 横向卡片）────────────────
+  static const _quickEntriesPrefKey = 'reading_manga_quick_entries';
+  static const _allQuickEntryKeys = ['source', 'history', 'favorite', 'download'];
+  List<String> _quickEntryKeys = _allQuickEntryKeys; // 当前启用的入口（可自定义）
 
   // 各源独立的搜索状态缓存：切源时保存/恢复，使每个源保留自己的上次结果
   final Map<String, _SourceSearchState> _sourceStates = {};
@@ -123,6 +136,34 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _ensureChipVisible(SourceManager().current);
     });
+    _maybeTriggerGuide();
+    _loadQuickEntries();
+  }
+
+  /// 读取快捷入口显隐配置
+  Future<void> _loadQuickEntries() async {
+    final sp = await SharedPreferences.getInstance();
+    final raw = sp.getString(_quickEntriesPrefKey);
+    if (raw == null) return;
+    try {
+      final list = (jsonDecode(raw) as List).cast<String>();
+      if (list.isNotEmpty) setState(() => _quickEntryKeys = list);
+    } catch (_) {/* 损坏配置忽略，用默认 */}
+  }
+
+  /// 首次激活时展示漫画页新手引导（仅一次）
+  void _maybeTriggerGuide() {
+    if (_guideShown || !widget.isActive) return;
+    _guideShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybeShowGuide(context, GuideGroups.manga);
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant SearchPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive && !oldWidget.isActive) _maybeTriggerGuide();
   }
 
   @override
@@ -537,6 +578,9 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     final sources = SourceManager().enabledSources;
     final currentId = SourceManager().current.id;
     final chips = <Widget>[];
+    // 「聚搜」入口：跨所有漫画源一键聚合搜索（参考 cmbok 引导）
+    chips.add(_buildAggregateChip(isDark));
+    chips.add(const SizedBox(width: 8));
     for (var i = 0; i < sources.length; i++) {
       if (i > 0) chips.add(const SizedBox(width: 8));
       final src = sources[i];
@@ -554,6 +598,49 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             mainAxisSize: MainAxisSize.max,
             children: chips,
           ),
+        ),
+      ),
+    );
+  }
+
+  /// 「聚搜」chip：跨所有启用漫画源并发聚合搜索
+  Widget _buildAggregateChip(bool isDark) {
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const ComicAggregateSearchPage()),
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.auto_awesome_rounded,
+              size: 14,
+              color: JellyTheme.primary,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '聚搜',
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                fontWeight: FontWeight.w700,
+                color: JellyTheme.primary,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1234,6 +1321,9 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
               ),
             ),
           ),
+          // ── 快捷入口叠卡：漫画源管理/浏览历史/我的收藏/下载 ──────
+          // （参考 cmbok 漫画页；下滑卡片区域可展开自定义面板）
+          _buildQuickEntriesBar(isDark),
           Expanded(
             child: Listener(
               // translucent：空态/无结果等 Center 的空白区域也能命中，
@@ -1250,8 +1340,237 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     );
   }
 
+  /// ── 快捷入口叠卡（源管理/历史/收藏/下载 横向卡片）──────────────
+  /// 参考 cmbok 漫画页顶部布局；下滑卡片区域（或点右侧 ⌄ 按钮）展开自定义面板。
+  Widget _buildQuickEntriesBar(bool isDark) {
+    final entries = _quickEntryDefs
+        .where((e) => _quickEntryKeys.contains(e.key))
+        .toList();
+    if (entries.isEmpty) return const SizedBox.shrink();
+
+    final cardColor = isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
+    final labelColor = isDark ? Colors.white70 : JellyTheme.textSecondary;
+
+    Widget entryCard(_QuickEntryDef e) {
+      return Expanded(
+        child: GestureDetector(
+          onTap: e.onTap,
+          child: Container(
+            height: 62,
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            decoration: BoxDecoration(
+              color: cardColor,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: JellyTheme.primary.withValues(alpha: 0.14),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(e.icon, size: 17, color: JellyTheme.primary),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  e.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontFootnote,
+                    fontWeight: FontWeight.w600,
+                    color: labelColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return GestureDetector(
+      // 下滑展开自定义面板（参考引导文案：下滑展开自定义）
+      onVerticalDragEnd: (details) {
+        if ((details.primaryVelocity ?? 0) > 250) _openQuickEntriesCustomize();
+      },
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
+        child: Row(
+          children: [
+            for (var i = 0; i < entries.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              entryCard(entries[i]),
+            ],
+            const SizedBox(width: 8),
+            // 自定义按钮（⌄）
+            GestureDetector(
+              onTap: _openQuickEntriesCustomize,
+              child: Container(
+                width: 34,
+                height: 62,
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  size: 20,
+                  color: JellyTheme.textSecondary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 快捷入口自定义面板：勾选显示哪些入口
+  Future<void> _openQuickEntriesCustomize() async {
+    if (!mounted) return;
+    final selected = List<String>.from(_quickEntryKeys);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  children: [
+                    Text(
+                      '快捷入口自定义',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '下滑卡片也可展开此面板',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: JellyTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              ..._quickEntryDefs.map(
+                (e) => SwitchListTile(
+                  value: selected.contains(e.key),
+                  title: Text(e.label),
+                  subtitle: Text(e.desc),
+                  secondary: Icon(e.icon, color: JellyTheme.primary, size: 22),
+                  activeTrackColor: JellyTheme.primary,
+                  onChanged: (on) {
+                    setState(() {
+                      if (on) {
+                        if (!selected.contains(e.key)) selected.add(e.key);
+                      } else {
+                        selected.remove(e.key);
+                      }
+                    });
+                  },
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: JellyTheme.primary,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: () {
+                      _quickEntryKeys = selected;
+                      SharedPreferences.getInstance().then(
+                        (sp) => sp.setString(
+                          _quickEntriesPrefKey,
+                          jsonEncode(selected),
+                        ),
+                      );
+                      Navigator.pop(ctx);
+                    },
+                    child: const Text('完成'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (mounted) setState(() {});
+  }
+
+  /// 快捷入口定义（key 与存储对应）
+  List<_QuickEntryDef> get _quickEntryDefs => [
+        _QuickEntryDef(
+          key: 'source',
+          label: '漫画源',
+          desc: '管理漫画源：启用源 · 云端配置',
+          icon: Icons.source_rounded,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const SourceRepoPage()),
+          ),
+        ),
+        _QuickEntryDef(
+          key: 'history',
+          label: '历史',
+          desc: '漫画 & 图书浏览历史',
+          icon: Icons.history_rounded,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const BrowseHistoryPage(showTabs: false),
+            ),
+          ),
+        ),
+        _QuickEntryDef(
+          key: 'favorite',
+          label: '收藏',
+          desc: '漫画 & 图书收藏',
+          icon: Icons.favorite_rounded,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const FavoritesPage()),
+          ),
+        ),
+        _QuickEntryDef(
+          key: 'download',
+          label: '下载',
+          desc: '漫画 & 图书下载管理',
+          icon: Icons.file_download_rounded,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const DownloadPage()),
+          ),
+        ),
+      ];
+
   /// 无可用源空状态：提示去漫画源仓库添加云端地址并更新。
-  /// 无可用源时的空态。
   ///
   /// ── 为什么有两种文案（用户给了两张图，它们不矛盾而是两个场景）──
   /// cmbok 这里其实是**两种状态**，用户截图各拍到一种：
@@ -1602,4 +1921,21 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       },
     );
   }
+}
+
+/// 快捷入口定义（key 与 SharedPreferences 存储对应）
+class _QuickEntryDef {
+  final String key;
+  final String label;
+  final String desc;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _QuickEntryDef({
+    required this.key,
+    required this.label,
+    required this.desc,
+    required this.icon,
+    required this.onTap,
+  });
 }

@@ -97,16 +97,6 @@ class CmbokConstants {
   static const String comicDir = 'Comics';
   static const String bookDir = 'Books';
 
-  /// GitHub 仓库地址（关于页 + 检查更新）
-  static const String githubUrl = 'https://github.com/hlning/cmbok_app';
-
-  /// 「甜甜的小站」博客地址（我的页 + 更新弹窗）
-  static const String blogUrl = 'https://bluemood.xiaomy.net/';
-
-  /// GitHub Releases 最新版本接口（检查更新）
-  static const String latestReleaseApiUrl =
-      'https://api.github.com/repos/hlning/cmbok_app/releases/latest';
-
   /// 远程公告地址（同步 Windows 端，首页弹窗展示）
   static const String notificationUrl =
       'https://cdn.jsdelivr.net/gh/hlning/cmbok_app@main/notification.json';

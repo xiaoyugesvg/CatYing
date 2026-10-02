@@ -16,7 +16,6 @@ import '../../widgets/vod_card.dart';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import '../../models/cache_store.dart';
 import '../../models/cache_ttl.dart';
-import '../../services/background_service.dart';
 import '../../services/tmdb_service.dart';
 import '../../services/detail_page_controller.dart';
 import '../../services/player_fullscreen_controller.dart';
@@ -637,12 +636,8 @@ class _DetailPageState extends State<DetailPage> {
       // 沉浸(全屏/PiP)模式保持视频黑底。
       return Stack(
         children: [
-          if (!immersive)
-            Positioned.fill(
-              child: BackgroundService.instance.buildBackground(
-                overlayAlpha: 0.3,
-              ),
-            ),
+          // 壁纸层已上提到 `app.dart` 的 MaterialApp.builder（Navigator 之上）。
+          // 这里不要再画一遍 —— 叠两层遮罩（0.3 + 0.3）会让整页明显变暗。
           Scaffold(
             backgroundColor: Colors.transparent,
             // ⚠️ 这里**不能**再放 AppBar（哪怕是空的、透明的）。

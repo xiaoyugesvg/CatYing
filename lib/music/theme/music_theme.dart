@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../common/theme.dart';
 import '../../common/theme_mode_store.dart';
 import '../../reading/theme/jelly_palette.dart';
 
@@ -108,10 +109,22 @@ class MusicTheme {
   static JellyPalette get palette =>
       MusicPaletteBridge.current() ?? const JellyPalette.ink();
 
-  /// 当前明暗。由 MusicThemeStore 在启动/切换时写入。
-  static bool _isDark = false;
+  /// 当前明暗 —— **直接派生自全局唯一真源 `AppBrightness`**。
+  ///
+  /// 🔴 原来它是音乐自己记的一个 bool（`static bool _isDark`），由
+  /// `MusicThemeStore` 在启动与 `applyFromGlobal` 时写入。那条链路只要
+  /// 有一次没跑到（初始化顺序、模块回写的时机、`_syncing` 吞掉推送……），
+  /// 音乐就会和全局不同步 —— 用户实测截图：
+  /// **全局是浅色（其它 tab 都是浅色、底栏是白的），音乐页却整片深色。**
+  ///
+  /// 改成派生之后，两者**结构上不可能再不一致**：
+  /// `setMode` → `_syncBackToGlobal` → 全局 `ThemeModeStore` →
+  /// `AppBrightness` → 这里跟着变；`applyFromGlobal` 同理。
+  ///
+  /// 用私有 getter 顶替原来的私有字段，是为了让文件内所有 `_isDark`
+  /// 读取点自动走新逻辑（一处改动，全文件生效）。
+  static bool get _isDark => !AppBrightness.isLight.value;
   static bool get isDark => _isDark;
-  static void setDark(bool v) => _isDark = v;
 
   /// 当前强调色方案
   // 默认水墨书香（与阅读一致）；其余 8 个仍是用户可选项
@@ -129,9 +142,11 @@ class MusicTheme {
 
   static void setCustomAccent(Color? c) => _customAccent = c;
 
-  /// 整体替换（启动时从存储恢复）
-  static void apply({required bool dark, required MusicAccent accent, Color? custom}) {
-    _isDark = dark;
+  /// 整体替换（启动时从存储恢复）。
+  ///
+  /// ⚠️ 这里**不再有 `dark` 参数**：明暗派生自全局 `AppBrightness`
+  ///（见 `_isDark` 的说明），模块自己的存储不再决定明暗。
+  static void apply({required MusicAccent accent, Color? custom}) {
     _accent = accent;
     _customAccent = custom;
   }
@@ -267,29 +282,23 @@ class MusicThemeStore {
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    final mode = MusicThemeMode.fromKey(prefs.getString(_kMode));
     final accent = MusicAccent.fromKey(prefs.getString(_kAccent));
     final customRaw = prefs.getInt(_kCustom);
+    // 明暗**不在这里恢复**：它派生自全局 `AppBrightness`（见 `MusicTheme._isDark`）。
+    // `music.themeMode` 仍然继续写（记录用户上次的选择），但不再决定渲染 ——
+    // 这正是"全局唯一真源"该有的样子。
     MusicTheme.apply(
-      dark: _resolveDark(mode),
       accent: accent,
       custom: customRaw == null ? null : Color(customRaw),
     );
     revision.value++;
   }
 
-  bool _resolveDark(MusicThemeMode mode) => switch (mode) {
-        MusicThemeMode.system =>
-          WidgetsBinding.instance.platformDispatcher.platformBrightness ==
-              Brightness.dark,
-        MusicThemeMode.light => false,
-        MusicThemeMode.dark => true,
-      };
-
   Future<void> setMode(MusicThemeMode mode) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kMode, mode.name);
-    MusicTheme.setDark(_resolveDark(mode));
+    // 不再 `MusicTheme.setDark(...)`：明暗派生自全局 `AppBrightness`。
+    // 本方法只负责"记录选择 + 回写全局"；全局一变，明暗自动跟着变。
     revision.value++;
     // 同步回全局主题存储，保持三模块一致。
     //
@@ -312,7 +321,7 @@ class MusicThemeStore {
     };
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kMode, m.name);
-    MusicTheme.setDark(_resolveDark(m));
+    // 明暗派生自 `AppBrightness`，无需在此写入；`revision` 负责触发 UI 重建。
     revision.value++;
   }
 

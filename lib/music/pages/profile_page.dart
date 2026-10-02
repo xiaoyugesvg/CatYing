@@ -8,7 +8,6 @@ import 'source_manager_page.dart';
 import '../../common/module_theme_store.dart';
 import '../../common/module_theme_sync.dart';
 import '../../common/theme_mode_store.dart';
-import '../../services/background_service.dart';
 import '../../reading/theme/jelly_palette.dart';
 import '../../common/theme.dart';
 
@@ -345,16 +344,9 @@ class _ModeTile extends StatelessWidget {
             // 改全局 ThemeModeStore —— 内部通过 GlobalThemeSync
             // 自动同步给音乐和阅读，三端一致。
             await ThemeModeStore.set(picked);
-            // 壁纸也跟着换（只有 light/dark 两套壁纸）
-            final wantLight = switch (picked) {
-              ThemeMode.light => true,
-              ThemeMode.dark => false,
-              ThemeMode.system =>
-                MediaQuery.of(context).platformBrightness == Brightness.light,
-            };
-            await BackgroundService.instance.setAppearanceMode(
-              wantLight ? AppearanceMode.light : AppearanceMode.dark,
-            );
+            // 壁纸会自动跟着换：`BackgroundService.currentSceneKey` 只读
+            // `AppBrightness`，上面这行改完它就切到对应那套场景。
+            //（原来还要调 `setAppearanceMode` 写第二份外观状态，已删除。）
           },
         );
       },

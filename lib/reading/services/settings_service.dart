@@ -83,7 +83,6 @@ class SettingsService extends ChangeNotifier {
   static const _kBgAnimationKey = 'background_animation'; // 主题背景动画开关
   static const _kFrameRateReducedKey = 'frame_rate_reduced'; // 主题动画降帧省电
   static const _kCustomThemesKey = 'custom_themes'; // 自定义主题（JSON 数组）
-  static const _kCheckUpdateKey = 'check_update_on_startup';
   static const _kBookFontSizeKey = 'book_font_size';
   static const _kBookLineHeightKey = 'book_line_height';
   static const _kBookHorizontalPaddingKey = 'book_h_padding';
@@ -184,7 +183,6 @@ class SettingsService extends ChangeNotifier {
   static const int maxMergeChaptersPerEpub = 20;
   DefaultHomePage _defaultHomePage = DefaultHomePage.manga;
   bool _useBuiltinAccount = true; // 图书下载未登录时是否回退内置账号（搜索一律回退内置账号）
-  bool _checkUpdateOnStartup = true; // 启动时自动检查 app 新版本
   bool _isDarkMode = false; // 暗色模式（首次跟随系统，之后保留用户选择）
   bool _themeFollowSystem = true; // 主题跟随系统明暗；关闭后用上面的手动选择
   String _themePreset = 'ink'; // 主题预设：ink(水墨书香,默认)/jelly/pink/green/... 或 custom_*
@@ -264,7 +262,6 @@ class SettingsService extends ChangeNotifier {
   bool get trimWhitespace => _trimWhitespace;
   DefaultHomePage get defaultHomePage => _defaultHomePage;
   bool get useBuiltinAccount => _useBuiltinAccount;
-  bool get checkUpdateOnStartup => _checkUpdateOnStartup;
   bool get isDarkMode => _themeFollowSystem
       ? (PlatformDispatcher.instance.platformBrightness == Brightness.dark)
       : _isDarkMode;
@@ -441,7 +438,6 @@ class SettingsService extends ChangeNotifier {
             : DefaultHomePage.manga;
       }
       _useBuiltinAccount = prefs.getBool(_kBuiltinAccountKey) ?? true;
-      _checkUpdateOnStartup = prefs.getBool(_kCheckUpdateKey) ?? true;
       // 暗色模式：有记录用记录，否则首次跟随系统
       _isDarkMode =
           prefs.getBool(_kDarkModeKey) ??
@@ -554,7 +550,7 @@ class SettingsService extends ChangeNotifier {
         '设置加载: 同时下载量=$_maxConcurrentChapters, 分片并发=$_maxConcurrentImages, '
         '漫画阅读模式=$_readingMode, 图书阅读模式=$_bookReadingMode, 保存路径=${_downloadSavePath ?? "默认"}, '
         '合并EPUB=$_mergeChapterToEpub, 合并话数=$_mergeChaptersPerEpub, 保留图片=$_keepImagesAfterEpub, '
-        '默认首页=$_defaultHomePage, 内置账号=$_useBuiltinAccount, 启动检查更新=$_checkUpdateOnStartup, 暗色模式=$_isDarkMode, 跟随系统=$_themeFollowSystem, 主题预设=$_themePreset, 预加载=$_preloadImageCount, '
+        '默认首页=$_defaultHomePage, 内置账号=$_useBuiltinAccount, 暗色模式=$_isDarkMode, 跟随系统=$_themeFollowSystem, 主题预设=$_themePreset, 预加载=$_preloadImageCount, '
         '图书排版: 字号=$_bookFontSize 行距=$_bookLineHeight 左右边距=$_bookHorizontalPadding 上下边距=$_bookVerticalPadding, '
         '翻页反转=$_reverseTap, 双页=$_doublePage, 信息栏=$_showReaderHud, 音量键翻页=$_volumeKeyTurn, 墨水屏=$_inkScreenMode',
       );
@@ -759,19 +755,6 @@ class SettingsService extends ChangeNotifier {
       await prefs.setBool(_kBuiltinAccountKey, value);
     } catch (e) {
       _log('保存内置账号开关失败: $e');
-    }
-  }
-
-  /// 设置：启动时是否自动检查 app 新版本
-  Future<void> setCheckUpdateOnStartup(bool value) async {
-    if (_checkUpdateOnStartup == value) return;
-    _checkUpdateOnStartup = value;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_kCheckUpdateKey, value);
-    } catch (e) {
-      _log('保存启动检查更新开关失败: $e');
     }
   }
 

@@ -8,9 +8,17 @@ import '../../common/theme.dart';
 ///
 /// 颜色经 [_palette]（[JellyPalette]）驱动：各 `static Color get xxx` 读取当前
 /// 调色板，切换主题只需 [apply] 换 _palette 并重建（调用点仍用 `JellyTheme.primary`
-/// 等不变）。三套预设见 [JellyPalette.jelly/pink/green]。
+/// 等不变）。内置预设共 7 套，见 `jelly_palette.dart` 的 `themePresets`。
 class JellyTheme {
-  static JellyPalette _palette = const JellyPalette.jelly();
+  /// 当前调色板。默认 **`ink`（水墨书香）** —— 与全项目的默认主题一致：
+  /// `SettingsService._themePreset` 默认 `'ink'`、`ModuleThemeStore._readingPreset`
+  /// 默认 `'ink'`、`themePresets` 第一项也是 `ink`。
+  ///
+  /// ⚠️ 这里原来是 `JellyPalette.jelly()`（魅力紫色）—— 同一个概念两个不同默认值：
+  /// 正常启动时 `main.dart` 的 `applyModuleThemes()` 与 `SettingsService.init()`
+  /// 都会把它设对，所以平时看不出来；但只要有一条路径漏跑 `apply`，
+  /// 就会变成"阅读是紫的、影视是墨的"这种跨模块撞色。
+  static JellyPalette _palette = const JellyPalette.ink();
 
   /// 切换主题调色板（需配合重建生效，见 main.dart 的主题动画接线）
   static void apply(JellyPalette palette) {

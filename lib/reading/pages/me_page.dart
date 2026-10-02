@@ -9,6 +9,7 @@ import '../theme/jelly_theme.dart';
 import '../widgets/bookshelf_icon.dart';
 import '../widgets/jelly_nav_bar.dart';
 import '../widgets/staggered_entrance.dart';
+import '../widgets/guide_overlay.dart';
 import 'book_search_page.dart';
 import 'bookshelf_page.dart';
 import 'browse_history_page.dart';
@@ -39,8 +40,24 @@ class MePage extends StatefulWidget {
 class _MePageState extends State<MePage> {
   int _session = 0; // 首次切到"我的" tab 时 +1，触发卡片入场动画
   bool _hasShownEntrance = false; // 是否已播过首次入场动画
+  bool _guideShown = false; // 新手引导已展示标记
   final GlobalKey _themeToggleKey = GlobalKey(); // 暗色模式切换按钮（量取圆形扩散动画起点）
   String? _switchingTo; // 主题切换中（主题风格面板内 loading 遮罩用）
+
+  @override
+  void initState() {
+    super.initState();
+    _maybeTriggerGuide();
+  }
+
+  /// 首次激活时展示"我的"页新手引导（仅一次）
+  void _maybeTriggerGuide() {
+    if (_guideShown || !widget.isActive) return;
+    _guideShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) maybeShowGuide(context, GuideGroups.me);
+    });
+  }
 
   @override
   void didUpdateWidget(covariant MePage oldWidget) {
@@ -50,6 +67,7 @@ class _MePageState extends State<MePage> {
       _hasShownEntrance = true;
       setState(() => _session++);
     }
+    if (widget.isActive && !oldWidget.isActive) _maybeTriggerGuide();
   }
 
   @override
@@ -350,22 +368,6 @@ class _MePageState extends State<MePage> {
                           child: _buildHiddenTabItem(isDark, hiddenTabs[i]),
                         ),
                       ),
-                    // 捐赠与支持（底部入口）
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_donate'),
-                      index: 9 + hiddenTabs.length,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.volunteer_activism_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '捐赠与支持',
-                          subtitle: '咸鱼店铺 · 微信 / 支付宝扫码',
-                          onTap: _showDonateSheet,
-                        ),
-                      ),
-                    ),
                   ],
                 );
               },
@@ -513,28 +515,6 @@ class _MePageState extends State<MePage> {
     );
   }
 
-  /// 捐赠与支持弹窗（咸鱼店铺 · 微信/支付宝扫码）
-  Future<void> _showDonateSheet() async {
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('捐赠与支持'),
-        content: const Text(
-          '如果这个 App 对你有帮助，欢迎支持：\n\n'
-          '· 咸鱼店铺：New-Tv 周边\n'
-          '· 微信 / 支付宝：扫描店铺二维码即可\n\n'
-          '每一份支持都会用来继续打磨功能。',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('知道了'),
-          ),
-        ],
-      ),
-    );
-  }
-
   // -------------------- 暗色模式切换 --------------------
 
   /// 右上角的通用圆形图标按钮（扫码 / 主题风格 用）。
@@ -611,12 +591,6 @@ class _MePageState extends State<MePage> {
       },
     );
   }
-
-  // -------------------- 检查更新 --------------------
-
-
-  // -------------------- 分享软件 --------------------
-
 
   // -------------------- 通用 --------------------
 
