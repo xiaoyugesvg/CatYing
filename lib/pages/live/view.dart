@@ -58,6 +58,9 @@ class _LivePageState extends State<LivePage> {
   StreamSubscription<bool>? _playSub;
   Worker? _tabWorker;
 
+  /// 是否已成功开过流（切回直播 tab 时用于"恢复播放"而非重新拉流）
+  bool _everOpened = false;
+
   @override
   void initState() {
     super.initState();
@@ -72,15 +75,44 @@ class _LivePageState extends State<LivePage> {
     // 离开直播 tab 时暂停；切回直播 tab 时若未在播则自动开播
     _tabWorker = ever(MainTabController.instance.selectedTab, (tab) {
       if (tab != 4) {
+        // ⚠️ 两个内核都要停：iOS 实际在播的是 `_avPlayer`（AVPlayer），
+        // 安卓才是 `_player`（media_kit）。旧代码只 pause `_player` →
+        // iOS 上切走直播后声音还在后台继续响。
+        // 系统小窗（PiP）激活时豁免：用户开着小窗切走，播放归系统悬浮窗管。
+        if (VideoPlayerPip.instance.isIosActive) return;
         try {
           _player?.pause();
         } catch (e) {
           /* ignore */
         }
+        try {
+          _avPlayer?.pause();
+        } catch (e) {
+          /* ignore */
+        }
       } else {
-        final playing = _player?.state.playing ?? false;
-        if (!playing) {
+        // 切回直播：已在播就不动；已开过流但被暂停 → 直接恢复播放
+        //（避免每次切回都重新 open 拉流闪断）；从没开过流才自动开播。
+        final pPlaying = _player?.state.playing ?? false;
+        final avPlaying = _avPlayer?.state.playing ?? false;
+        if (pPlaying || avPlaying) return;
+        if (!_everOpened) {
           _autoplayCurrent();
+          return;
+        }
+        final useAv = Platform.isIOS && _avPlayer != null;
+        if (useAv) {
+          try {
+            _avPlayer?.play();
+          } catch (e) {
+            _autoplayCurrent();
+          }
+        } else {
+          try {
+            _player?.play();
+          } catch (e) {
+            _autoplayCurrent();
+          }
         }
       }
     });
@@ -126,6 +158,7 @@ class _LivePageState extends State<LivePage> {
 
   void _playChannel(String url) {
     if (url.isEmpty) return;
+    _everOpened = true;
     _playError = null;
     // 切台时先亮起「加载中」遮罩：新流从 open 到出画面有几百毫秒到几秒，
     // 期间老画面还在，没有反馈会让人以为点了没反应。
