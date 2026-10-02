@@ -25,11 +25,12 @@ import 'reading/services/settings_service.dart';
 import 'reading/services/reader_override_service.dart';
 import 'reading/services/bookshelf_service.dart';
 import 'reading/services/book_reading_progress_service.dart';
+import 'reading/services/zlibrary_service.dart';
+import 'reading/services/remote_config_service.dart';
 import 'reading/models/book_source.dart';
 import 'reading/services/tts_service.dart';
 import 'music/services/settings_store.dart';
 import 'music/services/player_manager.dart';
-import 'common/appearance_sync.dart';
 import 'common/module_theme_store.dart';
 import 'common/module_theme_sync.dart';
 import 'common/theme_mode_store.dart';
@@ -95,8 +96,6 @@ void main() async {
   // 书架/收藏/历史/进度之间会在 init 里互相查询（例如书架要为已下载的书
   // 回填收藏角标），顺序错了会出现"首次启动状态丢失"。改动前先看 cmbok。
   //
-  // 注意：RemoteConfigService / ZlibraryService 依赖服务端配置与账号，
-  // 本项目不做账号，这两项**故意不初始化**（对应页面也不会被导航到）。
   await SettingsService().init();
   await ReaderOverrideService().init();
   await BookFontService().init();
@@ -114,6 +113,12 @@ void main() async {
   // 小说书源（Legado 格式）：导入 / 管理在「阅读 → 我的 → 书源仓库」
   await BookSourceStore.instance.init();
   await BookDownloadService().init();
+  // Z-Library 图书服务：RemoteConfigService 后台拉取云端域名配置，
+  // ZlibraryService 初始化后并发探测选最优节点（不阻塞启动）。
+  // 之前因"项目不做账号"而跳过初始化，但实际上内置账号 + 搜索/下载
+  // 功能都依赖这两个服务，现恢复。
+  await RemoteConfigService().init();
+  await ZlibraryService().init();
   // 听书：走原生 tts_engine channel（系统 AVSpeechSynthesizer，零插件）
   Get.put<TtsService>(TtsService(), permanent: true);
 
@@ -138,10 +143,16 @@ void main() async {
   MusicThemeBridge.register((primary) {
     MusicTheme.setCustomAccent(primary);
   });
+  // 配色变化 → 通知音乐 UI 重建。
+  // MusicTheme 的颜色是静态 getter，不通知的话没有任何 widget 会重建
+  //（`MusicThemeStore.notifyPaletteChanged` 原来在全仓无人调用）。
+  MusicThemeBridge.registerNotify(
+      () => MusicThemeStore.instance.notifyPaletteChanged());
   // 立刻落地一次，让影视/直播/音乐一启动就是用户选的方案
   await applyModuleThemes();
-  // 音乐明暗桥：AppearanceSync 要问音乐当前是深是浅
-  MusicBrightnessBridge.register(() => MusicTheme.isDark);
+  // （音乐明暗桥 `MusicBrightnessBridge` 已删除：明暗不再由模块反向决定全局，
+  //   模块的开关改为经 `GlobalThemeSync` 写回 `ThemeModeStore`。
+  //   详见 `common/appearance_sync.dart` 顶部说明。）
   // 音乐调色板桥：音乐模块要读"用户在统一主题页给它选的方案"
   MusicPaletteBridge.register(
       () => ModuleThemeStore.instance.paletteFor(ModuleThemeStore.music));
@@ -180,9 +191,10 @@ void main() async {
   // 背景层会自动换成新图（那之前先显示上一张/渐变，不会空）。
   unawaited(BackgroundService.instance.warmUpRandomImageIfNeeded());
 
-  // 启动外观协调：让"谁在前台谁说话"的规则生效。
-  // 必须放在 MainTabController 注册之后（sync 里读它判断当前 tab）。
-  AppearanceSync.start();
+  // 外观协调 `AppearanceSync.start()` 已移到 `TVBoxApp.initState`。
+  // 原因：它需要 `MainTabController` 已注册，而那个注册发生在
+  // `TVBoxApp.build` 里；在 main() 里调用只会撞上守卫直接 return
+  // —— 阅读侧的明暗监听从未注册过（真实 bug，不是重构）。
   await MusicPlayerSkin.instance.init();
   // #4/#5：音乐库（最近播放 + 收藏）—— 要在 PlayerManager 之前
     // 准备好，否则第一首播放时 addRecent 还在 init 中

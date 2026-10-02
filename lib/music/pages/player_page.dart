@@ -485,14 +485,13 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
               height: 246,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: MusicTheme.isDark
-                    ? const Color(0xFF141416)
-                    : const Color(0xFF2A2A2D),
+                // V9：原来是 `MusicTheme.isDark ? 深 : 浅`，而本页底色**恒为黑** ——
+                // 音乐选浅色时盘面反而变亮，成了"黑底上放一块更亮的盘"。
+                // 固定取原**深色档**的值，与整页的黑底/白字自洽。
+                color: const Color(0xFF141416),
                 // 唱片纹路：几道同心圆描边
                 border: Border.all(
-                    color: MusicTheme.isDark
-                        ? Colors.white.withValues(alpha: 0.06)
-                        : Colors.white.withValues(alpha: 0.10),
+                    color: Colors.white.withValues(alpha: 0.06),
                     width: 0.8),
                 boxShadow: [
                   BoxShadow(
@@ -515,9 +514,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                     height: 12,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: MusicTheme.isDark
-                          ? const Color(0xFF0A0A0C)
-                          : const Color(0xFF1A1A1D),
+                      color: const Color(0xFF0A0A0C),
                     ),
                   ),
                 ],
@@ -582,9 +579,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                   height: 54,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: MusicTheme.isDark
-                        ? const Color(0xFF0A0A0C)
-                        : const Color(0xFF1A1A1D),
+                    color: const Color(0xFF0A0A0C),
                     border: Border.all(
                         color: Colors.white.withValues(alpha: 0.18),
                         width: 1),

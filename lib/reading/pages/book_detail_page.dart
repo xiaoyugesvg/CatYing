@@ -200,25 +200,25 @@ class _BookDetailPageState extends State<BookDetailPage> {
           aspectRatio: 3 / 4,
           child: (widget.book.cover ?? '').isEmpty
               ? Container(
-                  color: isDark ? JellyTheme.cardDark : Colors.grey[200],
-                  child: const Icon(
+                  color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                  child: Icon(
                     Icons.menu_book_rounded,
                     size: 56,
-                    color: Colors.grey,
+                    color: JellyTheme.textSecondary,
                   ),
                 )
               : CachedNetworkImage(
                   imageUrl: widget.book.cover!,
                   fit: BoxFit.cover,
                   placeholder: (c, u) => Container(
-                    color: isDark ? JellyTheme.cardDark : Colors.grey[200],
+                    color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                   ),
                   errorWidget: (c, u, e) => Container(
-                    color: isDark ? JellyTheme.cardDark : Colors.grey[200],
-                    child: const Icon(
+                    color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                    child: Icon(
                       Icons.broken_image,
                       size: 48,
-                      color: Colors.grey,
+                      color: JellyTheme.textSecondary,
                     ),
                   ),
                 ),
@@ -807,11 +807,12 @@ class _BookDetailPageState extends State<BookDetailPage> {
                   ? Container(
                       width: 92,
                       height: 124,
-                      color: isDark ? JellyTheme.cardDark : Colors.grey[200],
-                      child: const Icon(
+                      color:
+                          isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                      child: Icon(
                         Icons.menu_book_rounded,
                         size: 28,
-                        color: Colors.grey,
+                        color: JellyTheme.textSecondary,
                       ),
                     )
                   : CachedNetworkImage(
@@ -822,16 +823,18 @@ class _BookDetailPageState extends State<BookDetailPage> {
                       placeholder: (c, u) => Container(
                         width: 92,
                         height: 124,
-                        color: isDark ? JellyTheme.cardDark : Colors.grey[200],
+                        color:
+                            isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                       ),
                       errorWidget: (c, u, e) => Container(
                         width: 92,
                         height: 124,
-                        color: isDark ? JellyTheme.cardDark : Colors.grey[200],
-                        child: const Icon(
+                        color:
+                            isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                        child: Icon(
                           Icons.broken_image,
                           size: 24,
-                          color: Colors.grey,
+                          color: JellyTheme.textSecondary,
                         ),
                       ),
                     ),

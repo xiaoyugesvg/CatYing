@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../reading/theme/jelly_palette.dart';
@@ -319,6 +320,11 @@ class AppTheme {
         backgroundColor: Colors.transparent,
         elevation: 0,
         foregroundColor: textPrimary,
+        // ⚠️ 必须显式指定：本主题的 AppBar 是**透明底**，而 Flutter 的默认
+        // 推导会对透明底得出 `SystemUiOverlayStyle.light`（白色图标）——
+        // 于是浅色页面上状态栏时钟/电量变成白字压浅底，看不见。
+        // 深色主题同理要发浅色图标，见下方 darkTheme。
+        systemOverlayStyle: SystemUiOverlayStyle.dark,
       ),
       cardTheme: base.cardTheme.copyWith(
         color: backgroundSecondary,
@@ -497,6 +503,10 @@ class AppTheme {
           fontWeight: FontWeight.bold,
         ),
         iconTheme: IconThemeData(color: textSecondary),
+        // 透明底导致 Flutter 默认推导出白色图标 —— 深色主题下这是对的，
+        // 但必须**显式**写出来，否则浅色主题的 AppBar 也会跟着发白色图标
+        //（两个主题共用 AppBar 的默认推导逻辑）。
+        systemOverlayStyle: SystemUiOverlayStyle.light,
       ),
       cardTheme: CardThemeData(
         color: backgroundSecondary,

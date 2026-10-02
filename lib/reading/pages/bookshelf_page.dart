@@ -388,7 +388,7 @@ class _BookshelfPageState extends State<BookshelfPage>
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) => Container(
           decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : Colors.white,
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             borderRadius:
                 const BorderRadius.vertical(top: Radius.circular(24)),
           ),
@@ -485,7 +485,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               maxHeight: MediaQuery.of(ctx).size.height * 0.75,
             ),
             decoration: BoxDecoration(
-              color: isDark ? JellyTheme.cardDark : Colors.white,
+              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
               borderRadius:
                   const BorderRadius.vertical(top: Radius.circular(24)),
             ),
@@ -635,7 +635,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               maxHeight: MediaQuery.of(ctx).size.height * 0.75,
             ),
             decoration: BoxDecoration(
-              color: isDark ? JellyTheme.cardDark : Colors.white,
+              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
               borderRadius:
                   const BorderRadius.vertical(top: Radius.circular(24)),
             ),
@@ -807,7 +807,7 @@ class _BookshelfPageState extends State<BookshelfPage>
         final isDark = Theme.of(context).brightness == Brightness.dark;
         return Container(
           decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : Colors.white,
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: SafeArea(
@@ -1297,7 +1297,7 @@ class _BookshelfPageState extends State<BookshelfPage>
             final shelves = BookshelfService().bookshelves;
             return Container(
               decoration: BoxDecoration(
-                color: isDark ? JellyTheme.cardDark : Colors.white,
+                color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(24),
                 ),
@@ -1315,7 +1315,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                         height: 4,
                         margin: const EdgeInsets.only(bottom: 12),
                         decoration: BoxDecoration(
-                          color: Colors.grey.withValues(alpha: 0.3),
+                          color: JellyTheme.textSecondary.withValues(
+                            alpha: 0.3,
+                          ),
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
@@ -1356,7 +1358,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                                     color: selected
                                         ? JellyTheme.primary
                                         : (disabled
-                                              ? Colors.grey
+                                              ? JellyTheme.textSecondary
                                               : (isDark
                                                     ? Colors.white38
                                                     : Colors.black38)),
@@ -1379,7 +1381,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                                       style: TextStyle(
                                         fontSize: AppTheme.fontBody,
                                         color: disabled
-                                            ? Colors.grey
+                                            ? JellyTheme.textSecondary
                                             : textColor,
                                       ),
                                     ),
@@ -1530,7 +1532,7 @@ class _BookshelfPageState extends State<BookshelfPage>
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) => Container(
           decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : Colors.white,
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             borderRadius:
                 const BorderRadius.vertical(top: Radius.circular(24)),
           ),
@@ -1774,7 +1776,7 @@ class _BookshelfPageState extends State<BookshelfPage>
         final isDark = Theme.of(context).brightness == Brightness.dark;
         return Container(
           decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : Colors.white,
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: SafeArea(
@@ -2156,7 +2158,7 @@ class _BookshelfPageState extends State<BookshelfPage>
             SizedBox(
               height: MediaQuery.of(context).size.height * 0.4,
               child: Material(
-                color: isDark ? JellyTheme.cardDark : Colors.white,
+                color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                 borderRadius: BorderRadius.circular(20),
                 clipBehavior: Clip.antiAlias,
                 child: ListView.builder(
@@ -2214,7 +2216,7 @@ class _BookshelfPageState extends State<BookshelfPage>
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 32),
       decoration: BoxDecoration(
-        color: isDark ? JellyTheme.cardDark : Colors.white,
+        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
@@ -2367,7 +2369,7 @@ class _BookshelfPageState extends State<BookshelfPage>
           decoration: BoxDecoration(
             color: selected
                 ? JellyTheme.primary
-                : (isDark ? JellyTheme.cardDark : Colors.white),
+                : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
@@ -2431,7 +2433,7 @@ class _BookshelfPageState extends State<BookshelfPage>
           decoration: BoxDecoration(
             color: selected
                 ? JellyTheme.primary
-                : (isDark ? JellyTheme.cardDark : Colors.white),
+                : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
@@ -2483,7 +2485,7 @@ class _BookshelfPageState extends State<BookshelfPage>
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : Colors.white,
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
@@ -2546,7 +2548,11 @@ class _SearchComicTile extends StatelessWidget {
           fit: BoxFit.cover,
           placeholder: (_, __) => const SizedBox.shrink(),
           errorWidget: (_, __, ___) =>
-              const Icon(Icons.palette_rounded, size: 20, color: Colors.grey),
+              Icon(
+                Icons.palette_rounded,
+                size: 20,
+                color: JellyTheme.textSecondary,
+              ),
         ),
       ),
       title: Text(
@@ -2600,7 +2606,11 @@ class _SearchBookTile extends StatelessWidget {
           book.cover ?? '',
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) =>
-              const Icon(Icons.book_rounded, size: 20, color: Colors.grey),
+              Icon(
+                Icons.book_rounded,
+                size: 20,
+                color: JellyTheme.textSecondary,
+              ),
         ),
       ),
       title: Text(
@@ -3394,7 +3404,7 @@ class _ShelfCoverState extends State<_ShelfCover> {
                   borderRadius: BorderRadius.circular(10),
                   color: isDark
                       ? Colors.white.withValues(alpha: 0.05)
-                      : Colors.grey[200],
+                      : JellyTheme.cardLight,
                   boxShadow: [
                     BoxShadow(
                       color: isDark
@@ -3627,7 +3637,7 @@ void _showShelfItemMenu(BuildContext context, String shelfId, _ShelfEntry e) {
     backgroundColor: Colors.transparent,
     builder: (ctx) => kbSheet(Container(
       decoration: BoxDecoration(
-        color: isDark ? JellyTheme.cardDark : Colors.white,
+        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: SafeArea(

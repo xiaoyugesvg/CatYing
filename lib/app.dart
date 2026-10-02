@@ -1,46 +1,43 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'common/theme.dart';
-import 'common/constants.dart';
-import 'services/app_state.dart';
 import 'services/app_log.dart';
-import 'services/background_service.dart';
-import 'pages/home/view.dart';
-import 'pages/shelf/view.dart';
-import 'reading/widgets/jelly_nav_bar.dart';
-import 'services/nav_feature_service.dart';
-import 'pages/live/view.dart';
-// cmbok 的 App 骨架入口也叫 HomePage，与影视侧 pages/home/view.dart 的
-// HomePage 重名，所以用前缀导入避免歧义。
-import 'reading/pages/home_page.dart' as reading_app;
-import 'pages/settings/view.dart';
-import 'pages/search/view.dart';
-import 'pages/search/controller.dart';
-import 'pages/settings/controller.dart';
 import 'router/app_pages.dart';
 import 'services/detail_page_controller.dart';
 import 'services/player_fullscreen_controller.dart';
 import 'widgets/video_player_pip.dart';
-import 'widgets/disclaimer_dialog.dart';
-import 'widgets/app_loading_view.dart';
 import 'common/appearance_sync.dart';
-import 'common/floating_nav_spec.dart';
 import 'common/theme_mode_store.dart';
 import 'services/main_tab_controller.dart';
 import 'pages/content_view.dart';
 
 /// 上一次打过的外观签名 —— 用**顶层变量**而不是实例字段：
-/// [TVBoxApp] 是 StatelessWidget，不能持有可变状态；
-/// 而日志去重本身是"进程级"的（同一时刻只会有一个 App 实例在跑）。
+/// 日志去重本身是"进程级"的（同一时刻只会有一个 App 实例在跑）。
 String? _lastAppearanceSig;
 
-class TVBoxApp extends StatelessWidget {
+class TVBoxApp extends StatefulWidget {
   const TVBoxApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  State<TVBoxApp> createState() => _TVBoxAppState();
+}
+
+/// ⚠️ 为什么是 StatefulWidget 而不是 StatelessWidget：
+///
+/// 本 widget 是 `runApp` 的根，位于 `WidgetsApp` / `MediaQuery` **之上**。
+/// 系统亮暗变化时 Flutter 只会重建 `MediaQuery` 以下的子树，
+/// **不会**重跑根 widget 的 build —— 而"跟随系统"恰恰要靠 build 里读一次
+/// `platformBrightness` 来决定明暗。原来这里是 StatelessWidget，
+/// 于是用户选「跟随系统」后，在系统设置里切深色**界面不会变**，
+/// 必须重启 App 才生效。
+/// 现在实现 [WidgetsBindingObserver.didChangePlatformBrightness] 并 setState，
+/// 系统亮暗一变就重算整棵外观链。
+class _TVBoxAppState extends State<TVBoxApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+
     // 提前注册全屏状态控制器, 这样详情页 onFullScreenChanged 才能
     // 直接 PlayerFullscreenController.instance.enter/exit 调用.
     Get.put(PlayerFullscreenController(), permanent: true);
@@ -55,18 +52,30 @@ class TVBoxApp extends StatelessWidget {
     // 排查时会以为是首页的问题。permanent 保证不被自动回收。
     Get.put(DetailPageController(), permanent: true);
 
-    // 外观模式是**唯一来源**（方向已反转：外观主导，背景跟着外观走）。
-    // BackgroundService 改变外观时通过回调推给 ThemeModeStore，
-    // 避免服务层反向依赖 App 层造成循环依赖。
-    final bg = BackgroundService.instance;
-    bg.onAppearanceChanged = (isLight) {
-      ThemeModeStore.applyLightFromBackground(isLight);
-    };
-    // 主题模式（含「跟随系统」）在 main() 启动时已从 prefs 加载，
-    // 这里**不再**用 BackgroundService.appearanceMode（只有 light/dark 两值）
-    // 覆盖 —— 旧逻辑每次冷启动都会把 'system' 覆盖成 dark/light，
-    // 导致「跟随系统」重启后丢失。
+    // 外观协调：必须在 MainTabController 注册之后（start 里读它判断当前 tab）。
+    // 原来这行在 `main()` 里，那时 MainTabController 还没注册，
+    // `start()` 直接在守卫处 return —— 阅读侧的明暗监听从未生效。
+    AppearanceSync.start();
 
+    // 系统亮暗变化（「跟随系统」模式要用）
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    // 只需触发重建：build 里会现读 platformBrightness，
+    // 再经 ThemeModeStore.syncFromPlatform + AppearanceSync 落地。
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: ThemeModeStore.notifier,
       builder: (context, themeMode, _) {
@@ -79,26 +88,23 @@ class TVBoxApp extends StatelessWidget {
         return ValueListenableBuilder<bool>(
           valueListenable: ThemeModeStore.brightnessListenable,
           builder: (context, isLightNow, __) {
-            // ⚠️ 必须在内层算：外观联动（方案 A）改的是 AppBrightness，
-            // 只会触发这一层重建。若在外层算 effectiveLight，外层不重建，
-            // MaterialApp.themeMode 会一直用旧值，界面文字颜色不跟着壁纸变。
-            final effectiveLight = ThemeModeStore.followBackground
-                ? isLightNow
-                : (platformLight && themeMode == ThemeMode.system) ||
-                    themeMode == ThemeMode.light;
-            // ⚠️ 单一真相源：AppTheme 的 textPrimary/backgroundCard 等 getter
-            // 读的是 AppBrightness.isLight，而 MaterialApp 用的是 effectiveLight。
-            // 两者若不同步，就会出现「背景是浅色、文字却是白色」这类颜色不统一
-            // （用户实测截图：皎月白壁纸 + 白字）。
-            // 这里在构建前把 AppBrightness 强制对齐到 effectiveLight。
+            // ⚠️ 明暗的**唯一**真源就是 `AppBrightness.isLight`（= isLightNow）。
             //
-            // ⚠️ 但要先问过 AppearanceSync：在阅读/音乐模块里，明暗该由
-            // **那个模块自己的设置**决定。用户实测"阅读的主题跟随系统
-            // 不生效"，根因就是 AppBrightness 只被影视这套驱动，
-            // 阅读的开关改了 SettingsService 却没人读。
-            // sync 会看当前 tab：非影视 tab 用模块设置覆盖这个 target。
+            // 不要在这里另外拿 `themeMode` + `platformLight` 再算一遍：
+            // `platformLight` 是外层 builder 捕获的，只在 [ThemeModeStore]
+            // 变化时刷新；系统亮度变化只改 `AppBrightness`，外层不会重建，
+            // 于是算出来的 effectiveLight 会是**过期值**，导致
+            // "MaterialApp 用旧主题、AppTheme 取色用新值"这种自相矛盾
+            //（用户实测截图：皎月白壁纸 + 白字）。
+            //
+            // 现在 `AppBrightness` 由三处共同维护、且都写同一个值：
+            //   · `ThemeModeStore.set/load`      → `_syncBrightness`
+            //   · `ThemeModeStore.syncFromPlatform`（system 模式，上面刚调过）
+            //   · `AppearanceSync.applyForCurrentModule`（下面的微任务兜底）
+            final effectiveLight = isLightNow;
+
+            // 兜底再对齐一次（微任务，避免在 build 中直接改 notifier 触发重入）
             {
-              // 用 microtask 避免在 build 中直接改 notifier 触发的重入
               final target = effectiveLight;
               Future<void>.microtask(() {
                 AppearanceSync.applyForCurrentModule(
@@ -106,20 +112,13 @@ class TVBoxApp extends StatelessWidget {
                 );
               });
             }
-            // ⚠️ 这行原来**每次 build 都打日志**。
-            // build 极其频繁（动画/交互/任何 setState 都会触发），
-            // 结果是 AppLog 被这行刷屏、日志文件膨胀，而内容和上一次
-            // 往往一模一样 —— 排查问题时反而被淹没。
-            //
-            // 改成**只在明暗真的变化时**打一条（静态字段记住上次的签名）。
+            // 只在明暗真的变化时打一条日志（build 极其频繁，全打会刷屏）
             {
-              final sig = '$themeMode|$platformLight|'
-                  '${ThemeModeStore.followBackground}|$effectiveLight';
+              final sig = '$themeMode|$platformLight|$effectiveLight';
               if (sig != _lastAppearanceSig) {
                 _lastAppearanceSig = sig;
                 AppLog.instance.log(
                     '[Appearance] themeMode=$themeMode platformLight=$platformLight '
-                    'followBg=${ThemeModeStore.followBackground} '
                     'isLight(theme)=$isLightNow effectiveLight=$effectiveLight');
               }
             }
@@ -180,21 +179,31 @@ class TVBoxApp extends StatelessWidget {
                       child: out,
                     );
                   }
-                  // ⚠️ 再包一层监听外观，并用 key 强制重建：
-                  // 弹窗 / 底部弹窗（筛选菜单、布局切换、各设置面板）挂在**根
-                  // Overlay** 上，不属于上面被重建的 tab 子树。它们内部的
+                  // ── ⚠️ 这里原来会换 key 强制重建整棵树 ──────────────────
+                  //
+                  //   KeyedSubtree(key: ValueKey('appearance-$isLight-$paletteRev'))
+                  //
+                  // 当时的理由是"弹窗 / 底部弹窗挂在根 Overlay 上，它们内部的
                   // AppTheme.* 颜色是在打开那一刻取值并缓存的，外观一变就会
-                  // 停在旧色（"筛选背景没变"就是这么来的）。
-                  // 在 builder 这一层换 key，Overlay 里的内容也会整体重绘。
-                  return ValueListenableBuilder<bool>(
-                    valueListenable: AppBrightness.isLight,
-                    builder: (context, isLight, __) => KeyedSubtree(
-                      // paletteRev 也拼进来：配色方案一变，
-                      // 连同挂在 Overlay 上的弹窗一起重建。
-                      key: ValueKey('appearance-$isLight-$paletteRev'),
-                      child: out,
-                    ),
-                  );
+                  // 停在旧色（筛选背景没变）"。
+                  //
+                  // 但 `child` 就是**根 Navigator** —— 换 key 会把整个路由栈
+                  // 连同下面 7 个 tab 页的 State 全部销毁重建。这正是
+                  // "主题切换卡顿"和"在阅读里切个明暗就跳回默认首页"
+                  // （tab 状态丢失）的根因。
+                  //
+                  // 现在改为依赖两条**非破坏性**的传播路径：
+                  //   1. `theme` / `themeMode` 变化 → Material 的 `Theme`
+                  //      InheritedWidget 通知所有 `Theme.of(context)` 依赖者重建
+                  //      （对话框/底部弹窗里的 Material 部件都属于此类）；
+                  //   2. `content_view.dart` 在明暗/配色变化时构造**新的**
+                  //      tab 页实例 → 子页 rebuild 而 Element/State 复用。
+                  //
+                  // 残留（已知）：若某个**已经打开**的弹窗内部显式写了
+                  // `AppTheme.xxx` 且完全不依赖 `Theme.of`，外观变化后它会停在
+                  // 旧色，重新打开即正常。要彻底消除需要把 `AppTheme.*` 静态取色
+                  // 迁到 `Theme.of(context)` —— 那是全工程级重构。
+                  return out;
                 },
                 ),
               );
@@ -205,5 +214,3 @@ class TVBoxApp extends StatelessWidget {
     );
   }
 }
-
-

@@ -151,8 +151,10 @@ class _JellyComicCardState extends State<JellyComicCard>
                         httpHeaders: coverHeaders(widget.comic.sourceId),
                         fit: BoxFit.cover,
                         memCacheWidth: 300,
-                        placeholder: (context, url) => Container(
-                          color: isDark ? Colors.grey[800] : Colors.grey[200],
+                        placeholder: (context, url) => ColoredBox(
+                          color: isDark
+                              ? JellyTheme.cardDark
+                              : JellyTheme.cardLight,
                           child: Center(
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
@@ -160,12 +162,14 @@ class _JellyComicCardState extends State<JellyComicCard>
                             ),
                           ),
                         ),
-                        errorWidget: (context, url, error) => Container(
-                          color: isDark ? Colors.grey[800] : Colors.grey[200],
-                          child: const Icon(
+                        errorWidget: (context, url, error) => ColoredBox(
+                          color: isDark
+                              ? JellyTheme.cardDark
+                              : JellyTheme.cardLight,
+                          child: Icon(
                             Icons.broken_image,
                             size: 40,
-                            color: Colors.grey,
+                            color: JellyTheme.textSecondary,
                           ),
                         ),
                       ),

@@ -100,7 +100,7 @@ class _DownloadChapterSheetState extends State<DownloadChapterSheet> {
       builder: (ctx) {
         final isDark = Theme.of(ctx).brightness == Brightness.dark;
         return AlertDialog(
-          backgroundColor: isDark ? JellyTheme.cardDark : Colors.white,
+          backgroundColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('去白边下载'),
@@ -151,7 +151,7 @@ class _DownloadChapterSheetState extends State<DownloadChapterSheet> {
       builder: (context, scrollController) {
         return Container(
           decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : Colors.white,
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(
@@ -174,7 +174,7 @@ class _DownloadChapterSheetState extends State<DownloadChapterSheet> {
         width: 40,
         height: 4,
         decoration: BoxDecoration(
-          color: Colors.grey[400],
+          color: JellyTheme.textSecondary.withValues(alpha: 0.35),
           borderRadius: BorderRadius.circular(10),
         ),
       ),

@@ -394,7 +394,7 @@ class _MePageState extends State<MePage> {
         return Padding(
           padding: const EdgeInsets.only(bottom: 14),
           child: Material(
-            color: isDark ? JellyTheme.cardDark : Colors.white,
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             borderRadius: BorderRadius.circular(20),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
@@ -574,7 +574,7 @@ class _MePageState extends State<MePage> {
         final dark = SettingsService().isDarkMode;
         return Material(
           key: _themeToggleKey,
-          color: isDark ? JellyTheme.cardDark : Colors.white,
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
           shape: const CircleBorder(),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
@@ -963,8 +963,8 @@ class _MePageState extends State<MePage> {
     bool editable = false,
     VoidCallback? onEdit,
   }) {
-    final labelColor = isDark ? Colors.white : const Color(0xFF1C1C1E);
-    final hintColor = isDark ? Colors.white54 : const Color(0xFF8E8E93);
+    final labelColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    final hintColor = JellyTheme.textSecondary;
     final canEdit = (editable && onEdit != null) || (deletable && onDelete != null);
 
     Future<void> showActions() async {
@@ -1088,7 +1088,7 @@ class _MePageState extends State<MePage> {
     final stroke = isDark
         ? Colors.white.withValues(alpha: 0.22)
         : Colors.black.withValues(alpha: 0.16);
-    final fg = isDark ? Colors.white : const Color(0xFF1C1C1E);
+    final fg = isDark ? Colors.white : JellyTheme.textPrimaryLight;
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Material(

@@ -67,7 +67,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 字号 / 行距 / 背景（与设置页同一把尺子）
   double _fontSize = 18;
   double _lineHeight = 1.9;
-  int _bgIndex = 0;
+  /// 阅读底色索引（见 [_bgs]：0 白 / 1 米黄 / 2 护眼绿 / 3 夜间）。
+  ///
+  /// ⚠️ 默认值**按全局明暗取**：全局是深色就默认"夜间"，浅色就默认"白"。
+  /// 原来写死 `0`（白），于是"暗色模式对书源阅读器完全无效"。
+  /// 用户在「主题」tab 里显式选过的值会由 `_restorePrefs()` 覆盖回来
+  ///（`reading.bgIndex`），所以这里只影响**没选过**的用户。
+  int _bgIndex = AppBrightness.isLight.value ? 0 : 3;
   bool _showBar = true;
 
   // ── 排版（截图 IMG_8092~8095 全文可调）───────────────────────

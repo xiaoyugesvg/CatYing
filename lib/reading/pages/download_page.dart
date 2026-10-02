@@ -603,12 +603,12 @@ class _DownloadPageState extends State<DownloadPage>
                         ? Icons.download_for_offline_rounded
                         : Icons.search_off_rounded,
                     size: 64,
-                    color: Colors.grey,
+                    color: JellyTheme.textSecondary,
                   ),
                   const SizedBox(height: 16),
                   Text(
                     svc.tasks.isEmpty ? '暂无下载任务' : '未找到匹配的下载',
-                    style: const TextStyle(color: Colors.grey),
+                    style: TextStyle(color: JellyTheme.textSecondary),
                   ),
                 ],
               ),
@@ -728,12 +728,12 @@ class _DownloadPageState extends State<DownloadPage>
                         ? Icons.download_for_offline_rounded
                         : Icons.search_off_rounded,
                     size: 64,
-                    color: Colors.grey,
+                    color: JellyTheme.textSecondary,
                   ),
                   const SizedBox(height: 16),
                   Text(
                     svc.tasks.isEmpty ? '暂无下载任务' : '未找到匹配的下载',
-                    style: const TextStyle(color: Colors.grey),
+                    style: TextStyle(color: JellyTheme.textSecondary),
                   ),
                 ],
               ),
@@ -885,7 +885,7 @@ class _DownloadPageState extends State<DownloadPage>
   Widget _buildOpenDirButton() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Material(
-      color: isDark ? JellyTheme.cardDark : Colors.white,
+      color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
       shape: const CircleBorder(),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -1346,15 +1346,16 @@ class _DownloadPageState extends State<DownloadPage>
         height: 60,
         fit: BoxFit.cover,
         placeholder: (c, u) => Container(
-          color: isDark ? JellyTheme.cardDark : Colors.grey[200],
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
           width: 44,
           height: 60,
         ),
         errorWidget: (c, u, e) => Container(
-          color: isDark ? JellyTheme.cardDark : Colors.grey[200],
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
           width: 44,
           height: 60,
-          child: const Icon(Icons.broken_image, size: 20, color: Colors.grey),
+          child: Icon(Icons.broken_image,
+              size: 20, color: JellyTheme.textSecondary),
         ),
       ),
     );
@@ -1642,7 +1643,7 @@ class _DownloadPageState extends State<DownloadPage>
         maxHeight: MediaQuery.of(context).size.height * 0.6,
       ),
       child: Material(
-        color: isDark ? JellyTheme.cardDark : Colors.white,
+        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         borderRadius: BorderRadius.circular(20),
         clipBehavior: Clip.antiAlias,
         child: Column(

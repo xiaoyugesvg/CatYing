@@ -134,7 +134,7 @@ class _JellyNavBarState extends State<JellyNavBar>
   Widget _buildFixedNavBar(bool isDark) {
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? JellyTheme.backgroundDark : Colors.white,
+        color: isDark ? JellyTheme.backgroundDark : JellyTheme.cardLight,
         borderRadius: const BorderRadius.vertical(
           top: Radius.circular(_topRadius), // 左、右上角圆角
         ),

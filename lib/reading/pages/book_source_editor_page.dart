@@ -319,7 +319,7 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
           decoration: BoxDecoration(
             color: isDark
                 ? Colors.white.withValues(alpha: 0.06)
-                : const Color(0xFFF2F2F4),
+                : JellyTheme.primary.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Row(
@@ -336,7 +336,7 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
                         color: _varKvMode == kv
                             ? (isDark
                                 ? Colors.white.withValues(alpha: 0.14)
-                                : const Color(0xFFE3E3E6))
+                                : JellyTheme.primary.withValues(alpha: 0.12))
                             : Colors.transparent,
                         borderRadius: BorderRadius.circular(20),
                       ),
@@ -348,7 +348,9 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
                               ? FontWeight.w600
                               : FontWeight.normal,
                           color: _varKvMode == kv
-                              ? (isDark ? Colors.white : const Color(0xFF1A1A1A))
+                              ? (isDark
+                                    ? Colors.white
+                                    : JellyTheme.textPrimaryLight)
                               : JellyTheme.textSecondary,
                         ),
                       ),

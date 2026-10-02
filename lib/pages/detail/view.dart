@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 import '../../services/live_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../common/theme.dart';
+import '../../common/system_ui.dart';
 import '../../models/movie.dart';
 import '../../models/vod_info.dart';
 import '../../models/player_engine.dart';
@@ -138,10 +139,18 @@ class _DetailPageState extends State<DetailPage> {
     // 底栏(首页/历史/收藏/设置) 在全屏时隐藏
     if (isFull) {
       PlayerFullscreenController.instance.enter('detail');
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
+      // 沉浸 + 视频黑底 → 浅色状态栏图标。
+      // ⚠️ 方向**不传**：详情页全屏的方向由 `widgets/video_player.dart`
+      // 自己管，这里传了会互相覆盖（V10）。
+      SystemUiController.enter(
+        'detail',
+        mode: SystemUiMode.immersive,
+        overlayStyle: SystemUiOverlayStyle.light,
+      );
     } else {
       PlayerFullscreenController.instance.exit('detail');
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      // 恢复**进入前**的系统栏状态，而不是写死 edgeToEdge
+      SystemUiController.exit('detail');
     }
   }
 
@@ -723,9 +732,16 @@ class _DetailPageState extends State<DetailPage> {
           children: [
             // 0. 状态栏高度黑边（与直播播放器上方一致）
             if (topBar > 0)
-              SizedBox(
-                height: topBar,
-                child: const ColoredBox(color: Colors.black),
+              // 这一条正好覆盖状态栏区域 → 发浅色图标。
+              // 本页刻意不放 AppBar（见 Scaffold 上方注释），没有 AppBar
+              // 就没人发布 overlay style，浅色模式下会沿用上一条路由的
+              // 深色图标，压在黑边上直接看不见。
+              AnnotatedRegion<SystemUiOverlayStyle>(
+                value: SystemUiOverlayStyle.light,
+                child: SizedBox(
+                  height: topBar,
+                  child: const ColoredBox(color: Colors.black),
+                ),
               ),
 
             // 1. 播放器 - 对应 Swift PlayerView
@@ -1854,7 +1870,8 @@ class _DetailPageState extends State<DetailPage> {
                       vertical: 10,
                     ),
                     filled: true,
-                    fillColor: Colors.white.withValues(alpha: 0.06),
+                    // 原来写死白 6%：浅色模式下与页面底几乎同色，输入框消失
+                    fillColor: AppTheme.backgroundTertiary,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(20),
                       borderSide: BorderSide.none,
@@ -2017,14 +2034,14 @@ class _DetailPageState extends State<DetailPage> {
                                     ? AppTheme.accentColor.withValues(
                                         alpha: 0.22,
                                       )
-                                    : Colors.white.withValues(alpha: 0.06),
+                                    : AppTheme.backgroundTertiary,
                                 borderRadius: BorderRadius.circular(20),
                                 border: Border.all(
                                   color: sel
                                       ? AppTheme.accentColor.withValues(
                                           alpha: 0.55,
                                         )
-                                      : Colors.white24,
+                                      : AppTheme.borderLight,
                                 ),
                               ),
                               child: Row(

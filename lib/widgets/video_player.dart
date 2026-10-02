@@ -11,6 +11,7 @@ import 'app_player.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart' show DragToMoveArea;
 import '../common/theme.dart';
+import '../common/system_ui.dart';
 import 'video_player_pip.dart';
 import 'window_fullscreen.dart';
 import 'danmaku.dart';
@@ -857,7 +858,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         try {
           final size = MediaQuery.of(context).size;
           if (size.height > size.width) {
-            await SystemChrome.setPreferredOrientations(const [
+            await SystemUiController.lockOrientations('videoLandscapePref', const [
               DeviceOrientation.landscapeLeft,
               DeviceOrientation.landscapeRight,
             ]);
@@ -1334,7 +1335,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
     AppLog.instance.log('=== _enterFullScreen: start ===');
     if (Platform.isIOS) {
-      await SystemChrome.setPreferredOrientations(const [
+      await SystemUiController.lockOrientations('videoFullscreen', const [
         DeviceOrientation.landscapeLeft,
         DeviceOrientation.landscapeRight,
       ]);
@@ -1386,11 +1387,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       );
     }
     if (Platform.isIOS) {
-      await SystemChrome.setPreferredOrientations(const [
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
+      // 还原进入全屏前记录的方向，而不是无条件写死"竖屏+左右横屏"
+      await SystemUiController.unlockOrientations('videoFullscreen');
     }
     await Future<void>.delayed(const Duration(milliseconds: 100));
     if (mounted) _onWindowFullScreenChanged();
@@ -1541,11 +1539,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     // 还原「优先横屏」强制过的方向，避免退出播放器后整个 App 卡在横屏
     if (_landscapeForcedByPref) {
       _landscapeForcedByPref = false;
-      SystemChrome.setPreferredOrientations(const [
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
+      SystemUiController.unlockOrientations('videoLandscapePref');
     }
     _batteryStateSub?.cancel();
     _positionVN.dispose();

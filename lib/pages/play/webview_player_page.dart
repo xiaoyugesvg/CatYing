@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../services/app_log.dart';
 import '../../services/player_prefs.dart';
 import 'package:flutter/services.dart';
+import '../../common/system_ui.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 /// 网页播放器页 - 全屏 WebView 加载网页播放页
@@ -38,10 +39,16 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     super.initState();
     // 网页播放页强制横屏（仅全屏页；内嵌模式保持竖屏布局）
     if (!widget.embedded && PlayerPrefs.instance.webviewForceLandscape.value) {
-      SystemChrome.setPreferredOrientations(const [
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
+      SystemUiController.enter(
+        'webviewPlayer',
+        mode: SystemUiMode.edgeToEdge,
+        orientations: const [
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ],
+        // 本页是黑底播放页 → 浅色状态栏图标
+        overlayStyle: SystemUiOverlayStyle.light,
+      );
     }
     _initController(widget.url);
   }
@@ -98,13 +105,10 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
       _controller.runJavaScript(
           'try{document.querySelectorAll("video,audio").forEach(function(m){m.pause&&m.pause();});}catch(e){}');
     } catch (_) {}
-    // 恢复允许竖屏 + 横屏（仅全屏页改过方向）
-    if (!widget.embedded) {
-      SystemChrome.setPreferredOrientations(const [
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
+    // 恢复**进入前**的方向（原来无条件写死"竖屏+左右横屏"，
+    // 会把别的页面设定的方向锁覆盖掉）
+    if (!widget.embedded && PlayerPrefs.instance.webviewForceLandscape.value) {
+      SystemUiController.exit('webviewPlayer');
     }
     super.dispose();
   }

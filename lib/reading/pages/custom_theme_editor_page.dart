@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_palette.dart';
+import '../theme/jelly_theme.dart';
 import '../theme/theme_background_painters.dart';
 import '../widgets/color_picker_dialog.dart';
 import '../../common/theme.dart';
@@ -362,7 +363,8 @@ class _CustomThemeEditorPageState extends State<CustomThemeEditorPage> {
         decoration: BoxDecoration(
           color: c,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.black12),
+          border:
+              Border.all(color: JellyTheme.primary.withValues(alpha: 0.12)),
         ),
       ),
       title: Text(

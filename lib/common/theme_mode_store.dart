@@ -1,3 +1,5 @@
+import 'dart:ui' show PlatformDispatcher;
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -6,37 +8,53 @@ import 'theme.dart';
 
 /// 全局主题模式：dark / light / system（设置页可改）
 ///
-/// 与 [BackgroundService] 的「壁纸 + 外观联动」关系：
-/// - 背景决定文字明暗（方案 A）：选到皎月白这类浅色底时自动切浅色文字。
-///   推导由 BackgroundService 负责，结果通过 [applyLightFromBackground] 推过来。
-/// - 用户手动选 = 打开手动覆盖标记，之后背景变化不再自动改文字颜色。
+/// ── 单一真源 ────────────────────────────────────────────────────
+/// 实际明暗（`AppBrightness.isLight`）**只**由本类的 [mode] + 平台亮度推出：
+///   · [set] / [load] 时按模式直接定
+///   · [syncFromPlatform] 时按平台亮度定（仅 `system` 模式）
+///   · `app.dart` 构建时经 `AppearanceSync.applyForCurrentModule` 再对齐一次
+///
+/// 壁纸（[BackgroundService]）**只读**这个结果来决定渲染深色还是浅色那一套
+/// 场景（见其 `isLight` / `_sceneKeyForCurrentAppearance`），**不再反向写入**。
+/// 方向统一为「外观 → 壁纸」。
 ///
 /// ── 三模块全局同步 ──────────────────────────────────────────────
 /// 改 [set] 时，会通过 [GlobalThemeSync] 同步推给音乐和阅读模块，
 /// 做到"一个开关，三处同时变"。
 /// 音乐 / 阅读模块自己的开关如果被用户拨动，也会通过
 /// [notifyModuleChanged] 回写到这里，保持全局一致。
+///
+/// ── 历史：为什么删掉了 `_followBackground` ──────────────────────
+/// 这里曾有一个 `_followBackground` 标志，语义是"文字明暗跟随壁纸"。
+/// 它由 [applyLightFromBackground]（壁纸回调）**无条件置真**，且不持久化。
+/// 一旦置真就会：
+///   · 让 [syncFromPlatform] 永远提前返回 → **「跟随系统」彻底失效**
+///   · 让 `app.dart` 里 `themeMode == ThemeMode.system` 分支变成死代码
+///   · 每次冷启动 `main.dart` 调 `setAppearanceMode` 都会把它重新闩死，
+///     而三个设置入口都是「先 set() 清闩 → 再 setAppearanceMode() 上闩」，
+///     于是用户选「跟随系统」后闩锁恒为真
+/// 而壁纸场景本身已经通过 `AppBrightness` 跟随明暗，那个反向推送纯属多余。
+/// 故连同 `followBackground` getter 一并删除。
 class ThemeModeStore {
   static ValueNotifier<ThemeMode> notifier =
       ValueNotifier(ThemeMode.dark);
-
-  /// true = 文字明暗由壁纸/背景自动推导（方案 A），此时忽略平台亮度同步。
-  ///
-  /// 不能复用 [ThemeMode.system] 表达"跟随背景"——那样 [syncFromPlatform]
-  /// 会立刻把明暗改回系统亮度，背景推导结果会被覆盖掉。
-  static bool get followBackground => _followBackground;
-  static bool _followBackground = false;
 
   /// 防止递归：同步到模块 → 模块回调 notifyModuleChanged → 再 set 回去
   static bool _syncing = false;
 
   static ThemeMode get mode => notifier.value;
 
-  static void _syncBrightness(ThemeMode m, {bool? systemLight}) {
+  /// 按模式把明暗写进全局开关。
+  ///
+  /// `system` 分支**现读一次平台亮度**，不能写死 false ——
+  /// 否则用户在浅色系统下选「跟随系统」的瞬间会先闪一下深色，
+  /// 直到别的重建路径把它纠正回来。
+  static void _syncBrightness(ThemeMode m) {
     final light = switch (m) {
       ThemeMode.light => true,
       ThemeMode.dark => false,
-      ThemeMode.system => systemLight ?? false,
+      ThemeMode.system =>
+        PlatformDispatcher.instance.platformBrightness == Brightness.light,
     };
     AppBrightness.isLight.value = light;
   }
@@ -56,9 +74,8 @@ class ThemeModeStore {
     }
   }
 
-  static Future<void> set(ThemeMode m) async {
-    if (notifier.value == m && !_followBackground) return;
-    _followBackground = false;
+  static Future<void> set(ThemeMode m, {String? origin}) async {
+    if (notifier.value == m) return;
     notifier.value = m;
     _syncBrightness(m);
     try {
@@ -78,7 +95,7 @@ class ThemeModeStore {
     if (!_syncing) {
       _syncing = true;
       try {
-        GlobalThemeSync.pushToModules(m);
+        GlobalThemeSync.pushToModules(m, except: origin);
       } finally {
         _syncing = false;
       }
@@ -87,44 +104,39 @@ class ThemeModeStore {
 
   /// 由音乐/阅读模块的开关回调（用户在模块内改了明暗），
   /// 回写到全局存储，保持三处一致。
-  static Future<void> notifyModuleChanged(ThemeMode m) async {
-    if (_syncing) return;
-    if (notifier.value == m && !_followBackground) return;
-    _syncing = true;
-    try {
-      await set(m);
-    } finally {
-      _syncing = false;
-    }
-  }
-
-  /// 由壁纸/背景推导结果驱动文字明暗（方案 A）。
   ///
-  /// 不走 [set]：这是"跟随背景"而非用户手动选择 —— 保留 [themeMode] 原值
-  /// 以免下次关闭跟随背景时丢掉用户上次的手动选择，只切实际明暗。
-  static void applyLightFromBackground(bool isLight) {
-    _followBackground = true;
-    AppBrightness.isLight.value = isLight;
+  /// [origin] 是发起模块（`GlobalThemeSync.music` / `.reading`）：
+  /// 只跳过它自己，**其余模块照常同步**。
+  static Future<void> notifyModuleChanged(ThemeMode m, {String? origin}) async {
+    // `_syncing` 为真 = 正在把变更推给各模块，此时模块的回声要忽略（防递归）
+    if (_syncing) return;
+    if (notifier.value == m) return;
+    // ⚠️ 不要把 [set] 包在 `_syncing = true` 里。
+    //
+    // 原来这里先置 `_syncing = true` 再 `await set(m)`，而 `set` 内部是
+    // `if (!_syncing) pushToModules(...)` —— 于是从模块发起的变更
+    // **一个模块都不会被通知**："音乐里改明暗，阅读不跟着变"，
+    // 与"一个开关，三处同时变"的承诺相反。
+    // 现在改由 [origin] 精确跳过发起方。
+    await set(m, origin: origin);
   }
 
-  /// 跟随系统时调用（View 平台亮度变化）
+  /// 平台亮度变化 / 需要重新对齐时调用。
+  ///
+  /// 只有 `system` 模式才由平台亮度决定明暗；其它模式以用户选择为准。
   static void syncFromPlatform(bool platformLight) {
-    // 背景推导优先：此时明暗由壁纸决定，不能被系统亮度覆盖
-    if (_followBackground) return;
     if (notifier.value != ThemeMode.system) return;
     if (AppBrightness.isLight.value == platformLight) return;
+    // 改 `AppBrightness` 就会触发外观相关重建（app.dart 内层
+    // ValueListenableBuilder 监听的正是它），不需要再动 notifier。
     AppBrightness.isLight.value = platformLight;
-    // 触发 ValueListenableBuilder / 外观相关重建
-    notifier.value = ThemeMode.system;
 
     // ── ⚠️ 还要推给音乐 / 阅读 ──────────────────────────────────
     //
-    // 这里原先只改了 `AppBrightness` 和 notifier，**没有通知模块**。
-    // 后果：选「跟随系统」时，用户在系统设置里切了深色，App 的整体明暗
+    // `set()` 那条路径本来就会推，但系统亮度变化**不走 set()**。
+    // 不推的话：选「跟随系统」时用户在系统设置里切了深色，App 整体明暗
     // 跟着变了（AppTheme 会变），但**音乐自己的皮肤不会变** ——
     // `MusicTheme._isDark` 停在旧值，于是浅色页面里配着深色文字。
-    //
-    // `set()` 那条路径本来就会推，但系统亮度变化**不走 set()**。
     if (!_syncing) {
       _syncing = true;
       try {
@@ -151,6 +163,11 @@ class ThemeModeStore {
 class GlobalThemeSync {
   GlobalThemeSync._();
 
+  /// 模块来源标识（用于"推给别人、跳过自己"）
+  static const String video = 'video';
+  static const String music = 'music';
+  static const String reading = 'reading';
+
   static void Function(ThemeMode mode)? _pushMusic;
   static void Function(ThemeMode mode)? _pushReading;
 
@@ -162,9 +179,12 @@ class GlobalThemeSync {
   static void registerReading(void Function(ThemeMode mode) fn) =>
       _pushReading = fn;
 
-  /// 把新的模式推给所有已注册的模块
-  static void pushToModules(ThemeMode mode) {
-    _pushMusic?.call(mode);
-    _pushReading?.call(mode);
+  /// 把新的模式推给所有已注册的模块。
+  ///
+  /// [except] 传发起模块的标识即可跳过它自己（避免回声），
+  /// 其余模块仍会收到通知。
+  static void pushToModules(ThemeMode mode, {String? except}) {
+    if (except != music) _pushMusic?.call(mode);
+    if (except != reading) _pushReading?.call(mode);
   }
 }

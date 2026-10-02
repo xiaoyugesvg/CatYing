@@ -18,13 +18,10 @@ import 'settings/view.dart';
 import 'search/view.dart';
 import 'search/controller.dart';
 import 'settings/controller.dart';
-import '../router/app_pages.dart';
 import '../services/detail_page_controller.dart';
 import '../services/player_fullscreen_controller.dart';
-import '../widgets/video_player_pip.dart';
 import '../widgets/disclaimer_dialog.dart';
 import '../widgets/app_loading_view.dart';
-import '../common/floating_nav_spec.dart';
 import '../services/main_tab_controller.dart';
 
 /// 主内容视图 - 对应 Swift ContentView
@@ -551,23 +548,54 @@ class _ContentViewState extends State<ContentView>
   ///
   /// 这两个模块**自带导航栏**，所以影视底栏要在它们选中时隐藏
   /// （否则两条栏重叠 —— 用户实测反馈过）。
-  /// 写成常量而不是散落的字面量 5/6，改 _tabPages 顺序时不容易漏。
+  /// 写成常量而不是散落的字面量 5/6，改 tab 顺序时不容易漏。
 
-  final List<Widget> _tabPages = [
-    const HomePage(),
-    // 「史藏」= 历史 + 收藏（统一页，顶部 tab 切换）
-    const ShelfPage(),
-    const ShelfPage(), // 占位：索引 2 保留结构避免下标错乱
-    const SettingsPage(),
-    // 直播作为第 5 个 tab（选中才高亮，修复"首页+直播同时高亮"）
-    const LivePage(),
-    // 音乐（索引 5）—— 按 Beans-Music 的 4-tab 结构重绘
-    // （主页/搜索/音乐库/我的 + 迷你播放器 + 全屏播放器）
-    const MusicRootView(),
-    // 阅读（索引 6）—— 完整移植 cmbok_app 的 5-tab 应用
-    // （漫画 / 图书 / 书架 / 收藏 / 我的），内含它自己的导航栏与主题体系
-    const reading_app.HomePage(),
-  ];
+  /// 上一次生成 tab 页实例用的"外观签名"（明暗 + 配色版本）
+  String? _tabSig;
+  List<Widget>? _tabPagesCache;
+
+  /// 构造 7 个 tab 页实例。
+  ///
+  /// ── ⚠️ 为什么必须"按外观签名换新实例"，而不是 const 字段 ──────────
+  ///
+  /// `AppTheme` 是静态类，颜色 getter 读 `AppBrightness.isLight` / `_palette`，
+  /// 改了**不会通知任何 widget**。若这些页面是 `const` 实例，IndexedStack
+  /// 重建时 Flutter 在 `Element.updateChild` 里判定
+  /// `child.widget == newWidget`（同一个规范化实例）→ **直接跳过子页 build**
+  /// → 子页停在旧颜色（"切了外观但筛选背景没变"）。
+  ///
+  /// 旧实现是靠给 IndexedStack 换 key 强制重建来解决的，但那是**销毁重建**：
+  /// 7 个 tab 的 State（阅读的子 tab、滚动位置、已加载列表）全部丢失 ——
+  /// 用户实测"在阅读里切个明暗，阅读就跳回默认首页"。
+  ///
+  /// 现在改成"新实例 + 不换 key"：`updateChild` 看到 widget 变了会走
+  /// `update()` → 子页**重建**；而 runtimeType / 位置 / key 都没变 →
+  /// Element 与 State **复用**。于是颜色刷新、状态不丢。
+  ///
+  /// 缓存的意义：只在"明暗或配色真的变了"时换新实例；其它重建
+  /// （切 tab、网络刷新等）继续复用同一批实例，避免每次都白重建 7 个大页面。
+  List<Widget> _tabPages(String sig) {
+    if (_tabSig != sig || _tabPagesCache == null) {
+      _tabSig = sig;
+      // 这里**故意不写 const**（写了就会被规范化成同一实例，子页又不重建了）
+      _tabPagesCache = <Widget>[
+        HomePage(),
+        // 「史藏」= 历史 + 收藏（统一页，顶部 tab 切换）
+        ShelfPage(),
+        ShelfPage(), // 占位：索引 2 保留结构避免下标错乱
+        SettingsPage(),
+        // 直播作为第 5 个 tab（选中才高亮，修复"首页+直播同时高亮"）
+        LivePage(),
+        // 音乐（索引 5）—— 按 Beans-Music 的 4-tab 结构重绘
+        // （主页/搜索/音乐库/我的 + 迷你播放器 + 全屏播放器）
+        MusicRootView(),
+        // 阅读（索引 6）—— 完整移植 cmbok_app 的 5-tab 应用
+        // （漫画 / 图书 / 书架 / 收藏 / 我的），内含它自己的导航栏与主题体系
+        reading_app.HomePage(),
+      ];
+    }
+    return _tabPagesCache!;
+  }
 
   Widget _buildMainTabView() {
     final appState = Get.find<AppState>();
@@ -604,27 +632,23 @@ class _ContentViewState extends State<ContentView>
           // 关键: IndexedStack 的 index 必须包在 Obx 里, 切 tab 才生效
           //
           // ⚠️ 外面再套一层 ValueListenableBuilder 监听外观：
-          // AppTheme 的颜色 getter 读 AppBrightness.isLight，但 _tabPages 是
-          // **const widget 实例** —— IndexedStack 重建时 Flutter 判定 widget
-          // 未变，会**跳过子页的 build**，于是首页里不在 Obx 内的部分
-          // （筛选芯片面板、搜索栏等）一直用旧颜色，表现为
-          // "切了外观，但筛选背景没变"。
-          // 这里监听 isLight，并在变化时换 key，强制子页重绘。
+          // AppTheme 的颜色 getter 读 AppBrightness.isLight，但页面的
+          // build 会被 Flutter 跳过（见 `_tabPages` 的说明）。
+          // 这里监听外观，并**只在这些值变化时**换一批新实例，
+          // 让子页重建（Element/State 复用），而不是换 key 销毁重建。
           ValueListenableBuilder<bool>(
             valueListenable: AppBrightness.isLight,
-            // ⚠️ 除了 isLight，**paletteRevision 也必须拼进 key**：
-            // `AppTheme` 是静态类，换配色（app.dart 的"主题与外观"）
-            // 时它的 `_palette` 变了但不会通知任何 widget；
-            // 而 `_tabPages` 是 const 实例，IndexedStack 重建时
-            // Flutter 判定"子 widget 未变"会跳过它们的 build。
-            // 拼进来之后，**换配色只需重建这一段**，
-            // 不必再靠 app.dart 换外层 key 去销毁整个 ContentView。
+            // ⚠️ 除 isLight 外，`paletteRevision` 也算进签名：
+            // `AppTheme` 换配色时 `_palette` 变了但不会通知任何 widget。
             builder: (context, isLight, __) => ValueListenableBuilder<int>(
               valueListenable: AppTheme.paletteRevision,
               builder: (context, paletteRev, ___) => Obx(() => IndexedStack(
-                  key: ValueKey('tabs-$isLight-$paletteRev'),
+                  // 🔴 这里**不能**再拼 `ValueKey('tabs-$isLight-$paletteRev')`：
+                  // 换 key 会销毁重建全部 tab 页，阅读子 tab 与各页滚动位置
+                  // 全部丢失（用户实测"切个明暗就跳回默认首页"）。
+                  // 子页重建改由 `_tabPages(sig)` 换新实例来触发。
                   index: MainTabController.instance.selectedTab.value,
-                  children: _tabPages,
+                  children: _tabPages('$isLight-$paletteRev'),
                 ))),
           ),
           // 搜索页 - 对应 Swift .sheet(isPresented: $showSearch)
@@ -636,10 +660,10 @@ class _ContentViewState extends State<ContentView>
                   // 半透明遮罩, 让 BackgroundService 全局背景层透出
                   // (纯黑会盖住玻璃背景层, 搜索页看起来像"死板黑块")
                   color: AppTheme.glassTintDeep,
-                  // key 跟随外观：搜索浮层里的文字/输入框颜色同样读 AppTheme，
-                  // 不重建的话切外观后会停在旧色。
+                  // 不再给 SearchPage 换 key：它是内联构造的，每次重建都是
+                  // 新实例 → 会 rebuild 拿到新颜色；而 key 变化会**销毁重建**
+                  // 它的 State（搜索词/结果/滚动位置全丢）。
                   child: SearchPage(
-                    key: ValueKey('search-$isLight'),
                     onClose: () {
                       setState(() {
                         _showSearch = false;
@@ -714,7 +738,9 @@ class _ContentViewState extends State<ContentView>
                     final features = NavFeatureService.instance.enabled;
                     final cur = MainTabController.instance.selectedTab.value;
                     return JellyNavBar(
-                      key: ValueKey('video-nav-$paletteRev'),
+                      // 不再换 key：`palette` 是构造参数，每次重建都传新的
+                      // `AppTheme.palette`，新实例自然会 rebuild 取到新色；
+                      // 而换 key 会销毁重建它的 State（果冻指示器动画被打断）。
                       // ⚠️ 必须显式传影视的调色板 —— JellyNavBar 默认用
                       // 阅读的 JellyTheme.palette，切影视配色时那个不会变，
                       // 会导致影视栏颜色错（静默 bug）。

@@ -194,13 +194,13 @@ class _JellyBookCardState extends State<JellyBookCard>
     final coverUrl = widget.book.cover ?? '';
     return coverUrl.isEmpty
         ? Container(
-            color: isDark ? Colors.grey[800] : Colors.grey[200],
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             width: width,
             height: height,
-            child: const Icon(
+            child: Icon(
               Icons.menu_book_rounded,
               size: 32,
-              color: Colors.grey,
+              color: JellyTheme.textSecondary,
             ),
           )
         : CachedNetworkImage(
@@ -210,7 +210,7 @@ class _JellyBookCardState extends State<JellyBookCard>
             width: width,
             height: height,
             placeholder: (c, u) => Container(
-              color: isDark ? Colors.grey[800] : Colors.grey[200],
+              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
               width: width,
               height: height,
               child: Center(
@@ -221,13 +221,13 @@ class _JellyBookCardState extends State<JellyBookCard>
               ),
             ),
             errorWidget: (c, u, e) => Container(
-              color: isDark ? Colors.grey[800] : Colors.grey[200],
+              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
               width: width,
               height: height,
-              child: const Icon(
+              child: Icon(
                 Icons.menu_book_rounded,
                 size: 32,
-                color: Colors.grey,
+                color: JellyTheme.textSecondary,
               ),
             ),
           );

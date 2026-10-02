@@ -291,14 +291,14 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
             httpHeaders: coverHeaders(_comic.sourceId),
             fit: BoxFit.cover,
             placeholder: (c, u) => Container(
-              color: isDark ? JellyTheme.cardDark : Colors.grey[200],
+              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             ),
             errorWidget: (c, u, e) => Container(
-              color: isDark ? JellyTheme.cardDark : Colors.grey[200],
-              child: const Icon(
+              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+              child: Icon(
                 Icons.broken_image,
                 size: 40,
-                color: Colors.grey,
+                color: JellyTheme.textSecondary,
               ),
             ),
           ),

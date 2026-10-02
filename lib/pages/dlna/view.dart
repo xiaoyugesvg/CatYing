@@ -114,7 +114,7 @@ class _DLNAPageState extends State<DLNAPage> {
           IconButton(
             tooltip: '重新搜索',
             onPressed: _onSearch,
-            icon: const Icon(Icons.refresh, color: Colors.white),
+            icon: Icon(Icons.refresh, color: AppTheme.textPrimary),
           ),
           const SizedBox(width: 6),
         ],
@@ -170,7 +170,7 @@ class _DLNAPageState extends State<DLNAPage> {
                       Text(
                         _title ?? '',
                         style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.5),
+                          color: AppTheme.textSecondary,
                           fontSize: AppTheme.fontCaption,
                         ),
                         maxLines: 1,
@@ -210,7 +210,7 @@ class _DLNAPageState extends State<DLNAPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const CircularProgressIndicator(color: Colors.white),
+            CircularProgressIndicator(color: AppTheme.accentColor),
             const SizedBox(height: 16),
             Text('正在搜索局域网内的 DLNA 设备…',
                 style: TextStyle(color: AppTheme.textSecondary)),
@@ -281,7 +281,7 @@ class _DLNAPageState extends State<DLNAPage> {
             style: TextStyle(
                 color: isActive
                     ? Colors.greenAccent.shade400.withValues(alpha: 0.7)
-                    : Colors.white.withValues(alpha: 0.4),
+                    : AppTheme.textTertiary,
                 fontSize: AppTheme.fontCaption),
           ),
           trailing: Icon(
@@ -305,8 +305,8 @@ class _DLNAPageState extends State<DLNAPage> {
         '提示',
         '当前已在此设备上播放',
         snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Colors.black87,
-        colorText: Colors.white,
+        backgroundColor: AppTheme.backgroundSecondary,
+        colorText: AppTheme.textPrimary,
       );
       return;
     }
@@ -325,8 +325,8 @@ class _DLNAPageState extends State<DLNAPage> {
         '正在 ${device.info.friendlyName} 上播放：${_title ?? ''}',
         snackPosition: SnackPosition.BOTTOM,
         duration: const Duration(seconds: 3),
-        backgroundColor: Colors.black87,
-        colorText: Colors.white,
+        backgroundColor: AppTheme.backgroundSecondary,
+        colorText: AppTheme.textPrimary,
       );
     } catch (e) {
       AppLog.instance.log('DLNA cast failed: $e');
@@ -334,7 +334,7 @@ class _DLNAPageState extends State<DLNAPage> {
       Get.snackbar('投屏失败', '$e',
           snackPosition: SnackPosition.BOTTOM,
           backgroundColor: Colors.red.shade700,
-          colorText: Colors.white);
+          colorText: AppTheme.textPrimary);
     } finally {
       if (mounted) setState(() => _isControlBusy = false);
     }
@@ -361,7 +361,7 @@ class _DLNAPageState extends State<DLNAPage> {
           '$e',
           snackPosition: SnackPosition.BOTTOM,
           backgroundColor: Colors.red.shade700,
-          colorText: Colors.white,
+          colorText: AppTheme.textPrimary,
         );
       }
     } finally {
@@ -385,8 +385,8 @@ class _DLNAPageState extends State<DLNAPage> {
           '已停止投屏',
           '已断开与设备的连接',
           snackPosition: SnackPosition.BOTTOM,
-          backgroundColor: Colors.black87,
-          colorText: Colors.white,
+          backgroundColor: AppTheme.backgroundSecondary,
+          colorText: AppTheme.textPrimary,
         );
       }
     } catch (e) {

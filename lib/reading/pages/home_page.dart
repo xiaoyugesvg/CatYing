@@ -12,6 +12,7 @@ import '../services/download_service.dart';
 import '../services/favorites_service.dart';
 import '../services/reading_progress_service.dart';
 import '../services/remote_config_service.dart';
+import '../../common/theme.dart';
 import '../../services/main_tab_controller.dart';
 import '../services/settings_service.dart';
 import '../services/update_service.dart';
@@ -319,6 +320,32 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    // ── V5：阅读模块终于套上了**自己的** Material 主题 ──────────────
+    //
+    // 在此之前 `JellyTheme.light / dark`（阅读的 ThemeData）**全工程 0 引用**，
+    // 本页里所有"没写显式配色"的 Material 部件取的都是影视侧的
+    // `AppTheme.lightTheme`。铁证：`me_page.dart` 那个没指定颜色的 `Switch`
+    // 跟着 `AppTheme.accentColor`（影视调色板）走，而同模块
+    // `reading_settings_page.dart` 的 Switch 写的是 `JellyTheme.primary` ——
+    // 同一个控件两条取色链路。现在整棵阅读子树统一走阅读主题。
+    //
+    // ⚠️ 必须监听 `AppBrightness.isLight`：本页原先只监听 SettingsService，
+    // 而 AppTheme / JellyTheme 的颜色 getter 读的是全局明暗（普通
+    // ValueNotifier，改了**不通知任何 widget**），不监听就切明暗不重建。
+    return ValueListenableBuilder<bool>(
+      valueListenable: AppBrightness.isLight,
+      builder: (context, isLight, _) => Theme(
+        data: isLight ? JellyTheme.light : JellyTheme.dark,
+        child: _buildRoot(context),
+      ),
+    );
+  }
+
+  /// 阅读模块的实际内容 —— 原来 [build] 里的全部逻辑，一行未改。
+  ///
+  /// 单独拆出来只是为了让上面那层 [Theme] 一眼可见：若把 60 行 build 体
+  /// 整体再缩进一层，diff 会大得看不出真正改了什么。
+  Widget _buildRoot(BuildContext context) {
     return ListenableBuilder(
       listenable: SettingsService(),
       builder: (context, _) {

@@ -6,11 +6,14 @@ import '../../../common/module_theme_sync.dart';
 import '../../../common/theme.dart';
 import '../../../common/theme_mode_store.dart';
 import '../../../services/background_service.dart';
+import '../../../services/rfw_theme_service.dart';
 import '../../../reading/services/settings_service.dart';
 import '../../../reading/theme/jelly_palette.dart';
+import '../rfw_theme_page.dart';
 import '../wallpaper_page.dart';
 import 'settings_shared.dart';
 import '../../../widgets/app_toast.dart';
+import '../../../widgets/common_widgets.dart';
 
 /// 统一主题设置 —— 一个页面里分别调**影视/直播、音乐、阅读**的风格。
 ///
@@ -57,6 +60,16 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
         // 表现就是"我原先的壁纸功能呢？"。
         // 统合页面时漏搬入口是典型事故，所以这里单列一张卡 + 加注释。
         _wallpaperCard(),
+        const SizedBox(height: AppTheme.spacingMD),
+
+        // ── 文字与首页 ────────────────────────────────────────
+        //
+        // ⚠️ 这两个入口原本**只**在 `sub/appearance_settings_page.dart` 里，
+        // 而那个页在设置菜单改指到本页之后就再没有任何导航入口了
+        //（全仓库无人 import、无人 `Get.to`）——
+        // 于是"界面字号"和"首页主题"两个已实现的功能在 UI 上**完全点不到**。
+        // 与 `_wallpaperCard` 上面那段注释是同一类事故，这里一并搬回来。
+        _textAndHomeCard(),
         const SizedBox(height: AppTheme.spacingMD),
 
         // ── 影视 · 直播 ───────────────────────────────────────
@@ -300,6 +313,96 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
         ),
       ),
     );
+  }
+
+  // ============================================================
+  // 文字与首页（界面字号 / 首页主题）
+  // ============================================================
+
+  /// 从被孤立的旧「外观」页搬回来的两个入口（见 build 里的说明）。
+  Widget _textAndHomeCard() {
+    final rfw = RfwThemeService.instance;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundSecondary,
+        borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
+      ),
+      child: Column(
+        children: [
+          SettingsRow(
+            icon: Icons.text_fields,
+            title: '界面字号',
+            value: '${(AppTheme.fontScale.value * 100).round()}%',
+            onTap: _pickFontScale,
+          ),
+          SettingsRow(
+            icon: Icons.dashboard_customize_outlined,
+            title: '首页主题',
+            value: rfw.enabled.value
+                ? (rfw.currentThemeId.value.isEmpty ? '未选择主题' : '已启用')
+                : '原生首页',
+            onTap: () => Get.to(() => const RfwThemePage()),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 界面字号（作用于全部界面文字；弹幕字号单独设置不受影响）
+  Future<void> _pickFontScale() async {
+    var v = AppTheme.fontScale.value;
+    final saved = await showDialog<double>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: AppTheme.backgroundSecondary,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+          ),
+          title: Text('界面字号',
+              style: TextStyle(color: AppTheme.textPrimary)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('${(v * 100).round()}%',
+                  style: TextStyle(color: AppTheme.textSecondary)),
+              Slider(
+                value: v,
+                min: 0.85,
+                max: 1.30,
+                divisions: 9,
+                label: '${(v * 100).round()}%',
+                onChanged: (nv) => setDialogState(() => v = nv),
+              ),
+              const SizedBox(height: AppTheme.spacingSM),
+              Text(
+                '作用于全部界面文字（弹幕字号单独设置不受影响）',
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: AppTheme.fontCaption,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text('取消',
+                  style: TextStyle(color: AppTheme.textSecondary)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(v),
+              child: Text('保存',
+                  style: TextStyle(color: AppTheme.accentColor)),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (saved == null) return;
+    await AppTheme.setFontScale(saved);
+    if (mounted) setState(() {});
   }
 
   // ============================================================

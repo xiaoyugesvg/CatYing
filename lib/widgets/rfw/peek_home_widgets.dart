@@ -33,9 +33,13 @@ class PeekHomeWidgets {
         final fitStr = source.v<String>(<Object>['fit']) ?? 'cover';
         final alignStr = source.v<String>(<Object>['alignment']) ?? '';
         final placeholder = source.v<int>(<Object>['placeholderColor']);
+        // V12b：默认占位色原为写死白 8%（深色档）—— 浅色模式下图片未加载时
+        // 那是"浅底上的白块"。浅色改走调色板的低透明度底，深色保留原值。
         final bg = placeholder != null
             ? Color(placeholder)
-            : const Color(0x14FFFFFF);
+            : (AppBrightness.isLight.value
+                ? AppTheme.backgroundTertiary
+                : const Color(0x14FFFFFF));
 
         if (url.isEmpty) {
           return ColoredBox(color: bg);
@@ -62,16 +66,28 @@ class PeekHomeWidgets {
       'PeekGlass': (BuildContext context, DataSource source) {
         final blur = source.v<double>(<Object>['blur']) ?? 0.0;
         final radius = source.v<double>(<Object>['radius']) ?? 12.0;
-        final tint = source.v<int>(<Object>['tintColor']) ?? 0x1AFFFFFF;
-        final border = source.v<int>(<Object>['borderColor']) ?? 0x18FFFFFF;
+        // V12b：默认 tint/border 原为写死白 10% / 9%（深色档）—— 浅色底上
+        // 那是"灰白糊片"。浅色改走 AppTheme 的玻璃取色，深色保留原值。
+        final tintColor = source.v<int>(<Object>['tintColor']);
+        final borderColor = source.v<int>(<Object>['borderColor']);
+        final tint = tintColor != null
+            ? Color(tintColor)
+            : (AppBrightness.isLight.value
+                ? AppTheme.glassTint
+                : const Color(0x1AFFFFFF));
+        final border = borderColor != null
+            ? Color(borderColor)
+            : (AppBrightness.isLight.value
+                ? AppTheme.glassBorder
+                : const Color(0x18FFFFFF));
         final child = source.optionalChild(<Object>['child']);
         final br = BorderRadius.circular(radius);
 
         Widget panel = Container(
           decoration: BoxDecoration(
-            color: Color(tint),
+            color: tint,
             borderRadius: br,
-            border: Border.all(color: Color(border), width: 0.8),
+            border: Border.all(color: border, width: 0.8),
           ),
           child: child,
         );
@@ -136,9 +152,13 @@ class PeekHomeWidgets {
           blocks.add(Padding(
             padding: const EdgeInsets.symmetric(vertical: 48),
             child: empty ??
-                const Center(
+                // V12b：空态文案原来写死 `Colors.white54` —— 浅色模式下
+                // 白字压浅底等于看不见，改用跟随明暗的次要文字色。
+                Center(
                   child: Text('暂无内容',
-                      style: TextStyle(color: Colors.white54, fontSize: AppTheme.fontSubhead)),
+                      style: TextStyle(
+                          color: AppTheme.textTertiary,
+                          fontSize: AppTheme.fontSubhead)),
                 ),
           ));
         } else {
@@ -192,8 +212,21 @@ class PeekHomeWidgets {
           autoPlay: autoPlay,
           intervalMs: interval,
           viewportFraction: vp,
-          activeColor: Color(active ?? 0xFFFFFFFF),
-          inactiveColor: Color(inactive ?? 0x55FFFFFF),
+          // V12b（同一处漏改的延伸）：指示条默认值是写死白（active 全白 /
+          // inactive 白 33%），浅色模式下白条压在浅底上等于看不见。
+          // 深色保留原值，浅色改走调色板取色。
+          activeColor: Color(
+            active ??
+                (AppBrightness.isLight.value
+                    ? AppTheme.accentColor.toARGB32()
+                    : 0xFFFFFFFF),
+          ),
+          inactiveColor: Color(
+            inactive ??
+                (AppBrightness.isLight.value
+                    ? AppTheme.borderMedium.toARGB32()
+                    : 0x55FFFFFF),
+          ),
           showIndicators: showIndicators,
         );
       },
@@ -245,7 +278,13 @@ class PeekHomeWidgets {
         final imageUrl = source.v<String>(<Object>['imageUrl']) ?? '';
         final bg = source.v<int>(<Object>['backgroundColor']);
         return ColoredBox(
-          color: bg != null ? Color(bg) : const Color(0xFF0E1116),
+          // V12b：默认背景原为写死 0xFF0E1116（深色档）—— 浅色模式下
+          // 「沉浸光影」整页发黑。浅色改走调色板底色，深色保留原值。
+          color: bg != null
+              ? Color(bg)
+              : (AppBrightness.isLight.value
+                  ? AppTheme.backgroundPrimary
+                  : const Color(0xFF0E1116)),
           child: imageUrl.isEmpty
               ? const SizedBox.expand()
               : Image.network(

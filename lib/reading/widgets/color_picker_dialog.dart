@@ -324,7 +324,8 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
           decoration: BoxDecoration(
             color: c,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.black12),
+            border:
+                Border.all(color: JellyTheme.primary.withValues(alpha: 0.12)),
           ),
         ),
         const SizedBox(height: 4),

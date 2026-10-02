@@ -39,7 +39,7 @@ class JellySegmentedToggle extends StatelessWidget {
       width: segmentWidth * segments.length + 10,
       height: 50,
       decoration: BoxDecoration(
-        color: isDark ? JellyTheme.cardDark : Colors.white,
+        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(

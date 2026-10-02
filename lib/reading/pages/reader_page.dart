@@ -21,6 +21,7 @@ import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/pomodoro_button.dart';
 import '../../common/theme.dart';
+import '../../common/system_ui.dart';
 import '../../widgets/app_image_cache.dart';
 
 /// 漫画阅读页面
@@ -200,9 +201,10 @@ class _ReaderPageState extends State<ReaderPage> {
     // 避免系统栏切换与 MaterialPageRoute 转场叠加造成进入卡顿。
     Future.delayed(const Duration(milliseconds: 350), () {
       if (!mounted) return;
-      SystemChrome.setEnabledSystemUIMode(
-        SystemUiMode.manual,
-        overlays: [SystemUiOverlay.bottom],
+      SystemUiController.enter(
+        'comicReader',
+        mode: SystemUiMode.manual,
+        overlays: const [SystemUiOverlay.bottom],
       );
     });
     _loadImages();
@@ -225,8 +227,8 @@ class _ReaderPageState extends State<ReaderPage> {
     ReaderOverrideService().removeListener(_onReaderSettingsChanged);
     _pageController.dispose();
     _continuousPageNotifier.dispose();
-    // 离开阅读器：恢复状态栏（App 默认 edge-to-edge）
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    // 离开阅读器：恢复**进入前**的系统栏状态（原来写死 edge-to-edge）
+    SystemUiController.exit('comicReader');
     // 清理 blob 站临时文件（摸摸漫画等 useBlobBase64 站落盘的章节图）
     WebViewImageFetcher().clearBlobTempFiles();
     super.dispose();
@@ -1403,11 +1405,15 @@ class _ReaderPageState extends State<ReaderPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.broken_image, size: 48, color: Colors.grey),
+                  Icon(
+                    Icons.broken_image,
+                    size: 48,
+                    color: JellyTheme.textSecondary,
+                  ),
                   const SizedBox(height: 8),
                   Text(
                     '第 ${index + 1} 页加载失败',
-                    style: const TextStyle(color: Colors.grey),
+                    style: TextStyle(color: JellyTheme.textSecondary),
                   ),
                 ],
               ),
@@ -1815,11 +1821,15 @@ class _ReaderPageState extends State<ReaderPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.broken_image, size: 48, color: Colors.grey),
+          Icon(
+            Icons.broken_image,
+            size: 48,
+            color: JellyTheme.textSecondary,
+          ),
           const SizedBox(height: 8),
           Text(
             '第 ${index + 1} 页加载失败',
-            style: const TextStyle(color: Colors.grey),
+            style: TextStyle(color: JellyTheme.textSecondary),
           ),
         ],
       ),
@@ -1977,11 +1987,17 @@ class _ReaderPageState extends State<ReaderPage> {
                 children: [
                   Text(
                     widget.comic.title,
-                    style: const TextStyle(fontSize: AppTheme.fontBody, color: Colors.grey),
+                    style: TextStyle(
+                      fontSize: AppTheme.fontBody,
+                      color: JellyTheme.textSecondary,
+                    ),
                   ),
                   Text(
                     _currentChapter.title,
-                    style: const TextStyle(fontSize: AppTheme.fontFootnote, color: Colors.grey),
+                    style: TextStyle(
+                      fontSize: AppTheme.fontFootnote,
+                      color: JellyTheme.textSecondary,
+                    ),
                   ),
                 ],
               ),

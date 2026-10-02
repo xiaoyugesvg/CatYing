@@ -544,7 +544,7 @@ class _SearchPageState extends State<SearchPage> {
                   decoration: BoxDecoration(
                     color: selected
                         ? AppTheme.accentColor.withValues(alpha: 0.22)
-                        : Colors.white.withValues(alpha: 0.06),
+                        : AppTheme.backgroundTertiary,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                       color: selected

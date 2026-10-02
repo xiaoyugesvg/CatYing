@@ -70,7 +70,7 @@ class _JellySearchBarState extends State<JellySearchBar> {
     return Container(
       height: 50,
       decoration: BoxDecoration(
-        color: isDark ? JellyTheme.cardDark : Colors.white,
+        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         borderRadius: BorderRadius.circular(20), // 胶囊形状（半径=高度的一半）
         boxShadow: [
           BoxShadow(

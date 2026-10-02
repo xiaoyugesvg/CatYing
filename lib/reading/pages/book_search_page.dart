@@ -328,7 +328,7 @@ class _BookSearchPageState extends State<BookSearchPage>
             decoration: BoxDecoration(
               color: active
                   ? JellyTheme.primary
-                  : (isDark ? JellyTheme.cardDark : Colors.white),
+                  : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
               borderRadius: BorderRadius.circular(10),
               boxShadow: [
                 BoxShadow(
@@ -389,7 +389,8 @@ class _BookSearchPageState extends State<BookSearchPage>
       final result = await showModalBottomSheet<_BookCategorySheetResult?>(
         context: context,
         isScrollControlled: true,
-        backgroundColor: isDark ? JellyTheme.cardDark : Colors.white,
+        backgroundColor:
+            isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
@@ -688,7 +689,7 @@ class _BookSearchPageState extends State<BookSearchPage>
         child: Container(
           padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
           decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : Colors.white,
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             borderRadius: BorderRadius.circular(20),
             boxShadow: JellyTheme.jellyShadows(
               color: JellyTheme.primary,
@@ -1115,7 +1116,7 @@ class _BookSearchPageState extends State<BookSearchPage>
         Material(
           color: logged
               ? JellyTheme.primary
-              : (isDark ? JellyTheme.cardDark : Colors.white),
+              : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
           shape: const CircleBorder(),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
@@ -1214,7 +1215,7 @@ class _BookSearchPageState extends State<BookSearchPage>
         decoration: BoxDecoration(
           color: selected
               ? JellyTheme.primary
-              : (isDark ? JellyTheme.cardDark : Colors.white),
+              : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
@@ -1284,7 +1285,8 @@ class _BookSearchPageState extends State<BookSearchPage>
           children: [
             CircularProgressIndicator(color: JellyTheme.primary),
             const SizedBox(height: 16),
-            const Text('正在筛选...', style: TextStyle(color: Colors.grey)),
+            Text('正在筛选...',
+                style: TextStyle(color: JellyTheme.textSecondary)),
           ],
         ),
       );
@@ -1296,14 +1298,14 @@ class _BookSearchPageState extends State<BookSearchPage>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.cloud_off_rounded, size: 64, color: Colors.grey),
+            Icon(Icons.cloud_off_rounded, size: 64, color: JellyTheme.textSecondary),
             const SizedBox(height: 16),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 32),
               child: Text(
                 _errorMsg!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.grey),
+                style: TextStyle(color: JellyTheme.textSecondary),
               ),
             ),
             const SizedBox(height: 16),
@@ -1322,13 +1324,15 @@ class _BookSearchPageState extends State<BookSearchPage>
     if (_result.items.isEmpty &&
         (_keyword.isNotEmpty || _categoryMode) &&
         !_isSearching) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_off_rounded, size: 64, color: Colors.grey),
-            SizedBox(height: 16),
-            Text('没有找到相关图书', style: TextStyle(color: Colors.grey)),
+            Icon(Icons.search_off_rounded,
+                size: 64, color: JellyTheme.textSecondary),
+            const SizedBox(height: 16),
+            Text('没有找到相关图书',
+                style: TextStyle(color: JellyTheme.textSecondary)),
           ],
         ),
       );
@@ -1360,10 +1364,10 @@ class _BookSearchPageState extends State<BookSearchPage>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.book_rounded, size: 64, color: Colors.grey),
+            Icon(Icons.book_rounded, size: 64, color: JellyTheme.textSecondary),
             const SizedBox(height: 16),
-            const Text('暂无推荐内容',
-                style: TextStyle(color: Colors.grey)),
+            Text('暂无推荐内容',
+                style: TextStyle(color: JellyTheme.textSecondary)),
             const SizedBox(height: 16),
             TextButton.icon(
               onPressed: _doCategorySearch,
@@ -1413,21 +1417,23 @@ class _BookSearchPageState extends State<BookSearchPage>
             ),
           ),
           if (_history.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(40),
+            Padding(
+              padding: const EdgeInsets.all(40),
               child: Center(
-                child: Text('暂无搜索历史', style: TextStyle(color: Colors.grey)),
+                child: Text('暂无搜索历史',
+                    style: TextStyle(color: JellyTheme.textSecondary)),
               ),
             )
           else
             ..._history.map(
               (kw) => ListTile(
-                leading: const Icon(Icons.history_rounded, color: Colors.grey),
+                leading:
+                    Icon(Icons.history_rounded, color: JellyTheme.textSecondary),
                 title: Text(kw),
                 trailing: IconButton(
-                  icon: const Icon(
+                  icon: Icon(
                     Icons.close_rounded,
-                    color: Colors.grey,
+                    color: JellyTheme.textSecondary,
                     size: 18,
                   ),
                   onPressed: () => _removeHistory(kw),
@@ -1770,7 +1776,9 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
   Widget build(BuildContext context) {
     final isDark = widget.isDark;
     final labelColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-    final chipColor = isDark ? JellyTheme.cardDark : const Color(0xFFF0F0F5);
+    final chipColor = isDark
+        ? JellyTheme.cardDark
+        : JellyTheme.primary.withValues(alpha: 0.08);
     final chipTextColor = isDark ? Colors.white70 : JellyTheme.textSecondary;
     // 通用 chip（子分类/语言/格式复用）
     Widget chip(String label, bool selected, VoidCallback onTap) =>

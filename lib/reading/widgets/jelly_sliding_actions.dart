@@ -329,7 +329,10 @@ class _JellySlidingActionsState extends State<JellySlidingActions>
 
     final bg = Color.lerp(
       _selectedBg(a, i),
-      widget.isDark ? const Color(0xFF3A3A3C) : const Color(0xFF2C2C2E),
+      // 展开态：浅色主题取主题深色（白图标可读），深色主题用微亮中性面
+      widget.isDark
+          ? Colors.white.withValues(alpha: 0.12)
+          : JellyTheme.primaryDark,
       t,
     )!;
 
@@ -378,7 +381,10 @@ class _JellySlidingActionsState extends State<JellySlidingActions>
   /// 现在用**下标**判定，与环形中心一致。
   Color _selectedBg(JellyAction a, int i) {
     if (a.highlight || i == _sel) {
-      return widget.isDark ? const Color(0xFF3A3A3C) : const Color(0xFFD9D9D9);
+      // 选中底：深色模式微亮中性面，浅色模式主色淡染（图标为深色，仍可读）
+      return widget.isDark
+          ? Colors.white.withValues(alpha: 0.14)
+          : JellyTheme.primary.withValues(alpha: 0.12);
     }
     return Colors.transparent;
   }

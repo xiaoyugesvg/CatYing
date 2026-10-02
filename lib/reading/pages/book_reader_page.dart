@@ -32,11 +32,21 @@ import '../widgets/book_page_curl.dart';
 import '../widgets/pomodoro_button.dart';
 import 'book_prefetch_page.dart';
 import '../../common/theme.dart';
+import '../../common/system_ui.dart';
 
-/// 图书阅读器固定浅色阅读主题，不跟随全局暗色模式：
-/// 仿真翻页为固定纸张图背景，全局暗色下文字翻白配浅纸看不清。
-/// 改为 true 可启用夜间反色（未来若加阅读器独立夜间模式开关，改此处即可）。
-const bool _readerIsDark = false;
+/// 图书阅读器明暗：**跟随全局外观**。
+///
+/// ── 原来写死 `false`（永远浅色），后果是"暗色模式对图书阅读完全无效" ──
+///
+/// 当初写死浅色的理由是"仿真翻页为固定纸张图背景，全局暗色下文字翻白配浅纸
+/// 看不清"。但实际 `widgets/book_page_curl.dart` 的**翻页背纸本来就按
+/// `Theme.of(context).brightness` 分了深浅两套**
+///（`:367-368` 的 `0xFF1E1E22` / `0xFFFBF6EC`）——
+/// 也就是说写死浅色反而制造了"深色背纸 + 浅色正文"的错配。
+/// 跟随全局之后，正文底色与翻页背纸同向，才是自洽的。
+///
+/// 若将来要做"阅读器独立夜间开关"，把这里换成读那个开关即可。
+bool get _readerIsDark => !AppBrightness.isLight.value;
 
 /// 图书阅读页：EPUB / MOBI / TXT / PDF app 内排版阅读；
 /// 其余格式由 [open] 路由到外部应用。
@@ -277,9 +287,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
     // 避免系统栏切换与 MaterialPageRoute 转场叠加造成进入卡顿。
     Future.delayed(const Duration(milliseconds: 350), () {
       if (!mounted) return;
-      SystemChrome.setEnabledSystemUIMode(
-        SystemUiMode.manual,
-        overlays: [SystemUiOverlay.bottom],
+      SystemUiController.enter(
+        'bookReader',
+        mode: SystemUiMode.manual,
+        overlays: const [SystemUiOverlay.bottom],
       );
     });
     PlatformService.onVolumeKey = _onVolumeKey;
@@ -334,8 +345,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
     _pageController.dispose();
     _imagePageController?.dispose();
     _currentPageNotifier.dispose();
-    // 离开阅读器：恢复状态栏（App 默认 edge-to-edge）
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    // 离开阅读器：恢复**进入前**的系统栏状态（原来写死 edge-to-edge）
+    SystemUiController.exit('bookReader');
     // 进度在翻页时已按节流策略通知书架重排（后台静默），退出时不额外 notify，
     // 避免书架变可见时重建造成的"列表刷新"观感。
     super.dispose();

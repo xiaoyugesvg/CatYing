@@ -34,7 +34,9 @@ class _InAppWebViewPageState extends State<InAppWebViewPage> {
     super.initState();
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.black)
+      // V7：原来是 Colors.black —— 本页只有"配置中心线路 URL"与"弹幕服务地址"
+      // 两个调用点，都不是视频播放页，浅色模式下会是黑页。
+      ..setBackgroundColor(AppTheme.backgroundPrimary)
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (progress) {
@@ -64,10 +66,12 @@ class _InAppWebViewPageState extends State<InAppWebViewPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      // V7：写死黑底 → 走主题。真正**有意**的黑底视频兜底页是
+      // `pages/play/webview_player_page.dart`，那个文件没动。
+      backgroundColor: AppTheme.backgroundPrimary,
       appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
+        backgroundColor: AppTheme.backgroundPrimary,
+        foregroundColor: AppTheme.textPrimary,
         title: Text(
           widget.title ?? widget.url,
           maxLines: 1,
@@ -90,8 +94,8 @@ class _InAppWebViewPageState extends State<InAppWebViewPage> {
             LinearProgressIndicator(
               value: _loadingProgress / 100.0,
               minHeight: 2,
-              backgroundColor: Colors.white12,
-              valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+              backgroundColor: AppTheme.borderLight,
+              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accentColor),
             ),
           Expanded(
             child: WebViewWidget(controller: _controller),

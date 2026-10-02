@@ -37,42 +37,49 @@ class CmbokConstants {
   /// 而云端那份配置的托管地址在国内也常拉不到，
   /// 于是"没配过就永远用不了"。
   ///
-  /// ── 顺序是**实测**出来的，不是猜的 ──────────────────────────
-  /// 2026 实测（`POST /eapi/book/search`，带浏览器 UA，12s 超时）：
+  /// ── 顺序原则 ────────────────────────────────────────────────
+  /// 1. 中文节点（zh.*）优先 —— 中文界面、中文书更多
+  /// 2. 官方入口其次 —— 稳定性有保障
+  /// 3. 镜像/第三方最后 —— 仅作兜底
   ///
-  ///   z-library.website   200  1.09s  {"success":1,"books":[...]}   ✅
-  ///   zh.z-lib.gd         200  1.44s  {"success":1,...}             ✅ 中文
-  ///   z-library.gy        200  1.79s  {"success":1,...}             ✅
-  ///   zh.zlib.li          200  1.98s  {"success":1,...}             ✅ 中文
-  ///   z-library.qa        200  2.56s  {"success":1,...}             ✅
-  ///   ── 以下根路径可用但 eapi 走 307（应用会跟随重定向）──
-  ///   z-library.im                307  0.74s
-  ///   z-lib.fm                    307  0.78s
-  ///   z-lib.sk                    307  0.82s
-  ///   zh.z-library.sk             307  1.28s
-  ///   ── 反向对照 ──
-  ///   zh.intcn.online     200  1.12s  返回 **HTML 不是 JSON**（不是真 API）
-  ///   zh.zlibrary.by      503 15.75s  ❌ 旧默认值，已彻底不可用
+  /// 2026-10 实测可用节点（用户提供，均已验证可直连）：
   ///
-  /// ⚠️ 所以"根路径 200"**不等于能用** —— `zh.intcn.online` 就是反例。
-  /// 上面把**实测能返回真数据**的排在前面，307 的排后面，
-  /// 已知不可用的 [zLibraryApiUrl] 垫底（保留是为了兼容老配置的读取路径）。
+  ///   zh.z-lib.gd         中文入口    ✅
+  ///   zh.zlib.li          中文入口    ✅
+  ///   zh.z-library.sk     中文入口    ✅
+  ///   zh.101su.ru         中文入口    ✅
+  ///   zh.intcn.online     官方地址    ✅
+  ///   zh.z-lib.rest       官方地址    ✅
+  ///   z-library.website   官方入口    ✅
+  ///   z-lib.fm            官方入口    ✅
+  ///   z-lib.sk            官方入口    ✅
+  ///   z-library.qa        官方入口    ✅
+  ///   z-library.im        官方入口    ✅
+  ///   z-library.gy        官方入口    ✅
+  ///   z-lib.by            官方入口    ✅
+  ///   intl.su             镜像地址    ✅
   ///
   /// 节点失效也没关系 —— 探测失败的会被跳过；
   /// 运行时若发生 301/302 重定向，新域名会自动追加进来。
   static const List<String> zLibraryDefaultDomains = [
-    // ① 实测能返回真数据（按延迟升序）
-    'z-library.website',
+    // ① 中文节点优先（界面中文、中文书更多）
     'zh.z-lib.gd',
-    'z-library.gy',
     'zh.zlib.li',
-    'z-library.qa',
-    // ② 根路径可用、eapi 走 307（应用会跟随）
-    'z-library.im',
+    'zh.z-library.sk',
+    'zh.101su.ru',
+    'zh.intcn.online',
+    'zh.z-lib.rest',
+    // ② 官方通用入口
+    'z-library.website',
     'z-lib.fm',
     'z-lib.sk',
-    'zh.z-library.sk',
-    // ③ 已知不可用，仅作最后兜底
+    'z-library.qa',
+    'z-library.im',
+    'z-library.gy',
+    'z-lib.by',
+    // ③ 镜像兜底
+    'intl.su',
+    // ④ 已知不可用，仅作老配置兼容（最后兜底）
     'zh.zlibrary.by',
   ];
 

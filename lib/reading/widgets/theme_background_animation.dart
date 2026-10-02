@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../common/theme.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
 import '../theme/theme_background_painters.dart';
@@ -103,7 +104,8 @@ class _ThemeBackgroundAnimationState extends State<ThemeBackgroundAnimation>
       // 自身 id；纯色/图片/未知 → 回退 themePreset（custom_* → null → 返回空）。
       settings.currentBackground.animationId ?? settings.themePreset,
       _driven,
-      settings.isDarkMode,
+      // 同 ThemeBackground：用全局明暗真源，不用阅读自己的 isDarkMode
+      !AppBrightness.isLight.value,
       JellyTheme.palette,
       topInset: widget.topInset,
       bottomInset: widget.bottomInset,

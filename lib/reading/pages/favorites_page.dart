@@ -557,16 +557,16 @@ class _FavoritesPageState extends State<FavoritesPage>
           SizedBox(
             height: MediaQuery.of(context).size.height * 0.4,
             child: Material(
-              color: isDark ? JellyTheme.cardDark : Colors.white,
+              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
               borderRadius: BorderRadius.circular(20),
               clipBehavior: Clip.antiAlias,
               child: all.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Padding(
-                        padding: EdgeInsets.all(24),
+                        padding: const EdgeInsets.all(24),
                         child: Text(
                           '无匹配结果',
-                          style: TextStyle(color: Colors.grey),
+                          style: TextStyle(color: JellyTheme.textSecondary),
                         ),
                       ),
                     )
@@ -580,8 +580,8 @@ class _FavoritesPageState extends State<FavoritesPage>
                             child: Center(
                               child: Text(
                                 '仅显示前 $maxResults 条，共 ${all.length} 条',
-                                style: const TextStyle(
-                                  color: Colors.grey,
+                                style: TextStyle(
+                                  color: JellyTheme.textSecondary,
                                   fontSize: AppTheme.fontFootnote,
                                 ),
                               ),
@@ -610,13 +610,16 @@ class _FavoritesPageState extends State<FavoritesPage>
           width: 40,
           height: 56,
           fit: BoxFit.cover,
-          placeholder: (c, u) =>
-              Container(color: Colors.grey[300], width: 40, height: 56),
+          placeholder: (c, u) => Container(
+              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+              width: 40,
+              height: 56),
           errorWidget: (c, u, e) => Container(
-            color: Colors.grey[300],
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             width: 40,
             height: 56,
-            child: const Icon(Icons.broken_image, size: 20, color: Colors.grey),
+            child: Icon(Icons.broken_image,
+                size: 20, color: JellyTheme.textSecondary),
           ),
         ),
       ),
@@ -651,13 +654,13 @@ class _FavoritesPageState extends State<FavoritesPage>
         borderRadius: BorderRadius.circular(10),
         child: (book.cover ?? '').isEmpty
             ? Container(
-                color: Colors.grey[300],
+                color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                 width: 40,
                 height: 56,
-                child: const Icon(
+                child: Icon(
                   Icons.menu_book_rounded,
                   size: 20,
-                  color: Colors.grey,
+                  color: JellyTheme.textSecondary,
                 ),
               )
             : CachedNetworkImage(
@@ -665,16 +668,18 @@ class _FavoritesPageState extends State<FavoritesPage>
                 width: 40,
                 height: 56,
                 fit: BoxFit.cover,
-                placeholder: (c, u) =>
-                    Container(color: Colors.grey[300], width: 40, height: 56),
+                placeholder: (c, u) => Container(
+                    color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                    width: 40,
+                    height: 56),
                 errorWidget: (c, u, e) => Container(
-                  color: Colors.grey[300],
+                  color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                   width: 40,
                   height: 56,
-                  child: const Icon(
+                  child: Icon(
                     Icons.broken_image,
                     size: 20,
-                    color: Colors.grey,
+                    color: JellyTheme.textSecondary,
                   ),
                 ),
               ),
@@ -790,17 +795,18 @@ class _ComicFavoritesTabState extends State<_ComicFavoritesTab> {
         final comics = FavoritesService().comics;
         final isGrid = ViewMode().isGrid;
         if (comics.isEmpty) {
-          return const Center(
+          return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
                   Icons.favorite_border_rounded,
                   size: 64,
-                  color: Colors.grey,
+                  color: JellyTheme.textSecondary,
                 ),
-                SizedBox(height: 16),
-                Text('还没有收藏的漫画', style: TextStyle(color: Colors.grey)),
+                const SizedBox(height: 16),
+                Text('还没有收藏的漫画',
+                    style: TextStyle(color: JellyTheme.textSecondary)),
               ],
             ),
           );
@@ -1022,17 +1028,18 @@ class _BookFavoritesTabState extends State<_BookFavoritesTab> {
         final books = BookFavoritesService().books;
         final isGrid = BookViewMode().isGrid;
         if (books.isEmpty) {
-          return const Center(
+          return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
                   Icons.favorite_border_rounded,
                   size: 64,
-                  color: Colors.grey,
+                  color: JellyTheme.textSecondary,
                 ),
-                SizedBox(height: 16),
-                Text('还没有收藏的图书', style: TextStyle(color: Colors.grey)),
+                const SizedBox(height: 16),
+                Text('还没有收藏的图书',
+                    style: TextStyle(color: JellyTheme.textSecondary)),
               ],
             ),
           );

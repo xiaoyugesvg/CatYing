@@ -583,7 +583,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         decoration: BoxDecoration(
           color: selected
               ? JellyTheme.primary
-              : (isDark ? JellyTheme.cardDark : Colors.white),
+              : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
@@ -680,7 +680,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         decoration: BoxDecoration(
           color: active
               ? JellyTheme.primary
-              : (isDark ? JellyTheme.cardDark : Colors.white),
+              : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
           borderRadius: BorderRadius.circular(10),
           boxShadow: [
             BoxShadow(
@@ -746,7 +746,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       final result = await showModalBottomSheet<List<FilterGroup>>(
         context: context,
         isScrollControlled: true,
-        backgroundColor: isDark ? JellyTheme.cardDark : Colors.white,
+        backgroundColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
@@ -756,7 +756,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
               : JellyTheme.textPrimaryLight;
           final chipColor = isDark
               ? JellyTheme.cardDark
-              : const Color(0xFFF0F0F5);
+              : JellyTheme.primary.withValues(alpha: 0.08);
           final chipTextColor = isDark
               ? Colors.white70
               : JellyTheme.textSecondary;
@@ -1366,7 +1366,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             const SizedBox(height: 16),
             Text(
               _categoryMode ? '正在筛选...' : '正在搜索...',
-              style: const TextStyle(color: Colors.grey),
+              style: TextStyle(color: JellyTheme.textSecondary),
             ),
           ],
         ),
@@ -1377,13 +1377,20 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     if (_result.items.isEmpty &&
         (_keyword.isNotEmpty || _categoryMode) &&
         !_isSearching) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_off_rounded, size: 64, color: Colors.grey),
-            SizedBox(height: 16),
-            Text('没有找到相关漫画', style: TextStyle(color: Colors.grey)),
+            Icon(
+              Icons.search_off_rounded,
+              size: 64,
+              color: JellyTheme.textSecondary,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '没有找到相关漫画',
+              style: TextStyle(color: JellyTheme.textSecondary),
+            ),
           ],
         ),
       );
@@ -1391,13 +1398,20 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
 
     // 未搜索 = 初始界面
     if (_result.items.isEmpty && _keyword.isEmpty && !_categoryMode) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.palette_rounded, size: 64, color: Colors.grey),
-            SizedBox(height: 16),
-            Text('输入关键词开始搜索漫画', style: TextStyle(color: Colors.grey)),
+            Icon(
+              Icons.palette_rounded,
+              size: 64,
+              color: JellyTheme.textSecondary,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '输入关键词开始搜索漫画',
+              style: TextStyle(color: JellyTheme.textSecondary),
+            ),
           ],
         ),
       );
@@ -1444,21 +1458,27 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             ),
           ),
           if (_history.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(40),
+            Padding(
+              padding: const EdgeInsets.all(40),
               child: Center(
-                child: Text('暂无搜索历史', style: TextStyle(color: Colors.grey)),
+                child: Text(
+                  '暂无搜索历史',
+                  style: TextStyle(color: JellyTheme.textSecondary),
+                ),
               ),
             )
           else
             ..._history.map(
               (kw) => ListTile(
-                leading: const Icon(Icons.history_rounded, color: Colors.grey),
+                leading: Icon(
+                  Icons.history_rounded,
+                  color: JellyTheme.textSecondary,
+                ),
                 title: Text(kw),
                 trailing: IconButton(
-                  icon: const Icon(
+                  icon: Icon(
                     Icons.close_rounded,
-                    color: Colors.grey,
+                    color: JellyTheme.textSecondary,
                     size: 18,
                   ),
                   onPressed: () => _removeHistory(kw),

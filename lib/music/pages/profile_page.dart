@@ -6,6 +6,7 @@ import '../services/settings_store.dart';
 import '../theme/music_theme.dart';
 import 'source_manager_page.dart';
 import '../../common/module_theme_store.dart';
+import '../../common/module_theme_sync.dart';
 import '../../common/theme_mode_store.dart';
 import '../../services/background_service.dart';
 import '../../reading/theme/jelly_palette.dart';
@@ -413,8 +414,16 @@ class _AccentPicker extends StatelessWidget {
                     palette: null,
                     label: '跟随',
                     selected: current == ModuleThemeStore.followReading,
-                    onTap: () => store.setPreset(
-                        ModuleThemeStore.music, ModuleThemeStore.followReading),
+                    onTap: () async {
+                      await store.setPreset(
+                          ModuleThemeStore.music, ModuleThemeStore.followReading);
+                      // ⚠️ 必须落地：`setPreset` 只改 store 的数据。
+                      // 不调 `applyModuleThemes()` 的话，注入给音乐的强调色
+                      // （`MusicTheme._customAccent`）不会更新，也不会通知
+                      // 音乐 UI 重建 —— 表现是"只有圆点的勾移动了，
+                      // 底色/强调色不同步或不刷新"。
+                      await applyModuleThemes();
+                    },
                   ),
                   // 7 套预设
                   for (final p in presets)
@@ -422,7 +431,11 @@ class _AccentPicker extends StatelessWidget {
                       palette: p.palette,
                       label: p.name,
                       selected: current == p.id,
-                      onTap: () => store.setPreset(ModuleThemeStore.music, p.id),
+                      onTap: () async {
+                        await store.setPreset(ModuleThemeStore.music, p.id);
+                        // 同上：换配色后要把新调色板落地并通知重建
+                        await applyModuleThemes();
+                      },
                     ),
                 ],
               ),

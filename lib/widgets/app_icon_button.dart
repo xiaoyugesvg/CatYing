@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../common/theme.dart';
+
 /// 顶栏圆形图标按钮 —— **全 App 统一的一种**。
 ///
 /// ── 为什么抽出来（B 档：图标按钮统一）──────────────────────────
@@ -58,14 +60,16 @@ class AppIconButton extends StatelessWidget {
       bg = isDark
           ? Colors.white.withValues(alpha: 0.92)
           : Theme.of(context).colorScheme.primary;
-      fg = isDark
-          ? const Color(0xFF1C1C1E)
-          : Colors.white;
+      // ⚠️ 这里**不能**用跟随明暗的 `AppTheme.textPrimary`：该分支的底是
+      // "近白实心圆"（深色档），深色下 textPrimary 取到的是近白 → 白上白。
+      // 所以固定取"浅色档前景墨色"（原来是写死的 0xFF1C1C1E）。
+      fg = isDark ? AppTheme.palette.textPrimaryLight : Colors.white;
     } else {
       bg = isDark
           ? Colors.white.withValues(alpha: 0.10)
           : Colors.black.withValues(alpha: 0.05);
-      fg = isDark ? Colors.white : const Color(0xFF1F1F1F);
+      // 原来是写死的 0xFF1F1F1F（= ink 的 textPrimaryLight）。
+      fg = isDark ? Colors.white : AppTheme.textPrimary;
     }
 
     return Material(

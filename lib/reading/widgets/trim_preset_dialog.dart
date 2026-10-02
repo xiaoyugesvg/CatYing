@@ -28,7 +28,7 @@ class _TrimPresetDialogState extends State<TrimPresetDialog> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return AlertDialog(
-      backgroundColor: isDark ? JellyTheme.cardDark : Colors.white,
+      backgroundColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: const Text('预设管理'),
       content: SizedBox(

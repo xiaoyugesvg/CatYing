@@ -46,12 +46,23 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
   @override
   void initState() {
     super.initState();
+    // 🔴 锁定本次编辑的目标场景（见 BackgroundService.pinEditScene）。
+    // 不锁的话：编辑期间明暗一旦翻转（系统亮暗变化、别的入口写入），
+    // 后续写入会静默落到**另一套**配置上 ——
+    // 表现就是"我在浅色下调的模糊，切到深色发现被改了"。
+    _bg.pinEditScene();
     // 进入页面时若已是网络壁纸模式，直接拉一次列表，省掉"再点一下"
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_bg.sourceType.value == WallpaperSourceType.network) {
         _loadWallpapers(reset: true);
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _bg.unpinEditScene();
+    super.dispose();
   }
 
   Future<void> _loadWallpapers({bool reset = false}) async {
@@ -785,9 +796,9 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
           crossAxisSpacing: 10,
           childAspectRatio: 0.82,
         ),
-        itemCount: BackgroundService.builtinPreviews.length,
+        itemCount: bg.builtinPreviewsForEditing.length,
         itemBuilder: (_, i) {
-          final p = BackgroundService.builtinPreviews[i];
+          final p = bg.builtinPreviewsForEditing[i];
           final selected = bg.choice.value == p.choice;
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -1060,7 +1071,9 @@ class _WallpaperSettingsPageState extends State<WallpaperSettingsPage> {
   /// 重置**当前模式**那一套背景（不动另一种模式的配置）
   Future<void> _resetAll() async {
     final bg = _bg;
-    final isLight = bg.isLight;
+    // 用"正在编辑的场景"而不是当前显示明暗：本页 initState 已
+    // `pinEditScene()`，正常情况下两者相同；编辑期间明暗漂移时以编辑目标为准。
+    final isLight = bg.editingSceneIsLight;
     await bg.setEnabled(true);
     await bg.clearCustom(); // 清图片/网络，回到渐变
     await bg.setBuiltin(

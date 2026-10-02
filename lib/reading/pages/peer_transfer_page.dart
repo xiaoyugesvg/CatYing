@@ -283,7 +283,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
             final isDark = Theme.of(ctx).brightness == Brightness.dark;
             return Container(
               decoration: BoxDecoration(
-                color: isDark ? JellyTheme.cardDark : Colors.white,
+                color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(24),
                 ),
@@ -564,7 +564,10 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: JellyTheme.textSecondary,
+              ),
             ],
           ),
         ),
@@ -972,10 +975,10 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                   itemCount: _events.length,
                   itemBuilder: (ctx, i) {
                     return ListTile(
-                      leading: const Icon(
+                      leading: Icon(
                         Icons.history_rounded,
                         size: 20,
-                        color: Colors.grey,
+                        color: JellyTheme.textSecondary,
                       ),
                       title: Text(
                         _events[i],
@@ -1128,7 +1131,7 @@ class _ShelfPickSheetState extends State<_ShelfPickSheet> {
       child: Container(
         height: height,
         decoration: BoxDecoration(
-          color: isDark ? JellyTheme.cardDark : Colors.white,
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: SafeArea(

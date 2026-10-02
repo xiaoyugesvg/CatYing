@@ -135,7 +135,33 @@ class BackgroundService extends GetxService {
   /// （见 `settings_shared.dart` 的说明："透出全局壁纸层"），
   /// 于是**透明页面全被这层黑背景罩住** ——
   /// 用户实测："全是浅色模式下的真实情况，底色是黑色的"。
-  String get _sceneKeyForCurrentAppearance => isLight ? 'light' : 'dark';
+  /// 壁纸设置页锁定"正在编辑哪一套场景"用的临时覆盖。
+  ///
+  /// 为什么需要：写入目标原来按**当前明暗**反推
+  /// （[updateActiveScene] → `_saveScene(editingSceneKey)`）。
+  /// 用户在壁纸页调滑块期间若明暗发生翻转（系统亮暗变化、别的入口写入），
+  /// 后续写入会静默落到**另一套场景**里 —— 表现为"我在浅色下调的模糊，
+  /// 切到深色发现被改了"。进入设置页时 [pinEditScene] 固定住目标即可。
+  String? _pinnedSceneKey;
+
+  /// 壁纸设置页进入时调用：按进入时的明暗锁定本次编辑的目标场景。
+  String pinEditScene() {
+    _pinnedSceneKey = isLight ? 'light' : 'dark';
+    return _pinnedSceneKey!;
+  }
+
+  /// 壁纸设置页退出时调用：解除锁定，恢复"跟随当前明暗"。
+  void unpinEditScene() => _pinnedSceneKey = null;
+
+  /// 当前正在编辑/读取的场景 key（受 [pinEditScene] 影响）
+  String get editingSceneKey => _pinnedSceneKey ?? (isLight ? 'light' : 'dark');
+
+  /// 正在编辑的场景是否为浅色。
+  /// 壁纸页里凡是要按"当前这套场景"取默认值的地方都必须用它，
+  /// **不要**用 [isLight]（那是"此刻实际显示的明暗"，编辑期间可能已漂移）。
+  bool get editingSceneIsLight => editingSceneKey == 'light';
+
+  String get _sceneKeyForCurrentAppearance => editingSceneKey;
 
   /// 当前模式那套配置
   WallpaperConfig get activeScene =>
@@ -211,12 +237,17 @@ class BackgroundService extends GetxService {
   /// 用户自建壁纸库 API 地址（全局）
   final customApiUrl = ''.obs;
 
-  /// 外观模式（主导）
+  /// 外观模式（**历史遗留，已不再驱动明暗**）。
+  ///
+  /// 明暗的唯一真源是 `ThemeModeStore` / `AppBrightness`，本服务只**读**它
+  /// （见 [isLight] / [editingSceneKey]）来决定渲染哪一套场景。
+  /// 这个枚举与 `appearance_mode` 持久化键仅为兼容旧数据保留：
+  /// 读它不改变任何行为，写它也不再有任何回调。
+  ///
+  /// ⚠️ 历史：这里曾有一个 `onAppearanceChanged` 回调，由 `app.dart` 接到
+  /// `ThemeModeStore.applyLightFromBackground`，于是壁纸反过来决定全 App 明暗，
+  /// 并永久闩死「跟随系统」。详见 `common/theme_mode_store.dart` 顶部说明。
   final appearanceMode = AppearanceMode.dark.obs;
-
-  /// 外观变化回调 —— 由 App 层注入，避免服务层直接依赖
-  /// ThemeModeStore 造成循环依赖。
-  void Function(bool isLight)? onAppearanceChanged;
 
   /// 启动时调用 - 从 SharedPreferences 加载
   @override
@@ -282,7 +313,6 @@ class BackgroundService extends GetxService {
     }
 
     _sceneVersion.value++;
-    _notifyAppearance();
 
     AppLog.instance.log(
       '[BackgroundService] 已加载: '
@@ -300,19 +330,15 @@ class BackgroundService extends GetxService {
 
   /// 切换外观模式：文字明暗跟着变，**背景也换成该模式自己那套**。
   Future<void> setAppearanceMode(AppearanceMode m) async {
+    // 只记录，**不再**回调全局明暗 —— 方向已统一为「外观 → 壁纸」：
+    // 渲染哪一套场景由 [isLight] / [editingSceneKey] 决定，本枚举不再参与决策。
     appearanceMode.value = m;
-    _notifyAppearance();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       _appearanceKey,
       m == AppearanceMode.light ? 'light' : 'dark',
     );
     AppLog.instance.log('[BackgroundService] 外观模式 → $m（背景随之切换）');
-  }
-
-  /// 把当前外观推给 App 层（注入的回调）
-  void _notifyAppearance() {
-    onAppearanceChanged?.call(appearanceMode.value == AppearanceMode.light);
   }
 
   // ============================================================
@@ -512,7 +538,11 @@ class BackgroundService extends GetxService {
     await updateActiveScene(
       activeScene.copyWith(
         customPath: '',
-        choice: BackgroundChoice.builtin1,
+        // 🔴 必须按当前明暗选默认渐变。
+        // 原来这里无条件写 `builtin1`（深邃黑 #0A0A0F 系），于是**浅色模式**下
+        // 点「移除当前图片」会把背景换成近黑底，叠 35% 白遮罩仍是深灰，
+        // 而文字是深色 → 整页基本不可读。`_resetAll` 里有补偿，这里漏了。
+        choice: isLight ? BackgroundChoice.moonWhite : BackgroundChoice.builtin1,
         sourceType: WallpaperSourceType.gradient,
         networkUrl: '',
         networkThumbUrl: '',
@@ -763,6 +793,9 @@ class BackgroundService extends GetxService {
     required Color overlayColor,
     Widget? child,
   }) {
+    // 装饰圆的基色：浅色壁纸（皎月白/晨雾蓝…）上白圆完全不可见，
+    // 装饰效果丢失；按明暗换成"深色阴影 / 白色高光"。
+    final decoBase = AppBrightness.isLight.value ? Colors.black : Colors.white;
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -782,7 +815,7 @@ class BackgroundService extends GetxService {
           right: -80,
           child: _buildCircle(
             size: 420,
-            color: Colors.white.withValues(alpha: 0.04),
+            color: decoBase.withValues(alpha: 0.04),
           ),
         ),
         Positioned(
@@ -790,7 +823,7 @@ class BackgroundService extends GetxService {
           left: -140,
           child: _buildCircle(
             size: 420,
-            color: Colors.white.withValues(alpha: 0.02),
+            color: decoBase.withValues(alpha: 0.02),
           ),
         ),
         Positioned(
@@ -798,7 +831,7 @@ class BackgroundService extends GetxService {
           right: -60,
           child: _buildCircle(
             size: 220,
-            color: Colors.white.withValues(alpha: 0.05),
+            color: decoBase.withValues(alpha: 0.05),
           ),
         ),
         // 蒙版 (保证文字可读)：颜色跟随明暗 —— 浅色白、深色黑
@@ -860,28 +893,38 @@ class BackgroundService extends GetxService {
     }
   }
 
+  static final List<({String name, BackgroundChoice choice, List<Color> colors})>
+      _lightPreviews = [
+    (name: '皎月白', choice: BackgroundChoice.moonWhite, colors: _moonWhite),
+    (name: '晨雾蓝', choice: BackgroundChoice.mistBlue, colors: _mistBlue),
+    (name: '竹青', choice: BackgroundChoice.sageGreen, colors: _sageGreen),
+    (name: '暖沙', choice: BackgroundChoice.sandBeige, colors: _sandBeige),
+  ];
+
+  static final List<({String name, BackgroundChoice choice, List<Color> colors})>
+      _darkPreviews = [
+    (name: '深邃黑', choice: BackgroundChoice.builtin1, colors: _builtin1),
+    (name: '极光紫', choice: BackgroundChoice.builtin2, colors: _builtin2),
+    (name: '赛博蓝', choice: BackgroundChoice.builtin3, colors: _builtin3),
+    (name: '暖阳橙', choice: BackgroundChoice.builtin4, colors: _builtin4),
+  ];
+
   /// 内置背景的预览色（设置页的预览小方块用）。
   ///
   /// #5：按**当前明暗**只列出对应那 4 套 ——
   /// 深色列深邃黑/极光紫/赛博蓝/暖阳橙，浅色列皎月白/晨雾蓝/竹青/暖沙。
   /// 混着列没意义：浅色界面套一个深色壁纸，文字对比会很难看。
   static List<({String name, BackgroundChoice choice, List<Color> colors})>
-  get builtinPreviews {
-    if (AppBrightness.isLight.value) {
-      return [
-        (name: '皎月白', choice: BackgroundChoice.moonWhite, colors: _moonWhite),
-        (name: '晨雾蓝', choice: BackgroundChoice.mistBlue, colors: _mistBlue),
-        (name: '竹青', choice: BackgroundChoice.sageGreen, colors: _sageGreen),
-        (name: '暖沙', choice: BackgroundChoice.sandBeige, colors: _sandBeige),
-      ];
-    }
-    return [
-      (name: '深邃黑', choice: BackgroundChoice.builtin1, colors: _builtin1),
-      (name: '极光紫', choice: BackgroundChoice.builtin2, colors: _builtin2),
-      (name: '赛博蓝', choice: BackgroundChoice.builtin3, colors: _builtin3),
-      (name: '暖阳橙', choice: BackgroundChoice.builtin4, colors: _builtin4),
-    ];
-  }
+      get builtinPreviews =>
+          AppBrightness.isLight.value ? _lightPreviews : _darkPreviews;
+
+  /// 按**正在编辑的场景**取那 4 套 —— 壁纸设置页必须用这个。
+  ///
+  /// 用 [builtinPreviews] 的话，编辑期间明暗一旦翻转，选图列表会跟着
+  /// 换成另一套，用户会把浅色渐变选进深色场景（见 [pinEditScene]）。
+  List<({String name, BackgroundChoice choice, List<Color> colors})>
+      get builtinPreviewsForEditing =>
+          editingSceneIsLight ? _lightPreviews : _darkPreviews;
 }
 
 /// 单个外观模式下的壁纸配置。
@@ -959,7 +1002,11 @@ class WallpaperConfig {
     return WallpaperConfig(
       choice: BackgroundChoice.values.firstWhere(
         (e) => e.name == s(json['choice']),
-        orElse: () => BackgroundChoice.builtin1,
+        // 兜底也要按明暗选：浅色场景解析失败/choice 名变更时不能退回深色渐变，
+        // 否则会出现"浅色界面 + 深邃黑背景"（`moonWhite` 改名踩过一次）。
+        orElse: () => AppBrightness.isLight.value
+            ? BackgroundChoice.moonWhite
+            : BackgroundChoice.builtin1,
       ),
       sourceType: WallpaperSourceType.values.firstWhere(
         (e) => e.name == s(json['sourceType']),

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../models/comic.dart';
 import 'source_cover_image.dart';
+import '../theme/jelly_theme.dart';
 import '../../common/theme.dart';
 
 /// 日志工具
@@ -22,6 +23,8 @@ class ComicCard extends StatelessWidget {
   Widget build(BuildContext context) {
     _log('构建卡片: ${comic.title}');
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Card(
       elevation: 2,
       clipBehavior: Clip.antiAlias,
@@ -41,13 +44,13 @@ class ComicCard extends StatelessWidget {
                   fit: BoxFit.cover,
                   memCacheWidth: 300,
                   placeholder: (context, url) => Container(
-                    color: Colors.grey[200],
+                    color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                     child: const Center(
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   ),
                   errorWidget: (context, url, error) => Container(
-                    color: Colors.grey[200],
+                    color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                     child: const Icon(Icons.broken_image, size: 40),
                   ),
                 ),
@@ -73,7 +76,9 @@ class ComicCard extends StatelessWidget {
                   if (comic.author != null && comic.author!.isNotEmpty)
                     Text(
                       comic.author!,
-                      style: TextStyle(fontSize: AppTheme.fontCaption, color: Colors.grey[600]),
+                      style: TextStyle(
+                          fontSize: AppTheme.fontCaption,
+                          color: JellyTheme.textSecondary),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),

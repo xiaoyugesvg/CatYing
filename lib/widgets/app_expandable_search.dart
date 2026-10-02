@@ -125,7 +125,9 @@ class _AppExpandableSearchState extends State<AppExpandableSearch> {
       width: _expanded ? null : 44,
       height: 50,
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.palette.cardDark : Colors.white,
+        // 浅色分支不能用写死的 Colors.white：用户把影视配色换成别的方案时
+        //（`JellyPalette.cardLight` 不一定是纯白），搜索栏会与卡片撞色。
+        color: isDark ? AppTheme.palette.cardDark : AppTheme.palette.cardLight,
         borderRadius: BorderRadius.circular(25),
         // 不加描边 —— 靠阴影与底色分离（与 JellySearchBar 一致）
         boxShadow: [

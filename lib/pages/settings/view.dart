@@ -20,7 +20,10 @@ import 'sub/playback_settings_page.dart';
 /// State 里，改一处容易碰到别处。
 ///
 /// 各分类对应的子页：
-/// - 外观与壁纸   → sub/appearance_settings_page.dart
+/// - 主题与外观   → sub/unified_theme_settings_page.dart
+///   ⚠️ 旧 `sub/appearance_settings_page.dart` 已**没有任何导航入口**
+///   （全仓库无人 import、无人 `Get.to`）。它独有的「界面字号」「首页主题」
+///   两个入口已搬进统一页，原文件仅为参考保留。
 /// - 订阅与数据源 → sub/data_source_settings_page.dart
 /// - 播放设置     → sub/playback_settings_page.dart
 /// - 弹幕         → sub/danmu_settings_page.dart

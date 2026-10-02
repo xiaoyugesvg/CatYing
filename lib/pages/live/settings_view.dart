@@ -78,7 +78,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
           const SizedBox(height: 10),
           Container(
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.06),
+              color: AppTheme.backgroundSecondary,
               borderRadius: BorderRadius.circular(14),
             ),
             child: Obx(() {
@@ -110,7 +110,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.06),
+              color: AppTheme.backgroundSecondary,
               borderRadius: BorderRadius.circular(14),
             ),
             child: Column(
@@ -135,7 +135,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                         ),
                         decoration: InputDecoration(
                           filled: true,
-                          fillColor: Colors.white.withValues(alpha: 0.08),
+                          fillColor: AppTheme.backgroundTertiary,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
                             borderSide: BorderSide.none,
@@ -156,7 +156,12 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
                     FilledButton(
                       style: FilledButton.styleFrom(
                         backgroundColor: AppTheme.accentColor,
-                        foregroundColor: Colors.black,
+                        // 强调色上必须按亮度选前景：写死黑色时，
+                        // ink 强调色 #3A3A3A 上的黑字对比只有约 1.3:1。
+                        foregroundColor:
+                            AppTheme.accentColor.computeLuminance() > 0.5
+                                ? Colors.black
+                                : Colors.white,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 18,
                           vertical: 14,
@@ -197,7 +202,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
           // 改为跳转独立管理页（可手动输入分类名，也能从当前源里挑）
           Container(
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.06),
+              color: AppTheme.backgroundSecondary,
               borderRadius: BorderRadius.circular(14),
             ),
             child: Obx(() {
@@ -254,7 +259,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
         decoration: BoxDecoration(
           color: loaded
               ? AppTheme.accentColor.withValues(alpha: 0.18)
-              : Colors.white.withValues(alpha: 0.06),
+              : AppTheme.backgroundTertiary,
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(
@@ -279,7 +284,8 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
         ),
       ),
       trailing: PopupMenuButton<String>(
-        color: Color(0xFF2A2A2E),
+        // 不写死底色：原来固定 #2A2A2E，而 M3 菜单文字取
+        // `textTheme.labelLarge`（浅色主题下是深色）→ 深底压深字不可读。
         icon: Icon(Icons.more_vert, color: AppTheme.textSecondary),
         onSelected: (v) async {
           if (v == 'refresh') {

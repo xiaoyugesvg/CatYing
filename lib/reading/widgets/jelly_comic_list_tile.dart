@@ -152,8 +152,10 @@ class _JellyComicListTileState extends State<JellyComicListTile>
                         httpHeaders: coverHeaders(comic.sourceId),
                         fit: BoxFit.cover,
                         memCacheWidth: 300,
-                        placeholder: (context, url) => Container(
-                          color: isDark ? Colors.grey[800] : Colors.grey[200],
+                        placeholder: (context, url) => ColoredBox(
+                          color: isDark
+                              ? JellyTheme.cardDark
+                              : JellyTheme.cardLight,
                           child: Center(
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
@@ -161,11 +163,13 @@ class _JellyComicListTileState extends State<JellyComicListTile>
                             ),
                           ),
                         ),
-                        errorWidget: (context, url, error) => Container(
-                          color: isDark ? Colors.grey[800] : Colors.grey[200],
-                          child: const Icon(
+                        errorWidget: (context, url, error) => ColoredBox(
+                          color: isDark
+                              ? JellyTheme.cardDark
+                              : JellyTheme.cardLight,
+                          child: Icon(
                             Icons.broken_image,
-                            color: Colors.grey,
+                            color: JellyTheme.textSecondary,
                           ),
                         ),
                       ),

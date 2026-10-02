@@ -374,7 +374,7 @@ class _DisplaySettingsPageState extends State<DisplaySettingsPage>
         fontWeight: FontWeight.w600,
         color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
       ),
-      dropdownColor: isDark ? JellyTheme.cardDark : Colors.white,
+      dropdownColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
       items: visible
           .map(
             (t) => DropdownMenuItem(

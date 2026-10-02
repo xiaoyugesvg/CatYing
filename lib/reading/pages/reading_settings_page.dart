@@ -247,7 +247,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
               fontWeight: FontWeight.w600,
               color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
             ),
-            dropdownColor: isDark ? JellyTheme.cardDark : Colors.white,
+            dropdownColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             items: _mangaModes
                 .map(
                   (m) => DropdownMenuItem(
@@ -310,7 +310,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
               fontWeight: FontWeight.w600,
               color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
             ),
-            dropdownColor: isDark ? JellyTheme.cardDark : Colors.white,
+            dropdownColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             items: _bookModes
                 .map(
                   (m) => DropdownMenuItem(

@@ -10,6 +10,7 @@ import 'package:media_kit_video/media_kit_video.dart'
     show VideoController, Video, AdaptiveVideoControls;
 
 import '../../common/theme.dart';
+import '../../common/system_ui.dart';
 import '../../models/live_models.dart';
 import '../../services/epg_service.dart';
 import '../../services/live_service.dart';
@@ -260,9 +261,15 @@ class _LivePageState extends State<LivePage> {
                 children: [
                   // 状态栏高度黑边：状态栏压在黑边上，不与画面重叠
                   if (topBar > 0)
-                    SizedBox(
-                      height: topBar,
-                      child: const ColoredBox(color: Colors.black),
+                    // ⚠️ 这一条正好覆盖状态栏区域，所以在这里发"浅色图标"：
+                    // 本页没有 AppBar，不标注的话会沿用上一条路由的样式，
+                    // 浅色模式下就是"深色图标压黑边"，看不见。
+                    AnnotatedRegion<SystemUiOverlayStyle>(
+                      value: SystemUiOverlayStyle.light,
+                      child: SizedBox(
+                        height: topBar,
+                        child: const ColoredBox(color: Colors.black),
+                      ),
                     ),
                   // 视频层（全屏时吃掉剩余高度）
                   SizedBox(
@@ -346,7 +353,10 @@ class _LivePageState extends State<LivePage> {
                               child: LinearProgressIndicator(
                                 minHeight: 2,
                                 color: AppTheme.accentColor,
-                                backgroundColor: Colors.white12,
+                                // 原来写死 Colors.white12：浅色模式下进度槽
+                                // 在白底上完全不可见。跟随主题三级色。
+                                backgroundColor:
+                                    AppTheme.textTertiary.withValues(alpha: 0.25),
                               ),
                             );
                           }),
@@ -850,8 +860,11 @@ class _LivePageState extends State<LivePage> {
                       height: 40,
                       alignment: Alignment.center,
                       child: Icon(
+                        // ⚠️ 这一层恒为黑底视频（见本文件 :732 的 Colors.black），
+                        // 前景必须白色：浅色模式下 AppTheme.textPrimary 是深色，
+                        // 深色图标压黑视频 = 返回键看不见。
                         Icons.arrow_back_ios_new,
-                        color: AppTheme.textPrimary,
+                        color: Colors.white,
                         size: 20,
                       ),
                     ),
@@ -871,7 +884,8 @@ class _LivePageState extends State<LivePage> {
                         Text(
                           'LIVE',
                           style: TextStyle(
-                            color: AppTheme.textPrimary,
+                            // 角标底是半透明黑（:865），文字必须白色
+                            color: Colors.white,
                             fontSize: AppTheme.fontCaption,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 0.5,
@@ -904,8 +918,9 @@ class _LivePageState extends State<LivePage> {
                   height: 40,
                   alignment: Alignment.center,
                   child: Icon(
+                    // 同 _VideoTopIcon：黑底视频层上必须用白色
                     Icons.arrow_back_ios_new,
-                    color: AppTheme.textPrimary,
+                    color: Colors.white,
                     size: 20,
                   ),
                 ),
@@ -984,7 +999,8 @@ class _LivePageState extends State<LivePage> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    // 听剧模式整屏黑底（:972），必须白色
+                    color: Colors.white,
                     fontSize: AppTheme.fontHeadline,
                     fontWeight: FontWeight.w600,
                   ),
@@ -1013,7 +1029,8 @@ class _LivePageState extends State<LivePage> {
                 child: Text(
                   '退出听剧模式',
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    // 同上：黑底
+                    color: Colors.white,
                     fontSize: AppTheme.fontFootnote,
                   ),
                 ),
@@ -1325,23 +1342,23 @@ class _LivePageState extends State<LivePage> {
       PlayerFullscreenController.instance.exit('live');
     }
     if (_fullscreen) {
-      // 横屏 + 跟随设备方向，避免只锁左/右横屏时布局错乱
-      if (Platform.isIOS) {
-        await SystemChrome.setPreferredOrientations(const [
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
-        ]);
-      }
-      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      await SystemUiController.enter(
+        'live',
+        mode: SystemUiMode.immersiveSticky,
+        // 横屏 + 跟随设备方向，避免只锁左/右横屏时布局错乱
+        orientations: Platform.isIOS
+            ? const [
+                DeviceOrientation.landscapeLeft,
+                DeviceOrientation.landscapeRight,
+              ]
+            : null,
+        // 视频黑底 → 浅色状态栏图标
+        overlayStyle: SystemUiOverlayStyle.light,
+      );
     } else {
-      if (Platform.isIOS) {
-        await SystemChrome.setPreferredOrientations(const [
-          DeviceOrientation.portraitUp,
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
-        ]);
-      }
-      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      // 恢复**进入前**的方向与系统栏状态
+      // （原来无条件写死"竖屏+左右横屏"，会覆盖别的页面设定的方向锁）
+      await SystemUiController.exit('live');
     }
   }
 
@@ -1601,7 +1618,9 @@ class _VideoTopIcon extends StatelessWidget {
           width: 38,
           height: 38,
           alignment: Alignment.center,
-          child: Icon(icon, color: AppTheme.textPrimary, size: size),
+          // ⚠️ 这几个按钮画在黑底视频层上：不能用跟随主题的
+          // AppTheme.textPrimary（浅色模式下是深色 → 图标隐形）。
+          child: Icon(icon, color: Colors.white, size: size),
         ),
       ),
     );

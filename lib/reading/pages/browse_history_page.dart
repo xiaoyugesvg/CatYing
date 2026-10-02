@@ -370,9 +370,12 @@ Widget _buildEmpty() {
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.history_rounded, size: 56, color: Colors.grey[400]),
+        Icon(Icons.history_rounded, size: 56, color: JellyTheme.textSecondary),
         const SizedBox(height: 12),
-        Text('暂无浏览记录', style: TextStyle(color: Colors.grey[500])),
+        Text(
+          '暂无浏览记录',
+          style: TextStyle(color: JellyTheme.textSecondary),
+        ),
       ],
     ),
   );

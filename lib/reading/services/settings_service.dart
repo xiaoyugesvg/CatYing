@@ -805,6 +805,8 @@ class SettingsService extends ChangeNotifier {
           _themeFollowSystem
               ? ThemeMode.system
               : (value ? ThemeMode.dark : ThemeMode.light),
+          // 只跳过阅读自己，仍要推给音乐（原来会被整体吞掉）
+          origin: GlobalThemeSync.reading,
         );
       } finally {
         _syncingTheme = false;
@@ -867,7 +869,8 @@ class SettingsService extends ChangeNotifier {
         final mode = value
             ? ThemeMode.system
             : (isDarkMode ? ThemeMode.dark : ThemeMode.light);
-        await ThemeModeStore.notifyModuleChanged(mode);
+        await ThemeModeStore.notifyModuleChanged(mode,
+            origin: GlobalThemeSync.reading);
       } finally {
         _syncingTheme = false;
       }

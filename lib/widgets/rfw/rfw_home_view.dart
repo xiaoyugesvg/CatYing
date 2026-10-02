@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rfw/formats.dart' show parseDataFile;
 import 'package:rfw/rfw.dart';
 
+import '../../common/theme.dart';
 import '../../services/app_log.dart';
 import '../../services/rfw_theme_service.dart';
 import 'peek_home_widgets.dart';
@@ -154,9 +155,14 @@ class RfwDataContract {
     String selectedTypeId = '',
     bool showFilters = false,
     String immersiveImageUrl = '',
-    int immersivePrimaryColor = 0xFF0E1116,
-    int immersiveSecondaryColor = 0xFF1B2230,
-    int immersiveBackgroundColor = 0xFF0E1116,
+    // V12b：这三个原来是**写死深色的 const 默认参数**
+    //（0xFF0E1116 / 0xFF1B2230 / 0xFF0E1116）—— 浅色模式下「沉浸光影」
+    // 首页会整片发黑。默认值必须跟随当前明暗，而 const 默认参数里读不到
+    // `AppBrightness`，所以改成可空：**传 null（不传）时自适应**，
+    // 显式传值时行为完全不变（调用方用法不受影响）。
+    int? immersivePrimaryColor,
+    int? immersiveSecondaryColor,
+    int? immersiveBackgroundColor,
   }) {
     // 给每个 item 补派生字段
     final normalizedItems = <Map<String, Object?>>[];
@@ -231,12 +237,22 @@ class RfwDataContract {
       'home': <String, Object?>{
         'recommend': recommend,
       },
-      // 沉浸式主题用
+      // 沉浸式主题用。三个色值传 null（=原来的默认路径）时**跟随当前明暗**：
+      // 浅色给调色板的浅底（深字主题才看得清），深色保留原深色值。
       'immersive': <String, Object?>{
         'imageUrl': immersiveImageUrl,
-        'primaryColor': immersivePrimaryColor,
-        'secondaryColor': immersiveSecondaryColor,
-        'backgroundColor': immersiveBackgroundColor,
+        'primaryColor': immersivePrimaryColor ??
+            (AppBrightness.isLight.value
+                ? AppTheme.backgroundPrimary.toARGB32()
+                : 0xFF0E1116),
+        'secondaryColor': immersiveSecondaryColor ??
+            (AppBrightness.isLight.value
+                ? AppTheme.backgroundSecondary.toARGB32()
+                : 0xFF1B2230),
+        'backgroundColor': immersiveBackgroundColor ??
+            (AppBrightness.isLight.value
+                ? AppTheme.backgroundPrimary.toARGB32()
+                : 0xFF0E1116),
       },
       // ---- 图标名（模板里 data.home.icons.xxx 高频使用）----
       'icons': _icons,

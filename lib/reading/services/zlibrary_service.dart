@@ -1428,7 +1428,7 @@ class ZlibraryService extends ChangeNotifier {
   // -------------------- HTTP 基础（对应 cmbook __makePostRequest/__makeGetRequest）--------------------
 
   Map<String, String> _cookies(String userid, String userkey) => {
-    'siteLanguageV2': 'en',
+    'siteLanguageV2': 'zh',
     'remix_userid': userid,
     'remix_userkey': userkey,
   };
@@ -1577,7 +1577,7 @@ class ZlibraryService extends ChangeNotifier {
       'User-Agent': _browserUa,
       'accept':
           'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-      'accept-language': 'en-US,en;q=0.9',
+      'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
     };
     if (cookies != null && cookies.isNotEmpty) {
       h['Cookie'] = cookies.entries

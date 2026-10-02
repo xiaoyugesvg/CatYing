@@ -156,8 +156,13 @@ class MusicTheme {
       _isDark ? palette.textPrimaryDark : palette.textPrimaryLight;
 
   /// 次要文字
+  ///
+  /// ⚠️ 浓度必须与全局 `AppTheme.textSecondary` 同向：全局是
+  /// "浅色更实(0.92) / 深色更淡(0.84)"，原来这里写反成
+  /// "浅色 0.80 / 深色 0.90"，于是同一套 palette、同一屏里，
+  /// 音乐的歌手名/副标题比全局同语义文字更淡（浅色）或更实（深色）。
   static Color get secondary =>
-      palette.textSecondary.withValues(alpha: _isDark ? 0.90 : 0.80);
+      palette.textSecondary.withValues(alpha: _isDark ? 0.84 : 0.92);
 
   /// 鼠尾草绿（Beans 的次要强调，用于"已下载/已完成"等状态）
   ///
@@ -170,20 +175,36 @@ class MusicTheme {
       (_isDark ? palette.cardDark : palette.cardLight)
           .withValues(alpha: _isDark ? 0.60 : 0.70);
 
-  /// 强调色（用户自定义优先，否则用 palette.primary）
+  /// 强调色。
+  ///
+  /// ⚠️ 两个坑：
+  ///  1. `_customAccent` 由 `MusicThemeBridge` 注入的是 **palette.primary**
+  ///     ——"浅色底上用的那一端"。深色模式直接拿它画播放键/进度条会与卡片
+  ///     几乎同色（ink：tint=#3A3A3A、card=#2A2A2C，对比≈1.1:1），
+  ///     按钮和进度条基本"消失"。所以深色模式要取亮端 `primaryLight`
+  ///     （`MusicAccent.tintDark => gradientStart` 早就是这个约定）。
+  ///  2. 浅色模式原写法是 `_shade(c, +0.15)`（**变亮**），与上方注释
+  ///     "压暗一点，白底上才够对比"正好相反。
   static Color get tint {
+    if (_isDark) return palette.primaryLight;
     final c = _customAccent;
-    if (c != null) return _isDark ? c : _shade(c, 0.15);
-    return _isDark ? palette.primaryLight : palette.primaryDark;
+    if (c == null) return palette.primaryDark;
+    return _shade(c, -0.15);
   }
 
   /// 高亮色（亮的那端，深色模式下更醒目）
-  static Color get highlight => _customAccent ?? palette.primaryLight;
+  static Color get highlight => _isDark
+      ? palette.primaryLight
+      : _shade(_customAccent ?? palette.primary, -0.05);
 
   /// 当前强调色的渐变（从浅到深，用于播放键/进度条/光晕）
-  static List<Color> get accentGradient => _customAccent != null
-      ? [_shade(_customAccent!, -0.1), _customAccent!]
-      : [palette.primaryLight, palette.primaryDark];
+  static List<Color> get accentGradient {
+    final c = _customAccent;
+    if (c == null) return [palette.primaryLight, palette.primaryDark];
+    return _isDark
+        ? [palette.primaryLight, palette.primary]
+        : [_shade(c, -0.24), _shade(c, -0.04)];
+  }
 
   /// 分隔线
   static Color get divider =>
@@ -236,6 +257,13 @@ class MusicThemeStore {
   static const _kCustom = 'music.customAccent';
 
   final ValueNotifier<int> revision = ValueNotifier<int>(0);
+
+  /// 由统一主题系统（ModuleThemeStore）调用：配色方案变化时，
+  /// 通知音乐侧 UI 重建（因为 MusicTheme.palette 是静态 getter，
+  /// 没人触发 rebuild 的话界面不会变）。
+  void notifyPaletteChanged() {
+    revision.value++;
+  }
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
@@ -295,8 +323,10 @@ class MusicThemeStore {
       MusicThemeMode.dark => ThemeMode.dark,
       MusicThemeMode.system => ThemeMode.system,
     };
-    // 延迟到下一帧，避免 build 期间调用
-    ThemeModeStore.notifyModuleChanged(global);
+    // 带上来源：只跳过音乐自己，**仍要推给阅读**。
+    // （原来 `notifyModuleChanged` 内部会置 `_syncing`，把发给所有模块的
+    //   推送一起吞掉 —— 音乐改明暗时阅读不跟着变。）
+    ThemeModeStore.notifyModuleChanged(global, origin: GlobalThemeSync.music);
   }
 
   Future<void> setAccent(MusicAccent accent) async {

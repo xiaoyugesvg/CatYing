@@ -194,12 +194,12 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
               color: Colors.transparent,
               child: Container(
                 decoration: BoxDecoration(
-                  color: isDark ? JellyTheme.cardDark : Colors.white,
+                  color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
                     color: isDark
                         ? Colors.white.withValues(alpha: 0.08)
-                        : const Color(0xFFE4E6EE),
+                        : JellyTheme.primary.withValues(alpha: 0.12),
                   ),
                   boxShadow: [
                     BoxShadow(
@@ -501,7 +501,9 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
         return Container(
           padding: const EdgeInsets.all(pad),
           decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : const Color(0xFFEEF0F7),
+            color: isDark
+                ? JellyTheme.cardDark
+                : JellyTheme.primary.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(16),
           ),
           child: SizedBox(
@@ -830,7 +832,9 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
             : null,
         suffixIcon: suffix,
         filled: true,
-        fillColor: isDark ? JellyTheme.cardDark : const Color(0xFFF2F3F8),
+        fillColor: isDark
+            ? JellyTheme.cardDark
+            : JellyTheme.primary.withValues(alpha: 0.08),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,
