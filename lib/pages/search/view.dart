@@ -173,76 +173,8 @@ class _SearchPageState extends State<SearchPage> {
     final picked = await showModalBottomSheet<SourceBean>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppTheme.backgroundSecondary,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      builder: (ctx) => kbSheet(
-        SafeArea(
-          // top:true —— 站点多时列表撑高，避免顶部顶到状态栏后面被遮
-          top: true,
-          bottom: false,
-          child: SizedBox(
-            height: (MediaQuery.of(ctx).size.height -
-                    MediaQuery.of(ctx).viewInsets.bottom -
-                    MediaQuery.of(ctx).padding.top)
-                .clamp(
-              MediaQuery.of(ctx).size.height * 0.5,
-              MediaQuery.of(ctx).size.height -
-                  MediaQuery.of(ctx).padding.top,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                  child: Row(
-                    children: [
-                      Text(
-                        '选择搜索源',
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: AppTheme.fontHeadline,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        '点选即搜索',
-                        style: TextStyle(
-                          color: AppTheme.textTertiary,
-                          fontSize: AppTheme.fontCaption,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: ListView.builder(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    itemCount: sites.length,
-                    itemBuilder: (c, i) => ListTile(
-                      leading: Icon(
-                        Icons.dns_outlined,
-                        size: 18,
-                        color: AppTheme.accentColor,
-                      ),
-                      title: Text(
-                        sites[i].name,
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: AppTheme.fontSubhead,
-                        ),
-                      ),
-                      onTap: () => Navigator.pop(ctx, sites[i]),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => kbSheet(_SearchSourcePicker(sites: sites)),
     );
     if (picked == null || !mounted) return;
     final kw = _inputController.text.trim();
@@ -269,32 +201,33 @@ class _SearchPageState extends State<SearchPage> {
         children: [
           Expanded(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              height: 44,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              height: 34,
               decoration: BoxDecoration(
-                color: AppTheme.backgroundTertiary,
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: AppTheme.glassBorder, width: 0.8),
+                // 干净白胶囊（参考图样式），细边无阴影
+                color: AppTheme.palette.cardLight,
+                borderRadius: BorderRadius.circular(17),
+                border: Border.all(color: AppTheme.borderLight, width: 0.5),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.search, color: AppTheme.textTertiary, size: 18),
-                  const SizedBox(width: 8),
+                  Icon(Icons.search, color: AppTheme.textTertiary, size: 15),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: TextField(
                       controller: _inputController,
                       focusNode: _focusNode,
                       cursorColor: AppTheme.accentColor,
-                      cursorWidth: 2,
+                      cursorWidth: 1.5,
                       style: TextStyle(
                         color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontSubhead + 1,
+                        fontSize: 12,
                       ),
                       decoration: InputDecoration(
                         hintText: '搜索影视...',
                         hintStyle: TextStyle(
                           color: AppTheme.textTertiary,
-                          fontSize: AppTheme.fontSubhead + 1,
+                          fontSize: 12,
                         ),
                         border: InputBorder.none,
                         isDense: true,
@@ -342,7 +275,7 @@ class _SearchPageState extends State<SearchPage> {
             ),
           ),
           const SizedBox(width: AppTheme.spacingSM),
-          // 「搜索」实心按钮（参考图样式）
+          // 「搜索」实心按钮（参考图样式：黑色圆角按钮）
           GestureDetector(
             onTap: () {
               final text = _inputController.text.trim();
@@ -352,18 +285,18 @@ class _SearchPageState extends State<SearchPage> {
               }
             },
             child: Container(
-              height: 44,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              height: 34,
+              padding: const EdgeInsets.symmetric(horizontal: 18),
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: AppTheme.accentColor,
-                borderRadius: BorderRadius.circular(22),
+                color: Colors.black,
+                borderRadius: BorderRadius.circular(17),
               ),
               child: const Text(
                 '搜索',
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: AppTheme.fontHeadline,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -838,17 +771,17 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  /// 热门搜索行：通栏圆角 + 文字居中（对应参考图）
+  /// 热门搜索行：通栏圆角 + 文字居中（对应参考图，紧凑高度）
   Widget _hotRow(String keyword) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => _runSearch(keyword),
       child: Container(
-        height: 46,
+        height: 38,
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: AppTheme.backgroundCard,
-          borderRadius: BorderRadius.circular(23),
+          borderRadius: BorderRadius.circular(19),
           border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
         ),
         child: Text(
@@ -857,7 +790,7 @@ class _SearchPageState extends State<SearchPage> {
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: AppTheme.textPrimary,
-            fontSize: AppTheme.fontSubhead + 1,
+            fontSize: AppTheme.fontBody,
           ),
         ),
       ),
@@ -921,5 +854,207 @@ class _SearchPageState extends State<SearchPage> {
       ),
     );
     if (ok == true) await _searchController.clearHistory();
+  }
+}
+
+/// 搜索页「搜索源」面板（2026-10-02 重构，对齐 Makka 聚合参考图）
+///
+/// - 三分之一屏底部面板（键盘弹起时 kbSheet 抬高仍不会顶出屏幕）
+/// - 顶部 SafeArea 避让状态栏；标题「搜索源」+ 小胶囊搜索框
+/// - 源列表**两列紧凑网格**，随时可滚动（搜索中/键盘弹起时也一样）
+class _SearchSourcePicker extends StatefulWidget {
+  final List<SourceBean> sites;
+
+  const _SearchSourcePicker({required this.sites});
+
+  @override
+  State<_SearchSourcePicker> createState() => _SearchSourcePickerState();
+}
+
+class _SearchSourcePickerState extends State<_SearchSourcePicker> {
+  final _ctrl = TextEditingController();
+  String _kw = '';
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final h = MediaQuery.of(context).size.height;
+    final panelHeight = (h / 3).clamp(h * 0.28, h * 0.40);
+    final list = _kw.isEmpty
+        ? widget.sites
+        : widget.sites
+            .where((s) => s.name.toLowerCase().contains(_kw.toLowerCase()))
+            .toList();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundSecondary,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border.all(color: AppTheme.borderLight, width: 0.5),
+      ),
+      // 顶部避让状态栏：标题永远不被刘海/状态栏遮住
+      child: SafeArea(
+        top: true,
+        bottom: false,
+        child: SizedBox(
+          height: panelHeight,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 顶部拖拽指示条
+              Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 4),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.textSecondary.withValues(alpha: 0.35),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              // 标题「搜索源」
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                child: Row(
+                  children: [
+                    Text(
+                      '搜索源',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // 搜索（小胶囊，与首页/源面板同规格）
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Container(
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AppTheme.palette.cardDark
+                        : AppTheme.palette.cardLight,
+                    borderRadius: BorderRadius.circular(15),
+                    border:
+                        Border.all(color: AppTheme.borderLight, width: 0.5),
+                  ),
+                  child: Row(
+                    children: [
+                      const SizedBox(width: 10),
+                      Icon(Icons.search,
+                          color: AppTheme.textTertiary, size: 14),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: TextField(
+                          controller: _ctrl,
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 12,
+                          ),
+                          onChanged: (v) =>
+                              setState(() => _kw = v.trim()),
+                          textInputAction: TextInputAction.search,
+                          decoration: InputDecoration(
+                            hintText: '搜索源…',
+                            hintStyle: TextStyle(
+                              color: AppTheme.textTertiary,
+                              fontSize: 12,
+                            ),
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding:
+                                const EdgeInsets.symmetric(vertical: 6),
+                          ),
+                        ),
+                      ),
+                      if (_kw.isNotEmpty)
+                        GestureDetector(
+                          onTap: () {
+                            _ctrl.clear();
+                            setState(() => _kw = '');
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(5),
+                            child: Icon(Icons.cancel,
+                                color: AppTheme.textTertiary, size: 13),
+                          ),
+                        ),
+                      const SizedBox(width: 6),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              // 两列紧凑网格：随时可滚动
+              Expanded(
+                child: list.isEmpty
+                    ? Center(
+                        child: Text(
+                          '未找到匹配的源',
+                          style: TextStyle(color: AppTheme.textTertiary),
+                        ),
+                      )
+                    : GridView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 8,
+                          crossAxisSpacing: 10,
+                          childAspectRatio: 3.2,
+                        ),
+                        itemCount: list.length,
+                        itemBuilder: (c, i) {
+                          final source = list[i];
+                          return GestureDetector(
+                            onTap: () => Navigator.pop(context, source),
+                            child: Container(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 10),
+                              decoration: BoxDecoration(
+                                color: AppTheme.backgroundTertiary,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                    color: AppTheme.borderLight, width: 0.5),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.pets,
+                                    size: 14,
+                                    color: AppTheme.textTertiary,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      source.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: AppTheme.textSecondary,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

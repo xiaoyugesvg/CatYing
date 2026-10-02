@@ -269,8 +269,8 @@ class _SourceRow extends StatelessWidget {
   }
 }
 
-/// 源面板搜索框：**小胶囊**（与首页 HomeSearchBar 同规格）
-/// 高 38 / 圆角 19 / 底色 cardLight·cardDark / 轻阴影无描边
+/// 源面板搜索框：**超小胶囊**（与首页 HomeSearchBar 同规格）
+/// 高 30 / 圆角 15 / 底色 cardLight·cardDark / 轻阴影无描边
 class _ExpandableSearchField extends StatefulWidget {
   final TextEditingController controller;
   final String keyword;
@@ -298,35 +298,35 @@ class _ExpandableSearchFieldState extends State<_ExpandableSearchField> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    // 常驻小胶囊搜索框：占满头部剩余宽度，
+    // 常驻超小胶囊搜索框：占满头部剩余宽度，
     // 背景/描边跟随外观（原来写死 0xFF2A2A2E，浅色模式下是一块脏黑）。
     return Container(
-      height: 38,
+      height: 30,
       decoration: BoxDecoration(
         color: isDark ? AppTheme.palette.cardDark : AppTheme.palette.cardLight,
-        borderRadius: BorderRadius.circular(19),
+        borderRadius: BorderRadius.circular(15),
         boxShadow: [
           BoxShadow(
             color: isDark
                 ? Colors.black.withValues(alpha: 0.30)
                 : Colors.black.withValues(alpha: 0.06),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Row(
         children: [
-          const SizedBox(width: 12),
-          Icon(Icons.search, color: AppTheme.textTertiary, size: 16),
-          const SizedBox(width: 6),
+          const SizedBox(width: 10),
+          Icon(Icons.search, color: AppTheme.textTertiary, size: 14),
+          const SizedBox(width: 5),
           Expanded(
             child: TextField(
               controller: widget.controller,
               focusNode: _focus,
               style: TextStyle(
                 color: AppTheme.textPrimary,
-                fontSize: AppTheme.fontBody,
+                fontSize: 12,
               ),
               onChanged: widget.onChanged,
               textInputAction: TextInputAction.search,
@@ -334,11 +334,11 @@ class _ExpandableSearchFieldState extends State<_ExpandableSearchField> {
                 hintText: '搜索源…',
                 hintStyle: TextStyle(
                   color: AppTheme.textTertiary,
-                  fontSize: AppTheme.fontBody,
+                  fontSize: 12,
                 ),
                 border: InputBorder.none,
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                contentPadding: const EdgeInsets.symmetric(vertical: 6),
               ),
             ),
           ),
@@ -349,12 +349,12 @@ class _ExpandableSearchFieldState extends State<_ExpandableSearchField> {
                 widget.onChanged('');
               },
               child: Padding(
-                padding: const EdgeInsets.all(6),
+                padding: const EdgeInsets.all(5),
                 child: Icon(Icons.cancel,
-                    color: AppTheme.textTertiary, size: 15),
+                    color: AppTheme.textTertiary, size: 13),
               ),
             ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
         ],
       ),
     );

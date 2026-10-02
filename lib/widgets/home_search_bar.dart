@@ -9,8 +9,13 @@ import '../common/theme.dart';
 /// 用户明确要求"重构首页右上角的搜索UI界面及其搜索位置UI"。
 ///
 /// ── 样式 ──────────────────────────────────────────────
-/// **小胶囊**（对齐参考 App）：高 38 / 圆角 19 / 底色 cardLight·cardDark
-/// 轻阴影无描边；左：放大镜图标(16)；中：hint「搜索影片」；右：有内容 × 清除
+/// **超小胶囊**（对齐参考 App：高度约一行文字多一点，很扁）：
+/// 高 30 / 圆角 15 / 底色 cardLight·cardDark + 细边（无阴影，干净）/
+/// 左：放大镜图标(14)；中：hint「搜索影片」(12)；右：有内容时才显示 × 清除
+///
+/// ── 与参考图的差异修正（2026-10-02）────────────────────
+/// 参考图（Makka 聚合首页）搜索框只有「放大镜 + 搜索影片」，**没有右侧箭头**。
+/// 旧版在无内容时放了个"→"图标，用户嫌丑，已去掉 —— 无内容点搜索框即进搜索页。
 ///
 /// ── 位置与键盘 ─────────────────────────────────────────
 /// 组件放在首页顶栏（外层 SafeArea 内），**永远在状态栏下方**；
@@ -98,36 +103,28 @@ class _HomeSearchBarState extends State<HomeSearchBar> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      height: 38,
+      height: 30,
       decoration: BoxDecoration(
         // 颜色走 AppTheme 调色板，切外观/配色自动跟随
         color: isDark ? AppTheme.palette.cardDark : AppTheme.palette.cardLight,
-        borderRadius: BorderRadius.circular(19),
-        // 靠阴影与底色分离，不加描边（浅色模式下写死描边会看不清）
-        boxShadow: [
-          BoxShadow(
-            color: isDark
-                ? Colors.black.withValues(alpha: 0.30)
-                : Colors.black.withValues(alpha: 0.06),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(15),
+        // 干净：细边代替阴影（参考图是无阴影的白胶囊）
+        border: Border.all(color: AppTheme.borderLight, width: 0.5),
       ),
       child: Row(
         children: [
-          const SizedBox(width: 12),
-          Icon(Icons.search_rounded, color: AppTheme.textTertiary, size: 16),
-          const SizedBox(width: 6),
+          const SizedBox(width: 10),
+          Icon(Icons.search_rounded, color: AppTheme.textTertiary, size: 14),
+          const SizedBox(width: 5),
           Expanded(
             child: TextField(
               controller: _ctrl,
               focusNode: _focus,
               cursorColor: AppTheme.accentColor,
-              cursorWidth: 2,
+              cursorWidth: 1.5,
               cursorRadius: const Radius.circular(1),
               style: TextStyle(
-                fontSize: AppTheme.fontBody,
+                fontSize: 12,
                 height: 1.0,
                 color: AppTheme.textPrimary,
               ),
@@ -140,7 +137,7 @@ class _HomeSearchBarState extends State<HomeSearchBar> {
               decoration: InputDecoration(
                 hintText: widget.hintText,
                 hintStyle: TextStyle(
-                  fontSize: AppTheme.fontBody,
+                  fontSize: 12,
                   color: AppTheme.textTertiary,
                 ),
                 border: InputBorder.none,
@@ -149,22 +146,24 @@ class _HomeSearchBarState extends State<HomeSearchBar> {
               ),
             ),
           ),
-          // 有内容：× 清除；无内容：搜索箭头 → 打开完整搜索页
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => _submit(_ctrl.text),
-            child: Padding(
-              padding: const EdgeInsets.all(9),
-              child: Icon(
-                _ctrl.text.isEmpty
-                    ? Icons.arrow_forward_ios_rounded
-                    : Icons.cancel_rounded,
-                color: AppTheme.textTertiary,
-                size: 15,
+          // 有内容才显示 × 清除（无内容时右侧不放任何图标，对齐参考图）
+          if (_ctrl.text.isNotEmpty)
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                _ctrl.clear();
+                setState(() {});
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Icon(
+                  Icons.cancel_rounded,
+                  color: AppTheme.textTertiary,
+                  size: 13,
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 5),
+          const SizedBox(width: 4),
         ],
       ),
     );
