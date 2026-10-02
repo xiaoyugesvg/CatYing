@@ -22,6 +22,7 @@ class TmdbService extends GetxService {
   static const _keyPosterStyle = 'tmdb_poster_style';
   static const _keyApiProxy = 'tmdb_api_proxy';
   static const _keyImgProxy = 'tmdb_img_proxy';
+  static const _keyLibraryMode = 'tmdb_library_mode';
   static const _base = 'https://api.themoviedb.org/3';
   static const _img = 'https://image.tmdb.org/t/p';
 
@@ -58,6 +59,11 @@ class TmdbService extends GetxService {
   final showSimilar = true.obs;
 
   final isWorking = false.obs;
+
+  /// 媒体库模式开关（设置 → TMDB 管理）：
+  /// 开启后进入视频详情页时切换为媒体库界面（TMDB 数据驱动），
+  /// 播放器也切换为媒体库播放器。
+  final libraryMode = false.obs;
 
   /// 最近一次 enrich 失败原因（供媒体库视图引导卡显示精确原因；
   /// 未配置 Key / 搜索无结果 / 网络异常 分开提示）
@@ -97,12 +103,20 @@ class TmdbService extends GetxService {
     posterStyle.value = prefs.getString(_keyPosterStyle) ?? 'fixed';
     apiProxy.value = (prefs.getString(_keyApiProxy) ?? '').trim();
     imgProxy.value = (prefs.getString(_keyImgProxy) ?? '').trim();
+    libraryMode.value = prefs.getBool(_keyLibraryMode) ?? false;
   }
 
   Future<void> setEnabled(bool v) async {
     enabled.value = v;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyEnabled, v);
+  }
+
+  /// 媒体库模式：开启后详情页/播放器切换为媒体库界面
+  Future<void> setLibraryMode(bool v) async {
+    libraryMode.value = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyLibraryMode, v);
   }
 
   /// 海报展示样式：fixed / random / rotate
@@ -131,6 +145,59 @@ class TmdbService extends GetxService {
     apiKey.value = '';
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyApiKey);
+  }
+
+  /// 刮削数据测试（设置 → TMDB 管理）：
+  /// 用真实片名搜索 TMDB，返回是否拿到数据 + 候选列表，
+  /// 用于验证 Key/代理/网络整条链路可用。
+  Future<
+      ({
+        bool ok,
+        String message,
+        List<(String, Map<String, dynamic>)> candidates,
+      })> testScrape(String rawTitle) async {
+    if (!configured) {
+      return (ok: false, message: '未配置 API Key', candidates: const <(String, Map<String, dynamic>)>[]);
+    }
+    final title = cleanTitle(rawTitle);
+    if (title.isEmpty) {
+      return (ok: false, message: '片名为空，无法测试', candidates: const <(String, Map<String, dynamic>)>[]);
+    }
+    try {
+      final qp = <String, dynamic>{'query': title};
+      final out = <(String, Map<String, dynamic>)>[];
+      // 先试电影，无结果再试剧集
+      final res = await _dio.get(
+        '${effectiveApiBase}/search/movie',
+        queryParameters: qp,
+      );
+      final movieResults = (res.data['results'] as List?) ?? const [];
+      for (final r in movieResults.take(3)) {
+        out.add(('movie', Map<String, dynamic>.from(r as Map)));
+      }
+      if (out.isEmpty) {
+        final res2 = await _dio.get(
+          '${effectiveApiBase}/search/tv',
+          queryParameters: qp,
+        );
+        final tvResults = (res2.data['results'] as List?) ?? const [];
+        for (final r in tvResults.take(3)) {
+          out.add(('tv', Map<String, dynamic>.from(r as Map)));
+        }
+      }
+      if (out.isEmpty) {
+        return (ok: false, message: '搜索无结果（TMDB 可能未收录该片）', candidates: const <(String, Map<String, dynamic>)>[]);
+      }
+      return (
+        ok: true,
+        message: '✅ 获取成功，找到 ${out.length} 条候选',
+        candidates: out,
+      );
+    } on DioException catch (e) {
+      return (ok: false, message: '请求失败：${e.type.name}（$e）', candidates: const <(String, Map<String, dynamic>)>[]);
+    } catch (e) {
+      return (ok: false, message: '请求失败：$e', candidates: const <(String, Map<String, dynamic>)>[]);
+    }
   }
 
   /// 测试 API 代理是否可用（发一个最轻的请求）

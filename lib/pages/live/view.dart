@@ -1202,10 +1202,17 @@ class _LivePageState extends State<LivePage> {
                         width: 40,
                         height: 40,
                         alignment: Alignment.center,
+                        // 恒为黑底视频层：前景必须白色（浅色模式下
+                        // AppTheme.textPrimary 是深色 → 返回键隐形）。
+                        // 半透明黑圆底保证浅色/白色画面下也看得见。
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.22),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.14),
+                          ),
+                        ),
                         child: Icon(
-                          // ⚠️ 这一层恒为黑底视频（见本文件 :732 的 Colors.black），
-                          // 前景必须白色：浅色模式下 AppTheme.textPrimary 是深色，
-                          // 深色图标压黑视频 = 返回键看不见。
                           Icons.arrow_back_ios_new,
                           color: Colors.white,
                           size: 20,
@@ -1265,8 +1272,16 @@ class _LivePageState extends State<LivePage> {
                     width: 40,
                     height: 40,
                     alignment: Alignment.center,
+                    // 同 _VideoTopIcon：黑底视频层上必须用白色，
+                    // 半透明黑圆底保证浅色画面下可见。
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.22),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.14),
+                      ),
+                    ),
                     child: Icon(
-                      // 同 _VideoTopIcon：黑底视频层上必须用白色
                       Icons.arrow_back_ios_new,
                       color: Colors.white,
                       size: 20,
@@ -2064,6 +2079,14 @@ class _VideoTopIcon extends StatelessWidget {
           alignment: Alignment.center,
           // ⚠️ 这几个按钮画在黑底视频层上：不能用跟随主题的
           // AppTheme.textPrimary（浅色模式下是深色 → 图标隐形）。
+          // 同时必须加半透明黑圆底 —— 直播画面本身可能是浅色/白色，
+          // 纯白图标直接压浅色画面 = 看不见（用户实测深色模式看不清）。
+          // 黑圆底 + 白图标在任何画面上都清晰。
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.22),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+          ),
           child: Icon(icon, color: Colors.white, size: size),
         ),
       ),

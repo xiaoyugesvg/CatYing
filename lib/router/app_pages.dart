@@ -1,9 +1,11 @@
 import 'package:get/get.dart';
 import '../pages/detail/view.dart';
+import '../pages/media_library/media_library_detail_page.dart';
 import '../pages/search/view.dart';
 import '../pages/dlna/view.dart';
 import '../pages/live/view.dart';
 import '../pages/live/settings_view.dart';
+import '../services/tmdb_service.dart';
 
 class AppPages {
   static const String detail = '/detail';
@@ -15,7 +17,10 @@ class AppPages {
   static final pages = [
     GetPage(
       name: detail,
-      page: () => DetailPage(),
+      // 设置 → TMDB 管理 → 媒体库模式：开启后详情页整体切换为媒体库界面
+      page: () => TmdbService.instance.libraryMode.value
+          ? MediaLibraryDetailPage()
+          : DetailPage(),
       transition: Transition.fadeIn,
       transitionDuration: const Duration(milliseconds: 220),
     ),

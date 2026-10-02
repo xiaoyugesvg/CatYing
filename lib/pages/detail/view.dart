@@ -2085,13 +2085,13 @@ class _DetailPageState extends State<DetailPage> {
 
   // MARK: - 播放线路 / 清晰度 / 选集（统一在 _buildPlaybackCard 内渲染）
 
-  /// 播放线路 + 清晰度 + 选集播放 —— 合并成一张独立卡片（三段式底部）
+  /// 播放线路 + 选集播放 —— 合并成一张独立卡片（三段式底部）
+  /// （清晰度选择已按用户要求移除：HLS 解析仍自动进行，默认档位直接播放）
   Widget _buildPlaybackCard() {
-    // 有一条也显示，对齐参考图（播放源/画质/合集完整三段）
+    // 有一条也显示，对齐参考图（播放源/合集完整分段）
     final hasFlag = _controller.flags.isNotEmpty;
-    final hasQuality = _controller.qualityOptions.isNotEmpty;
     final hasEpisodes = _controller.currentEpisodes.isNotEmpty;
-    if (!hasFlag && !hasQuality && !hasEpisodes) {
+    if (!hasFlag && !hasEpisodes) {
       return const SizedBox.shrink();
     }
     return Padding(
@@ -2126,41 +2126,6 @@ class _DetailPageState extends State<DetailPage> {
                           isSelected: isSelected,
                           onTap: () {
                             _controller.selectFlag(flag);
-                            if (_controller.isPlaying.value) {
-                              _saveHistoryForCurrentEpisode();
-                            }
-                          },
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ),
-            ],
-            // 清晰度：三段式卡片之前把 hasQuality 算出来了却没渲染，
-            // 导致 qualityOptions（HLS master 解析出的多档码率）用户完全点不到。
-            if (hasQuality) ...[
-              const SizedBox(height: AppTheme.spacingMD),
-              Divider(height: 1, color: AppTheme.borderLight),
-              const SizedBox(height: AppTheme.spacingMD),
-              const SectionHeader(title: '清晰度', icon: Icons.auto_awesome),
-              const SizedBox(height: AppTheme.spacingSM),
-              Obx(
-                () => SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: _controller.qualityOptions.map((option) {
-                      final isSelected =
-                          _controller.selectedQualityId.value == option.id;
-                      return Padding(
-                        padding: const EdgeInsets.only(
-                          right: AppTheme.spacingSM,
-                        ),
-                        child: _PillChip(
-                          title: option.name,
-                          isSelected: isSelected,
-                          onTap: () {
-                            _controller.selectQuality(option);
                             if (_controller.isPlaying.value) {
                               _saveHistoryForCurrentEpisode();
                             }

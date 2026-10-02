@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:cached_network_image_ce/cached_network_image.dart';
 
 import '../../../common/theme.dart';
 import '../../../services/tmdb_service.dart';
@@ -38,6 +39,21 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
               title: '启用 TMDB',
               value: tmdb.enabled.value,
               onChanged: tmdb.setEnabled,
+            ),
+          ),
+        ),
+        const SizedBox(height: AppTheme.spacingLG),
+
+        // ---------- 媒体库模式 ----------
+        Obx(
+          () => AppCard(
+            dense: true,
+            child: unifiedSwitchRow(
+              icon: Icons.video_library_outlined,
+              title: '媒体库模式',
+              value: tmdb.libraryMode.value,
+              onChanged: tmdb.setLibraryMode,
+              subtitle: '开启后视频详情页与播放器切换为媒体库界面（TMDB 数据驱动）',
             ),
           ),
         ),
@@ -136,6 +152,11 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
                     ),
                   ],
                 ),
+              ),
+              // 刮削数据测试：真实片名搜索，验证整条刮削链路
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: _outlineButton('刮削数据测试', _runScrapeTest),
               ),
             ],
           ),
@@ -366,6 +387,190 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
     if (!mounted) return;
     setState(() => _testing = false);
     AppToast.message(r.message, isError: true);
+  }
+
+  /// 刮削数据测试：输入片名 → 真实搜索 TMDB → 展示候选与获取状态
+  Future<void> _runScrapeTest() async {
+    final input = TextEditingController(text: '西游记');
+    final title = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTheme.glassRadius),
+        ),
+        title: Text(
+          '刮削数据测试',
+          style: TextStyle(color: AppTheme.textPrimary),
+        ),
+        content: TextField(
+          controller: input,
+          autofocus: true,
+          style: TextStyle(color: AppTheme.textPrimary),
+          decoration: InputDecoration(
+            hintText: '输入片名，例如：西游记',
+            hintStyle: TextStyle(
+              color: AppTheme.textTertiary,
+              fontSize: AppTheme.fontFootnote,
+            ),
+            filled: true,
+            fillColor: AppTheme.backgroundTertiary,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(AppTheme.glassRadiusSmall),
+              borderSide: BorderSide.none,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              '取消',
+              style: TextStyle(color: AppTheme.textTertiary),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, input.text),
+            child: Text(
+              '开始测试',
+              style: TextStyle(color: AppTheme.accentColor),
+            ),
+          ),
+        ],
+      ),
+    );
+    final kw = title?.trim() ?? '';
+    if (kw.isEmpty || !mounted) return;
+    setState(() => _testing = true);
+    final r = await tmdb.testScrape(kw);
+    if (!mounted) return;
+    setState(() => _testing = false);
+    _showScrapeResult(kw, r);
+  }
+
+  void _showScrapeResult(
+    String kw,
+    ({
+      bool ok,
+      String message,
+      List<(String, Map<String, dynamic>)> candidates,
+    }) r,
+  ) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTheme.glassRadius),
+        ),
+        title: Text('刮削结果', style: TextStyle(color: AppTheme.textPrimary)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                r.message,
+                style: TextStyle(
+                  color: r.ok ? Colors.greenAccent : Colors.redAccent,
+                  fontSize: AppTheme.fontSubhead,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (r.candidates.isNotEmpty)
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: r.candidates.length,
+                    separatorBuilder: (_, __) =>
+                        Divider(color: AppTheme.borderLight, height: 1),
+                    itemBuilder: (_, i) {
+                      final (type, item) = r.candidates[i];
+                      final name =
+                          (item['title'] ?? item['name'] ?? '').toString();
+                      final date = (item['release_date'] ??
+                              item['first_air_date'] ??
+                              '')
+                          .toString();
+                      final year = date.length >= 4 ? date.substring(0, 4) : '';
+                      final vote = (item['vote_average'] as num?)?.toDouble() ?? 0;
+                      final poster = (item['poster_path'] ?? '').toString();
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: poster.isNotEmpty
+                            ? ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: CachedNetworkImage(
+                                  imageUrl:
+                                      '${tmdb.effectiveImgBase}/w92$poster',
+                                  width: 46,
+                                  height: 64,
+                                  fit: BoxFit.cover,
+                                  placeholder: (_, __) => Container(
+                                    width: 46,
+                                    height: 64,
+                                    color: AppTheme.backgroundTertiary,
+                                  ),
+                                  errorWidget: (_, __, ___) => Container(
+                                    width: 46,
+                                    height: 64,
+                                    color: AppTheme.backgroundTertiary,
+                                    child: Icon(
+                                      Icons.broken_image_outlined,
+                                      color: AppTheme.textTertiary,
+                                      size: 18,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : Container(
+                                width: 46,
+                                height: 64,
+                                color: AppTheme.backgroundTertiary,
+                                child: Icon(
+                                  Icons.movie_outlined,
+                                  color: AppTheme.textTertiary,
+                                  size: 20,
+                                ),
+                              ),
+                        title: Text(
+                          name,
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: AppTheme.fontSubhead,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          '${type == 'movie' ? '电影' : '剧集'}'
+                          '${year.isNotEmpty ? ' · $year' : ''}'
+                          '${vote > 0 ? ' · ${vote.toStringAsFixed(1)}★' : ''}',
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: AppTheme.fontFootnote,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              '完成',
+              style: TextStyle(color: AppTheme.accentColor),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _confirmDisconnect() async {

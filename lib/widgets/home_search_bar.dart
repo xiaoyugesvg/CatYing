@@ -191,9 +191,8 @@ class _HomeSearchBarState extends State<HomeSearchBar> {
               child: Center(
                 child: Icon(
                   Icons.search_rounded,
-                  color: isDark
-                      ? AppTheme.textPrimary
-                      : Colors.black87,
+                  // 明暗自适应：浅色=宣纸上的墨字、深色=墨夜上的亮字
+                  color: AppTheme.textPrimary,
                   size: 16,
                 ),
               ),
