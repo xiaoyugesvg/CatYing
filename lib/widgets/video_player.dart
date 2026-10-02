@@ -87,6 +87,9 @@ class VideoPlayerWidget extends StatefulWidget {
   /// 顶部按钮栏距顶部的额外间距（默认 8，详情页可传大一点让按钮往下挪）
   final double topBarTopPadding;
 
+  /// 底部工具栏距底部的间距（默认 0 贴底；媒体库播放器传大一点让整栏往上挪）
+  final double bottomBarBottomPadding;
+
   /// 播放设置弹窗的最大高度（父级传入播放器所在区域高度），见构造函数注释
   final double? sheetMaxHeight;
 
@@ -128,6 +131,7 @@ class VideoPlayerWidget extends StatefulWidget {
     this.skipIntroSeconds = 0,
     this.skipOutroSeconds = 0,
     this.topBarTopPadding = 8.0,
+    this.bottomBarBottomPadding = 0.0,
 
     /// 播放设置弹窗的最大高度（由父级传入播放器所在区域的高度）。
     ///
@@ -1355,7 +1359,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
   }
 
-  /// 进入短剧模式：锁竖屏 + immersive 全屏。
+  /// 进入短剧模式：锁竖屏 + immersive 全屏（与直播播放器同款轻量实现：
+  /// SystemUiController 沉浸 + 方向锁，不走系统全屏转场，视频不停）。
   /// 画面按当前画幅比例居中（横视频上下黑边），类似媒体库播放器竖屏。
   Future<void> _enterDramaMode() async {
     AppLog.instance.log('=== _enterDramaMode: start ===');
@@ -1365,24 +1370,31 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
     // 与抖音模式互斥
     _douyinMode = false;
-    if (Platform.isIOS) {
-      await SystemUiController.lockOrientations('videoDrama', const [
-        DeviceOrientation.portraitUp,
-      ]);
+    if (mounted) {
+      setState(() {
+        _dramaMode = true;
+        _isImmersive = true;
+        _isNativeFullscreen = true;
+        _persisted.isImmersive = true;
+        _persisted.isNativeFullscreen = true;
+      });
+    } else {
+      _dramaMode = true;
+      _isImmersive = true;
+      _isNativeFullscreen = true;
+      _persisted.isImmersive = true;
+      _persisted.isNativeFullscreen = true;
     }
-    _dramaMode = true;
-    _isImmersive = true;
-    _isNativeFullscreen = true;
-    _persisted.isImmersive = true;
-    _persisted.isNativeFullscreen = true;
     widget.onFullScreenChanged?.call(true);
-    try {
-      await WindowFullScreen.instance.enter();
-      AppLog.instance.log('=== _enterDramaMode: WindowFullScreen enter OK ===');
-    } catch (e) {
-      AppLog.instance.log('=== _enterDramaMode: enter failed: $e ===');
-    }
-    if (mounted) _onWindowFullScreenChanged();
+    // 直播同款：SystemUiController 沉浸 + 锁竖屏
+    await SystemUiController.enter(
+      'videoDrama',
+      mode: SystemUiMode.immersiveSticky,
+      orientations: Platform.isIOS
+          ? const [DeviceOrientation.portraitUp]
+          : null,
+      overlayStyle: SystemUiOverlayStyle.light,
+    );
     try {
       if (!_player.state.playing) {
         await AudioFocus.request('video');
@@ -1396,16 +1408,34 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   Future<void> _exitDramaMode() async {
     AppLog.instance.log('=== _exitDramaMode: start ===');
     // 先**同步**清掉短剧模式并刷新按钮/布局：
-    // iOS 上 unlockOrientations（SystemChrome.setPreferredOrientations）
-    // 是异步的，await 它会让视觉退出被拖住 —— 表现就是"点了闪一下
-    // 但模式不退"。先 setState 立即退出模式，再异步解锁方向。
-    if (mounted) setState(() => _dramaMode = false);
-    _dramaMode = false;
-    if (Platform.isIOS) {
-      // 先解锁短剧自己的方向锁，再走通用退出（内部会还原进入前的方向）
-      await SystemUiController.unlockOrientations('videoDrama');
+    // 系统栏还原/方向解锁是异步的，await 它会让视觉退出被拖住
+    // —— 表现就是"点了闪一下但模式不退"。先 setState 立即退出模式。
+    if (mounted) {
+      setState(() {
+        _dramaMode = false;
+        _isImmersive = false;
+        _isNativeFullscreen = false;
+        _persisted.isImmersive = false;
+        _persisted.isNativeFullscreen = false;
+      });
+    } else {
+      _dramaMode = false;
+      _isImmersive = false;
+      _isNativeFullscreen = false;
+      _persisted.isImmersive = false;
+      _persisted.isNativeFullscreen = false;
     }
-    await _exitFullScreen();
+    widget.onFullScreenChanged?.call(false);
+    // 直播同款：SystemUiController.exit 还原进入前方向/系统栏
+    await SystemUiController.exit('videoDrama');
+    try {
+      if (!_player.state.playing) {
+        await AudioFocus.request('video');
+        await _player.play();
+      }
+    } catch (e) {
+      AppLog.instance.log('[video_player] swallowed: $e');
+    }
   }
 
   /// 抖音模式切换（点「抖」进入/退出）
@@ -1421,7 +1451,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
   }
 
-  /// 进入抖音模式：锁竖屏 + immersive 全屏。
+  /// 进入抖音模式：锁竖屏 + immersive 全屏（与直播播放器同款轻量实现）。
   /// 画面按当前画幅比例居中（横视频上下黑边），与短剧模式互斥。
   /// 区别：抖音模式右侧有竖排切换胶囊（↟ 上一集/⏩/↡ 下一集），
   /// 短剧模式只有中间滑动切集。
@@ -1431,25 +1461,32 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (WindowFullScreen.instance.isActive || _isImmersive) {
       await _exitFullScreen();
     }
-    if (Platform.isIOS) {
-      await SystemUiController.lockOrientations('videoDouyin', const [
-        DeviceOrientation.portraitUp,
-      ]);
-    }
     _dramaMode = false;
-    _douyinMode = true;
-    _isImmersive = true;
-    _isNativeFullscreen = true;
-    _persisted.isImmersive = true;
-    _persisted.isNativeFullscreen = true;
-    widget.onFullScreenChanged?.call(true);
-    try {
-      await WindowFullScreen.instance.enter();
-      AppLog.instance.log('=== _enterDouyinMode: WindowFullScreen enter OK ===');
-    } catch (e) {
-      AppLog.instance.log('=== _enterDouyinMode: enter failed: $e ===');
+    if (mounted) {
+      setState(() {
+        _douyinMode = true;
+        _isImmersive = true;
+        _isNativeFullscreen = true;
+        _persisted.isImmersive = true;
+        _persisted.isNativeFullscreen = true;
+      });
+    } else {
+      _douyinMode = true;
+      _isImmersive = true;
+      _isNativeFullscreen = true;
+      _persisted.isImmersive = true;
+      _persisted.isNativeFullscreen = true;
     }
-    if (mounted) _onWindowFullScreenChanged();
+    widget.onFullScreenChanged?.call(true);
+    // 直播同款：SystemUiController 沉浸 + 锁竖屏
+    await SystemUiController.enter(
+      'videoDouyin',
+      mode: SystemUiMode.immersiveSticky,
+      orientations: Platform.isIOS
+          ? const [DeviceOrientation.portraitUp]
+          : null,
+      overlayStyle: SystemUiOverlayStyle.light,
+    );
     try {
       if (!_player.state.playing) {
         await AudioFocus.request('video');
@@ -1462,14 +1499,33 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   Future<void> _exitDouyinMode() async {
     AppLog.instance.log('=== _exitDouyinMode: start ===');
-    // 同 _exitDramaMode：先同步清模式刷新，再异步解锁方向/退全屏
-    if (mounted) setState(() => _douyinMode = false);
-    _douyinMode = false;
-    if (Platform.isIOS) {
-      // 先解锁抖音自己的方向锁，再走通用退出
-      await SystemUiController.unlockOrientations('videoDouyin');
+    // 同 _exitDramaMode：先同步清模式刷新，再异步还原系统栏/方向
+    if (mounted) {
+      setState(() {
+        _douyinMode = false;
+        _isImmersive = false;
+        _isNativeFullscreen = false;
+        _persisted.isImmersive = false;
+        _persisted.isNativeFullscreen = false;
+      });
+    } else {
+      _douyinMode = false;
+      _isImmersive = false;
+      _isNativeFullscreen = false;
+      _persisted.isImmersive = false;
+      _persisted.isNativeFullscreen = false;
     }
-    await _exitFullScreen();
+    widget.onFullScreenChanged?.call(false);
+    // 直播同款：SystemUiController.exit 还原进入前方向/系统栏
+    await SystemUiController.exit('videoDouyin');
+    try {
+      if (!_player.state.playing) {
+        await AudioFocus.request('video');
+        await _player.play();
+      }
+    } catch (e) {
+      AppLog.instance.log('[video_player] swallowed: $e');
+    }
   }
 
   Future<void> _onUserExitFullscreen() async {
@@ -3917,11 +3973,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         ),
       ),
       child: Padding(
-        // 按你的要求把底部功能栏**整体下移**：
-        // 原来还吃了安全区内边距（mediaPadding.bottom），但视频区本身并不
-        // 贴到屏幕物理底边，这段内边距纯属多余 → 去掉后整栏往下走。
+        // 底栏默认贴底（bottom 0，全屏时自然对齐屏幕物理底边）；
+        // 媒体库播放器可传 bottomBarBottomPadding 让整栏往上挪一点。
         padding: EdgeInsets.only(
-          bottom: 0,
+          bottom: widget.bottomBarBottomPadding,
           left: mediaPadding.left,
           right: mediaPadding.right,
         ),

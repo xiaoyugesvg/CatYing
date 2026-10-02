@@ -933,31 +933,10 @@ class _LivePageState extends State<LivePage> {
               initialData: p.state.duration,
               builder: (context, dSnap) {
                 final dur = dSnap.data ?? Duration.zero;
-                // 纯 HLS 直播流 duration ≤0（LIVE 无时长）→ 显示「● 直播」，
-                // 不给进度条（直播不可 seek，画假条是误导）。
+                // 纯 HLS 直播流 duration ≤0（LIVE 无时长）→ 不给进度条
+                // （直播不可 seek，画假条是误导）；去掉「● 直播」红点标识。
                 if (dur <= Duration.zero) {
-                  return Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        width: 7,
-                        height: 7,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFFF5252),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      const Text(
-                        '直播',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  );
+                  return const SizedBox.shrink();
                 }
                 // 其余（mp4 直链 / 点播类 m3u8 / DVR 回看等**有时长的流**）
                 // → 保留真实进度条，可拖动 seek（用户拍板：进度条功能保留）
@@ -1219,36 +1198,6 @@ class _LivePageState extends State<LivePage> {
                         ),
                       ),
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      // 用户要求：去掉 LIVE 角标的胶囊背景（黑/灰底都不要），
-                      // 完全透明，只留 LIVE 文字 + 红点悬浮在画面上。
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'LIVE',
-                            style: TextStyle(
-                              // 无背景盒后文字直接压视频，加黑色阴影保证
-                              // 浅色画面下也看得清
-                              color: Colors.white,
-                              fontSize: AppTheme.fontCaption,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.5,
-                              shadows: const [
-                                Shadow(color: Colors.black, blurRadius: 4),
-                                Shadow(color: Colors.black, blurRadius: 1),
-                              ],
-                            ),
-                          ),
-                          SizedBox(width: 5),
-                          _LiveDot(size: 7),
-                        ],
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -1344,10 +1293,21 @@ class _LivePageState extends State<LivePage> {
                         width: 38,
                         height: 38,
                         alignment: Alignment.center,
+                        // 与右上功能钮同款背景：半透明黑圆底 + 细白描边，
+                        // 亮/暗画面下都清晰（不再裸文字压视频）
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.22),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.14),
+                          ),
+                        ),
                         child: Text(
                           '短',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: _dramaMode
+                                ? AppTheme.accentColor
+                                : Colors.white,
                             fontSize: AppTheme.fontHeadline,
                             fontWeight: FontWeight.w600,
                           ),
@@ -1366,10 +1326,20 @@ class _LivePageState extends State<LivePage> {
                         width: 38,
                         height: 38,
                         alignment: Alignment.center,
+                        // 与「短」同款背景
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.22),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.14),
+                          ),
+                        ),
                         child: Text(
                           '抖',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: _douyinMode
+                                ? AppTheme.accentColor
+                                : Colors.white,
                             fontSize: AppTheme.fontHeadline,
                             fontWeight: FontWeight.w600,
                           ),

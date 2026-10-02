@@ -158,6 +158,9 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
           canPlayNext: _canNext,
           canPlayPrevious: _canPrev,
           showAudioModeButton: true,
+          // 媒体库播放器：顶栏往下挪（避开状态栏）、底栏往上挪一点
+          topBarTopPadding: 28,
+          bottomBarBottomPadding: 16,
           onPlayNext: () => _switchTo(_currentIndex + 1),
           onPlayPrevious: () => _switchTo(_currentIndex - 1),
           onSelectEpisode: (index) => _switchTo(index),

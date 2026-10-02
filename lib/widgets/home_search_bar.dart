@@ -106,7 +106,6 @@ class _HomeSearchBarState extends State<HomeSearchBar> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     // 展开后胶囊长度：参考图"搜索漫画"那条的长度（约屏宽 36%，
     // 不撑满整行 —— 用户明确要求"长度只需要这个这么长"）
     final expandedWidth = MediaQuery.of(context).size.width * 0.36;
@@ -117,8 +116,9 @@ class _HomeSearchBarState extends State<HomeSearchBar> {
       width: _expanded ? expandedWidth : 32,
       height: 30,
       decoration: BoxDecoration(
-        // 颜色走 AppTheme 调色板，切外观/配色自动跟随
-        color: isDark ? AppTheme.palette.cardDark : AppTheme.palette.cardLight,
+        // 透明底 + 细边：跟随页面背景（深浅模式自动切换），
+        // 不再有一块明显灰底（用户要求搜索框灰色透明）
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(15),
         // 干净：细边代替阴影（参考图是无阴影的白胶囊/白圆钮）
         border: Border.all(color: AppTheme.borderLight, width: 0.5),

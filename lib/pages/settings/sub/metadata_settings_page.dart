@@ -499,6 +499,8 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
                       final poster = (item['poster_path'] ?? '').toString();
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
+                        // 点击候选 → 跑完整详情刮削（与媒体库详情页同一链路）
+                        onTap: () => _runDetailTest(type, item),
                         leading: poster.isNotEmpty
                             ? ClipRRect(
                                 borderRadius: BorderRadius.circular(6),
@@ -566,6 +568,130 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
             child: Text(
               '完成',
               style: TextStyle(color: AppTheme.accentColor),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 点击候选 → 跑完整详情刮削（与媒体库详情页同一 enrich 链路）
+  Future<void> _runDetailTest(String type, Map<String, dynamic> item) async {
+    if (!mounted) return;
+    Navigator.pop(context); // 关闭候选列表框
+    setState(() => _testing = true);
+    final r = await tmdb.testScrapeDetail(type, item);
+    if (!mounted) return;
+    setState(() => _testing = false);
+    _showDetailResult(r.summary, r.ok, r.message);
+  }
+
+  void _showDetailResult(
+    Map<String, dynamic> s,
+    bool ok,
+    String message,
+  ) {
+    final rating = (s['rating'] as num?)?.toDouble() ?? 0;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTheme.glassRadius),
+        ),
+        title: Text('详情刮削验证', style: TextStyle(color: AppTheme.textPrimary)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  message,
+                  style: TextStyle(
+                    color: ok ? Colors.greenAccent : Colors.redAccent,
+                    fontSize: AppTheme.fontSubhead,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _kv('标题', s['title']),
+                _kv('类型', s['typeName']),
+                _kv('年份', s['year']),
+                _kv('评分', rating > 0 ? '${rating.toStringAsFixed(1)}★' : ''),
+                _kv('状态', s['status']),
+                _kv('导演', s['director']),
+                _kv('演职员', '${s['castCount']} 位'),
+                _kv('类似作品', '${s['similarCount']} 部'),
+                _kv('剧集剧照', '${s['stillsCount']} 张'),
+                _kv('总集数', '${s['episodeCount']}'),
+                _kv('背景图', s['hasBackdrop'] == true ? '✅ 有' : '❌ 无'),
+                _kv('海报', s['hasPoster'] == true ? '✅ 有' : '❌ 无'),
+                if ('${s['overview'] ?? ''}'.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '简介',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${s['overview']}',
+                    maxLines: 6,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: AppTheme.fontFootnote,
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('完成', style: TextStyle(color: AppTheme.accentColor)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 键值行：空值自动隐藏
+  Widget _kv(String k, dynamic v) {
+    final s = '$v';
+    if (s.isEmpty || s == 'null' || s == '0') return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 62,
+            child: Text(
+              k,
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontFootnote,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              s,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: AppTheme.fontFootnote,
+              ),
             ),
           ),
         ],

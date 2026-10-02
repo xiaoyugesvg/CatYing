@@ -2,6 +2,8 @@ import 'movie.dart';
 
 /// TMDB 演职人员条目（刮削增强：带头像与角色名）
 class VodCastMember {
+  /// TMDB person id（相关作品推荐用）
+  final int id;
   /// 演员名
   final String name;
   /// 饰演角色（可为空）
@@ -12,6 +14,7 @@ class VodCastMember {
   final int order;
 
   const VodCastMember({
+    this.id = 0,
     required this.name,
     this.character = '',
     this.profilePath = '',
@@ -28,6 +31,7 @@ class VodCastMember {
   }
 
   Map<String, dynamic> toJson() => {
+        'id': id,
         'name': name,
         'character': character,
         'profilePath': profilePath,
@@ -35,6 +39,7 @@ class VodCastMember {
       };
 
   factory VodCastMember.fromJson(Map<String, dynamic> json) => VodCastMember(
+        id: (json['id'] as num?)?.toInt() ?? 0,
         name: (json['name'] ?? '').toString(),
         character: (json['character'] ?? '').toString(),
         profilePath: (json['profilePath'] ?? '').toString(),

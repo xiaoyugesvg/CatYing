@@ -200,6 +200,60 @@ class TmdbService extends GetxService {
     }
   }
 
+  /// 详情刮削测试（设置 → TMDB 管理）：
+  /// 从「刮削数据测试」选中的候选，跑一遍与媒体库详情页**完全相同**的
+  /// enrich 链路（详情 + 演职员 + 类似作品 + 剧集剧照），返回刮削摘要，
+  /// 用于验证整条 TMDB 数据链路是否齐全。
+  Future<
+      ({
+        bool ok,
+        String message,
+        Map<String, dynamic> summary,
+      })> testScrapeDetail(String type, Map<String, dynamic> candidate) async {
+    if (!configured) {
+      return (ok: false, message: '未配置 API Key', summary: const <String, dynamic>{});
+    }
+    final name = (candidate['title'] ?? candidate['name'] ?? '').toString();
+    if (name.isEmpty) {
+      return (ok: false, message: '候选片名为空', summary: const <String, dynamic>{});
+    }
+    final date =
+        (candidate['release_date'] ?? candidate['first_air_date'] ?? '')
+            .toString();
+    final year = date.length >= 4 ? date.substring(0, 4) : '';
+    final info = VodInfo(
+      id: 'tmdb-test',
+      name: name,
+      year: year,
+      typeName: type == 'tv' ? '剧集' : '电影',
+    );
+    try {
+      final ok = await enrich(info, forceNetwork: true);
+      final summary = <String, dynamic>{
+        'title': info.tmdbName.isNotEmpty ? info.tmdbName : name,
+        'typeName': info.typeName,
+        'year': info.year,
+        'rating': info.rating,
+        'status': info.tmdbStatus,
+        'director': info.director,
+        'overview': info.des,
+        'castCount': info.castList.length,
+        'similarCount': info.similarList.length,
+        'stillsCount': info.episodeStills.length,
+        'episodeCount': info.episodeCount,
+        'hasBackdrop': info.backdrop.isNotEmpty,
+        'hasPoster': info.pic.isNotEmpty,
+      };
+      if (!ok) {
+        final err = lastEnrichError.value ?? '刮削失败';
+        return (ok: false, message: '详情刮削失败：$err', summary: summary);
+      }
+      return (ok: true, message: '✅ 详情刮削成功（完整链路）', summary: summary);
+    } catch (e) {
+      return (ok: false, message: '详情刮削异常：$e', summary: const <String, dynamic>{});
+    }
+  }
+
   /// 测试 API 代理是否可用（发一个最轻的请求）
   Future<({bool ok, String message})> testApiProxy() async {
     final base = effectiveApiBase;
@@ -325,6 +379,21 @@ class TmdbService extends GetxService {
       final detail = await _fetchDetail(type, id.toString());
       if (detail == null) return false;
       _apply(info, type, detail);
+      // 剧集：拉首季剧照+集标题（媒体库剧集缩略图条用）
+      if (type == 'tv') {
+        final season = _firstSeasonNumber(detail);
+        final stills = await _fetchSeasonStills(id.toString(), season);
+        if (stills.isNotEmpty) {
+          info.episodeStills = stills.map((k, v) => MapEntry(k, v.still));
+          info.episodeTitles = stills.map((k, v) => MapEntry(k, v.title));
+          detail['__episode_stills'] = {
+            for (final e in stills.entries) '${e.key}': e.value.still,
+          };
+          detail['__episode_titles'] = {
+            for (final e in stills.entries) '${e.key}': e.value.title,
+          };
+        }
+      }
       final ck = cacheKey(info.name, '');
       await CacheStore.instance.setJsonCache('tmdb:$ck', {
         ...detail,
@@ -366,6 +435,12 @@ class TmdbService extends GetxService {
               'tmdb:$ck',
               ttl: CacheTtl.tmdb,
             );
+      // 重新刮削：先清理旧的缓存条目，再拉取新数据回写
+      if (forceNetwork) {
+        try {
+          await CacheStore.instance.removeCacheItem('tmdb:$ck');
+        } catch (_) {}
+      }
       if (cached != null && cached.isNotEmpty) {
         final type = cached['__type'] as String? ?? 'movie';
         _apply(info, type, cached);
@@ -379,6 +454,28 @@ class TmdbService extends GetxService {
         if (epTitles is Map && epTitles.isNotEmpty) {
           info.episodeTitles = epTitles.map(
               (k, v) => MapEntry(int.tryParse('$k') ?? 0, '$v'));
+        }
+        // 旧缓存（本轮逐集剧照功能上线前刮削的）没有剧照 →
+        // 命中缓存时也补拉每一集剧照并回写缓存，保证自动进入就能看到
+        if (type == 'tv' && info.episodeStills.isEmpty) {
+          final tvId = (cached['id'] ?? '').toString();
+          if (tvId.isNotEmpty) {
+            final season = _firstSeasonNumber(cached);
+            final s2 = await _fetchSeasonStills(tvId, season);
+            if (s2.isNotEmpty) {
+              info.episodeStills = s2.map((k, v) => MapEntry(k, v.still));
+              info.episodeTitles = s2.map((k, v) => MapEntry(k, v.title));
+              cached['__episode_stills'] = {
+                for (final e in s2.entries) '${e.key}': e.value.still,
+              };
+              cached['__episode_titles'] = {
+                for (final e in s2.entries) '${e.key}': e.value.title,
+              };
+              try {
+                await CacheStore.instance.setJsonCache('tmdb:$ck', cached);
+              } catch (_) {}
+            }
+          }
         }
         AppLog.instance.log('[TmdbService] enrich 命中磁盘缓存 (type=$type)');
         return true;
@@ -536,6 +633,59 @@ class TmdbService extends GetxService {
     }
   }
 
+  /// 演员/导演相关作品（媒体库「相关推荐」区）：
+  /// /person/{id}/combined_credits —— 电影 + 剧集合并、去重、按人气排序，
+  /// 最多 20 条。失败静默返回空。
+  Future<List<Map<String, dynamic>>> fetchPersonWorks(int personId) async {
+    if (!configured || personId <= 0) return const [];
+    try {
+      final res = await _dio.get(
+        '${effectiveApiBase}/person/$personId/combined_credits',
+        queryParameters: {'language': 'zh-CN'},
+      );
+      final data = Map<String, dynamic>.from(res.data as Map);
+      final seen = <String>{};
+      final out = <Map<String, dynamic>>[];
+      void collect(Object? list) {
+        if (list is! List) return;
+        for (final e in list) {
+          if (e is! Map) continue;
+          final type = (e['media_type'] ?? '').toString();
+          if (type != 'movie' && type != 'tv') continue;
+          final id = (e['id'] as num?)?.toInt() ?? 0;
+          if (id <= 0) continue;
+          final key = '$type-$id';
+          if (!seen.add(key)) continue;
+          final title = (e['title'] ?? e['name'] ?? '').toString().trim();
+          if (title.isEmpty) continue;
+          final date =
+              (e['release_date'] ?? e['first_air_date'] ?? '').toString();
+          out.add({
+            'mediaType': type,
+            'id': id,
+            'title': title,
+            'year': date.length >= 4 ? date.substring(0, 4) : '',
+            'posterPath': (e['poster_path'] ?? '').toString(),
+            'rating': (e['vote_average'] as num?)?.toDouble() ?? 0,
+            'role': (e['character'] ?? e['job'] ?? '').toString(),
+            'popularity': (e['popularity'] as num?)?.toDouble() ?? 0,
+          });
+        }
+      }
+
+      collect(data['cast']);
+      collect(data['crew']);
+      out.sort((a, b) {
+        final pa = (a['popularity'] as num?)?.toDouble() ?? 0;
+        final pb = (b['popularity'] as num?)?.toDouble() ?? 0;
+        return pb.compareTo(pa);
+      });
+      return out.take(20).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
   /// 第一个有集的季号；seasons 缺数据时兜底 1
   int _firstSeasonNumber(Map<String, dynamic> detail) {
     final seasons = detail['seasons'];
@@ -554,6 +704,11 @@ class TmdbService extends GetxService {
   /// 拉取某一季的剧集剧照与标题（键 = 集号，值 = still URL + 集标题）。
   /// 供媒体库刮削视图「剧集缩略图条」使用（参考图：缩略图 + 集标题）；
   /// 失败静默，不影响刮削主流程。
+  /// 拉取指定季的「每一集」剧照 + 集标题。
+  ///
+  /// 关键点：TMDB 的 `/tv/{id}/season/{n}` 响应里**没有** still_path，
+  /// 每集剧照只能通过 `/tv/{id}/season/{n}/episode/{m}/images` 逐集获取，
+  /// 所以这里分两步：先拿集号/集名列表，再对每集并发拉 images（取第一张 still）。
   Future<Map<int, ({String still, String title})>> _fetchSeasonStills(
       String tvId, int season) async {
     final out = <int, ({String still, String title})>{};
@@ -564,21 +719,48 @@ class TmdbService extends GetxService {
       );
       final data = Map<String, dynamic>.from(res.data as Map);
       final eps = data['episodes'];
-      if (eps is List) {
-        for (final e in eps) {
-          if (e is! Map) continue;
-          final n = (e['episode_number'] as num?)?.toInt() ?? 0;
-          final still = (e['still_path'] ?? '').toString();
-          final title = (e['name'] ?? '').toString().trim();
-          if (n > 0) {
-            out[n] = (
-              still: still.isNotEmpty
-                  ? '${effectiveImgBase}/w300$still'
-                  : '',
-              title: title,
-            );
-          }
+      if (eps is! List || eps.isEmpty) return out;
+      // 集号 → 集名（缩略图条无图时仍有标题可用）
+      final epMeta = <int, String>{};
+      for (final e in eps) {
+        if (e is! Map) continue;
+        final n = (e['episode_number'] as num?)?.toInt() ?? 0;
+        if (n <= 0) continue;
+        final title = (e['name'] ?? '').toString().trim();
+        epMeta[n] = title;
+        out[n] = (still: '', title: title);
+      }
+      // 逐集并发拉剧照（默认 5 路并发，失败的单集保持无图）
+      final ns = epMeta.keys.toList()..sort();
+      const concurrency = 5;
+      var idx = 0;
+      while (idx < ns.length) {
+        final batch = <Future<void>>[];
+        for (var k = 0; k < concurrency && idx < ns.length; k++, idx++) {
+          final n = ns[idx];
+          batch.add(() async {
+            try {
+              final r = await _dio.get(
+                '${effectiveApiBase}/tv/$tvId/season/$season/episode/$n/images',
+              );
+              final d = Map<String, dynamic>.from(r.data as Map);
+              final stills = d['stills'];
+              if (stills is List && stills.isNotEmpty && stills.first is Map) {
+                final sp = (stills.first['file_path'] ?? '').toString();
+                if (sp.isNotEmpty) {
+                  out[n] = (
+                    still: '${effectiveImgBase}/w300$sp',
+                    title: epMeta[n] ?? '',
+                  );
+                }
+              }
+            } catch (e) {
+              AppLog.instance
+                  .log('[TmdbService] 第$n集剧照失败: $e');
+            }
+          }());
         }
+        await Future.wait(batch);
       }
     } catch (e) {
       AppLog.instance.log('[TmdbService] 拉取剧集剧照失败: $e');
@@ -803,6 +985,7 @@ class TmdbService extends GetxService {
       info.castList = cast.take(20).map((e) {
         final m = e is Map ? e : const <String, dynamic>{};
         return VodCastMember(
+          id: (m['id'] as num?)?.toInt() ?? 0,
           name: (m['name'] ?? '').toString(),
           character: (m['character'] ?? '').toString(),
           profilePath: (m['profile_path'] ?? '').toString(),
