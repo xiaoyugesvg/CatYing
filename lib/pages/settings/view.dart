@@ -49,12 +49,14 @@ class _SettingsPageState extends State<SettingsPage> {
       body: Container(
         color: Colors.transparent,
         child: SafeArea(
+          // 与其他页一致：底部延伸到底（不预留 Home Indicator/留白）
+          bottom: false,
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(
               AppTheme.spacingLG,
               AppTheme.spacingLG,
               AppTheme.spacingLG,
-              AppTheme.spacingLG + 96,
+              0,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

@@ -567,6 +567,11 @@ class TmdbService extends GetxService {
     if (poster != null && poster.isNotEmpty) {
       info.pic = '${effectiveImgBase}/w500$poster';
     }
+    // 背景大图（媒体库刮削视图的头图用；backdrop 是横版图）
+    final backdrop = d['backdrop_path']?.toString();
+    if (backdrop != null && backdrop.isNotEmpty) {
+      info.backdrop = '${effectiveImgBase}/w780$backdrop';
+    }
     // 收集候选海报：详情里若已带 images.posters 就直接用，
     // 保证「随机 / 轮播」有图可换且不必额外请求。
     _collectPosterPool(info.id, d, primary: poster);

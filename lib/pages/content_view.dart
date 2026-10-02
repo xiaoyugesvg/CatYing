@@ -615,7 +615,7 @@ class _ContentViewState extends State<ContentView>
     // 外层 Positioned 直接贴边即可，避免双重边距导致三条栏不一致。
     // JellyNavBar 内部已统一：
     //   · sideMargin = 12（左右边距）
-    //   · bottomMargin = 30（距底部距离）
+    //   · bottomMargin = 20（距底部距离，2026-10-02 由 30 下调，栏整体下移）
     //   · SafeArea 自动避让 Home Indicator
 
     return Scaffold(

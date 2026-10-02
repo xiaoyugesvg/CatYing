@@ -188,7 +188,7 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
                 icon: Icons.dashboard_customize_outlined,
                 title: '详情页样式',
                 value: PlayerPrefs.instance.scrapedDetailLayout.value
-                    ? '刮削版'
+                    ? '媒体库'
                     : '默认',
                 onTap: () async {
                   final cur = PlayerPrefs.instance.scrapedDetailLayout.value;

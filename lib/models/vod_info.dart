@@ -97,6 +97,9 @@ class VodInfo {
   String name;
   /// 海报地址
   String pic;
+
+  /// TMDB 背景大图（backdrop，横版头图用；未刮削为空）
+  String backdrop;
   /// 备注（更新状态等）
   String note;
   /// 年份
@@ -146,6 +149,7 @@ class VodInfo {
     required this.id,
     this.name = '',
     this.pic = '',
+    this.backdrop = '',
     this.note = '',
     this.year = '',
     this.area = '',

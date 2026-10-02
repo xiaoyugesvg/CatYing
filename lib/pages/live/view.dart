@@ -52,6 +52,18 @@ class _LivePageState extends State<LivePage> {
   /// 加载遮罩兜底计时器
   Timer? _switchTimer;
 
+  /// playing=true 后的**延迟确认**计时器：iOS AVPlayer 的 playing 常早于
+  /// 画面帧渲染，立即撤遮罩会露出黑屏（用户实测：黑屏无加载提示）。
+  /// 延迟 2.5s 后检查 position 是否真的前进，前进才撤「正在加载…」。
+  Timer? _playingConfirmTimer;
+
+  /// ── 控制栏自动隐藏（2026-10-02 补，对齐点播端）─────────────────
+  /// 点播播放器有 `_showControls + _hideTimer` 自动隐藏，直播页漏做，
+  /// 工具栏（LIVE 角标 / 右上功能钮 / 底部 iOS 控制条）永久常显。
+  /// 现在：显示后 3 秒无操作自动隐藏，点击视频画面切换显隐。
+  bool _controlsVisible = true;
+  Timer? _controlsTimer;
+
   /// 「出画面」监听（position 前进即视为开播）
   StreamSubscription? _switchReadySub;
   StreamSubscription<dynamic>? _errSub;
@@ -139,6 +151,8 @@ class _LivePageState extends State<LivePage> {
     _switchReadySub?.cancel();
     _playSub?.cancel();
     _switchTimer?.cancel();
+    _playingConfirmTimer?.cancel();
+    _controlsTimer?.cancel();
     _player?.dispose();
     _player = null;
     _avPlayer?.dispose();
@@ -160,6 +174,8 @@ class _LivePageState extends State<LivePage> {
     if (url.isEmpty) return;
     _everOpened = true;
     _playError = null;
+    // 切台时强制显示控制栏并重置自动隐藏计时
+    _showControls();
     // 切台时先亮起「加载中」遮罩：新流从 open 到出画面有几百毫秒到几秒，
     // 期间老画面还在，没有反馈会让人以为点了没反应。
     _switching = true;
@@ -215,6 +231,7 @@ class _LivePageState extends State<LivePage> {
     _switchReadySub?.cancel();
     _playSub?.cancel();
     _switchTimer?.cancel();
+    _playingConfirmTimer?.cancel();
     final useAv = Platform.isIOS && _avPlayer != null;
     // ⚠️ 不能用 `useAv ? _avPlayer!.stream : _player!.stream` 三元：
     // AppPlayerStreams（video_player）与 PlayerStream（media_kit）没有公共基类，
@@ -252,14 +269,65 @@ class _LivePageState extends State<LivePage> {
         setState(() => _switching = false);
       }
     });
-    // 兜底：进入 playing 状态也立刻撤掉「加载中」遮罩
+    // 兜底：进入 playing 状态**延迟确认**再撤「加载中」遮罩。
+    // ⚠️ 不能 playing=true 立即撤 —— iOS AVPlayer 的 playing 会早于画面帧
+    // 渲染（HLS 解析 + 平台视图 attach），立即撤就是"黑屏但无加载提示"
+    //（用户实测截图：画面全黑、无转圈、无报错）。
+    // 延迟 2.5s 后再查一次 position：真的前进才撤；没前进继续等
+    // position 流（或 20s 兜底），避免把黑屏当开播。
     _playSub = playings.listen((pl) {
       if (!mounted) return;
       if (_switching && pl) {
-        _switchTimer?.cancel();
-        setState(() => _switching = false);
+        _playingConfirmTimer?.cancel();
+        _playingConfirmTimer = Timer(const Duration(milliseconds: 2500), () {
+          _playingConfirmTimer = null;
+          if (!mounted || !_switching) return;
+          final pos = Platform.isIOS
+              ? (_avPlayer?.state.position ?? Duration.zero)
+              : (_player?.state.position ?? Duration.zero);
+          if (pos > Duration.zero) {
+            _switchTimer?.cancel();
+            setState(() => _switching = false);
+          }
+          // 未前进：保持「正在加载…」，由 positions 流或 20s 兜底接管
+        });
       }
     });
+  }
+
+  /// 控制栏显隐包装：隐藏时不可点击 + 200ms 淡出
+  Widget _controlsWrap(Widget child) {
+    return IgnorePointer(
+      ignoring: !_controlsVisible,
+      child: AnimatedOpacity(
+        opacity: _controlsVisible ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 200),
+        child: child,
+      ),
+    );
+  }
+
+  /// 显示控制栏并重置 3 秒自动隐藏计时（切台/交互后调用）
+  void _showControls() {
+    _controlsTimer?.cancel();
+    if (!_controlsVisible && mounted) {
+      setState(() => _controlsVisible = true);
+    }
+    _controlsTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted && _controlsVisible) {
+        setState(() => _controlsVisible = false);
+      }
+    });
+  }
+
+  /// 点击视频画面：切换控制栏显隐（显示时重置计时）
+  void _toggleControls() {
+    if (_controlsVisible) {
+      _controlsTimer?.cancel();
+      setState(() => _controlsVisible = false);
+    } else {
+      _showControls();
+    }
   }
 
   Future<void> _togglePip() async {
@@ -883,6 +951,30 @@ class _LivePageState extends State<LivePage> {
                     ],
                   );
                 }
+                // ⚠️ 直播流 duration 一般 ≤0；报出**很短的正时长**（<5 分钟）
+                // 说明是测试流/点播片段/解析异常 —— 不放假进度条（会显示
+                // 00:00/00:15 这种假回看条），改成明确提示。
+                //（用户实测 iPTV 占位频道：黑屏 + 15 秒假进度条。）
+                if (dur < const Duration(minutes: 5)) {
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.warning_amber_rounded,
+                        size: 14,
+                        color: Color(0xFFFFC107),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '疑似非直播源（时长仅 ${_fmtClock(dur)}）',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  );
+                }
                 return StreamBuilder<Duration>(
                   stream: p.stream.position,
                   initialData: p.state.position,
@@ -987,9 +1079,14 @@ class _LivePageState extends State<LivePage> {
 
     return Container(
       color: Colors.black,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
+      // 点击视频画面 = 切换控制栏显隐（对齐点播端交互）。
+      // 按钮/滑块等子级手势会在竞技场中赢过这里，点击工具栏本身不误触。
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _toggleControls,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
           // 视频层常驻（听剧时透明隐藏，不从树上摘掉，保证音轨不断、退出听剧能恢复画面）
           if (isIosAv || (_videoController != null && current != null))
             Offstage(
@@ -1096,7 +1193,7 @@ class _LivePageState extends State<LivePage> {
               left: 0,
               right: 0,
               bottom: 0,
-              child: _buildIosLiveControls(),
+              child: _controlsWrap(_buildIosLiveControls()),
             ),
           if (_audioMode) _buildAudioModeOverlay(c, current),
           // 普通模式左上：返回 + LIVE 角标
@@ -1104,58 +1201,60 @@ class _LivePageState extends State<LivePage> {
             Positioned(
               top: topInset,
               left: 4 + pad.left,
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: () {
-                      if (MainTabController.instance.selectedTab.value == 4) {
-                        MainTabController.instance.selectedTab.value = 0;
-                      } else {
-                        Get.back();
-                      }
-                    },
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      alignment: Alignment.center,
-                      child: Icon(
-                        // ⚠️ 这一层恒为黑底视频（见本文件 :732 的 Colors.black），
-                        // 前景必须白色：浅色模式下 AppTheme.textPrimary 是深色，
-                        // 深色图标压黑视频 = 返回键看不见。
-                        Icons.arrow_back_ios_new,
-                        color: Colors.white,
-                        size: 20,
+              child: _controlsWrap(
+                Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () {
+                        if (MainTabController.instance.selectedTab.value == 4) {
+                          MainTabController.instance.selectedTab.value = 0;
+                        } else {
+                          Get.back();
+                        }
+                      },
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        alignment: Alignment.center,
+                        child: Icon(
+                          // ⚠️ 这一层恒为黑底视频（见本文件 :732 的 Colors.black），
+                          // 前景必须白色：浅色模式下 AppTheme.textPrimary 是深色，
+                          // 深色图标压黑视频 = 返回键看不见。
+                          Icons.arrow_back_ios_new,
+                          color: Colors.white,
+                          size: 20,
+                        ),
                       ),
                     ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.5),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'LIVE',
-                          style: TextStyle(
-                            // 角标底是半透明黑（:865），文字必须白色
-                            color: Colors.white,
-                            fontSize: AppTheme.fontCaption,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.5,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'LIVE',
+                            style: TextStyle(
+                              // 角标底是半透明黑（:865），文字必须白色
+                              color: Colors.white,
+                              fontSize: AppTheme.fontCaption,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                            ),
                           ),
-                        ),
-                        SizedBox(width: 5),
-                        _LiveDot(size: 7),
-                      ],
+                          SizedBox(width: 5),
+                          _LiveDot(size: 7),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           // 全屏：左上返回（退出全屏并回首页/退路由）
@@ -1163,24 +1262,26 @@ class _LivePageState extends State<LivePage> {
             Positioned(
               top: 8 + topInset,
               left: 8 + pad.left,
-              child: GestureDetector(
-                onTap: () {
-                  _toggleFullscreen();
-                  if (MainTabController.instance.selectedTab.value == 4) {
-                    MainTabController.instance.selectedTab.value = 0;
-                  } else {
-                    Get.back();
-                  }
-                },
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  alignment: Alignment.center,
-                  child: Icon(
-                    // 同 _VideoTopIcon：黑底视频层上必须用白色
-                    Icons.arrow_back_ios_new,
-                    color: Colors.white,
-                    size: 20,
+              child: _controlsWrap(
+                GestureDetector(
+                  onTap: () {
+                    _toggleFullscreen();
+                    if (MainTabController.instance.selectedTab.value == 4) {
+                      MainTabController.instance.selectedTab.value = 0;
+                    } else {
+                      Get.back();
+                    }
+                  },
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    alignment: Alignment.center,
+                    child: Icon(
+                      // 同 _VideoTopIcon：黑底视频层上必须用白色
+                      Icons.arrow_back_ios_new,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                   ),
                 ),
               ),
@@ -1189,53 +1290,56 @@ class _LivePageState extends State<LivePage> {
           Positioned(
             top: topInset,
             right: 8 + pad.right,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (_fullscreen && current != null)
-                  Container(
-                    constraints: const BoxConstraints(maxWidth: 150),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                    child: Text(
-                      current.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: AppTheme.fontCaption,
-                        fontFamily: 'monospace',
+            child: _controlsWrap(
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_fullscreen && current != null)
+                    Container(
+                      constraints: const BoxConstraints(maxWidth: 150),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      child: Text(
+                        current.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: AppTheme.fontCaption,
+                          fontFamily: 'monospace',
+                        ),
                       ),
                     ),
+                  _VideoTopIcon(
+                    icon: _audioMode
+                        ? Icons.headphones
+                        : Icons.headphones_outlined,
+                    onTap: _toggleAudioMode,
+                    tooltip: '听剧模式',
                   ),
-                _VideoTopIcon(
-                  icon: _audioMode
-                      ? Icons.headphones
-                      : Icons.headphones_outlined,
-                  onTap: _toggleAudioMode,
-                  tooltip: '听剧模式',
-                ),
-                _VideoTopIcon(
-                  icon: Icons.picture_in_picture_alt,
-                  onTap: _togglePip,
-                  tooltip: '小窗播放',
-                ),
-                _VideoTopIcon(
-                  icon: Icons.cast,
-                  onTap: _toggleCast,
-                  tooltip: '投屏',
-                ),
-                _VideoTopIcon(
-                  icon: _fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                  onTap: _toggleFullscreen,
-                  tooltip: _fullscreen ? '退出全屏' : '全屏',
-                ),
-              ],
+                  _VideoTopIcon(
+                    icon: Icons.picture_in_picture_alt,
+                    onTap: _togglePip,
+                    tooltip: '小窗播放',
+                  ),
+                  _VideoTopIcon(
+                    icon: Icons.cast,
+                    onTap: _toggleCast,
+                    tooltip: '投屏',
+                  ),
+                  _VideoTopIcon(
+                    icon: _fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                    onTap: _toggleFullscreen,
+                    tooltip: _fullscreen ? '退出全屏' : '全屏',
+                  ),
+                ],
+              ),
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }

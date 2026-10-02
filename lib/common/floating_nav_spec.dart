@@ -36,9 +36,9 @@ class FloatingNavSpec {
 
   /// 距屏幕底部的距离（**不含** Home Indicator 安全区）
   ///
-  /// 30 是阅读/音乐的既有值。影视原来是 8 —— 底栏会紧贴
-  /// Home Indicator，看起来"陷进屏幕底部"，与另两条不一致。
-  static const double bottomMargin = 30.0;
+  /// 2026-10-02 用户要求"所有悬浮栏位置再统一往下移一点"：
+  /// 由 30 → 20（胶囊整体下移 10px，更贴底；三条栏一处生效）。
+  static const double bottomMargin = 20.0;
 
   /// 左右屏幕边距
   static const double sideMargin = 12.0;
