@@ -42,7 +42,10 @@ class _HomePageState extends State<HomePage> {
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
+          // 底部不避让 Home Indicator：内容延伸到小白条下方，
+          // 一屏显示更多卡片（用户要求）
           SafeArea(
+            bottom: false,
             child: Column(
               children: [
                 // 顶部：源切换 + 搜索

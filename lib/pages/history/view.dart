@@ -87,7 +87,9 @@ class _HistoryPageState extends State<HistoryPage> {
       backgroundColor: Colors.transparent,
       body: Container(
         color: Colors.transparent,
+        // 底部不避让 Home Indicator：内容延伸到小白条下方，显示更多
         child: SafeArea(
+          bottom: false,
           child: Column(
             children: [
               _buildToolbar(controller),

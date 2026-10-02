@@ -205,8 +205,9 @@ class _SearchPageState extends State<SearchPage> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               height: 34,
               decoration: BoxDecoration(
-                // 干净白胶囊（参考图样式），细边无阴影
-                color: AppTheme.palette.cardLight,
+                // 透明底 + 细边：跟随页面背景（深浅模式自动切换），
+                // 不再是一块固定浅色/灰色（用户要求"背景跟随系统、灰色透明"）
+                color: Colors.transparent,
                 borderRadius: BorderRadius.circular(17),
                 border: Border.all(color: AppTheme.borderLight, width: 0.5),
               ),
