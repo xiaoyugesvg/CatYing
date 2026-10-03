@@ -601,6 +601,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
     final backdrop = info.backdrop.isNotEmpty
         ? info.backdrop
         : (info.pic.isNotEmpty ? info.pic : '');
+    final screenH = MediaQuery.of(context).size.height;
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -613,18 +614,40 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
           )
         else
           ColoredBox(color: AppTheme.backgroundPrimary),
-        // 顶部轻遮罩：保证状态栏 / 操作栏可读
+        // 顶部轻遮罩：只保证状态栏 / 操作栏可读（标题已下移，上部保持干净）
         const DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [Colors.black54, Colors.transparent],
-              stops: [0.0, 0.35],
+              stops: [0.0, 0.18],
             ),
           ),
         ),
-        // 底部渐变遮罩：保证按钮 / 剧集 / 演职员 / 简介文字可读
+        // 中部渐变：标题区（约 26%~56% 屏高）背景压暗，
+        // 标题 / 元数据 / 按钮叠在变暗区上（参考图：头图下半部渐暗、标题在暗区）
+        Positioned(
+          left: 0,
+          right: 0,
+          top: screenH * 0.26,
+          height: screenH * 0.30,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.transparent,
+                  Colors.black.withValues(alpha: 0.75),
+                  Colors.black.withValues(alpha: 0.85),
+                ],
+                stops: const [0.0, 0.55, 1.0],
+              ),
+            ),
+          ),
+        ),
+        // 底部渐变遮罩：保证剧集 / 演职员 / 简介文字可读
         Positioned(
           left: 0,
           right: 0,
@@ -648,11 +671,11 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
   // ---------- 贴顶标题区（悬浮在壁纸上，打开即见） ----------
 
   Widget _buildHeroHeader(VodInfo info, String title) {
-    // 元数据行：年份 · 评分 · 英文名/别名 · 时长 · 集数 · 状态 · 上映日期
+    // 元数据行：年份 · 评分 · 时长 · 集数 · 状态 · 上映日期
+    //（英文名/原名不进这一行 —— 参考图里它独立成主标题下方的小字副标题）
     final metaParts = <String>[
       if (info.year.isNotEmpty) info.year,
       if (info.rating > 0) '${info.rating.toStringAsFixed(1)}★',
-      if (info.tmdbOriginalName.isNotEmpty) info.tmdbOriginalName,
       if (info.runtime > 0) '${info.runtime} 分钟',
       if (info.episodeCount > 0) '${info.episodeCount} ep',
       if (info.tmdbStatus.isNotEmpty) info.tmdbStatus,
@@ -660,11 +683,14 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
       if (info.releaseDate.isNotEmpty) info.releaseDate,
     ];
     final genreLine = info.typeName.replaceAll(' / ', ' |');
+    final screenH = MediaQuery.of(context).size.height;
     // 壁纸场景固定白色系文字（背景是深色海报，不随主题明暗）
     return SafeArea(
       bottom: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 70, 16, 8),
+        // 标题下移：顶部留出约 34% 屏高给壁纸（参考图：标题在头图下方居中偏左，
+        // 壁纸上半部保持干净露出园林画面）
+        padding: EdgeInsets.fromLTRB(16, screenH * 0.34, 16, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -672,22 +698,32 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
               title,
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 28,
+                fontSize: 32,
                 fontWeight: FontWeight.w700,
                 height: 1.15,
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
+            // 原名/别名独立一行小字（参考图：主标题下方始终有一行小字副标题）
+            if (info.tmdbOriginalName.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                info.tmdbOriginalName,
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
             if (metaParts.isNotEmpty) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               Text(
                 metaParts.join(' · '),
                 style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
             ],
             if (genreLine.isNotEmpty) ...[
-              const SizedBox(height: 4),
+              const SizedBox(height: 5),
               Text(
                 genreLine,
                 style: const TextStyle(color: Colors.white54, fontSize: 12),
@@ -786,7 +822,8 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
   Widget _buildMetaButtons(VodInfo info) {
     final hasSource = info.currentEpisodes.isNotEmpty;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+      // 按钮区：与参考图一致，紧贴标题元数据下方（约 52% 屏高）
+      padding: const EdgeInsets.fromLTRB(16, 30, 16, 6),
       child: Row(
         children: [
           Expanded(

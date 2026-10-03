@@ -20,12 +20,16 @@ class JellySegmentedToggle extends StatelessWidget {
   final List<JellySegmentData> segments;
   final double segmentWidth;
 
+  /// 整体高度（默认 50；顶栏嫌大的页面可传 40，内部指示器/圆角自动缩放）
+  final double height;
+
   const JellySegmentedToggle({
     super.key,
     required this.index,
     required this.onChanged,
     required this.segments,
     this.segmentWidth = 40,
+    this.height = 50,
   });
 
   @override
@@ -34,13 +38,16 @@ class JellySegmentedToggle extends StatelessWidget {
     final selectedColor = isDark ? Colors.white : JellyTheme.navSelectedFg;
     final unselectedColor = isDark ? Colors.white54 : JellyTheme.navUnselected;
     final roundedIndex = index.round();
+    // 内部内容高 = 整体高 - 上下 padding(5×2)；圆角随高度走（≈ 高/2.5）
+    final innerHeight = height - 10;
+    final radius = height / 2.5;
 
     return Container(
       width: segmentWidth * segments.length + 10,
-      height: 50,
+      height: height,
       decoration: BoxDecoration(
         color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(radius),
         boxShadow: [
           BoxShadow(
             color: isDark
@@ -55,7 +62,7 @@ class JellySegmentedToggle extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 5),
         child: SizedBox(
           width: segmentWidth * segments.length,
-          height: 40,
+          height: innerHeight,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -65,12 +72,12 @@ class JellySegmentedToggle extends StatelessWidget {
                 top: 0,
                 child: Container(
                   width: segmentWidth,
-                  height: 40,
+                  height: innerHeight,
                   decoration: BoxDecoration(
                     color: isDark
                         ? JellyTheme.navSelectedFg
                         : JellyTheme.navSelectedBg,
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(radius),
                   ),
                 ),
               ),
@@ -85,7 +92,7 @@ class JellySegmentedToggle extends StatelessWidget {
                     behavior: HitTestBehavior.opaque,
                     child: SizedBox(
                       width: segmentWidth,
-                      height: 40,
+                      height: innerHeight,
                       child: Center(
                         child: seg.emoji != null
                             ? Text(

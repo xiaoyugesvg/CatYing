@@ -19,7 +19,7 @@ import '../widgets/jelly_comic_card.dart';
 import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_ring_button.dart';
 import '../widgets/jelly_comic_list_tile.dart';
-import '../widgets/jelly_search_bar.dart';
+import '../widgets/jelly_expandable_search.dart';
 import '../widgets/guide_overlay.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/jelly_sliding_actions.dart';
@@ -553,11 +553,13 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   /// 漫画源切换小标签（横向滚动居中，样式同图书搜索页格式标签）
   /// 搜索框本体（不带外边距）—— 放在标题行的 Expanded 里。
   ///
-  /// 原来是用 `SizedBox(width: 屏宽*0.4)` 居中放的，改为 Expanded 撑满中间，
-  /// 这样右侧图标组不会被挤压，与图书/书源页的布局一致。
+  /// 原来是常驻长条 `JellySearchBar`，占掉一整行宽度。按用户要求改成
+  /// 与首页右上角同款的小胶囊：收起 = 44 圆钮（搜索图标），点击展开成胶囊，
+  /// 图标在左、提示「搜索漫画」。
   Widget _searchField() {
-    return JellySearchBar(
+    return JellyExpandableSearch(
       controller: _searchController,
+      hintText: '搜索漫画',
       onFocusChange: (f) => setState(() {
         if (f) {
           if (_searchController.text.isEmpty) {
@@ -1177,8 +1179,9 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             bottom: false,
             child: SizedBox(
               // 高度跟着布局走：原来是"标题行 + 居中的搜索行"两行(152)，
-              // 现在只有一行(56)。不改会留约 100px 空白。
-              height: widget.showBackButton ? 60 : 56,
+              // 现在只有一行。搜索换成了可展开胶囊（高 50），
+              // 行高 = headerTop(8) + 50 = 58。
+              height: widget.showBackButton ? 60 : 58,
               child: Stack(
                 children: [
                   // ── 标题行（一行放下：标题 / 搜索框 / 图标组）────────

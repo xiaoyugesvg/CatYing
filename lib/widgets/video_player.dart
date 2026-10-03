@@ -3943,16 +3943,26 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     const contentH = 38.0;
     final top = widget.topBarTopPadding;
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      // 顶栏渐变减淡（black87 → 55% 黑）：不再是一块明显的灰色长条，
+      // 更通透、与纯黑播放画面融为一体；可读性由按钮自身玻璃底保证
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Colors.black87, Colors.transparent],
+          colors: [
+            Colors.black.withValues(alpha: 0.55),
+            Colors.transparent,
+          ],
         ),
       ),
       child: Padding(
+        // 顶栏避让状态栏（对齐直播页的控制逻辑）：
+        // - 竖屏（pad.top>0，状态栏/刘海占安全区）：pad.top 下方再多留 10px，
+        //   顶栏不再紧贴状态栏底边（用户要求"往下移一点"）
+        // - 横屏全屏（pad.top=0，iOS 横屏状态栏不占 safe area 但实际占据
+        //   顶部约 24px）：统一下移 28px，顶栏图标不再和状态栏时间/电量挤同一行
         padding: EdgeInsets.only(
-          top: top + (pad.top > 0 ? 0 : 8),
+          top: top + (pad.top > 0 ? pad.top + 10 : 28),
           left: 4 + pad.left,
           right: 4 + pad.right,
           bottom: 8,
@@ -3965,11 +3975,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   Widget _gradientBottomContainer({required Widget child}) {
     final mediaPadding = MediaQuery.of(context).padding;
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      // 底栏渐变同样减淡（black87 → 55% 黑），和顶栏对称、贴近周边黑底
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Colors.transparent, Colors.black87],
+          colors: [
+            Colors.transparent,
+            Colors.black.withValues(alpha: 0.55),
+          ],
         ),
       ),
       child: Padding(
@@ -4211,7 +4225,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           // 左：快退 —— 以画面中心为对称轴（中心左侧约 27% 屏宽处）
           Positioned.fill(
             child: Align(
-              alignment: const Alignment(-0.55, 0),
+              alignment: const Alignment(-0.275, 0),
               child: _seekStepButton(forward: false),
             ),
           ),
@@ -4221,7 +4235,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             child: Align(
               alignment: _douyinMode
                   ? const Alignment(1, 0)
-                  : const Alignment(0.55, 0),
+                  : const Alignment(0.275, 0),
               child: _douyinMode
                   ? Column(
                       mainAxisSize: MainAxisSize.min,
@@ -4332,22 +4346,24 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     final ten = forward ? Icons.forward_10 : Icons.replay_10;
     return _iconButton(
       icon: step == 10 ? ten : base,
-      size: 22,
-      width: 38,
+      // 10S 按钮放大 2 倍（用户要求）：图标 22→44、按钮 38→76
+      size: 44,
+      width: 76,
+      height: 76,
       child: step == 10
           ? null
           : Stack(
               alignment: Alignment.center,
               children: [
-                Icon(base, color: Colors.white, size: 22),
+                Icon(base, color: Colors.white, size: 44),
                 Positioned(
-                  right: 3,
-                  bottom: 3,
+                  right: 6,
+                  bottom: 6,
                   child: Text(
                     '$step',
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 8,
+                      fontSize: 16,
                       fontWeight: FontWeight.w700,
                       height: 1,
                     ),

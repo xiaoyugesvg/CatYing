@@ -12,6 +12,7 @@ import '../services/favorites_service.dart';
 import '../services/view_mode.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/jelly_book_card.dart';
+import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_select_badge.dart';
 import '../services/settings_service.dart';
 import '../utils/list_pagination.dart';
@@ -25,7 +26,6 @@ import '../widgets/source_cover_image.dart';
 import 'book_detail_page.dart';
 import 'comic_detail_page.dart';
 import '../../common/theme.dart';
-import '../../widgets/app_icon_button.dart';
 import '../../widgets/app_page_header.dart';
 
 /// 收藏页面（顶部 Tab：漫画收藏 / 图书收藏）
@@ -128,29 +128,6 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   /// 通用圆形图标按钮（浅灰底 + 近黑图标）—— 与书架页同款。
   ///
-  /// 收藏页标题行右侧那个搜索按钮用它（截图里是浅灰圆 + 近黑放大镜，
-  /// 不是原来的"深色圆 + 白图标"）。
-  /// 顶栏圆形图标按钮。
-  ///
-  /// ⚠️ 实现已抽到 [AppIconButton]（B 档：图标按钮统一）——
-  /// 原来这个方法在 **4 个页面里各写了一份**，实现逐字雷同。
-  /// 这里留薄委托，调用点不动。
-  Widget _buildCircleIcon({
-    required bool isDark,
-    required IconData icon,
-    required String tooltip,
-    required VoidCallback onTap,
-    double size = 36,
-  }) {
-    return AppIconButton(
-      icon: icon,
-      tooltip: tooltip,
-      onTap: onTap,
-      isDark: isDark,
-      size: size,
-    );
-  }
-
   Widget _buildSearchButton({double size = 50}) {
     final iconSize = size <= 40 ? 20.0 : 22.0;
     return Material(
@@ -172,7 +149,12 @@ class _FavoritesPageState extends State<FavoritesPage>
     );
   }
 
-  void _openSearch() {
+  void _openSearch([String? initial]) {
+    // 顶栏胶囊提交时带入关键词，直接出结果
+    if (initial != null && initial.trim().isNotEmpty) {
+      _favSearchController.text = initial;
+      _favQuery = initial;
+    }
     setState(() => _searchVisible = true);
     _searchAnim.forward();
   }
@@ -205,8 +187,9 @@ class _FavoritesPageState extends State<FavoritesPage>
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final contentTabs = SettingsService().effectiveContentTabs();
-    // tab 总宽 = 屏幕一半：段宽*2 + 左右各5内边距 = 屏幕宽/2
-    final tabSegWidth = (MediaQuery.of(context).size.width * 0.5 - 10) / 2;
+    // 胶囊切换改小：原按"半屏宽均分"太占地方（用户嫌标题边图标太大），
+    // 固定段宽 40（两段共 90），配合 height 40 整体小一号
+    final tabSegWidth = 40.0;
     return PopScope(
       canPop: !_isSelecting,
       onPopInvokedWithResult: (didPop, _) {
@@ -236,10 +219,11 @@ class _FavoritesPageState extends State<FavoritesPage>
                   bottom: false,
                   child: SizedBox(
                     // 高度跟着布局走：原来是"标题行 + 控件行"两行(105)，
-                    // 现在只有一行(48)。不改的话标题下会多出约 50px 空白。
+                    // 现在只有一行。搜索换成了可展开胶囊（高 50），
+                    // 行高 = headerTop(8) + 50 = 58。
                     height: contentTabs.length < 2
                         ? 0.0
-                        : (widget.showBackButton ? 0.0 : 48.0),
+                        : (widget.showBackButton ? 0.0 : 58.0),
                     child: Stack(
                       children: [
                         // ── 标题行（按截图：收藏 [漫画|图书] ······ (搜索)）──
@@ -273,6 +257,8 @@ class _FavoritesPageState extends State<FavoritesPage>
                                           // 原来第二行控件组也是直接 animateTo
                                           onChanged: (i) =>
                                               _tabController.animateTo(i),
+                                          // 改小：高度 40、段宽 40
+                                          height: 40,
                                           segmentWidth: tabSegWidth,
                                           segments: contentTabs
                                               .map(
@@ -285,13 +271,19 @@ class _FavoritesPageState extends State<FavoritesPage>
                                               .toList(),
                                         ),
                                   ),
-                                const Spacer(),
-                                // 右侧只有 1 个搜索按钮（浅灰圆 + 近黑图标）
-                                _buildCircleIcon(
-                                  isDark: isDark,
-                                  icon: Icons.search_rounded,
-                                  tooltip: '搜索',
-                                  onTap: _openSearch,
+                                // 搜索：与首页右上角同款小胶囊（收起=圆钮，
+                                // 点击展开、图标在左、提示「搜索收藏」），
+                                // 提交直接进搜索浮层出结果
+                                Expanded(
+                                  child: Align(
+                                    alignment: Alignment.centerRight,
+                                    child: JellyExpandableSearch(
+                                      controller: _favSearchController,
+                                      hintText: '搜索收藏',
+                                      onSubmitted: (v) => _openSearch(v),
+                                      onChanged: (v) => setState(() {}),
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),

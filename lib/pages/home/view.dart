@@ -617,6 +617,9 @@ class _HomePageState extends State<HomePage> {
   ///   2. 选中值若不在当前列表里（换分类后的残留），「全部」的选中态要失效，
   ///      否则两个同时高亮；
   ///   3. 选项末尾留余量，最后一项不被裁掉半个字。
+  ///   4. 源 filters 配置自带「全部/默认」首项时，**不再重复渲染固定「全部」**
+  ///      （用户反馈：每个维度多了一列按钮，第二列点不动）——
+  ///      直接渲染源返回的选项列表即可，与分类页筛选弹层样式一致。
   Widget _filterRow(SortFilter f) {
     final selected = _controller.selectedFilters[f.key];
     final hasValidSelection =
@@ -650,17 +653,14 @@ class _HomePageState extends State<HomePage> {
             padding: const EdgeInsets.only(right: 12),
             child: Row(
               children: [
-                // 「全部」只在没有有效选中时高亮，避免双高亮
-                SelectableChip(
-                  title: '全部',
-                  isSelected: !hasValidSelection,
-                  onTap: () => _controller.selectFilter(f.key, ''),
-                ),
-                const SizedBox(width: AppTheme.spacingSM),
+                // 只渲染源返回的选项（首个通常是「全部」或「默认」），
+                // 不再追加固定「全部」——避免每个维度出现两列重复按钮
                 for (final v in f.values) ...[
                   SelectableChip(
                     title: v.n,
-                    isSelected: selected == v.v,
+                    // 空值项（「全部」）在无有效选中时高亮；其余按选中值高亮
+                    isSelected:
+                        v.v == '' ? !hasValidSelection : selected == v.v,
                     onTap: () => _controller.selectFilter(f.key, v.v),
                   ),
                   const SizedBox(width: AppTheme.spacingSM),
@@ -747,22 +747,19 @@ class _HomePageState extends State<HomePage> {
                                 spacing: 8,
                                 runSpacing: 8,
                                 children: [
-                                  SelectableChip(
-                                    title: '全部',
-                                    isSelected: _controller
-                                            .selectedFilters[f.key] ==
-                                        null,
-                                    onTap: () =>
-                                        _controller.selectFilter(f.key, ''),
-                                  ),
+                                  // 与行筛选一致：不再追加固定「全部」，
+                                  // 源 filters 自带「全部/默认」首项，避免重复一列
                                   for (final v in f.values)
                                     SelectableChip(
                                       title: v.n,
-                                      isSelected: _controller
-                                              .selectedFilters[f.key] ==
-                                          v.v,
-                                      onTap: () =>
-                                          _controller.selectFilter(f.key, v.v),
+                                      isSelected: v.v == ''
+                                          ? _controller
+                                                  .selectedFilters[f.key] ==
+                                              null
+                                          : _controller.selectedFilters[f.key] ==
+                                              v.v,
+                                      onTap: () => _controller
+                                          .selectFilter(f.key, v.v),
                                     ),
                                 ],
                               ),

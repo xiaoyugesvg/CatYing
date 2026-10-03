@@ -155,9 +155,10 @@ class _ShelfPageState extends State<ShelfPage> {
       child: Container(
         height: 36,
         decoration: BoxDecoration(
-          color: AppTheme.backgroundTertiary,
+          // 完全透明：无底色也无边框，整条和页面背景融为一体
+          //（用户要求"长方形灰色条"调成周边颜色一致）
+          color: Colors.transparent,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppTheme.glassBorder, width: 0.8),
         ),
         child: Row(
           children: [

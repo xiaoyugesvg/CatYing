@@ -26,6 +26,7 @@ import '../widgets/source_cover_image.dart';
 import '../widgets/guide_overlay.dart';
 import '../widgets/jelly_bookshelf_dialog.dart';
 import '../widgets/jelly_nav_bar.dart';
+import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/jelly_select_badge.dart';
@@ -287,8 +288,13 @@ class _BookshelfPageState extends State<BookshelfPage>
 
   // ========== 搜索浮层 ==========
 
-  void _openSearch() {
+  void _openSearch([String? initial]) {
     FocusScope.of(context).unfocus();
+    // 顶栏胶囊提交时带入关键词，直接出结果
+    if (initial != null && initial.trim().isNotEmpty) {
+      _searchController.text = initial;
+      _searchQuery = initial;
+    }
     _searchAnim.forward();
   }
 
@@ -1029,7 +1035,9 @@ class _BookshelfPageState extends State<BookshelfPage>
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final contentTabs = SettingsService().effectiveContentTabs();
-    final tabSegWidth = (MediaQuery.of(context).size.width * 0.5 - 10) / 2;
+    // 胶囊切换改小：原按"半屏宽均分"太占地方（用户嫌左上角图标太大），
+    // 固定段宽 40（两段共 90），配合 height 40 整体小一号
+    final tabSegWidth = 40.0;
     return PopScope(
       canPop: !_isSelecting,
       onPopInvokedWithResult: (didPop, _) {
@@ -1066,10 +1074,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                   // ⚠️ 高度常量要跟着布局走。
                   // 原来是"标题一行 + 胶囊一行"共两行，所以两 tab 时是 105。
                   // 已按截图重排成**一行**（标题 / 胶囊 / 排序 / 搜索 …… 闪电），
-                  // 高度要收到一行（36 的圆按钮 + 上下留白 ≈ 48）。
-                  //
-                  // 不跟着改的后果：标题行下面多出 ~50px 空白，
-                  // 分类栏被顶下去，看起来"标题和标签之间空了一大块"。
+                  // 搜索换成了可展开胶囊（高 50），行高 = headerTop(8) + 50 = 58。
                   SizedBox(
                     // ⚠️ 这里曾有一个高度 bug：
                     //   原式 = `contentTabs.length < 2 ? 0
@@ -1082,7 +1087,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                     //
                     // 只有**两个 tab 都没有**时这一行才真该消失
                     //（那种情况下标题行和胶囊都不渲染）。
-                    height: contentTabs.length < 2 ? 0.0 : 48.0,
+                    height: contentTabs.length < 2 ? 0.0 : 58.0,
                     child: Stack(
                       children: [
                         // ── 标题行（一行内全部左对齐，右侧只放闪电）──────
@@ -1118,6 +1123,8 @@ class _BookshelfPageState extends State<BookshelfPage>
                                                 _switchTab(tabs[i]);
                                               }
                                             },
+                                            // 改小：高度 40、段宽 40
+                                            height: 40,
                                             segmentWidth: tabSegWidth,
                                             segments: tabs
                                                 .map(
@@ -1144,13 +1151,18 @@ class _BookshelfPageState extends State<BookshelfPage>
                                   onLongPress: _showManageShelves,
                                 ),
                                 const SizedBox(width: 8),
-                                _buildCircleIcon(
-                                  isDark: isDark,
-                                  icon: Icons.search_rounded,
-                                  tooltip: '搜索',
-                                  onTap: _openSearch,
+                                // 搜索：与首页右上角同款小胶囊（收起=圆钮，
+                                // 点击展开、图标在左、提示「搜索书架」），
+                                // 提交直接进搜索浮层出结果
+                                Expanded(
+                                  child: JellyExpandableSearch(
+                                    controller: _searchController,
+                                    hintText: '搜索书架',
+                                    onSubmitted: (v) => _openSearch(v),
+                                    onChanged: (v) => setState(() {}),
+                                  ),
                                 ),
-                                const Spacer(),
+                                const SizedBox(width: 8),
                                 // 闪电：导入/导出（近黑实心圆）
                                 _buildBoltButton(),
                               ],

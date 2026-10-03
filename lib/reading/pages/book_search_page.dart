@@ -17,6 +17,7 @@ import '../services/settings_service.dart';
 import '../widgets/jelly_book_card.dart';
 import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_ring_button.dart';
+import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_pull_cord.dart';
 import '../widgets/guide_overlay.dart';
 import '../widgets/jelly_segmented_toggle.dart';
@@ -31,7 +32,6 @@ import 'favorites_page.dart';
 import 'zlibrary_auth_page.dart';
 import '../../common/theme.dart';
 import '../../widgets/app_icon_button.dart';
-import '../../widgets/app_expandable_search.dart';
 import '../../widgets/app_page_header.dart';
 
 /// 日志工具
@@ -1225,13 +1225,13 @@ class _BookSearchPageState extends State<BookSearchPage>
   /// 右上角头像（登录态显示用户图标，未登录显示登录图标）
   /// 搜索框（标题行内用 Expanded 撑开）
   ///
-  /// ── 改成「圆形图标 → 点击展开」──────────────────────────────
+  /// ── 圆形图标 → 点击展开的小胶囊 ──────────────────────────────
   /// 原来是**常驻长条** `JellySearchBar`，占掉一整行宽度。
   /// 用户给的参考图是：收起只留一个圆形搜索图标，点一下才伸长成输入框。
-  /// 实现在 [AppExpandableSearch]（影视首页原本有一份私有实现，
-  /// 现在抽成公共组件，两个模块共用）。
+  /// 统一用阅读自己的 [JellyExpandableSearch]（Jelly 配色，图标在左，
+  /// 提示「搜索图书」），与漫画/书架/收藏页同款交互。
   Widget _buildSearchBar(bool isDark) {
-    return AppExpandableSearch(
+    return JellyExpandableSearch(
       controller: _searchController,
       hintText: '搜索图书',
       onFocusChange: (f) => setState(() {

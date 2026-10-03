@@ -116,12 +116,14 @@ class _HomeSearchBarState extends State<HomeSearchBar> {
       width: _expanded ? expandedWidth : 32,
       height: 30,
       decoration: BoxDecoration(
-        // 透明底 + 细边：跟随页面背景（深浅模式自动切换），
-        // 不再有一块明显灰底（用户要求搜索框灰色透明）
+        // 透明底：跟随页面背景（深浅模式自动切换），不再有一块明显灰底
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(15),
-        // 干净：细边代替阴影（参考图是无阴影的白胶囊/白圆钮）
-        border: Border.all(color: AppTheme.borderLight, width: 0.5),
+        // 展开态无边框（整条融入背景，用户要求搜索框灰色长条透明）；
+        // 收起态（圆形按钮）保留细边以便看出是按钮
+        border: _expanded
+            ? Border.all(color: Colors.transparent, width: 0)
+            : Border.all(color: AppTheme.borderLight, width: 0.5),
       ),
       child: _expanded
           ? Row(

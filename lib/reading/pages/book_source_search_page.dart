@@ -5,6 +5,7 @@ import '../models/book_source.dart';
 import '../services/book_source_service.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/jelly_pull_cord.dart';
+import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_sliding_actions.dart';
 import 'book_source_detail_page.dart';
 import 'book_source_repo_page.dart';
@@ -80,8 +81,10 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       ));
   }
 
-  Future<void> _run() async {
-    final kw = _ctrl.text.trim();
+  Future<void> _run([String? kwArg]) async {
+    // 兼容两处调用：胶囊提交时传 value（提交后输入框会被清空收起），
+    // 初筛自动搜索时无参（从 _ctrl.text 读）
+    final kw = (kwArg ?? _ctrl.text).trim();
     if (kw.isEmpty) {
       _toast('请输入书名或作者');
       return;
@@ -246,35 +249,25 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
 
   /// 搜索框本体（不带外边距）—— 放在 AppBar 的 title 里，
   /// 由外层 Row 的 Expanded 负责宽度。
+  ///
+  /// 与漫画/图书/书架/收藏页统一成小胶囊：收起 = 44 圆钮，点击展开成胶囊，
+  /// 图标在左、提示「搜索书源图书」；搜索中右侧显示 spinner。
   Widget _searchField() {
-    return TextField(
-        controller: _ctrl,
-        textInputAction: TextInputAction.search,
-        onSubmitted: (_) => _run(),
-        style: TextStyle(fontSize: AppTheme.fontHeadline, color: _titleColor),
-        decoration: InputDecoration(
-          hintText: '搜索书源图书',
-          hintStyle: TextStyle(fontSize: AppTheme.fontHeadline, color: JellyTheme.textSecondary),
-          prefixIcon: Icon(Icons.search_rounded,
-              size: 20, color: JellyTheme.textSecondary),
-          suffixIcon: _searching
-              ? const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                )
-              : null,
-          filled: true,
-          fillColor: _isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
-          ),
-          contentPadding: const EdgeInsets.symmetric(vertical: 10),
-        ),
+    return JellyExpandableSearch(
+      controller: _ctrl,
+      hintText: '搜索书源图书',
+      onSubmitted: (value) => _run(value),
+      onChanged: (value) => setState(() {}),
+      trailing: _searching
+          ? const Padding(
+              padding: EdgeInsets.all(10),
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          : null,
     );
   }
 
