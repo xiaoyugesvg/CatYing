@@ -760,7 +760,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
 
   // ---------- 头图壁纸（竖版海报贴顶铺满宽，55% 屏高处按海报底部色渐变） ----------
 
-  /// 取图片底部平均色（海报底边颜色，做渐变用）。
+  /// 取图片主色调（下半 40% 区域平均色 —— 海报主体色，做渐变用）。
   /// 失败返回黑色兜底；结果缓存到 [_posterEdgeColor]，同一海报只取一次。
   Future<Color> _edgeColorOf(String url) async {
     try {
@@ -786,13 +786,12 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
       img.dispose();
       if (data == null || w == 0 || h == 0) return Colors.black;
       final bytes = data.buffer.asUint8List();
-      // 采样最底部 6% 行、中间 50% 宽的像素平均色
+      // 采样下半 40% 区域（海报主体色，偏亮海报也取得到主色）
       var r = 0, g = 0, b = 0, n = 0;
-      final yStart = (h * 0.94).floor();
-      final xStart = (w * 0.25).floor();
-      final xEnd = (w * 0.75).floor();
-      for (var y = yStart; y < h; y++) {
-        for (var x = xStart; x < xEnd; x += 2) {
+      final yStart = (h * 0.55).floor();
+      final yEnd = (h * 0.95).floor();
+      for (var y = yStart; y < yEnd; y++) {
+        for (var x = 0; x < w; x += 2) {
           final i = (y * w + x) * 4;
           if (i + 2 >= bytes.length) continue;
           r += bytes[i];
@@ -830,18 +829,45 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 1. 竖版海报：原图宽度铺满屏幕、完整不裁切、贴顶部
+        // 1. 竖版海报：原图宽度铺满屏幕、完整不裁切、贴顶部；
+        //    底部叠加一层「主色调渐入」过渡带，与下方渐变区无缝衔接
         Positioned(
           top: 0,
           left: 0,
           right: 0,
           height: posterH,
           child: poster.isNotEmpty
-              ? CachedNetworkImage(
-                  imageUrl: poster,
-                  fit: BoxFit.fill,
-                  placeholder: (_, __) => ColoredBox(color: Colors.black),
-                  errorWidget: (_, __, ___) => ColoredBox(color: Colors.black),
+              ? Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    CachedNetworkImage(
+                      imageUrl: poster,
+                      fit: BoxFit.fill,
+                      placeholder: (_, __) =>
+                          ColoredBox(color: Colors.black),
+                      errorWidget: (_, __, ___) =>
+                          ColoredBox(color: Colors.black),
+                    ),
+                    // 海报底边过渡带：透明 → 主色调（高 70px，消掉硬分界）
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: 70,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              edge.withValues(alpha: 0),
+                              edge,
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 )
               : ColoredBox(color: AppTheme.backgroundPrimary),
         ),
@@ -856,12 +882,12 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
             ),
           ),
         ),
-        // 3. 从屏幕高度 55% 开始向下：用海报底部颜色做垂直渐变，
-        //    与海报自然衔接，不再是"海报 + 纯黑"的硬切
+        // 3. 从海报底边略上方开始向下：用封面主色调做垂直渐变，
+        //    与海报底边过渡带颜色一致 → 不再有突兀分界线
         Positioned(
           left: 0,
           right: 0,
-          top: screenH * 0.55,
+          top: (posterH - 60).clamp(0.0, screenH),
           bottom: 0,
           child: DecoratedBox(
             decoration: BoxDecoration(
@@ -898,6 +924,19 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
     ];
     final genreLine = info.typeName.replaceAll(' / ', ' |');
     final screenH = MediaQuery.of(context).size.height;
+    // 封面主色调偏亮（白/浅色海报）时，文字包一层淡灰底保证可读
+    final lightEdge = _posterEdgeColor != null &&
+        _posterEdgeColor!.computeLuminance() > 0.55;
+    Widget lightWrap(Widget child) => lightEdge
+        ? Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.black38,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: child,
+          )
+        : child;
     // 壁纸场景固定白色系文字（背景是深色海报，不随主题明暗）
     return SafeArea(
       bottom: false,
@@ -908,39 +947,47 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 32,
-                fontWeight: FontWeight.w700,
-                height: 1.15,
+            lightWrap(
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 32,
+                  fontWeight: FontWeight.w700,
+                  height: 1.15,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
             // 原名/别名独立一行小字（参考图：主标题下方始终有一行小字副标题）
             if (info.tmdbOriginalName.isNotEmpty) ...[
               const SizedBox(height: 4),
-              Text(
-                info.tmdbOriginalName,
-                style: const TextStyle(color: Colors.white70, fontSize: 13),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              lightWrap(
+                Text(
+                  info.tmdbOriginalName,
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ],
             if (metaParts.isNotEmpty) ...[
               const SizedBox(height: 10),
-              Text(
-                metaParts.join(' · '),
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              lightWrap(
+                Text(
+                  metaParts.join(' · '),
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
               ),
             ],
             if (genreLine.isNotEmpty) ...[
               const SizedBox(height: 5),
-              Text(
-                genreLine,
-                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              lightWrap(
+                Text(
+                  genreLine,
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                ),
               ),
             ],
           ],
@@ -1593,16 +1640,18 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
     // 优先从集名解析真实集号（"第1集"/"01 命运"/"EP01"…），解析不到回退列表位置 i+1
     final epNo = _parseEpisodeNumber(ep.name) ?? (i + 1);
     final epDetail = info.episodeDetails[epNo];
-    // 封面：剧照优先，回退 TMDB 背板/海报
-    final still = info.episodeStills[epNo] ??
-        (info.backdrop.isNotEmpty ? info.backdrop : info.pic) ??
-        '';
+    // 封面：剧照优先（空串也视为无，继续回退背板/海报 —— 空串会挡住 ?? 回退）
+    final stillRaw = info.episodeStills[epNo] ?? '';
+    final still = stillRaw.isNotEmpty
+        ? stillRaw
+        : (info.backdrop.isNotEmpty ? info.backdrop : info.pic);
     final epTitle = info.episodeTitles[epNo] ?? ep.name;
-    final overview = epDetail?.overview ?? '';
     final rating = epDetail?.rating ?? 0;
     final runtime = epDetail?.runtime ?? 0;
     final selected = i == _selectedIndex;
     final accent = AppTheme.accentColor;
+    // 电影（TMDB 无剧集概念，episodeCount ≤ 1）：标题居中
+    final isMovie = info.episodeCount <= 1;
 
     return Container(
       width: 150,
@@ -1613,7 +1662,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 封面 + 图上简介：点击弹单集详情（保留原弹窗）
+          // 封面（剧照 + 选中角标 + 时长角标）：点击弹单集详情（保留原弹窗）
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () =>
@@ -1637,33 +1686,22 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                       )
                     else
                       ColoredBox(color: Colors.black26),
-                    // 底部渐变 + 两行简介（最多两行，超出隐藏）
-                    if (overview.isNotEmpty)
+                    // 选中角标：左上角 accent 蓝底白字「▶」（替代纯描边，醒目不显黑）
+                    if (selected)
                       Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
+                        top: 5,
+                        left: 5,
                         child: Container(
-                          padding: const EdgeInsets.fromLTRB(7, 14, 7, 5),
+                          width: 20,
+                          height: 20,
                           decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                Colors.transparent,
-                                Colors.black.withValues(alpha: 0.85),
-                              ],
-                            ),
+                            color: accent,
+                            borderRadius: BorderRadius.circular(6),
                           ),
-                          child: Text(
-                            overview,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 9.5,
-                              height: 1.25,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
+                          child: const Icon(
+                            Icons.play_arrow_rounded,
+                            color: Colors.white,
+                            size: 14,
                           ),
                         ),
                       ),
@@ -1695,7 +1733,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
             ),
           ),
             // 封面下方：集号（中文序数「第一集/第二集…」）+ 集标题；
-            // 点击此处直接跳转播放（不弹详情）
+            // 点击此处直接跳转播放（不弹详情）；电影无集号 → 标题居中
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () {
@@ -1712,6 +1750,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                   ),
+                  textAlign: isMovie ? TextAlign.center : TextAlign.start,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1771,16 +1810,32 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
   }
 
   /// 剧集名展示：名称前是纯数字（"1"/"01"/"1 xxx"）时转中文序数
-  /// （"第一集 xxx"），已有"第X集"或非数字开头保持原名。
+  /// （"第一集 xxx"）；数字在末尾（"饼干 - 1"/"饼干-02"）也提取转前置；
+  /// 已有"第X集"或非数字开头保持原名。
   String _epTitleDisplay(String title) {
     if (title.isEmpty) return title;
+    // 1) 开头数字："01 命运" / "1" / "1-xxx"
     final m = RegExp(r'^(\d{1,3})\s*[\s.、:：\-]?(.*)$').firstMatch(title);
-    if (m == null) return title;
-    final n = int.tryParse(m.group(1)!);
-    if (n == null) return title;
-    final rest = (m.group(2) ?? '').trim();
-    if (rest.isEmpty) return _chineseOrdinal(n);
-    return '${_chineseOrdinal(n)} ${rest}';
+    if (m != null) {
+      final n = int.tryParse(m.group(1)!);
+      if (n != null) {
+        final rest = (m.group(2) ?? '').trim();
+        if (rest.isEmpty) return _chineseOrdinal(n);
+        return '${_chineseOrdinal(n)} ${rest}';
+      }
+    }
+    // 2) 末尾数字："饼干 - 1" / "红色40号 - 2"（只取行尾数字，避免吃掉
+    //    "红色40号"这类标题自身的数字）
+    final m2 =
+        RegExp(r'^(.*?)[\s\-—.:：、,，]*(?:第)?(\d{1,3})\s*$').firstMatch(title);
+    if (m2 != null) {
+      final rest = (m2.group(1) ?? '').trim();
+      final n = int.tryParse(m2.group(2)!);
+      if (n != null && rest.isNotEmpty && rest != title.trim()) {
+        return '${_chineseOrdinal(n)} ${rest}';
+      }
+    }
+    return title;
   }
 
   Widget _buildDirector(VodInfo info) {

@@ -30,10 +30,12 @@ import 'comic_detail_page.dart';
 // 之前缺了这一行 —— 于是 `:607 const ComicAggregateSearchPage()` 报
 // "The name 'ComicAggregateSearchPage' isn't a class"。
 import 'comic_aggregate_search_page.dart';
+import 'display_settings_page.dart';
 import 'download_page.dart';
 import 'favorites_page.dart';
 import 'source_repo_page.dart';
 import '../../common/theme.dart';
+import '../../widgets/app_icon_button.dart';
 import '../../widgets/app_page_header.dart';
 
 /// 日志工具
@@ -1205,6 +1207,32 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                           // 搜索框占满中间（原来固定屏宽 40% 且居中）
                           Expanded(child: _searchField()),
                           const SizedBox(width: 8),
+                          // 设置：进入阅读显示设置页（外观/布局，全模块统一）
+                          AppIconButton(
+                            icon: Icons.settings_outlined,
+                            tooltip: '设置',
+                            isDark: isDark,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const DisplaySettingsPage(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          // 下载：进入下载管理页（与图书页同款直接入口）
+                          AppIconButton(
+                            icon: Icons.file_download_outlined,
+                            tooltip: '下载',
+                            isDark: isDark,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const DownloadPage(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
                           // 指环切换菜单：视图/分类/常用操作收敛成一个环按钮
                           JellyRingButton(
                             isDark: isDark,

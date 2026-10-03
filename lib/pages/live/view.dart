@@ -822,10 +822,12 @@ class _LivePageState extends State<LivePage> {
   }
 
   Future<void> _pickSource(BuildContext context, LiveController c) async {
-    // 导入/覆盖直播源（m3u/txt URL）——左栏底部 + 号进入
-    final url = await showDialog<String>(
+    // 导入直播源（m3u/txt URL）——左栏底部 + 号进入。
+    // 与设置页一致：可填「源名称 + 地址」；多源模式追加，单源模式覆盖当前
+    final result = await showDialog<(String, String)>(
       context: context,
       builder: (ctx) {
+        final nameCtrl = TextEditingController();
         final ctrl = TextEditingController();
         return AlertDialog(
           backgroundColor: AppTheme.backgroundSecondary,
@@ -836,13 +838,27 @@ class _LivePageState extends State<LivePage> {
               fontSize: AppTheme.fontHeadline,
             ),
           ),
-          content: TextField(
-            controller: ctrl,
-            style: TextStyle(color: AppTheme.textPrimary),
-            decoration: InputDecoration(
-              hintText: 'm3u / txt 地址',
-              hintStyle: TextStyle(color: AppTheme.textTertiary),
-            ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                style: TextStyle(color: AppTheme.textPrimary),
+                decoration: InputDecoration(
+                  hintText: '源名称（可留空，默认按序号命名）',
+                  hintStyle: TextStyle(color: AppTheme.textTertiary),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: ctrl,
+                style: TextStyle(color: AppTheme.textPrimary),
+                decoration: InputDecoration(
+                  hintText: 'm3u / txt 地址',
+                  hintStyle: TextStyle(color: AppTheme.textTertiary),
+                ),
+              ),
+            ],
           ),
           actions: [
             TextButton(
@@ -850,19 +866,28 @@ class _LivePageState extends State<LivePage> {
               child: const Text('取消'),
             ),
             TextButton(
-              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              onPressed: () => Navigator.pop(
+                ctx,
+                (nameCtrl.text.trim(), ctrl.text.trim()),
+              ),
               child: const Text('加载'),
             ),
           ],
         );
       },
     );
-    if (url != null && url.isNotEmpty) {
+    if (result == null || result.$2.isEmpty) return;
+    final url = result.$2.trim();
+    final name = result.$1.trim();
+    // 已有多个源 → 追加新源（不覆盖）；单源 → 保持原覆盖行为
+    if (c.sources.length > 1) {
+      await c.addSource(url, name: name.isEmpty ? null : name);
+    } else {
       await c.reloadFromUrl(url);
-      if (mounted) {
-        c.selectGroup(0);
-        _autoplayCurrent();
-      }
+    }
+    if (mounted) {
+      c.selectGroup(0);
+      _autoplayCurrent();
     }
   }
 

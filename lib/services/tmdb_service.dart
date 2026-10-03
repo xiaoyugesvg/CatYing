@@ -841,7 +841,12 @@ class TmdbService extends GetxService {
         })> stills,
   ) {
     if (stills.isEmpty) return;
-    info.episodeStills = stills.map((k, v) => MapEntry(k, v.still));
+    // 剧照可能拉取失败（值为空串）：空 key 不写入，
+    // 否则消费端 `episodeStills[epNo] ?? backdrop` 会被空串挡住、图永远不显示
+    info.episodeStills = {
+      for (final e in stills.entries)
+        if (e.value.still.isNotEmpty) e.key: e.value.still,
+    };
     info.episodeTitles = stills.map((k, v) => MapEntry(k, v.title));
     info.episodeDetails = stills.map(
       (k, v) => MapEntry(

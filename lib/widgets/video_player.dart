@@ -1856,19 +1856,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           ),
         ),
 
-        // 缓冲指示器
-        // 缓冲圈：buffering 时显示（换集后旧状态不再挡转圈）
-        if (_isBuffering && !_audioMode)
-          const Center(
-            child: SizedBox(
-              width: 36,
-              height: 36,
-              child: CircularProgressIndicator(
-                color: Colors.white,
-                strokeWidth: 3,
-              ),
-            ),
-          ),
+        // 缓冲/暂停状态图标统一由画面中间层显示（_buildCenterSeekButtons 正中），
+        // 这里不再单独放缓冲圈，避免与中间层重复
 
         // 弹幕层（手势层之上, 不阻挡点击）
         if (_danmuOn && _danmus.isNotEmpty) _buildDanmuLayer(),
@@ -2490,12 +2479,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               size: 17,
               onTap: widget.onBack ?? () => Navigator.of(context).maybePop(),
             ),
-            const Spacer(),
 
-            // 缓冲状态：按你的要求放在**听剧图标前面**（原来在最右侧菜单位置）
+            // 网速/缓冲状态：紧跟返回键右侧（用户要求）
             if (_alwaysShowSpeed && _netSpeedText.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(right: 6),
+                padding: const EdgeInsets.only(left: 8, right: 6),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -2516,6 +2504,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   ],
                 ),
               ),
+
+            const Spacer(),
 
             // 听剧模式（仅点播页显示）
             if (widget.showAudioModeButton)
@@ -3957,14 +3947,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       ),
       child: Padding(
         // 顶栏避让状态栏：
-        // - 竖屏内嵌（pad.top>0）：pad.top + 4（状态栏下留 4px 呼吸）
-        // - 纯竖屏全屏（短剧/抖音，immersive 下 pad.top=0）：8
-        //   （8(top) + 8 = 16px，按钮离屏幕顶的呼吸）
+        // - 竖屏内嵌（pad.top>0）：外层（详情页）已垫一条与状态栏等高的黑条，
+        //   **不再重复加 pad.top**，只留 4px 呼吸 → 功能栏正好贴住刘海底部
+        // - 纯竖屏全屏（短剧/抖音，immersive 下 pad.top=0）：4
+        //   （4(top) + 8 = 12px，按钮离屏幕顶的呼吸）
         // - 横屏全屏（pad.top=0，iOS 横屏状态栏不占 safe area 但实际占据
         //   顶部约 24px）：保持 24，不与状态栏时间/电量挤同一行
         padding: EdgeInsets.only(
           top: top +
-              (pad.top > 0 ? pad.top + 4 : (_dramaMode || _douyinMode ? 8 : 24)),
+              (pad.top > 0 ? 4 : (_dramaMode || _douyinMode ? 4 : 24)),
           left: 4 + pad.left,
           right: 4 + pad.right,
           bottom: 8,
@@ -4227,6 +4218,42 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     return Positioned.fill(
       child: Stack(
         children: [
+          // 正中：缓冲加载圈 / 暂停图标（加载不挡点击；暂停图标可点恢复播放）
+          Positioned.fill(
+            child: Align(
+              alignment: Alignment.center,
+              child: _audioMode
+                  ? const SizedBox.shrink()
+                  : _isBuffering
+                      ? const SizedBox(
+                          width: 52,
+                          height: 52,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 3,
+                          ),
+                        )
+                      : !_isPlaying
+                          ? GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () => _safeTap(_togglePlayPause),
+                              child: Container(
+                                width: 60,
+                                height: 60,
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.35),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.pause_rounded,
+                                  color: Colors.white,
+                                  size: 38,
+                                ),
+                              ),
+                            )
+                          : const SizedBox.shrink(),
+            ),
+          ),
           // 左：快退 —— 以画面中心为对称轴（中心左侧约 33% 屏宽处）
           Positioned.fill(
             child: Align(

@@ -187,4 +187,8 @@ class LiveController extends GetxController {
   }
 
   Future<void> reloadFromUrl(String url) => service.loadFromUrl(url);
+
+  /// 追加一个新直播源（可带名称；多源模式直接追加）
+  Future<void> addSource(String url, {String? name}) =>
+      service.addSource(url, name: name);
 }
