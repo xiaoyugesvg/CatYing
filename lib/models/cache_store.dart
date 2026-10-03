@@ -537,6 +537,43 @@ class CacheStore {
     }
   }
 
+  /// 按 key 前缀统计业务缓存字节数（如 `tmdb:` 前缀的刮削缓存）。
+  int cacheItemsByteSizeByPrefix(String prefix) {
+    final box = _cacheItemsBox;
+    if (box == null) return 0;
+    var total = 0;
+    for (final k in box.keys) {
+      final raw = box.get(k);
+      if (raw is Map) {
+        final key = raw['key']?.toString() ?? '';
+        final v = raw['value'];
+        if (key.startsWith(prefix) && v is String) total += v.length;
+      }
+    }
+    return total;
+  }
+
+  /// 按 key 前缀删除业务缓存条目（如清 `tmdb:` 刮削缓存时用）。
+  Future<void> clearItemsByPrefix(String prefix) async {
+    try {
+      final box = _cacheItemsBox;
+      if (box == null) return;
+      final toDelete = <dynamic>[];
+      for (final k in box.keys) {
+        final raw = box.get(k);
+        if (raw is Map && (raw['key']?.toString().startsWith(prefix) ?? false)) {
+          toDelete.add(k);
+        }
+      }
+      for (final k in toDelete) {
+        await box.delete(k);
+      }
+      AppLog.instance.log('[CacheStore] cleared ${toDelete.length} items by prefix: $prefix');
+    } catch (e) {
+      AppLog.instance.log('[CacheStore] clearItemsByPrefix fail: $e');
+    }
+  }
+
   List<CacheItem> _loadCacheItems() {
     final box = _cacheItemsBox!;
     final items = <CacheItem>[];

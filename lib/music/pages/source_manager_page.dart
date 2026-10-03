@@ -384,11 +384,14 @@ Future<void> showImportSheet(BuildContext context) async {
                   hintText: '在此粘贴音源内容…',
                   hintStyle:
                       TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead),
-                  filled: true,
-                  fillColor: MusicTheme.fill,
+                  // 透明底：去掉灰填充；补一条细边框保持粘贴区可辨识
+                  filled: false,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
+                    borderSide: BorderSide(
+                      color: MusicTheme.divider,
+                      width: 0.5,
+                    ),
                   ),
                 ),
               ),

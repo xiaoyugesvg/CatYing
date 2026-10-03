@@ -322,6 +322,13 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       if (token != _detailLoadToken || isClosed) return;
       if (info != null) {
         vodInfo.value = info;
+        // 恢复上次选择的播放源（线路）：用户要求每次重进详情页都用
+        // 上次选的源，而不是每次都回到第一个。源更新链接后旧 flag
+        // 不在 playFlags 里，自然回退到第一个。
+        final remembered = await _rememberedFlag();
+        if (remembered != null && info.playFlags.contains(remembered)) {
+          info.playFlag = remembered;
+        }
         selectedFlag.value = info.playFlag;
         selectedEpisodeIndex.value = info.playIndex;
         resumeSeconds.value = 0;
@@ -345,6 +352,31 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     }
   }
 
+  static const _playFlagPrefix = 'play_flag_';
+
+  /// 记住当前选择的播放源（线路）：下次重进详情页恢复。
+  /// 键 = `play_flag_{sourceKey}|{id}`；「清除全部缓存」时统一重置。
+  Future<void> _rememberFlag(String flag) async {
+    final info = vodInfo.value;
+    if (info == null || info.sourceKey.isEmpty || flag.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('$_playFlagPrefix${info.sourceKey}|${info.id}', flag);
+    } catch (_) {}
+  }
+
+  /// 读取上次选择的播放源；无记忆 / 源已变更时返回 null（调用方回退第一个）。
+  Future<String?> _rememberedFlag() async {
+    final info = vodInfo.value;
+    if (info == null || info.sourceKey.isEmpty) return null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('$_playFlagPrefix${info.sourceKey}|${info.id}');
+    } catch (_) {
+      return null;
+    }
+  }
+
   void selectFlag(String flag) {
     if (selectedFlag.value == flag) return;
 
@@ -360,6 +392,8 @@ class DetailController extends GetxController with WidgetsBindingObserver {
 
     selectedFlag.value = flag;
     vodInfo.value?.playFlag = flag;
+    // 记住源选择：下次重进详情页恢复（清除全部缓存时重置）
+    _rememberFlag(flag);
     // 恢复到刚才的位置，而不是清零
     resumeSeconds.value = keepSeconds;
     _realtimeProgressSeconds = keepSeconds;

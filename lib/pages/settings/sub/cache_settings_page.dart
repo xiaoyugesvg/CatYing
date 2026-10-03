@@ -79,18 +79,6 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
               value: _autoCleanLabels[_autoCleanIndex],
               onTap: _pickAutoClean,
             ),
-            SettingsRow(
-              icon: Icons.cleaning_services_outlined,
-              title: '清理源文件缓存',
-              value: '源 JS',
-              onTap: () => controller.clearSourceCache(),
-            ),
-            Obx(() => SettingsRow(
-                  icon: Icons.delete_outline,
-                  title: '清除应用缓存',
-                  value: controller.cacheSizeString.value,
-                  onTap: _confirmClearCache,
-                )),
             // 精细清理：按项勾选（缓存 / 用户数据），对应参考图的「数据清理」页
             SettingsRow(
               icon: Icons.checklist,
@@ -98,14 +86,20 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
               value: '精细',
               onTap: () => Get.to(() => const DataCleanupPage()),
             ),
+            // 全清入口保留（含源选择记忆重置）：放在列表末尾，不与分项并列
+            Obx(() => SettingsRow(
+                  icon: Icons.delete_outline,
+                  title: '清空全部缓存',
+                  value: controller.cacheSizeString.value,
+                  onTap: _confirmClearAll,
+                )),
           ],
         ),
 
-        // ── 缓存明细（按模块分开，可单独清）──────────────────────
+        // ── 缓存明细（按模块/分类分组，可单独清）──────────────────
         //
-        // 上面那排"清除应用缓存"只有一个**总数**，用户看不出
-        // "到底是影视占的、还是阅读占的"。这里按 [CacheModule] 分组：
-        // 最上面几排是**软件本身**，往下依次是影视/音乐/阅读。
+        // 顺序：影视 → 直播 → 音乐 → 阅读 → TMDB 缓存 → 图片 →
+        // 数据 → JS → 临时文件。每组一个卡片，组内条目 + 「清空整组」。
         const SizedBox(height: AppTheme.spacingMD),
         _cacheDetailSection(),
       ],
@@ -142,61 +136,25 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
       children: [
         for (final m in CacheModule.values)
           if ((groups[m] ?? const []).isNotEmpty) ...[
-            _groupHeader(
-              m,
-              totalBytes: (groups[m] ?? const [])
-                  .fold<int>(0, (a, b) => a + (b.size < 0 ? 0 : b.size)),
-              entries: groups[m] ?? const [],
+            SettingsGroup(
+              title:
+                  '${m.label} · ${CacheManagerService.formatSize((groups[m] ?? const []).fold<int>(0, (a, b) => a + (b.size < 0 ? 0 : b.size)))}',
+              children: [
+                for (final e in groups[m] ?? const []) _entryRow(e),
+                // 精细清理：点开底部勾选菜单（与「数据清理」页同一交互）
+                SettingsRow(
+                  icon: Icons.checklist,
+                  title: '精细清理',
+                  value: '${(groups[m] ?? const []).length} 项可勾选',
+                  onTap: _busy
+                      ? null
+                      : () => _showFineCleanSheet(m, groups[m] ?? const []),
+                ),
+              ],
             ),
-            const SizedBox(height: 6),
-            for (final e in groups[m] ?? const []) _entryRow(e),
             const SizedBox(height: AppTheme.spacingMD),
           ],
       ],
-    );
-  }
-
-  Widget _groupHeader(
-    CacheModule m, {
-    required int totalBytes,
-    required List<CacheEntryInfo> entries,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 2, 4, 2),
-      child: Row(
-        children: [
-          Icon(_moduleIcon(m), size: 15, color: AppTheme.textSecondary),
-          const SizedBox(width: 6),
-          Text(
-            m.label,
-            style: TextStyle(
-              fontSize: AppTheme.fontSubhead,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            CacheManagerService.formatSize(totalBytes),
-            style: TextStyle(
-                fontSize: AppTheme.fontCaption, color: AppTheme.textTertiary),
-          ),
-          const Spacer(),
-          // 整组清空（比逐个点省事）
-          GestureDetector(
-            onTap: _busy ? null : () => _confirmClearModule(m, entries),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-              child: Text(
-                '清空',
-                style: TextStyle(
-                    fontSize: AppTheme.fontSubhead,
-                    color: AppTheme.accentColor),
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -211,21 +169,160 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
   }
 
   IconData _moduleIcon(CacheModule m) => switch (m) {
-        CacheModule.app => Icons.phone_iphone_rounded,
         CacheModule.video => Icons.movie_outlined,
+        CacheModule.live => Icons.live_tv_outlined,
         CacheModule.music => Icons.music_note_outlined,
         CacheModule.reading => Icons.menu_book_outlined,
+        CacheModule.tmdb => Icons.movie_filter_outlined,
+        CacheModule.app => Icons.phone_iphone_rounded,
       };
 
-  /// 整组清空前二次确认（说清影响）
-  Future<void> _confirmClearModule(
+  /// 精细清理：底部弹出勾选菜单（与「数据清理」页同一交互：
+  /// 全选 / 勾选 / 底部「清理选中项」/ 二次确认）。
+  Future<void> _showFineCleanSheet(
       CacheModule m, List<CacheEntryInfo> entries) async {
-    final names = entries.map((e) => '· ${e.label}').join('\n');
+    if (entries.isEmpty) return;
+    final selected = <String>{for (final e in entries) e.id}; // 默认全选
+    final allIds = entries.map((e) => e.id).toSet();
+
+    final proceed = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      isScrollControlled: true,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppTheme.radiusLG),
+        ),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          final chosen = entries.where((e) => selected.contains(e.id)).toList();
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 标题 + 全选切换
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '精细清理 · ${m.label}',
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: AppTheme.fontTitle3,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => setSheetState(() {
+                          if (selected.length == allIds.length) {
+                            selected.clear();
+                          } else {
+                            selected.addAll(allIds);
+                          }
+                        }),
+                        child: Text(
+                          selected.length == allIds.length ? '取消全选' : '全选',
+                          style: TextStyle(
+                            color: AppTheme.accentColor,
+                            fontSize: AppTheme.fontSubhead,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '勾选要清理的项，点击底部按钮执行',
+                    style: TextStyle(
+                      color: AppTheme.textTertiary,
+                      fontSize: AppTheme.fontCaption,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // 条目勾选列表（最多 5 项，撑不满屏）
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: [
+                        for (final e in entries)
+                          CheckboxListTile(
+                            value: selected.contains(e.id),
+                            onChanged: (v) => setSheetState(() {
+                              if (v == true) {
+                                selected.add(e.id);
+                              } else {
+                                selected.remove(e.id);
+                              }
+                            }),
+                            activeColor: AppTheme.accentColor,
+                            dense: true,
+                            title: Text(
+                              e.label,
+                              style: TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontSize: AppTheme.fontBody,
+                              ),
+                            ),
+                            subtitle: Text(
+                              '${CacheManagerService.formatSize(e.size)} · ${e.hint}',
+                              style: TextStyle(
+                                color: AppTheme.textTertiary,
+                                fontSize: AppTheme.fontCaption,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // 底部执行按钮
+                  SizedBox(
+                    width: double.infinity,
+                    height: 44,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.redAccent.withValues(alpha: 0.9),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(22),
+                        ),
+                      ),
+                      onPressed: chosen.isEmpty
+                          ? null
+                          : () => Navigator.pop(ctx, true),
+                      child: Text(
+                        '清理选中项（${chosen.length}）',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: AppTheme.fontBody,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    if (proceed != true) return;
+
+    // 二次确认（与数据清理页一致：说清清理范围与影响）
+    final names = entries
+        .where((e) => selected.contains(e.id))
+        .map((e) => '· ${e.label}')
+        .join('\n');
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.backgroundSecondary,
-        title: Text('清空「${m.label}」缓存',
+        title: Text('清理「${m.label}」选中项',
             style: TextStyle(color: AppTheme.textPrimary)),
         content: Text(
           '将清理：\n$names\n\n'
@@ -245,18 +342,21 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('清空', style: TextStyle(color: Colors.redAccent)),
+            child: Text('清理', style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
     );
     if (ok != true) return;
+
     setState(() => _busy = true);
-    await CacheManagerService.clearModule(_entries!, m);
+    for (final e in entries.where((x) => selected.contains(x.id))) {
+      await e.clear();
+    }
     await _reloadEntries();
     if (!mounted) return;
     setState(() => _busy = false);
-    AppToast.success('已清空「${m.label}」缓存');
+    AppToast.success('已清理「${m.label}」${selected.length} 项');
   }
 
   Future<void> _reloadEntries() async {
@@ -279,8 +379,8 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
     await prefs.setInt('source_cache_auto_clean', i);
   }
 
-  /// 清除应用缓存前确认：分项说明清理范围，避免用户担心误清历史/收藏。
-  Future<void> _confirmClearCache() async {
+  /// 清空全部缓存前确认：分项说明清理范围，避免用户担心误清历史/收藏。
+  Future<void> _confirmClearAll() async {
     final action = await showDialog<_ClearCacheAction>(
       context: context,
       builder: (ctx) => AlertDialog(

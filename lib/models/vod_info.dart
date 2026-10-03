@@ -174,6 +174,10 @@ class VodInfo {
   /// 剧集标题（键 = 集号 1 起，值 = TMDB 每集标题，如「沈家灭门，嘉兰入林府」）
   Map<int, String> episodeTitles;
 
+  /// 每集 TMDB 元数据（键 = 集号，值 = 简介/评分/播出日期/时长）。
+  /// 供媒体库选集卡「封面上两行简介 + 点击弹窗完整简介」使用。
+  Map<int, EpisodeDetail> episodeDetails;
+
   VodInfo({
     required this.id,
     this.name = '',
@@ -202,6 +206,7 @@ class VodInfo {
     this.tmdbStatus = '',
     this.episodeCount = 0,
     this.episodeTitles = const {},
+    this.episodeDetails = const {},
   });
 
   /// 当前线路下的剧集
@@ -279,4 +284,33 @@ class Episode {
   final String url;
 
   const Episode({required this.name, required this.url});
+}
+
+/// 单集 TMDB 元数据（简介 / 评分 / 播出日期 / 时长）
+class EpisodeDetail {
+  final String overview;
+  final double rating;
+  final String airDate;
+  final int runtime;
+
+  const EpisodeDetail({
+    this.overview = '',
+    this.rating = 0,
+    this.airDate = '',
+    this.runtime = 0,
+  });
+
+  factory EpisodeDetail.fromJson(Map<String, dynamic> json) => EpisodeDetail(
+        overview: (json['overview'] ?? '').toString(),
+        rating: (json['rating'] as num?)?.toDouble() ?? 0,
+        airDate: (json['airDate'] ?? '').toString(),
+        runtime: (json['runtime'] as num?)?.toInt() ?? 0,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'overview': overview,
+        'rating': rating,
+        'airDate': airDate,
+        'runtime': runtime,
+      };
 }

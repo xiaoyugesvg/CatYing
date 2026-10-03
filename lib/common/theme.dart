@@ -346,8 +346,8 @@ class AppTheme {
         backgroundColor: backgroundSecondary,
       ),
       inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: backgroundTertiary,
+        // 统一透明底：所有输入框不再带灰填充（用户要求全局去灰底）
+        filled: false,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(glassRadiusSmall),
           borderSide: BorderSide.none,
@@ -572,8 +572,8 @@ class AppTheme {
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: backgroundSecondary,
+        // 统一透明底：所有输入框不再带灰填充（用户要求全局去灰底）
+        filled: false,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(glassRadiusSmall),
           borderSide: BorderSide.none,

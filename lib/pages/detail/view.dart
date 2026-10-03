@@ -1556,9 +1556,8 @@ class _DetailPageState extends State<DetailPage> {
                       horizontal: 12,
                       vertical: 10,
                     ),
-                    filled: true,
-                    // 原来写死白 6%：浅色模式下与页面底几乎同色，输入框消失
-                    fillColor: AppTheme.backgroundTertiary,
+                    // 透明底：去掉灰填充，透出外层容器/页面背景
+                    filled: false,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(20),
                       borderSide: BorderSide.none,

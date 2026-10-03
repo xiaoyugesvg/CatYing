@@ -211,6 +211,18 @@ class SettingsController extends GetxController {
   Future<void> clearCache() async {
     final all = await CacheManagerService.instance.list();
     await CacheManagerService.clearAll(all);
+    // 重置播放源记忆：全部清除后，视频详情回到第一个源
+    //（用户要求：源选择记忆只在「清理所有缓存」时重置）
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs
+          .getKeys()
+          .where((k) => k.startsWith('play_flag_'))
+          .toList();
+      for (final k in keys) {
+        await prefs.remove(k);
+      }
+    } catch (_) {}
     AppLog.instance.log('[Settings] clearCache: 已清 ${all.length} 类缓存');
     Get.snackbar(
       '清除缓存',

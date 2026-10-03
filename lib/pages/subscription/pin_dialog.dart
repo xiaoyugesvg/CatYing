@@ -72,11 +72,14 @@ class _PinDialogState extends State<PinDialog> {
               hintText: '••••••',
               hintStyle: TextStyle(
                   color: AppTheme.textTertiary, letterSpacing: 8),
-              filled: true,
-              fillColor: AppTheme.backgroundTertiary,
+              // 透明底：去掉灰填充；补一条细边框保持输入区可辨识
+              filled: false,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(AppTheme.glassRadiusSmall),
-                borderSide: BorderSide.none,
+                borderSide: BorderSide(
+                  color: AppTheme.borderMedium,
+                  width: 0.5,
+                ),
               ),
             ),
           ),

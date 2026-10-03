@@ -629,18 +629,21 @@ class _HomePageState extends State<HomePage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          width: 56,
+          width: 60,
           child: Padding(
-            padding: const EdgeInsets.only(top: 7, right: 4),
+            padding: const EdgeInsets.only(top: 6, right: 4),
             child: Text(
               f.name,
+              // 组名文字在固定宽度列内居中
+              textAlign: TextAlign.center,
               // 允许换行，长组名（国家/地区）不再被截断
               softWrap: true,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: AppTheme.textTertiary,
-                fontSize: AppTheme.fontCaption,
+                // 组名字号加大（11 → 13）：用户反馈 4 个字太小、卡片显宽
+                fontSize: AppTheme.fontSubhead,
                 fontWeight: FontWeight.w600,
                 height: 1.25,
               ),
@@ -740,7 +743,8 @@ class _HomePageState extends State<HomePage> {
                               Text(f.name,
                                   style: TextStyle(
                                       color: AppTheme.textTertiary,
-                                      fontSize: AppTheme.fontCaption,
+                                      // 与行筛选一致：组名字号 11 → 13
+                                      fontSize: AppTheme.fontSubhead,
                                       fontWeight: FontWeight.w600)),
                               const SizedBox(height: 8),
                               Wrap(

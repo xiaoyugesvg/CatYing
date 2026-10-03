@@ -3957,12 +3957,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       ),
       child: Padding(
         // 顶栏避让状态栏（对齐直播页的控制逻辑）：
-        // - 竖屏（pad.top>0，状态栏/刘海占安全区）：pad.top 下方再多留 10px，
-        //   顶栏不再紧贴状态栏底边（用户要求"往下移一点"）
+        // - 竖屏内嵌（pad.top>0，状态栏/刘海占安全区）：pad.top 下方再多留 8px
+        //   （原 12 偏下，往上移到 8）
+        // - 纯竖屏全屏（短剧/抖音，immersive 下 pad.top=0，无状态栏）：12
+        //   （原与横屏共用 24 偏下，单列小值往上移）
         // - 横屏全屏（pad.top=0，iOS 横屏状态栏不占 safe area 但实际占据
-        //   顶部约 24px）：统一下移 28px，顶栏图标不再和状态栏时间/电量挤同一行
+        //   顶部约 24px）：保持 24，不与状态栏时间/电量挤同一行
         padding: EdgeInsets.only(
-          top: top + (pad.top > 0 ? pad.top + 10 : 28),
+          top: top +
+              (pad.top > 0
+                  ? pad.top + 8
+                  : ((_dramaMode || _douyinMode) ? 12 : 24)),
           left: 4 + pad.left,
           right: 4 + pad.right,
           bottom: 8,
@@ -4014,6 +4019,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     required VoidCallback onTap,
     Widget? child,
     bool filled = false,
+    bool circular = false,
   }) {
     final side = height < 38 ? 38.0 : height;
     return GestureDetector(
@@ -4029,7 +4035,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: filled ? 0.22 : 0.13),
-              borderRadius: BorderRadius.circular(filled ? 12 : 10),
+              borderRadius: BorderRadius.circular(
+                circular ? (side - 4) / 2 : (filled ? 12 : 10),
+              ),
               border: Border.all(
                 color: Colors.white.withValues(alpha: filled ? 0.34 : 0.18),
                 width: 0.5,
@@ -4214,28 +4222,28 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// 画面中间层：快退/快进跳转按钮（步长可配置）。
   /// 与顶栏/底栏同步显隐（跟随 [_showControls] 与锁定态）。
   /// 2026-10-03：以**视频画面正中心为对称轴**、左右对称拉开距离
-  /// （约中心两侧 27% 屏宽处，不贴边缘也不贴中心，视觉美观）；
-  /// 中间 45% 区域留白给双击暂停/手势。
+  /// （约中心两侧 33% 屏宽处，间距 = 上次 27% × 1.2，不贴边缘也不贴中心）；
+  /// 中间区域留白给双击暂停/手势。
   /// 抖音模式（[_douyinMode]）下，右侧变为靠右缘竖排：⏩ + ↑（上一集/上一部）+ ↓（下一集/下一部）；
   /// 短剧模式（[_dramaMode]）无右侧胶囊，保持左右对称（纯滑动切集）。
   Widget _buildCenterSeekButtons() {
     return Positioned.fill(
       child: Stack(
         children: [
-          // 左：快退 —— 以画面中心为对称轴（中心左侧约 27% 屏宽处）
+          // 左：快退 —— 以画面中心为对称轴（中心左侧约 33% 屏宽处）
           Positioned.fill(
             child: Align(
-              alignment: const Alignment(-0.275, 0),
+              alignment: const Alignment(-0.33, 0),
               child: _seekStepButton(forward: false),
             ),
           ),
-          // 右：快进 —— 非抖音模式与左侧对称（中心右侧约 27% 屏宽处）；
+          // 右：快进 —— 非抖音模式与左侧对称（中心右侧约 33% 屏宽处）；
           // 抖音模式靠右缘竖排（↟ 上一集 / ⏩ / ↡ 下一集）
           Positioned.fill(
             child: Align(
               alignment: _douyinMode
                   ? const Alignment(1, 0)
-                  : const Alignment(0.275, 0),
+                  : const Alignment(0.33, 0),
               child: _douyinMode
                   ? Column(
                       mainAxisSize: MainAxisSize.min,
@@ -4340,22 +4348,24 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// 快进/快退跳转按钮（步长可配置 5/10/15/30 秒）。
   /// 步长=10 时用系统自带 replay_10/forward_10 圆形图标（与参考图一致）；
   /// 其他步长用 replay/forward + 右下角数字角标，所见即所跳。
+  /// 2026-10-03：框改圆形；图标尺寸 = 上次(44) × 0.8 = 35；
+  /// 与中心间距 = 上次(±0.275) × 1.2 = ±0.33。
   Widget _seekStepButton({required bool forward}) {
     final step = _effectiveSeekStep;
     final base = forward ? Icons.forward : Icons.replay;
     final ten = forward ? Icons.forward_10 : Icons.replay_10;
     return _iconButton(
       icon: step == 10 ? ten : base,
-      // 10S 按钮放大 2 倍（用户要求）：图标 22→44、按钮 38→76
-      size: 44,
+      size: 35,
       width: 76,
       height: 76,
+      circular: true,
       child: step == 10
           ? null
           : Stack(
               alignment: Alignment.center,
               children: [
-                Icon(base, color: Colors.white, size: 44),
+                Icon(base, color: Colors.white, size: 35),
                 Positioned(
                   right: 6,
                   bottom: 6,

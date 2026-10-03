@@ -670,8 +670,8 @@ class _LivePageState extends State<LivePage> {
                                       size: 18,
                                       color: AppTheme.textTertiary,
                                     ),
-                                    filled: true,
-                                    fillColor: AppTheme.backgroundTertiary,
+                                    // 透明底：去掉灰填充
+                                    filled: false,
                                     contentPadding: const EdgeInsets.symmetric(
                                       horizontal: 10,
                                       vertical: 8,

@@ -3,18 +3,23 @@ import 'dart:io';
 import 'package:flutter/painting.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../reading/services/book_content_cache_service.dart';
 import '../../reading/services/book_page_cache_service.dart';
 import '../../music/services/music_api.dart';
 import '../models/cache_store.dart';
+import 'nodejs_manager.dart';
 
-/// 缓存分类：**软件本身** vs **各模块**
+/// 缓存分类：模块（影视/直播/音乐/阅读/TMDB）在前，
+/// 「软件本身」收纳图片/数据/JS/临时文件等跨模块分类。
 enum CacheModule {
-  app('软件本身'),
-  video('影视 · 直播'),
+  video('影视'),
+  live('直播'),
   music('音乐'),
-  reading('阅读');
+  reading('阅读'),
+  tmdb('TMDB 缓存'),
+  app('软件本身');
 
   const CacheModule(this.label);
   final String label;
@@ -71,72 +76,7 @@ class CacheManagerService {
   Future<List<CacheEntryInfo>> list({void Function()? onSize}) async {
     final out = <CacheEntryInfo>[];
 
-    // ── 软件本身 ──────────────────────────────────────────────
-    var imageBytes = 0;
-    try {
-      imageBytes = PaintingBinding.instance.imageCache.currentSizeBytes;
-    } catch (_) {}
-    out.add(
-      CacheEntryInfo(
-        id: 'app_image_memory',
-        label: '内存图片缓存',
-        hint: '当前会话已解码的图片，清了只影响滚动流畅度',
-        module: CacheModule.app,
-        size: imageBytes,
-        clear: () async {
-          try {
-            PaintingBinding.instance.imageCache.clear();
-            PaintingBinding.instance.imageCache.clearLiveImages();
-          } catch (_) {}
-        },
-      ),
-    );
-    onSize?.call();
-
-    var diskImg = 0;
-    try {
-      // cached_network_image 把文件写在 getApplicationCacheDirectory() 里，
-      // 所以直接量那个目录 —— 不用去碰 DefaultCacheManager 的内部 store
-      //（它的目录字段不对外公开）。
-      diskImg = await _dirSize(await getApplicationCacheDirectory());
-    } catch (_) {}
-    out.add(
-      CacheEntryInfo(
-        id: 'app_image_disk',
-        label: '磁盘图片缓存',
-        hint: '封面/海报等网络图，清了会重新下载',
-        module: CacheModule.app,
-        size: diskImg,
-        clear: () async {
-          try {
-            await DefaultCacheManager().emptyCache();
-          } catch (_) {}
-        },
-      ),
-    );
-    onSize?.call();
-
-    var tmpBytes = 0;
-    try {
-      tmpBytes = await _dirSize(await getTemporaryDirectory());
-    } catch (_) {}
-    out.add(
-      CacheEntryInfo(
-        id: 'app_temp',
-        label: '临时文件',
-        hint: '系统与第三方库的临时文件，可安全清理',
-        module: CacheModule.app,
-        size: tmpBytes,
-        clear: () async {
-          try {
-            await _deleteDirContents(await getTemporaryDirectory());
-          } catch (_) {}
-        },
-      ),
-    );
-    onSize?.call();
-
-    // ── 影视 · 直播 ───────────────────────────────────────────
+    // ── 影视（业务缓存：首页列表 / 详情 / 刮削 / 清晰度）──────────
     var bizBytes = 0;
     try {
       bizBytes = CacheStore.instance.cacheItemsByteSize();
@@ -151,6 +91,37 @@ class CacheManagerService {
         clear: () async {
           try {
             await CacheStore.instance.clearItemsCache();
+          } catch (_) {}
+        },
+      ),
+    );
+    onSize?.call();
+
+    // ── 直播（频道列表本地缓存，SP 键 live_channel_cache_v1|*）──────
+    var liveBytes = 0;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      liveBytes = prefs
+          .getKeys()
+          .where((k) => k.startsWith('live_channel_cache_v1'))
+          .fold<int>(0, (a, k) => a + (prefs.getString(k)?.length ?? 0));
+    } catch (_) {}
+    out.add(
+      CacheEntryInfo(
+        id: 'live_channel',
+        label: '频道列表缓存',
+        hint: '直播频道列表，清了下次打开重新拉取',
+        module: CacheModule.live,
+        size: liveBytes,
+        clear: () async {
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            for (final k in prefs
+                .getKeys()
+                .where((x) => x.startsWith('live_channel_cache_v1'))
+                .toList()) {
+              await prefs.remove(k);
+            }
           } catch (_) {}
         },
       ),
@@ -209,6 +180,160 @@ class CacheManagerService {
         clear: () async {
           try {
             await BookPageCacheService.instance.clear();
+          } catch (_) {}
+        },
+      ),
+    );
+    onSize?.call();
+
+    // ── TMDB 缓存（刮削数据 + 匹配记录）─────────────────────────
+    var tmdbBytes = 0;
+    try {
+      tmdbBytes = CacheStore.instance.cacheItemsByteSizeByPrefix('tmdb:');
+    } catch (_) {}
+    var matchCount = 0;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      matchCount = prefs
+          .getKeys()
+          .where((k) => k.startsWith('tmdb_match'))
+          .length;
+    } catch (_) {}
+    out.add(
+      CacheEntryInfo(
+        id: 'tmdb_scrape',
+        label: '刮削数据缓存',
+        hint: 'TMDB 搜索/详情/剧集结果，清了重新刮削',
+        module: CacheModule.tmdb,
+        size: tmdbBytes,
+        clear: () async {
+          try {
+            await CacheStore.instance.clearItemsByPrefix('tmdb:');
+          } catch (_) {}
+        },
+      ),
+    );
+    onSize?.call();
+    out.add(
+      CacheEntryInfo(
+        id: 'tmdb_match',
+        label: 'TMDB 匹配记录',
+        hint: matchCount > 0 ? '已保存 $matchCount 条手动匹配，清了需重新匹配' : '暂无手动匹配记录',
+        module: CacheModule.tmdb,
+        size: -1,
+        clear: () async {
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            for (final k in prefs
+                .getKeys()
+                .where((x) => x.startsWith('tmdb_match'))
+                .toList()) {
+              await prefs.remove(k);
+            }
+          } catch (_) {}
+        },
+      ),
+    );
+    onSize?.call();
+
+    // ── 图片（内存 + 磁盘）────────────────────────────────────
+    var imageBytes = 0;
+    try {
+      imageBytes = PaintingBinding.instance.imageCache.currentSizeBytes;
+    } catch (_) {}
+    out.add(
+      CacheEntryInfo(
+        id: 'image_memory',
+        label: '内存图片缓存',
+        hint: '当前会话已解码的图片，清了只影响滚动流畅度',
+        module: CacheModule.app,
+        size: imageBytes,
+        clear: () async {
+          try {
+            PaintingBinding.instance.imageCache.clear();
+            PaintingBinding.instance.imageCache.clearLiveImages();
+          } catch (_) {}
+        },
+      ),
+    );
+    onSize?.call();
+
+    var diskImg = 0;
+    try {
+      // cached_network_image 把文件写在 getApplicationCacheDirectory() 里，
+      // 所以直接量那个目录 —— 不用去碰 DefaultCacheManager 的内部 store
+      //（它的目录字段不对外公开）。
+      diskImg = await _dirSize(await getApplicationCacheDirectory());
+    } catch (_) {}
+    out.add(
+      CacheEntryInfo(
+        id: 'image_disk',
+        label: '磁盘图片缓存',
+        hint: '封面/海报等网络图，清了会重新下载',
+        module: CacheModule.app,
+        size: diskImg,
+        clear: () async {
+          try {
+            await DefaultCacheManager().emptyCache();
+          } catch (_) {}
+        },
+      ),
+    );
+    onSize?.call();
+
+    // ── 数据（页面数据缓存，与影视业务缓存同源：CacheStore items）────
+    var dataBytes = 0;
+    try {
+      dataBytes = CacheStore.instance.cacheItemsByteSize();
+    } catch (_) {}
+    out.add(
+      CacheEntryInfo(
+        id: 'data_pages',
+        label: '页面数据缓存',
+        hint: '首页列表 / 详情 / 刮削结果，清了会重新拉取',
+        module: CacheModule.app,
+        size: dataBytes,
+        clear: () async {
+          try {
+            await CacheStore.instance.clearItemsCache();
+          } catch (_) {}
+        },
+      ),
+    );
+    onSize?.call();
+
+    // ── JS（源文件 JS 缓存）────────────────────────────────────
+    out.add(
+      CacheEntryInfo(
+        id: 'js_source',
+        label: '源 JS 缓存',
+        hint: '已下载的 Spider 源脚本文件',
+        module: CacheModule.app,
+        size: -1,
+        clear: () async {
+          try {
+            await NodeJSManager.instance.deleteSource();
+          } catch (_) {}
+        },
+      ),
+    );
+    onSize?.call();
+
+    // ── 临时文件 ──────────────────────────────────────────────
+    var tmpBytes = 0;
+    try {
+      tmpBytes = await _dirSize(await getTemporaryDirectory());
+    } catch (_) {}
+    out.add(
+      CacheEntryInfo(
+        id: 'temp_files',
+        label: '临时文件',
+        hint: '系统与第三方库的临时文件，可安全清理',
+        module: CacheModule.app,
+        size: tmpBytes,
+        clear: () async {
+          try {
+            await _deleteDirContents(await getTemporaryDirectory());
           } catch (_) {}
         },
       ),

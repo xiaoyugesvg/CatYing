@@ -500,20 +500,11 @@ class TmdbService extends GetxService {
       final detail = await _fetchDetail(type, id.toString());
       if (detail == null) return false;
       _apply(info, type, detail);
-      // 剧集：拉首季剧照+集标题（媒体库剧集缩略图条用）
+      // 剧集：拉首季剧照+集标题+每集简介（媒体库选集卡用）
       if (type == 'tv') {
         final season = _firstSeasonNumber(detail);
         final stills = await _fetchSeasonStills(id.toString(), season);
-        if (stills.isNotEmpty) {
-          info.episodeStills = stills.map((k, v) => MapEntry(k, v.still));
-          info.episodeTitles = stills.map((k, v) => MapEntry(k, v.title));
-          detail['__episode_stills'] = {
-            for (final e in stills.entries) '${e.key}': e.value.still,
-          };
-          detail['__episode_titles'] = {
-            for (final e in stills.entries) '${e.key}': e.value.title,
-          };
-        }
+        _applyEpisodeStills(info, detail, stills);
       }
       final ck = cacheKey(info.name, extractYear(info.note, info.year)?.toString() ?? '');
       await CacheStore.instance.setJsonCache('tmdb:$ck', {
@@ -565,7 +556,8 @@ class TmdbService extends GetxService {
       if (cached != null && cached.isNotEmpty) {
         final type = cached['__type'] as String? ?? 'movie';
         _apply(info, type, cached);
-        // 恢复剧集剧照 + 集标题（缓存里带 __episode_stills / __episode_titles）
+        // 恢复剧集剧照 + 集标题 + 每集简介/评分/日期/时长
+        // （缓存里带 __episode_stills / __episode_titles / __episode_details）
         final stills = cached['__episode_stills'];
         if (stills is Map && stills.isNotEmpty) {
           info.episodeStills = stills.map((k, v) =>
@@ -576,22 +568,23 @@ class TmdbService extends GetxService {
           info.episodeTitles = epTitles.map(
               (k, v) => MapEntry(int.tryParse('$k') ?? 0, '$v'));
         }
-        // 旧缓存（本轮逐集剧照功能上线前刮削的）没有剧照 →
-        // 命中缓存时也补拉每一集剧照并回写缓存，保证自动进入就能看到
-        if (type == 'tv' && info.episodeStills.isEmpty) {
+        final epDetails = cached['__episode_details'];
+        if (epDetails is Map && epDetails.isNotEmpty) {
+          info.episodeDetails = epDetails.map((k, v) => MapEntry(
+                int.tryParse('$k') ?? 0,
+                EpisodeDetail.fromJson(Map<String, dynamic>.from(v as Map)),
+              ));
+        }
+        // 旧缓存（本轮集卡功能上线前刮削的）可能没有剧照或每集简介 →
+        // 命中缓存时也补拉整季数据并回写缓存，保证自动进入就能看到
+        if (type == 'tv' &&
+            (info.episodeStills.isEmpty || info.episodeDetails.isEmpty)) {
           final tvId = (cached['id'] ?? '').toString();
           if (tvId.isNotEmpty) {
             final season = _firstSeasonNumber(cached);
             final s2 = await _fetchSeasonStills(tvId, season);
             if (s2.isNotEmpty) {
-              info.episodeStills = s2.map((k, v) => MapEntry(k, v.still));
-              info.episodeTitles = s2.map((k, v) => MapEntry(k, v.title));
-              cached['__episode_stills'] = {
-                for (final e in s2.entries) '${e.key}': e.value.still,
-              };
-              cached['__episode_titles'] = {
-                for (final e in s2.entries) '${e.key}': e.value.title,
-              };
+              _applyEpisodeStills(info, cached, s2);
               try {
                 await CacheStore.instance.setJsonCache('tmdb:$ck', cached);
               } catch (_) {}
@@ -625,22 +618,11 @@ class TmdbService extends GetxService {
         return false;
       }
       _apply(info, best.$1, detail);
-      // 剧集：拉首季剧照+集标题 → 媒体库「剧集缩略图条」用真实剧照与标题（参考图缺口）
+      // 剧集：拉首季剧照+集标题+每集简介 → 媒体库「选集卡」用真实剧照/标题/简介
       if (best.$1 == 'tv') {
         final season = _firstSeasonNumber(detail);
         final stills = await _fetchSeasonStills(best.$2, season);
-        if (stills.isNotEmpty) {
-          info.episodeStills =
-              stills.map((k, v) => MapEntry(k, v.still));
-          info.episodeTitles =
-              stills.map((k, v) => MapEntry(k, v.title));
-          detail['__episode_stills'] = {
-            for (final e in stills.entries) '${e.key}': e.value.still,
-          };
-          detail['__episode_titles'] = {
-            for (final e in stills.entries) '${e.key}': e.value.title,
-          };
-        }
+        _applyEpisodeStills(info, detail, stills);
       }
       AppLog.instance.log(
           '[TmdbService] enrich 成功: type=${best.$1} id=${best.$2} '
@@ -822,34 +804,139 @@ class TmdbService extends GetxService {
     return 1;
   }
 
-  /// 拉取某一季的剧集剧照与标题（键 = 集号，值 = still URL + 集标题）。
-  /// 供媒体库刮削视图「剧集缩略图条」使用（参考图：缩略图 + 集标题）；
+  /// 代理优先，失败自动官方直连兜底一次。
+  /// 逐集剧照接口（每集一次请求）在代理偶发失败时靠它保底，
+  /// 避免整季剧照因个别请求失败而全空。
+  Future<dynamic> _getWithFallback(String path,
+      {Map<String, dynamic>? query}) async {
+    try {
+      final r = await _dio.get('$effectiveApiBase$path',
+          queryParameters: query);
+      return r.data;
+    } catch (_) {
+      if (effectiveApiBase != _base) {
+        try {
+          final r = await _dio.get('$_base$path', queryParameters: query);
+          return r.data;
+        } catch (_) {}
+      }
+      rethrow;
+    }
+  }
+
+  /// 把整季剧集数据（剧照/标题/简介/评分/日期/时长）写入 VodInfo 与刮削缓存。
+  /// applyCandidate / enrich / 缓存补拉 三处共用，保证字段一致。
+  void _applyEpisodeStills(
+    VodInfo info,
+    Map<String, dynamic> detail,
+    Map<
+        int,
+        ({
+          String still,
+          String title,
+          String overview,
+          double rating,
+          String airDate,
+          int runtime,
+        })> stills,
+  ) {
+    if (stills.isEmpty) return;
+    info.episodeStills = stills.map((k, v) => MapEntry(k, v.still));
+    info.episodeTitles = stills.map((k, v) => MapEntry(k, v.title));
+    info.episodeDetails = stills.map(
+      (k, v) => MapEntry(
+        k,
+        EpisodeDetail(
+          overview: v.overview,
+          rating: v.rating,
+          airDate: v.airDate,
+          runtime: v.runtime,
+        ),
+      ),
+    );
+    detail['__episode_stills'] = {
+      for (final e in stills.entries) '${e.key}': e.value.still,
+    };
+    detail['__episode_titles'] = {
+      for (final e in stills.entries) '${e.key}': e.value.title,
+    };
+    detail['__episode_details'] = {
+      for (final e in stills.entries)
+        '${e.key}': <String, dynamic>{
+          'overview': e.value.overview,
+          'rating': e.value.rating,
+          'airDate': e.value.airDate,
+          'runtime': e.value.runtime,
+        },
+    };
+  }
+
+  /// 拉取某一季的剧集剧照与标题（键 = 集号）。
+  /// 每集数据：still 剧照 + 标题 + 简介 + 评分 + 播出日期 + 时长。
+  /// 供媒体库刮削视图「选集卡」使用（封面 + 两行简介 + 点击弹窗完整简介）；
   /// 失败静默，不影响刮削主流程。
-  /// 拉取指定季的「每一集」剧照 + 集标题。
   ///
   /// 关键点：TMDB 的 `/tv/{id}/season/{n}` 响应里**没有** still_path，
-  /// 每集剧照只能通过 `/tv/{id}/season/{n}/episode/{m}/images` 逐集获取，
-  /// 所以这里分两步：先拿集号/集名列表，再对每集并发拉 images（取第一张 still）。
-  Future<Map<int, ({String still, String title})>> _fetchSeasonStills(
-      String tvId, int season) async {
-    final out = <int, ({String still, String title})>{};
+  /// 每集剧照只能通过 `/tv/{id}/season/{n}/episode/{m}/images` 逐集获取；
+  /// 但简介/评分/日期/时长 season 接口**一次性全带回**，无需逐集请求。
+  /// 所以这里分两步：先拿集元数据，再对每集并发拉 images（取第一张 still）。
+  Future<
+      Map<int,
+          ({
+            String still,
+            String title,
+            String overview,
+            double rating,
+            String airDate,
+            int runtime,
+          })>> _fetchSeasonStills(String tvId, int season) async {
+    final out =
+        <int,
+            ({
+              String still,
+              String title,
+              String overview,
+              double rating,
+              String airDate,
+              int runtime,
+            })>{};
     try {
-      final res = await _dio.get(
-        '${effectiveApiBase}/tv/$tvId/season/$season',
-        queryParameters: {'language': 'zh-CN'},
+      final data = await _getWithFallback(
+        '/tv/$tvId/season/$season',
+        query: {'language': 'zh-CN'},
       );
-      final data = Map<String, dynamic>.from(res.data as Map);
-      final eps = data['episodes'];
+      final eps = (data as Map)['episodes'];
       if (eps is! List || eps.isEmpty) return out;
-      // 集号 → 集名（缩略图条无图时仍有标题可用）
-      final epMeta = <int, String>{};
+      // 集号 → 集元数据（标题/简介/评分/日期/时长，season 接口一次带回）
+      final epMeta =
+          <int,
+              ({
+                String title,
+                String overview,
+                double rating,
+                String airDate,
+                int runtime,
+              })>{};
       for (final e in eps) {
         if (e is! Map) continue;
         final n = (e['episode_number'] as num?)?.toInt() ?? 0;
         if (n <= 0) continue;
-        final title = (e['name'] ?? '').toString().trim();
-        epMeta[n] = title;
-        out[n] = (still: '', title: title);
+        final meta = (
+          title: (e['name'] ?? '').toString().trim(),
+          overview: (e['overview'] ?? '').toString().trim(),
+          rating: (e['vote_average'] as num?)?.toDouble() ?? 0,
+          airDate: (e['air_date'] ?? '').toString(),
+          runtime: (e['runtime'] as num?)?.toInt() ?? 0,
+        );
+        epMeta[n] = meta;
+        out[n] = (
+          still: '',
+          title: meta.title,
+          overview: meta.overview,
+          rating: meta.rating,
+          airDate: meta.airDate,
+          runtime: meta.runtime,
+        );
       }
       // 逐集并发拉剧照（默认 5 路并发，失败的单集保持无图）
       final ns = epMeta.keys.toList()..sort();
@@ -861,17 +948,27 @@ class TmdbService extends GetxService {
           final n = ns[idx];
           batch.add(() async {
             try {
-              final r = await _dio.get(
-                '${effectiveApiBase}/tv/$tvId/season/$season/episode/$n/images',
+              final d = await _getWithFallback(
+                '/tv/$tvId/season/$season/episode/$n/images',
               );
-              final d = Map<String, dynamic>.from(r.data as Map);
-              final stills = d['stills'];
+              final stills = (d as Map)['stills'];
               if (stills is List && stills.isNotEmpty && stills.first is Map) {
                 final sp = (stills.first['file_path'] ?? '').toString();
                 if (sp.isNotEmpty) {
+                  final meta = epMeta[n] ?? (
+                    title: '',
+                    overview: '',
+                    rating: 0.0,
+                    airDate: '',
+                    runtime: 0,
+                  );
                   out[n] = (
                     still: '${effectiveImgBase}/w300$sp',
-                    title: epMeta[n] ?? '',
+                    title: meta.title,
+                    overview: meta.overview,
+                    rating: meta.rating,
+                    airDate: meta.airDate,
+                    runtime: meta.runtime,
                   );
                 }
               }
