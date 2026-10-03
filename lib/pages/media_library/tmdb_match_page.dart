@@ -11,7 +11,10 @@ import '../../widgets/app_toast.dart';
 /// 点击条目后 `Navigator.pop` 返回 `(type, item)`，
 /// 由媒体库详情页用该候选直接刮削填充数据。
 class TmdbMatchPage extends StatefulWidget {
-  const TmdbMatchPage({super.key});
+  const TmdbMatchPage({super.key, this.initialKeyword = ''});
+
+  /// 进入页面时自动填入并搜索的片名（媒体库详情页传入当前视频名）
+  final String initialKeyword;
 
   @override
   State<TmdbMatchPage> createState() => _TmdbMatchPageState();
@@ -29,6 +32,18 @@ class _TmdbMatchPageState extends State<TmdbMatchPage> {
   String _tab = '综合';
 
   static const _tabs = ['综合', '电影', '电视剧'];
+
+  @override
+  void initState() {
+    super.initState();
+    // 进入页面即用当前片名自动搜索（无需手动输入）
+    if (widget.initialKeyword.trim().isNotEmpty) {
+      _input.text = widget.initialKeyword.trim();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _search(widget.initialKeyword.trim());
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -54,7 +69,8 @@ class _TmdbMatchPageState extends State<TmdbMatchPage> {
     setState(() {
       _loading = false;
       if (list.isEmpty) {
-        _error = '搜索无结果（TMDB 可能未收录该片）';
+        _error = TmdbService.instance.lastSearchError.value ??
+            '搜索无结果（TMDB 可能未收录该片）';
         _candidates = const <(String, Map<String, dynamic>)>[];
       } else {
         _candidates = list;

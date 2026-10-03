@@ -277,33 +277,8 @@ class _SearchPageState extends State<SearchPage> {
             ),
           ),
           const SizedBox(width: AppTheme.spacingSM),
-          // 「搜索」实心按钮（主题色胶囊：跟随深浅模式，深色下不再是死黑一团）
-          GestureDetector(
-            onTap: () {
-              final text = _inputController.text.trim();
-              if (text.isNotEmpty) {
-                _searchController.keyword.value = text;
-                _searchController.search();
-              }
-            },
-            child: Container(
-              height: 34,
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: AppTheme.accentColor,
-                borderRadius: BorderRadius.circular(17),
-              ),
-              child: Text(
-                '搜索',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
+          // 「搜索」按钮已移除：回车 / 输入防抖自动搜索即可触发，
+          // 右侧不再有灰色实心按钮（用户要求去掉）
         ],
       ),
     );

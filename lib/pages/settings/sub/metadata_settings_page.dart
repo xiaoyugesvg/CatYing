@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -119,7 +120,7 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
               _labeledField(
                 label: 'API 代理地址',
                 controller: TextEditingController(text: tmdb.apiProxy.value),
-                hint: '例如 https://api.themoviedb.org，留空则使用官方地址',
+                hint: '填基础链接即可（自动补 /3），如 https://tmdb.huamu.shop',
                 onChanged: tmdb.setApiProxy,
                 trailing: _copyButton(tmdb.apiProxy.value),
               ),
@@ -127,7 +128,7 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
               _labeledField(
                 label: '图片代理地址',
                 controller: TextEditingController(text: tmdb.imgProxy.value),
-                hint: '例如 https://image.tmdb.org/t/p，留空则使用官方地址',
+                hint: '留空自动复用 API 代理（补 /t/p），也可单独填',
                 onChanged: tmdb.setImgProxy,
                 trailing: _copyButton(tmdb.imgProxy.value),
               ),
@@ -389,9 +390,9 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
     AppToast.message(r.message, isError: true);
   }
 
-  /// 刮削数据测试：输入片名 → 真实搜索 TMDB → 展示候选与获取状态
+  /// 刮削数据测试：自己输入片名 → 真实搜索 TMDB → 弹出候选的原始 JSON 数据
   Future<void> _runScrapeTest() async {
-    final input = TextEditingController(text: '西游记');
+    final input = TextEditingController();
     final title = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -408,7 +409,7 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
           autofocus: true,
           style: TextStyle(color: AppTheme.textPrimary),
           decoration: InputDecoration(
-            hintText: '输入片名，例如：西游记',
+            hintText: '输入视频名称，例如：大唐妖探',
             hintStyle: TextStyle(
               color: AppTheme.textTertiary,
               fontSize: AppTheme.fontFootnote,
@@ -456,6 +457,12 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
       List<(String, Map<String, dynamic>)> candidates,
     }) r,
   ) {
+    // 原始 JSON：把每个候选（含 type 标记）序列化成缩进 JSON，可直接复制核对
+    final jsonText = const JsonEncoder.withIndent('  ').convert(
+      r.candidates
+          .map((e) => <String, dynamic>{'type': e.$1, ...e.$2})
+          .toList(),
+    );
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -478,8 +485,46 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 12),
-              if (r.candidates.isNotEmpty)
+              const SizedBox(height: 8),
+              if (r.candidates.isNotEmpty) ...[
+                Text(
+                  '候选 JSON（${r.candidates.length} 条，可长按复制）：',
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontFootnote,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  height: 180,
+                  width: double.maxFinite,
+                  decoration: BoxDecoration(
+                    color: AppTheme.backgroundTertiary,
+                    borderRadius:
+                        BorderRadius.circular(AppTheme.glassRadiusSmall),
+                  ),
+                  padding: const EdgeInsets.all(8),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      jsonText,
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 10.5,
+                        height: 1.45,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '点击候选查看详情刮削（与媒体库同一链路）：',
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontFootnote,
+                  ),
+                ),
+                const SizedBox(height: 4),
                 Flexible(
                   child: ListView.separated(
                     shrinkWrap: true,
@@ -559,6 +604,7 @@ class _MetadataSettingsPageState extends State<MetadataSettingsPage> {
                     },
                   ),
                 ),
+              ],
             ],
           ),
         ),

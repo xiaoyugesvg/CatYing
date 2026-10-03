@@ -122,7 +122,27 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
     final tmdb = TmdbService.instance;
     final info = _info;
     if (!tmdb.configured || info == null) return;
-    final ok = await tmdb.enrich(info, forceNetwork: force);
+    var ok = await tmdb.enrich(info, forceNetwork: force);
+    // 整名未命中 → 自动拆词兜底一次（媒体库要求数据必须来自 TMDB）：
+    // 用 searchCandidates（自带 cleanTitle + 语言降级 + 拆词）取候选，
+    // 候选标题与片名相关（互含/前缀匹配）才自动应用，避免错配。
+    if (!ok && !force) {
+      final year = TmdbService.extractYear(info.note, info.year);
+      final cands = await tmdb.searchCandidates(info.name, year);
+      final clean = TmdbService.cleanTitle(info.name);
+      for (final (type, item) in cands.take(8)) {
+        final n = (item['title'] ?? item['name'] ?? '').toString();
+        if (n.isEmpty || clean.isEmpty) continue;
+        final a = n.contains(clean) || clean.contains(n);
+        final prefix = clean.length >= 2 &&
+            (n.startsWith(clean.substring(0, 2)) ||
+                clean.startsWith(n.length >= 2 ? n.substring(0, 2) : n));
+        if (a || prefix) {
+          ok = await tmdb.applyCandidate(info, type, item);
+          break;
+        }
+      }
+    }
     if (!mounted) return;
     setState(() {
       _tmdbAttempted = true;
@@ -528,14 +548,18 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
       final eps = info.currentEpisodes;
 
       return Scaffold(
-        backgroundColor: bg,
+        backgroundColor: Colors.black,
         body: Stack(
           children: [
+            // 全屏壁纸：视频封面（backdrop 优先）铺满整屏 + 顶部/底部渐变遮罩
+            Positioned.fill(child: _buildWallpaper(info)),
+            // 内容浮层：标题贴顶悬浮在封面上，内容可整体上滑、放手回弹
             ListView(
               controller: _scrollController,
+              physics: const BouncingScrollPhysics(),
               padding: EdgeInsets.zero,
               children: [
-                _buildHero(info, title),
+                _buildHeroHeader(info, title),
                 _buildMetaButtons(info),
                 if (eps.isNotEmpty) _buildEpisodes(info, eps),
                 if (info.director.isNotEmpty) _buildDirector(info),
@@ -563,17 +587,67 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                 const SizedBox(height: 16),
               ],
             ),
+            // 顶部操作栏悬浮（返回 + 手动匹配 T + 收藏），不随内容滚动
+            _buildTopBar(info),
           ],
         ),
       );
     });
   }
 
-  // ---------- 头图区 ----------
+  // ---------- 全屏壁纸（视频封面铺满） ----------
 
-  Widget _buildHero(VodInfo info, String title) {
-    final backdrop =
-        info.backdrop.isNotEmpty ? info.backdrop : (info.pic.isNotEmpty ? info.pic : '');
+  Widget _buildWallpaper(VodInfo info) {
+    final backdrop = info.backdrop.isNotEmpty
+        ? info.backdrop
+        : (info.pic.isNotEmpty ? info.pic : '');
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (backdrop.isNotEmpty)
+          CachedNetworkImage(
+            imageUrl: backdrop,
+            fit: BoxFit.cover,
+            placeholder: (_, __) => ColoredBox(color: Colors.black),
+            errorWidget: (_, __, ___) => ColoredBox(color: Colors.black),
+          )
+        else
+          ColoredBox(color: AppTheme.backgroundPrimary),
+        // 顶部轻遮罩：保证状态栏 / 操作栏可读
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Colors.black54, Colors.transparent],
+              stops: [0.0, 0.35],
+            ),
+          ),
+        ),
+        // 底部渐变遮罩：保证按钮 / 剧集 / 演职员 / 简介文字可读
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: Container(
+            height: 340,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.transparent, Colors.black87],
+                stops: const [0.0, 1.0],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ---------- 贴顶标题区（悬浮在壁纸上，打开即见） ----------
+
+  Widget _buildHeroHeader(VodInfo info, String title) {
     // 元数据行：年份 · 评分 · 英文名/别名 · 时长 · 集数 · 状态 · 上映日期
     final metaParts = <String>[
       if (info.year.isNotEmpty) info.year,
@@ -586,123 +660,79 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
       if (info.releaseDate.isNotEmpty) info.releaseDate,
     ];
     final genreLine = info.typeName.replaceAll(' / ', ' |');
-    // 渐变遮罩用页面底色（浅色=宣纸、深色=墨夜），跟随主题明暗
-    final bg = AppTheme.backgroundPrimary;
+    // 壁纸场景固定白色系文字（背景是深色海报，不随主题明暗）
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 70, 16, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 28,
+                fontWeight: FontWeight.w700,
+                height: 1.15,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (metaParts.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                metaParts.join(' · '),
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ],
+            if (genreLine.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                genreLine,
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 
-    return SizedBox(
-      // 壁纸只占页面一半多一点（屏高 55%，钳制 380~520）
-      height: (MediaQuery.of(context).size.height * 0.55).clamp(380.0, 520.0),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // 背景图（backdrop 优先，无则海报）
-          if (backdrop.isNotEmpty)
-            CachedNetworkImage(
-              imageUrl: backdrop,
-              fit: BoxFit.cover,
-              placeholder: (_, __) =>
-                  ColoredBox(color: AppTheme.backgroundSecondary),
-              errorWidget: (_, __, ___) =>
-                  ColoredBox(color: AppTheme.backgroundSecondary),
-            )
-          else
-            ColoredBox(color: AppTheme.backgroundSecondary),
-          // 顶部操作栏：返回 + 收藏
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                child: Row(
-                  children: [
-                    _circleIconButton(
-                      Icons.arrow_back,
-                      onTap: () => Get.back(),
-                    ),
-                    const Spacer(),
-                    // 手动匹配 TMDB：搜索 → 点选候选 → 自动刮削回填
-                    _circleIconButton(
-                      Icons.search,
-                      onTap: _openTmdbMatch,
-                    ),
-                    const SizedBox(width: 10),
-                    // 收藏（仅主路径有 Video 时可用；空心/实心切换）
-                    if (_video != null)
-                      _circleIconButton(
-                        _collected ? Icons.favorite : Icons.favorite_border,
-                        onTap: _toggleCollect,
-                      ),
-                  ],
-                ),
+  // ---------- 顶部操作栏（悬浮，不随内容滚动） ----------
+
+  Widget _buildTopBar(VodInfo info) {
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          child: Row(
+            children: [
+              _circleIconButton(
+                Icons.arrow_back,
+                onTap: () => Get.back(),
               ),
-            ),
-          ),
-          // 底部渐变遮罩（透明 → 底色 0.75 → 底色 0.95）
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: Container(
-              height: 230,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.transparent,
-                    bg.withValues(alpha: 0.75),
-                    bg.withValues(alpha: 0.95),
-                  ],
-                  stops: const [0.0, 0.55, 1.0],
-                ),
+              const Spacer(),
+              // 手动匹配 TMDB：搜索 → 点选候选 → 自动刮削回填
+              //（T 字图标，背景与其它圆形按钮一致）
+              _circleIconButton(
+                Icons.search,
+                onTap: _openTmdbMatch,
+                label: 'T',
               ),
-            ),
-          ),
-          // 标题区：名称一行 + 元数据一行 + 类型一行
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: 28,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w700,
-                    height: 1.15,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+              const SizedBox(width: 10),
+              // 收藏（仅主路径有 Video 时可用；空心/实心切换）
+              if (_video != null)
+                _circleIconButton(
+                  _collected ? Icons.favorite : Icons.favorite_border,
+                  onTap: _toggleCollect,
                 ),
-                if (metaParts.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    metaParts.join(' · '),
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-                if (genreLine.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    genreLine,
-                    style: TextStyle(
-                      color: AppTheme.textTertiary,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ],
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -725,7 +755,9 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
   Future<void> _openTmdbMatch() async {
     final result = await Navigator.push<(String, Map<String, dynamic>)>(
       context,
-      MaterialPageRoute(builder: (_) => const TmdbMatchPage()),
+      MaterialPageRoute(
+        builder: (_) => TmdbMatchPage(initialKeyword: _info?.name ?? ''),
+      ),
     );
     if (result == null || !mounted) return;
     final info = _info;
@@ -807,7 +839,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
               size: 20,
               color: enabled
                   ? (filled ? Colors.white : accent)
-                  : AppTheme.textTertiary,
+                  : Colors.white54,
             ),
             const SizedBox(width: 6),
             Text(
@@ -815,7 +847,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
               style: TextStyle(
                 color: enabled
                     ? (filled ? Colors.white : accent)
-                    : AppTheme.textTertiary,
+                    : Colors.white54,
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
               ),
@@ -835,9 +867,10 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
           child: Text(
-            '剧集  ${eps.length}集',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
+            // 集数优先用 TMDB 官方总集数（参考图 "47 ep"），源解析集数兜底
+            '剧集  ${info.episodeCount > 0 ? info.episodeCount : eps.length}集',
+            style: const TextStyle(
+              color: Colors.white,
               fontSize: 16,
               fontWeight: FontWeight.w700,
             ),
@@ -859,7 +892,8 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
 
   Widget _episodeCard(VodInfo info, List<Episode> eps, int i) {
     final ep = eps[i];
-    final still = info.episodeStills[i + 1] ?? '';
+    // 剧照优先；电视剧有逐集 still，电影没有 → 回退 TMDB 海报（集卡也有图）
+    final still = info.episodeStills[i + 1] ?? info.pic ?? '';
     final epTitle = info.episodeTitles[i + 1] ?? ep.name;
     final selected = i == _selectedIndex;
     final accent = AppTheme.accentColor;
@@ -885,13 +919,12 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                 CachedNetworkImage(
                   imageUrl: still,
                   fit: BoxFit.cover,
-                  placeholder: (_, __) =>
-                      ColoredBox(color: AppTheme.backgroundSecondary),
+                  placeholder: (_, __) => ColoredBox(color: Colors.black26),
                   errorWidget: (_, __, ___) =>
-                      ColoredBox(color: AppTheme.backgroundSecondary),
+                      ColoredBox(color: Colors.black26),
                 )
               else
-                ColoredBox(color: AppTheme.backgroundSecondary),
+                ColoredBox(color: Colors.black26),
               // 底部渐变 + 集号 + 标题
               Positioned(
                 left: 0,
@@ -905,7 +938,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                       end: Alignment.bottomCenter,
                       colors: [
                         Colors.transparent,
-                        AppTheme.textPrimary.withValues(alpha: 0.85),
+                        Colors.white.withValues(alpha: 0.85),
                       ],
                     ),
                   ),
@@ -927,7 +960,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                           style: TextStyle(
                             color: selected
                                 ? Colors.white
-                                : AppTheme.textPrimary,
+                                : Colors.white,
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
                           ),
@@ -936,8 +969,8 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                       const SizedBox(height: 3),
                       Text(
                         epTitle,
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
+                        style: const TextStyle(
+                          color: Colors.white,
                           fontSize: 11,
                         ),
                         maxLines: 1,
@@ -961,7 +994,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
       child: Text(
         '导演: ${info.director}',
-        style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+        style: const TextStyle(color: Colors.white70, fontSize: 13),
       ),
     );
   }
@@ -976,8 +1009,8 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
           child: Text(
             '演职员',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
+            style: const TextStyle(
+              color: Colors.white,
               fontSize: 16,
               fontWeight: FontWeight.w700,
             ),
@@ -998,22 +1031,22 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                   children: [
                     CircleAvatar(
                       radius: 32,
-                      backgroundColor: AppTheme.backgroundSecondary,
+                      backgroundColor: Colors.black26,
                       foregroundImage: m.hasPhoto
                           ? CachedNetworkImageProvider(m.avatarUrl)
                           : null,
                       child: m.hasPhoto
                           ? null
-                          : Icon(
+                          : const Icon(
                               Icons.person_outline,
-                              color: AppTheme.textTertiary,
+                              color: Colors.white54,
                             ),
                     ),
                     const SizedBox(height: 6),
                     Text(
                       m.name,
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
+                      style: const TextStyle(
+                        color: Colors.white,
                         fontSize: 12,
                       ),
                       maxLines: 1,
@@ -1022,8 +1055,8 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                     if (m.character.isNotEmpty) ...[
                       Text(
                         m.character,
-                        style: TextStyle(
-                          color: AppTheme.textTertiary,
+                        style: const TextStyle(
+                          color: Colors.white54,
                           fontSize: 11,
                         ),
                         maxLines: 1,
@@ -1051,8 +1084,8 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
         children: [
           Text(
             '简介',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
+            style: const TextStyle(
+              color: Colors.white,
               fontSize: 16,
               fontWeight: FontWeight.w700,
             ),
@@ -1060,8 +1093,8 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
           const SizedBox(height: 8),
           Text(
             info.des,
-            style: TextStyle(
-              color: AppTheme.textSecondary,
+            style: const TextStyle(
+              color: Colors.white70,
               fontSize: 13,
               height: 1.5,
             ),
@@ -1102,12 +1135,12 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.info_outline, size: 15, color: AppTheme.textTertiary),
+          Icon(Icons.info_outline, size: 15, color: Colors.white54),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               'TMDB 未匹配到「${info.name}」的详情数据，导演 / 演员 / 简介暂缺',
-              style: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
+              style: const TextStyle(color: Colors.white54, fontSize: 12),
             ),
           ),
           GestureDetector(
@@ -1138,8 +1171,8 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
           child: Text(
             lead.isNotEmpty ? '$lead 的相关作品' : '相关推荐',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
+            style: const TextStyle(
+              color: Colors.white,
               fontSize: 16,
               fontWeight: FontWeight.w700,
             ),
@@ -1215,7 +1248,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
             const SizedBox(height: 6),
             Text(
               title,
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
+              style: const TextStyle(color: Colors.white, fontSize: 12),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -1223,7 +1256,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
               Text(
                 [if (year.isNotEmpty) year, if (rating > 0) '${rating.toStringAsFixed(1)}★']
                     .join(' · '),
-                style: TextStyle(color: AppTheme.textTertiary, fontSize: 11),
+                style: const TextStyle(color: Colors.white54, fontSize: 11),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1243,8 +1276,8 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
           child: Text(
             '类似作品',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
+            style: const TextStyle(
+              color: Colors.white,
               fontSize: 16,
               fontWeight: FontWeight.w700,
             ),
@@ -1297,18 +1330,17 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                     ? CachedNetworkImage(
                         imageUrl: item.posterUrl,
                         fit: BoxFit.cover,
-                        placeholder: (_, __) =>
-                            ColoredBox(color: AppTheme.backgroundSecondary),
+                        placeholder: (_, __) => ColoredBox(color: Colors.black26),
                         errorWidget: (_, __, ___) =>
-                            ColoredBox(color: AppTheme.backgroundSecondary),
+                            ColoredBox(color: Colors.black26),
                       )
-                    : ColoredBox(color: AppTheme.backgroundSecondary),
+                    : ColoredBox(color: Colors.black26),
               ),
             ),
             const SizedBox(height: 6),
             Text(
               item.title,
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
+              style: const TextStyle(color: Colors.white, fontSize: 12),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -1328,7 +1360,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
 
   // ---------- 通用 ----------
 
-  Widget _circleIconButton(IconData icon, {VoidCallback? onTap}) {
+  Widget _circleIconButton(IconData icon, {VoidCallback? onTap, String? label}) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
@@ -1340,7 +1372,20 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
           shape: BoxShape.circle,
           border: Border.all(color: AppTheme.borderLight, width: 0.6),
         ),
-        child: Icon(icon, color: AppTheme.textPrimary, size: 20),
+        child: label != null
+            // 文字型圆形按钮（如「匹配 TMDB」的 T 字）
+            ? Center(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                  ),
+                ),
+              )
+            : Icon(icon, color: AppTheme.textPrimary, size: 20),
       ),
     );
   }

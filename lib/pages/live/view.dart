@@ -120,12 +120,23 @@ class _LivePageState extends State<LivePage> {
         }
         final useAv = Platform.isIOS && _avPlayer != null;
         if (useAv) {
+          // ⚠️ iOS 共享原生 AvEngine（AVPlayer 单例）：点播/音乐最后
+          // open 过的话，原生 item 已被它们的内容覆盖，直接 play() 恢复的
+          // 是**别人的画面和声音**（"打开直播结果还在播影视"）。
+          // 这里一律重新 open 当前直播流，保证切回直播播的一定是直播。
+          final want = _controller.currentChannel?.playUrl ?? '';
+          if (want.isNotEmpty) {
+            _playChannel(want);
+            return;
+          }
+          unawaited(AudioFocus.request('live'));
           try {
             _avPlayer?.play();
           } catch (e) {
             _autoplayCurrent();
           }
         } else {
+          unawaited(AudioFocus.request('live'));
           try {
             _player?.play();
           } catch (e) {
@@ -180,6 +191,9 @@ class _LivePageState extends State<LivePage> {
     if (url.isEmpty) return;
     _everOpened = true;
     _playError = null;
+    // 直播要出声了 → 让点播/音乐先闭嘴（AudioFocus 三方互斥：
+    // 任何开播/切台/恢复路径都必须声明焦点，缺一路就会"双声"）
+    unawaited(AudioFocus.request('live'));
     // 切台时强制显示控制栏并重置自动隐藏计时
     _showControls();
     // 切台时先亮起「加载中」遮罩：新流从 open 到出画面有几百毫秒到几秒，

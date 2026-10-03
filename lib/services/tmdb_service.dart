@@ -44,13 +44,30 @@ class TmdbService extends GetxService {
   final apiKey = ''.obs;
   final autoScrape = true.obs;
 
-  /// 实际生效的 API base（代理优先）
-  String get effectiveApiBase =>
-      apiProxy.value.trim().isNotEmpty ? apiProxy.value.trim() : _base;
+  /// 实际生效的 API base（代理优先）。
+  /// 自动规范化：剥尾斜杠；地址未含 /3 前缀时自动补上（TMDB API 统一前缀），
+  /// 因此填 `https://xxx` 或 `https://xxx/` 或 `https://xxx/3` 均等价可用。
+  String get effectiveApiBase {
+    final p = apiProxy.value.trim().replaceAll(RegExp(r'/+$'), '');
+    if (p.isEmpty) return _base;
+    return p.endsWith('/3') ? p : '$p/3';
+  }
 
-  /// 实际生效的图片 base（代理优先）
-  String get effectiveImgBase =>
-      imgProxy.value.trim().isNotEmpty ? imgProxy.value.trim() : _img;
+  /// 实际生效的图片 base（代理优先）。
+  /// 自动规范化：剥尾斜杠；未含 /t/p 前缀时自动补上。
+  /// 图片代理留空时，自动复用 API 代理的同域名（双路由 Worker 的 /t/p），
+  /// 因此用户只需填一个「API 代理」链接即可。
+  String get effectiveImgBase {
+    final p = imgProxy.value.trim().replaceAll(RegExp(r'/+$'), '');
+    if (p.isNotEmpty) return p.endsWith('/t/p') ? p : '$p/t/p';
+    final a = apiProxy.value.trim().replaceAll(RegExp(r'/+$'), '');
+    if (a.isNotEmpty) {
+      // 用户若在 API 代理里带了 /3，图片推导时先去掉
+      final base = a.endsWith('/3') ? a.substring(0, a.length - 2) : a;
+      return '$base/t/p';
+    }
+    return _img;
+  }
 
   /// 详情页是否展示「演职人员」区（默认开）
   final showCast = true.obs;
@@ -68,6 +85,9 @@ class TmdbService extends GetxService {
   /// 最近一次 enrich 失败原因（供媒体库视图引导卡显示精确原因；
   /// 未配置 Key / 搜索无结果 / 网络异常 分开提示）
   final lastEnrichError = RxnString();
+
+  /// 最近一次手动搜索失败原因（匹配 TMDB 页空态显示精确原因）
+  final lastSearchError = RxnString();
 
   Dio? _dioInstance;
   String _dioApiKey = '';
@@ -353,18 +373,119 @@ class TmdbService extends GetxService {
       String title, int? year) async {
     final out = <(String, Map<String, dynamic>)>[];
     if (!configured) return out;
-    for (final type in ['movie', 'tv']) {
-      try {
-        final qp = <String, dynamic>{'query': title};
-        if (year != null) {
-          qp[type == 'movie' ? 'year' : 'first_air_date_year'] = '$year';
+    final clean = cleanTitle(title);
+    if (clean.isEmpty) return out;
+    lastSearchError.value = null;
+    // 用独立 Dio：全局 _dio 固定带 language=zh-CN，无法"不带语言重试"。
+    // 有的代理/网络对 zh-CN + 中文 query 组合处理异常（整名搜索返回空），
+    // 所以这里自己控制参数，按「zh-CN → 不带语言」两级降级。
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 12),
+      receiveTimeout: const Duration(seconds: 15),
+    ));
+    // Key 池：用户填的 Key 优先；若被拒绝（失效/限流）自动用内置默认 Key 兜底
+    //（默认 Key 即用户之前确认可用的 Key，避免"填了 Key 反而搜不到"）。
+    final keys = <String>{apiKey.value.trim(), _defaultApiKey}.toList();
+    for (final key in keys) {
+      if (out.isNotEmpty) break;
+      for (final lang in const ['zh-CN', '']) {
+        if (out.isNotEmpty) break;
+        for (final type in const ['movie', 'tv']) {
+          try {
+            final qp = <String, dynamic>{
+              'query': clean,
+              'api_key': key,
+              if (lang.isNotEmpty) 'language': lang,
+            };
+            if (year != null) {
+              qp[type == 'movie' ? 'year' : 'first_air_date_year'] = '$year';
+            }
+            final res =
+                await dio.get('${effectiveApiBase}/search/$type',
+                    queryParameters: qp);
+            // TMDB 对错误请求（无效 Key / 限流等）有时返回 HTTP 200 + JSON 错误体，
+            // 必须检查 status_code，否则被当成"无结果"掩盖。
+            final body = res.data;
+            if (body is Map && body['status_code'] != null) {
+              final sm = (body['status_message'] ?? '').toString();
+              lastSearchError.value =
+                  'TMDB 返回错误：$sm（${body['status_code']}）';
+              continue;
+            }
+            final results = (body['results'] as List?) ?? const [];
+            for (final r in results.take(6)) {
+              out.add((type, Map<String, dynamic>.from(r as Map)));
+            }
+          } on DioException catch (e) {
+            final code = e.response?.statusCode;
+            if (code == 401 || code == 403) {
+              // Key 被拒：换下一个 Key 重试
+              lastSearchError.value = 'API Key 无效（HTTP $code），已用备用 Key 重试';
+            } else if (e.type == DioExceptionType.connectionError ||
+                e.type == DioExceptionType.connectionTimeout ||
+                e.type == DioExceptionType.receiveTimeout) {
+              lastSearchError.value =
+                  '无法连接 TMDB 官方 API（网络被屏蔽/不通？）请在设置→TMDB管理→API代理填写可用代理地址';
+            } else {
+              lastSearchError.value = '搜索请求失败：HTTP ${code ?? '-'}';
+            }
+          } catch (_) {}
         }
-        final res = await _dio.get('${effectiveApiBase}/search/$type', queryParameters: qp);
-        final results = (res.data['results'] as List?) ?? const [];
-        for (final r in results.take(5)) {
-          out.add((type, Map<String, dynamic>.from(r as Map)));
+      }
+    }
+    // 整名搜不到 → 从后往前截断拆词重试：
+    // 兼容 Spider 源标题带别名/分隔差异（如「大唐妖探·2026」在 TMDB 收录名不同）。
+    // 拆词结果可能较宽，交给用户在候选列表里挑选（匹配页的意义所在）。
+    if (out.isEmpty && clean.length > 2) {
+      for (var cut = 1; cut < clean.length; cut++) {
+        final sub = clean.substring(0, clean.length - cut).trim();
+        if (sub.length < 2) break;
+        for (final type in const ['movie', 'tv']) {
+          try {
+            final res = await dio.get('${effectiveApiBase}/search/$type',
+                queryParameters: {
+                  'query': sub,
+                  'api_key': apiKey.value,
+                  'language': 'zh-CN',
+                });
+            final results = (res.data['results'] as List?) ?? const [];
+            for (final r in results.take(6)) {
+              out.add((type, Map<String, dynamic>.from(r as Map)));
+            }
+          } catch (_) {}
         }
-      } catch (_) {}
+        if (out.isNotEmpty) break;
+      }
+    }
+    // 直连官方兜底：以上（含代理）全空时，绕过 API 代理直连
+    // api.themoviedb.org 再试（代理对中文 query 支持差是常见现象；
+    // 用户 Key 经官方 API 实测中文搜索有效）。
+    if (out.isEmpty && effectiveApiBase != 'https://api.themoviedb.org/3') {
+      for (final lang in const ['zh-CN', '']) {
+        if (out.isNotEmpty) break;
+        for (final type in const ['movie', 'tv']) {
+          try {
+            final qp = <String, dynamic>{
+              'query': clean,
+              'api_key': apiKey.value,
+              if (lang.isNotEmpty) 'language': lang,
+            };
+            if (year != null) {
+              qp[type == 'movie' ? 'year' : 'first_air_date_year'] = '$year';
+            }
+            final res = await dio.get(
+                'https://api.themoviedb.org/3/search/$type',
+                queryParameters: qp);
+            final results = (res.data['results'] as List?) ?? const [];
+            for (final r in results.take(6)) {
+              out.add((type, Map<String, dynamic>.from(r as Map)));
+            }
+          } catch (_) {}
+        }
+      }
+    }
+    if (out.isEmpty && lastSearchError.value == null) {
+      lastSearchError.value = '搜索无结果（TMDB 可能未收录该片）';
     }
     return out;
   }
@@ -394,7 +515,7 @@ class TmdbService extends GetxService {
           };
         }
       }
-      final ck = cacheKey(info.name, '');
+      final ck = cacheKey(info.name, extractYear(info.note, info.year)?.toString() ?? '');
       await CacheStore.instance.setJsonCache('tmdb:$ck', {
         ...detail,
         '__type': type,
