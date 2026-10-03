@@ -86,8 +86,7 @@ class _JellyNavBarState extends State<JellyNavBar>
   static const _topPad = 10.0; // 顶部间距
   static const _bottomPad = 18.0; // 底部间距（> 顶部，内容整体偏上）
   static const _topRadius = 20.0; // 左、右上角圆角
-  static const _pillPad = 8.0; // 指示器左右内边距
-  static const _indicatorRatio = 1.25;
+  // 选中指示器为圆形（宽=高），宽度由 itemWidth 与 bandHeight 反算，无固定内边距常量
 
   // 悬浮模式尺寸（高度/边距在 Widget 类中公开定义，供外部避让使用）
   static const _floatingRadius = FloatingNavSpec.radius; // 悬浮胶囊圆角
@@ -163,7 +162,11 @@ class _JellyNavBarState extends State<JellyNavBar>
           child: Padding(
             // 底部间距稍高于顶部，内容整体偏上
             padding: const EdgeInsets.only(top: _topPad, bottom: _bottomPad),
-            child: _buildNavContent(height: _barHeight - _topPad - _bottomPad),
+            child: _buildNavContent(
+              height: _barHeight - _topPad - _bottomPad,
+              iconOnly: SettingsService().navIconOnly,
+              iconSize: SettingsService().navIconOnly ? 26 : 22,
+            ),
           ),
         ),
       ),
@@ -225,15 +228,18 @@ class _JellyNavBarState extends State<JellyNavBar>
               padding: const EdgeInsets.symmetric(vertical: _floatingTopPad),
               child: _buildNavContent(
                 height: JellyNavBar.floatingBarHeight - _floatingTopPad * 2,
-                // #1：**显示文字标签**（与影视/音乐一致）。
+                // #1：默认**显示文字标签**（与影视/音乐一致）。
                 //
                 // 原来是硬编码 `iconOnly: true`（纯图标）—— 那是
                 // "5 项：漫画/图书/书架/收藏/我的"时期的写法。
                 // 现在三条栏要以阅读为基准统一，而影视/音乐都是
                 // 图标+文字，阅读只有图标就"光秃秃的"，而且
                 // 漫画/图书/书架 三个图标辨识度本来就低。
-                iconOnly: false,
-                iconSize: _floatingIconSize,
+                // 设置里可切换纯图标（隐藏文字），纯图标时图标放大。
+                iconOnly: SettingsService().navIconOnly,
+                iconSize: SettingsService().navIconOnly
+                    ? 26
+                    : _floatingIconSize,
               ),
             ),
           );
@@ -285,10 +291,9 @@ class _JellyNavBarState extends State<JellyNavBar>
       builder: (context, constraints) {
         final itemWidth = constraints.maxWidth / widget.items.length;
         final bandHeight = height;
-        final naturalWidth = itemWidth - _pillPad * 2;
-        final indicatorWidth = naturalWidth < bandHeight * _indicatorRatio
-            ? naturalWidth
-            : bandHeight * _indicatorRatio;
+        // 选中指示器 = 圆形（用户要求"图标和文字的背景太大，改成圆形"）：
+        // 宽 = 高 = bandHeight，圆角 = 半径。不再用 1.25 倍宽的圆角矩形。
+        final indicatorWidth = bandHeight;
         final pillPad = (itemWidth - indicatorWidth) / 2;
         return Stack(
           children: [
@@ -317,7 +322,7 @@ class _JellyNavBarState extends State<JellyNavBar>
                             ? JellyTheme.navSelectedFg
                             : JellyTheme.navSelectedBg,
                         borderRadius:
-                            BorderRadius.circular(FloatingNavSpec.itemRadius),
+                            BorderRadius.circular(bandHeight / 2),
                       ),
                     ),
                   ),

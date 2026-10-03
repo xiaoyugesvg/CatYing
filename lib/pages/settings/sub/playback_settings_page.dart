@@ -97,14 +97,11 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                   )
                 : const SizedBox.shrink()),
             Obx(() => controller.vodPlayerEngine.value == PlayerEngine.webview
-                ? SettingsRow(
+                ? unifiedSwitchRow(
                     icon: Icons.javascript,
                     title: '网页 JS',
-                    value: PlayerPrefs.instance.webviewEnableJs.value
-                        ? '已开启'
-                        : '已关闭',
-                    onTap: () => PlayerPrefs.instance.setWebviewEnableJs(
-                        !PlayerPrefs.instance.webviewEnableJs.value),
+                    value: PlayerPrefs.instance.webviewEnableJs.value,
+                    onChanged: PlayerPrefs.instance.setWebviewEnableJs,
                   )
                 : const SizedBox.shrink()),
           ],
@@ -218,30 +215,23 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
         SettingsGroup(
           title: '其他',
           children: [
-            Obx(() => SettingsRow(
+            Obx(() => unifiedSwitchRow(
                   icon: Icons.skip_next_outlined,
                   title: '自动下一集',
-                  value: PlayerPrefs.instance.avAutoNext.value ? '已开启' : '已关闭',
-                  onTap: () => PlayerPrefs.instance
-                      .setAvAutoNext(!PlayerPrefs.instance.avAutoNext.value),
+                  value: PlayerPrefs.instance.avAutoNext.value,
+                  onChanged: PlayerPrefs.instance.setAvAutoNext,
                 )),
-            Obx(() => SettingsRow(
+            Obx(() => unifiedSwitchRow(
                   icon: Icons.screen_lock_landscape_outlined,
                   title: '强制横屏（网页）',
-                  value: PlayerPrefs.instance.webviewForceLandscape.value
-                      ? '已开启'
-                      : '已关闭',
-                  onTap: () => PlayerPrefs.instance.setWebviewForceLandscape(
-                      !PlayerPrefs.instance.webviewForceLandscape.value),
+                  value: PlayerPrefs.instance.webviewForceLandscape.value,
+                  onChanged: PlayerPrefs.instance.setWebviewForceLandscape,
                 )),
-            Obx(() => SettingsRow(
+            Obx(() => unifiedSwitchRow(
                   icon: Icons.volume_off_outlined,
                   title: '静音后台保活',
-                  value: PlayerPrefs.instance.silentKeepAlive.value
-                      ? '已开启'
-                      : '已关闭',
-                  onTap: () => PlayerPrefs.instance.setSilentKeepAlive(
-                      !PlayerPrefs.instance.silentKeepAlive.value),
+                  value: PlayerPrefs.instance.silentKeepAlive.value,
+                  onChanged: PlayerPrefs.instance.setSilentKeepAlive,
                 )),
             SettingsRow(
               icon: Icons.skip_previous_outlined,
@@ -255,15 +245,15 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
               value: _skipOutro == 0 ? '关闭' : '$_skipOutro秒',
               onTap: () => _pickSkipSeconds(intro: false),
             ),
-            Obx(() => SettingsRow(
+            Obx(() => unifiedSwitchRow(
                   icon: Icons.high_quality_outlined,
                   title: '默认画质',
-                  value: PlayerPrefs.instance.defaultQuality.value == 1
-                      ? '最高清晰度'
-                      : '自动',
-                  onTap: () async {
+                  subtitle: '开启：最高清晰度；关闭：自动',
+                  value: PlayerPrefs.instance.defaultQuality.value == 1,
+                  onChanged: (v) async {
                     final cur = PlayerPrefs.instance.defaultQuality.value;
-                    await PlayerPrefs.instance.setDefaultQuality(cur == 1 ? 0 : 1);
+                    await PlayerPrefs.instance
+                        .setDefaultQuality(v ? 1 : (cur == 1 ? 0 : cur));
                   },
                 )),
           ],

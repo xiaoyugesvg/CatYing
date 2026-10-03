@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../../../common/theme.dart';
+import '../../../reading/services/settings_service.dart';
 import '../../../services/nav_feature_service.dart';
 import 'settings_shared.dart';
 
@@ -53,6 +54,34 @@ class HomePagesSettingsPage extends StatelessWidget {
             ],
           );
         }),
+        const SizedBox(height: AppTheme.spacingLG),
+
+        // ---------- 悬浮导航栏（全 App 三条底栏统一生效） ----------
+        ListenableBuilder(
+          listenable: SettingsService(),
+          builder: (context, _) {
+            final s = SettingsService();
+            return SettingsGroup(
+              title: '悬浮导航栏',
+              children: [
+                unifiedSwitchRow(
+                  icon: Icons.filter_center_focus,
+                  title: '悬浮样式',
+                  subtitle: '胶囊型毛玻璃悬浮，关闭为底部固定样式',
+                  value: s.navFloating,
+                  onChanged: (v) => s.setNavFloating(v),
+                ),
+                unifiedSwitchRow(
+                  icon: Icons.label_off_outlined,
+                  title: '只显示图标',
+                  subtitle: '隐藏文字标签，仅保留图标（图标自动放大）',
+                  value: s.navIconOnly,
+                  onChanged: (v) => s.setNavIconOnly(v),
+                ),
+              ],
+            );
+          },
+        ),
       ],
     );
   }

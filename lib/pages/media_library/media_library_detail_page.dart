@@ -1,12 +1,17 @@
+import 'dart:async';
+
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ImageStreamListener;
 import 'package:get/get.dart';
+import 'dart:ui' as ui;
 
 import '../../common/theme.dart';
 import '../../models/cache_store.dart';
 import '../../models/movie.dart';
 import '../../models/vod_info.dart';
 import '../../pages/detail/controller.dart';
+import '../detail/view.dart';
 import '../../services/tmdb_service.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/common_widgets.dart';
@@ -71,6 +76,11 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
   bool _worksLoading = false;
   bool _worksTriggered = false;
 
+  /// 竖版海报底边颜色（用于头图渐变：从 55% 屏高向下用图片底部色渐变，
+  /// 与海报自然衔接，不再是"海报 + 纯黑"的硬切）
+  Color? _posterEdgeColor;
+  String? _posterEdgeUrl;
+
   VodInfo? get _info => _controller.vodInfo.value;
 
   @override
@@ -83,6 +93,12 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
       _video = video;
       _collected =
           CacheStore.instance.isCollected(video.id, video.sourceKey);
+      // 媒体库模式但 TMDB 未配置（没填 Key）：媒体库页无数据可刮，
+      // 直接回退默认详情页，不展示空壳媒体库界面
+      if (!TmdbService.instance.configured) {
+        _fallbackToDefault(video);
+        return;
+      }
     }
     if (widget.initialInfo != null) {
       // 类似作品路径：直接用 TMDB 数据展示（无 Spider 源）
@@ -91,6 +107,20 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
     } else {
       _loadDetailIfNeeded();
     }
+  }
+
+  /// TMDB 刮削失败 → 一律回退默认详情页。
+  /// 主路径（有 Video）回退到默认详情页；类似作品/相关推荐路径
+  /// （无 Video，默认详情页没有数据可渲染）回退为返回上一页。
+  void _fallbackToDefault(Video? video) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (video != null) {
+        Get.off(() => DetailPage(), arguments: video);
+      } else {
+        Get.back();
+      }
+    });
   }
 
   @override
@@ -147,6 +177,15 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
       }
     }
     if (!mounted) return;
+    // 回退策略：
+    // - 自动首次刮削失败（整名 + 拆词兜底都没命中）：留在媒体库页，
+    //   显示「TMDB 未匹配到」提示条 + 重新刮削入口，不回退（用户可手动匹配 T）
+    // - 手动重新刮削（force）也失败：回退默认详情页
+    //   （有 Video 进默认详情页；类似作品/相关推荐路径无 Video 则返回上一页）
+    if (!ok && force) {
+      _fallbackToDefault(_video);
+      return;
+    }
     setState(() {
       _tmdbAttempted = true;
       _tmdbOk = ok;
@@ -234,6 +273,9 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
     final screenH = MediaQuery.of(context).size.height;
     final accent = AppTheme.accentColor;
     final flags = info.playFlags;
+    // 弹窗局部状态：线路下拉开关 + 搜索关键词
+    var flagMenuOpen = false;
+    var query = '';
     return Container(
       height: screenH * 0.66,
       decoration: BoxDecoration(
@@ -246,6 +288,15 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
               info.playUrlMap[_episodeSelectedFlag] ?? const <Episode>[];
           final ordered = _episodeDesc ? eps.reversed.toList() : eps;
           final current = _controller.selectedEpisodeIndex.value;
+          // 搜索过滤索引（保留原顺序索引；供定位按钮与列表共用）
+          // MapEntry: key=ordered 索引, value=剧集；关键词同时匹配集名与真实集号
+          final indexed = ordered.asMap().entries.where((e) {
+            final q = query.trim().toLowerCase();
+            if (q.isEmpty) return true;
+            if (e.value.name.toLowerCase().contains(q)) return true;
+            final n = _parseEpisodeNumber(e.value.name);
+            return n != null && '$n'.contains(query.trim());
+          }).toList();
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -261,68 +312,169 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                   ),
                 ),
               ),
-              // 标题 + 关闭
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 8, 8),
-                child: Row(
-                  children: [
-                    Text(
-                      '选集  ${eps.length}集',
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const Spacer(),
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => Navigator.pop(ctx),
-                      child: Padding(
-                        padding: const EdgeInsets.all(6),
-                        child: Icon(
-                          Icons.close,
-                          size: 18,
-                          color: AppTheme.textTertiary,
+              // 第一排：选集 + 线路名（点击下拉切换）+ 集数 + 排序 + 定位（去掉右上角关闭）
+              Stack(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 12, 4),
+                    child: Row(
+                      children: [
+                        Text(
+                          '选集',
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: 10),
+                        // 线路名：多线路点击下拉切换；单线路固定显示「默认」
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: flags.length > 1
+                              ? () => setSheetState(
+                                  () => flagMenuOpen = !flagMenuOpen)
+                              : null,
+                          child: Container(
+                            height: 28,
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 10),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: AppTheme.backgroundTertiary,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ConstrainedBox(
+                                  constraints:
+                                      const BoxConstraints(maxWidth: 96),
+                                  child: Text(
+                                    flags.length > 1
+                                        ? _episodeSelectedFlag
+                                        : '默认',
+                                    style: TextStyle(
+                                      color: AppTheme.textPrimary,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (flags.length > 1)
+                                  Icon(
+                                    flagMenuOpen
+                                        ? Icons.arrow_drop_up
+                                        : Icons.arrow_drop_down,
+                                    size: 16,
+                                    color: AppTheme.textSecondary,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${eps.length}集',
+                          style: TextStyle(
+                            color: AppTheme.textTertiary,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const Spacer(),
+                        _sheetAction(
+                          icon: _episodeDesc
+                              ? Icons.arrow_downward
+                              : Icons.arrow_upward,
+                          label: _episodeDesc ? '倒序' : '正序',
+                          active: _episodeDesc,
+                          onTap: () => setSheetState(
+                              () => _episodeDesc = !_episodeDesc),
+                        ),
+                        const SizedBox(width: 8),
+                        _sheetAction(
+                          icon: Icons.my_location,
+                          label: '定位当前集',
+                          active: false,
+                          onTap: () {
+                            setSheetState(() {});
+                            WidgetsBinding.instance
+                                .addPostFrameCallback((_) {
+                              final qNow = query.trim();
+                              var targetIdx = _episodeDesc
+                                  ? (eps.length - 1 - current)
+                                  : current;
+                              if (qNow.isNotEmpty) {
+                                final curOrdered = _episodeDesc
+                                    ? (eps.length - 1 - current)
+                                    : current;
+                                final fi = indexed
+                                    .indexWhere((e) => e.key == curOrdered);
+                                targetIdx = fi < 0 ? 0 : fi;
+                              }
+                              if (_episodeListScroll.hasClients) {
+                                _episodeListScroll.animateTo(
+                                  targetIdx * 48.0,
+                                  duration:
+                                      const Duration(milliseconds: 260),
+                                  curve: Curves.easeOut,
+                                );
+                              }
+                            });
+                          },
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              ),
-              // 播放分组（线路）横条
-              if (flags.length > 1)
-                SizedBox(
-                  height: 36,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    children: [
-                      for (final flag in flags)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
+                  ),
+                  // 线路下拉：≤4 项（每项 42 高），超出可滑动（无滚动条图标）
+                  if (flagMenuOpen && flags.length > 1)
+                    Positioned(
+                      top: 46,
+                      left: 16,
+                      child: Container(
+                        width: 200,
+                        constraints: const BoxConstraints(maxHeight: 168),
+                        decoration: BoxDecoration(
+                          color: AppTheme.backgroundSecondary,
+                          borderRadius: BorderRadius.circular(14),
+                          border:
+                              Border.all(color: AppTheme.borderLight),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black38,
+                              blurRadius: 14,
+                              offset: Offset(0, 5),
+                            ),
+                          ],
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          physics: const ClampingScrollPhysics(),
+                          itemCount: flags.length,
+                          itemBuilder: (_, i) => InkWell(
                             onTap: () {
-                              _controller.selectFlag(flag);
-                              setSheetState(
-                                  () => _episodeSelectedFlag = flag);
+                              _controller.selectFlag(flags[i]);
+                              setSheetState(() {
+                                _episodeSelectedFlag = flags[i];
+                                flagMenuOpen = false;
+                              });
                             },
                             child: Container(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 14),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: flag == _episodeSelectedFlag
-                                    ? accent
-                                    : AppTheme.backgroundTertiary,
-                                borderRadius: BorderRadius.circular(18),
-                              ),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 9),
+                              color: flags[i] == _episodeSelectedFlag
+                                  ? AppTheme.accentColor
+                                      .withValues(alpha: 0.15)
+                                  : null,
                               child: Text(
-                                flag,
+                                flags[i],
                                 style: TextStyle(
-                                  color: flag == _episodeSelectedFlag
-                                      ? Colors.white
+                                  color: flags[i] == _episodeSelectedFlag
+                                      ? AppTheme.accentColor
                                       : AppTheme.textSecondary,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
@@ -333,73 +485,65 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                             ),
                           ),
                         ),
-                    ],
-                  ),
-                )
-              else
-                const SizedBox(height: 4),
-              // 操作行：正序/倒序 + 定位当前集
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
-                child: Row(
-                  children: [
-                    _sheetAction(
-                      icon: _episodeDesc
-                          ? Icons.arrow_downward
-                          : Icons.arrow_upward,
-                      label: _episodeDesc ? '倒序' : '正序',
-                      active: _episodeDesc,
-                      onTap: () => setSheetState(
-                          () => _episodeDesc = !_episodeDesc),
-                    ),
-                    const SizedBox(width: 10),
-                    _sheetAction(
-                      icon: Icons.my_location,
-                      label: '定位当前集',
-                      active: false,
-                      onTap: () {
-                        setSheetState(() {});
-                        WidgetsBinding.instance
-                            .addPostFrameCallback((_) {
-                          final idx = _episodeDesc
-                              ? (eps.length - 1 - current)
-                              : current;
-                          if (_episodeListScroll.hasClients) {
-                            _episodeListScroll.animateTo(
-                              idx * 48.0,
-                              duration: const Duration(milliseconds: 260),
-                              curve: Curves.easeOut,
-                            );
-                          }
-                        });
-                      },
-                    ),
-                    const Spacer(),
-                    Text(
-                      '正在播放 第${current + 1}集',
-                      style: TextStyle(
-                        color: AppTheme.textTertiary,
-                        fontSize: 11,
                       ),
                     ),
-                  ],
+                ],
+              ),
+              // 第二排：搜索框（搜索剧集）
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: TextField(
+                  onChanged: (v) => setSheetState(() => query = v),
+                  style:
+                      TextStyle(color: AppTheme.textPrimary, fontSize: 12),
+                  decoration: InputDecoration(
+                    hintText: '搜索剧集',
+                    hintStyle: TextStyle(
+                        color: AppTheme.textTertiary, fontSize: 12),
+                    prefixIcon: Icon(Icons.search,
+                        size: 15, color: AppTheme.textTertiary),
+                    suffixIcon: query.isNotEmpty
+                        ? GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () =>
+                                setSheetState(() => query = ''),
+                            child: Padding(
+                              padding: const EdgeInsets.all(8),
+                              child: Icon(Icons.close,
+                                  size: 14,
+                                  color: AppTheme.textTertiary),
+                            ),
+                          )
+                        : null,
+                    isDense: true,
+                    filled: true,
+                    fillColor: AppTheme.backgroundTertiary
+                        .withValues(alpha: 0.45),
+                    contentPadding:
+                        const EdgeInsets.symmetric(vertical: 9),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
                 ),
               ),
               Divider(height: 1, color: AppTheme.borderLight),
-              // 播放列表（可滑动）
+              // 播放列表（可滑动；支持搜索过滤，过滤索引见 builder 顶层 indexed）
               Expanded(
                 child: ListView.separated(
                   controller: _episodeListScroll,
                   padding: const EdgeInsets.symmetric(vertical: 6),
-                  itemCount: ordered.length,
+                  itemCount: indexed.length,
                   separatorBuilder: (_, __) =>
                       Divider(height: 1, color: AppTheme.borderLight),
                   itemBuilder: (_, i) {
+                    final orderedIdx = indexed[i].key;
+                    final ep = indexed[i].value;
                     final realIndex = _episodeDesc
-                        ? eps.length - 1 - i
-                        : i;
+                        ? eps.length - 1 - orderedIdx
+                        : orderedIdx;
                     final selected = realIndex == current;
-                    final ep = ordered[i];
                     return InkWell(
                       onTap: () {
                         _controller.selectEpisode(realIndex);
@@ -614,35 +758,94 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
     });
   }
 
-  // ---------- 头图壁纸（16:9 全宽，不拉伸铺满整屏） ----------
+  // ---------- 头图壁纸（竖版海报贴顶铺满宽，55% 屏高处按海报底部色渐变） ----------
+
+  /// 取图片底部平均色（海报底边颜色，做渐变用）。
+  /// 失败返回黑色兜底；结果缓存到 [_posterEdgeColor]，同一海报只取一次。
+  Future<Color> _edgeColorOf(String url) async {
+    try {
+      final prov = CachedNetworkImageProvider(url);
+      final stream = prov.resolve(const ImageConfiguration());
+      final completer = Completer<ui.Image>();
+      late final ImageStreamListener listener;
+      listener = ImageStreamListener(
+        (info, _) {
+          if (!completer.isCompleted) completer.complete(info.image);
+          stream.removeListener(listener);
+        },
+        onError: (e, s) {
+          if (!completer.isCompleted) completer.completeError(e);
+          stream.removeListener(listener);
+        },
+      );
+      stream.addListener(listener);
+      final img = await completer.future.timeout(const Duration(seconds: 8));
+      final w = img.width;
+      final h = img.height;
+      final data = await img.toByteData(format: ui.ImageByteFormat.rawRgba);
+      img.dispose();
+      if (data == null || w == 0 || h == 0) return Colors.black;
+      final bytes = data.buffer.asUint8List();
+      // 采样最底部 6% 行、中间 50% 宽的像素平均色
+      var r = 0, g = 0, b = 0, n = 0;
+      final yStart = (h * 0.94).floor();
+      final xStart = (w * 0.25).floor();
+      final xEnd = (w * 0.75).floor();
+      for (var y = yStart; y < h; y++) {
+        for (var x = xStart; x < xEnd; x += 2) {
+          final i = (y * w + x) * 4;
+          if (i + 2 >= bytes.length) continue;
+          r += bytes[i];
+          g += bytes[i + 1];
+          b += bytes[i + 2];
+          n++;
+        }
+      }
+      if (n == 0) return Colors.black;
+      return Color.fromARGB(255, r ~/ n, g ~/ n, b ~/ n);
+    } catch (_) {
+      return Colors.black;
+    }
+  }
 
   Widget _buildWallpaper(VodInfo info) {
-    final backdrop = info.backdrop.isNotEmpty
-        ? info.backdrop
-        : (info.pic.isNotEmpty ? info.pic : '');
-    // 用户要求：壁纸不要放大铺满整屏 —— 宽度最多 = 屏幕宽度（16:9 头图），
-    // 长度方向不够的位置用黑渐变一直延伸到屏幕底。
+    // 竖版海报优先（用户要求：竖屏视频封面），无则回退横版 backdrop
+    final poster = info.pic.isNotEmpty
+        ? info.pic
+        : (info.backdrop.isNotEmpty ? info.backdrop : '');
     final screenW = MediaQuery.of(context).size.width;
-    final headerH = screenW * 9 / 16;
+    final screenH = MediaQuery.of(context).size.height;
+    // 海报按 2:3 原比例铺满宽度：高 = 宽 × 1.5（完整显示、不裁切、贴顶）
+    final posterH = screenW * 1.5;
+    // 首次见到的海报 → 异步取底部色（取到后 setState 刷新渐变）
+    if (poster.isNotEmpty && _posterEdgeUrl != poster) {
+      _posterEdgeUrl = poster;
+      _edgeColorOf(poster).then((c) {
+        if (mounted && _posterEdgeUrl == poster) {
+          setState(() => _posterEdgeColor = c);
+        }
+      });
+    }
+    final edge = _posterEdgeColor ?? Colors.black;
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 1. 壁纸：顶部 16:9 全宽头图（区域内 cover 即可，不整屏拉伸裁切）
+        // 1. 竖版海报：原图宽度铺满屏幕、完整不裁切、贴顶部
         Positioned(
           top: 0,
           left: 0,
           right: 0,
-          height: headerH,
-          child: backdrop.isNotEmpty
+          height: posterH,
+          child: poster.isNotEmpty
               ? CachedNetworkImage(
-                  imageUrl: backdrop,
-                  fit: BoxFit.cover,
+                  imageUrl: poster,
+                  fit: BoxFit.fill,
                   placeholder: (_, __) => ColoredBox(color: Colors.black),
                   errorWidget: (_, __, ___) => ColoredBox(color: Colors.black),
                 )
               : ColoredBox(color: AppTheme.backgroundPrimary),
         ),
-        // 2. 顶部轻遮罩：只保证状态栏 / 操作栏可读（标题已下移，上部保持干净）
+        // 2. 顶部轻遮罩：只保证状态栏 / 操作栏可读（上部保持干净）
         const DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -653,11 +856,12 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
             ),
           ),
         ),
-        // 3. 壁纸底 → 屏幕底：黑渐变到底（长度方向不够的位置用渐变填满）
+        // 3. 从屏幕高度 55% 开始向下：用海报底部颜色做垂直渐变，
+        //    与海报自然衔接，不再是"海报 + 纯黑"的硬切
         Positioned(
           left: 0,
           right: 0,
-          top: headerH - 140,
+          top: screenH * 0.55,
           bottom: 0,
           child: DecoratedBox(
             decoration: BoxDecoration(
@@ -665,11 +869,11 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Colors.transparent,
-                  Colors.black.withValues(alpha: 0.85),
-                  Colors.black,
+                  edge.withValues(alpha: 0),
+                  edge.withValues(alpha: 0.85),
+                  edge,
                 ],
-                stops: const [0.0, 0.4, 1.0],
+                stops: const [0.0, 0.35, 1.0],
               ),
             ),
           ),
@@ -698,9 +902,9 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
     return SafeArea(
       bottom: false,
       child: Padding(
-        // 标题下移：顶部留出约 34% 屏高给壁纸（参考图：标题在头图下方居中偏左，
-        // 壁纸上半部保持干净露出园林画面）
-        padding: EdgeInsets.fromLTRB(16, screenH * 0.34, 16, 8),
+        // 标题下移：海报贴顶占满宽度后（高≈屏高 69%），标题叠在海报下部
+        // 渐变区（55% 屏高渐变起点略上方），白字有海报底部色渐变垫底
+        padding: EdgeInsets.fromLTRB(16, screenH * 0.52, 16, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1396,23 +1600,25 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
     final epTitle = info.episodeTitles[epNo] ?? ep.name;
     final overview = epDetail?.overview ?? '';
     final rating = epDetail?.rating ?? 0;
+    final runtime = epDetail?.runtime ?? 0;
     final selected = i == _selectedIndex;
     final accent = AppTheme.accentColor;
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => _showEpisodeDetail(info, epNo, epTitle, still, i),
-      child: Container(
-        width: 150,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
-          border: selected ? Border.all(color: accent, width: 1.5) : null,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 封面（16:9）+ 图上叠两行简介
-            ClipRRect(
+    return Container(
+      width: 150,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        border: selected ? Border.all(color: accent, width: 1.5) : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 封面 + 图上简介：点击弹单集详情（保留原弹窗）
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () =>
+                _showEpisodeDetail(info, epNo, epTitle, still, i),
+            child: ClipRRect(
               borderRadius: BorderRadius.circular(10),
               child: SizedBox(
                 width: 150,
@@ -1461,48 +1667,59 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                           ),
                         ),
                       ),
+                    // 封面右下角：时长角标（如 46分钟）
+                    if (runtime > 0)
+                      Positioned(
+                        right: 4,
+                        bottom: 4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 5, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            '$runtime分钟',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
             ),
-            // 封面下方：集号 + 集标题（与封面同一张卡片，但在封面下面）
-            Padding(
-              padding: const EdgeInsets.fromLTRB(3, 4, 3, 0),
-              child: Row(
-                children: [
-                  if (rating > 0) ...[
-                    Icon(Icons.star_rounded,
-                        size: 11, color: Colors.amber.shade400),
-                    const SizedBox(width: 2),
-                    Text(
-                      rating.toStringAsFixed(1),
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                  ],
-                  Expanded(
-                    child: Text(
-                      '$epNo $epTitle',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+          ),
+            // 封面下方：集号（中文序数「第一集/第二集…」）+ 集标题；
+            // 点击此处直接跳转播放（不弹详情）
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                _controller.selectEpisode(i);
+                setState(() => _selectedIndex = i);
+                _playAt(i);
+              },
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(3, 4, 3, 0),
+                child: Text(
+                  _epTitleDisplay(epTitle),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
                   ),
-                ],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
           ],
         ),
-      ),
-    );
+      );
   }
 
   // ---------- 导演 ----------
@@ -1532,6 +1749,38 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
     final m = RegExp(r'(\d{1,3})').firstMatch(name);
     if (m != null) return int.tryParse(m.group(1)!);
     return null;
+  }
+
+  /// 阿拉伯数字 → 中文序数："第一集"…"第九十九集"
+  String _chineseOrdinal(int n) {
+    const cn = <String>[
+      '零', '一', '二', '三', '四', '五', '六', '七', '八', '九',
+    ];
+    if (n <= 0) return '第$n集';
+    if (n >= 100) return '第$n集';
+    String s;
+    if (n >= 10) {
+      final tens = n ~/ 10;
+      final ones = n % 10;
+      s = (tens == 1 ? '十' : '${cn[tens]}十');
+      if (ones > 0) s += cn[ones];
+    } else {
+      s = cn[n];
+    }
+    return '第${s}集';
+  }
+
+  /// 剧集名展示：名称前是纯数字（"1"/"01"/"1 xxx"）时转中文序数
+  /// （"第一集 xxx"），已有"第X集"或非数字开头保持原名。
+  String _epTitleDisplay(String title) {
+    if (title.isEmpty) return title;
+    final m = RegExp(r'^(\d{1,3})\s*[\s.、:：\-]?(.*)$').firstMatch(title);
+    if (m == null) return title;
+    final n = int.tryParse(m.group(1)!);
+    if (n == null) return title;
+    final rest = (m.group(2) ?? '').trim();
+    if (rest.isEmpty) return _chineseOrdinal(n);
+    return '${_chineseOrdinal(n)} ${rest}';
   }
 
   Widget _buildDirector(VodInfo info) {

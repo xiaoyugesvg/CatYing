@@ -3956,18 +3956,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         ),
       ),
       child: Padding(
-        // 顶栏避让状态栏（对齐直播页的控制逻辑）：
-        // - 竖屏内嵌（pad.top>0，状态栏/刘海占安全区）：pad.top 下方再多留 8px
-        //   （原 12 偏下，往上移到 8）
-        // - 纯竖屏全屏（短剧/抖音，immersive 下 pad.top=0，无状态栏）：12
-        //   （原与横屏共用 24 偏下，单列小值往上移）
+        // 顶栏避让状态栏：
+        // - 竖屏内嵌（pad.top>0）：pad.top + 4（状态栏下留 4px 呼吸）
+        // - 纯竖屏全屏（短剧/抖音，immersive 下 pad.top=0）：8
+        //   （8(top) + 8 = 16px，按钮离屏幕顶的呼吸）
         // - 横屏全屏（pad.top=0，iOS 横屏状态栏不占 safe area 但实际占据
         //   顶部约 24px）：保持 24，不与状态栏时间/电量挤同一行
         padding: EdgeInsets.only(
           top: top +
-              (pad.top > 0
-                  ? pad.top + 8
-                  : ((_dramaMode || _douyinMode) ? 12 : 24)),
+              (pad.top > 0 ? pad.top + 4 : (_dramaMode || _douyinMode ? 8 : 24)),
           left: 4 + pad.left,
           right: 4 + pad.right,
           bottom: 8,
@@ -4357,8 +4354,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     return _iconButton(
       icon: step == 10 ? ten : base,
       size: 35,
-      width: 76,
-      height: 76,
+      // 圆形背景缩到 54（原 76 比图标大太多）：图标 35 + 每边 ~9px 内边距，
+      // 比例从 2:1 收到 ~1.5:1，视觉更贴
+      width: 54,
+      height: 54,
       circular: true,
       child: step == 10
           ? null

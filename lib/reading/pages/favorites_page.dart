@@ -273,15 +273,20 @@ class _FavoritesPageState extends State<FavoritesPage>
                                   ),
                                 // 搜索：与首页右上角同款小胶囊（收起=圆钮，
                                 // 点击展开、图标在左、提示「搜索收藏」），
-                                // 提交直接进搜索浮层出结果
+                                // 提交直接进搜索浮层出结果；
+                                // 长度 = 标题行剩余空间的 3/5，右对齐
                                 Expanded(
                                   child: Align(
                                     alignment: Alignment.centerRight,
-                                    child: JellyExpandableSearch(
-                                      controller: _favSearchController,
-                                      hintText: '搜索收藏',
-                                      onSubmitted: (v) => _openSearch(v),
-                                      onChanged: (v) => setState(() {}),
+                                    child: FractionallySizedBox(
+                                      widthFactor: 0.6,
+                                      alignment: Alignment.centerRight,
+                                      child: JellyExpandableSearch(
+                                        controller: _favSearchController,
+                                        hintText: '搜索收藏',
+                                        onSubmitted: (v) => _openSearch(v),
+                                        onChanged: (v) => setState(() {}),
+                                      ),
                                     ),
                                   ),
                                 ),

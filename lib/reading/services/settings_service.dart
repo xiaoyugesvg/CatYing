@@ -93,6 +93,7 @@ class SettingsService extends ChangeNotifier {
   static const _kBookFontFamilyKey = 'book_font_family';
   static const _kNavVisibleTabsKey = 'nav_visible_tabs';
   static const _kNavFloatingKey = 'nav_floating';
+  static const _kNavIconOnlyKey = 'nav_icon_only';
   static const _kNavOrderVersionKey =
       'nav_order_version'; // 导航 tab 顺序版本（v2: 书架与收藏互换）
   static const _kPageTabsFollowNavKey = 'page_tabs_follow_nav';
@@ -199,6 +200,7 @@ class SettingsService extends ChangeNotifier {
   String? _bookFontFamily;
   List<NavTab> _visibleNavTabs = NavTab.values.toList(); // 导航栏可见 tab，默认全显示
   bool _navFloating = true; // 导航栏是否悬浮（胶囊型毛玻璃样式），默认开启
+  bool _navIconOnly = false; // 导航栏只显示图标（隐藏文字标签），默认关
   bool _pageTabsFollowNav = true; // 收藏/书架/下载页 tab 是否跟随导航栏 manga/book 可见性
   PageDefaultContent _pageDefaultContent =
       PageDefaultContent.manga; // 收藏/书架/下载页默认显示内容
@@ -318,6 +320,7 @@ class SettingsService extends ChangeNotifier {
   String? get bookFontFamily => _bookFontFamily;
   List<NavTab> get visibleNavTabs => List.unmodifiable(_visibleNavTabs);
   bool get navFloating => _navFloating;
+  bool get navIconOnly => _navIconOnly;
   bool get pageTabsFollowNav => _pageTabsFollowNav;
   PageDefaultContent get pageDefaultContent => _pageDefaultContent;
   bool get reverseTap => _reverseTap;
@@ -496,6 +499,7 @@ class SettingsService extends ChangeNotifier {
           : savedFont;
       // 导航栏悬浮开关
       _navFloating = prefs.getBool(_kNavFloatingKey) ?? true;
+      _navIconOnly = prefs.getBool(_kNavIconOnlyKey) ?? false;
       // 当前漫画源
       _currentSourceId = prefs.getString(_currentSourceKey) ?? 'copymanga';
       // 禁用漫画源列表
@@ -1529,6 +1533,19 @@ class SettingsService extends ChangeNotifier {
       await prefs.setBool(_kNavFloatingKey, value);
     } catch (e) {
       _log('保存导航栏悬浮开关失败: $e');
+    }
+  }
+
+  /// 设置导航栏是否只显示图标（隐藏文字标签）
+  Future<void> setNavIconOnly(bool value) async {
+    if (_navIconOnly == value) return;
+    _navIconOnly = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kNavIconOnlyKey, value);
+    } catch (e) {
+      _log('保存导航栏纯图标开关失败: $e');
     }
   }
 
