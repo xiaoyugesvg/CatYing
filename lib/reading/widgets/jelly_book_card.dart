@@ -20,6 +20,9 @@ class JellyBookCard extends StatefulWidget {
   /// 封面 Hero 动画 tag（与详情页一致；为空则不启用共享元素过渡）
   final String? heroTag;
 
+  /// 封面图请求头（如豆瓣图床需 Referer/UA 反爬头；空则不带）
+  final Map<String, String>? coverHeaders;
+
   const JellyBookCard({
     super.key,
     required this.book,
@@ -27,6 +30,7 @@ class JellyBookCard extends StatefulWidget {
     this.onTap,
     this.onLongPress,
     this.heroTag,
+    this.coverHeaders,
   });
 
   @override
@@ -207,6 +211,7 @@ class _JellyBookCardState extends State<JellyBookCard>
             imageUrl: coverUrl,
             fit: BoxFit.cover,
             memCacheWidth: 300,
+            httpHeaders: widget.coverHeaders,
             width: width,
             height: height,
             placeholder: (c, u) => Container(

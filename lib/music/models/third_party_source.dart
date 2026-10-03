@@ -110,17 +110,61 @@ class ThirdPartySource {
       headers: headers,
       quality: quality,
       script: j['script']?.toString(),
-      enabled: j['enabled'] as bool? ?? true,
+      enabled: _asBool(j['enabled']),
     );
   }
 
+  /// 宽容解析 bool：兼容 `true/false`、`"true"/"false"`、`1/0`、`"1"/"0"`、`yes/no/on/off`。
+  ///
+  /// ⚠️ 原来是 `j['enabled'] as bool? ?? true` —— 用户导入的源里 `enabled`
+  /// 写成字符串或数字时会抛 `CastError`，而 [listFromJson] 是整份 map，
+  /// **一条脏数据就把整个音源列表废掉**（列表变空且没有任何提示）。
+  static bool _asBool(Object? v, {bool fallback = true}) {
+    if (v == null) return fallback;
+    if (v is bool) return v;
+    if (v is num) return v != 0;
+    final s = v.toString().trim().toLowerCase();
+    if (s.isEmpty) return fallback;
+    if (s == 'true' || s == '1' || s == 'yes' || s == 'y' || s == 'on') {
+      return true;
+    }
+    if (s == 'false' || s == '0' || s == 'no' || s == 'n' || s == 'off') {
+      return false;
+    }
+    return fallback;
+  }
+
   static List<ThirdPartySource> listFromJson(String raw) {
-    final decoded = jsonDecode(raw);
+    Object? decoded;
+    try {
+      decoded = jsonDecode(raw);
+    } catch (e) {
+      debugPrint('[ThirdPartySource] 音源列表 JSON 解析失败: $e');
+      return const [];
+    }
     if (decoded is! List) return const [];
-    return decoded
-        .whereType<Map>()
-        .map((e) => ThirdPartySource.fromJson(e.cast<String, dynamic>()))
-        .toList();
+
+    // ⚠️ 逐条容错：原来 `.map(fromJson)` 一条坏数据就整份抛异常 →
+    // 列表直接空掉，用户看到"音源全没了"却不知道是哪条坏了。
+    // 现在跳过坏的、保留好的，并把跳过了几条写进日志。
+    final out = <ThirdPartySource>[];
+    var skipped = 0;
+    for (final e in decoded) {
+      if (e is! Map) {
+        skipped++;
+        continue;
+      }
+      try {
+        out.add(ThirdPartySource.fromJson(e.cast<String, dynamic>()));
+      } catch (err) {
+        skipped++;
+        debugPrint('[ThirdPartySource] 跳过无法解析的音源: $err');
+      }
+    }
+    if (skipped > 0) {
+      debugPrint('[ThirdPartySource] 共跳过 $skipped 条坏数据，保留 ${out.length} 条音源');
+    }
+    return out;
   }
 
   @override

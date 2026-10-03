@@ -12,6 +12,7 @@ import '../../models/movie.dart';
 import '../../models/vod_info.dart';
 import '../../pages/detail/controller.dart';
 import '../detail/view.dart';
+import '../../services/app_log.dart';
 import '../../services/tmdb_service.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/common_widgets.dart';
@@ -82,6 +83,150 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
   String? _posterEdgeUrl;
 
   VodInfo? get _info => _controller.vodInfo.value;
+
+  // ============================================================
+  // 媒体库固定深色风格（"路线 1"：本页与全局明暗解耦）
+  // ============================================================
+  //
+  // 为什么需要这一组常量：海报以下是"封面主色 → 主色压暗"的**不透明**渐变
+  // （见 `_buildWallpaper`），底色恒为暗色。若文字仍用 `AppTheme.textPrimary`，
+  // 浅色模式下就是"深字压暗底"→ 直接看不见。所以本页内容恒用浅色字/暗色卡。
+  //
+  // 唯一必须单独钉住的是**强调色**：`AppTheme.accentColor` 取的是调色板的
+  // `primary`，默认「水墨书香」调色板下是 `#3A3A3A`（墨灰）—— 压在暗底上
+  // 等于看不见；而调色板是**与明暗模式无关**的，所以不能靠切模式解决。
+  // 这里恒用目标图里的蓝。想改回跟主题走，只改这一行即可。
+  static const Color _libAccent = Color(0xFF3B82F6);
+  static const Color _libText = Color(0xFFFFFFFF);
+  static const Color _libCard = Color(0x14FFFFFF); // white8
+  static const Color _libBorder = Color(0x1FFFFFFF); // white12
+
+  /// 海报底部取色**未完成/失败**时的兜底底色。
+  /// 不能用 `AppTheme.backgroundPrimary`：浅色模式下是宣纸米白，压暗后是脏灰，
+  /// 而且首帧（取色未回来）与最终态会明显跳一下。用中性深色把跳变压到最小。
+  static const Color _libGradBase = Color(0xFF14141A);
+
+  /// 压暗：保色相/饱和度，只降明度（比 lerp 到黑更"本色"，不会越调越灰）。
+  static Color _darken(Color c, double amount) {
+    final hsl = HSLColor.fromColor(c);
+    return hsl
+        .withLightness((hsl.lightness * (1 - amount)).clamp(0.0, 1.0))
+        .toColor();
+  }
+
+  /// 渐变压暗比例（可按真机观感微调）：中段 / 末尾。
+  static const double _kGradDarkenMid = 0.45;
+  static const double _kGradDarkenEnd = 0.82;
+
+  // ============================================================
+  // 集号来源：列表位置 → 真实集号（TMDB episode_number）
+  // ============================================================
+  //
+  // 剧照 / 集标题 / 每集简介三张表的**键都是 TMDB `episode_number`**
+  // （`TmdbService._applyEpisodeStills` 用 `e['episode_number']` 当 key）。
+  // 而页面拿到的是**源**的剧集列表，两者不一定一一对应：
+  //   · 源集名没带集号（本项目这部就是："沈家灭门，嘉兰入林府"）→ 只能靠顺序
+  //   · 源顺序不同 / 缺集 / 倒序 / 不从第 1 集起 → 按位置取会**错位**
+  // 所以这里做一次显式映射，并且**全页共用同一份**（卡片 / 选集列表 / 弹窗），
+  // 避免三处各算一套、显示和剧照对不上。
+  Map<int, int>? _epNoMap;
+  String _epNoMapKey = '';
+
+  /// 标题归一：去掉空白与常见装饰符号，便于"源集名 == TMDB 集标题"的比对。
+  static String _normTitle(String s) => s
+      .replaceAll(RegExp(r'[\s\u3000]+'), '')
+      .replaceAll(RegExp(r'[「」【】\[\]（）()<>《》""'']'), '')
+      .toLowerCase();
+
+  /// 标题模糊匹配（互相包含且够长才认，避免短名误配）。
+  static int? _fuzzyTitleNo(Map<String, int> titleToNo, String name) {
+    final t = _normTitle(name);
+    if (t.length < 4) return null;
+    for (final e in titleToNo.entries) {
+      if (e.key.length < 4) continue;
+      if (e.key == t || e.key.contains(t) || t.contains(e.key)) return e.value;
+    }
+    return null;
+  }
+
+  /// 为整份列表算出「列表位置 → 真实集号」。优先级：
+  /// ① 集名里带的集号（第X集 / EP01 / 01 xxx …）
+  /// ② 集名与 TMDB 集标题**完全一致**（源直接用 TMDB 标题时最可信）
+  /// ③ 标题模糊匹配
+  /// ④ 与 TMDB 已知集号**按顺序对齐**（解决"源没带集号"的情况）
+  /// ⑤ 位置兜底
+  /// 同时保证**不出现重复集号**（重复会让两集显示同一张剧照）。
+  Map<int, int> _episodeNoMap(VodInfo info, List<Episode> eps) {
+    final key = '${info.name}|${eps.length}|'
+        '${info.episodeTitles.length}|${info.episodeStills.length}';
+    final cached = _epNoMap;
+    if (cached != null && _epNoMapKey == key) return cached;
+
+    // TMDB 已知集号（升序）：三张表的键合集
+    final tmdbNos = <int>{
+      ...info.episodeTitles.keys,
+      ...info.episodeStills.keys,
+      ...info.episodeDetails.keys,
+    }.where((n) => n > 0).toList()
+      ..sort();
+
+    final titleToNo = <String, int>{};
+    for (final e in info.episodeTitles.entries) {
+      final t = _normTitle(e.value);
+      if (t.length >= 2 && !titleToNo.containsKey(t)) titleToNo[t] = e.key;
+    }
+
+    final used = <int>{};
+    final map = <int, int>{};
+    int take(int want, int index) {
+      if (want > 0 && !used.contains(want)) {
+        used.add(want);
+        return want;
+      }
+      // 想用的号被占用/无效 → 与 TMDB 集号按顺序对齐
+      if (index < tmdbNos.length && !used.contains(tmdbNos[index])) {
+        final n = tmdbNos[index];
+        used.add(n);
+        return n;
+      }
+      for (final n in tmdbNos) {
+        if (!used.contains(n)) {
+          used.add(n);
+          return n;
+        }
+      }
+      final n = want > 0 ? want : index + 1;
+      used.add(n);
+      return n;
+    }
+
+    for (var i = 0; i < eps.length; i++) {
+      final name = eps[i].name;
+      var no = _parseEpisodeNumber(name);
+      if (no == null || (tmdbNos.isNotEmpty && !tmdbNos.contains(no))) {
+        no = titleToNo[_normTitle(name)] ?? _fuzzyTitleNo(titleToNo, name);
+      }
+      map[i] = take(no ?? 0, i);
+    }
+    // ── 自诊断（每次列表/剧照表变化只记一条）──────────────────
+    // 一条日志就能区分"剧照拿不到"的两类原因：
+    //   · TMDB 剧照 0 张        → **取数侧**问题（缓存 / 代理路由 / 超时）
+    //                             → 再看 TmdbService 的 `缓存补拉剧照…` 日志
+    //   · 剧照 N 张但命中 0 集  → **键映射**问题（源集名与 TMDB 标题差异过大）
+    final hit = map.values.where(info.episodeStills.containsKey).length;
+    AppLog.instance.log('[MediaLibrary] 集号映射: 列表 ${eps.length} 集 / '
+        'TMDB 剧照 ${info.episodeStills.length} 张 / '
+        '集标题 ${info.episodeTitles.length} 条 → 剧照命中 $hit 集');
+    _epNoMap = map;
+    _epNoMapKey = key;
+    return map;
+  }
+
+  /// 取某一列表位置的真实集号（拿不到就用位置兜底）。
+  int _episodeNoAt(VodInfo info, List<Episode> eps, int index) {
+    if (index < 0 || index >= eps.length) return index + 1;
+    return _episodeNoMap(info, eps)[index] ?? (index + 1);
+  }
 
   @override
   void initState() {
@@ -569,7 +714,9 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                                 borderRadius: BorderRadius.circular(9),
                               ),
                               child: Text(
-                                '${realIndex + 1}',
+                                // 角标用**真实集号**（不再是列表位置）：源顺序不同
+                                // 或缺集时，位置号会和剧照/标题对不上
+                                '${_episodeNoAt(info, eps, realIndex)}',
                                 style: TextStyle(
                                   color: selected
                                       ? Colors.white
@@ -582,7 +729,12 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
-                                ep.name,
+                                // 方案 B：集号做成"第一集 "前缀放在**标题**上
+                                //（左侧角标保持数字，两者不再互相挤）
+                                _epTitleDisplay(
+                                  ep.name,
+                                  _episodeNoAt(info, eps, realIndex),
+                                ),
                                 style: TextStyle(
                                   color: selected
                                       ? AppTheme.textPrimary
@@ -825,7 +977,9 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
         }
       });
     }
-    final edge = _posterEdgeColor ?? Colors.black;
+    // 取色失败/未完成兜底：用中性深色（**不能**用 AppTheme.backgroundPrimary ——
+    // 浅色模式下是宣纸米白，压暗后是脏灰，且首帧与取色完成后会明显跳变）
+    final edge = _posterEdgeColor ?? _libGradBase;
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -869,7 +1023,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                     ),
                   ],
                 )
-              : ColoredBox(color: AppTheme.backgroundPrimary),
+              : ColoredBox(color: _libGradBase),
         ),
         // 2. 顶部轻遮罩：只保证状态栏 / 操作栏可读（上部保持干净）
         const DecoratedBox(
@@ -882,12 +1036,23 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
             ),
           ),
         ),
-        // 3. 从海报底边略上方开始向下：用封面主色调做垂直渐变，
-        //    与海报底边过渡带颜色一致 → 不再有突兀分界线
+        // 3. 从海报底边正下方开始向下：**"封面主色 → 主色压暗"的真渐变**。
+        //
+        //    ⚠️ 原来这里是 `[edge, edge(alpha .9), edge]` —— 三个停靠点
+        //    **用的是同一个颜色**，只有中间 10% alpha 差，视觉上就是
+        //    **一块纯色**（用户实测："海报下面是一块平的灰绿"）。
+        //    真渐变必须有**第二个颜色**，只调 alpha 是不够的。
+        //
+        //    现在：起点仍是 `edge` 且 alpha=1 → 与上面那条 70px 过渡带
+        //    （结尾也是 `edge` alpha=1）**无缝衔接**，不会出现亮度突变黑线；
+        //    然后向下压暗到 `_kGradDarkenEnd`，末尾接近深色。
+        //
+        //    全程**不透明**：半透明会把下层全局壁纸（浅色模式是米白）透上来，
+        //    把主色的色相冲淡成灰 —— 这是原来发灰的另一个原因。
         Positioned(
           left: 0,
           right: 0,
-          top: (posterH - 60).clamp(0.0, screenH),
+          top: posterH.clamp(0.0, screenH),
           bottom: 0,
           child: DecoratedBox(
             decoration: BoxDecoration(
@@ -895,11 +1060,11 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  edge.withValues(alpha: 0),
-                  edge.withValues(alpha: 0.85),
                   edge,
+                  _darken(edge, _kGradDarkenMid),
+                  _darken(edge, _kGradDarkenEnd),
                 ],
-                stops: const [0.0, 0.35, 1.0],
+                stops: const [0.0, 0.30, 1.0],
               ),
             ),
           ),
@@ -1234,7 +1399,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                     Text(
                       '正在刮削 TMDB 数据…',
                       style: TextStyle(
-                        color: AppTheme.accentColor,
+                        color: _libAccent,
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                       ),
@@ -1369,7 +1534,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
     required bool enabled,
     required VoidCallback onTap,
   }) {
-    final accent = AppTheme.accentColor;
+    final accent = _libAccent;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: enabled ? onTap : null,
@@ -1484,7 +1649,9 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                     children: [
                       Expanded(
                         child: Text(
-                          '第$epNo集  $epTitle',
+                          // 统一走中文序数（"第一集 沈家灭门…"）。`epTitle` 若自带
+                          // "第X集"前缀，`_epTitleDisplay` 会原样返回，不会重复
+                          _epTitleDisplay(epTitle, epNo),
                           style: TextStyle(
                             color: AppTheme.textPrimary,
                             fontSize: 15,
@@ -1636,9 +1803,12 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
   /// 点击卡片弹出单集详情（完整简介）。
   Widget _episodeCard(VodInfo info, List<Episode> eps, int i) {
     final ep = eps[i];
-    // 剧照键 = TMDB 真实集号；源的列表位置可能错位（非从第 1 集起/缺集/顺序不同），
-    // 优先从集名解析真实集号（"第1集"/"01 命运"/"EP01"…），解析不到回退列表位置 i+1
-    final epNo = _parseEpisodeNumber(ep.name) ?? (i + 1);
+    // 剧照键 = TMDB 真实集号。**必须用整份列表算出的映射**，不能只解析本集名字：
+    //   · 源集名可能不带集号（本项目这部就是"沈家灭门，嘉兰入林府"）→ 靠顺序对齐
+    //   · 源的顺序可能不同 / 缺集 / 不从第 1 集起 → 按位置取会**错位**
+    //   · 集名与 TMDB 集标题一致时直接比对（最可信）
+    // 详见 `_episodeNoMap`。
+    final epNo = _episodeNoAt(info, eps, i);
     final epDetail = info.episodeDetails[epNo];
     // 封面：剧照优先（空串也视为无，继续回退背板/海报 —— 空串会挡住 ?? 回退）
     final stillRaw = info.episodeStills[epNo] ?? '';
@@ -1646,18 +1816,14 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
         ? stillRaw
         : (info.backdrop.isNotEmpty ? info.backdrop : info.pic);
     final epTitle = info.episodeTitles[epNo] ?? ep.name;
-    final rating = epDetail?.rating ?? 0;
     final runtime = epDetail?.runtime ?? 0;
     final selected = i == _selectedIndex;
-    final accent = AppTheme.accentColor;
-    // 电影（TMDB 无剧集概念，episodeCount ≤ 1）：标题居中
-    final isMovie = info.episodeCount <= 1;
+    final accent = _libAccent;
 
     return Container(
       width: 150,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
-        border: selected ? Border.all(color: accent, width: 1.5) : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1744,13 +1910,13 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(3, 4, 3, 0),
                 child: Text(
-                  _epTitleDisplay(epTitle),
+                  _epTitleDisplay(epTitle, epNo),
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                   ),
-                  textAlign: isMovie ? TextAlign.center : TextAlign.start,
+                  textAlign: TextAlign.center,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1763,31 +1929,76 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
 
   // ---------- 导演 ----------
 
-  /// 从集名解析真实集号："第1集"/"01 命运"/"EP01"/"第一集" → 1；
-  /// 解析不到返回 null（调用方回退列表位置）。
+  /// 从集名解析真实集号："第1集"/"第一集"/"第21集"/"第二十一集"/"01 命运"/
+  /// "EP01"/"E01"/"1"/"名 - 03" → 1/2/21…；解析不到返回 null（调用方回退）。
+  ///
+  /// ⚠️ 原来只处理了 `十` / `十X` / `X十` 三种中文数字形态，**`X十Y` 会落到
+  /// `cn['二十一']` → null**：于是"第二十一集 / 第三十五集 / 第四十七集"这类
+  /// （21–29、31–39、41–49）**全部解析失败并静默回退成列表位置** —— 源顺序一旦
+  /// 与 TMDB 不同，剧照就会错位。这里补齐到 99。
   int? _parseEpisodeNumber(String name) {
     if (name.isEmpty) return null;
-    // 中文数字："第一集"…"第十集"
-    const cn = <String, int>{
-      '零': 0, '一': 1, '二': 2, '三': 3, '四': 4,
+    // 1) 中文数字：第…集 / 第…话 / 第…話
+    final cnMatch =
+        RegExp(r'第\s*([一二三四五六七八九十百零两]+)\s*[集话話]').firstMatch(name);
+    if (cnMatch != null) {
+      final n = _cnNumber(cnMatch.group(1)!);
+      if (n != null && n > 0) return n;
+    }
+    // 2) 英文前缀：EP01 / E01 / EP.1 / EPISODE 1
+    final ep = RegExp(r'\b(?:EP|E|EPISODE)\.?\s*(\d{1,3})\b', caseSensitive: false)
+        .firstMatch(name);
+    if (ep != null) {
+      final n = int.tryParse(ep.group(1)!);
+      if (n != null && n > 0) return n;
+    }
+    // 3) 开头的阿拉伯数字："01 命运" / "1" / "1-xxx" / "[01] xxx"
+    final head =
+        RegExp(r'^\s*[\[\(【]?\s*(\d{1,3})\s*[\]\)】]?\s*[\s.、:：\-]').firstMatch(name);
+    if (head != null) {
+      final n = int.tryParse(head.group(1)!);
+      if (n != null && n > 0) return n;
+    }
+    // 4) 整名就是数字（含被括号包住）
+    final only = RegExp(r'^\s*[\[\(【]?\s*(\d{1,3})\s*[\]\)】]?\s*$').firstMatch(name);
+    if (only != null) {
+      final n = int.tryParse(only.group(1)!);
+      if (n != null && n > 0) return n;
+    }
+    // 5) 行尾数字："饼干 - 1"（只认行尾，避免吃掉"红色40号"里的 40）
+    final tail =
+        RegExp(r'[\s\-—.:：、,，]\s*[\[\(【]?\s*(\d{1,3})\s*[\]\)】]?\s*$').firstMatch(name);
+    if (tail != null) {
+      final n = int.tryParse(tail.group(1)!);
+      if (n != null && n > 0) return n;
+    }
+    // 6) 兜底：名字里第一个 1–3 位数字（保持旧行为，避免"命运1"这类漏掉）
+    final any = RegExp(r'(\d{1,3})').firstMatch(name);
+    if (any != null) {
+      final n = int.tryParse(any.group(1)!);
+      if (n != null && n > 0) return n;
+    }
+    return null;
+  }
+
+  /// 中文数字 → int，支持 一~九十九（含 十 / 十一 / 二十 / 二十一 / 两 / 零）。
+  static int? _cnNumber(String s) {
+    const d = <String, int>{
+      '零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4,
       '五': 5, '六': 6, '七': 7, '八': 8, '九': 9,
     };
-    final cnMatch = RegExp(r'第([一二三四五六七八九十]+)集').firstMatch(name);
-    if (cnMatch != null) {
-      final s = cnMatch.group(1)!;
-      if (s == '十') return 10;
-      if (s.length == 2 && s[0] == '十') {
-        return 10 + (cn[s[1]] ?? 0);
-      }
-      if (s.length == 2 && s[1] == '十') {
-        return (cn[s[0]] ?? 0) * 10;
-      }
-      return cn[s];
-    }
-    // 阿拉伯数字：01 / 1 / EP01 / 第1集（取第一个 1-3 位数字）
-    final m = RegExp(r'(\d{1,3})').firstMatch(name);
-    if (m != null) return int.tryParse(m.group(1)!);
-    return null;
+    final t = s.trim();
+    if (t.isEmpty) return null;
+    if (t == '百') return 100;
+    final i = t.indexOf('十');
+    if (i < 0) return d[t]; // 一~九
+    final tens = i == 0 ? 1 : (d[t.substring(0, i)] ?? -1);
+    if (tens < 0) return null;
+    final rest = t.substring(i + 1);
+    if (rest.isEmpty) return tens * 10; // 十 / 二十 / 三十
+    final ones = d[rest];
+    if (ones == null) return null;
+    return tens * 10 + ones; // 十一 / 二十一 / 四十七
   }
 
   /// 阿拉伯数字 → 中文序数："第一集"…"第九十九集"
@@ -1811,9 +2022,14 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
 
   /// 剧集名展示：名称前是纯数字（"1"/"01"/"1 xxx"）时转中文序数
   /// （"第一集 xxx"）；数字在末尾（"饼干 - 1"/"饼干-02"）也提取转前置；
-  /// 已有"第X集"或非数字开头保持原名。
-  String _epTitleDisplay(String title) {
+  /// 已有"第X集"前缀保持原名；**纯剧名（TMDB 剧集标题无数字）用集号补
+  /// "第一集"前缀**（如「第一集 沈家灭门，嘉兰入林府」）。
+  String _epTitleDisplay(String title, int fallbackNo) {
     if (title.isEmpty) return title;
+    // 0) 已带"第X集/第一集"前缀（中英文数字均算）→ 原样
+    if (RegExp(r'^第\s*[一二三四五六七八九十\d]+\s*集').hasMatch(title)) {
+      return title;
+    }
     // 1) 开头数字："01 命运" / "1" / "1-xxx"
     final m = RegExp(r'^(\d{1,3})\s*[\s.、:：\-]?(.*)$').firstMatch(title);
     if (m != null) {
@@ -1835,7 +2051,8 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
         return '${_chineseOrdinal(n)} ${rest}';
       }
     }
-    return title;
+    // 3) 纯剧名无数字 → 用真实集号补中文序数前缀
+    return '${_chineseOrdinal(fallbackNo)} ${title}';
   }
 
   Widget _buildDirector(VodInfo info) {
@@ -1963,7 +2180,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                 child: Text(
                   _overviewExpanded ? '收起' : '展开全部',
                   style: TextStyle(
-                    color: AppTheme.accentColor,
+                    color: _libAccent,
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
@@ -1978,7 +2195,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
   // ---------- TMDB 刮削未命中提示 ----------
 
   Widget _buildTmdbMiss(VodInfo info) {
-    final accent = AppTheme.accentColor;
+    final accent = _libAccent;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
       child: Row(
@@ -2087,11 +2304,11 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                         imageUrl: poster,
                         fit: BoxFit.cover,
                         placeholder: (_, __) =>
-                            ColoredBox(color: AppTheme.backgroundSecondary),
+                            ColoredBox(color: _libCard),
                         errorWidget: (_, __, ___) =>
-                            ColoredBox(color: AppTheme.backgroundSecondary),
+                            ColoredBox(color: _libCard),
                       )
-                    : ColoredBox(color: AppTheme.backgroundSecondary),
+                    : ColoredBox(color: _libCard),
               ),
             ),
             const SizedBox(height: 6),
@@ -2197,7 +2414,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
               Text(
                 '${item.voteAverage.toStringAsFixed(1)}★',
                 style: TextStyle(
-                  color: AppTheme.accentColor,
+                  color: _libAccent,
                   fontSize: 11,
                 ),
               ),
@@ -2217,9 +2434,9 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
         width: 40,
         height: 40,
         decoration: BoxDecoration(
-          color: AppTheme.backgroundSecondary.withValues(alpha: 0.8),
+          color: _libCard.withValues(alpha: 0.8),
           shape: BoxShape.circle,
-          border: Border.all(color: AppTheme.borderLight, width: 0.6),
+          border: Border.all(color: _libBorder, width: 0.6),
         ),
         child: label != null
             // 文字型圆形按钮（如「匹配 TMDB」的 T 字）
@@ -2227,14 +2444,14 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                 child: Text(
                   label,
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: _libText,
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
                     height: 1,
                   ),
                 ),
               )
-            : Icon(icon, color: AppTheme.textPrimary, size: 20),
+            : Icon(icon, color: _libText, size: 20),
       ),
     );
   }

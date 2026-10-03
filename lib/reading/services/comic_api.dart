@@ -182,6 +182,65 @@ class ComicApi {
     }
   }
 
+  /// 无关键词的漫画列表（copymanga API v3/comics）。
+  ///
+  /// 供「热门 / 最新更新」用：ordering 传 `-popular`（热门）或
+  /// `-datetime_updated`（按更新时间，默认）。
+  Future<SearchResult<Comic>> getComicList({
+    String ordering = '-datetime_updated',
+    int page = 0,
+    int limit = 27,
+  }) async {
+    _log('漫画列表: ordering=$ordering, page=$page');
+    try {
+      final url = '${baseUrl}api/v3/comics';
+      final response = await dio.get(
+        url,
+        queryParameters: {
+          'format': 'json',
+          'platform': '1',
+          'limit': limit,
+          'offset': page * limit,
+          'ordering': ordering,
+        },
+      );
+      final data = _parseResponse(response);
+      List<dynamic> list = [];
+      int total = 0;
+      if (data.containsKey('list')) {
+        list = data['list'] as List? ?? [];
+        total = data['total'] ?? 0;
+      } else if (data.containsKey('data') && data['data'] is Map) {
+        final inner = data['data'] as Map;
+        list = inner['list'] as List? ?? [];
+        total = inner['total'] ?? 0;
+      } else if (data.containsKey('comics')) {
+        list = data['comics'] as List? ?? [];
+        total = data['total'] ?? list.length;
+      }
+      final comics = <Comic>[];
+      for (final item in list) {
+        if (item is Map<String, dynamic>) {
+          try {
+            comics.add(Comic.fromJson(item));
+          } catch (e) {
+            _log('解析第 ${comics.length} 条失败: $e');
+          }
+        }
+      }
+      _log('列表解析 ${comics.length} 条 / 总数 $total');
+      return SearchResult<Comic>(
+        items: comics,
+        total: total,
+        currentPage: page + 1,
+        totalPages: (total / limit).ceil(),
+      );
+    } catch (e) {
+      _log('漫画列表失败: $e');
+      rethrow;
+    }
+  }
+
   /// 按题材分类拉取漫画（走 www 网页域 SSR，非 API 子域）。
   ///
   /// copymanga 搜索接口不支持分类（theme 被忽略），分类列表只能走网页

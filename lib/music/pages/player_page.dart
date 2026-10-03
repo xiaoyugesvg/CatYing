@@ -638,7 +638,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                     width: 280,
                     height: 300,
                     fit: BoxFit.cover,
-                    errorWidget: (_, __, ___) => const SizedBox()),
+                    errorBuilder: (_, __, ___) => const SizedBox()),
               ),
             ),
           // 压暗一层，让中间的小封面跳出来

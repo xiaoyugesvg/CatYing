@@ -14,6 +14,7 @@ class SettingsStore {
 
   static const _kQuality = AudioQuality.storageKey;
   static const _kSourceEnabled = 'music.sourceEnabled';
+  static const _kMusicSource = 'music.platform';
 
   /// 优先音质
   final audioQuality = ValueNotifier<AudioQuality>(AudioQuality.exhigh);
@@ -21,11 +22,34 @@ class SettingsStore {
   /// 是否启用第三方音源（关掉就只用内置公开接口）
   final useThirdPartySources = ValueNotifier<bool>(true);
 
+  /// 当前音乐**平台**（搜索/发现用哪个内置数据源）。
+  ///
+  /// ⚠️ 播放地址**不看它** —— 解析用的是**每首歌自己的 `Song.source`**
+  ///（否则搜到酷狗的歌却拿酷狗 id 去查网易云，必然取不到地址）。
+  final musicSource = ValueNotifier<SongSource>(SongSource.netease);
+
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    audioQuality.value =
-        AudioQuality.fromName(prefs.getString(_kQuality));
+    // ⚠️ 只在「存过**且合法**」时才覆盖默认值。
+    //
+    // 原来是无条件 `audioQuality.value = AudioQuality.fromName(prefs.getString(...))`，
+    // 而 `AudioQuality.fromName` 的 orElse 是 **hires** ——
+    // 首次启动（没有存储值 → 传 null）就被悄悄改成 hires，
+    // 与这里声明的默认 `exhigh`(320K) 不符，用户更容易撞上"这首歌没有免费音源"。
+    final saved = prefs.getString(_kQuality);
+    AudioQuality? parsed;
+    if (saved != null) {
+      for (final q in AudioQuality.values) {
+        if (q.name == saved) {
+          parsed = q;
+          break;
+        }
+      }
+    }
+    if (parsed != null) audioQuality.value = parsed;
     useThirdPartySources.value = prefs.getBool(_kSourceEnabled) ?? true;
+    // 没存过 / 存的是未知值 → `fromKey` 会兜底成 netease（行为不变）
+    musicSource.value = SongSource.fromKey(prefs.getString(_kMusicSource));
     // 音源列表也在这里一起初始化，保证进音乐 tab 前就绪
     await ThirdPartySourceStore.instance.init();
   }
@@ -38,5 +62,12 @@ class SettingsStore {
   Future<void> setUseThirdPartySources(bool v) async {
     useThirdPartySources.value = v;
     (await SharedPreferences.getInstance()).setBool(_kSourceEnabled, v);
+  }
+
+  /// 切换音乐平台（搜索/发现用哪个内置数据源）。
+  /// 播放地址**不受它影响** —— 那是按每首歌自己的 `Song.source` 解析的。
+  Future<void> setMusicSource(SongSource s) async {
+    musicSource.value = s;
+    (await SharedPreferences.getInstance()).setString(_kMusicSource, s.key);
   }
 }

@@ -252,7 +252,15 @@ class _DetailPageState extends State<DetailPage> {
     var forceNetwork = false;
     try {
       final cached = CacheStore.instance.getJsonCache(
-        'tmdb:${TmdbService.cacheKey(info.name, '')}',
+        // ⚠️ 这里的 key **必须与 `TmdbService.enrich` 写入时用的 key 一致**
+        //（`tmdb_service.dart` 里是 `cacheKey(info.name, year)`）。
+        // 原来传的是**空年份** → 有年份的作品永远读不到缓存 → 下面
+        // `forceNetwork = !cached.containsKey('similar')` 这个"旧缓存缺字段就
+        // 强制联网重取"的探测**永不生效**（类似作品可能一直空着）。
+        'tmdb:${TmdbService.cacheKey(
+          info.name,
+          TmdbService.extractYear(info.note, info.year)?.toString() ?? '',
+        )}',
         ttl: CacheTtl.tmdb,
       );
       if (cached != null && cached.isNotEmpty) {

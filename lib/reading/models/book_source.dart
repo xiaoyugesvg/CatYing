@@ -1,43 +1,65 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 小说书源（Legado / 阅读 3.0 格式）的模型与存储。
+/// 小说书源模型与存储。
 ///
-/// ── 这份东西的来历（重要）─────────────────────────────────────
-/// 老桌面版猫影有完整的 Legado 书源体系（`book_source.js` 528 行引擎 +
-/// `book_service.dart` 485 行 + 427 行管理页）。按早期需求"删除现有书源"
-/// 时被删掉了，而 **cmbok 本身没有替代品** —— cmbok 的图书只有
-/// Z-Library（单一图书库，要账号），没有"一个 JSON 描述一个小说站"的模型。
+/// 支持两种书源形态：
+/// ── 明文 config 源（推荐）────────────────────────────────────
+/// `{type:'config', config:{name,url,search_url,search_result_dom,...}}`，
+/// 搜索/目录/正文全部 CSS 选择器配置驱动，由 Dart 侧 ConfigBookSource
+/// 引擎执行（book_site_config.dart / config_book_source.dart）。
+/// 导入直接吃明文 json，无加密、无 JS 规则 —— 与漫画源同款体验。
+/// id 派生：`config:${config.name}`。
 ///
-/// 所以这里是**重新建**的数据层，不是"把 UI 接上已有的功能"。
-///
-/// ── 为什么 raw 存整份 JSON 而不是解出字段 ──────────────────────
-/// Legado 书源字段非常多（ruleSearch / ruleBookInfo / ruleToc / ruleContent
-/// 各自下面还有几十个子字段，还允许用户自定义变量）。逐个解成强类型字段
+/// ── Legado / 阅读 3.0 源（兼容保留）─────────────────────────
+/// `bookSourceName/bookSourceUrl/ruleSearch/...` 规则格式，由 Node 里的
+/// Legado 引擎执行（book_source.js）。字段非常多，逐个解成强类型字段
 /// 既冗长又容易漏，**保留原始 Map**，由执行引擎在需要时按需取。
-/// 只有展示与管理需要的几个字段（name / url / enabled / group / order）
-/// 提出来做便捷访问。
 class BookSource {
-  /// 原始 JSON（Legado 书源就是一份 JSON）
+  /// 原始 JSON（config 源 = 顶层定义；Legado 源 = 一份规则 JSON）
   final Map<String, dynamic> raw;
 
-  /// 稳定 id：优先用 Legado 的 bookSourceUrl，没有就退回 name
+  /// 稳定 id：config 源 = config:${name}；Legado 源优先 bookSourceUrl
   final String id;
 
   const BookSource({required this.raw, required this.id});
 
+  /// 是否明文 config 源（type=config）。
+  bool get isConfig => raw['type'] == 'config';
+
+  Map<String, dynamic>? get _configBody =>
+      isConfig && raw['config'] is Map
+          ? (raw['config'] as Map).cast<String, dynamic>()
+          : null;
+
   // ── 展示/管理用的便捷访问 ──────────────────────────────────
 
-  String get name =>
-      (raw['bookSourceName'] ?? raw['name'] ?? '未命名书源').toString();
+  String get name {
+    final c = _configBody;
+    if (c != null) {
+      return (c['name'] ?? '未命名书源').toString();
+    }
+    return (raw['bookSourceName'] ?? raw['name'] ?? '未命名书源').toString();
+  }
 
-  String get url =>
-      (raw['bookSourceUrl'] ?? raw['url'] ?? '').toString();
+  String get url {
+    final c = _configBody;
+    if (c != null) {
+      return (c['url'] ?? '').toString();
+    }
+    return (raw['bookSourceUrl'] ?? raw['url'] ?? '').toString();
+  }
 
-  String get group =>
-      (raw['bookSourceGroup'] ?? raw['group'] ?? '未分组').toString();
+  String get group {
+    final c = _configBody;
+    if (c != null) {
+      return (c['group'] ?? '未分组').toString();
+    }
+    return (raw['bookSourceGroup'] ?? raw['group'] ?? '未分组').toString();
+  }
 
   int get order {
     final v = raw['customOrder'] ?? raw['order'];
@@ -47,12 +69,20 @@ class BookSource {
 
   bool get enabled => raw['enabled'] != false;
 
-  /// 书源类型（Legado 有小说/漫画/音源等）
-  String get type => (raw['bookSourceType'] ?? raw['type'] ?? '').toString();
+  /// 书源类型（Legado 有小说/漫画/音源等；config 源一律 0=小说）
+  String get type {
+    if (isConfig) return '0';
+    return (raw['bookSourceType'] ?? raw['type'] ?? '').toString();
+  }
 
   /// 是否只用于搜索（Legado 的 enabledExplore 之类）
-  String get comment =>
-      (raw['bookSourceComment'] ?? raw['comment'] ?? '').toString();
+  String get comment {
+    final c = _configBody;
+    if (c != null) {
+      return (c['comment'] ?? '').toString();
+    }
+    return (raw['bookSourceComment'] ?? raw['comment'] ?? '').toString();
+  }
 
   /// 按**点分路径**读字段，如 `ruleSearch.name` / `enabled` / `header`。
   ///
@@ -126,10 +156,22 @@ class BookSource {
 
   /// 宽松解析：只要是个带名字的 Map 就收。
   ///
+  /// 支持两种形态：
+  ///   · 明文 config：`{type:'config', config:{name,url,...}}` → id=config:${name}
+  ///   · Legado：`{bookSourceName/bookSourceUrl,...}` → id=bookSourceUrl
+  ///
   /// 为什么不严格：用户从各处收集来的书源格式五花八门，
   /// **严格校验等于用不了**。真正能不能跑由执行引擎决定，
   /// 这里负责"先收进来、能看能管"。
   static BookSource? fromJson(Map<String, dynamic> j) {
+    // config 明文源：{type:'config', config:{name,url,...}}
+    if (j['type'] == 'config' && j['config'] is Map) {
+      final c = (j['config'] as Map).cast<String, dynamic>();
+      final name = (c['name'] ?? '').toString().trim();
+      final url = (c['url'] ?? '').toString().trim();
+      if (name.isEmpty && url.isEmpty) return null;
+      return BookSource(raw: j, id: 'config:$name');
+    }
     final name = (j['bookSourceName'] ?? j['name'] ?? '').toString().trim();
     final url = (j['bookSourceUrl'] ?? j['url'] ?? '').toString().trim();
     // 名字和地址至少要有一个，否则没法展示也没法识别
@@ -157,6 +199,13 @@ class BookSourceStore {
   static final BookSourceStore instance = BookSourceStore._();
 
   static const _key = 'book_sources_v1';
+  // 出厂内置明文 config 书源（装上即有源，与漫画源同款兜底体验）
+  static const _kBundledSourcesPath = 'assets/config/book_sources.json';
+  // 出厂内置 Legado 书源包（精选 10 源；装上即有、与 cmbok 同体验）
+  static const _kBundledLegadoPath = 'assets/config/legado_sources.json';
+  // 内置源一次性初始化标记：首次启动补入内置源后置位，
+  // 之后用户增删/改名/改规则均以用户状态为准，不再被内置重置。
+  static const _kBundledInitDone = 'book_sources_bundled_init_done';
 
   final List<BookSource> _items = [];
   List<BookSource> get all => List.unmodifiable(_items);
@@ -175,10 +224,71 @@ class BookSourceStore {
           ..clear()
           ..addAll(_decode(raw));
       }
+      // 出厂内置明文书源：装上即有（用户已导入同 id 则跳过，不清已有）
+      await _loadBundled();
     } catch (e) {
       debugPrint('[BookSource] 加载失败: $e');
     }
     revision.value++;
+  }
+
+  /// 加载 assets 内置书源：明文 config 源（book_sources.json）
+  /// + Legado 精选源包（legado_sources.json，10 源）。
+  /// 仅在**首次**启动补入（_kBundledInitDone 标记）；之后用户增删/
+  /// 改名/改规则均以用户状态为准，内置源不再重复补入或重置。
+  Future<void> _loadBundled() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(_kBundledInitDone) ?? false) return;
+      var added = 0;
+      added += await _loadBundledFile(_kBundledSourcesPath);
+      added += await _loadBundledFile(_kBundledLegadoPath);
+      if (added > 0) {
+        debugPrint('[BookSource] 内置书源补入 $added 个');
+        await _persist();
+      }
+      await prefs.setBool(_kBundledInitDone, true);
+    } catch (e) {
+      debugPrint('[BookSource] 内置书源初始化失败: $e');
+    }
+  }
+
+  Future<int> _loadBundledFile(String path) async {
+    try {
+      final bundled = await rootBundle.loadString(path);
+      final defs = <BookSource>[];
+      void take(dynamic e) {
+        if (e is! Map) return;
+        final s = BookSource.fromJson(e.cast<String, dynamic>());
+        if (s != null) defs.add(s);
+      }
+
+      final decoded = jsonDecode(bundled);
+      if (decoded is List) {
+        for (final e in decoded) {
+          take(e);
+        }
+      } else if (decoded is Map) {
+        final m = decoded.cast<String, dynamic>();
+        if (m['sources'] is List) {
+          for (final e in (m['sources'] as List)) {
+            take(e);
+          }
+        } else {
+          take(m);
+        }
+      }
+      var added = 0;
+      for (final s in defs) {
+        if (_items.any((e) => e.id == s.id)) continue;
+        _items.add(s);
+        added++;
+      }
+      return added;
+    } catch (e) {
+      debugPrint('[BookSource] 内置书源加载失败($path): $e');
+      return 0;
+    }
   }
 
   /// 兼容三种落盘形态：数组 / 单个对象 / {"sources":[...]}

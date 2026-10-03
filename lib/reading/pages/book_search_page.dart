@@ -1,7 +1,9 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../widgets/common_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/book.dart';
 import '../models/book_category.dart';
 import '../models/book_source.dart';
@@ -40,6 +42,16 @@ void _log(String message) {
     print('[BookSearchPage] $message');
   }
 }
+
+/// 豆瓣图床反爬头：无 Referer/手机 UA 会返回 HTTP 418（实测），
+/// 热门推荐封面必须带上。
+const _doubanImageHeaders = <String, String>{
+  'User-Agent':
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+          'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
+          'Mobile/15E148 Safari/604.1',
+  'Referer': 'https://m.douban.com/',
+};
 
 /// 图书搜索页面（果冻风，布局同漫画搜索 + 格式筛选 + 右上角 z-library 登录头像）
 class BookSearchPage extends StatefulWidget {
@@ -94,6 +106,12 @@ class _BookSearchPageState extends State<BookSearchPage>
   /// z-library 可用性上一状态（仅状态变化才弹通知；null=尚未初始化）
   bool? _wasUnavailable;
 
+  /// 热门推荐流（豆瓣 book_hot，不依赖 z-library）——进页即拉，
+  /// 供未搜索/无结果时直接展示热门书籍网格。
+  List<Book> _hotBooks = [];
+  bool _hotLoading = false;
+  bool _hotFailed = false;
+
   ScrollController get _activeScrollController =>
       _tabController.index == 0 ? _gridScrollController : _listScrollController;
 
@@ -118,6 +136,7 @@ class _BookSearchPageState extends State<BookSearchPage>
     _loadHistory();
     _ensureCategories();
     _maybeTriggerGuide();
+    _loadHotBooks();
   }
 
   /// 首次激活时展示图书页新手引导（仅一次）
@@ -194,6 +213,83 @@ class _BookSearchPageState extends State<BookSearchPage>
     } catch (e) {
       _log('后台拉取分类失败: $e');
     }
+  }
+
+  /// 拉豆瓣热门榜（book_hot）作主页推荐流，不依赖 z-library。
+  ///
+  /// 失败静默（只置 _hotFailed），不阻塞搜索/分类等其它入口。
+  Future<void> _loadHotBooks() async {
+    if (_hotLoading) return;
+    _hotLoading = true;
+    _hotFailed = false;
+    if (mounted) setState(() {});
+    try {
+      final dio = Dio(BaseOptions(
+        headers: {
+          'User-Agent':
+              'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+                  'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
+                  'Mobile/15E148 Safari/604.1',
+          'Referer': 'https://m.douban.com/book/chart/',
+        },
+        connectTimeout: const Duration(seconds: 12),
+        receiveTimeout: const Duration(seconds: 12),
+      ));
+      final r = await dio.get(
+        'https://m.douban.com/rexxar/api/v2/subject_collection/book_hot/items',
+        queryParameters: {'start': 0, 'count': 20},
+      );
+      final data = r.data;
+      final raw = (data is Map) ? data['subject_collection_items'] : null;
+      final list = <Book>[];
+      if (raw is List) {
+        for (final e in raw) {
+          if (e is! Map) continue;
+          final j = e.cast<String, dynamic>();
+          final title = (j['title'] ?? '').toString().trim();
+          if (title.isEmpty) continue;
+          final sub = (j['card_subtitle'] ?? '').toString().trim();
+          final author =
+              sub.split('/').first.trim(); // "作者 / 年份 / 出版社"
+          list.add(Book(
+            id: 'douban-${j['id'] ?? title}',
+            hash: '',
+            title: title,
+            author: author,
+            cover: _doubanCoverOf(j),
+            year: sub.split('/').length > 1
+                ? sub.split('/')[1].trim()
+                : null,
+            description: (j['description'] ?? '').toString().trim(),
+            publisher: sub.split('/').length > 2
+                ? sub.split('/')[2].trim()
+                : null,
+          ));
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _hotBooks = list;
+        _hotFailed = list.isEmpty;
+      });
+    } catch (e) {
+      _log('热门推荐拉取失败: $e');
+      if (mounted) setState(() => _hotFailed = true);
+    } finally {
+      _hotLoading = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  /// 豆瓣 cover 兼容字符串与对象两种形态（对象是 {url,...}）。
+  static String _doubanCoverOf(Map<String, dynamic> j) {
+    final c = j['cover'];
+    if (c is String) return c;
+    if (c is Map) {
+      final u = c['url'];
+      if (u is String && u.isNotEmpty) return u;
+    }
+    return '';
   }
 
   Future<void> _addHistory(String keyword) async {
@@ -1546,17 +1642,32 @@ class _BookSearchPageState extends State<BookSearchPage>
           ),
         );
       }
+      // 热门推荐流（豆瓣 book_hot）：有数据直接铺网格，不依赖 z-library
+      if (_hotBooks.isNotEmpty) return _buildHotGrid();
+      if (_hotLoading) {
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: JellyTheme.primary),
+              const SizedBox(height: 16),
+              Text('正在加载热门书籍...',
+                  style: TextStyle(color: JellyTheme.textSecondary)),
+            ],
+          ),
+        );
+      }
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.book_rounded, size: 64, color: JellyTheme.textSecondary),
             const SizedBox(height: 16),
-            Text('暂无推荐内容',
+            Text(_hotFailed ? '热门书籍加载失败' : '暂无推荐内容',
                 style: TextStyle(color: JellyTheme.textSecondary)),
             const SizedBox(height: 16),
             TextButton.icon(
-              onPressed: _doCategorySearch,
+              onPressed: _loadHotBooks,
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('重新获取'),
             ),
@@ -1692,6 +1803,105 @@ class _BookSearchPageState extends State<BookSearchPage>
         );
       },
     );
+  }
+
+  /// 热门推荐网格（豆瓣热榜）：封面 + 书名，点击打开豆瓣图书页。
+  Widget _buildHotGrid() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cols = _adaptiveColumns(
+          constraints.maxWidth,
+          min: 2,
+          target: 170,
+        );
+        return CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+                child: Row(
+                  children: [
+                    Text(
+                      '热门书籍',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontTitle3,
+                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? Colors.white
+                            : JellyTheme.textPrimaryLight,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '豆瓣热榜 · 点击看详情',
+                      style: TextStyle(
+                          fontSize: AppTheme.fontFootnote,
+                          color: JellyTheme.textSecondary),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: '刷新热门',
+                      onPressed: _hotLoading ? null : _loadHotBooks,
+                      icon: Icon(
+                        Icons.refresh_rounded,
+                        size: 20,
+                        color: JellyTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SliverPadding(
+              padding: EdgeInsets.only(
+                left: 12,
+                right: 12,
+                bottom: 12 + JellyNavBar.contentBottomAvoid,
+              ),
+              sliver: SliverGrid(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: cols,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 3 / 4.55,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final book = _hotBooks[index];
+                    return JellyBookCard(
+                      book: book,
+                      isGrid: true,
+                      heroTag: bookCoverHeroTag('hot', book),
+                      coverHeaders: _doubanImageHeaders,
+                      onTap: () => _openDoubanBook(book),
+                    );
+                  },
+                  childCount: _hotBooks.length,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 打开豆瓣图书详情页（系统浏览器；id 形如 douban-26943161）。
+  Future<void> _openDoubanBook(Book book) async {
+    final doubanId =
+        book.id.startsWith('douban-') ? book.id.substring(7) : book.id;
+    final uri = Uri.parse('https://book.douban.com/subject/$doubanId/');
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+          content: Text('无法打开豆瓣页面'),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ));
+    }
   }
 
   Widget _buildListView() {

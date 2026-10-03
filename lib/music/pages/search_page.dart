@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 import '../services/music_api.dart';
 import '../services/player_manager.dart';
+import '../services/settings_store.dart';
+import 'ximalaya_category_page.dart';
 import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
 import '../../widgets/app_page_loading.dart';
@@ -66,6 +68,9 @@ class _SearchPageState extends State<SearchPage>
   /// 快速打字只会在最后一次停顿后发一次请求，不会每个字符都发。
   Timer? _debounce;
 
+  /// 搜索代次（见 `_run`）：只认最后一次发起的搜索。
+  int _runEpoch = 0;
+
   @override
   void dispose() {
     _debounce?.cancel(); // 不取消的话：页面已销毁，定时器仍会触发网络请求
@@ -104,6 +109,9 @@ class _SearchPageState extends State<SearchPage>
   Future<void> _run(String kw) async {
     final k = kw.trim();
     if (k.isEmpty) return;
+    // 搜索代次：快速连打关键词 / 切 tab 时，先发的请求后回来会把
+    // 新结果覆盖成旧结果（防抖只解决"还没发"，不解决"已在途乱序"）。
+    final epoch = ++_runEpoch;
     ctrl.text = k;
     ctrl.selection =
         TextSelection.collapsed(offset: k.length);
@@ -116,12 +124,18 @@ class _SearchPageState extends State<SearchPage>
       _albums = const [];
     });
     await _pushHistory(k);
+    if (!mounted || epoch != _runEpoch) return;
 
     try {
       switch (_kind) {
         case _Kind.song:
-          final r = await api.search(k, limit: 40);
-          if (!mounted) return;
+          // 平台由「平台切换条」决定（默认网易云；不传时 Node 侧也默认 netease）
+          final r = await api.search(
+            k,
+            limit: 40,
+            source: SettingsStore.instance.musicSource.value,
+          );
+          if (!mounted || epoch != _runEpoch) return;
           setState(() {
             _loading = false;
             _songs = r.list;
@@ -129,7 +143,7 @@ class _SearchPageState extends State<SearchPage>
           });
         case _Kind.artist:
           final r = await api.searchArtists(k, limit: 30);
-          if (!mounted) return;
+          if (!mounted || epoch != _runEpoch) return;
           setState(() {
             _loading = false;
             _artists = r.list;
@@ -137,7 +151,7 @@ class _SearchPageState extends State<SearchPage>
           });
         case _Kind.album:
           final r = await api.searchAlbums(k, limit: 30);
-          if (!mounted) return;
+          if (!mounted || epoch != _runEpoch) return;
           setState(() {
             _loading = false;
             _albums = r.list;
@@ -145,7 +159,7 @@ class _SearchPageState extends State<SearchPage>
           });
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || epoch != _runEpoch) return;
       setState(() {
         _loading = false;
         _error = '$e';
@@ -163,10 +177,95 @@ class _SearchPageState extends State<SearchPage>
       child: Column(
         children: [
           _searchBar(),
+          _platformBar(),
           if (_searching) _kindTabs(),
           Expanded(
             child: _searching ? _results() : _landingPage(),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// 平台切换条（网易云 / 酷狗）。
+  ///
+  /// 只决定"**搜索**用哪个内置数据源"；**播放地址不受它影响** ——
+  /// 解析永远按每首歌自己的 `Song.source`（否则酷狗的歌会被拿酷狗 id
+  /// 去查网易云，必然取不到地址）。
+  Widget _platformBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Row(
+        children: [
+          // 「有声书」**不是"平台切换"**，而是进分类页：
+          // 喜马拉雅是**专辑模型**（专辑→单集），跟"单曲搜索"不是一回事；
+          // 直接切换搜索平台会让搜索结果出现"点一下播不了"的假可用。
+          GestureDetector(
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                builder: (_) => const XimalayaCategoryPage(),
+              ),
+            ),
+            child: Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: MusicTheme.fill,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                    color: MusicTheme.secondary.withValues(alpha: 0.35)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.headphones_rounded,
+                      size: 13, color: MusicTheme.secondary),
+                  const SizedBox(width: 4),
+                  Text('有声书',
+                      style: TextStyle(
+                          color: MusicTheme.label,
+                          fontSize: AppTheme.fontCaption)),
+                ],
+              ),
+            ),
+          ),
+          for (final s in const [SongSource.netease, SongSource.kugou])
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ValueListenableBuilder<SongSource>(
+                valueListenable: SettingsStore.instance.musicSource,
+                builder: (_, cur, __) {
+                  final on = cur == s;
+                  return GestureDetector(
+                    onTap: () async {
+                      if (on) return;
+                      await SettingsStore.instance.setMusicSource(s);
+                      if (!mounted) return;
+                      setState(() {});
+                      // 已有关键词就立刻用新平台重搜
+                      final k = ctrl.text.trim();
+                      if (k.isNotEmpty) unawaited(_run(k));
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: on ? MusicTheme.tint : MusicTheme.fill,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Text(
+                        s.displayName,
+                        style: TextStyle(
+                          color: on ? Colors.white : MusicTheme.label,
+                          fontSize: AppTheme.fontCaption,
+                          fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
         ],
       ),
     );

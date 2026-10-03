@@ -13,6 +13,10 @@ class CopymangaConfig {
   /// 显示名。
   final String name;
 
+  /// API base（可空）。copymanga 系镜像站（如热辣漫画 manga2026.xyz）各自独立
+  /// base；缺省（null）时走全局 copyApiUrl（RemoteConfigService）。
+  final String? base;
+
   /// 图片下载防盗链 Referer（站点首页）。
   final String referer;
 
@@ -24,6 +28,7 @@ class CopymangaConfig {
     required this.name,
     required this.referer,
     required this.ua,
+    this.base,
   });
 
   static const _defaultUa =
@@ -33,6 +38,7 @@ class CopymangaConfig {
   factory CopymangaConfig.fromJson(Map<String, dynamic> j) => CopymangaConfig(
     id: (j['id'] as String?) ?? 'copymanga',
     name: (j['name'] as String?) ?? '拷贝漫画',
+    base: j['base'] as String?,
     referer: (j['referer'] as String?) ?? 'https://2025copy.com/',
     ua: (j['ua'] as String?) ?? _defaultUa,
   );
@@ -40,6 +46,7 @@ class CopymangaConfig {
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
+    if (base != null) 'base': base,
     'referer': referer,
     'ua': ua,
   };

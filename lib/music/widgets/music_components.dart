@@ -1,10 +1,17 @@
+import 'dart:async';
+
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../models/models.dart';
 import '../services/player_manager.dart';
+import '../services/download_service.dart';
 import '../theme/music_theme.dart';
 import '../../common/theme.dart';
+import '../../widgets/app_toast.dart';
+import 'comment_sheet.dart';
+import '../pages/playlist_page.dart';
 
 /// 音乐模块的通用 UI 组件 —— 对应 Beans 的 `Components.swift` / `SongCell.swift`。
 ///
@@ -53,7 +60,7 @@ class CoverImage extends StatelessWidget {
         height: size,
         fit: BoxFit.cover,
         // 加载失败也退回占位，而不是显示破图图标
-        errorWidget: (_, __, ___) => _placeholder(radius),
+        errorBuilder: (_, __, ___) => _placeholder(radius),
         placeholder: (_, __) => _placeholder(radius),
         // 淡入让"图从无到有"不那么突兀（列表滚动时尤其明显）
         fadeInDuration: const Duration(milliseconds: 180),
@@ -324,11 +331,80 @@ Future<void> showSongActions(
                 style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
             onTap: () => Navigator.pop(ctx),
           ),
+          ListTile(
+            leading: Icon(Icons.playlist_add_rounded, color: MusicTheme.tint),
+            title: Text('添加到歌单', style: TextStyle(color: MusicTheme.label)),
+            onTap: () {
+              Navigator.pop(ctx);
+              showAddToPlaylistSheet(context, song);
+            },
+          ),
+          ListTile(
+            leading: Icon(Icons.queue_music_rounded, color: MusicTheme.tint),
+            title: Text('我的歌单', style: TextStyle(color: MusicTheme.label)),
+            onTap: () {
+              Navigator.pop(ctx);
+              Navigator.of(context).push<void>(
+                MaterialPageRoute(builder: (_) => const PlaylistListPage()),
+              );
+            },
+          ),
+          ListTile(
+            leading: Icon(Icons.mode_comment_outlined, color: MusicTheme.tint),
+            title: Text('评论', style: TextStyle(color: MusicTheme.label)),
+            subtitle: song.source == SongSource.netease
+                ? null
+                : Text('${song.source.displayName}暂无评论接口',
+                    style: TextStyle(
+                        color: MusicTheme.secondary,
+                        fontSize: AppTheme.fontFootnote)),
+            onTap: () {
+              Navigator.pop(ctx);
+              // ⚠️ 既有 `MusicApi.comments()` 只走网易云（没有 source 参数）。
+              // 对酷狗的歌必须挡住 —— 否则会拿酷狗的 id 去查网易云，必然空。
+              if (song.source != SongSource.netease) {
+                AppToast.show('${song.source.displayName}暂无评论接口', '');
+                return;
+              }
+              showCommentSheet(context, song);
+            },
+          ),
+          // 下载：入队到 App 沙盒（`Documents/music/`）。
+          // 已下载/下载中的会被服务自动忽略；下载完播放会**本地优先**（离线可听）。
+          ListTile(
+            leading: Icon(Icons.download_rounded, color: MusicTheme.tint),
+            title: Text('下载', style: TextStyle(color: MusicTheme.label)),
+            onTap: () {
+              Navigator.pop(ctx);
+              MusicDownloadService.instance.enqueue(song);
+              AppToast.show('已加入下载', song.name);
+            },
+          ),
+          ListTile(
+            leading: Icon(Icons.ios_share_rounded, color: MusicTheme.tint),
+            title: Text('分享', style: TextStyle(color: MusicTheme.label)),
+            onTap: () {
+              Navigator.pop(ctx);
+              unawaited(_shareSong(song));
+            },
+          ),
           const SizedBox(height: 8),
         ],
       ),
     ),
   );
+}
+
+/// 分享：把「歌名 - 歌手」复制到剪贴板并提示。
+///
+/// 与阅读模块「分享书源」的既有做法一致（复制到剪贴板 + toast）。
+/// **没有引入 `share_plus`** 是有意的：那会新增一个 iOS 原生依赖
+/// （要 pod install / 重编），而且我在这里无法验证其构建；
+/// 剪贴板方案零依赖、零风险。以后若要系统分享面板再单独引。
+Future<void> _shareSong(Song song) async {
+  final text = '${song.name} - ${song.artists}';
+  await Clipboard.setData(ClipboardData(text: text));
+  AppToast.show('已复制，可直接粘贴分享', text);
 }
 
 // ============================================================

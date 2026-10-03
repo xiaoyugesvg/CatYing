@@ -554,7 +554,14 @@ class TmdbService extends GetxService {
         } catch (_) {}
       }
       if (cached != null && cached.isNotEmpty) {
-        final type = cached['__type'] as String? ?? 'movie';
+        // ⚠️ 原来这里是 `cached['__type'] as String? ?? 'movie'`：
+        // 缓存条目一旦缺 `__type`（旧版本写入、被裁剪、字段名变过…），
+        // 下面"表空就补拉剧照"的守卫 **会静默失效** —— 空表一直空到缓存
+        // 过期（30 天），用户只会看到"剧照永远不出来"却毫无线索。
+        // 现在：优先用 `__type`，缺失/存疑时按**内容**判断（有 seasons 即剧集）。
+        final type = (cached['__type'] as String?) ??
+            (cached['seasons'] is List ? 'tv' : 'movie');
+        final isTv = type == 'tv' || cached['seasons'] is List;
         _apply(info, type, cached);
         // 恢复剧集剧照 + 集标题 + 每集简介/评分/日期/时长
         // （缓存里带 __episode_stills / __episode_titles / __episode_details）
@@ -577,8 +584,7 @@ class TmdbService extends GetxService {
         }
         // 旧缓存（本轮集卡功能上线前刮削的）可能没有剧照或每集简介 →
         // 命中缓存时也补拉整季数据并回写缓存，保证自动进入就能看到
-        if (type == 'tv' &&
-            (info.episodeStills.isEmpty || info.episodeDetails.isEmpty)) {
+        if (isTv && (info.episodeStills.isEmpty || info.episodeDetails.isEmpty)) {
           final tvId = (cached['id'] ?? '').toString();
           if (tvId.isNotEmpty) {
             final season = _firstSeasonNumber(cached);
@@ -588,6 +594,14 @@ class TmdbService extends GetxService {
               try {
                 await CacheStore.instance.setJsonCache('tmdb:$ck', cached);
               } catch (_) {}
+              AppLog.instance.log(
+                  '[TmdbService] 缓存补拉剧照成功: ${info.episodeStills.length} 张');
+            } else {
+              // ⚠️ 原来是**完全静默**的（只有 `if (s2.isNotEmpty)`、没有 else）：
+              // 补拉失败时用户拿不到任何线索。这里明确记一条。
+              AppLog.instance.log(
+                  '[TmdbService] 缓存补拉剧照为空（tvId=$tvId season=$season）'
+                  ' —— 检查 API 代理是否支持 /tv/{id}/season/{n}');
             }
           }
         }
@@ -807,21 +821,37 @@ class TmdbService extends GetxService {
   /// 代理优先，失败自动官方直连兜底一次。
   /// 逐集剧照接口（每集一次请求）在代理偶发失败时靠它保底，
   /// 避免整季剧照因个别请求失败而全空。
+  ///
+  /// [receiveTimeout] 可单独放宽：季剧照响应实测约 **94KB**，而 `_dio` 默认
+  /// 只有 15s —— 慢代理上很容易超时，结果是**整季剧照全空**（而详情/搜索这种
+  /// 小响应却正常，现象就是"别的都好好的，只有剧照没有"）。
+  /// [retries] 是**整轮**（含官方兜底）之外的重试次数。
   Future<dynamic> _getWithFallback(String path,
-      {Map<String, dynamic>? query}) async {
-    try {
-      final r = await _dio.get('$effectiveApiBase$path',
-          queryParameters: query);
+      {Map<String, dynamic>? query,
+      Duration? receiveTimeout,
+      int retries = 0}) async {
+    Future<dynamic> once(String base) async {
+      final r = await _dio.get('$base$path',
+          queryParameters: query,
+          options: receiveTimeout == null
+              ? null
+              : Options(receiveTimeout: receiveTimeout));
       return r.data;
-    } catch (_) {
-      if (effectiveApiBase != _base) {
-        try {
-          final r = await _dio.get('$_base$path', queryParameters: query);
-          return r.data;
-        } catch (_) {}
-      }
-      rethrow;
     }
+
+    for (var attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await once(effectiveApiBase);
+      } catch (_) {
+        if (effectiveApiBase != _base) {
+          try {
+            return await once(_base);
+          } catch (_) {}
+        }
+        if (attempt == retries) rethrow;
+      }
+    }
+    throw StateError('unreachable');
   }
 
   /// 把整季剧集数据（剧照/标题/简介/评分/日期/时长）写入 VodInfo 与刮削缓存。
@@ -881,10 +911,10 @@ class TmdbService extends GetxService {
   /// 供媒体库刮削视图「选集卡」使用（封面 + 两行简介 + 点击弹窗完整简介）；
   /// 失败静默，不影响刮削主流程。
   ///
-  /// 关键点：TMDB 的 `/tv/{id}/season/{n}` 响应里**没有** still_path，
-  /// 每集剧照只能通过 `/tv/{id}/season/{n}/episode/{m}/images` 逐集获取；
-  /// 但简介/评分/日期/时长 season 接口**一次性全带回**，无需逐集请求。
-  /// 所以这里分两步：先拿集元数据，再对每集并发拉 images（取第一张 still）。
+  /// 关键点：`/tv/{id}/season/{n}` 响应的 episodes[] **自带 still_path**
+  /// （实测兰香如故 47 集自带 41 张），一次请求拿全大部分剧照；
+  /// 只对 season 里**缺剧照**的集，再走 `/episode/{m}/images` 逐集补拉
+  /// （简介/评分/日期/时长 season 接口一次全带回，无需逐集请求）。
   Future<
       Map<int,
           ({
@@ -909,10 +939,15 @@ class TmdbService extends GetxService {
       final data = await _getWithFallback(
         '/tv/$tvId/season/$season',
         query: {'language': 'zh-CN'},
+        // 整季响应 ~94KB：放宽超时 + 多试一轮，避免慢代理下整季剧照全空
+        receiveTimeout: const Duration(seconds: 30),
+        retries: 1,
       );
       final eps = (data as Map)['episodes'];
       if (eps is! List || eps.isEmpty) return out;
       // 集号 → 集元数据（标题/简介/评分/日期/时长，season 接口一次带回）
+      // + 剧照：season 响应的 episodes[] 自带 still_path，直接取
+      final missing = <int>[]; // season 无剧照的集，稍后逐集补拉
       final epMeta =
           <int,
               ({
@@ -934,17 +969,30 @@ class TmdbService extends GetxService {
           runtime: (e['runtime'] as num?)?.toInt() ?? 0,
         );
         epMeta[n] = meta;
-        out[n] = (
-          still: '',
-          title: meta.title,
-          overview: meta.overview,
-          rating: meta.rating,
-          airDate: meta.airDate,
-          runtime: meta.runtime,
-        );
+        final sp = (e['still_path'] ?? '').toString();
+        if (sp.isNotEmpty) {
+          out[n] = (
+            still: '${effectiveImgBase}/w300$sp',
+            title: meta.title,
+            overview: meta.overview,
+            rating: meta.rating,
+            airDate: meta.airDate,
+            runtime: meta.runtime,
+          );
+        } else {
+          missing.add(n);
+          out[n] = (
+            still: '',
+            title: meta.title,
+            overview: meta.overview,
+            rating: meta.rating,
+            airDate: meta.airDate,
+            runtime: meta.runtime,
+          );
+        }
       }
-      // 逐集并发拉剧照（默认 5 路并发，失败的单集保持无图）
-      final ns = epMeta.keys.toList()..sort();
+      // 只对 season 缺剧照的集，逐集并发拉剧照（默认 5 路并发，失败的单集保持无图）
+      final ns = missing..sort();
       const concurrency = 5;
       var idx = 0;
       while (idx < ns.length) {
@@ -955,6 +1003,8 @@ class TmdbService extends GetxService {
             try {
               final d = await _getWithFallback(
                 '/tv/$tvId/season/$season/episode/$n/images',
+                receiveTimeout: const Duration(seconds: 25),
+                retries: 1,
               );
               final stills = (d as Map)['stills'];
               if (stills is List && stills.isNotEmpty && stills.first is Map) {

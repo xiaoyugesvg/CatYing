@@ -12,11 +12,13 @@ import '../models/book_content.dart';
 import '../models/reading_settings.dart';
 import '../services/book_paginator.dart';
 import '../services/book_source_service.dart';
+import '../services/reader_notes_service.dart';
 import '../services/tts_service.dart';
 import '../widgets/book_page_curl.dart';
 import '../widgets/pomodoro_button.dart';
 import 'tts_engine_page.dart';
 import '../../common/theme.dart';
+import '../theme/jelly_theme.dart';
 import '../../widgets/app_image_cache.dart';
 
 /// 书源在线阅读器。
@@ -851,22 +853,35 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     );
   }
 
-  /// 一个段落的渲染（含首行缩进 / 字间距 / 字重 / 底线 / 书签竖线 / 长按加书签）
+  /// 一个段落的渲染（含首行缩进 / 字间距 / 字重 / 底线 / 书签竖线 / 划线背景 / 长按菜单）
   Widget _paragraphWidget(int pi, Color fg, {String? overrideText}) {
     final text = overrideText ?? _paragraphs[pi];
+    final note = ReaderNotesService.instance.all.where((n) =>
+        n.sourceId == widget.source.id &&
+        n.bookName == widget.bookName &&
+        n.chapterIndex == _index &&
+        n.paragraphIndex == pi).firstOrNull;
+    final hasNote = note != null;
+    final noteBg = note == null
+        ? null
+        : Color(note.color).withValues(alpha: 0.35);
     return Padding(
       padding: EdgeInsets.only(bottom: _fontSize * _paraSpacing),
       child: GestureDetector(
         onLongPress: () => _onParagraphLongPress(pi),
         child: Container(
-          decoration: _bookmarks.containsKey(pi)
-              ? BoxDecoration(
-                  border: Border(
-                    left: BorderSide(color: _bookmarks[pi]!, width: 3),
-                  ),
-                )
-              : null,
-          padding: EdgeInsets.only(left: _bookmarks.containsKey(pi) ? 8 : 0),
+          decoration: BoxDecoration(
+            color: noteBg,
+            border: Border(
+              left: BorderSide(
+                color: _bookmarks[pi] ??
+                    (note != null ? Color(note.color) : Colors.transparent),
+                width: 3,
+              ),
+            ),
+          ),
+          padding: EdgeInsets.only(
+              left: (_bookmarks.containsKey(pi) || hasNote) ? 8 : 0),
           child: _wrapWithHighlight(
             pi,
             Text(
@@ -2208,8 +2223,177 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     return names[i % names.length];
   }
 
-  /// 长按段落 → 加书签（书签入口）
-  Future<void> _onParagraphLongPress(int i) => _showAddBookmark(i);
+  /// 长按段落 → 菜单：📌 加书签 / 🖍 划线 / ✍️ 划线+批注
+  Future<void> _onParagraphLongPress(int i) async {
+    if (_paragraphs.isEmpty || i < 0 || i >= _paragraphs.length) return;
+    final text = _paragraphs[i];
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: _bgs[_bgIndex][0],
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  text.length > 42 ? '${text.substring(0, 42)}…' : text,
+                  style: TextStyle(fontSize: AppTheme.fontFootnote, color: _fgMuted),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _longPressAction(
+                        Icons.bookmark_add_rounded,
+                        '加书签',
+                        () => Navigator.pop(ctx, 'bookmark'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _longPressAction(
+                        Icons.border_color_rounded,
+                        '划线',
+                        () => Navigator.pop(ctx, 'highlight'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _longPressAction(
+                        Icons.edit_note_rounded,
+                        '划线+批注',
+                        () => Navigator.pop(ctx, 'note'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (action == null || !mounted) return;
+    switch (action) {
+      case 'bookmark':
+        await _showAddBookmark(i);
+      case 'highlight':
+        final kept = await ReaderNotesService.instance.toggleHighlight(
+          sourceId: widget.source.id,
+          sourceName: widget.source.name,
+          bookName: widget.bookName,
+          chapterIndex: _index,
+          chapterName: widget.chapters[_index].name,
+          paragraphIndex: i,
+          text: text,
+        );
+        if (!mounted) return;
+        setState(() {});
+        _toast(kept ? '已划线' : '已取消划线');
+      case 'note':
+        final note = await _showNoteInput(text);
+        if (note == null || !mounted) return;
+        await ReaderNotesService.instance.addNote(
+          sourceId: widget.source.id,
+          sourceName: widget.source.name,
+          bookName: widget.bookName,
+          chapterIndex: _index,
+          chapterName: widget.chapters[_index].name,
+          paragraphIndex: i,
+          text: text,
+          note: note,
+        );
+        if (!mounted) return;
+        setState(() {});
+        _toast('已划线并写入批注');
+    }
+  }
+
+  Widget _longPressAction(IconData icon, String label, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: _fg.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 22, color: _fg),
+            const SizedBox(height: 6),
+            Text(label,
+                style: TextStyle(fontSize: AppTheme.fontFootnote, color: _fg)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 批注输入框。返回批注文字（空字符串 = 只划线不批注）。
+  Future<String?> _showNoteInput(String text) {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: _bgs[_bgIndex][0],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('写批注',
+            style: TextStyle(fontSize: AppTheme.fontTitle3, color: _fg)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              text.length > 60 ? '${text.substring(0, 60)}…' : text,
+              style: TextStyle(fontSize: AppTheme.fontFootnote, color: _fgMuted),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              maxLines: 3,
+              decoration: InputDecoration(
+                hintText: '写下你的想法…',
+                hintStyle:
+                    TextStyle(fontSize: AppTheme.fontSubhead, color: _fgMuted),
+                filled: true,
+                fillColor: _fg.withValues(alpha: 0.05),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: Text('取消',
+                style: TextStyle(fontSize: AppTheme.fontSubhead, color: _fgMuted)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, ctrl.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
 
   /// 应用一个排版预设。
   ///
@@ -3142,12 +3326,18 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     }
   }
 
-  /// 笔记面板（占位实现：显示"+ 划线/批注"入口说明）
+  /// 笔记面板：本书划线/批注列表，点击跳转到对应章节。
   void _showNotesSheet() {
+    final notes = ReaderNotesService.instance
+        .forBook(widget.source.id, widget.bookName);
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (ctx) => Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(ctx).size.height * 0.72,
+        ),
         decoration: BoxDecoration(
           color: _bgs[_bgIndex][0],
           borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
@@ -3160,23 +3350,166 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('笔记',
-                    style: TextStyle(
-                        fontSize: AppTheme.fontTitle3,
-                        fontWeight: FontWeight.w700,
-                        color: _fg)),
+                Row(
+                  children: [
+                    Text('笔记',
+                        style: TextStyle(
+                            fontSize: AppTheme.fontTitle3,
+                            fontWeight: FontWeight.w700,
+                            color: _fg)),
+                    const Spacer(),
+                    if (notes.isNotEmpty)
+                      TextButton(
+                        onPressed: () async {
+                          await ReaderNotesService.instance
+                              .clearBook(widget.source.id, widget.bookName);
+                          if (ctx.mounted) {
+                            Navigator.pop(ctx);
+                            setState(() {});
+                            _toast('已清空本书笔记');
+                          }
+                        },
+                        child: Text('清空',
+                            style: TextStyle(
+                                fontSize: AppTheme.fontFootnote,
+                                color: JellyTheme.error)),
+                      ),
+                  ],
+                ),
                 const SizedBox(height: 10),
-                Text('在正文里长按选中文字即可划线、写批注。',
-                    style: TextStyle(fontSize: AppTheme.fontSubhead, color: _fgMuted)),
-                const SizedBox(height: 6),
-                Text('（本页按截图保留入口；划线/批注的完整交互还没做）',
-                    style: TextStyle(fontSize: AppTheme.fontFootnote, color: _fgMuted)),
+                if (notes.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 30),
+                    child: Center(
+                      child: Text(
+                        '还没有划线笔记\n在正文里长按段落即可划线、写批注',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontSize: AppTheme.fontSubhead,
+                            color: _fgMuted,
+                            height: 1.6),
+                      ),
+                    ),
+                  )
+                else
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: notes.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (_, i) {
+                        final n = notes[i];
+                        final isCur = n.chapterIndex == _index;
+                        return Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: _fg.withValues(alpha: 0.05),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border(
+                              left: BorderSide(
+                                  color: Color(n.color), width: 3),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    n.hasNote
+                                        ? Icons.edit_note_rounded
+                                        : Icons.border_color_rounded,
+                                    size: 16,
+                                    color: Color(n.color),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      '${n.chapterName.isEmpty ? '第${n.chapterIndex + 1}章' : n.chapterName}'
+                                      '${isCur ? '（当前）' : ''}',
+                                      style: TextStyle(
+                                          fontSize: AppTheme.fontFootnote,
+                                          color: _fgMuted),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  GestureDetector(
+                                    onTap: () async {
+                                      await ReaderNotesService.instance
+                                          .remove(n.id);
+                                      if (ctx.mounted) {
+                                        Navigator.pop(ctx);
+                                        setState(() {});
+                                      }
+                                    },
+                                    child: Icon(Icons.close_rounded,
+                                        size: 16, color: _fgMuted),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(n.text,
+                                  style: TextStyle(
+                                      fontSize: AppTheme.fontSubhead,
+                                      color: _fg,
+                                      height: 1.5),
+                                  maxLines: 4,
+                                  overflow: TextOverflow.ellipsis),
+                              if (n.hasNote) ...[
+                                const SizedBox(height: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 5),
+                                  decoration: BoxDecoration(
+                                    color: Color(n.color)
+                                        .withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text('批注：${n.note}',
+                                      style: TextStyle(
+                                          fontSize: AppTheme.fontFootnote,
+                                          color: _fg,
+                                          height: 1.4)),
+                                ),
+                              ],
+                              if (!isCur)
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      Navigator.pop(ctx);
+                                      _jumpToChapter(n.chapterIndex);
+                                    },
+                                    child: Text('跳到本章 →',
+                                        style: TextStyle(
+                                            fontSize: AppTheme.fontFootnote,
+                                            color: JellyTheme.primary)),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
               ],
             ),
           ),
         ),
       ),
     );
+  }
+
+  /// 跳转到某章节（笔记点击用；分页模式回第一页）。
+  Future<void> _jumpToChapter(int chapterIndex) async {
+    if (chapterIndex < 0 || chapterIndex >= widget.chapters.length) return;
+    if (_index != chapterIndex) {
+      _index = chapterIndex;
+      await _loadChapter(_index);
+      await _saveProgress();
+      if (_pageCtrl.hasClients) _pageCtrl.jumpToPage(0);
+    }
+    _toast('已跳转到${widget.chapters[chapterIndex].name}');
   }
 
   /// 阅读设置面板（截图 IMG_71a10）。

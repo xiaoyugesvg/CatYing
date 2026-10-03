@@ -17,6 +17,12 @@
  *   · 不提供：登录、歌单、收藏、排行榜（那些需要账号）
  *
  * 明确不做：任何账号/加密协议（weapi/eapi）、扫码、Cookie 持久化。
+ *
+ * ── 多平台（多数据源）─────────────────────────────────────────
+ * `handleMusicApi(body)` 现在按 `body.source` 分派：
+ *   · 不传 / `'netease'` / `'wy'` → 本文件里的网易云实现（**默认，行为不变**）
+ *   · `'kugou'` / `'kg'`        → `kugou_source.js`（第三方库 KuGouMusicApi，MIT）
+ * 两个平台的返回结构完全一致（见各函数注释与 `kugou_source.js` 文件头）。
  */
 
 import axios from 'axios';
@@ -24,6 +30,13 @@ import axios from 'axios';
 import { loadScript, runAction, engineInfo } from './lx_engine.js';
 // 第三方音源解析（模板法 / 脚本法）
 import { resolveSource } from './source_resolver.js';
+// ── 多平台：酷狗（第三方库 KuGouMusicApi 的 ESM 桥接层）──────────
+// 见 `kugou_source.js` 文件头（来源/许可/设备身份 bootstrap）。
+// 这里只 import 函数；上游 CJS 代码在桥接层内部用 createRequire 加载。
+import * as kugou from './kugou_source.js';
+// ── 多平台：喜马拉雅（有声书/播客）──────────────────────────────
+// 映射：专辑 → Album，单集 → Song。**播放必须带 UA**（见 ximalaya_source.js）。
+import * as ximalaya from './ximalaya_source.js';
 
 /** 网易云公开接口要求的请求头（缺 Referer 会被拒） */
 const NETEASE_HEADERS = {
@@ -267,8 +280,140 @@ async function resolveBySourceAction(source, song) {
         : { ok: false, error: r.error, kind: r.kind };
 }
 
+/**
+ * 平台别名归一化。
+ *
+ * ⚠️ 为什么要有这个函数（而不是直接在 switch 里比字符串）：
+ *   · `source` **可以完全不传** —— 此时必须与改动前**逐字节一致**地走网易云；
+ *   · Dart 侧 `MusicApi` 传的是 `SongSource.key`（`'netease'`/`'kugou'`），
+ *     但历史/其它调用点可能传 `'wy'`/`'kg'`，这里统一收口。
+ * 返回 `'kugou'` 或 `'netease'`（未知值一律回落 netease，保证默认行为不变）。
+ */
+function normalizeSource(raw) {
+    const s = String(raw == null ? '' : raw).trim().toLowerCase();
+    if (s === 'kugou' || s === 'kg') return 'kugou';
+    if (s === 'ximalaya' || s === 'xmly') return 'ximalaya';
+    return 'netease';
+}
+
+/**
+ * 酷狗**暂不支持**的接口统一返回。
+ * 契约与网易云的失败分支一致（`{ok:false, error}`），上层原样显示 error，
+ * 不会"假装成功返回空列表"。
+ */
+function kugouUnsupported(action) {
+    return { ok: false, error: '酷狗暂不支持该接口', action, source: 'kugou' };
+}
+
+/**
+ * 喜马拉雅的分派（**早返回**，不掺进下面网易云/酷狗的逐条逻辑）。
+ *
+ * 为什么单独一个函数：喜马拉雅的语义与前两个平台不同 ——
+ *   · 搜索返回的是**专辑**（不是单曲）→ 这里映射成 Song 形状，`id` = 专辑 id，
+ *     上层点进去再拉专辑单集（`ximalayaAlbum`）。
+ *   · 播放地址**随专辑单集列表一起返回**（不需要另外换链），但**必须带 UA**。
+ */
+async function handleXimalayaAction(action, body) {
+    switch (action) {
+        case 'search': {
+            const r = await ximalaya.ximalayaSearch(body.keyword);
+            if (!r.ok) return r;
+            // 映射成 Song 形状（`artists` 放主播名），让搜索页能直接渲染；
+            // 点进去走 `ximalayaAlbum` 拿单集（见 Dart 侧专辑详情页）。
+            const list = (r.list || []).map((a) => ({
+                id: a.id,
+                name: a.name,
+                artist: a.artist || '',
+                artistIds: [],
+                album: a.name,
+                albumId: a.id,
+                cover: a.cover,
+                duration: 0,
+                fee: -1,
+                source: 'ximalaya',
+                kind: 'album', // 上层据此显示"专辑"并进专辑页
+            }));
+            return { ok: true, list, total: list.length };
+        }
+        case 'url':
+            return ximalaya.ximalayaUrl(body.id);
+        case 'lyric':
+            // 有声书没有歌词 —— 明确说，不要静默返回空
+            return { ok: false, error: '喜马拉雅是有声书，没有歌词' };
+        case 'ximalayaCategories':
+            return ximalaya.ximalayaCategories();
+        case 'ximalayaCategory':
+            return ximalaya.ximalayaCategory(body.categoryId, body.page);
+        case 'ximalayaAlbum':
+            return ximalaya.ximalayaAlbum(body.id);
+        case 'ximalayaSelfTest':
+            return ximalaya.ximalayaSelfTest();
+        default:
+            return {
+                ok: false,
+                error: '喜马拉雅暂不支持该接口',
+                action,
+                source: 'ximalaya',
+            };
+    }
+}
+
 async function handleMusicApi(body) {
     const action = String((body && body.action) || '');
+    // 默认 netease：不传 source 时下面每条分支都与改动前完全一样
+    const source = normalizeSource(body && body.source);
+    const isKg = source === 'kugou';
+    // 喜马拉雅：整条链路独立（语义与"单曲平台"不同），提前返回
+    if (source === 'ximalaya') return handleXimalayaAction(action, body);
+
+    // ── 三个"双平台"接口 ────────────────────────────────────
+    if (action === 'search') {
+        return isKg
+            ? kugou.searchSongs(body.keyword, body.limit, body.offset)
+            : search(body.keyword, body.limit, body.offset);
+    }
+    if (action === 'url') {
+        return isKg
+            ? kugou.songUrl(body.id, body.quality)
+            : songUrl(body.id, body.quality);
+    }
+    if (action === 'lyric') {
+        return isKg
+            ? kugou.lyric(body.id)
+            : lyric(body.id);
+    }
+
+    // ── 以下接口目前只有网易云实现 ──────────────────────────
+    // 传了 kugou 就**明确说"不支持"**，绝不静默回落到网易云
+    // （否则用户选了酷狗却看到网易云的内容，是更严重的错）。
+    if (isKg) {
+        switch (action) {
+            case 'topLists':
+                return kugou.topLists();
+            case 'playlistDetail':
+                return kugou.playlistDetail(body.id);
+            case 'hotSearch':
+                return kugou.hotSearch();
+            case 'newSongs':
+                return kugou.newSongs(body.limit);
+            // ── 酷狗桥接层确实没做的，明确返回不支持 ──
+            case 'personalized':
+            case 'playlistSquare':
+            case 'playlistCatlist':
+            case 'comments':
+            case 'simiSongs':
+            case 'searchArtists':
+            case 'searchAlbums':
+            case 'artistSongs':
+            case 'artistAlbums':
+            case 'albumSongs':
+            case 'resolveBySource':
+                return kugouUnsupported(action);
+            default:
+                return { ok: false, error: '未知 action: ' + action };
+        }
+    }
+
     switch (action) {
         case 'search':
             return search(body.keyword, body.limit, body.offset);
@@ -312,6 +457,11 @@ async function handleMusicApi(body) {
         // ── LX 引擎自检（沙箱 / 超时 / crypto 是否真的生效）──
         case 'lxSelfTest':
             return lxSelfTest();
+        // ── 酷狗桥接层自检（不联网：上游版本 / 依赖 / 模块 / 设备身份）──
+        // ⚠️ 放在 netease 分支的 switch 里是**故意的**：
+        //    它不依赖 `source`（也不该被 source 影响），任何调用方都能拿到结果。
+        case 'kugouSelfTest':
+            return kugou.selfTest();
         default:
             return { ok: false, error: '未知 action: ' + action };
     }

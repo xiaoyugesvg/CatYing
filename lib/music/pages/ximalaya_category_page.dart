@@ -1,0 +1,275 @@
+import 'package:flutter/material.dart';
+
+import '../models/models.dart';
+import '../services/music_api.dart';
+import '../theme/music_theme.dart';
+import '../../common/theme.dart';
+import 'ximalaya_album_page.dart';
+
+/// 喜马拉雅的**分类浏览**（有声书 / 儿童 / 相声 / 历史…）。
+///
+/// 为什么要有分类入口：喜马拉雅的**搜索走第三方聚合站，不稳定**
+///（实测出现过 TLS 断开），而分类/专辑走的是官方域名，稳定得多。
+/// 所以"发现内容"这条主路径靠分类，搜索只当补充。
+class XimalayaCategoryPage extends StatefulWidget {
+  const XimalayaCategoryPage({super.key});
+
+  @override
+  State<XimalayaCategoryPage> createState() => _XimalayaCategoryPageState();
+}
+
+class _XimalayaCategoryPageState extends State<XimalayaCategoryPage> {
+  bool _loading = true;
+  String _error = '';
+  List<({String id, String name})> _cats = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = '';
+    });
+    try {
+      final cats = await MusicApi.instance.ximalayaCategories();
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _cats = cats;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = '$e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('有声书')),
+      body: _loading
+          ? Center(
+              child: SizedBox(
+                width: 26,
+                height: 26,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2.4, color: MusicTheme.tint),
+              ),
+            )
+          : _error.isNotEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(_error,
+                          style: TextStyle(
+                              color: MusicTheme.secondary,
+                              fontSize: AppTheme.fontBody)),
+                      const SizedBox(height: 14),
+                      TextButton(
+                          onPressed: _load,
+                          child: Text('重试',
+                              style: TextStyle(color: MusicTheme.tint))),
+                    ],
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  itemCount: _cats.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, i) {
+                    final c = _cats[i];
+                    return ListTile(
+                      leading: Icon(Icons.graphic_eq_rounded,
+                          color: MusicTheme.tint),
+                      title: Text(c.name,
+                          style: TextStyle(color: MusicTheme.label)),
+                      trailing: Icon(Icons.chevron_right_rounded,
+                          color: MusicTheme.secondary),
+                      onTap: () => Navigator.of(context).push<void>(
+                        MaterialPageRoute(
+                          builder: (_) => _AlbumListPage(
+                            categoryId: c.id,
+                            categoryName: c.name,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+    );
+  }
+}
+
+/// 某分类下的专辑列表。
+///
+/// ⚠️ 只做**单页 + 手动"加载更多"**，不做无限滚动：喜马拉雅的单集动辄几千集，
+/// 无脑翻页会让请求量失控（数据源那边一页 50 个专辑）。
+class _AlbumListPage extends StatefulWidget {
+  const _AlbumListPage({required this.categoryId, required this.categoryName});
+  final String categoryId;
+  final String categoryName;
+
+  @override
+  State<_AlbumListPage> createState() => _AlbumListPageState();
+}
+
+class _AlbumListPageState extends State<_AlbumListPage> {
+  final _items = <Song>[];
+  bool _loading = true;
+  bool _loadingMore = false;
+  String _error = '';
+  int _page = 1;
+  bool _hasMore = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    if (_loadingMore || !_hasMore) return;
+    setState(() {
+      if (_items.isEmpty) _loading = true;
+      _loadingMore = true;
+    });
+    final r = await MusicApi.instance
+        .ximalayaCategory(widget.categoryId, page: _page);
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      _loadingMore = false;
+      if (!r.ok) {
+        _error = r.message;
+        _hasMore = false;
+        return;
+      }
+      if (r.list.isEmpty) {
+        _hasMore = false;
+        return;
+      }
+      _items.addAll(r.list);
+      _page++;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+          title: Text(widget.categoryName,
+              maxLines: 1, overflow: TextOverflow.ellipsis)),
+      body: _loading
+          ? Center(
+              child: SizedBox(
+                width: 26,
+                height: 26,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2.4, color: MusicTheme.tint),
+              ),
+            )
+          : _error.isNotEmpty && _items.isEmpty
+              ? Center(
+                  child: Text(_error,
+                      style: TextStyle(
+                          color: MusicTheme.secondary,
+                          fontSize: AppTheme.fontBody)),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  itemCount: _items.length + (_hasMore ? 1 : 0),
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, i) {
+                    if (i >= _items.length) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        child: Center(
+                          child: _loadingMore
+                              ? SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: MusicTheme.tint),
+                                )
+                              : TextButton(
+                                  onPressed: _load,
+                                  child: Text('加载更多',
+                                      style: TextStyle(
+                                          color: MusicTheme.tint)),
+                                ),
+                        ),
+                      );
+                    }
+                    final a = _items[i];
+                    return ListTile(
+                      leading: _AlbumThumb(url: a.coverUrl),
+                      title: Text(a.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: MusicTheme.label)),
+                      subtitle: Text(a.artists.isEmpty ? '有声书' : a.artists,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: MusicTheme.secondary,
+                              fontSize: AppTheme.fontFootnote)),
+                      trailing: Icon(Icons.chevron_right_rounded,
+                          color: MusicTheme.secondary),
+                      onTap: () => Navigator.of(context).push<void>(
+                        MaterialPageRoute(
+                          builder: (_) => XimalayaAlbumPage(
+                            albumId: '${a.id}',
+                            albumName: a.name,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+    );
+  }
+}
+
+/// 专辑封面（取不到就用音符占位，不留空白格）。
+class _AlbumThumb extends StatelessWidget {
+  const _AlbumThumb({required this.url});
+  final String? url;
+
+  @override
+  Widget build(BuildContext context) {
+    final u = (url ?? '').trim();
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        width: 46,
+        height: 46,
+        child: u.isEmpty
+            ? Container(
+                color: MusicTheme.fill,
+                alignment: Alignment.center,
+                child: Icon(Icons.headphones_rounded,
+                    size: 20, color: MusicTheme.secondary),
+              )
+            : Image.network(
+                u,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  color: MusicTheme.fill,
+                  alignment: Alignment.center,
+                  child: Icon(Icons.headphones_rounded,
+                      size: 20, color: MusicTheme.secondary),
+                ),
+              ),
+      ),
+    );
+  }
+}

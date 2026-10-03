@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/models.dart';
 import '../models/third_party_source.dart';
+import '../../services/app_log.dart';
 import 'music_api.dart';
 
 /// 音源解析结果
@@ -111,10 +112,17 @@ class UnblockService {
     }
   }
 
-  /// 汇总失败原因（给 UI 一行显示，太长就截断）
+  /// 汇总失败原因。
+  ///
+  /// ⚠️ 返回值会被塞进 toast 并**被截断**（用户实测只看到
+  /// `内置接口没有免费音源；car_conv2: GD接口失败: Clie...`，看不到真正原因）。
+  /// 所以这里**永远**把完整逐条明细写进 `AppLog`（日志页可查），
+  /// 返回值仍保持简短，专供 toast 用。
   String describeFailure() {
     if (lastAttempts.isEmpty) return '';
-    debugPrint('[Unblock] 逐个失败原因:\n${lastAttempts.join('\n')}');
+    final full = lastAttempts.join('\n');
+    debugPrint('[Unblock] 逐个失败原因:\n$full');
+    AppLog.instance.log('[Unblock] 音源逐个失败原因:\n$full');
     if (lastAttempts.length == 1) return lastAttempts.first;
     return '试了 ${lastAttempts.length} 个音源都没成功';
   }

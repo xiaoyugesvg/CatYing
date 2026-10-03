@@ -86,6 +86,63 @@ function aesDecrypt(data, mode, key, iv) {
 }
 
 // ============================================================
+// lx.utils.crypto 补充：sha1 / sha256 / rsaEncrypt / rsaDecrypt
+// ============================================================
+
+function sha1(value) {
+    return crypto.createHash('sha1').update(String(value ?? ''), 'utf8').digest('hex');
+}
+
+function sha256(value) {
+    return crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
+}
+
+/** PEM 公钥；也兼容"只有 base64 正文"的写法（很多音源把 PEM 头尾省掉） */
+function toPublicKey(key) {
+    const s = String(key ?? '').trim();
+    if (!s) throw new Error('rsaEncrypt: 缺少公钥');
+    if (s.includes('-----BEGIN')) return s;
+    return `-----BEGIN PUBLIC KEY-----\n${s.replace(/\s+/g, '')}\n-----END PUBLIC KEY-----`;
+}
+
+function toPrivateKey(key) {
+    const s = String(key ?? '').trim();
+    if (!s) throw new Error('rsaDecrypt: 缺少私钥');
+    if (s.includes('-----BEGIN')) return s;
+    return `-----BEGIN RSA PRIVATE KEY-----\n${s.replace(/\s+/g, '')}\n-----END RSA PRIVATE KEY-----`;
+}
+
+/**
+ * RSA 加密（PKCS#1 v1.5），对齐 LX 的 `utils.crypto.rsaEncrypt(data, key)`。
+ *
+ * ⚠️ 这是**第三方音源脚本最常用的缺口之一**：网易 / QQ 类音源几乎都要 RSA，
+ * 而原来 `utils.crypto` 里**没有这个方法** → 脚本一调就抛
+ * `TypeError: lx.utils.crypto.rsaEncrypt is not a function`，
+ * 用户看到的就是"音源跑不通、只报一句看不懂的错"。
+ *
+ * 返回 **Buffer**（LX 脚本通常接 `.toString('base64')` 或
+ * `lx.utils.buffer.bufToString(...)`）。
+ */
+function rsaEncrypt(data, key) {
+    const buf = Buffer.isBuffer(data) ? data : Buffer.from(String(data ?? ''), 'utf8');
+    return crypto.publicEncrypt(
+        { key: toPublicKey(key), padding: crypto.constants.RSA_PKCS1_PADDING },
+        buf,
+    );
+}
+
+/** RSA 解密（少数音源用私钥解响应），同样返回 Buffer。 */
+function rsaDecrypt(data, key) {
+    const buf = Buffer.isBuffer(data)
+        ? data
+        : Buffer.from(String(data ?? ''), 'base64');
+    return crypto.privateDecrypt(
+        { key: toPrivateKey(key), padding: crypto.constants.RSA_PKCS1_PADDING },
+        buf,
+    );
+}
+
+// ============================================================
 // lx.utils.buffer
 // ============================================================
 
@@ -105,12 +162,35 @@ const bufferBridge = {
             return '';
         }
     },
-    /** 字符串 -> hex 字符串 */
-    stringToBuf(str) {
+    /** 字符串 → **Buffer**（LX 语义）。
+     *
+     * ⚠️ 原来这里返回的是 **hex 字符串** —— 与 LX 不一致：脚本拿去做
+     * `bufConcat` / `rsaEncrypt` / `writeUInt...` 之类会直接报错。
+     * 旧的 hex 行为挪到 [stringToHex] 保留。 */
+    stringToBuf(str, encoding) {
+        try {
+            return Buffer.from(String(str ?? ''), String(encoding || 'utf8'));
+        } catch (_) {
+            return Buffer.alloc(0);
+        }
+    },
+    /** 字符串 → hex 字符串（旧 `stringToBuf` 的行为，保留以免有人依赖） */
+    stringToHex(str) {
         try {
             return Buffer.from(String(str ?? ''), 'utf8').toString('hex');
         } catch (_) {
             return '';
+        }
+    },
+    /** 拼接若干 Buffer / 字符串（LX 有这个方法，音源里常见） */
+    bufConcat(...args) {
+        try {
+            const list = args.map((a) =>
+                Buffer.isBuffer(a) ? a : Buffer.from(String(a ?? ''), 'utf8'),
+            );
+            return Buffer.concat(list);
+        } catch (_) {
+            return Buffer.alloc(0);
         }
     },
 };
@@ -141,21 +221,48 @@ async function lxRequest(url, options, callback) {
     );
     const timeout = Math.min(REQUEST_TIMEOUT_MS, parseInt(opt.timeout, 10) || REQUEST_TIMEOUT_MS);
 
+    // ── 补齐 LX 的常用请求形态（三方音源脚本高频使用）────────────
+    // ① `form`：表单 POST。原来只认 `body`/`data` → 脚本传 `form` 时请求体为空，
+    //    服务端必然报错（表现就是"音源跑不通"）。
+    let data = opt.body ?? opt.data;
+    if (data == null && opt.form != null) {
+        data = opt.form;
+        const hasCt = Object.keys(headers).some(
+            (k) => k.toLowerCase() === 'content-type',
+        );
+        if (!hasCt) headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    }
+    // ② `params`：查询串（axios 风格，LX 脚本也会用）
+    const params =
+        opt.params && typeof opt.params === 'object' ? opt.params : undefined;
+    // ③ 二进制响应：`binary: true` 或 `responseType: 'arraybuffer'`。
+    //    原来恒为 text → 要解密/解包的接口拿到的是乱码字符串。
+    const binary = opt.binary === true || opt.responseType === 'arraybuffer';
+
     try {
         const res = await axios.request({
             url: String(url),
             method,
             headers,
-            data: opt.body ?? opt.data,
+            data,
+            params,
             timeout,
-            responseType: 'text',
+            responseType: binary ? 'arraybuffer' : 'text',
             // 自己判状态码，4xx/5xx 也要把 body 交给脚本（很多音源靠错误页判断）
             validateStatus: () => true,
             maxContentLength: MAX_RESPONSE_BYTES,
             maxBodyLength: MAX_RESPONSE_BYTES,
-            transformResponse: [(d) => d],
+            ...(binary ? {} : { transformResponse: [(d) => d] }),
+            // ④ 重定向次数（LX 的 follow_max）
+            ...(opt.follow_max != null
+                ? { maxRedirects: Math.max(0, parseInt(opt.follow_max, 10) || 0) }
+                : {}),
         });
-        const body = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+        const body = binary
+            ? Buffer.from(res.data)
+            : typeof res.data === 'string'
+              ? res.data
+              : JSON.stringify(res.data);
         const resp = {
             statusCode: res.status,
             headers: res.headers || {},
@@ -230,10 +337,17 @@ export async function loadScript(script) {
             buffer: bufferBridge,
             crypto: {
                 md5,
+                sha1,
+                sha256,
+                rsaEncrypt,
+                rsaDecrypt,
                 aesEncrypt,
                 aesDecrypt, // 比 Beans 多一个 —— 很多源要用它解响应
                 randomBytes,
             },
+            // LX 常用便捷函数：不少音源脚本直接调（缺了会 TypeError）
+            str2b64: (str) => Buffer.from(String(str ?? ''), 'utf8').toString('base64'),
+            b64toStr: (b64) => Buffer.from(String(b64 ?? ''), 'base64').toString('utf8'),
         },
     };
 

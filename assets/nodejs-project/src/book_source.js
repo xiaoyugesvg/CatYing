@@ -106,6 +106,21 @@ function absolute(url, base) {
   }
 }
 
+/** 单源代理：source.proxy = "host:port"，空则直连。 */
+let CURRENT_PROXY = null;
+function setProxy(p) {
+  if (!p || typeof p !== 'string') {
+    CURRENT_PROXY = null;
+    return;
+  }
+  const m = p.trim().match(/^([^:]+):(\d+)$/);
+  if (!m) {
+    CURRENT_PROXY = null;
+    return;
+  }
+  CURRENT_PROXY = { host: m[1], port: parseInt(m[2], 10), protocol: 'http' };
+}
+
 async function httpGet(url, headers, method = 'GET', body) {
   const res = await axios({
     url,
@@ -122,6 +137,8 @@ async function httpGet(url, headers, method = 'GET', body) {
     timeout: HTTP_TIMEOUT_MS,
     maxRedirects: 5,
     validateStatus: () => true,
+    // 单源代理：CURRENT_PROXY 非空时走 http 代理
+    ...(CURRENT_PROXY ? { proxy: CURRENT_PROXY } : {}),
     // 书源经常返回非 UTF-8（GBK），先拿 buffer 再解码
     responseType: 'arraybuffer',
     transformResponse: [(d) => d],
@@ -208,6 +225,7 @@ function str(v) {
 // ============================================================
 
 async function search({ source, keyword, page = 1 }) {
+  setProxy(source && source.proxy);
   const base = source.bookSourceUrl || '';
   const state = stateOf(base);
   state.key = keyword;
@@ -285,6 +303,7 @@ async function search({ source, keyword, page = 1 }) {
 // ============================================================
 
 async function bookInfo({ source, bookUrl }) {
+  setProxy(source && source.proxy);
   const base = source.bookSourceUrl || '';
   const state = stateOf(base);
   const rule = source.ruleBookInfo || {};
@@ -351,6 +370,7 @@ async function bookInfo({ source, bookUrl }) {
 // ============================================================
 
 async function toc({ source, tocUrl }) {
+  setProxy(source && source.proxy);
   const base = source.bookSourceUrl || '';
   const state = stateOf(base);
   const rule = source.ruleToc || {};
@@ -405,6 +425,7 @@ async function toc({ source, tocUrl }) {
 // ============================================================
 
 async function content({ source, chapterUrl }) {
+  setProxy(source && source.proxy);
   const base = source.bookSourceUrl || '';
   const state = stateOf(base);
   const rule = source.ruleContent || {};

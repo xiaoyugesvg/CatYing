@@ -110,7 +110,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
               CachedNetworkImage(
                 imageUrl: _pl!.coverUrl!,
                 fit: BoxFit.cover,
-                errorWidget: (_, __, ___) => const SizedBox(),
+                errorBuilder: (_, __, ___) => const SizedBox(),
               ),
             DecoratedBox(
               decoration: BoxDecoration(

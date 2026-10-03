@@ -10,6 +10,7 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:encrypt/encrypt.dart' as enc;
 import 'package:flutter/foundation.dart';
 import 'package:html/dom.dart';
 import 'package:html/parser.dart';
@@ -621,6 +622,18 @@ class ConfigMangaSource extends MangaSource {
   @override
   Future<List<String>> getChapterImages(CManga manga, CChapter chapter) async {
     final url = chapter.url ?? _resolveUrl(chapter.id);
+    // 章节页 HTML 内嵌密文解密取图（imgDecodeRegex 非空，如追更漫画）：
+    // 章节页嵌 base64(iv+密文)，AES-CBC 解密出图片 URL 数组 JSON。优先于 DOM/WebView 路径。
+    if (site.imgDecodeRegex.isNotEmpty) {
+      final decoded = await _decryptChapterImages(url);
+      if (decoded.isNotEmpty) {
+        _log('章节图密文解密: $url, ${decoded.length} 张');
+        return site.urlRewrites == null || site.urlRewrites!.isEmpty
+            ? decoded
+            : decoded.map(_rewriteUrl).toList();
+      }
+      _log('章节图密文解密失败，回退 DOM/WebView 路径');
+    }
     // URL 规律直下（imgUrlPattern 非空，如摸摸）：跳过 WebView/直连解析，
     // 失败回退原路径
     if (site.imgUrlPattern.isNotEmpty) {
@@ -637,22 +650,93 @@ class ConfigMangaSource extends MangaSource {
         : imgs.map(_rewriteUrl).toList();
   }
 
+  /// 章节页 HTML 内嵌密文解密取图（追更漫画系协议）：
+  /// 章节页 HTML 里嵌 `base64(iv16+密文)` 变量，AES-CBC(key=site.imgDecodeKey) 解密
+  /// 出图片 URL 数组 JSON（或 {images:[...]}，字段 site.imgDecodeDataField）。
+  Future<List<String>> _decryptChapterImages(String chapterUrl) async {
+    try {
+      final html = await _fetchHtml(chapterUrl);
+      final m = RegExp(site.imgDecodeRegex).firstMatch(html);
+      if (m == null || m.groupCount < 1) {
+        _log('章节图密文解密: 未匹配到密文变量');
+        return [];
+      }
+      final bytes = base64.decode(m.group(1)!.trim());
+      if (bytes.length < 16) {
+        _log('章节图密文解密: 密文过短 ${bytes.length}B');
+        return [];
+      }
+      final key = enc.Key(utf8.encode(site.imgDecodeKey));
+      final iv = enc.IV(bytes.sublist(0, 16));
+      final decrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
+      final plain = decrypter.decryptBytes(enc.Encrypted(bytes.sublist(16)), iv: iv);
+      final text = utf8.decode(plain, allowMalformed: true).trim();
+      if (text.isEmpty) return [];
+      final obj = jsonDecode(text);
+      final urls = <String>[];
+      void collect(List<dynamic> arr) {
+        for (final e in arr) {
+          if (e is String && e.isNotEmpty) {
+            urls.add(e);
+          } else if (e is Map) {
+            final u = e['url'];
+            if (u is String && u.isNotEmpty) urls.add(u);
+          }
+        }
+      }
+
+      if (obj is List) {
+        collect(obj);
+      } else if (obj is Map) {
+        if (site.imgDecodeDataField.isNotEmpty) {
+          final arr = obj[site.imgDecodeDataField];
+          if (arr is List) collect(arr);
+        } else if (obj['url'] is String) {
+          urls.add(obj['url'] as String);
+        }
+      }
+      return urls;
+    } catch (e) {
+      _log('章节图密文解密失败: $e');
+      return [];
+    }
+  }
+
   /// 直连取图：Dio 章节页 HTML + imgDom/imgAttr 提取。
+  ///
+  /// imgLoadMode=3（站一页一图）：循环点「下一页」（nextPageSelector）
+  /// 合并所有页图片，直到没有下一页 / URL 重复（防死循环）/ 超过 80 页。
   Future<List<String>> _directImages(String chapterUrl) async {
-    final html = await _fetchHtml(chapterUrl);
-    final doc = parse(html);
-    if (site.imgDom.isEmpty) return [];
     final urls = <String>[];
-    for (final img in doc.querySelectorAll(site.imgDom)) {
-      final u = site.imgAttr.isNotEmpty
-          ? (img.attributes[site.imgAttr] ?? '')
-          : (img.attributes['src'] ?? '');
-      if (u.isNotEmpty && u.indexOf('data:') != 0) {
-        urls.add(_resolveUrl(u, chapterUrl));
+    final seen = <String>{};
+    var cur = chapterUrl;
+    for (var p = 0; p < 80; p++) {
+      final html = await _fetchHtml(cur);
+      final doc = parse(html);
+      if (site.imgDom.isNotEmpty) {
+        for (final img in doc.querySelectorAll(site.imgDom)) {
+          final u = site.imgAttr.isNotEmpty
+              ? (img.attributes[site.imgAttr] ?? '')
+              : (img.attributes['src'] ?? '');
+          if (u.isNotEmpty && u.indexOf('data:') != 0) {
+            final abs = _resolveUrl(u, cur);
+            if (seen.add(abs)) urls.add(abs);
+          }
+        }
+      }
+      // 翻页合并
+      if (site.imgLoadMode == 3 && site.nextPageSelector.isNotEmpty) {
+        final next = doc.querySelector(site.nextPageSelector);
+        final nh = next?.attributes['href'] ?? '';
+        if (nh.isEmpty || nh.startsWith('javascript:')) break;
+        final nu = _resolveUrl(nh, cur);
+        if (nu == cur || !seen.add('__page__$nu')) break; // 防死循环
+        cur = nu;
+      } else {
+        break;
       }
     }
     _log('直连取图: $chapterUrl, ${urls.length} 张');
-    // TODO(2b): imgLoadMode=3 直连翻页合并
     return urls;
   }
 

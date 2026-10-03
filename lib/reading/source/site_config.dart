@@ -56,6 +56,15 @@ class SiteConfig {
   final bool useBlobBase64; // blob 站走 base64 取图（如摸摸漫画），其余 blob 站用还原后真实 URL
   final String imgAesKey; // 章节图 AES-CBC 密钥（utf-8 前 32 字节；密文=前 16 字节 IV+密文）。
   // 非空时 Dio 直下密文本地解密落盘，不走 WebView 逐张解密（如漫蛙）
+
+  // 章节页 HTML 内嵌密文解密取图（章节图 URL 列表加密，如追更漫画）：
+  // 章节页 HTML 里嵌 base64(iv+密文) 变量，AES-CBC 解密出图片 URL 数组 JSON。
+  //   imgDecodeRegex     —— 从章节页 HTML 提取密文变量的正则（第 1 组捕获 base64 串）
+  //   imgDecodeKey       —— AES 密钥（utf-8，如追更漫画 '9S8$vJnU2ANeSRoF'）
+  //   imgDecodeDataField —— 解密 JSON 的图片字段（空=JSON 本身是数组）
+  final String imgDecodeRegex;
+  final String imgDecodeKey;
+  final String imgDecodeDataField;
   final String imgUrlPattern; // 章节图 URL 模板（{comicId}/{chapterNo}/{index} 占位）。
   // 非空时跳过 WebView，按序号直下到 404 为止（如摸摸 c2.2thewash.com）
   final String imgUrlIdRegex; // 从章节 URL 提取 comicId/chapterNo 的正则（两组捕获）
@@ -155,6 +164,9 @@ class SiteConfig {
     this.restoreAlgorithm = '',
     this.useBlobBase64 = false,
     this.imgAesKey = '',
+    this.imgDecodeRegex = '',
+    this.imgDecodeKey = '',
+    this.imgDecodeDataField = '',
     this.imgUrlPattern = '',
     this.imgUrlIdRegex = r'comics/(\d+)/(\d+)',
     this.imgBodyBase64 = false,
@@ -215,6 +227,9 @@ class SiteConfig {
     restoreAlgorithm: (j['restore_algorithm'] as String?) ?? '',
     useBlobBase64: (j['use_blob_base64'] as bool?) ?? false,
     imgAesKey: (j['img_aes_key'] as String?) ?? '',
+    imgDecodeRegex: (j['img_decode_regex'] as String?) ?? '',
+    imgDecodeKey: (j['img_decode_key'] as String?) ?? '',
+    imgDecodeDataField: (j['img_decode_data_field'] as String?) ?? '',
     imgUrlPattern: (j['img_url_pattern'] as String?) ?? '',
     imgUrlIdRegex: (j['img_url_id_regex'] as String?) ?? r'comics/(\d+)/(\d+)',
     imgBodyBase64: (j['img_body_base64'] as bool?) ?? false,
@@ -306,6 +321,9 @@ class SiteConfig {
     'restore_algorithm': restoreAlgorithm,
     'use_blob_base64': useBlobBase64,
     'img_aes_key': imgAesKey,
+    'img_decode_regex': imgDecodeRegex,
+    'img_decode_key': imgDecodeKey,
+    'img_decode_data_field': imgDecodeDataField,
     'img_url_pattern': imgUrlPattern,
     'img_url_id_regex': imgUrlIdRegex,
     'img_body_base64': imgBodyBase64,

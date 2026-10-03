@@ -13,6 +13,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -26,6 +27,8 @@ void _log(String message) {
 }
 
 const _kDocFileName = 'sources.json';
+// 出厂内置源（装上即有源，文档目录无配置时兜底加载）。
+const _kBundledSourcesPath = 'assets/config/sources.json';
 // 云端源迁移标记：升级到本版本时一次性清除本地源覆盖层（旧版本缓存/自定义）。
 const _kCloudOnlyMigrationDone = 'source_cloud_only_migration_done';
 
@@ -51,8 +54,10 @@ class SourceConfigStore {
     }
   }
 
-  /// 加载源配置定义：仅读文档目录 sources.json（fetchRemote 写入的云端缓存）。
-  /// 软件不自带源，无缓存时返回空列表，由上层 UI 提示无可用源。
+  /// 加载源配置定义：文档目录 sources.json（云端更新覆盖层）优先，
+  /// 无配置时回落出厂内置源（assets/config/sources.json）。
+  /// 软件出厂自带 15 个官方源，保证装上即有可用源；
+  /// 用户云端更新后以文档目录为准（覆盖层设计，内置源不重复注册）。
   Future<List<SourceDefinition>> loadLocal() async {
     // 升级一次性迁移：先清掉旧版本本地源覆盖层（仅一次）。
     await _migrateOnceIfNeeded();
@@ -73,7 +78,22 @@ class SourceConfigStore {
       _log('文档目录配置读取失败: $e');
     }
 
-    _log('无本地源配置（未从云端更新过）');
+    // 出厂内置源兜底：文档目录无配置（首次安装/清缓存后）时读 assets，
+    // 保证装上即有源，无需用户手动导入。
+    try {
+      final bundled = await rootBundle.loadString(_kBundledSourcesPath);
+      final parsed = SourceConfigFile.fromJson(
+        jsonDecode(bundled) as Map<String, dynamic>,
+      );
+      if (parsed.sources.isNotEmpty) {
+        _log('加载出厂内置源: ${parsed.sources.length} 源');
+        return parsed.sources;
+      }
+    } catch (e) {
+      _log('出厂内置源读取失败: $e');
+    }
+
+    _log('无本地源配置（未从云端更新过，也无内置源）');
     return [];
   }
 

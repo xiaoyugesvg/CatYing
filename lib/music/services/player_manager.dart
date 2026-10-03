@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 import '../models/models.dart';
 import '../models/third_party_source.dart';
 import 'music_api.dart';
+import 'download_service.dart';
 import 'settings_store.dart';
 import 'unblock_service.dart';
 import '../../services/audio_focus.dart';
@@ -50,6 +51,12 @@ class MusicPlayerManager extends ChangeNotifier {
 
   int _index = -1;
   int get currentIndex => _index;
+
+  /// 播放代次：每次 `_load` 自增；`await` 回来发现代次变了就**丢弃本次结果**。
+  ///
+  /// 没有它时：连点两首歌，先发的请求后回来 → 把界面/歌词/播放地址覆盖成
+  /// 上一首（"界面显示 A、声音播 B"），歌词也会串到别的歌。
+  int _loadEpoch = 0;
 
   /// 播放状态
   final isPlaying = ValueNotifier<bool>(false);
@@ -145,6 +152,9 @@ class MusicPlayerManager extends ChangeNotifier {
         next(auto: true);
       }
     });
+    // #11：把上次的队列恢复回来（**不自动播放**）。
+    // 原来 `loadQueue()` 全仓没有调用者 → "下次启动恢复队列"从未生效。
+    unawaited(_restoreQueue());
     notifyListeners();
   }
 
@@ -294,8 +304,50 @@ class MusicPlayerManager extends ChangeNotifier {
   }
 
 
+  /// 取地址 / 播放失败时调用：**把音频停掉**，保证"界面显示的当前歌"与
+  /// "实际在响的声音"一致。
+  ///
+  /// 原来失败分支只写 `isPlaying = false; return;` —— 但**旧歌还在播**，
+  /// 于是界面是新歌、声音还是上一首（用户实测："点了新歌，响的还是上一首"）。
+  /// 现在显式停掉旧音频，`isPlaying = false` 才是真的。
+  Future<void> _silenceForFailure(Song song) async {
+    try {
+      await _player.stop();
+    } catch (e) {
+      AppLog.instance.log('[Music] 失败后停旧音频出错: $e');
+    }
+    isPlaying.value = false;
+    isBuffering.value = false;
+    position.value = Duration.zero;
+    duration.value = Duration(seconds: song.duration.round());
+  }
+
+  /// 恢复上次的队列（**只恢复列表与当前项，不自动播放**）。
+  ///
+  /// `MusicLibraryStore.loadQueue()` 早就实现了，但**全仓没有调用者** →
+  /// "下次启动恢复上次听到哪"从未生效。这里把它接上。
+  /// 不自动播放：用户没要求时突然出声是很糟的体验。
+  Future<void> _restoreQueue() async {
+    try {
+      if (_queue.isNotEmpty) return; // 用户已经点过歌了，别覆盖
+      final saved = await MusicLibraryStore.instance.loadQueue();
+      if (saved.songs.isEmpty) return;
+      _queue.addAll(saved.songs);
+      _index = saved.index.clamp(0, _queue.length - 1);
+      _currentSong = _queue[_index];
+      duration.value = Duration(seconds: _currentSong!.duration.round());
+      notifyListeners();
+      AppLog.instance.log('[Music] 已恢复上次队列: ${_queue.length} 首，'
+          '当前第 ${_index + 1} 首《${_currentSong!.name}》（未自动播放）');
+    } catch (e) {
+      AppLog.instance.log('[Music] 恢复队列失败: $e');
+    }
+  }
+
   Future<void> _load(int index, {required bool autoplay}) async {
     if (index < 0 || index >= _queue.length) return;
+    // 本次加载的代次（见 `_loadEpoch`）：下面每个 await 之后都要校验
+    final epoch = ++_loadEpoch;
     _index = index;
     final song = _queue[index];
     _currentSong = song;
@@ -322,7 +374,19 @@ class MusicPlayerManager extends ChangeNotifier {
     // 之前是 `songUrl(song.id)` —— 它会退到默认 exhigh(320K)，
     // 于是"音质"设置能选能存却**从未生效**（典型的假设置）。
     final wantQuality = SettingsStore.instance.audioQuality.value;
-    final r = await MusicApi.instance.songUrl(song.id, quality: wantQuality);
+    // ① **本地优先**：已下载的歌直接播沙盒里的文件 —— 不走网络解析。
+    // 这样"下载"才真的有用（离线能听），也省掉一次接口往返。
+    // 放在解析**之前**是关键：否则离线/取不到地址时会提前 return，本地文件永远播不到。
+    final dl = MusicDownloadService.instance.bySong(song);
+    final localPath =
+        (dl != null && dl.status == MusicDownloadStatus.done && dl.path.isNotEmpty)
+            ? dl.path
+            : '';
+    final r = localPath.isNotEmpty
+        ? MusicUrlInfo(ok: true, url: localPath, type: '本地')
+        : await MusicApi.instance
+            .songUrl(song.id, quality: wantQuality, source: song.source);
+    if (epoch != _loadEpoch) return; // 已被更新的点歌取代，丢弃本次结果
     if (r.ok && r.url.isNotEmpty) {
       url = r.url;
       quality = r.qualityText;
@@ -345,6 +409,7 @@ class MusicPlayerManager extends ChangeNotifier {
           },
         );
         switching.value = false;
+        if (epoch != _loadEpoch) return; // 同上：期间用户又点了别的歌
         if (sr.ok && sr.url.isNotEmpty) {
           url = sr.url;
           fromSource = sr.source?.name ?? '';
@@ -352,19 +417,23 @@ class MusicPlayerManager extends ChangeNotifier {
         } else {
           // 都失败：把「内置为什么失败」+「每个源为什么失败」一起说清楚
           final detail = UnblockService.instance.describeFailure();
-          lastError.value = detail.isEmpty
-              ? builtinMsg
-              : '$builtinMsg；$detail';
-          isPlaying.value = false;
+          final full = detail.isEmpty ? builtinMsg : '$builtinMsg；$detail';
+          // ⚠️ 完整原因**必须**进日志：toast 会把长文本截断
+          //（用户实测只看到 `…car_conv2: GD接口失败: Clie…`，看不到真正原因）
+          AppLog.instance.log('[Music] 取播放地址失败（${song.name}）: $full');
+          lastError.value = full;
+          await _silenceForFailure(song);
           notifyListeners();
           return;
         }
       } else {
         // 没有可用音源时，明确告知 —— 这是正常业务结果（VIP/独家），不是异常
-        lastError.value = r.noFreeSource
-            ? '这首没有免费音源（可能需要会员）'
-            : builtinMsg;
-        isPlaying.value = false;
+        final msg = r.noFreeSource ? '这首没有免费音源（可能需要会员）' : builtinMsg;
+        AppLog.instance.log('[Music] 取播放地址失败（${song.name}）: $msg'
+            '（第三方音源开关=${SettingsStore.instance.useThirdPartySources.value}，'
+            '已启用 ${ThirdPartySourceStore.instance.enabled.length} 个）');
+        lastError.value = msg;
+        await _silenceForFailure(song);
         notifyListeners();
         return;
       }
@@ -380,19 +449,31 @@ class MusicPlayerManager extends ChangeNotifier {
       // 音乐要出声了 → 让影视/直播先闭嘴（互斥的核心：
     // 看视频时音乐还在响 / 听音乐时点视频两边一起响，都是缺这一步）
     if (autoplay) await AudioFocus.request('music');
-      await _player.open(Media(url), play: autoplay);
+      // ⚠️ **必须把 headers 透传给播放器**：喜马拉雅的直链没有 User-Agent
+      // 会被服务端拒（表现是"地址拿到了但播不了"）。
+      // 这里用 `r.headers`：第三方音源路径下 `r` 是内置接口的失败结果
+      //（headers 为空），不会误传别人的头。
+      await _player.open(
+        Media(url, httpHeaders: r.headers),
+        play: autoplay,
+      );
     } catch (e, st) {
       // #15：**不要把异常 toString 直接给用户看** ——
       // 它可能包含堆栈、完整 URL、内部实现细节（用户看不懂，也不该看到）。
       // 技术细节只写日志（方便排查），界面给可读的提示。
+      if (epoch != _loadEpoch) return;
       AppLog.instance.log('[Music] 播放失败 url=$url err=$e\n$st');
       lastError.value = _friendlyPlayError(e);
-      isPlaying.value = false;
+      await _silenceForFailure(song);
       return;
     }
 
-    // 3) 取歌词（失败不影响播放）
-    unawaited(_loadLyric(song.id));
+    // 到这里音频已经换成这首歌了；若期间用户又点了别的歌，本次的收尾
+    //（歌词 / 最近播放 / 队列落盘）就不该再执行
+    if (epoch != _loadEpoch) return;
+
+    // 3) 取歌词（失败不影响播放）。歌词也要按**这首歌自己的平台**取。
+    unawaited(_loadLyric(song.id, song.source));
 
     // #4：记入最近播放（新的在前、按 identityKey 去重、上限 100）。
     // 放在"真正开始播"之后 —— 只是点开列表不算听过。
@@ -402,9 +483,9 @@ class MusicPlayerManager extends ChangeNotifier {
     unawaited(MusicLibraryStore.instance.saveQueue(_queue, _index));
   }
 
-  Future<void> _loadLyric(int id) async {
+  Future<void> _loadLyric(int id, SongSource source) async {
     try {
-      final l = await MusicApi.instance.lyric(id);
+      final l = await MusicApi.instance.lyric(id, source: source);
       if (l == null) return;
       // #9：**优先逐字歌词（YRC）**，拿不到再回落到标准 LRC。
       // 两条路的 `LyricLine.text` 都是一行原文，

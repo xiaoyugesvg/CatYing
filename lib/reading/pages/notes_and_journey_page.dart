@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/reader_notes_service.dart';
 import '../theme/jelly_theme.dart';
 import 'browse_history_page.dart';
 
@@ -8,7 +9,7 @@ import 'browse_history_page.dart';
 /// 三块：
 ///   · 阅读足迹：漫画 & 图书浏览历史（复用 BrowseHistoryPage）
 ///   · 每日阅读打卡：设置每日目标分钟数，当天打卡，统计连续天数
-///   · 划线笔记：阅读器划线功能后续接入时在此集中管理（当前占位说明）
+///   · 划线笔记：阅读器长按划线 / 批注的集中管理（已接入 ReaderNotesService）
 class NotesAndJourneyPage extends StatefulWidget {
   const NotesAndJourneyPage({super.key});
 
@@ -237,18 +238,13 @@ class _NotesAndJourneyPageState extends State<NotesAndJourneyPage> {
                   isDark: isDark,
                   icon: Icons.edit_note_rounded,
                   title: '全书库划线笔记',
-                  subtitle: '集中管理在阅读器里划线的内容（划线功能接入后可用）',
-                  onTap: () {
-                    ScaffoldMessenger.of(context)
-                      ..hideCurrentSnackBar()
-                      ..showSnackBar(
-                        const SnackBar(
-                          content: Text('阅读器划线功能尚未接入，敬请期待'),
-                          duration: Duration(seconds: 2),
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-                  },
+                  subtitle: '集中管理在阅读器里划线的内容',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const _BookNotesPage(),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 24),
                 Center(
@@ -331,6 +327,209 @@ class _NotesAndJourneyPageState extends State<NotesAndJourneyPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 全书库划线笔记：按书分组 → 每本书的划线/批注列表。
+class _BookNotesPage extends StatefulWidget {
+  const _BookNotesPage();
+
+  @override
+  State<_BookNotesPage> createState() => _BookNotesPageState();
+}
+
+class _BookNotesPageState extends State<_BookNotesPage> {
+  @override
+  void initState() {
+    super.initState();
+    ReaderNotesService.instance.init();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final card = isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
+    final groups = ReaderNotesService.instance.bookGroups();
+    return Scaffold(
+      appBar: AppBar(title: const Text('全书库划线笔记')),
+      body: groups.isEmpty
+          ? Center(
+              child: Text(
+                '还没有任何划线笔记\n在阅读器里长按段落即可划线、写批注',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 14, color: JellyTheme.textSecondary, height: 1.8),
+              ),
+            )
+          : ListView.separated(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+              itemCount: groups.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (_, i) {
+                final g = groups[i];
+                final notes = ReaderNotesService.instance
+                    .forBook(g.sourceId, g.bookName);
+                return _BookNoteGroup(
+                  isDark: isDark,
+                  card: card,
+                  sourceName: g.sourceId.contains('config:')
+                      ? g.sourceId.replaceFirst('config:', '')
+                      : '',
+                  bookName: g.bookName,
+                  count: g.count,
+                  notes: notes,
+                );
+              },
+            ),
+    );
+  }
+}
+
+class _BookNoteGroup extends StatefulWidget {
+  const _BookNoteGroup({
+    required this.isDark,
+    required this.card,
+    required this.sourceName,
+    required this.bookName,
+    required this.count,
+    required this.notes,
+  });
+
+  final bool isDark;
+  final Color card;
+  final String sourceName;
+  final String bookName;
+  final int count;
+  final List<ReaderNote> notes;
+
+  @override
+  State<_BookNoteGroup> createState() => _BookNoteGroupState();
+}
+
+class _BookNoteGroupState extends State<_BookNoteGroup> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = widget.isDark;
+    final labelColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    return Container(
+      decoration: BoxDecoration(
+        color: widget.card,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          GestureDetector(
+            onTap: () => setState(() => _expanded = !_expanded),
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.bookName,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: labelColor,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${widget.sourceName.isEmpty ? '' : '${widget.sourceName} · '}'
+                          '${widget.count} 条',
+                          style: TextStyle(
+                              fontSize: 12, color: JellyTheme.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    _expanded
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    color: JellyTheme.textSecondary,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              child: Column(
+                children: [
+                  for (final n in widget.notes)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: JellyTheme.primary.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border(
+                          left: BorderSide(color: Color(n.color), width: 3),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            n.chapterName.isEmpty
+                                ? '第${n.chapterIndex + 1}章'
+                                : n.chapterName,
+                            style: TextStyle(
+                                fontSize: 12, color: JellyTheme.textSecondary),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            n.text,
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: labelColor,
+                                height: 1.5),
+                            maxLines: 4,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (n.hasNote) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              '批注：${n.note}',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: Color(n.color),
+                                  height: 1.4),
+                            ),
+                          ],
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: GestureDetector(
+                              onTap: () async {
+                                await ReaderNotesService.instance
+                                    .remove(n.id);
+                                if (mounted) setState(() {});
+                              },
+                              child: Text('删除',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: JellyTheme.textSecondary)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }

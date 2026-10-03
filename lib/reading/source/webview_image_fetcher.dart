@@ -385,10 +385,33 @@ $scriptBody
     // 把真实 URL 写回 data-original，后续通用快取就能识别。
     await _restoreBlobImages();
 
-    // TODO(2b): imgLoadMode=3（下一页）站一页一图，需循环 next_page 翻页合并。
-    //   2a 验证站（MYCOMIC/咚漫）均为 mode 2，快取可一次拿全；mode 3 暂返回当前页。
+    // imgLoadMode=3（下一页）站一页一图：循环点「下一页」翻页合并，
+    // 直到没有下一页 / URL 重复（防死循环）/ 超过 80 页上限。
     if (site.imgLoadMode == 3) {
-      _log('imgLoadMode=3（下一页）暂未实现翻页，仅取当前页');
+      final collected = <String>[];
+      final seen = <String>{};
+      for (var p = 0; p < 80; p++) {
+        // 当前页图片
+        for (final u in await _extract(site)) {
+          if (u.isNotEmpty && seen.add(u)) collected.add(u);
+        }
+        // 下一页链接（href 可能是相对路径）
+        if (site.nextPageSelector.isEmpty) break;
+        final nextRaw = await controller.runJavaScriptReturningResult(
+          '(function(){var a=document.querySelector(${jsonEncode(site.nextPageSelector)});'
+          'return a ? (a.href || a.getAttribute("href") || "") : "";})()',
+        );
+        final nh = _unwrapJsString(nextRaw).trim();
+        if (nh.isEmpty || nh.startsWith('javascript:')) break;
+        final nu = Uri.parse(url).resolve(nh).toString();
+        if (nu == url || !seen.add('__page__$nu')) break;
+        _log('imgLoadMode=3 翻页: $nu');
+        await _loadPage(nu);
+        // 等懒加载/渲染稳定再取当前页
+        await Future.delayed(const Duration(milliseconds: 600));
+      }
+      _log('imgLoadMode=3 翻页合并完成: ${collected.length} 张');
+      return collected;
     }
 
     return _extract(site);

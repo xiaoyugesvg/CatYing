@@ -102,12 +102,14 @@ class MusicQueuePage extends StatelessWidget {
           return ReorderableListView.builder(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 24),
             itemCount: queue.length,
-            onReorder: (oldIndex, newIndex) {
-              // ⚠️ ReorderableListView 的 newIndex 是"移除前"的下标：
-              // 往下拖时要 -1，否则会多移一位（这是该组件的经典坑）。
-              var to = newIndex;
-              if (to > oldIndex) to -= 1;
-              player.moveInQueue(oldIndex, to);
+            // `onReorderItem` 替代已废弃的 `onReorder`。
+            //
+            // ⚠️ 语义变了：官方说明 onReorderItem **已经**把"被移除项"的下标
+            // 修正过（"adjusts the newIndex parameter for a removed item at the
+            // oldIndex"），所以这里**不能再手动 -1** ——
+            // 否则往下拖会少移一位（旧 onReorder 才需要那个经典 workaround）。
+            onReorderItem: (oldIndex, newIndex) {
+              player.moveInQueue(oldIndex, newIndex);
             },
             itemBuilder: (context, i) {
               final s = queue[i];

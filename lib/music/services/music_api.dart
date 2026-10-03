@@ -20,6 +20,12 @@ class MusicUrlInfo {
   /// 容器格式（mp3 / flac …）
   final String type;
 
+  /// 播放该地址**必须**带的请求头。
+  ///
+  /// 例如喜马拉雅：集自带 https 直链，但**没有 User-Agent 就被服务端拒**。
+  /// 不把它透传给播放器，表现就是"地址拿到了但播不了 / 403"。
+  final Map<String, String> headers;
+
   const MusicUrlInfo({
     required this.ok,
     this.url = '',
@@ -27,6 +33,7 @@ class MusicUrlInfo {
     this.message = '',
     this.bitrate = 0,
     this.type = '',
+    this.headers = const {},
   });
 
   bool get playable => ok && url.isNotEmpty;
@@ -53,6 +60,11 @@ class MusicUrlInfo {
         message: (j['error'] ?? j['message'] ?? '').toString(),
         bitrate: asInt(j['br']),
         type: (j['type'] ?? '').toString(),
+        // Node 侧 `url` 动作可以回一个 headers（喜马拉雅就是靠它带 UA）
+        headers: j['headers'] is Map
+            ? (j['headers'] as Map)
+                .map((k, v) => MapEntry(k.toString(), v.toString()))
+            : const {},
       );
 }
 
@@ -270,18 +282,37 @@ class MusicApi {
   // 搜索
   // ============================================================
 
-  Future<MusicListResult<Song>> search(String keyword, {int limit = 30, int offset = 0}) async {
+  Future<MusicListResult<Song>> search(
+    String keyword, {
+    int limit = 30,
+    int offset = 0,
+    SongSource source = SongSource.netease,
+  }) async {
     if (keyword.trim().isEmpty) {
       return const MusicListResult(ok: false, message: '请输入关键词');
     }
-    final r = await _call({'action': 'search', 'keyword': keyword, 'limit': limit, 'offset': offset});
+    final r = await _call({
+      'action': 'search',
+      'keyword': keyword,
+      'limit': limit,
+      'offset': offset,
+      // 多平台：Node 侧按 `source` 分派（不传时默认 netease，行为不变）
+      'source': source.key,
+    });
     final m = _asMap(r);
     if (m['ok'] != true) {
       return MusicListResult(ok: false, message: (m['error'] ?? '搜索失败').toString());
     }
     return MusicListResult(
       ok: true,
-      list: _listOf(r, 'list').map(Song.fromJson).toList(),
+      // 结果必须带上**真实来源**：`Song.source` 决定后面用哪个平台解析播放地址
+      // （`identityKey` 也靠它避免"网易云的 123"和"酷狗的 123"撞车）。
+      // Node 侧若没回 `source` 就用本次请求的平台兜底。
+      list: _listOf(r, 'list')
+          .map((j) => Song.fromJson(
+                j['source'] == null ? {...j, 'source': source.key} : j,
+              ))
+          .toList(),
     );
   }
 
@@ -338,14 +369,124 @@ class MusicApi {
   // 播放地址 / 歌词
   // ============================================================
 
-  Future<MusicUrlInfo> songUrl(int id, {AudioQuality? quality}) async {
+  // ============================================================
+  // 喜马拉雅（有声书 / 播客）：专辑 → 单集
+  // ============================================================
+  //
+  // ⚠️ 与网易云/酷狗不同：它**不是单曲平台**。
+  //   · 搜索/分类返回的是**专辑**（`kind == 'album'`）→ 点进去进专辑页
+  //   · 必须先调 `ximalayaAlbum()` 拿到单集列表，Node 侧才会**填充直链缓存**；
+  //     直接播搜索到的专辑 id 是拿不到地址的（这是数据源的既定取舍）。
+
+  /// 分类列表（有声书 / 儿童 / 相声 / 历史…）
+  Future<List<({String id, String name})>> ximalayaCategories() async {
+    final r = await _call({'action': 'ximalayaCategories', 'source': 'ximalaya'});
+    final m = _asMap(r);
+    final l = m['list'];
+    if (l is! List) return const [];
+    return l
+        .whereType<Map>()
+        .map((e) => (
+              id: (e['id'] ?? '').toString(),
+              name: (e['name'] ?? '').toString(),
+            ))
+        .where((e) => e.id.isNotEmpty)
+        .toList();
+  }
+
+  /// 某分类下的专辑（分页）
+  Future<MusicListResult<Song>> ximalayaCategory(
+    String categoryId, {
+    int page = 1,
+  }) async {
+    final r = await _call({
+      'action': 'ximalayaCategory',
+      'source': 'ximalaya',
+      'categoryId': categoryId,
+      'page': page,
+    });
+    final m = _asMap(r);
+    if (m['ok'] != true) {
+      return MusicListResult(
+          ok: false, message: (m['error'] ?? '加载失败').toString());
+    }
+    return MusicListResult(
+      ok: true,
+      list: _listOf(r, 'list').map(_xmSong).toList(),
+    );
+  }
+
+  /// 专辑详情 → 单集列表。
+  ///
+  /// 返回 `skipped`（没有直链、被数据源过滤掉的集数）与 `message`
+  /// （整张专辑都不可播时的原因），让 UI 能如实告知而不是显示空列表。
+  Future<
+      ({
+        bool ok,
+        String message,
+        List<Song> songs,
+        int skipped,
+        String albumName,
+      })> ximalayaAlbum(String albumId) async {
+    final r = await _call({
+      'action': 'ximalayaAlbum',
+      'source': 'ximalaya',
+      'id': albumId,
+    });
+    final m = _asMap(r);
+    if (m['ok'] != true) {
+      return (
+        ok: false,
+        message: (m['error'] ?? '加载失败').toString(),
+        songs: const <Song>[],
+        skipped: 0,
+        albumName: '',
+      );
+    }
+    final album = m['album'] is Map
+        ? (m['album'] as Map).cast<String, dynamic>()
+        : <String, dynamic>{};
+    return (
+      ok: true,
+      message: (m['message'] ?? '').toString(),
+      songs: _listOf(r, 'list').map(_xmSong).toList(),
+      skipped: asInt(m['skipped']),
+      albumName: (album['name'] ?? '').toString(),
+    );
+  }
+
+  /// 喜马拉雅的专辑/单集统一走这里。
+  ///
+  /// ⚠️ 同时补 `artists`：Node 侧（沿用 `mapTrack` 的习惯）用的是单数 `artist`，
+  /// 而 `Song.fromJson` 读的是 `artists` —— 不补的话**歌手/主播会显示为空**。
+  static Song _xmSong(Map<String, dynamic> j) => Song.fromJson({
+        ...j,
+        'source': 'ximalaya',
+        'artists': j['artists'] ?? j['artist'] ?? '',
+      });
+
+  Future<MusicUrlInfo> songUrl(
+    int id, {
+    AudioQuality? quality,
+    SongSource source = SongSource.netease,
+  }) async {
     final q = quality ?? AudioQuality.exhigh;
-    final r = await _call({'action': 'url', 'id': id, 'quality': q.level});
+    final r = await _call({
+      'action': 'url',
+      'id': id,
+      'quality': q.level,
+      // ⚠️ 必须带上**这首歌自己的**平台：用酷狗的 id 去查网易云是查不到的
+      //（`player_manager` 传的就是 `song.source.key`）。
+      'source': source.key,
+    });
     return MusicUrlInfo.fromJson(_asMap(r));
   }
 
-  Future<MusicLyric?> lyric(int id) async {
-    final r = await _call({'action': 'lyric', 'id': id});
+  Future<MusicLyric?> lyric(
+    int id, {
+    SongSource source = SongSource.netease,
+  }) async {
+    final r = await _call({'action': 'lyric', 'id': id, 'source': source.key});
     final m = _asMap(r);
     if (m['ok'] != true) return null;
     return MusicLyric(

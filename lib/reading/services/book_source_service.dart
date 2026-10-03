@@ -8,6 +8,8 @@ import 'package:flutter/foundation.dart';
 
 import '../../services/nodejs_manager.dart';
 import '../models/book_source.dart';
+import '../source/book_site_config.dart';
+import '../source/config_book_source.dart';
 
 /// 书源搜索到的一本书。
 ///
@@ -237,12 +239,49 @@ class BookSourceService {
   // 单源操作
   // ============================================================
 
+  /// 明文 config 源 → Dart 侧 ConfigBookSource 引擎。
+  ///
+  /// config 源（type=config）不走 Node/Legado，直接按 CSS 选择器抓取。
+  ConfigBookSource _configSource(BookSource source) {
+    final c = (source.raw['config'] as Map).cast<String, dynamic>();
+    return ConfigBookSource(
+      BookSiteConfig.fromJson(c),
+      proxy: source.raw['proxy']?.toString() ?? '',
+    );
+  }
+
   /// 用**一个**书源搜索。
   Future<({bool ok, String? error, List<BookSourceResult> list})> searchOne(
     BookSource source,
     String keyword, {
     int page = 1,
   }) async {
+    // ── config 明文源：Dart 侧引擎 ─────────────────────────────
+    if (source.isConfig) {
+      try {
+        final list = await _configSource(source).search(keyword, page: page);
+        return (
+          ok: true,
+          error: null,
+          list: list
+              .map(
+                (r) => BookSourceResult(
+                  source: source,
+                  name: r.title,
+                  author: r.author,
+                  bookUrl: r.bookUrl,
+                  coverUrl: r.cover,
+                  intro: r.intro,
+                  lastChapter: r.lastChapter,
+                ),
+              )
+              .toList(),
+        );
+      } catch (e) {
+        return (ok: false, error: e.toString(), list: const <BookSourceResult>[]);
+      }
+    }
+    // ── Legado 源：Node 引擎 ───────────────────────────────────
     final raw = await _call({
       'action': 'bsSearch',
       'source': source.raw,
@@ -273,6 +312,22 @@ class BookSourceService {
   /// 书籍详情（详情页用；失败时返回 null 由 UI 退回搜索页已有字段）
   Future<Map<String, dynamic>?> bookInfo(
       BookSource source, String bookUrl) async {
+    // ── config 明文源：Dart 侧引擎 ─────────────────────────────
+    if (source.isConfig) {
+      try {
+        final info = await _configSource(source)
+            .bookInfo(BookSiteResult(title: '', bookUrl: bookUrl));
+        return {
+          'name': info.title,
+          'author': info.author,
+          'coverUrl': info.cover,
+          'intro': info.intro,
+          'lastChapter': info.lastChapter,
+        };
+      } catch (_) {
+        return null;
+      }
+    }
     final raw = await _callCached(
       {
         'action': 'bsBookInfo',
@@ -293,6 +348,25 @@ class BookSourceService {
     BookSource source,
     String tocUrl,
   ) async {
+    // ── config 明文源：Dart 侧引擎 ─────────────────────────────
+    if (source.isConfig) {
+      try {
+        final list = await _configSource(source).toc(tocUrl);
+        return (
+          ok: true,
+          error: null,
+          list: list
+              .map((c) => BookSourceChapter(name: c.name, url: c.url))
+              .toList(),
+        );
+      } catch (e) {
+        return (
+          ok: false,
+          error: e.toString(),
+          list: const <BookSourceChapter>[],
+        );
+      }
+    }
     final raw = await _callCached(
       {
         'action': 'bsToc',
@@ -336,6 +410,20 @@ class BookSourceService {
     BookSource source,
     String chapterUrl,
   ) async {
+    // ── config 明文源：Dart 侧引擎（正文纯文字，无图片）──────
+    if (source.isConfig) {
+      try {
+        final text = await _configSource(source).content(chapterUrl);
+        return (ok: true, error: null, content: text, images: const <String>[]);
+      } catch (e) {
+        return (
+          ok: false,
+          error: e.toString(),
+          content: '',
+          images: const <String>[],
+        );
+      }
+    }
     final raw = await _call({
       'action': 'bsContent',
       'source': source.raw,

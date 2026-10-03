@@ -451,6 +451,64 @@ class BookshelfService extends ChangeNotifier {
 
   // ========== 内部方法 ==========
 
+  /// 全量导出书架（书架列表 + 条目），供 WebDAV 备份。
+  String exportJson() => jsonEncode({
+        'version': 1,
+        'bookshelves': _bookshelves.map((s) => s.toJson()).toList(),
+        'items': _items.map((i) => i.toJson()).toList(),
+      });
+
+  /// 从备份 JSON 恢复/合并书架。
+  ///
+  /// 策略：同名书架复用（不改 id），新书架追加；条目按
+  /// bookshelfId+itemId 去重后合并（保留本机已有、补入备份缺失）。
+  /// 返回恢复的条目数。
+  Future<int> importJson(String json) async {
+    try {
+      final obj = jsonDecode(json);
+      if (obj is! Map) return 0;
+      final shelvesRaw = obj['bookshelves'];
+      final itemsRaw = obj['items'];
+      var restored = 0;
+
+      final existingShelfIds = _bookshelves.map((s) => s.id).toSet();
+      if (shelvesRaw is List) {
+        for (final e in shelvesRaw) {
+          if (e is! Map) continue;
+          final s = Bookshelf.fromJson(e.cast<String, dynamic>());
+          if (s.id.isEmpty) continue;
+          if (!existingShelfIds.contains(s.id)) {
+            _bookshelves.add(s);
+            existingShelfIds.add(s.id);
+          }
+        }
+        _sortShelves();
+        await _persistShelves();
+      }
+
+      final existingItems = _items
+          .map((i) => '${i.bookshelfId}::${i.itemId}')
+          .toSet();
+      if (itemsRaw is List) {
+        for (final e in itemsRaw) {
+          if (e is! Map) continue;
+          final it = BookshelfItem.fromJson(e.cast<String, dynamic>());
+          if (it.bookshelfId.isEmpty || it.itemId.isEmpty) continue;
+          if (existingItems.add('${it.bookshelfId}::${it.itemId}')) {
+            _items.add(it);
+            restored++;
+          }
+        }
+        await _persistItems();
+      }
+      if (restored > 0) notifyListeners();
+      return restored;
+    } catch (e) {
+      _log('导入备份失败: $e');
+      return 0;
+    }
+  }
+
   /// 按给定的 id 顺序重排书架（供「管理书架」的拖动排序用）。
   ///
   /// 实现要点：不直接依赖传入列表的顺序去改 `_bookshelves` 的位置，

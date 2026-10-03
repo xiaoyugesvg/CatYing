@@ -12,6 +12,7 @@ import '../models/book.dart';
 import '../models/bookshelf.dart';
 import '../models/comic.dart';
 import '../services/book_download_service.dart';
+import '../services/sync_service.dart';
 import '../services/book_favorites_service.dart';
 import '../services/book_reading_progress_service.dart';
 import '../services/bookshelf_service.dart';
@@ -1912,7 +1913,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                     );
                   },
                 ),
-                // ── WebDAV 备份同步（占位入口，参考 cmbok 引导 1/5）──
+                // ── WebDAV 备份同步 ──────────────────────────
                 ListTile(
                   leading: Icon(
                     Icons.cloud_sync_outlined,
@@ -1922,10 +1923,10 @@ class _BookshelfPageState extends State<BookshelfPage>
                   subtitle: const Text('把书架/设置备份到 WebDAV 网盘，换机恢复'),
                   onTap: () {
                     Navigator.pop(context);
-                    _showComingSoon('WebDAV 备份同步');
+                    _showWebdavPanel();
                   },
                 ),
-                // ── Kindle 推送（占位入口，参考 cmbok 引导 1/5）────
+                // ── Kindle 推送 ───────────────────────────────
                 ListTile(
                   leading: Icon(
                     Icons.menu_book_outlined,
@@ -1935,7 +1936,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                   subtitle: const Text('通过邮件把图书推送到 Kindle 设备'),
                   onTap: () {
                     Navigator.pop(context);
-                    _showComingSoon('Kindle 推送');
+                    _showKindlePanel();
                   },
                 ),
                 ListTile(
@@ -1954,17 +1955,370 @@ class _BookshelfPageState extends State<BookshelfPage>
     );
   }
 
-  /// 「即将支持」占位提示（WebDAV / Kindle 等功能尚未接入时用）
-  void _showComingSoon(String feature) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('「$feature」功能即将支持，敬请期待'),
+  /// WebDAV 备份同步面板：配置 + 立即备份 / 从云端恢复。
+  Future<void> _showWebdavPanel() async {
+    await SyncService.instance.load();
+    final c = SyncService.instance.config;
+    final urlC = TextEditingController(text: c.webdavUrl);
+    final userC = TextEditingController(text: c.webdavUser);
+    final passC = TextEditingController(text: c.webdavPass);
+    final pathC = TextEditingController(text: c.webdavPath);
+    var busy = false;
+
+    void toast(String msg) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(msg),
           duration: const Duration(seconds: 2),
           behavior: SnackBarBehavior.floating,
+        ));
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Container(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          decoration: BoxDecoration(
+            color: Theme.of(ctx).scaffoldBackgroundColor,
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(22)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('WebDAV 备份同步',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 4),
+                    Text(
+                      '服务器示例：https://dav.example.com/dav/',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(ctx).colorScheme.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: urlC,
+                      decoration: const InputDecoration(
+                          labelText: 'WebDAV 服务器地址',
+                          border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: userC,
+                      decoration: const InputDecoration(
+                          labelText: '用户名', border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: passC,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                          labelText: '密码', border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: pathC,
+                      decoration: const InputDecoration(
+                          labelText: '备份路径（默认 NewTv/bookshelf_backup.json）',
+                          border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: busy
+                                ? null
+                                : () async {
+                                    setSheet(() => busy = true);
+                                    await SyncService.instance.save(SyncConfig(
+                                      webdavUrl: urlC.text.trim(),
+                                      webdavUser: userC.text.trim(),
+                                      webdavPass: passC.text,
+                                      webdavPath: pathC.text.trim(),
+                                    ));
+                                    final json =
+                                        BookshelfService().exportJson();
+                                    final r = await SyncService.instance
+                                        .backupBookshelf(json);
+                                    if (ctx.mounted) {
+                                      Navigator.pop(ctx);
+                                    }
+                                    toast(r.ok
+                                        ? '备份成功（${json.length ~/ 1024} KB）'
+                                        : '备份失败：${r.error}');
+                                  },
+                            icon: const Icon(Icons.cloud_upload_outlined,
+                                size: 18),
+                            label: busy
+                                ? const Text('备份中…')
+                                : const Text('立即备份'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: busy
+                                ? null
+                                : () async {
+                                    setSheet(() => busy = true);
+                                    final r = await SyncService.instance
+                                        .restoreBookshelf();
+                                    if (ctx.mounted) Navigator.pop(ctx);
+                                    if (!r.ok) {
+                                      toast('恢复失败：${r.error}');
+                                      return;
+                                    }
+                                    final n = await BookshelfService()
+                                        .importJson(r.json ?? '');
+                                    toast('恢复成功，新增 $n 条记录');
+                                  },
+                            icon: const Icon(Icons.cloud_download_outlined,
+                                size: 18),
+                            label: busy
+                                ? const Text('恢复中…')
+                                : const Text('从云端恢复'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
-      );
+      ),
+    );
+  }
+
+  /// Kindle 推送面板：配置 SMTP + Kindle 邮箱，选本地书推送。
+  Future<void> _showKindlePanel() async {
+    await SyncService.instance.load();
+    final c = SyncService.instance.config;
+    final hostC = TextEditingController(text: c.smtpHost);
+    final portC = TextEditingController(text: c.smtpPort.toString());
+    final userC = TextEditingController(text: c.smtpUser);
+    final passC = TextEditingController(text: c.smtpPass);
+    final kindleC = TextEditingController(text: c.kindleEmail);
+    var useTls = c.useStartTls;
+    var busy = false;
+
+    void toast(String msg) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(msg),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ));
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Container(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          decoration: BoxDecoration(
+            color: Theme.of(ctx).scaffoldBackgroundColor,
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(22)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Kindle 推送',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 4),
+                    Text(
+                      '用发件邮箱把图书附件发送到你的 Kindle 邮箱',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(ctx).colorScheme.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: hostC,
+                      decoration: const InputDecoration(
+                          labelText: 'SMTP 服务器（如 smtp.qq.com）',
+                          border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: TextField(
+                            controller: portC,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                                labelText: '端口（465 / 587）',
+                                border: OutlineInputBorder()),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          flex: 3,
+                          child: Row(
+                            children: [
+                              Text('587 用 STARTTLS',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: Theme.of(ctx)
+                                          .colorScheme
+                                          .onSurfaceVariant)),
+                              Switch(
+                                value: useTls,
+                                onChanged: (v) =>
+                                    setSheet(() => useTls = v),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: userC,
+                      decoration: const InputDecoration(
+                          labelText: '发件邮箱账号',
+                          border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: passC,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                          labelText: '邮箱授权码/密码',
+                          border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: kindleC,
+                      decoration: const InputDecoration(
+                          labelText: 'Kindle 收件邮箱',
+                          border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed: busy
+                          ? null
+                          : () async {
+                              setSheet(() => busy = true);
+                              await SyncService.instance.save(SyncConfig(
+                                smtpHost: hostC.text.trim(),
+                                smtpPort:
+                                    int.tryParse(portC.text.trim()) ?? 465,
+                                smtpUser: userC.text.trim(),
+                                smtpPass: passC.text,
+                                kindleEmail: kindleC.text.trim(),
+                                useStartTls: useTls,
+                              ));
+                              // 从书架/下载任务里挑一本有本地文件的图书
+                              final tasks = BookDownloadService()
+                                  .tasks.values
+                                  .where((t) =>
+                                      t.localPath != null &&
+                                      t.localPath!.isNotEmpty)
+                                  .toList();
+                              if (tasks.isEmpty) {
+                                if (ctx.mounted) Navigator.pop(ctx);
+                                setSheet(() => busy = false);
+                                toast('书架里没有已下载的本地图书，请先下载一本书');
+                                return;
+                              }
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              final picked = await showModalBottomSheet<String>(
+                                context: context,
+                                backgroundColor: Colors.transparent,
+                                builder: (c2) => SafeArea(
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(c2).scaffoldBackgroundColor,
+                                      borderRadius: const BorderRadius.vertical(
+                                          top: Radius.circular(22)),
+                                    ),
+                                    child: ListView(
+                                      shrinkWrap: true,
+                                      children: [
+                                        const Padding(
+                                          padding: EdgeInsets.all(16),
+                                          child: Text('选择要推送到 Kindle 的书',
+                                              style: TextStyle(
+                                                  fontSize: 16,
+                                                  fontWeight:
+                                                      FontWeight.w700)),
+                                        ),
+                                        for (final t in tasks)
+                                          ListTile(
+                                            leading: const Icon(
+                                                Icons.menu_book_outlined),
+                                            title: Text(t.title,
+                                                overflow:
+                                                    TextOverflow.ellipsis),
+                                            subtitle: Text(t.localPath ?? ''),
+                                            onTap: () =>
+                                                Navigator.pop(c2, t.localPath),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                              if (picked == null) {
+                                toast('已取消推送');
+                                return;
+                              }
+                              final task = tasks.firstWhere(
+                                  (t) => t.localPath == picked);
+                              final bytes = await File(picked).readAsBytes();
+                              final r = await SyncService.instance.pushToKindle(
+                                fileName:
+                                    '${task.title}.${task.extension ?? 'epub'}',
+                                fileBytes: bytes,
+                                title: task.title,
+                              );
+                              toast(r.ok
+                                  ? '已推送到 Kindle 邮箱'
+                                  : '推送失败：${r.error}');
+                            },
+                      icon: const Icon(Icons.send_rounded, size: 18),
+                      label: busy
+                          ? const Text('发送中…')
+                          : const Text('选择图书推送'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   /// 导入本地图书：多选文件 -> 逐本建已完成任务 -> 入"本地图书"书架（Book 类型，固定 id）

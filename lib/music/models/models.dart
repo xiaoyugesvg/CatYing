@@ -90,11 +90,16 @@ enum AudioQuality {
       );
 }
 
-/// 歌曲来源。本项目只用网易云，保留枚举是为将来扩展。
+/// 歌曲来源（多平台）。`key` 会作为 `source` 字段发给 Node 侧做分派。
 enum SongSource {
   netease('netease', '网易云'),
   qq('qq', 'QQ音乐'),
-  kugou('kugou', '酷狗');
+  kugou('kugou', '酷狗'),
+  // 喜马拉雅：有声书 / 播客。
+  // 映射：**专辑 → Album，单集 → Song**（`id`=trackId、`artists`=专辑名/主播）。
+  // 播放时 Node 侧返回的是集自带直链，但**必须带 User-Agent 才能播**
+  //（所以 `MusicUrlInfo` 还要把 headers 透传给播放器）。
+  ximalaya('ximalaya', '喜马拉雅');
 
   const SongSource(this.key, this.displayName);
   final String key;

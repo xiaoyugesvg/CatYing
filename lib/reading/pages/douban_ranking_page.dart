@@ -26,6 +26,16 @@ import '../../common/theme.dart';
 /// ── 为什么不用 WebView ────────────────────────────────────────
 /// 豆瓣排行榜页是重 JS 渲染的，WebView 打开慢、还带广告与"打开 App"横幅。
 /// 走 JSON 接口能直接拿到 书名/封面/评分/作者，列表也更顺滑。
+/// 豆瓣图床反爬头：无 Referer/手机 UA 会返回 HTTP 418（实测），
+/// CachedNetworkImage 拉封面必须带上，否则全部走 errorWidget 占位图。
+const _doubanImageHeaders = <String, String>{
+  'User-Agent':
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+          'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
+          'Mobile/15E148 Safari/604.1',
+  'Referer': 'https://m.douban.com/',
+};
+
 class DoubanRankingPage extends StatefulWidget {
   const DoubanRankingPage({super.key});
 
@@ -378,6 +388,7 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
                             imageUrl: b.cover,
                             fit: BoxFit.cover,
                             memCacheWidth: 200,
+                            httpHeaders: _doubanImageHeaders,
                             placeholder: (_, __) => Container(
                               color: JellyTheme.textSecondary
                                   .withValues(alpha: 0.10),
@@ -600,8 +611,9 @@ class _Book {
   /// 从豆瓣接口条目构造。
   ///
   /// ⚠️ 全部字段**容错取值**。踩过的两个坑：
-  ///   1. 封面键是 **`cover`** 不是 `pic` —— `pic` 恒为 undefined，
-  ///      用它会导致**所有封面都显示占位图**。
+  ///   1. 封面键是 **`cover`** —— 但它是**对象** `{"url": "...", "width":0,...}`
+  ///      不是字符串（`toString()` 会得到 `{url: ...}` 导致全部占位图）。
+  ///      老版本接口可能直接返回字符串，两者都兼容。
   ///   2. `rating` 有时整个是 null（新书无评分，另有 `null_rating_reason`）。
   ///      直接 `j['rating']['value']` 会抛 NoSuchMethodError。
   factory _Book.fromJson(Map<String, dynamic> j, int fallbackRank) {
@@ -621,9 +633,20 @@ class _Book {
       // card_subtitle 形如 "刘慈欣 / 重庆出版社 / 2012-1"
       subtitle: (j['card_subtitle'] ?? '').toString().trim(),
       description: (j['description'] ?? '').toString().trim(),
-      cover: (j['cover'] ?? '').toString(),
+      cover: _coverOf(j),
       rating: rating,
       ratingCount: count,
     );
+  }
+
+  /// 兼容 cover 字符串与对象两种形态。
+  static String _coverOf(Map<String, dynamic> j) {
+    final c = j['cover'];
+    if (c is String) return c;
+    if (c is Map) {
+      final u = c['url'];
+      if (u is String && u.isNotEmpty) return u;
+    }
+    return '';
   }
 }
