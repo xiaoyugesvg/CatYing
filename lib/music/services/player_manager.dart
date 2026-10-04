@@ -140,9 +140,18 @@ class MusicPlayerManager extends ChangeNotifier {
       );
       if (idx != lyricIndex.value) lyricIndex.value = idx;
     });
-    _durSub = _player.stream.duration.listen((d) => duration.value = d);
-    _playSub = _player.stream.playing.listen((v) => isPlaying.value = v);
-    _bufSub = _player.stream.buffering.listen((v) => isBuffering.value = v);
+    _durSub = _player.stream.duration.listen((d) {
+      duration.value = d;
+      notifyListeners();
+    });
+    _playSub = _player.stream.playing.listen((v) {
+      isPlaying.value = v;
+      notifyListeners();
+    });
+    _bufSub = _player.stream.buffering.listen((v) {
+      isBuffering.value = v;
+      notifyListeners();
+    });
     _compSub = _player.stream.completed.listen((done) {
       if (!done) return;
       final cb = onCompleted;

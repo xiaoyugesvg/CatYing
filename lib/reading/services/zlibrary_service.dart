@@ -1110,6 +1110,79 @@ class ZlibraryService extends ChangeNotifier {
     );
   }
 
+  // -------------------- 首页推荐（热门图书）--------------------
+
+  /// 抓取 z-library 首页热门/推荐图书（图书主页"推荐"数据源）。
+  ///
+  /// 走当前节点域名 `https://$_domain/`，由 WebView 自动过 CF 挑战，
+  /// 解析首页的 `z-bookcard` 卡片（与分类页同一解析器）。
+  /// 失败抛 [ZlibraryException]（unavailable / fail）。
+  Future<SearchResult<Book>> fetchHomeRecommendations({int page = 1}) async {
+    if (_domain.isEmpty) {
+      throw ZlibraryException('unavailable', '图书功能暂不可用，请等待恢复');
+    }
+    final url = page > 1
+        ? 'https://$_domain/s/?page=$page'
+        : 'https://$_domain/';
+    _log('抓取首页推荐: $url');
+    String? htmlStr;
+    Object? lastError;
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        final html = await WebViewImageFetcher().fetchHtml(url);
+        if (html.isNotEmpty) {
+          htmlStr = html;
+          break;
+        }
+        lastError = StateError('首页返回空 HTML');
+      } catch (e) {
+        lastError = e;
+      }
+      _log('首页第 $attempt/3 次失败: $lastError');
+      if (attempt < 3) {
+        await Future.delayed(const Duration(milliseconds: 800));
+      }
+    }
+    if (htmlStr == null) {
+      _log('首页 3 次均失败: $lastError');
+      throw ZlibraryException('fail', '推荐加载失败，请稍后重试');
+    }
+    final books = _parseHomeHtml(htmlStr);
+    if (books.isEmpty) {
+      _log('首页解析到 0 条，HTML 长度=${htmlStr.length}');
+      throw ZlibraryException('fail', '推荐解析失败');
+    }
+    _log('首页推荐解析到 ${books.length} 条，前两条: '
+        '${books.take(2).map((b) => b.title).join(", ")}');
+    return SearchResult<Book>(
+      items: books,
+      total: books.length,
+      currentPage: page,
+      totalPages: 1,
+    );
+  }
+
+  /// 解析 z-library 首页 HTML（热门/推荐区块，卡片结构与分类页相同）。
+  ///
+  /// 首页可能有多个区块（今日图书/热门图书/最新上架等），全部
+  /// `z-bookcard` 一并收集，按 id 去重，保持 DOM 顺序。
+  List<Book> _parseHomeHtml(String htmlStr) {
+    final doc = html_parser.parse(htmlStr);
+    final rows = doc.querySelectorAll('z-bookcard');
+    final books = <Book>[];
+    final seenIds = <String>{};
+    for (final r in rows) {
+      try {
+        final book = _parseBookRow(r);
+        if (book != null && book.id.isNotEmpty && !seenIds.contains(book.id)) {
+          seenIds.add(book.id);
+          books.add(book);
+        }
+      } catch (_) {}
+    }
+    return books;
+  }
+
   // -------------------- 下载链接 --------------------
 
   /// 获取下载链接。已登录自有账号用自有 token，否则按 round-robin 起点轮询内置账号。

@@ -543,8 +543,8 @@ class MusicApi {
   // ============================================================
 
   /// 榜单列表
-  Future<List<TopList>> topLists() async {
-    final r = await _call({'action': 'topLists'});
+  Future<List<TopList>> topLists({SongSource source = SongSource.netease}) async {
+    final r = await _call({'action': 'topLists', 'source': source.key});
     return _listOf(r, 'list')
         .map((e) => TopList(
               id: asInt(e['id']),
@@ -556,8 +556,8 @@ class MusicApi {
   }
 
   /// 推荐歌单（首页"推荐歌单"）
-  Future<List<Playlist>> personalized({int limit = 20}) async {
-    final r = await _call({'action': 'personalized', 'limit': limit});
+  Future<List<Playlist>> personalized({int limit = 20, SongSource source = SongSource.netease}) async {
+    final r = await _call({'action': 'personalized', 'limit': limit, 'source': source.key});
     return _listOf(r, 'list').map(Playlist.fromJson).toList();
   }
 
@@ -566,16 +566,17 @@ class MusicApi {
     String cat = '全部',
     String order = 'hot',
     int limit = 12,
+    SongSource source = SongSource.netease,
   }) async {
     final r = await _call({
-      'action': 'playlistSquare', 'cat': cat, 'order': order, 'limit': limit,
+      'action': 'playlistSquare', 'cat': cat, 'order': order, 'limit': limit, 'source': source.key,
     });
     return _listOf(r, 'list').map(Playlist.fromJson).toList();
   }
 
   /// 歌单分类名
-  Future<List<String>> playlistCatlist() async {
-    final r = await _call({'action': 'playlistCatlist'});
+  Future<List<String>> playlistCatlist({SongSource source = SongSource.netease}) async {
+    final r = await _call({'action': 'playlistCatlist', 'source': source.key});
     return _listOf(r, 'list')
         .map((e) => (e['name'] ?? '').toString())
         .where((e) => e.isNotEmpty)
@@ -583,14 +584,14 @@ class MusicApi {
   }
 
   /// 新歌速递
-  Future<List<Song>> newSongs({int limit = 10}) async {
-    final r = await _call({'action': 'newSongs', 'limit': limit});
+  Future<List<Song>> newSongs({int limit = 10, SongSource source = SongSource.netease}) async {
+    final r = await _call({'action': 'newSongs', 'limit': limit, 'source': source.key});
     return _listOf(r, 'list').map(Song.fromJson).toList();
   }
 
   /// 歌单详情（含歌曲）；返回 (歌单元信息, 歌曲列表)
-  Future<(Playlist?, List<Song>)> playlistDetail(int id) async {
-    final r = await _call({'action': 'playlistDetail', 'id': id});
+  Future<(Playlist?, List<Song>)> playlistDetail(int id, {SongSource source = SongSource.netease}) async {
+    final r = await _call({'action': 'playlistDetail', 'id': id, 'source': source.key});
     final m = _asMap(r);
     if (m['ok'] != true) return (null, const <Song>[]);
     final p = m['playlist'];

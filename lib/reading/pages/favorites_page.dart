@@ -36,10 +36,20 @@ class FavoritesPage extends StatefulWidget {
   /// 是否显示返回按钮（从"我的"页面入口进入时为 true）
   final bool showBackButton;
 
+  /// 图书收藏独立页模式（从图书页聚合菜单进入）：
+  /// 标题「图书收藏」+ 顶部搜索框，只显示图书收藏，无漫画/图书切换。
+  final bool bookOnly;
+
+  /// 漫画收藏独立页模式（从漫画页聚合菜单进入，参考图 IMG_8402）：
+  /// 标题「漫画收藏」+ 顶部搜索框「搜索漫画」+ 漫画收藏列表。
+  final bool comicOnly;
+
   const FavoritesPage({
     super.key,
     this.isActive = false,
     this.showBackButton = false,
+    this.bookOnly = false,
+    this.comicOnly = false,
   });
 
   @override
@@ -196,12 +206,22 @@ class _FavoritesPageState extends State<FavoritesPage>
         if (!didPop && _isSelecting) _exitSelection();
       },
       child: Scaffold(
-        backgroundColor: widget.showBackButton ? null : Colors.transparent,
-        appBar: widget.showBackButton
+        backgroundColor: (widget.showBackButton ||
+                widget.bookOnly ||
+                widget.comicOnly)
+            ? null
+            : Colors.transparent,
+        appBar: (widget.showBackButton ||
+                widget.bookOnly ||
+                widget.comicOnly)
             ? AppBar(
-                title: const Text('收藏'),
+                title: Text(widget.bookOnly
+                    ? '图书收藏'
+                    : (widget.comicOnly ? '漫画收藏' : '收藏')),
                 actions: [
-                  if (contentTabs.length < 2)
+                  if (contentTabs.length < 2 &&
+                      !widget.bookOnly &&
+                      !widget.comicOnly)
                     Padding(
                       padding: const EdgeInsets.only(right: 12),
                       child: _buildSearchButton(size: 36),
@@ -209,7 +229,11 @@ class _FavoritesPageState extends State<FavoritesPage>
                 ],
               )
             : null,
-        body: Stack(
+        body: widget.bookOnly
+            ? _buildBookOnlyBody(isDark)
+            : widget.comicOnly
+                ? _buildComicOnlyBody(isDark)
+                : Stack(
           children: [
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -336,6 +360,61 @@ class _FavoritesPageState extends State<FavoritesPage>
           ],
         ),
       ),
+    );
+  }
+
+  // ===== 图书收藏独立页（bookOnly）=====
+
+  /// 参考目标界面 IMG_8395：标题「图书收藏」+ 顶部全宽搜索框 + 图书收藏列表
+  Widget _buildBookOnlyBody(bool isDark) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+          child: JellySearchBar(
+            controller: _favSearchController,
+            hintText: '搜索图书',
+            onChanged: (v) => setState(() {}),
+            onCleared: () => setState(() {}),
+          ),
+        ),
+        Expanded(
+          child: _BookFavoritesTab(
+            isSelecting: _isSelecting,
+            selectedIds: _selectedIds,
+            onSelect: _onSelect,
+            keyword: _favSearchController.text.trim(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ===== 漫画收藏独立页（comicOnly）=====
+
+  /// 参考目标界面 IMG_8402：标题「漫画收藏」+ 顶部搜索框「搜索漫画」+ 漫画收藏列表
+  Widget _buildComicOnlyBody(bool isDark) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+          child: JellySearchBar(
+            controller: _favSearchController,
+            hintText: '搜索漫画',
+            onChanged: (v) => setState(() {}),
+            onCleared: () => setState(() {}),
+          ),
+        ),
+        Expanded(
+          child: _ComicFavoritesTab(
+            isActive: widget.isActive,
+            isSelecting: _isSelecting,
+            selectedIds: _selectedIds,
+            onSelect: _onSelect,
+            keyword: _favSearchController.text.trim(),
+          ),
+        ),
+      ],
     );
   }
 
@@ -719,10 +798,14 @@ class _ComicFavoritesTab extends StatefulWidget {
   final Set<String> selectedIds;
   final ValueChanged<String> onSelect;
 
+  /// 搜索关键词（漫画收藏独立页传入；主页 tab 不传 = 显示全部）
+  final String keyword;
+
   const _ComicFavoritesTab({
     this.isActive = false,
     this.isSelecting = false,
     this.selectedIds = const {},
+    this.keyword = '',
     required this.onSelect,
   });
 
@@ -789,7 +872,13 @@ class _ComicFavoritesTabState extends State<_ComicFavoritesTab> {
     return ListenableBuilder(
       listenable: Listenable.merge([FavoritesService(), ViewMode()]),
       builder: (context, _) {
-        final comics = FavoritesService().comics;
+        final all = FavoritesService().comics;
+        final kw = widget.keyword.trim().toLowerCase();
+        final comics = kw.isEmpty
+            ? all
+            : all
+                .where((c) => c.title.toLowerCase().contains(kw))
+                .toList();
         final isGrid = ViewMode().isGrid;
         if (comics.isEmpty) {
           return Center(
@@ -955,10 +1044,14 @@ class _BookFavoritesTab extends StatefulWidget {
   final Set<String> selectedIds;
   final ValueChanged<String> onSelect;
 
+  /// 搜索过滤关键词（图书收藏独立页顶部搜索框联动）
+  final String keyword;
+
   const _BookFavoritesTab({
     this.isSelecting = false,
     this.selectedIds = const {},
     required this.onSelect,
+    this.keyword = '',
   });
 
   @override
@@ -982,9 +1075,21 @@ class _BookFavoritesTabState extends State<_BookFavoritesTab> {
     super.dispose();
   }
 
+  /// 关键词过滤后的收藏图书列表（空关键词 = 全部）
+  List<Book> _filteredBooks() {
+    final all = BookFavoritesService().books;
+    final kw = widget.keyword.trim().toLowerCase();
+    if (kw.isEmpty) return all;
+    return all
+        .where((b) =>
+            b.title.toLowerCase().contains(kw) ||
+            (b.author?.toLowerCase().contains(kw) ?? false))
+        .toList();
+  }
+
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    final total = BookFavoritesService().books.length;
+    final total = _filteredBooks().length;
     if (ListPagination.shouldLoadMore(_scrollController) &&
         _displayCount < total) {
       setState(
@@ -1022,21 +1127,26 @@ class _BookFavoritesTabState extends State<_BookFavoritesTab> {
     return ListenableBuilder(
       listenable: Listenable.merge([BookFavoritesService(), BookViewMode()]),
       builder: (context, _) {
-        final books = BookFavoritesService().books;
+        final books = _filteredBooks();
         final isGrid = BookViewMode().isGrid;
+        final kw = widget.keyword.trim();
         if (books.isEmpty) {
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
-                  Icons.favorite_border_rounded,
+                  kw.isEmpty
+                      ? Icons.favorite_border_rounded
+                      : Icons.search_off_rounded,
                   size: 64,
                   color: JellyTheme.textSecondary,
                 ),
                 const SizedBox(height: 16),
-                Text('还没有收藏的图书',
-                    style: TextStyle(color: JellyTheme.textSecondary)),
+                Text(
+                  kw.isEmpty ? '还没有收藏的图书' : '未找到匹配的图书',
+                  style: TextStyle(color: JellyTheme.textSecondary),
+                ),
               ],
             ),
           );

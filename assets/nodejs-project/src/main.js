@@ -430,10 +430,11 @@ const mgmtServer = createServer((req, res) => {
         return;
     }
 
-    // ── 小说书源：搜索 / 详情 / 目录 / 正文 ──────────────────
+    // ── 小说书源：搜索 / 详情 / 目录 / 正文 / 登录 / 发现 ──────
     //
-    // body: { action:'bsSearch'|'bsBookInfo'|'bsToc'|'bsContent',
-    //         source:{...Legado 书源...}, keyword?, bookUrl?, tocUrl?, chapterUrl?, page? }
+    // body: { action:'bsSearch'|'bsBookInfo'|'bsToc'|'bsContent'|'bsLogin'|'bsExplore',
+    //         source:{...Legado 书源...}, keyword?, bookUrl?, tocUrl?, chapterUrl?,
+    //         url?, method?, body?, contentType?, headers?, categoryUrl?, page? }
     //
     // 执行逻辑全在 book_source.js（Legado 规则求值 + 变量语法），
     // 这里只做转发 —— 与既有做法一致（影视源/音乐都走这条思路）。
@@ -480,6 +481,13 @@ const mgmtServer = createServer((req, res) => {
                             body: data.body,
                             contentType: data.contentType,
                             headers: data.headers,
+                        });
+                        break;
+                    // 发现 / 分类浏览（exploreUrl + ruleExplore）
+                    case 'bsExplore':
+                        r = await bs.bsExplore({
+                            source: data.source,
+                            categoryUrl: data.categoryUrl,
                         });
                         break;
                     default:

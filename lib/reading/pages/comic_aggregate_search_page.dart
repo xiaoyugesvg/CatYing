@@ -46,6 +46,12 @@ class _AggregateEntry {
 
 class _ComicAggregateSearchPageState extends State<ComicAggregateSearchPage> {
   final TextEditingController _controller = TextEditingController();
+
+  /// 「搜索源」输入框（空态筛选源标签，参考图 IMG_8406）
+  final TextEditingController _sourceSearch = TextEditingController();
+
+  /// 空态选中的单源 id（空 = 聚搜全部源；点击源标签切换）
+  String _singleSourceId = '';
   bool _isSearching = false;
   bool _hasSearched = false;
   bool _focusMode = false; // 聚搜(false) / 复搜(true)
@@ -65,6 +71,7 @@ class _ComicAggregateSearchPageState extends State<ComicAggregateSearchPage> {
   @override
   void dispose() {
     _controller.dispose();
+    _sourceSearch.dispose();
     super.dispose();
   }
 
@@ -84,7 +91,11 @@ class _ComicAggregateSearchPageState extends State<ComicAggregateSearchPage> {
       _sourceErrors.clear();
     });
 
-    final sources = SourceManager().enabledSources.toList();
+    final allSources = SourceManager().enabledSources.toList();
+    // 空态选中单源 → 仅搜该源；否则跨全部源聚搜
+    final sources = _singleSourceId.isEmpty
+        ? allSources
+        : allSources.where((s) => s.id == _singleSourceId).toList();
     final results = <Comic>[];
     final errors = <String, String>{};
 
@@ -376,40 +387,97 @@ class _ComicAggregateSearchPageState extends State<ComicAggregateSearchPage> {
     );
   }
 
+  /// 初始空态（参考图 IMG_8406）：「搜索源」筛选框 + 全部源标签 +
+  /// 底部「输入关键词开始搜索漫画 / 下拉切换复搜」提示。
+  /// 点击源标签 = 切换单源搜索（再次点击恢复聚搜全部源）。
   Widget _buildHint(bool isDark) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.auto_awesome_rounded,
-              size: 56,
-              color: JellyTheme.primary.withValues(alpha: 0.6),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '跨所有漫画源一键聚合搜索',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '输入关键词开始搜索；在结果列表顶部下拉可切换为多标签组合的「复搜」模式。',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                height: 1.5,
-                color: JellyTheme.textSecondary,
-              ),
-            ),
-          ],
+    final sources = SourceManager().enabledSources.toList();
+    final kw = _sourceSearch.text.trim().toLowerCase();
+    final shown = kw.isEmpty
+        ? sources
+        : sources
+            .where((s) => s.name.toLowerCase().contains(kw))
+            .toList();
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        // 搜索源输入框
+        JellySearchBar(
+          controller: _sourceSearch,
+          hintText: '搜索源',
+          onChanged: (_) => setState(() {}),
+          onCleared: () => setState(() {}),
         ),
-      ),
+        const SizedBox(height: 14),
+        // 源标签：点击切换单源搜索
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: shown.map((s) {
+            final selected = _singleSourceId == s.id;
+            return GestureDetector(
+              onTap: () => setState(() {
+                _singleSourceId = selected ? '' : s.id;
+                _toast(
+                  selected
+                      ? '已恢复聚搜：跨全部源'
+                      : '已切换为单源搜索：${s.name}',
+                );
+              }),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? JellyTheme.primary
+                      : (isDark
+                          ? JellyTheme.cardDark
+                          : JellyTheme.primary.withValues(alpha: 0.08)),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Text(
+                  s.name,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontSubhead,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: selected
+                        ? Colors.white
+                        : (isDark
+                            ? Colors.white70
+                            : JellyTheme.textPrimaryLight),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 48),
+        // 底部提示（参考图）
+        Center(
+          child: Column(
+            children: [
+              Text(
+                '输入关键词开始搜索漫画',
+                style: TextStyle(
+                  fontSize: AppTheme.fontSubhead,
+                  fontWeight: FontWeight.w600,
+                  color:
+                      isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '下拉切换复搜',
+                style: TextStyle(
+                  fontSize: AppTheme.fontFootnote,
+                  color: JellyTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

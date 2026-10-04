@@ -1,15 +1,11 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../widgets/common_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../models/book.dart';
 import '../models/book_category.dart';
-import '../models/book_source.dart';
 import '../models/search_result.dart';
 import '../services/book_download_service.dart';
-import '../../services/main_tab_controller.dart';
 import '../services/book_view_mode.dart';
 import '../services/browse_history_service.dart';
 import '../services/search_history_service.dart';
@@ -18,6 +14,7 @@ import '../theme/jelly_theme.dart';
 import '../services/settings_service.dart';
 import '../widgets/jelly_book_card.dart';
 import '../widgets/jelly_nav_bar.dart';
+import '../widgets/jelly_icon_menu_button.dart';
 import '../widgets/jelly_ring_button.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_pull_cord.dart';
@@ -25,15 +22,12 @@ import '../widgets/guide_overlay.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/staggered_entrance.dart';
 import 'book_detail_page.dart';
-import 'book_source_repo_page.dart';
 import 'book_source_search_page.dart';
 import 'douban_ranking_page.dart';
 import 'browse_history_page.dart';
-import 'download_page.dart';
+import 'book_download_records_page.dart';
 import 'favorites_page.dart';
-import 'zlibrary_auth_page.dart';
 import '../../common/theme.dart';
-import '../../widgets/app_icon_button.dart';
 import '../../widgets/app_page_header.dart';
 
 /// 日志工具
@@ -43,16 +37,6 @@ void _log(String message) {
   }
 }
 
-/// 豆瓣图床反爬头：无 Referer/手机 UA 会返回 HTTP 418（实测），
-/// 热门推荐封面必须带上。
-const _doubanImageHeaders = <String, String>{
-  'User-Agent':
-      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
-          'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
-          'Mobile/15E148 Safari/604.1',
-  'Referer': 'https://m.douban.com/',
-};
-
 /// 图书搜索页面（果冻风，布局同漫画搜索 + 格式筛选 + 右上角 z-library 登录头像）
 class BookSearchPage extends StatefulWidget {
   /// 是否为当前激活的 tab（用于触发结果瀑布入场动画）
@@ -61,10 +45,14 @@ class BookSearchPage extends StatefulWidget {
   /// 是否显示返回按钮（从"我的"页面入口进入时为 true）
   final bool showBackButton;
 
+  /// 进入后预填并自动搜索的关键词（豆瓣排行「去找书」跳转用）
+  final String? initialKeyword;
+
   const BookSearchPage({
     super.key,
     this.isActive = false,
     this.showBackButton = false,
+    this.initialKeyword,
   });
 
   @override
@@ -106,11 +94,11 @@ class _BookSearchPageState extends State<BookSearchPage>
   /// z-library 可用性上一状态（仅状态变化才弹通知；null=尚未初始化）
   bool? _wasUnavailable;
 
-  /// 热门推荐流（豆瓣 book_hot，不依赖 z-library）——进页即拉，
-  /// 供未搜索/无结果时直接展示热门书籍网格。
-  List<Book> _hotBooks = [];
-  bool _hotLoading = false;
-  bool _hotFailed = false;
+  /// 首页推荐流（z-library 首页热门，走用户配置的节点域名）——进页即拉，
+  /// 供未搜索/无结果时直接展示推荐书籍网格。
+  List<Book> _recBooks = [];
+  bool _recLoading = false;
+  bool _recFailed = false;
 
   ScrollController get _activeScrollController =>
       _tabController.index == 0 ? _gridScrollController : _listScrollController;
@@ -136,7 +124,16 @@ class _BookSearchPageState extends State<BookSearchPage>
     _loadHistory();
     _ensureCategories();
     _maybeTriggerGuide();
-    _loadHotBooks();
+    _loadRecommendations();
+    // 豆瓣排行「去找书」跳转：预填关键词并立即执行搜索
+    // （首帧后触发，避免 initState 阶段 FocusScope 查询）
+    final kw = widget.initialKeyword?.trim() ?? '';
+    if (kw.isNotEmpty) {
+      _searchController.text = kw;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _runSearch(kw);
+      });
+    }
   }
 
   /// 首次激活时展示图书页新手引导（仅一次）
@@ -215,81 +212,28 @@ class _BookSearchPageState extends State<BookSearchPage>
     }
   }
 
-  /// 拉豆瓣热门榜（book_hot）作主页推荐流，不依赖 z-library。
+  /// 拉取 z-library 首页推荐（走当前节点域名）作图书主页推荐流。
   ///
-  /// 失败静默（只置 _hotFailed），不阻塞搜索/分类等其它入口。
-  Future<void> _loadHotBooks() async {
-    if (_hotLoading) return;
-    _hotLoading = true;
-    _hotFailed = false;
+  /// 失败静默（只置 _recFailed），不阻塞搜索/分类等其它入口。
+  Future<void> _loadRecommendations() async {
+    if (_recLoading) return;
+    _recLoading = true;
+    _recFailed = false;
     if (mounted) setState(() {});
     try {
-      final dio = Dio(BaseOptions(
-        headers: {
-          'User-Agent':
-              'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
-                  'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
-                  'Mobile/15E148 Safari/604.1',
-          'Referer': 'https://m.douban.com/book/chart/',
-        },
-        connectTimeout: const Duration(seconds: 12),
-        receiveTimeout: const Duration(seconds: 12),
-      ));
-      final r = await dio.get(
-        'https://m.douban.com/rexxar/api/v2/subject_collection/book_hot/items',
-        queryParameters: {'start': 0, 'count': 20},
-      );
-      final data = r.data;
-      final raw = (data is Map) ? data['subject_collection_items'] : null;
-      final list = <Book>[];
-      if (raw is List) {
-        for (final e in raw) {
-          if (e is! Map) continue;
-          final j = e.cast<String, dynamic>();
-          final title = (j['title'] ?? '').toString().trim();
-          if (title.isEmpty) continue;
-          final sub = (j['card_subtitle'] ?? '').toString().trim();
-          final author =
-              sub.split('/').first.trim(); // "作者 / 年份 / 出版社"
-          list.add(Book(
-            id: 'douban-${j['id'] ?? title}',
-            hash: '',
-            title: title,
-            author: author,
-            cover: _doubanCoverOf(j),
-            year: sub.split('/').length > 1
-                ? sub.split('/')[1].trim()
-                : null,
-            description: (j['description'] ?? '').toString().trim(),
-            publisher: sub.split('/').length > 2
-                ? sub.split('/')[2].trim()
-                : null,
-          ));
-        }
-      }
+      final result = await ZlibraryService().fetchHomeRecommendations();
       if (!mounted) return;
       setState(() {
-        _hotBooks = list;
-        _hotFailed = list.isEmpty;
+        _recBooks = result.items;
+        _recFailed = result.items.isEmpty;
       });
     } catch (e) {
-      _log('热门推荐拉取失败: $e');
-      if (mounted) setState(() => _hotFailed = true);
+      _log('首页推荐拉取失败: $e');
+      if (mounted) setState(() => _recFailed = true);
     } finally {
-      _hotLoading = false;
+      _recLoading = false;
       if (mounted) setState(() {});
     }
-  }
-
-  /// 豆瓣 cover 兼容字符串与对象两种形态（对象是 {url,...}）。
-  static String _doubanCoverOf(Map<String, dynamic> j) {
-    final c = j['cover'];
-    if (c is String) return c;
-    if (c is Map) {
-      final u = c['url'];
-      if (u is String && u.isNotEmpty) return u;
-    }
-    return '';
   }
 
   Future<void> _addHistory(String keyword) async {
@@ -659,181 +603,6 @@ class _BookSearchPageState extends State<BookSearchPage>
     }
   }
 
-  // -------------------- 详情 --------------------
-
-  /// 拉绳「卷帘」：弹出书源层（第一层=当前模式，第二层=已导入书源列表）。
-  /// 点选源 → 单源搜索页；长按源标签 → 登录管理；底部可进书源仓库。
-  void _showSourceLayerSheet(bool isDark) {
-    final store = BookSourceStore.instance;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (sheetCtx) {
-        return Container(
-          decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: SafeArea(
-            top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(height: 12),
-                Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.2)
-                        : Colors.black.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '切换书源',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? Colors.white
-                            : JellyTheme.textPrimaryLight,
-                      ),
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '长按书源可登录管理账号；点选书源进入该书源搜索',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: JellyTheme.textSecondary,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                // 第一层：z-library 图书搜索（当前模式）
-                ListTile(
-                  leading: Icon(
-                    Icons.auto_stories_rounded,
-                    color: JellyTheme.primary,
-                  ),
-                  title: const Text('z-library 图书搜索'),
-                  subtitle: const Text('当前模式：按书名/作者/ISBN 搜索'),
-                  trailing: Icon(
-                    Icons.check_circle_rounded,
-                    color: JellyTheme.primary,
-                    size: 20,
-                  ),
-                  onTap: () => Navigator.pop(sheetCtx),
-                ),
-                // 第二层：已导入书源列表
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '已导入书源（${store.enabled.length}）',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: JellyTheme.textSecondary,
-                      ),
-                    ),
-                  ),
-                ),
-                if (store.enabled.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        '暂无书源，去书源仓库导入 Legado 书源',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: JellyTheme.textSecondary,
-                        ),
-                      ),
-                    ),
-                  )
-                else
-                  Flexible(
-                    child: ListView(
-                      shrinkWrap: true,
-                      padding: EdgeInsets.zero,
-                      children: [
-                        for (final src in store.enabled)
-                          ListTile(
-                            dense: true,
-                            leading: Icon(
-                              Icons.library_books_outlined,
-                              color: JellyTheme.primary,
-                            ),
-                            title: Text(src.name),
-                            subtitle: Text(
-                              '搜索「${_keyword.trim().isEmpty ? '输入关键词' : _keyword.trim()}」',
-                            ),
-                            onTap: () {
-                              Navigator.pop(sheetCtx);
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => BookSourceSearchPage(
-                                    initialKeyword: _keyword.trim(),
-                                    initialSourceId: src.id,
-                                  ),
-                                ),
-                              );
-                            },
-                            onLongPress: () {
-                              Navigator.pop(sheetCtx);
-                              _showTip('书源「${src.name}」：可在书源仓库管理登录');
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const BookSourceRepoPage(),
-                                ),
-                              );
-                            },
-                          ),
-                      ],
-                    ),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.settings_suggest_outlined, size: 18),
-                      label: const Text('管理书源'),
-                      onPressed: () {
-                        Navigator.pop(sheetCtx);
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const BookSourceRepoPage(),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   void _openDetail(Book book) async {
     FocusScope.of(context).unfocus(); // 进详情前先收起键盘与历史弹层
     // 分类页来源（hash 是 dl/{slug}，无 eapi hash）：先搜索匹配 bookId 拿 eapi hash
@@ -946,189 +715,6 @@ class _BookSearchPageState extends State<BookSearchPage>
       );
   }
 
-  // -------------------- 头像 / 登录 --------------------
-
-  Future<void> _onAvatarTap() async {
-    final z = ZlibraryService();
-    if (z.isLoggedIn) {
-      // 已登录：弹出账号信息 + 退出登录
-      await _showLogoutDialog(z);
-      return;
-    }
-    // 未登录：弹登录框
-    final ok = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(builder: (_) => const ZlibraryAuthPage()),
-    );
-    if (ok == true && mounted) {
-      _showTip('登录成功');
-    }
-  }
-
-  /// 已登录账号弹窗：展示账号信息 + 今日下载配额 + 退出登录（果冻风）
-  Future<void> _showLogoutDialog(ZlibraryService z) async {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final limit = z.serverDownloadsLimit ?? ZlibraryService.loggedDailyLimit;
-    final used = z.loggedCountToday;
-    final action = await showDialog<String>(
-      context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-          decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: JellyTheme.jellyShadows(
-              color: JellyTheme.primary,
-              blurRadius: 30,
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 头像（与顶栏一致：主色圆底 + user.png）
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: JellyTheme.primary,
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: Image.asset(
-                    'assets/icons/user.png',
-                    width: 44,
-                    height: 44,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => const Icon(
-                      Icons.person_rounded,
-                      color: Colors.white,
-                      size: 32,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                z.username.isEmpty ? z.email : z.username,
-                style: TextStyle(
-                  fontSize: AppTheme.fontTitle3,
-                  fontWeight: FontWeight.w700,
-                  color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-                ),
-              ),
-              if (z.username.isNotEmpty) ...[
-                const SizedBox(height: 2),
-                Text(
-                  z.email,
-                  style: TextStyle(
-                    fontSize: AppTheme.fontSubhead,
-                    color: JellyTheme.textSecondary,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 16),
-              // 今日下载配额
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: JellyTheme.primary.withValues(
-                    alpha: isDark ? 0.18 : 0.08,
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.menu_book_rounded,
-                      size: 18,
-                      color: JellyTheme.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '今日下载  $used / $limit 本',
-                      style: TextStyle(
-                        fontSize: AppTheme.fontSubhead,
-                        fontWeight: FontWeight.w600,
-                        color: isDark
-                            ? Colors.white70
-                            : JellyTheme.textPrimaryLight,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              // 退出后回退提示
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.info_outline_rounded,
-                    size: 15,
-                    color: JellyTheme.accent,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      '退出后将回退内置账号（${ZlibraryService.builtinDailyLimit} 本/天）',
-                      style: TextStyle(
-                        fontSize: AppTheme.fontFootnote,
-                        color: JellyTheme.textSecondary,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              // 按钮区
-              Row(
-                children: [
-                  Expanded(
-                    child: SizedBox(
-                      height: 44,
-                      child: TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        style: TextButton.styleFrom(
-                          foregroundColor: JellyTheme.primary,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        child: const Text(
-                          '取消',
-                          style: TextStyle(
-                            fontSize: AppTheme.fontHeadline,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _LogoutButton(
-                      onTap: () => Navigator.pop(ctx, 'logout'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (action == 'logout' && mounted) {
-      await z.logout();
-      _showTip('已退出登录');
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -1137,15 +723,6 @@ class _BookSearchPageState extends State<BookSearchPage>
       appBar: widget.showBackButton
           ? AppBar(
               title: const Text('图书'),
-              actions: [
-                Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: Transform.translate(
-                    offset: const Offset(0, 4),
-                    child: _buildAvatar(isDark),
-                  ),
-                ),
-              ],
             )
           : null,
       floatingActionButton: ListenableBuilder(
@@ -1182,29 +759,35 @@ class _BookSearchPageState extends State<BookSearchPage>
                       children: [
                         AppPageTitle('图书', isDark: isDark),
                         const SizedBox(width: 4),
-                        // 「拉绳」：标题右边那根挂着的小绳（点它切到书源）。
-                        // 它是**挂饰**不是普通按钮，所以不带底色、
-                        // 也不参与右侧图标的横排/展开逻辑。
+                        // 「拉绳」：标题右边那根挂着的小绳。
+                        // 点它**直接进入书源界面（书源搜索页）**——
+                        // 原来是弹出「切换书源」两层弹层，按用户要求改成直进书源页；
+                        // 书源仓库（导入/管理）在书源页的聚合菜单里。
                         JellyPullCord(
                           // ⚠️ 必须限高：绳子的 CustomPaint 自然高 50，
                           // 不限的话这一行会被撑到 50px，同排的搜索框/圆图标
                           // 垂直错位、圆环还会探出压到搜索框上。
                           height: 40,
-                          tooltip: '切换书源',
-                          onTap: () => _showSourceLayerSheet(isDark),
+                          tooltip: '书源',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const BookSourceSearchPage(),
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 10),
                         // 搜索框占据剩余宽度（Expanded 让右侧图标始终贴边）
                         Expanded(child: _buildSearchBar(isDark)),
                         const SizedBox(width: 8),
-                        // 指环切换菜单：视图/下载/分类/常用操作收敛成一个环按钮
-                        //（z-library 头像保留在右侧作为登录入口）
+                        // 指环切换菜单：**只保留视图 + 分类筛选**
+                        // （已下载/历史/收藏/下载/豆瓣排行收敛到右侧聚合按钮）
                         JellyRingButton(
                           isDark: isDark,
-                          tooltip: '切换菜单',
+                          tooltip: '视图与分类',
                           menuBuilder: (ctx) => JellyRingMenuPanel(
                             isDark: isDark,
-                            title: '切换菜单',
+                            title: '视图与分类',
                             children: [
                               // 视图切换（网格/列表）
                               JellyRingMenuRow(
@@ -1218,89 +801,64 @@ class _BookSearchPageState extends State<BookSearchPage>
                                 label: '分类筛选',
                                 child: _buildCategoryButton(isDark),
                               ),
-                              // 已下载的图书（跳书架）
-                              JellyRingMenuRow(
-                                isDark: isDark,
-                                label: '已下载的图书',
-                                child: _buildCircleIcon(
-                                  isDark: isDark,
-                                  icon: Icons.file_download_outlined,
-                                  tooltip: '已下载的图书',
-                                  onTap: () {
-                                    Navigator.pop(ctx);
-                                    MainTabController.instance.select(
-                                      MainTabController.bookshelfTabIndex,
-                                    );
-                                  },
-                                ),
-                              ),
-                              const Divider(
-                                  height: 12, indent: 20, endIndent: 20),
-                              // 常用操作
-                              JellyRingMenuActions(
-                                isDark: isDark,
-                                actions: [
-                                  (
-                                    icon: Icons.history_rounded,
-                                    label: '浏览记录',
-                                    onTap: () {
-                                      Navigator.pop(ctx);
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) =>
-                                              const BrowseHistoryPage(
-                                                  showTabs: false),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  (
-                                    icon: Icons.favorite_rounded,
-                                    label: '收藏',
-                                    onTap: () {
-                                      Navigator.pop(ctx);
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => const FavoritesPage(),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  (
-                                    icon: Icons.file_download_rounded,
-                                    label: '下载',
-                                    onTap: () {
-                                      Navigator.pop(ctx);
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => const DownloadPage(),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  (
-                                    icon: Icons.leaderboard_rounded,
-                                    label: '豆瓣排行',
-                                    onTap: () {
-                                      Navigator.pop(ctx);
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => const DoubanRankingPage(),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ],
-                              ),
                             ],
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        _buildAvatar(isDark),
+                        const SizedBox(width: 6),
+                        // 聚合菜单：浏览历史 / 收藏 / 下载 / 豆瓣排行
+                        // （纯图标下拉菜单栏；登录入口在设置界面里）
+                        JellyIconMenuButton(
+                          isDark: isDark,
+                          tooltip: '历史 · 收藏 · 下载 · 排行',
+                          actions: [
+                            (
+                              icon: Icons.history_rounded,
+                              tooltip: '浏览记录',
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  // 图书足迹页（参考图 IMG_8398）
+                                  builder: (_) => const BrowseHistoryPage(
+                                      showTabs: false, bookOnly: true),
+                                ),
+                              ),
+                            ),
+                            (
+                              icon: Icons.favorite_rounded,
+                              tooltip: '收藏',
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  // 图书页进收藏 → 图书收藏独立页（参考图 IMG_8395）
+                                  builder: (_) =>
+                                      const FavoritesPage(bookOnly: true),
+                                ),
+                              ),
+                            ),
+                            (
+                              icon: Icons.file_download_rounded,
+                              tooltip: '下载',
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  // 下载记录页（参考图 IMG_8397：5 状态 tab）
+                                  builder: (_) =>
+                                      const BookDownloadRecordsPage(),
+                                ),
+                              ),
+                            ),
+                            (
+                              icon: Icons.leaderboard_rounded,
+                              tooltip: '豆瓣排行',
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const DoubanRankingPage(),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   // 第二行（搜索框 + 视图切换 + 分类按钮）已删除 ——
@@ -1360,83 +918,6 @@ class _BookSearchPageState extends State<BookSearchPage>
           JellySegmentData(icon: Icons.view_list_rounded),
         ],
       ),
-    );
-  }
-
-  /// 通用圆形图标按钮（浅灰底 + 近黑图标）—— 与书架/收藏页同款
-  /// 顶栏圆形图标按钮。
-  ///
-  /// ⚠️ 实现已抽到 [AppIconButton]（B 档：图标按钮统一）——
-  /// 原来这个方法在 **4 个页面里各写了一份**，实现逐字雷同。
-  /// 这里留薄委托，调用点不动。
-  Widget _buildCircleIcon({
-    required bool isDark,
-    required IconData icon,
-    required String tooltip,
-    required VoidCallback onTap,
-    double size = 36,
-  }) {
-    return AppIconButton(
-      icon: icon,
-      tooltip: tooltip,
-      onTap: onTap,
-      isDark: isDark,
-      size: size,
-    );
-  }
-
-  Widget _buildAvatar(bool isDark) {
-    final z = ZlibraryService();
-    final logged = z.isLoggedIn;
-    // 登录态：限额优先用服务端实际值（/eapi/user/profile），未取到回退硬编码
-    final limit = z.isLoggedIn
-        ? (z.serverDownloadsLimit ?? ZlibraryService.loggedDailyLimit)
-        : ZlibraryService.builtinDailyLimit;
-    final used = z.isLoggedIn ? z.loggedCountToday : z.builtinCountToday;
-    return Column(
-      children: [
-        Material(
-          color: logged
-              ? JellyTheme.primary
-              : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
-          shape: const CircleBorder(),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: _onAvatarTap,
-            child: SizedBox(
-              width: 36,
-              height: 36,
-              child: Center(
-                child: logged
-                    ? Image.asset(
-                        'assets/icons/user.png',
-                        width: 30,
-                        height: 30,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => Icon(
-                          Icons.person_rounded,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                      )
-                    : Icon(
-                        Icons.person_rounded,
-                        color: isDark ? Colors.white70 : JellyTheme.primary,
-                        size: 20,
-                      ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          logged ? '$used/$limit' : '未登录',
-          style: TextStyle(
-            fontSize: AppTheme.fontCaption,
-            color: isDark ? Colors.white54 : JellyTheme.textSecondary,
-          ),
-        ),
-      ],
     );
   }
 
@@ -1642,16 +1123,16 @@ class _BookSearchPageState extends State<BookSearchPage>
           ),
         );
       }
-      // 热门推荐流（豆瓣 book_hot）：有数据直接铺网格，不依赖 z-library
-      if (_hotBooks.isNotEmpty) return _buildHotGrid();
-      if (_hotLoading) {
+      // 首页推荐流（z-library 首页热门，走用户配置的节点域名）
+      if (_recBooks.isNotEmpty) return _buildRecGrid();
+      if (_recLoading) {
         return Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               CircularProgressIndicator(color: JellyTheme.primary),
               const SizedBox(height: 16),
-              Text('正在加载热门书籍...',
+              Text('正在加载推荐书籍...',
                   style: TextStyle(color: JellyTheme.textSecondary)),
             ],
           ),
@@ -1663,11 +1144,11 @@ class _BookSearchPageState extends State<BookSearchPage>
           children: [
             Icon(Icons.book_rounded, size: 64, color: JellyTheme.textSecondary),
             const SizedBox(height: 16),
-            Text(_hotFailed ? '热门书籍加载失败' : '暂无推荐内容',
+            Text(_recFailed ? '推荐书籍加载失败' : '暂无推荐内容',
                 style: TextStyle(color: JellyTheme.textSecondary)),
             const SizedBox(height: 16),
             TextButton.icon(
-              onPressed: _loadHotBooks,
+              onPressed: _loadRecommendations,
               icon: const Icon(Icons.refresh_rounded),
               label: const Text('重新获取'),
             ),
@@ -1805,8 +1286,8 @@ class _BookSearchPageState extends State<BookSearchPage>
     );
   }
 
-  /// 热门推荐网格（豆瓣热榜）：封面 + 书名，点击打开豆瓣图书页。
-  Widget _buildHotGrid() {
+  /// 首页推荐网格（z-library 首页热门）：封面 + 书名，点击进图书详情。
+  Widget _buildRecGrid() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1823,7 +1304,7 @@ class _BookSearchPageState extends State<BookSearchPage>
                 child: Row(
                   children: [
                     Text(
-                      '热门书籍',
+                      '推荐',
                       style: TextStyle(
                         fontSize: AppTheme.fontTitle3,
                         fontWeight: FontWeight.w700,
@@ -1834,15 +1315,15 @@ class _BookSearchPageState extends State<BookSearchPage>
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      '豆瓣热榜 · 点击看详情',
+                      'Z-Library 首页热门',
                       style: TextStyle(
                           fontSize: AppTheme.fontFootnote,
                           color: JellyTheme.textSecondary),
                     ),
                     const Spacer(),
                     IconButton(
-                      tooltip: '刷新热门',
-                      onPressed: _hotLoading ? null : _loadHotBooks,
+                      tooltip: '刷新推荐',
+                      onPressed: _recLoading ? null : _loadRecommendations,
                       icon: Icon(
                         Icons.refresh_rounded,
                         size: 20,
@@ -1868,16 +1349,15 @@ class _BookSearchPageState extends State<BookSearchPage>
                 ),
                 delegate: SliverChildBuilderDelegate(
                   (context, index) {
-                    final book = _hotBooks[index];
+                    final book = _recBooks[index];
                     return JellyBookCard(
                       book: book,
                       isGrid: true,
-                      heroTag: bookCoverHeroTag('hot', book),
-                      coverHeaders: _doubanImageHeaders,
-                      onTap: () => _openDoubanBook(book),
+                      heroTag: bookCoverHeroTag('rec', book),
+                      onTap: () => _openDetail(book),
                     );
                   },
-                  childCount: _hotBooks.length,
+                  childCount: _recBooks.length,
                 ),
               ),
             ),
@@ -1885,23 +1365,6 @@ class _BookSearchPageState extends State<BookSearchPage>
         );
       },
     );
-  }
-
-  /// 打开豆瓣图书详情页（系统浏览器；id 形如 douban-26943161）。
-  Future<void> _openDoubanBook(Book book) async {
-    final doubanId =
-        book.id.startsWith('douban-') ? book.id.substring(7) : book.id;
-    final uri = Uri.parse('https://book.douban.com/subject/$doubanId/');
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok && mounted) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(
-          content: Text('无法打开豆瓣页面'),
-          duration: Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ));
-    }
   }
 
   Widget _buildListView() {

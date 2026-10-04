@@ -32,7 +32,7 @@ import '../pages/playlist_page.dart';
 /// 表现就是"滚动卡、流量还费"。封面图恰恰是最不该重复下载的东西
 /// （同一首歌的封面永远是同一张）。
 /// 项目里阅读模块早就在用 `cached_network_image`，这里统一过来。
-class CoverImage extends StatelessWidget {
+class CoverImage extends StatefulWidget {
   const CoverImage({
     super.key,
     this.url,
@@ -47,38 +47,75 @@ class CoverImage extends StatelessWidget {
   final bool circle;
 
   @override
+  State<CoverImage> createState() => _CoverImageState();
+}
+
+class _CoverImageState extends State<CoverImage> {
+  /// 是否已经重试过一次。**只重试一次** —— 否则服务器真挂了会无限刷请求。
+  bool _retried = false;
+
+  @override
+  void didUpdateWidget(CoverImage old) {
+    super.didUpdateWidget(old);
+    // 列表滚动时 Element 会被复用但 url 换了：重试状态**必须一起重置**，
+    // 否则"上一首重试过"会连累下一首（新歌直接显示占位、不再重试）。
+    if (old.url != widget.url) _retried = false;
+  }
+
+  /// 失败后延时重试一次。
+  ///
+  /// 依据（实测）：探测 13 个封面有 2 个是 `read ECONNRESET` **瞬时**失败，
+  /// 换一次请求就成功 —— 不是 URL 无效。所以这里重试一次能明显减少
+  /// "一片占位图"的观感。
+  void _scheduleRetry() {
+    if (_retried) return;
+    _retried = true;
+    Future<void>.delayed(const Duration(milliseconds: 700), () {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final radius = circle ? size / 2 : cornerRadius;
+    final radius = widget.circle ? widget.size / 2 : widget.cornerRadius;
+    final u = (widget.url ?? '').trim();
     Widget child;
-    final u = (url ?? '').trim();
     if (u.isEmpty) {
       child = _placeholder(radius);
     } else {
+      // 重试时换一个缓存键：绕过"失败已被缓存记住"的情况
+      final imageUrl =
+          _retried ? (u.contains('?') ? '$u&_retry=1' : '$u?_retry=1') : u;
       child = CachedNetworkImage(
-        imageUrl: u,
-        width: size,
-        height: size,
+        key: ValueKey<String>(imageUrl),
+        imageUrl: imageUrl,
+        width: widget.size,
+        height: widget.size,
         fit: BoxFit.cover,
-        // 加载失败也退回占位，而不是显示破图图标
-        errorBuilder: (_, __, ___) => _placeholder(radius),
+        // 加载失败退回占位（不显示破图图标），并安排一次重试
+        errorBuilder: (_, __, ___) {
+          _scheduleRetry();
+          return _placeholder(radius);
+        },
         placeholder: (_, __) => _placeholder(radius),
         // 淡入让"图从无到有"不那么突兀（列表滚动时尤其明显）
         fadeInDuration: const Duration(milliseconds: 180),
         // 网易云的封面有多个尺寸后缀，缓存键用完整 URL 即可
-        memCacheWidth: (size * MediaQuery.devicePixelRatioOf(context))
-            .round()
-            .clamp(1, 2048),
+        memCacheWidth:
+            (widget.size * MediaQuery.devicePixelRatioOf(context))
+                .round()
+                .clamp(1, 2048),
       );
     }
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
-      child: SizedBox(width: size, height: size, child: child),
+      child: SizedBox(width: widget.size, height: widget.size, child: child),
     );
   }
 
   Widget _placeholder(double radius) => Container(
-        width: size,
-        height: size,
+        width: widget.size,
+        height: widget.size,
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -91,7 +128,8 @@ class CoverImage extends StatelessWidget {
         ),
         alignment: Alignment.center,
         child: Icon(Icons.music_note_rounded,
-            size: size * 0.45, color: Colors.white.withValues(alpha: 0.9)),
+            size: widget.size * 0.45,
+            color: Colors.white.withValues(alpha: 0.9)),
       );
 }
 

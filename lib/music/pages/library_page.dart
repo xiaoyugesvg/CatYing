@@ -4,9 +4,12 @@ import '../models/models.dart';
 import '../services/library_store.dart';
 import '../services/music_api.dart';
 import '../services/player_manager.dart';
+import '../services/settings_store.dart';
 import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
 import 'playlist_detail_page.dart';
+import 'playlist_page.dart';
+import 'local_music_page.dart';
 import '../../widgets/app_page_loading.dart';
 import '../../common/theme.dart';
 
@@ -39,22 +42,43 @@ class _LibraryPageState extends State<LibraryPage>
   List<Song> _favorites = const [];
   bool _loading = true;
 
+  /// 最近播放（Beans 歌单页的「最近播放」板块）
+  List<Song> _recent = const [];
+
   @override
   bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
+    // 榜单要**跟随当前音乐平台**：切换平台后自动重载。
+    // 本页 `wantKeepAlive = true`（切 tab 不重建），不监听的话会一直显示
+    // 上一个平台的榜单，直到用户手动下拉刷新 —— 那就是"切了平台内容没变"。
+    SettingsStore.instance.musicSource.addListener(_onSourceChanged);
     _load();
   }
 
+  void _onSourceChanged() {
+    if (mounted) _load();
+  }
+
+  @override
+  void dispose() {
+    SettingsStore.instance.musicSource.removeListener(_onSourceChanged);
+    super.dispose();
+  }
+
   Future<void> _load() async {
-    final tops = await api.topLists();
+    // 用**当前**平台拉榜单（原来没传 source → 永远走网易云）
+    final tops =
+        await api.topLists(source: SettingsStore.instance.musicSource.value);
     final favs = await FavoriteStore.instance.all();
+    await MusicLibraryStore.instance.init();
     if (!mounted) return;
     setState(() {
       _tops = tops;
       _favorites = favs;
+      _recent = List<Song>.of(MusicLibraryStore.instance.recent);
       _loading = false;
     });
   }
@@ -86,6 +110,42 @@ class _LibraryPageState extends State<LibraryPage>
           ),
           _queueSection(),
           _favoriteSection(),
+          _recentSection(),
+          // ── 我的内容：本地歌单 / 已下载（都不需要账号）──────────────
+          const SectionTitle(title: '我的内容'),
+          ListTile(
+            leading: Icon(Icons.queue_music_rounded, color: MusicTheme.tint),
+            title: Text('我的歌单',
+                style: TextStyle(
+                    color: MusicTheme.label,
+                    fontSize: AppTheme.fontHeadline)),
+            subtitle: Text('本地歌单，不需要账号',
+                style: TextStyle(
+                    color: MusicTheme.secondary,
+                    fontSize: AppTheme.fontFootnote)),
+            trailing:
+                Icon(Icons.chevron_right, size: 18, color: MusicTheme.secondary),
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => const PlaylistListPage()),
+            ),
+          ),
+          ListTile(
+            leading:
+                Icon(Icons.download_done_rounded, color: MusicTheme.tint),
+            title: Text('本地音乐',
+                style: TextStyle(
+                    color: MusicTheme.label,
+                    fontSize: AppTheme.fontHeadline)),
+            subtitle: Text('已下载的歌，离线可听',
+                style: TextStyle(
+                    color: MusicTheme.secondary,
+                    fontSize: AppTheme.fontFootnote)),
+            trailing:
+                Icon(Icons.chevron_right, size: 18, color: MusicTheme.secondary),
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => const LocalMusicPage()),
+            ),
+          ),
           if (_tops.isNotEmpty) ...[
             const SectionTitle(title: '榜单'),
             ..._tops.map((t) => ListTile(
@@ -99,13 +159,57 @@ class _LibraryPageState extends State<LibraryPage>
                           color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
                   trailing: Icon(Icons.chevron_right,
                       size: 18, color: MusicTheme.secondary),
-                  onTap: () => openPlaylist(context, t.id, t.name),
+                  // 进详情也要带平台：否则会拿酷狗的榜单 id 去查网易云（必然空）
+                  onTap: () => openPlaylist(context, t.id, t.name,
+                      source: SettingsStore.instance.musicSource.value),
                 )),
             ],
           ],
         ),
       ),
     );
+  }
+
+  /// 最近播放（对齐 Beans 歌单页：**行尾显示时长**，只列前 6 首）
+  Widget _recentSection() {
+    if (_recent.isEmpty) return const SizedBox.shrink();
+    final head = _recent.take(6).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionTitle(title: '最近播放', action: '${_recent.length} 首'),
+        ...head.map((s) => ListTile(
+              leading: CoverImage(url: s.coverUrl, size: 46, cornerRadius: 8),
+              title: Text(s.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: MusicTheme.label,
+                      fontSize: AppTheme.fontHeadline)),
+              subtitle: Text(s.artists,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: MusicTheme.secondary,
+                      fontSize: AppTheme.fontFootnote)),
+              // Beans 的行尾不是箭头，而是**时长**
+              trailing: Text(
+                _fmtDur(s.duration),
+                style: TextStyle(
+                    color: MusicTheme.secondary,
+                    fontSize: AppTheme.fontFootnote),
+              ),
+              onTap: () => player.playQueue(_recent, index: _recent.indexOf(s)),
+            )),
+      ],
+    );
+  }
+
+  /// 秒 → `m:ss`（Beans 就是这么显示的）
+  static String _fmtDur(double sec) {
+    final t = sec.round();
+    if (t <= 0) return '--:--';
+    return '${t ~/ 60}:${(t % 60).toString().padLeft(2, '0')}';
   }
 
   /// 正在播放队列（等于"当前歌单"，最实用的一个板块）

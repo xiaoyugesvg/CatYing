@@ -13,17 +13,23 @@ import '../../common/theme.dart';
 ///
 /// 顶部大头图 + 歌单信息 + 「播放全部 / 随机播放」，
 /// 下面是歌曲列表。点歌从该列表位置开始播（这样"下一首"才正确）。
-Future<void> openPlaylist(BuildContext context, int id, String title) {
+Future<void> openPlaylist(
+  BuildContext context,
+  int id,
+  String title, {
+  SongSource source = SongSource.netease,
+}) {
   return Navigator.of(context).push(
-    MaterialPageRoute(builder: (_) => PlaylistDetailPage(id: id, title: title)),
+    MaterialPageRoute(builder: (_) => PlaylistDetailPage(id: id, title: title, source: source)),
   );
 }
 
 class PlaylistDetailPage extends StatefulWidget {
-  const PlaylistDetailPage({super.key, required this.id, required this.title});
+  const PlaylistDetailPage({super.key, required this.id, required this.title, this.source = SongSource.netease});
 
   final int id;
   final String title;
+  final SongSource source;
 
   @override
   State<PlaylistDetailPage> createState() => _PlaylistDetailPageState();
@@ -47,7 +53,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       _loading = true;
       _error = '';
     });
-    final (pl, songs) = await api.playlistDetail(widget.id);
+    final (pl, songs) = await api.playlistDetail(widget.id, source: widget.source);
     if (!mounted) return;
     setState(() {
       _pl = pl;

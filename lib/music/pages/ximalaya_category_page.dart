@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../services/music_api.dart';
 import '../theme/music_theme.dart';
 import '../../common/theme.dart';
+import '../widgets/music_components.dart';
 import 'ximalaya_album_page.dart';
 
 /// 喜马拉雅的**分类浏览**（有声书 / 儿童 / 相声 / 历史…）。
@@ -183,92 +184,107 @@ class _AlbumListPageState extends State<_AlbumListPage> {
                           color: MusicTheme.secondary,
                           fontSize: AppTheme.fontBody)),
                 )
-              : ListView.separated(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  itemCount: _items.length + (_hasMore ? 1 : 0),
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (_, i) {
-                    if (i >= _items.length) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        child: Center(
-                          child: _loadingMore
-                              ? SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: MusicTheme.tint),
-                                )
-                              : TextButton(
-                                  onPressed: _load,
-                                  child: Text('加载更多',
-                                      style: TextStyle(
-                                          color: MusicTheme.tint)),
+              : Column(
+                  children: [
+                    // 对齐 Beans 精选页：**2 列网格**（原来是竖排 ListTile）
+                    Expanded(
+                      child: GridView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 16,
+                          crossAxisSpacing: 12,
+                          childAspectRatio: 0.66,
+                        ),
+                        itemCount: _items.length,
+                        itemBuilder: (_, i) {
+                          final a = _items[i];
+                          return _AlbumGridCard(
+                            song: a,
+                            onTap: () => Navigator.of(context).push<void>(
+                              MaterialPageRoute(
+                                builder: (_) => XimalayaAlbumPage(
+                                  albumId: '${a.id}',
+                                  albumName: a.name,
                                 ),
-                        ),
-                      );
-                    }
-                    final a = _items[i];
-                    return ListTile(
-                      leading: _AlbumThumb(url: a.coverUrl),
-                      title: Text(a.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: MusicTheme.label)),
-                      subtitle: Text(a.artists.isEmpty ? '有声书' : a.artists,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: MusicTheme.secondary,
-                              fontSize: AppTheme.fontFootnote)),
-                      trailing: Icon(Icons.chevron_right_rounded,
-                          color: MusicTheme.secondary),
-                      onTap: () => Navigator.of(context).push<void>(
-                        MaterialPageRoute(
-                          builder: (_) => XimalayaAlbumPage(
-                            albumId: '${a.id}',
-                            albumName: a.name,
-                          ),
-                        ),
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
+                    ),
+                    if (_hasMore)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 14),
+                        child: _loadingMore
+                            ? SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: MusicTheme.tint),
+                              )
+                            : TextButton(
+                                onPressed: _load,
+                                child: Text('加载更多',
+                                    style: TextStyle(color: MusicTheme.tint)),
+                              ),
+                      ),
+                  ],
                 ),
     );
   }
 }
 
-/// 专辑封面（取不到就用音符占位，不留空白格）。
-class _AlbumThumb extends StatelessWidget {
-  const _AlbumThumb({required this.url});
-  final String? url;
+/// 专辑网格卡（对齐 Beans 精选页）：
+/// **1:1 封面 + 两行标题 + 「平台 · 作者」**。
+///
+/// 封面走 `CoverImage`（带磁盘缓存 + 失败自动重试 + 占位），
+/// 比原来的 `Image.network` 更省流量，也不会留空白格。
+class _AlbumGridCard extends StatelessWidget {
+  const _AlbumGridCard({required this.song, required this.onTap});
+
+  final Song song;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final u = (url ?? '').trim();
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: SizedBox(
-        width: 46,
-        height: 46,
-        child: u.isEmpty
-            ? Container(
-                color: MusicTheme.fill,
-                alignment: Alignment.center,
-                child: Icon(Icons.headphones_rounded,
-                    size: 20, color: MusicTheme.secondary),
-              )
-            : Image.network(
-                u,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  color: MusicTheme.fill,
-                  alignment: Alignment.center,
-                  child: Icon(Icons.headphones_rounded,
-                      size: 20, color: MusicTheme.secondary),
-                ),
+    final artist = song.artists.trim();
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AspectRatio(
+            aspectRatio: 1,
+            child: LayoutBuilder(
+              builder: (c, cons) => CoverImage(
+                url: song.coverUrl,
+                size: cons.maxWidth,
+                cornerRadius: 10,
               ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            song.name,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+                color: MusicTheme.label,
+                fontSize: AppTheme.fontFootnote,
+                height: 1.25,
+                fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 2),
+          // Beans 的副标题就是「平台 · 作者」两段式
+          Text(
+            '喜马拉雅 · ${artist.isEmpty ? '有声书' : artist}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: MusicTheme.secondary, fontSize: 11),
+          ),
+        ],
       ),
     );
   }

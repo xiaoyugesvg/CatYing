@@ -4,11 +4,15 @@ import 'package:flutter/material.dart';
 import '../models/book_source.dart';
 import '../services/book_source_service.dart';
 import '../theme/jelly_theme.dart';
+import '../widgets/jelly_icon_menu_button.dart';
 import '../widgets/jelly_pull_cord.dart';
 import '../widgets/jelly_expandable_search.dart';
-import '../widgets/jelly_sliding_actions.dart';
+import '../widgets/jelly_search_bar.dart';
+import 'book_download_records_page.dart';
 import 'book_source_detail_page.dart';
 import 'book_source_repo_page.dart';
+import 'browse_history_page.dart';
+import 'favorites_page.dart';
 import '../../common/theme.dart';
 
 /// 书源搜索页 —— 用已导入的 Legado 书源跨站搜小说。
@@ -39,6 +43,23 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
   final _ctrl = TextEditingController();
   final store = BookSourceStore.instance;
 
+  /// 「搜索源」筛选框（快速书源列表弹窗用）
+  final TextEditingController _sourceFilter = TextEditingController();
+
+  /// 源标签行选中的单源 id（空 = 聚搜全部源；点击源标签切换）
+  String _selectedSourceId = '';
+
+  /// 复搜模式：结果列表顶部下拉进入，源 chips 多选过滤
+  bool _focusMode = false;
+  final Set<String> _selectedSourceIds = {};
+
+  /// 分类浏览（选中单源后，参考图「必读榜」网格 + 分类弹窗）
+  List<ExploreCategory> _cats = [];
+  ExploreCategory? _activeCat;
+  List<BookSourceResult> _exploreList = [];
+  bool _exploreLoading = false;
+  String? _exploreError;
+
   bool _searching = false;
   String _keyword = '';
 
@@ -57,12 +78,19 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
     _ctrl.text = widget.initialKeyword;
     if (widget.initialKeyword.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _run());
+    } else if (widget.initialSourceId != null) {
+      // 从图书页拉绳指定单源进入：直接选中该源并加载分类浏览
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        setState(() => _selectedSourceId = widget.initialSourceId!);
+        _loadExploreIfNeeded();
+      });
     }
   }
 
   @override
   void dispose() {
     _ctrl.dispose();
+    _sourceFilter.dispose();
     super.dispose();
   }
 
@@ -90,9 +118,12 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       return;
     }
     final allEnabled = store.enabled;
-    final enabled = widget.initialSourceId == null
-        ? allEnabled
-        : allEnabled.where((s) => s.id == widget.initialSourceId).toList();
+    // 优先级：构造指定源 → 源标签行选中源 → 跨全部源聚搜
+    final enabled = widget.initialSourceId != null
+        ? allEnabled.where((s) => s.id == widget.initialSourceId).toList()
+        : (_selectedSourceId.isEmpty
+            ? allEnabled
+            : allEnabled.where((s) => s.id == _selectedSourceId).toList());
     if (enabled.isEmpty) {
       _toast('未找到指定书源，请先在书源仓库确认源已启用');
       setState(() => _searching = false);
@@ -112,6 +143,9 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       _states.clear();
       _doneCount = 0;
       _totalCount = enabled.length;
+      // 新搜索复位复搜模式
+      _focusMode = false;
+      _selectedSourceIds.clear();
     });
 
     await BookSourceService.instance.searchAll(
@@ -131,6 +165,73 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
 
     if (!mounted || _session != mySession) return;
     setState(() => _searching = false);
+  }
+
+  /// 切到某个源后：未搜索时加载该源的分类浏览（exploreUrl）。
+  Future<void> _loadExploreIfNeeded() async {
+    if (_selectedSourceId.isEmpty) {
+      setState(() {
+        _cats = [];
+        _activeCat = null;
+        _exploreList = [];
+        _exploreError = null;
+        _exploreLoading = false;
+      });
+      return;
+    }
+    final sources = store.enabled;
+    if (sources.isEmpty) return;
+    BookSource? source;
+    for (final s in sources) {
+      if (s.id == _selectedSourceId) {
+        source = s;
+        break;
+      }
+    }
+    if (source == null) return;
+
+    setState(() {
+      _exploreLoading = true;
+      _exploreError = null;
+      _cats = [];
+      _activeCat = null;
+      _exploreList = [];
+    });
+    final r = await BookSourceService.instance.exploreCategories(source);
+    if (!mounted || source.id != _selectedSourceId) return;
+    if (!r.ok || r.categories.isEmpty) {
+      setState(() {
+        _exploreLoading = false;
+        _exploreError = r.error ?? '该源没有配置分类浏览';
+      });
+      return;
+    }
+    setState(() {
+      _cats = r.categories;
+      _activeCat = r.categories.first;
+      _exploreLoading = false;
+    });
+    await _loadCatBooks(source, r.categories.first);
+  }
+
+  /// 加载某个分类的书籍列表（ruleExplore）。
+  Future<void> _loadCatBooks(BookSource source, ExploreCategory cat) async {
+    setState(() {
+      _exploreLoading = true;
+      _exploreError = null;
+      _activeCat = cat;
+      _exploreList = [];
+    });
+    final r = await BookSourceService.instance.exploreBooks(source, cat.url);
+    if (!mounted || source.id != _selectedSourceId) return;
+    setState(() {
+      _exploreLoading = false;
+      if (r.ok) {
+        _exploreList = r.list;
+      } else {
+        _exploreError = r.error ?? '加载分类失败';
+      }
+    });
   }
 
   /// 从各源结果重建聚合视图。
@@ -156,12 +257,31 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       if (v.isEmpty) return;
       out.add(_BookGroup(key: k, items: v));
     });
+    // 复搜模式：按选中的源多选过滤
+    if (_focusMode && _selectedSourceIds.isNotEmpty) {
+      out.removeWhere(
+        (g) => !g.items.any((r) => _selectedSourceIds.contains(r.source.id)),
+      );
+    }
     // 来源多的排前面（更可能有完整章节），其次书名
     out.sort((a, b) {
       final c = b.items.length.compareTo(a.items.length);
       return c != 0 ? c : a.items.first.name.compareTo(b.items.first.name);
     });
     return out;
+  }
+
+  /// 结果涉及的所有源（复搜 chips 用）
+  List<({String id, String name})> get _involvedSources {
+    final map = <String, String>{};
+    for (final list in _grouped.values) {
+      for (final r in list) {
+        map.putIfAbsent(r.source.id, () => r.source.name);
+      }
+    }
+    return map.entries
+        .map((e) => (id: e.key, name: e.value))
+        .toList();
   }
 
   @override
@@ -199,14 +319,61 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
           ],
         ),
         actions: [
-          JellySlidingActions(
+          // 刷新（重新搜索当前关键词；未搜索时重载分类浏览）
+          IconButton(
+            tooltip: '重新搜索',
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: () {
+              if (_keyword.isNotEmpty) {
+                _run(_keyword);
+              } else if (_selectedSourceId.isNotEmpty) {
+                _loadExploreIfNeeded();
+              }
+            },
+          ),
+          // 聚合菜单：浏览记录 / 收藏 / 下载（与图书共用）+ 书源仓库
+          JellyIconMenuButton(
             isDark: _isDark,
-            width: 130,
+            tooltip: '历史 · 收藏 · 下载 · 仓库',
             actions: [
-              JellyAction(
+              (
+                icon: Icons.history_rounded,
+                tooltip: '浏览记录',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    // 与图书共用的足迹页
+                    builder: (_) => const BrowseHistoryPage(
+                        showTabs: false, bookOnly: true),
+                  ),
+                ),
+              ),
+              (
+                icon: Icons.favorite_rounded,
+                tooltip: '收藏',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    // 与图书共用的图书收藏页
+                    builder: (_) => const FavoritesPage(bookOnly: true),
+                  ),
+                ),
+              ),
+              (
+                icon: Icons.file_download_rounded,
+                tooltip: '下载',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    // 与图书共用的下载记录页
+                    builder: (_) => const BookDownloadRecordsPage(),
+                  ),
+                ),
+              ),
+              (
                 icon: Icons.manage_search_rounded,
                 tooltip: '书源仓库',
-                onPressed: () async {
+                onTap: () async {
                   await Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -214,22 +381,6 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                   );
                   if (mounted) setState(() {});
                 },
-              ),
-              JellyAction(
-                icon: Icons.health_and_safety_rounded,
-                tooltip: '书源体检',
-                onPressed: () => _toast('请在书源仓库里点「体检」'),
-              ),
-              JellyAction(
-                icon: Icons.clear_all_rounded,
-                tooltip: '清空结果',
-                onPressed: () => setState(() {
-                  _grouped.clear();
-                  _states.clear();
-                  _perSource.clear();
-                  _doneCount = 0;
-                  _totalCount = 0;
-                }),
               ),
             ],
           ),
@@ -240,10 +391,209 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
         children: [
           // 搜索框已并入 AppBar 的标题行（按截图的一行布局），
           // 这里不再重复渲染。
+          // 源标签行（聚搜 + 各启用书源，点击切换单源/聚搜）
+          _sourceTabs(),
           if (_searching) _progressBar(),
           Expanded(child: _body()),
         ],
       ),
+    );
+  }
+
+  /// 源标签行（参考图：聚搜/画涯爱子/猫眼看书…）：
+  /// 聚搜 = 跨全部源；选中某个源 = 单源搜索。
+  /// 右侧「快速书源」按钮弹源列表筛选弹窗。
+  Widget _sourceTabs() {
+    final sources = store.enabled;
+    return SizedBox(
+      height: 40,
+      child: Row(
+        children: [
+          Expanded(
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+              itemCount: sources.length + 1, // +聚搜
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, i) {
+                if (i == 0) return _sourceChip('聚搜', '');
+                final s = sources[i - 1];
+                return _sourceChip(s.name, s.id);
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Material(
+              color: _isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+              shape: const CircleBorder(),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: _showQuickSources,
+                child: SizedBox(
+                width: 32,
+                height: 32,
+                child: Icon(Icons.view_list_rounded,
+                    size: 18, color: JellyTheme.textPrimaryLight),
+              ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sourceChip(String name, String id) {
+    final selected = id == _selectedSourceId;
+    return GestureDetector(
+      onTap: () {
+        setState(() => _selectedSourceId = id);
+        _toast(id.isEmpty ? '已切换到聚搜：跨全部书源' : '已切换到书源：$name');
+        if (_keyword.isNotEmpty) {
+          // 有当前关键词则立刻用新源重搜
+          _run(_keyword);
+        } else {
+          // 未搜索：加载该源的分类浏览
+          _loadExploreIfNeeded();
+        }
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: selected
+              ? JellyTheme.primary
+              : (_isDark
+                  ? JellyTheme.cardDark
+                  : JellyTheme.primary.withValues(alpha: 0.08)),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Text(
+          name,
+          style: TextStyle(
+            fontSize: AppTheme.fontSubhead,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected
+                ? Colors.white
+                : (_isDark ? Colors.white70 : JellyTheme.textPrimaryLight),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 快速书源列表弹窗（参考图 IMG_8430：「搜索源」输入框 + 快速书源列表 + 收起）
+  Future<void> _showQuickSources() async {
+    final sources = store.all;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor:
+          _isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            final kw = _sourceFilter.text.trim().toLowerCase();
+            final shown = kw.isEmpty
+                ? sources
+                : sources
+                    .where((s) =>
+                        s.name.toLowerCase().contains(kw) ||
+                        s.group.toLowerCase().contains(kw))
+                    .toList();
+            return SafeArea(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.7,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                      child: JellySearchBar(
+                        controller: _sourceFilter,
+                        hintText: '搜索源',
+                        onChanged: (_) => setSheetState(() {}),
+                        onCleared: () => setSheetState(() {}),
+                      ),
+                    ),
+                    Flexible(
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: shown.length,
+                        itemBuilder: (_, i) {
+                          final s = shown[i];
+                          final selected = s.id == _selectedSourceId;
+                          return ListTile(
+                            dense: true,
+                            leading: CircleAvatar(
+                              radius: 16,
+                              backgroundColor: JellyTheme.primary
+                                  .withValues(alpha: 0.12),
+                              child: Text(
+                                s.name.characters.first,
+                                style: TextStyle(
+                                  fontSize: AppTheme.fontSubhead,
+                                  color: JellyTheme.primary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            title: Text(
+                              s.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: AppTheme.fontBody,
+                                color: _isDark
+                                    ? Colors.white
+                                    : JellyTheme.textPrimaryLight,
+                              ),
+                            ),
+                            subtitle: s.group.isNotEmpty
+                                ? Text(
+                                    s.group,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: AppTheme.fontCaption,
+                                      color: JellyTheme.textSecondary,
+                                    ),
+                                  )
+                                : null,
+                            trailing: selected
+                                ? Icon(Icons.check_circle_rounded,
+                                    color: JellyTheme.primary, size: 20)
+                                : const Icon(Icons.chevron_right_rounded,
+                                    size: 20),
+                            onTap: () {
+                              setSheetState(() {
+                                _selectedSourceId = s.id;
+                              });
+                              Navigator.pop(ctx);
+                              setState(() {});
+                              _toast('已切换到书源：${s.name}');
+                              if (_keyword.isNotEmpty) {
+                                _run(_keyword);
+                              } else {
+                                _loadExploreIfNeeded();
+                              }
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -305,20 +655,343 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
 
   Widget _body() {
     if (store.enabled.isEmpty) return _emptySources();
-    if (_groups.isEmpty) {
-      if (_searching) return const SizedBox.shrink();
-      if (_keyword.isEmpty) {
-        return _hint('输入书名或作者，跨所有已启用书源搜索',
-            Icons.manage_search_rounded);
-      }
-      return _hint('没有搜到「$_keyword」', Icons.search_off_rounded);
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      itemCount: _groups.length,
-      itemBuilder: (c, i) => _bookTile(_groups[i]),
+    if (_groups.isNotEmpty) return _resultsBody();
+    if (_searching) return const SizedBox.shrink();
+    if (_keyword.isNotEmpty) return _hint('没有搜到「$_keyword」', Icons.search_off_rounded);
+    // 未搜索 + 选中单源 → 分类浏览（参考图「必读榜」网格）
+    if (_selectedSourceId.isNotEmpty) return _exploreBody();
+    // 聚搜空态（参考图 IMG_8427）
+    return _emptyHint('输入关键词，在 ${store.enabled.length} 个书源里一起搜',
+        '下拉切换复搜', Icons.manage_search_rounded);
+  }
+
+  /// 搜索结果（聚搜/单源），复搜 chips + 下拉切换
+  Widget _resultsBody() {
+    return Column(
+      children: [
+        // 复搜模式：源 chips 多选过滤（结果列表顶部）
+        if (_focusMode && _involvedSources.isNotEmpty) _focusChips(),
+        Expanded(
+          child: RefreshIndicator(
+            color: JellyTheme.primary,
+            // 结果列表顶部下拉 → 切换为「复搜」模式（参考 cmbok 引导）
+            onRefresh: () async {
+              if (!_focusMode) {
+                setState(() => _focusMode = true);
+                _toast('已切换到「复搜」模式：点选源标签组合过滤');
+              }
+            },
+            child: ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+              physics: const AlwaysScrollableScrollPhysics(),
+              itemCount: _groups.length,
+              itemBuilder: (c, i) => _bookTile(_groups[i]),
+            ),
+          ),
+        ),
+      ],
     );
   }
+
+  /// 分类浏览主体：源名·分类名标题行 + 分类弹窗按钮 + 封面网格
+  Widget _exploreBody() {
+    final src = store.enabled.firstWhere(
+      (s) => s.id == _selectedSourceId,
+      orElse: () => store.enabled.first,
+    );
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 8, 2),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${src.name}·${_activeCat?.title ?? '分类'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontTitle3,
+                    fontWeight: FontWeight.w700,
+                    color: _titleColor,
+                  ),
+                ),
+              ),
+              // 分类弹窗按钮（参考图 IMG_8428/8429：「xx·分类」标签云）
+              TextButton.icon(
+                onPressed: _showCategorySheet,
+                icon: const Icon(Icons.grid_view_rounded, size: 18),
+                label: const Text('分类'),
+                style: TextButton.styleFrom(
+                  foregroundColor: JellyTheme.primary,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(child: _exploreGrid()),
+      ],
+    );
+  }
+
+  Widget _exploreGrid() {
+    if (_exploreLoading && _exploreList.isEmpty) {
+      return const Center(
+        child: SizedBox(
+          width: 26,
+          height: 26,
+          child: CircularProgressIndicator(strokeWidth: 2.5),
+        ),
+      );
+    }
+    if (_exploreList.isEmpty) {
+      return _hint(_exploreError ?? '该分类暂时没有内容', Icons.auto_stories_outlined);
+    }
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      physics: const AlwaysScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        mainAxisSpacing: 14,
+        crossAxisSpacing: 12,
+        childAspectRatio: 0.56,
+      ),
+      itemCount: _exploreList.length,
+      itemBuilder: (context, i) => _exploreTile(_exploreList[i]),
+    );
+  }
+
+  /// 分类网格条目：竖版封面 + 书名 + 作者（点击直接进详情）
+  Widget _exploreTile(BookSourceResult r) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => BookSourceDetailPage(result: r),
+          ),
+        );
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: AspectRatio(
+              aspectRatio: 0.7, // 高 : 宽
+              child: r.coverUrl.isEmpty
+                  ? Container(
+                      color: JellyTheme.primary.withValues(alpha: 0.1),
+                      child: Icon(Icons.menu_book_rounded,
+                          size: 26, color: JellyTheme.primary),
+                    )
+                  : CachedNetworkImage(
+                      imageUrl: r.coverUrl,
+                      fit: BoxFit.cover,
+                      errorWidget: (_, __, ___) => Container(
+                        color: JellyTheme.primary.withValues(alpha: 0.1),
+                        child: Icon(Icons.menu_book_rounded,
+                            size: 26, color: JellyTheme.primary),
+                      ),
+                    ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            r.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: AppTheme.fontFootnote,
+              fontWeight: FontWeight.w600,
+              color: _titleColor,
+            ),
+          ),
+          if (r.author.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                r.author,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: AppTheme.fontCaption,
+                    color: JellyTheme.textSecondary),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 分类弹窗（参考图：「xx·分类」榜单/题材标签云，右上 ×）
+  Future<void> _showCategorySheet() async {
+    final src = store.enabled.firstWhere(
+      (s) => s.id == _selectedSourceId,
+      orElse: () => store.enabled.first,
+    );
+    if (_cats.isEmpty) {
+      _toast('该源没有可用的分类');
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: _isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${src.name}·分类',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w700,
+                        color: _titleColor,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '关闭',
+                    icon: Icon(Icons.close_rounded,
+                        color: JellyTheme.textSecondary),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _cats.map((c) {
+                      final active = _activeCat?.url == c.url;
+                      return GestureDetector(
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _loadCatBooks(src, c);
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 160),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: active
+                                ? JellyTheme.primary
+                                : (_isDark
+                                    ? JellyTheme.backgroundDark
+                                    : JellyTheme.primary
+                                        .withValues(alpha: 0.08)),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(
+                            c.title,
+                            style: TextStyle(
+                              fontSize: AppTheme.fontSubhead,
+                              fontWeight:
+                                  active ? FontWeight.w700 : FontWeight.w500,
+                              color: active
+                                  ? Colors.white
+                                  : (_isDark
+                                      ? Colors.white70
+                                      : JellyTheme.textPrimaryLight),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 复搜模式下的源 chips（多选，点选即过滤）
+  Widget _focusChips() {
+    final sources = _involvedSources;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        children: sources.map((s) {
+          final selected = _selectedSourceIds.contains(s.id);
+          return GestureDetector(
+            onTap: () => setState(() {
+              if (selected) {
+                _selectedSourceIds.remove(s.id);
+              } else {
+                _selectedSourceIds.add(s.id);
+              }
+            }),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+              decoration: BoxDecoration(
+                color: selected
+                    ? JellyTheme.primary
+                    : (_isDark
+                        ? JellyTheme.cardDark
+                        : JellyTheme.primary.withValues(alpha: 0.08)),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Text(
+                s.name,
+                style: TextStyle(
+                  fontSize: AppTheme.fontFootnote,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: selected
+                      ? Colors.white
+                      : (_isDark ? Colors.white70 : JellyTheme.textPrimaryLight),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  /// 两行提示（主文案 + 副文案，参考图）
+  Widget _emptyHint(String main, String sub, IconData icon) => Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon,
+                size: 48,
+                color: JellyTheme.textSecondary.withValues(alpha: 0.5)),
+            const SizedBox(height: 14),
+            Text(main,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: AppTheme.fontSubhead,
+                    fontWeight: FontWeight.w600,
+                    color: _titleColor)),
+            const SizedBox(height: 8),
+            Text(sub,
+                style: TextStyle(
+                    fontSize: AppTheme.fontFootnote,
+                    color: JellyTheme.textSecondary)),
+          ],
+        ),
+      );
 
   Widget _emptySources() {
     return Center(

@@ -7,6 +7,7 @@ import '../services/music_api.dart';
 import '../services/player_manager.dart';
 import '../services/settings_store.dart';
 import 'ximalaya_category_page.dart';
+import 'ximalaya_album_page.dart';
 import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
 import '../../widgets/app_page_loading.dart';
@@ -229,7 +230,11 @@ class _SearchPageState extends State<SearchPage>
               ),
             ),
           ),
-          for (final s in const [SongSource.netease, SongSource.kugou])
+          for (final s in const [
+            SongSource.netease,
+            SongSource.kugou,
+            SongSource.ximalaya,
+          ])
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: ValueListenableBuilder<SongSource>(
@@ -440,20 +445,22 @@ class _SearchPageState extends State<SearchPage>
             ],
           ),
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _hot
-                .take(20)
-                .toList()
-                .asMap()
-                .entries
-                .map((e) => _chip(
-                      e.value,
-                      () => _run(e.value),
-                      hot: e.key < 3,
-                    ))
-                .toList(),
+          // 对齐 Beans 截图⑤：热搜是**2 列等宽圆角格**，每条左侧一个放大镜图标
+          // （原来是变宽的胶囊 Wrap，看起来"散"。用 LayoutBuilder 算列宽比
+          //  嵌 GridView 安全：这里在 ListView 内部，嵌套滚动容易出问题）
+          LayoutBuilder(
+            builder: (c, cons) {
+              const gap = 10.0;
+              final w = (cons.maxWidth - gap) / 2;
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: _hot
+                    .take(8)
+                    .map((k) => _hotCell(k, () => _run(k), w))
+                    .toList(),
+              );
+            },
           ),
         ],
         if (_history.isEmpty && _hot.isEmpty)
@@ -466,6 +473,40 @@ class _SearchPageState extends State<SearchPage>
             ),
           ),
       ],
+    );
+  }
+
+  /// 热搜格（对齐 Beans 截图⑤）：等宽圆角格 + 左侧放大镜 + 文字左对齐。
+  ///
+  /// 图标用 `MusicTheme.tint` 而不是 Beans 的品牌红 —— 外观系统不动。
+  Widget _hotCell(String text, VoidCallback onTap, double width) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: width,
+        height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: MusicTheme.fill,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.search_rounded, size: 15, color: MusicTheme.tint),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text(
+                text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: MusicTheme.label,
+                    fontSize: AppTheme.fontBody),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -527,6 +568,43 @@ class _SearchPageState extends State<SearchPage>
     switch (_kind) {
       case _Kind.song:
         if (_songs.isEmpty) return _empty();
+        // ⚠️ 喜马拉雅的"搜索结果"其实是**专辑**（有声书没有单曲概念）。
+        // 必须走专辑页、**不能直接播** —— 它的播放直链是跟着专辑单集列表
+        // 一起返回的，直接拿专辑 id 去播只会得到"没取到直链"。
+        if (SettingsStore.instance.musicSource.value == SongSource.ximalaya) {
+          return ListView.builder(
+            padding: const EdgeInsets.only(bottom: 150),
+            itemCount: _songs.length,
+            itemBuilder: (c, i) {
+              final a = _songs[i];
+              return ListTile(
+                leading:
+                    CoverImage(url: a.coverUrl, size: 46, cornerRadius: 8),
+                title: Text(a.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: MusicTheme.label,
+                        fontSize: AppTheme.fontHeadline)),
+                subtitle: Text(a.artists.isEmpty ? '有声书专辑' : a.artists,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: MusicTheme.secondary,
+                        fontSize: AppTheme.fontFootnote)),
+                trailing: const Icon(Icons.chevron_right, size: 18),
+                onTap: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => XimalayaAlbumPage(
+                      albumId: '${a.id}',
+                      albumName: a.name,
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        }
         return ListView.builder(
           padding: const EdgeInsets.only(bottom: 150),
           itemCount: _songs.length,

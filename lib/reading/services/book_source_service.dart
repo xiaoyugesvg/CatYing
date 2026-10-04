@@ -76,6 +76,17 @@ class BookSourceResult {
   String toString() => 'BookSourceResult($name / ${source.name})';
 }
 
+/// 书源发现/分类浏览的一个分类（exploreUrl 解析结果）
+class ExploreCategory {
+  const ExploreCategory({required this.title, required this.url});
+
+  final String title;
+  final String url;
+
+  @override
+  String toString() => 'ExploreCategory($title)';
+}
+
 /// 书源目录里的一章
 class BookSourceChapter {
   const BookSourceChapter({required this.name, required this.url});
@@ -302,6 +313,84 @@ class BookSourceService {
       for (final e in items) {
         if (e is Map) {
           final r = BookSourceResult.fromJson(e.cast<String, dynamic>(), source);
+          if (r != null) out.add(r);
+        }
+      }
+    }
+    return (ok: true, error: null, list: out);
+  }
+
+  /// 发现/分类浏览的分类列表（exploreUrl + ruleExplore，对应书源页「必读榜」等）
+  ///
+  /// [source] 未传 categoryUrl → Node 侧解析 exploreUrl 返回分类数组。
+  Future<({bool ok, String? error, List<ExploreCategory> categories})>
+      exploreCategories(BookSource source) async {
+    if (source.isConfig) {
+      return (
+        ok: false,
+        error: '明文 config 源暂不支持分类浏览',
+        categories: const <ExploreCategory>[],
+      );
+    }
+    final data = await _callCached(
+      {'action': 'bsExplore', 'source': source.raw, 'categoryUrl': null},
+      _key('bsExploreCats', source.id),
+      _detailTtl,
+    );
+    final m = _asMap(data);
+    if (m['ok'] != true) {
+      return (
+        ok: false,
+        error: (m['error'] ?? '获取分类失败').toString(),
+        categories: const <ExploreCategory>[],
+      );
+    }
+    final raw = m['categories'];
+    final cats = <ExploreCategory>[];
+    if (raw is List) {
+      for (final it in raw) {
+        if (it is Map) {
+          final j = it.cast<String, dynamic>();
+          final title = (j['title'] ?? '').toString().trim();
+          final url = (j['url'] ?? '').toString().trim();
+          if (title.isEmpty || url.isEmpty) continue;
+          cats.add(ExploreCategory(title: title, url: url));
+        }
+      }
+    }
+    return (ok: true, error: null, categories: cats);
+  }
+
+  /// 分类页的书籍列表（ruleExplore 解析，对应分类网格内容）
+  Future<({bool ok, String? error, List<BookSourceResult> list})>
+      exploreBooks(BookSource source, String categoryUrl) async {
+    if (source.isConfig) {
+      return (
+        ok: false,
+        error: '明文 config 源暂不支持分类浏览',
+        list: const <BookSourceResult>[],
+      );
+    }
+    final data = await _callCached(
+      {'action': 'bsExplore', 'source': source.raw, 'categoryUrl': categoryUrl},
+      _key('bsExploreBooks', '${source.id}::$categoryUrl'),
+      _detailTtl,
+    );
+    final m = _asMap(data);
+    if (m['ok'] != true) {
+      return (
+        ok: false,
+        error: (m['error'] ?? '加载分类失败').toString(),
+        list: const <BookSourceResult>[],
+      );
+    }
+    final raw = m['list'];
+    final out = <BookSourceResult>[];
+    if (raw is List) {
+      for (final it in raw) {
+        if (it is Map) {
+          final r =
+              BookSourceResult.fromJson(it.cast<String, dynamic>(), source);
           if (r != null) out.add(r);
         }
       }

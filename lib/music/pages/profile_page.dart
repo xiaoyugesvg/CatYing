@@ -46,13 +46,16 @@ class ProfilePage extends StatelessWidget {
 
           // ── 外观 ────────────────────────────────────────────
           const _GroupTitle('个性化外观'),
+          _groupCard([
           _ModeTile(store: themeStore),
           _AccentPicker(),
           _coverStyleTile(),
           _dustTile(),
+          ]),
 
           // ── 播放 ────────────────────────────────────────────
           const _GroupTitle('播放'),
+          _groupCard([
           _qualityTile(store),
           _switchTile(
             label: '使用第三方音源',
@@ -60,9 +63,11 @@ class ProfilePage extends StatelessWidget {
             value: store.useThirdPartySources.value,
             onChanged: (v) => store.setUseThirdPartySources(v),
           ),
+          ]),
 
           // ── 音源 ────────────────────────────────────────────
           const _GroupTitle('音源'),
+          _groupCard([
           ValueListenableBuilder<int>(
             valueListenable: ThirdPartySourceStore.instance.revision,
             builder: (context, _, __) {
@@ -85,10 +90,32 @@ class ProfilePage extends StatelessWidget {
               );
             },
           ),
+          ]),
         ],
       ),
     );
   }
+
+  /// 把一组行包成 Beans 式的**分组圆角卡片**（对齐截图④：每组一张卡）。
+  ///
+  /// ⚠️ 必须用 `Material` 而不是 `Container(color:)`：
+  /// `ListTile` 需要 **Material 祖先**来画背景与水波纹，否则框架会抛
+  /// "ListTile background color or ink splashes may be invisible."
+  /// （这正是 `music_root_view_test` 那 3 个失败的原因 —— IndexedStack 会
+  ///   构建所有 tab，一构建到本页就抛断言。）
+  /// `clipBehavior: Clip.antiAlias` 让水波纹被圆角裁掉。
+  ///
+  /// 注意：内部行**保留原有缩进**（Dart 不看缩进），这样这次改动是
+  /// "组首组尾各插一行"的最小 diff，不动那一大段既有代码 —— 降低改崩的风险。
+  Widget _groupCard(List<Widget> rows) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
+        child: Material(
+          color: MusicTheme.card,
+          borderRadius: BorderRadius.circular(14),
+          clipBehavior: Clip.antiAlias,
+          child: Column(children: rows),
+        ),
+      );
 
   static Widget _iconBox(IconData icon) => Container(
         width: 32,

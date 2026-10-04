@@ -2715,7 +2715,7 @@ class _BookshelfPageState extends State<BookshelfPage>
 
         // 用 IntrinsicWidth 测出内容总宽度，判断是否需要滚动
         return Container(
-          height: 34,
+          height: 40,
           margin: const EdgeInsets.only(bottom: 8),
           child: LayoutBuilder(
             builder: (context, constraints) {
@@ -2777,18 +2777,48 @@ class _BookshelfPageState extends State<BookshelfPage>
               )..layout();
               totalWidth += addChipPadding + 14 + 2 + addTextPainter.width + 16;
 
+              // 标签行：正在读/想读/已读完/全部…… 可横向滑动
               final scrollView = SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.only(left: 16),
                 child: Row(mainAxisSize: MainAxisSize.min, children: chips),
               );
 
-              if (totalWidth <= constraints.maxWidth - 32) {
-                // 内容小于宽度 → 居中
-                return Center(child: scrollView);
-              }
-              // 内容超出 → 正常横向滚动
-              return scrollView;
+              // 固定按钮（管理书架 / 排序方式）：图标固定，不随标签滑动
+              final fixedButtons = Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildCircleIcon(
+                    isDark: isDark,
+                    icon: Icons.library_books_rounded,
+                    tooltip: '管理书架',
+                    onTap: _showManageShelves,
+                  ),
+                  const SizedBox(width: 6),
+                  _buildCircleIcon(
+                    isDark: isDark,
+                    icon: Icons.swap_vert_rounded,
+                    tooltip: '排序方式',
+                    onTap: _showSortSheet,
+                  ),
+                ],
+              );
+
+              // 标签行占满剩余宽度；内容不足时居中，超出则横向滚动
+              //（固定按钮宽度 78 = 36+6+36，加 16 左侧留白与 4 间距）
+              const fixedWidth = 78.0;
+              return Row(
+                children: [
+                  Expanded(
+                    child: totalWidth + 16 + fixedWidth + 4 <=
+                            constraints.maxWidth
+                        ? Center(child: scrollView)
+                        : scrollView,
+                  ),
+                  const SizedBox(width: 4),
+                  fixedButtons,
+                ],
+              );
             },
           ),
         );

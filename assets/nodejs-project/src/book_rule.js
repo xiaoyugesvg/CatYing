@@ -680,12 +680,24 @@ function evalRule({ rule, input, vars = {}, ctx = {}, isList = false }) {
 
   // ── @json: ────────────────────────────────────────────
   if (prefix === 'json') {
-    const out = jsonPath(input, parts[0]);
+    const root = input && input.__json ? input.__json : input;
+    const out = jsonPath(root, parts[0]);
     if (isList) {
       return out.flatMap((v) => (Array.isArray(v) ? v : [v]));
     }
     const v = out.length > 0 ? out[0] : '';
     return v == null ? '' : v;
+  }
+
+  // 裸 JSONPath 兜底（JSON 响应 + `$.x` 规则，无 @json: 前缀）
+  if (prefix === '' && parts.length === 1 && r.startsWith('$') && !(input && input.__cheerio)) {
+    const root = input && input.__json ? input.__json : input;
+    if (root != null && typeof root === 'object') {
+      const out = jsonPath(root, parts[0]);
+      if (isList) return out.flatMap((v) => (Array.isArray(v) ? v : [v]));
+      const v = out.length > 0 ? out[0] : '';
+      return v == null ? '' : v;
+    }
   }
 
   // ── 字符串直取（规则本身就是 @text / @href 这类）──────
@@ -927,8 +939,19 @@ function evalList({ rule, input, vars, ctx }) {
     return [out];
   }
   if (prefix === 'json') {
-    const out = jsonPath(input, parts[0]);
+    const root = input && input.__json ? input.__json : input;
+    const out = jsonPath(root, parts[0]);
     return out.flatMap((v) => (Array.isArray(v) ? v : [v]));
+  }
+
+  // 裸 JSONPath 兜底：规则 `$.x[*]` 且输入是 JSON（无 @json: 前缀，
+  // Legado 对 JSON 响应会自动识别）→ 按 JSONPath 展开。
+  if (prefix === '' && parts.length === 1 && r.startsWith('$') && !(input && input.__cheerio)) {
+    const root = input && input.__json ? input.__json : input;
+    if (root != null && typeof root === 'object') {
+      const out = jsonPath(root, parts[0]);
+      return out.flatMap((v) => (Array.isArray(v) ? v : [v]));
+    }
   }
 
   // ⚠️ 复合规则（`div.book-item@h3` 这种含 @ 的）不能只取 parts[0] 当选择器，

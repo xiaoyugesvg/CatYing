@@ -24,7 +24,7 @@
  *   · @p.N 段落下标、## 正则替换（部分规则会退化）
  */
 
-import { evalRule, evalList, makeInput } from './book_rule.js';
+import { evalRule, evalList, makeInput, jsonPath } from './book_rule.js';
 
 import axios from 'axios';
 
@@ -173,6 +173,24 @@ function decodeBody(buf, headers) {
   return buf.toString('utf8');
 }
 
+/**
+ * 请求响应 → 规则引擎 input：
+ *   · JSON 响应（{ 或 [ 开头且可解析）→ { __json: obj }，规则走 JSONPath
+ *   · 其余（HTML 等）→ makeInput() 包装成 cheerio 文档
+ */
+function makeInputSafe(text) {
+  const s = String(text || '');
+  const t = s.trim();
+  if (t.startsWith('{') || t.startsWith('[')) {
+    try {
+      return { __json: JSON.parse(t) };
+    } catch (_) {
+      /* 不是合法 JSON，按 HTML 处理 */
+    }
+  }
+  return makeInput(s);
+}
+
 // ============================================================
 // 变量
 // ============================================================
@@ -261,7 +279,7 @@ async function search({ source, keyword, page = 1 }) {
     return { ok: false, error: '该源没有配置 ruleSearch.bookList' };
   }
 
-  const input = makeInput(resp.text);
+  const input = makeInputSafe(resp.text);
   const vars = buildVars(state);
 
   let items;
@@ -324,7 +342,7 @@ async function bookInfo({ source, bookUrl }) {
   let finalUrl = bookUrl;
   try {
     const resp = await httpGet(bookUrl, source.header || {});
-    input = makeInput(resp.text);
+    input = makeInputSafe(resp.text);
   } catch (e) {
     // 详情页拿不到也不算致命：目录可能仍能取
     input = makeInput('');
@@ -391,7 +409,7 @@ async function toc({ source, tocUrl }) {
     };
   }
 
-  const input = makeInput(text);
+  const input = makeInputSafe(text);
   const vars = buildVars(state);
 
   let items;
@@ -442,7 +460,7 @@ async function content({ source, chapterUrl }) {
     return { ok: false, error: '正文请求失败：' + (e.message || e) };
   }
 
-  const input = makeInput(text);
+  const input = makeInputSafe(text);
   const vars = buildVars(state);
   const ctx = { baseUrl: url, chapterUrl: url };
 
@@ -550,6 +568,146 @@ async function login({ url, method = 'POST', body, contentType, headers }) {
   };
 }
 
+// ============================================================
+// 发现 / 分类浏览（explore）
+// ============================================================
+
+/**
+ * 解析 Legado exploreUrl 的分类列表。
+ *
+ * exploreUrl 常见形态：
+ *   1. JSON 数组：[{"title":"必读榜","url":"https://...","style":{}}, ...]
+ *   2. @js: 前缀，脚本生成上面的数组
+ *   3. 单个链接（视为「全部」一个分类）
+ */
+function parseExploreCategories(raw, state, base) {
+  let s = String(raw || '').trim();
+  if (!s) return [];
+  s = applyLegadoVars(s, state);
+  if (s.startsWith('@js:')) {
+    try {
+      const v = evalRule({
+        rule: s,
+        input: makeInput(''),
+        vars: buildVars(state),
+        ctx: { baseUrl: base },
+      });
+      s = str(v);
+    } catch (_) {
+      return [];
+    }
+  }
+  if (s.startsWith('[')) {
+    try {
+      const arr = JSON.parse(s);
+      if (Array.isArray(arr)) {
+        return arr
+          .map((it) => ({
+            title: str(it && it.title),
+            url: absolute(str(it && it.url), base),
+          }))
+          .filter((it) => it.title || it.url);
+      }
+    } catch (_) {
+      return [];
+    }
+  }
+  if (/^https?:\/\//i.test(s)) return [{ title: '全部', url: s }];
+  return [];
+}
+
+/**
+ * 发现/分类浏览：
+ *   · 不传 categoryUrl → 返回 exploreUrl 的分类列表
+ *   · 传 categoryUrl   → 抓分类页，用 ruleExplore 解析书籍列表
+ */
+async function explore({ source, categoryUrl }) {
+  setProxy(source && source.proxy);
+  const base = source.bookSourceUrl || '';
+  const state = stateOf(base);
+
+  // 1) 分类列表
+  if (!categoryUrl) {
+    const raw = source.exploreUrl;
+    if (!raw) return { ok: false, error: '该源没有配置 exploreUrl（发现地址）' };
+    const cats = parseExploreCategories(raw, state, base);
+    if (cats.length === 0) {
+      return { ok: false, error: 'exploreUrl 解析失败（需 JSON 分类数组或单个链接）' };
+    }
+    return { ok: true, categories: cats };
+  }
+
+  // 2) 分类书籍列表
+  const rule = source.ruleExplore || {};
+  if (!rule.bookList) {
+    return { ok: false, error: '该源没有配置 ruleExplore.bookList' };
+  }
+
+  // 分类 URL 可能带 {{page}} / {{key}} 变量（与 searchUrl 同规则）
+  let rawUrl = applyLegadoVars(categoryUrl, state)
+    .replace(/\{\{\s*page\s*\}\}/g, String(state.page || 1))
+    .replace(/\{page\}/g, String(state.page || 1));
+  const opt = splitUrlOptions(rawUrl);
+  const url = absolute(opt.url, base);
+  let text = '';
+  try {
+    const resp = await httpGet(
+      url,
+      Object.assign({}, source.header || {}, opt.headers || {}),
+      opt.method || 'GET',
+      opt.body,
+    );
+    text = resp.text;
+  } catch (e) {
+    return { ok: false, error: '分类请求失败：' + (e.message || e) };
+  }
+
+  const input = makeInputSafe(text);
+  const vars = buildVars(state);
+
+  let items;
+  try {
+    items = evalList({ rule: rule.bookList, input, vars, ctx: { baseUrl: url } });
+  } catch (e) {
+    return { ok: false, error: 'ruleExplore.bookList 规则失败：' + e.message };
+  }
+
+  const out = [];
+  for (const node of items) {
+    const pick = (r) => {
+      if (!r) return '';
+      let v = '';
+      try {
+        v = str(evalRule({ rule: r, input: node, vars, ctx: { baseUrl: url } }));
+      } catch (_) {
+        return '';
+      }
+      // 残留 {{$.x}} 变量（Legado：从当前 JSON 节点取）→ 用 jsonPath 替换
+      if (v.includes('{{')) {
+        const root = node && node.__json ? node.__json : node;
+        v = v.replace(/\{\{\s*\$\.([\w$.\[\]*]+)\s*\}\}/g, (all, p) => {
+          const hit = jsonPath(root, '$.' + p);
+          return hit.length > 0 && hit[0] != null ? String(hit[0]) : '';
+        });
+      }
+      return v;
+    };
+    const name = pick(rule.name);
+    if (!name) continue;
+    out.push({
+      name,
+      author: pick(rule.author),
+      bookUrl: absolute(pick(rule.bookUrl), base),
+      coverUrl: absolute(pick(rule.coverUrl), base),
+      intro: pick(rule.intro),
+      kind: pick(rule.kind),
+      lastChapter: pick(rule.lastChapter),
+      wordCount: pick(rule.wordCount),
+    });
+  }
+  return { ok: true, list: out, url };
+}
+
 function detectImages(raw, base) {
   const s = (raw || '').trim();
   if (!s) return [];
@@ -620,4 +778,4 @@ function cleanText(t) {
   return s.trim();
 }
 
-export { search as bsSearch, bookInfo as bsBookInfo, toc as bsToc, content as bsContent, login as bsLogin, splitUrlOptions, decodeBody };
+export { search as bsSearch, bookInfo as bsBookInfo, toc as bsToc, content as bsContent, login as bsLogin, explore as bsExplore, splitUrlOptions, decodeBody };

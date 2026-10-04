@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../theme/jelly_theme.dart';
 import '../../widgets/app_page_loading.dart';
 import '../../common/theme.dart';
+import 'book_search_page.dart';
 
 /// 豆瓣图书排行榜。
 ///
@@ -351,13 +352,52 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
               ),
             );
           }
-          return _bookRow(items[i], isDark);
+          return InkWell(
+            onTap: () => _confirmGoSearch(items[i].title),
+            borderRadius: BorderRadius.circular(14),
+            child: _bookRow(items[i], isDark),
+          );
         },
       ),
     );
   }
 
   /// 一本书的卡片（按截图：名次徽标压在封面上 / 标题 / 作者行 / 简介 / 人数 / 星星+评分）
+  /// 点击排行条目：弹「去找书？」确认框，确认后跳图书搜索页按书名搜索
+  /// （参考目标界面 IMG_8394：白色圆角居中确认框，取消 / 去搜索）
+  Future<void> _confirmGoSearch(String title) async {
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Text(
+          '去找书？\n跳转到图书搜索，按书名「$title」搜索',
+          textAlign: TextAlign.center,
+          style: const TextStyle(height: 1.5),
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('去搜索'),
+          ),
+        ],
+      ),
+    );
+    if (go == true && mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => BookSearchPage(initialKeyword: title),
+        ),
+      );
+    }
+  }
+
   Widget _bookRow(_Book b, bool isDark) {
     final label = isDark ? Colors.white : JellyTheme.textPrimaryLight;
     return Container(

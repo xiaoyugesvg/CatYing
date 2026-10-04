@@ -19,7 +19,11 @@ import 'comic_detail_page.dart';
 class BrowseHistoryPage extends StatefulWidget {
   final bool showTabs;
 
-  const BrowseHistoryPage({super.key, this.showTabs = true});
+  /// 图书足迹模式（从图书页聚合菜单进入，参考图 IMG_8398）：
+  /// 标题「足迹」+ 图书浏览记录 + 右上角清空。
+  final bool bookOnly;
+
+  const BrowseHistoryPage({super.key, this.showTabs = true, this.bookOnly = false});
 
   @override
   State<BrowseHistoryPage> createState() => _BrowseHistoryPageState();
@@ -59,14 +63,14 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage>
     final tabSegWidth = (MediaQuery.of(context).size.width * 0.5 - 10) / 2;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('浏览记录'),
+        title: Text(widget.showTabs ? '浏览记录' : '足迹'),
         actions: [
-          // 仅漫画模式：清理按钮放 AppBar 右上角（参考下载记录）
+          // 仅漫画/图书单一模式：清理按钮放 AppBar 右上角（参考下载记录）
           if (!widget.showTabs)
             IconButton(
               icon: const Icon(Icons.delete_sweep_rounded),
               tooltip: '清理',
-              onPressed: () => _showCleanSheet(isComic: true),
+              onPressed: () => _showCleanSheet(isComic: !widget.bookOnly),
             ),
         ],
       ),
@@ -105,7 +109,9 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage>
                 ),
               ],
             )
-          : const _ComicHistoryTab(),
+          : widget.bookOnly
+              ? const _BookHistoryTab()
+              : const _ComicHistoryTab(),
     );
   }
 
