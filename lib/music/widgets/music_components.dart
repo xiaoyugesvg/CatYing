@@ -83,7 +83,15 @@ class _CoverImageState extends State<CoverImage> {
   @override
   Widget build(BuildContext context) {
     final radius = widget.circle ? widget.size / 2 : widget.cornerRadius;
-    final u = (widget.url ?? '').trim();
+    // ⚠️ 网易云封面**降级为 http** —— 这是**实测驱动的规避**，不是拍脑袋：
+    //   · 「新歌速递 / 搜索」的封面是 `http://p1/p2.music.126.net/...` → App 里**能显示** ✓
+    //   · 「推荐歌单 / 排行榜」的封面是 `https://p1.music.126.net/...` → App 里**一直空白** ✗
+    // 同一 CDN、我本机裸请求 https 那张也是 200 ✓ —— 所以问题在 App 侧这条 https 路径上。
+    // 在**渲染层**统一降级（单点改动，不用去改 Song/Playlist/TopList 三个模型）。
+    var u = (widget.url ?? '').trim();
+    if (u.startsWith('https://') && u.contains('.music.126.net/')) {
+      u = 'http://${u.substring('https://'.length)}';
+    }
     Widget child;
     if (u.isEmpty) {
       child = _placeholder(radius);

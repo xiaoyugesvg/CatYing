@@ -1,42 +1,4 @@
 {
   "version": 1,
-  "sources": [
-    {
-      "type": "config",
-      "config": {
-        "name": "示例书源（笔趣阁类）",
-        "url": "https://www.example-biquge.com/",
-        "icon": "",
-        "search_url": "https://www.example-biquge.com/search.php?keyword={q}&page={page}",
-        "search_result_dom": ".search-list .result-item",
-        "search_title_dom": ".book-name",
-        "search_author_dom": ".book-author",
-        "search_cover_dom": "img",
-        "search_book_url_dom": "a.book-name",
-        "search_intro_dom": ".book-intro",
-        "search_last_chapter_dom": ".book-last",
-        "search_encoding": "utf-8",
-        "search_page_start": 1,
-        "book_name_dom": "h1.book-name",
-        "book_cover_dom": ".book-cover img",
-        "book_author_dom": ".book-info .author",
-        "book_desc_dom": ".book-intro",
-        "book_last_chapter_dom": ".book-info .last-chapter",
-        "toc_name_dom": "",
-        "toc_link_dom": "#chapter-list a",
-        "toc_url_pattern": "/chapter/",
-        "toc_page_url": "",
-        "toc_page_base_dom": "",
-        "toc_page_count_dom": "",
-        "toc_order": 1,
-        "content_dom": "#chapter-content",
-        "content_remove_doms": ".ad-content .tips",
-        "content_next_dom": "",
-        "content_max_pages": 10,
-        "page_encoding": "utf-8",
-        "use_webview_fetch": false,
-        "header": {}
-      }
-    }
-  ]
+  "sources": []
 }

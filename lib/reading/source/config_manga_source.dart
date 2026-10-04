@@ -8,8 +8,10 @@
 // 由搜索页捕获并提示「用 URL 兜底入口」。
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:encrypt/encrypt.dart' as enc;
 import 'package:flutter/foundation.dart';
 import 'package:html/dom.dart';
@@ -21,6 +23,7 @@ import 'cover_cache.dart';
 import 'site_config.dart';
 import 'webview_image_fetcher.dart';
 import 'package:gbk_codec/gbk_codec.dart';
+import '../services/settings_service.dart';
 
 /// 配置源不支持搜索时抛出（UI 提示用 URL 兜底入口）。
 class UnsupportedSearchError implements Exception {
@@ -90,7 +93,26 @@ class ConfigMangaSource extends MangaSource {
       receiveTimeout: const Duration(seconds: 30),
       followRedirects: true,
     ),
-  );
+  )..httpClientAdapter = _adapterForGlobalProxy();
+
+  /// 漫画源未配单源代理时回退全局代理（通用设置 → 网络代理）。
+  static HttpClientAdapter _adapterForGlobalProxy() {
+    final s = SettingsService();
+    if (!s.globalProxyEnabled) return IOHttpClientAdapter();
+    final p = s.globalProxy.trim();
+    final parts = p.split(':');
+    if (parts.length != 2) return IOHttpClientAdapter();
+    final host = parts[0].trim();
+    final port = int.tryParse(parts[1].trim()) ?? 0;
+    if (host.isEmpty || port <= 0) return IOHttpClientAdapter();
+    return IOHttpClientAdapter(
+      createHttpClient: () {
+        final client = HttpClient()
+          ..findProxy = (uri) => 'PROXY $host:$port';
+        return client;
+      },
+    );
+  }
 
   /// 把相对 URL（或完整 URL）解析为绝对 URL，base 默认站点首页。
   String _resolveUrl(String idOrUrl, [String? base]) {

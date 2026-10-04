@@ -11,6 +11,7 @@ import '../../common/theme_mode_store.dart';
 import '../theme/jelly_palette.dart';
 import '../theme/jelly_theme.dart';
 import '../utils/constants.dart';
+import '../utils/safe_num.dart';
 
 /// 日志工具
 void _log(String message) {
@@ -75,8 +76,20 @@ class SettingsService extends ChangeNotifier {
   static const _keepImagesKey = 'download_keep_images_after_epub';
   static const _mergeChaptersCountKey = 'download_merge_chapters_count';
   static const _trimWhitespaceKey = 'download_trim_whitespace';
+  // ── 下载设置（参考图 IMG_8466~8468 补全）─────────────────────
+  static const _kBackgroundDownloadKey = 'download_background';
+  static const _kWifiOnlyKey = 'download_wifi_only';
+  static const _kBookSourceConcurrencyKey = 'download_book_source_concurrency';
+  static const _kBookFileConcurrencyKey = 'download_book_file_concurrency';
+  static const _kOnlineBookCacheKey = 'download_online_book_cache_gb';
+  static const _kOnlineComicCacheKey = 'download_online_comic_cache_gb';
+  static const _kPauseMergeOnErrorKey = 'download_pause_merge_on_error';
+  static const _kProtectFullBookKey = 'download_protect_full_book_cache';
   static const _defaultHomeKey = 'default_home_page';
   static const _kBuiltinAccountKey = 'use_builtin_account';
+  static const _kGlobalProxyEnabledKey = 'global_proxy_enabled';
+  static const _kGlobalProxyKey = 'global_proxy'; // "host:port"（空串=直连）
+  static const _kAutoSyncKey = 'auto_sync_backup'; // 同步与备份：自动同步开关
   static const _kDarkModeKey = 'dark_mode';
   static const _kThemeFollowSystemKey = 'theme_follow_system';
   static const _kThemePresetKey = 'theme_preset'; // 主题预设：jelly/pink/green
@@ -121,6 +134,15 @@ class SettingsService extends ChangeNotifier {
   // 从书架移除时是否同时删除本地文件（「书架设置」里的开关）
   static const _kRemoveDeletesFileKey = 'shelf_remove_deletes_file';
   static const _kScreenSleepKey = 'reader_screen_sleep';
+  // 阅读背景样式：0纯白 / 1纸白 / 2米黄 / 3暗夜 / 4纯黑（默认暗夜=现黑底）
+  static const _kReaderBackgroundStyleKey = 'reader_background_style';
+  // 漫画阅读器边距（参考 cmbok「边距」tab：页眉左右16/上8、页脚左右16/下8）
+  static const _kComicMarginKey = 'comic_reader_margin';
+  // 端侧 AI 漫画超分（参考 cmbok「AI 超分」面板；仅 UI，不真实推理）
+  static const _kUpscaleAutoCleanKey = 'upscale_auto_clean';
+  static const _kUpscaleCleanLimitKey = 'upscale_clean_limit_gb';
+  static const _kUpscaleDenoiseKey = 'upscale_denoise';
+  static const _kUpscaleModelDownloadedKey = 'upscale_model_downloaded';
   static const _kAutoAddShelfKey = 'reader_auto_add_shelf';
   static const _kAutoAddShelfForBookKey = 'reader_auto_add_shelf_book';
   // 墨水屏模式：漫画黑白显示 + 柔和浅灰底（默认关）
@@ -178,12 +200,39 @@ class SettingsService extends ChangeNotifier {
   String? _downloadSavePath;
   bool _mergeChapterToEpub = true;
   bool _keepImagesAfterEpub = true;
-  int _mergeChaptersPerEpub = 1; // 每 N 话合并为一个 EPUB（1~20）
+  int _mergeChaptersPerEpub = 1; // 每 N 话合并为一个 EPUB（1~101，101=无限整本）
   bool _trimWhitespace = false; // 下载时去白边
+  // ── 下载设置（参考图 IMG_8466~8468 补全）─────────────────────
+  bool _backgroundDownload = true; // 后台下载（切后台/息屏继续）
+  bool _wifiOnlyDownload = false; // 仅 Wi-Fi 下载
+  int _bookSourceConcurrency = 15; // 书源下载并发量（1~50）
+  int _bookFileConcurrency = 2; // 图书文件下载并发量（1~5）
+  int _onlineBookCacheGb = 1; // 在线书临时缓存上限（GB，1~16）
+  int _onlineComicCacheGb = 1; // 在线漫画图片缓存上限（GB，1~16）
+  bool _pauseMergeOnError = false; // 失败或缺页时暂停合并
+  bool _protectFullBookCache = true; // 缓存全本固定保护
   static const int minMergeChaptersPerEpub = 1;
-  static const int maxMergeChaptersPerEpub = 20;
+  static const int maxMergeChaptersPerEpub = 101; // 101 = 无限（整本合并）
+
+  /// 书源下载并发量：默认 15，范围 1~50
+  static const int minBookSourceConcurrency = 1;
+  static const int maxBookSourceConcurrency = 50;
+  static const int defaultBookSourceConcurrency = 15;
+
+  /// 图书文件下载并发量：默认 2，范围 1~5
+  static const int minBookFileConcurrency = 1;
+  static const int maxBookFileConcurrency = 5;
+  static const int defaultBookFileConcurrency = 2;
+
+  /// 在线书/漫画缓存上限（GB）：默认 1，范围 1~16
+  static const int minOnlineCacheGb = 1;
+  static const int maxOnlineCacheGb = 16;
+  static const int defaultOnlineCacheGb = 1;
   DefaultHomePage _defaultHomePage = DefaultHomePage.manga;
   bool _useBuiltinAccount = true; // 图书下载未登录时是否回退内置账号（搜索一律回退内置账号）
+  bool _globalProxyEnabled = false; // 全局网络代理开关（参考图 IMG_8465 网络代理）
+  String _globalProxy = ''; // 全局代理 "host:port"
+  bool _autoSyncBackup = false; // 同步与备份：自动同步开关
   bool _isDarkMode = false; // 暗色模式（首次跟随系统，之后保留用户选择）
   bool _themeFollowSystem = true; // 主题跟随系统明暗；关闭后用上面的手动选择
   String _themePreset = 'ink'; // 主题预设：ink(水墨书香,默认)/jelly/pink/green/... 或 custom_*
@@ -220,6 +269,22 @@ class SettingsService extends ChangeNotifier {
   bool _singleHand = false;
   /// 屏幕休眠：'default' 跟随系统 / '10min' / 'never'
   String _screenSleep = 'default';
+
+  /// 阅读背景样式：0纯白 / 1纸白 / 2米黄 / 3暗夜 / 4纯黑
+  int _readerBackgroundStyle = 3;
+
+  /// 漫画阅读器边距（参考 cmbok「边距」tab）
+  double _comicHeaderLeft = 16;
+  double _comicHeaderRight = 16;
+  double _comicHeaderTop = 8;
+  double _comicFooterLeft = 16;
+  double _comicFooterRight = 16;
+  double _comicFooterBottom = 8;
+  /// 端侧 AI 漫画超分设置（仅 UI 面板，不做真实推理）
+  bool _upscaleAutoClean = true;
+  double _upscaleCleanLimitGb = 1.0;
+  int _upscaleDenoise = 0; // 0 保守 / 1 中等 / 2 强力
+  bool _upscaleModelDownloaded = false;
   /// 漫画在线阅读满 N 话后自动加入「正在读」
   bool _autoAddShelfForManga = true;
   /// 图书在线阅读满 N 章后自动加入「正在读」
@@ -262,8 +327,19 @@ class SettingsService extends ChangeNotifier {
   bool get keepImagesAfterEpub => _keepImagesAfterEpub;
   int get mergeChaptersPerEpub => _mergeChaptersPerEpub;
   bool get trimWhitespace => _trimWhitespace;
+  bool get backgroundDownload => _backgroundDownload;
+  bool get wifiOnlyDownload => _wifiOnlyDownload;
+  int get bookSourceConcurrency => _bookSourceConcurrency;
+  int get bookFileConcurrency => _bookFileConcurrency;
+  int get onlineBookCacheGb => _onlineBookCacheGb;
+  int get onlineComicCacheGb => _onlineComicCacheGb;
+  bool get pauseMergeOnError => _pauseMergeOnError;
+  bool get protectFullBookCache => _protectFullBookCache;
   DefaultHomePage get defaultHomePage => _defaultHomePage;
   bool get useBuiltinAccount => _useBuiltinAccount;
+  bool get globalProxyEnabled => _globalProxyEnabled;
+  String get globalProxy => _globalProxy;
+  bool get autoSyncBackup => _autoSyncBackup;
   bool get isDarkMode => _themeFollowSystem
       ? (PlatformDispatcher.instance.platformBrightness == Brightness.dark)
       : _isDarkMode;
@@ -332,6 +408,17 @@ class SettingsService extends ChangeNotifier {
   bool get pinchZoom => _pinchZoom;
   bool get singleHand => _singleHand;
   String get screenSleep => _screenSleep;
+  int get readerBackgroundStyle => _readerBackgroundStyle;
+  double get comicHeaderLeft => _comicHeaderLeft;
+  double get comicHeaderRight => _comicHeaderRight;
+  double get comicHeaderTop => _comicHeaderTop;
+  double get comicFooterLeft => _comicFooterLeft;
+  double get comicFooterRight => _comicFooterRight;
+  double get comicFooterBottom => _comicFooterBottom;
+  bool get upscaleAutoClean => _upscaleAutoClean;
+  double get upscaleCleanLimitGb => _upscaleCleanLimitGb;
+  int get upscaleDenoise => _upscaleDenoise;
+  bool get upscaleModelDownloaded => _upscaleModelDownloaded;
   bool get autoAddShelfForManga => _autoAddShelfForManga;
   bool get autoAddShelfForBook => _autoAddShelfForBook;
   String get shelfSort => _shelfSort;
@@ -413,6 +500,30 @@ class SettingsService extends ChangeNotifier {
               .getInt(_mergeChaptersCountKey)
               ?.clamp(minMergeChaptersPerEpub, maxMergeChaptersPerEpub) ??
           1;
+      _backgroundDownload = prefs.getBool(_kBackgroundDownloadKey) ?? true;
+      _wifiOnlyDownload = prefs.getBool(_kWifiOnlyKey) ?? false;
+      _bookSourceConcurrency = _clamp(
+        prefs.getInt(_kBookSourceConcurrencyKey) ?? defaultBookSourceConcurrency,
+        minBookSourceConcurrency,
+        maxBookSourceConcurrency,
+      );
+      _bookFileConcurrency = _clamp(
+        prefs.getInt(_kBookFileConcurrencyKey) ?? defaultBookFileConcurrency,
+        minBookFileConcurrency,
+        maxBookFileConcurrency,
+      );
+      _onlineBookCacheGb = _clamp(
+        prefs.getInt(_kOnlineBookCacheKey) ?? defaultOnlineCacheGb,
+        minOnlineCacheGb,
+        maxOnlineCacheGb,
+      );
+      _onlineComicCacheGb = _clamp(
+        prefs.getInt(_kOnlineComicCacheKey) ?? defaultOnlineCacheGb,
+        minOnlineCacheGb,
+        maxOnlineCacheGb,
+      );
+      _pauseMergeOnError = prefs.getBool(_kPauseMergeOnErrorKey) ?? false;
+      _protectFullBookCache = prefs.getBool(_kProtectFullBookKey) ?? true;
       // 默认首页：v1 枚举顺序为 漫画/图书/收藏/书架/我的，v2 将书架与收藏互换。
       // v1 按下标持久化，换序后需按下标还原旧 tab 再映射到新枚举，避免老用户默认首页错位。
       final navOrderVersion = prefs.getInt(_kNavOrderVersionKey) ?? 1;
@@ -441,6 +552,10 @@ class SettingsService extends ChangeNotifier {
             : DefaultHomePage.manga;
       }
       _useBuiltinAccount = prefs.getBool(_kBuiltinAccountKey) ?? true;
+      _globalProxyEnabled =
+          prefs.getBool(_kGlobalProxyEnabledKey) ?? false;
+      _globalProxy = prefs.getString(_kGlobalProxyKey) ?? '';
+      _autoSyncBackup = prefs.getBool(_kAutoSyncKey) ?? false;
       // 暗色模式：有记录用记录，否则首次跟随系统
       _isDarkMode =
           prefs.getBool(_kDarkModeKey) ??
@@ -534,10 +649,40 @@ class SettingsService extends ChangeNotifier {
     _pinchZoom = prefs.getBool(_kPinchZoomKey) ?? true;
     _singleHand = prefs.getBool(_kSingleHandKey) ?? false;
     _screenSleep = prefs.getString(_kScreenSleepKey) ?? 'default';
+    _readerBackgroundStyle = _clamp(
+      prefs.getInt(_kReaderBackgroundStyleKey) ?? 3,
+      0,
+      4,
+    );
+    final marginRaw = prefs.getString(_kComicMarginKey);
+    if (marginRaw != null) {
+      try {
+        final m = jsonDecode(marginRaw) as Map<String, dynamic>;
+        _comicHeaderLeft = asDoubleOrNull(m['hl']) ?? 16;
+        _comicHeaderRight = asDoubleOrNull(m['hr']) ?? 16;
+        _comicHeaderTop = asDoubleOrNull(m['ht']) ?? 8;
+        _comicFooterLeft = asDoubleOrNull(m['fl']) ?? 16;
+        _comicFooterRight = asDoubleOrNull(m['fr']) ?? 16;
+        _comicFooterBottom = asDoubleOrNull(m['fb']) ?? 8;
+      } catch (_) {}
+    }
     _autoAddShelfForManga =
         prefs.getBool(_kAutoAddShelfKey) ?? true;
     _autoAddShelfForBook =
         prefs.getBool(_kAutoAddShelfForBookKey) ?? true;
+    _upscaleAutoClean = prefs.getBool(_kUpscaleAutoCleanKey) ?? true;
+    _upscaleCleanLimitGb = _clampDouble(
+      asDoubleOrNull(prefs.getDouble(_kUpscaleCleanLimitKey)) ?? 1.0,
+      0.1,
+      10,
+    );
+    _upscaleDenoise = _clamp(
+      prefs.getInt(_kUpscaleDenoiseKey) ?? 0,
+      0,
+      2,
+    );
+    _upscaleModelDownloaded =
+        prefs.getBool(_kUpscaleModelDownloadedKey) ?? false;
     _shelfSort = prefs.getString(_kShelfSortKey) ?? 'default';
     _shelfSortAsc = prefs.getBool(_kShelfSortAscKey) ?? false;
     _shelfSortGlobal = prefs.getBool(_kShelfSortGlobalKey) ?? true;
@@ -693,6 +838,110 @@ class SettingsService extends ChangeNotifier {
     }
   }
 
+  Future<void> setBackgroundDownload(bool value) async {
+    if (_backgroundDownload == value) return;
+    _backgroundDownload = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kBackgroundDownloadKey, value);
+    } catch (e) {
+      _log('保存后台下载开关失败: $e');
+    }
+  }
+
+  Future<void> setWifiOnlyDownload(bool value) async {
+    if (_wifiOnlyDownload == value) return;
+    _wifiOnlyDownload = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kWifiOnlyKey, value);
+    } catch (e) {
+      _log('保存仅WiFi下载开关失败: $e');
+    }
+  }
+
+  Future<void> setBookSourceConcurrency(int value) async {
+    final v = _clamp(
+      value,
+      minBookSourceConcurrency,
+      maxBookSourceConcurrency,
+    );
+    if (_bookSourceConcurrency == v) return;
+    _bookSourceConcurrency = v;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_kBookSourceConcurrencyKey, v);
+    } catch (e) {
+      _log('保存书源并发量失败: $e');
+    }
+  }
+
+  Future<void> setBookFileConcurrency(int value) async {
+    final v = _clamp(value, minBookFileConcurrency, maxBookFileConcurrency);
+    if (_bookFileConcurrency == v) return;
+    _bookFileConcurrency = v;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_kBookFileConcurrencyKey, v);
+    } catch (e) {
+      _log('保存图书文件并发量失败: $e');
+    }
+  }
+
+  Future<void> setOnlineBookCacheGb(int value) async {
+    final v = _clamp(value, minOnlineCacheGb, maxOnlineCacheGb);
+    if (_onlineBookCacheGb == v) return;
+    _onlineBookCacheGb = v;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_kOnlineBookCacheKey, v);
+    } catch (e) {
+      _log('保存在线书缓存上限失败: $e');
+    }
+  }
+
+  Future<void> setOnlineComicCacheGb(int value) async {
+    final v = _clamp(value, minOnlineCacheGb, maxOnlineCacheGb);
+    if (_onlineComicCacheGb == v) return;
+    _onlineComicCacheGb = v;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_kOnlineComicCacheKey, v);
+    } catch (e) {
+      _log('保存在线漫画缓存上限失败: $e');
+    }
+  }
+
+  Future<void> setPauseMergeOnError(bool value) async {
+    if (_pauseMergeOnError == value) return;
+    _pauseMergeOnError = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kPauseMergeOnErrorKey, value);
+    } catch (e) {
+      _log('保存失败暂停合并开关失败: $e');
+    }
+  }
+
+  Future<void> setProtectFullBookCache(bool value) async {
+    if (_protectFullBookCache == value) return;
+    _protectFullBookCache = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kProtectFullBookKey, value);
+    } catch (e) {
+      _log('保存缓存全本保护开关失败: $e');
+    }
+  }
+
   /// 设置：漫画章节下载是否合并成 EPUB
   Future<void> setMergeChapterToEpub(bool value) async {
     if (_mergeChapterToEpub == value) return;
@@ -759,6 +1008,46 @@ class SettingsService extends ChangeNotifier {
       await prefs.setBool(_kBuiltinAccountKey, value);
     } catch (e) {
       _log('保存内置账号开关失败: $e');
+    }
+  }
+
+  /// 设置：全局网络代理开关
+  Future<void> setGlobalProxyEnabled(bool value) async {
+    if (_globalProxyEnabled == value) return;
+    _globalProxyEnabled = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kGlobalProxyEnabledKey, value);
+    } catch (e) {
+      _log('保存全局代理开关失败: $e');
+    }
+  }
+
+  /// 设置：全局网络代理地址 "host:port"（空串=直连）
+  Future<void> setGlobalProxy(String value) async {
+    final v = value.trim();
+    if (_globalProxy == v) return;
+    _globalProxy = v;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kGlobalProxyKey, v);
+    } catch (e) {
+      _log('保存全局代理失败: $e');
+    }
+  }
+
+  /// 设置：自动同步开关
+  Future<void> setAutoSyncBackup(bool value) async {
+    if (_autoSyncBackup == value) return;
+    _autoSyncBackup = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kAutoSyncKey, value);
+    } catch (e) {
+      _log('保存自动同步开关失败: $e');
     }
   }
 
@@ -1430,6 +1719,84 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kScreenSleepKey, value);
+  }
+
+  /// 阅读背景样式：0纯白 / 1纸白 / 2米黄 / 3暗夜 / 4纯黑
+  Future<void> setReaderBackgroundStyle(int value) async {
+    final clamped = _clamp(value, 0, 4);
+    if (_readerBackgroundStyle == clamped) return;
+    _readerBackgroundStyle = clamped;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kReaderBackgroundStyleKey, clamped);
+  }
+
+  /// 漫画边距（页眉左右/上、页脚左右/下，逻辑像素）
+  Future<void> setComicMargins({
+    double headerLeft = 16,
+    double headerRight = 16,
+    double headerTop = 8,
+    double footerLeft = 16,
+    double footerRight = 16,
+    double footerBottom = 8,
+  }) async {
+    _comicHeaderLeft = _clampDouble(headerLeft, 0, 96);
+    _comicHeaderRight = _clampDouble(headerRight, 0, 96);
+    _comicHeaderTop = _clampDouble(headerTop, 0, 96);
+    _comicFooterLeft = _clampDouble(footerLeft, 0, 96);
+    _comicFooterRight = _clampDouble(footerRight, 0, 96);
+    _comicFooterBottom = _clampDouble(footerBottom, 0, 96);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _kComicMarginKey,
+      jsonEncode({
+        'hl': _comicHeaderLeft,
+        'hr': _comicHeaderRight,
+        'ht': _comicHeaderTop,
+        'fl': _comicFooterLeft,
+        'fr': _comicFooterRight,
+        'fb': _comicFooterBottom,
+      }),
+    );
+  }
+
+  /// 端侧 AI 超分：自动清理缓存开关
+  Future<void> setUpscaleAutoClean(bool value) async {
+    if (_upscaleAutoClean == value) return;
+    _upscaleAutoClean = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kUpscaleAutoCleanKey, value);
+  }
+
+  /// 端侧 AI 超分：清理上限（GB，0.1~10）
+  Future<void> setUpscaleCleanLimitGb(double value) async {
+    final clamped = _clampDouble(value, 0.1, 10);
+    if (_upscaleCleanLimitGb == clamped) return;
+    _upscaleCleanLimitGb = clamped;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_kUpscaleCleanLimitKey, clamped);
+  }
+
+  /// 端侧 AI 超分：降噪强度（0 保守 / 1 中等 / 2 强力）
+  Future<void> setUpscaleDenoise(int value) async {
+    final clamped = _clamp(value, 0, 2);
+    if (_upscaleDenoise == clamped) return;
+    _upscaleDenoise = clamped;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kUpscaleDenoiseKey, clamped);
+  }
+
+  /// 端侧 AI 超分：模型已下载状态（仅 UI 记录）
+  Future<void> setUpscaleModelDownloaded(bool value) async {
+    if (_upscaleModelDownloaded == value) return;
+    _upscaleModelDownloaded = value;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kUpscaleModelDownloadedKey, value);
   }
 
   /// 切换书架显隐（「管理书架」里的眼睛）。

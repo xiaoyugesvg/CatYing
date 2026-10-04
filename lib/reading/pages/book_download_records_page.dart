@@ -140,12 +140,7 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('下载记录'),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: _buildOpenDirButton(isDark),
-          ),
-        ],
+        centerTitle: true,
       ),
       body: ListenableBuilder(
         listenable: BookDownloadService(),
@@ -154,19 +149,28 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // 搜索行：搜索框 + 右侧文件夹图标（与漫画下载记录页一致）
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-                child: JellySearchBar(
-                  controller: _searchController,
-                  hintText: '搜索图书',
-                  onChanged: (v) => setState(() {
-                    _keyword = v;
-                    _displayCount = ListPagination.pageSize;
-                  }),
-                  onCleared: () => setState(() {
-                    _keyword = '';
-                    _displayCount = ListPagination.pageSize;
-                  }),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: JellySearchBar(
+                        controller: _searchController,
+                        hintText: '搜索图书',
+                        onChanged: (v) => setState(() {
+                          _keyword = v;
+                          _displayCount = ListPagination.pageSize;
+                        }),
+                        onCleared: () => setState(() {
+                          _keyword = '';
+                          _displayCount = ListPagination.pageSize;
+                        }),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _buildOpenDirButton(isDark),
+                  ],
                 ),
               ),
               _buildStatusTabs(isDark),
@@ -209,45 +213,46 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
     );
   }
 
-  /// 状态 tab：文字胶囊（参考图：下载中/已下载/失败/已暂停/已取消）
+  /// 状态 tab：等分 5 列（与漫画下载记录页一致，参考图 IMG_8464）
   Widget _buildStatusTabs(bool isDark) {
-    return SizedBox(
+    return Container(
       height: 40,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        itemCount: _tabs.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (context, i) {
-          final selected = _statusIndex == i;
-          return GestureDetector(
-            onTap: () => setState(() {
-              _statusIndex = i;
-              _displayCount = ListPagination.pageSize;
-            }),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: selected
-                    ? JellyTheme.primary
-                    : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Text(
-                _tabs[i],
-                style: TextStyle(
-                  fontSize: AppTheme.fontSubhead,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  color: selected
-                      ? Colors.white
-                      : (isDark ? Colors.white : JellyTheme.textPrimaryLight),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Row(
+        children: [
+          for (var i = 0; i < _tabs.length; i++) ...[
+            if (i > 0) const SizedBox(width: 4),
+            Expanded(
+              child: GestureDetector(
+                onTap: () => setState(() {
+                  _statusIndex = i;
+                  _displayCount = ListPagination.pageSize;
+                }),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: _statusIndex == i
+                        ? JellyTheme.primary.withValues(alpha: 0.12)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    _tabs[i],
+                    style: TextStyle(
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight:
+                          _statusIndex == i ? FontWeight.w700 : FontWeight.w500,
+                      color: _statusIndex == i
+                          ? JellyTheme.primary
+                          : (isDark ? Colors.white70 : JellyTheme.textSecondary),
+                    ),
+                  ),
                 ),
               ),
             ),
-          );
-        },
+          ],
+        ],
       ),
     );
   }

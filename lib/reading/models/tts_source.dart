@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 ///   | `azure`    | Azure 语音服务 REST   | 音色多、稳定，要 API Key |
 ///   | `mimo`     | 小米 MiMo chat 接口   | **没有语速字段**（见下）|
 ///   | `openai`   | OpenAI /audio/speech  | 通用形状，各家兼容服务都能接 |
+///   | `easyvoice`| EasyVoice 免费服务（Edge-TTS）| 自部署或公共实例，HTTP 返回 mp3，无需 API Key |
 ///
 /// ⚠️ **MiMo 的关键差异**（截图里的原话）：
 ///   "MiMo 的语音合成走 chat 接口：正文作为 assistant 消息发送，
@@ -51,7 +52,7 @@ class TtsSource {
   /// 稳定 id（新建时按时间戳生成）
   final String id;
 
-  /// `network` / `azure` / `mimo` / `openai`
+  /// `network` / `azure` / `mimo` / `openai` / `easyvoice`
   final String type;
 
   final String name;
@@ -160,6 +161,16 @@ class TtsSource {
           audioFormat: 'mp3',
           extraParams: '{"emotion":"happy"}',
         );
+      case 'easyvoice':
+        return TtsSource(
+          id: ts,
+          type: type,
+          name: 'EasyVoice 免费',
+          endpoint: 'http://192.168.1.100:3000',
+          voice: 'zh-CN-XiaoxiaoNeural',
+          audioFormat: 'mp3',
+          maxRetries: 2,
+        );
       default: // network
         return TtsSource(id: ts, type: 'network', name: '网络导入');
     }
@@ -173,6 +184,8 @@ class TtsSource {
         return '小米 MiMo（限时免费）';
       case 'openai':
         return 'OpenAI 兼容（/audio/speech 接口）';
+      case 'easyvoice':
+        return 'EasyVoice（免费 Edge-TTS 服务）';
       default:
         return '网络导入';
     }

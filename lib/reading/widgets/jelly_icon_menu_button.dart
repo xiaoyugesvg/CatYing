@@ -15,7 +15,7 @@ class JellyIconMenuButton extends StatelessWidget {
     this.icon = Icons.more_horiz_rounded,
     this.tooltip = '更多',
     this.size = 36,
-    this.menuWidth = 68,
+    this.menuWidth = 32,
   });
 
   final bool isDark;
@@ -44,39 +44,43 @@ class JellyIconMenuButton extends StatelessWidget {
         overlay.size.width - pos.dx,
         0,
       ),
-      color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
+      // 菜单框透明：竖排圆图标直接悬浮在页面上（图标自身带阴影），
+      // 没有背景框 / 圆角 / 容器阴影
+      color: Colors.transparent,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.zero),
       ),
-      elevation: 12,
-      shadowColor: Colors.black.withValues(alpha: 0.18),
+      elevation: 0,
+      shadowColor: Colors.transparent,
       items: [
         for (final a in actions)
           PopupMenuItem<void>(
-            height: 50,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+            height: 40,
+            padding: EdgeInsets.zero,
             onTap: a.onTap,
             child: Tooltip(
               message: a.tooltip,
-              child: Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  // 参考样式：黑色实心圆 + 白色图标；深色模式反转为白圆 + 深色图标
-                  color: isDark ? Colors.white : const Color(0xFF17181C),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.14),
-                      blurRadius: 6,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Icon(
-                  a.icon,
-                  size: 21,
-                  color: isDark ? const Color(0xFF17181C) : Colors.white,
+              child: Center(
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    // 参考样式：黑色实心圆 + 白色图标；深色模式反转为白圆 + 深色图标
+                    color: isDark ? Colors.white : const Color(0xFF17181C),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.14),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    a.icon,
+                    size: 17,
+                    color: isDark ? const Color(0xFF17181C) : Colors.white,
+                  ),
                 ),
               ),
             ),

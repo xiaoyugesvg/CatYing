@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import '../models/tts_source.dart';
@@ -73,6 +74,7 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
   }
 
   Future<void> _save() async {
+    final isNew = !TtsSourceStore.instance.all.any((e) => e.id == _s.id);
     final built = _s.copyWith(
       name: _name.text.trim(),
       endpoint: _endpoint.text.trim(),
@@ -85,15 +87,17 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
       extraParams: _extraParams.text.trim(),
     );
     await TtsSourceStore.instance.upsert(built, apiKey: _apiKey.text);
+    // 新建的源保存后直接设为「当前使用」，配完即可朗读
+    if (isNew) await TtsSourceStore.instance.setActive(built.id);
     if (!mounted) return;
     Navigator.pop(context, true);
   }
 
-  /// 「测试连接」—— 会真发一次很短的合成请求。
+  /// 「测试连接」。
   ///
-  /// ⚠️ 真正的合成需要 HTTP 音频解码 + 播放器；这里只做到**校验配置
-  /// 完整性并如实报告**，不假装"测试成功"。
-  void _test() {
+  /// easyvoice 会**真发一次合成请求**并校验返回的音频字节（mp3 魔数）；
+  /// 其余类型只做到**校验配置完整性并如实报告**，不假装"测试成功"。
+  Future<void> _test() async {
     final problems = <String>[];
     if (_s.type == 'azure') {
       if (_region.text.trim().isEmpty && _customHost.text.trim().isEmpty) {
@@ -103,15 +107,92 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
     } else if (_s.type == 'mimo' || _s.type == 'openai') {
       if (_endpoint.text.trim().isEmpty) problems.add('接口地址没填');
       if (_modelId.text.trim().isEmpty) problems.add('模型 ID 没填');
+    } else if (_s.type == 'easyvoice') {
+      if (_endpoint.text.trim().isEmpty) problems.add('接口地址没填');
+      if (_voice.text.trim().isEmpty) problems.add('音色没填');
     }
-    if (_apiKey.text.trim().isEmpty) problems.add('API Key 没填');
+    if (_apiKey.text.trim().isEmpty &&
+        _s.type != 'easyvoice') {
+      problems.add('API Key 没填');
+    }
+    if (problems.isNotEmpty) {
+      setState(() {
+        _testResult = '还差这些：\n· ${problems.join('\n· ')}';
+      });
+      return;
+    }
+
+    // easyvoice：真发一次合成请求（免费服务无需 Key）
+    if (_s.type == 'easyvoice') {
+      setState(() {
+        _busy = true;
+        _testResult = '正在请求合成…';
+      });
+      try {
+        final r = await _requestEasyVoice('这是一个测试。', timeoutSec: 12);
+        final bytes = r ?? [];
+        final okMagic = bytes.length > 4 &&
+            ((bytes[0] == 0x49 && bytes[1] == 0x44 && bytes[2] == 0x33) || // ID3
+                (bytes[0] == 0xFF && bytes[1] == 0xFB)); // FFD8 mp3 帧
+        if (!mounted) return;
+        setState(() {
+          _busy = false;
+          _testResult = okMagic
+              ? '连通：返回 ${(bytes.length / 1024).toStringAsFixed(0)} KB mp3，'
+                  '音色 ${_voice.text.trim()}。\n保存后即可在朗读面板使用。'
+              : '服务返回了内容但不是音频（${bytes.length} 字节，'
+                  '开头 ${bytes.take(4).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}）。\n'
+                  '检查 endpoint 是否指向 EasyVoice（如 http://ip:3000）。';
+        });
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _busy = false;
+          _testResult = '请求失败：$e\n\n检查：\n'
+              '· endpoint 是否带端口且可达（局域网 http://ip:3000）\n'
+              '· 服务是否已 docker 启动（cosincox/easyvoice:latest）';
+        });
+      }
+      return;
+    }
 
     setState(() {
-      _testResult = problems.isEmpty
-          ? '配置完整。\n\n真正的合成请求需要音频播放器（当前项目还没接），'
-              '所以这里只校验配置，不谎报"连通"。'
-          : '还差这些：\n· ${problems.join('\n· ')}';
+      _testResult = '配置完整。\n\n此类型真正的合成请求需要音频播放器'
+          '（当前只接入了 EasyVoice），所以这里只校验配置，不谎报"连通"。';
     });
+  }
+
+  /// EasyVoice 合成：POST /api/v1/tts/generateJson → mp3 字节。
+  /// 返回 null 表示响应为空。
+  Future<List<int>?> _requestEasyVoice(String text,
+      {int? timeoutSec}) async {
+    final base = _endpoint.text.trim().replaceAll(RegExp(r'/+$'), '');
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 8),
+      receiveTimeout: Duration(seconds: timeoutSec ?? 20),
+    ));
+    final r = await dio.post<List<int>>(
+      '$base/api/v1/tts/generateJson',
+      data: {
+        'data': [
+          {
+            'desc': '旁白',
+            'text': text,
+            'voice': _voice.text.trim().isEmpty
+                ? 'zh-CN-XiaoxiaoNeural'
+                : _voice.text.trim(),
+            'rate': '0%',
+            'pitch': '0Hz',
+            'volume': '0%',
+          },
+        ],
+      },
+      options: Options(
+        responseType: ResponseType.bytes,
+        headers: {'Content-Type': 'application/json'},
+      ),
+    );
+    return r.data ?? <int>[];
   }
 
   @override
@@ -145,6 +226,10 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
               _row('区域', _region, hint: 'eastasia', chevron: true),
               _row('自定义主机', _customHost,
                   hint: '留空按区域自动拼；主权云填完整地址'),
+            ] else if (_s.type == 'easyvoice') ...[
+              _row('接口地址', _endpoint,
+                  hint: 'http://ip:3000（自部署）或公共实例地址'),
+              _row('音色', _voice, hint: 'zh-CN-XiaoxiaoNeural'),
             ] else ...[
               _row('接口地址', _endpoint,
                   hint: _s.type == 'mimo'
@@ -153,9 +238,15 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
               _row('模型 ID', _modelId,
                   hint: _s.type == 'mimo' ? 'mimo-v2.5-tts' : '如 tts-1'),
             ],
-            _row('API Key', _apiKey, hint: '必填', obscure: true),
-            _note('API Key 存在系统密钥库里，不写进配置、也不进备份。'
-                '换机后需要重填一次。'),
+            if (_s.type == 'easyvoice')
+              _note('EasyVoice 是免费的 Edge-TTS 服务，无需 API Key。'
+                  '自部署：docker run -d -p 3000:3000 cosincox/easyvoice:latest。'
+                  '保存后自动设为「当前使用」，朗读面板点播放即走本源。')
+            else ...[
+              _row('API Key', _apiKey, hint: '必填', obscure: true),
+              _note('API Key 存在系统密钥库里，不写进配置、也不进备份。'
+                  '换机后需要重填一次。'),
+            ],
           ]),
 
           // ── 音色 / 音色与风格 / 音色与格式 ────────────────────
@@ -201,6 +292,13 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
                   'model/input/voice/speed/response_format）。若某家服务返回 404，'
                   '多半是它并不提供这个接口 —— 小米 MiMo 就属于这种，'
                   '请改用「小米 MiMo」类型。'),
+            ])
+          else if (_s.type == 'easyvoice')
+            _card(isDark, '音色', [
+              _row('音色', _voice, hint: 'zh-CN-XiaoxiaoNeural', chevron: true),
+              _note('Edge 神经音色，免费。常用：zh-CN-XiaoxiaoNeural（晓晓）、'
+                  'zh-CN-YunxiNeural（云希）、zh-CN-YunyangNeural（云扬）。\n'
+                  '朗读面板的语速 / 音调滑杆会映射为请求里的 rate / pitch。'),
             ])
           else
             _card(isDark, '音色', [

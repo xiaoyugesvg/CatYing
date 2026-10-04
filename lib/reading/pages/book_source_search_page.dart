@@ -313,6 +313,12 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       backgroundColor:
           _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
       appBar: AppBar(
+        // 去掉返回箭头：书源页返回靠标题旁的拉绳（maybePop）/ 系统返回
+        automaticallyImplyLeading: false,
+        // AppBar 背景透明：露出 Scaffold 页面背景（backgroundLight/Dark），
+        // 让搜索框的透明底和漫画/书架/收藏页一致（原来 AppBar 用主题默认
+        // 背景色，透明搜索框露出的底色不一样）
+        backgroundColor: Colors.transparent,
         titleSpacing: 0,
         // ── 标题行（按截图：一行放下全部控件）──────────────────
         //   书源 ⋮拉绳  [搜索书源图书]  (工具) (历史) (菜单)

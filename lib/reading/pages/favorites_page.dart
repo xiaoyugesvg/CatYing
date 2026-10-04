@@ -218,6 +218,8 @@ class _FavoritesPageState extends State<FavoritesPage>
                 title: Text(widget.bookOnly
                     ? '图书收藏'
                     : (widget.comicOnly ? '漫画收藏' : '收藏')),
+                // 独立收藏页标题居中（参考图 IMG_8470）
+                centerTitle: true,
                 actions: [
                   // 聚合模式（从漫画/图书/书源页 push 进来，showBackButton=true）：
                   // 标题行在 AppBar 下方会隐藏，所以把漫画/图书切换胶囊 + 搜索按钮放进 AppBar

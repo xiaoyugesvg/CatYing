@@ -217,87 +217,97 @@ class _BookSearchPageState extends State<BookSearchPage>
 
   /// 拉取 z-library 首页推荐（走当前节点域名）作图书主页推荐流。
   ///
-  /// 失败静默（只置 _recFailed），不阻塞搜索/分类等其它入口；
-  /// zlib 拉不到时自动切豆瓣「热门榜」兜底，保证主页有推荐可看。
+  /// 豆瓣（Dio 直连，通常 1~3s）与 zlib（WebView，可能较慢）**并行**：
+  /// 豆瓣先到就先显示，避免"正在加载推荐书籍"长时间空转；zlib 拉到后
+  /// 无缝替换成 zlib 数据。zlib 全失败、豆瓣也失败才置 _recFailed。
   Future<void> _loadRecommendations() async {
     if (_recLoading) return;
     _recLoading = true;
     _recFailed = false;
     if (mounted) setState(() {});
+    // zlib 后台尝试（最多 3 镜像 × 6s ≈ 18s 封顶），成功返回数据、失败返回 null
+    final zlibF = ZlibraryService().fetchHomeRecommendations().then<
+        SearchResult<Book>?>(
+      (r) => r,
+      onError: (Object e) {
+        _log('首页推荐拉取失败: $e');
+        return null;
+      },
+    );
+    // 1) 豆瓣热门榜先出 → 立即显示，主页不再空转
     try {
-      final result = await ZlibraryService().fetchHomeRecommendations();
+      final doubanBooks = await _fetchDoubanBooks();
       if (!mounted) return;
-      setState(() {
-        _recBooks = result.items;
-        _recFailed = result.items.isEmpty;
-        _recIsDouban = false;
-      });
-    } catch (e) {
-      _log('首页推荐拉取失败: $e');
-      if (!mounted) return;
-      // zlib 失败 → 豆瓣热门榜兜底
-      await _loadDoubanFallback();
-    } finally {
-      _recLoading = false;
-      if (mounted) setState(() {});
-    }
-  }
-
-  /// z-library 推荐失败时的兜底：拉豆瓣「热门榜」（book_hot）填充推荐区。
-  /// 豆瓣条目没有 zlib 的下载/阅读数据，点击走「去找书？」跳书源搜索。
-  Future<void> _loadDoubanFallback() async {
-    if (!mounted) return;
-    try {
-      final dio = Dio(BaseOptions(
-        headers: {
-          'User-Agent':
-              'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
-                  'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
-                  'Mobile/15E148 Safari/604.1',
-          'Referer': 'https://m.douban.com/book/chart/',
-        },
-        connectTimeout: const Duration(seconds: 12),
-        receiveTimeout: const Duration(seconds: 12),
-      ));
-      final r = await dio.get(
-        'https://m.douban.com/rexxar/api/v2/subject_collection/book_hot/items',
-        queryParameters: {'start': 0, 'count': 20},
-      );
-      final raw = (r.data is Map)
-          ? (r.data as Map)['subject_collection_items']
-          : null;
-      final books = <Book>[];
-      if (raw is List) {
-        for (final e in raw) {
-          if (e is! Map) continue;
-          final j = e.cast<String, dynamic>();
-          final title = (j['title'] ?? '').toString().trim();
-          if (title.isEmpty) continue;
-          var cover = '';
-          final c = j['cover'];
-          if (c is String) cover = c;
-          if (c is Map) cover = (c['url'] ?? '').toString();
-          books.add(Book(
-            id: 'douban:${title.hashCode}',
-            hash: '',
-            title: title,
-            author: (j['card_subtitle'] ?? '').toString().trim(),
-            cover: cover,
-            description: (j['description'] ?? '').toString().trim(),
-          ));
-        }
+      if (doubanBooks.isNotEmpty) {
+        setState(() {
+          _recBooks = doubanBooks;
+          _recIsDouban = true;
+          _recFailed = false;
+        });
+        _log('豆瓣兜底推荐: ${doubanBooks.length} 本');
       }
-      if (!mounted) return;
-      setState(() {
-        _recBooks = books;
-        _recIsDouban = books.isNotEmpty;
-        _recFailed = books.isEmpty;
-      });
-      _log('豆瓣兜底推荐: ${books.length} 本');
     } catch (e) {
       _log('豆瓣兜底推荐失败: $e');
-      if (mounted) setState(() => _recFailed = true);
     }
+    // 2) zlib 结果到了：成功则替换豆瓣；失败且当前无内容才置失败
+    final zlibResult = await zlibF;
+    if (!mounted) return;
+    setState(() {
+      if (zlibResult != null && zlibResult.items.isNotEmpty) {
+        _recBooks = zlibResult.items;
+        _recIsDouban = false;
+        _recFailed = false;
+      } else if (_recBooks.isEmpty) {
+        _recFailed = true;
+      }
+    });
+    _recLoading = false;
+    if (mounted) setState(() {});
+  }
+
+  /// 拉豆瓣「热门榜」（book_hot）返回书籍列表（不 setState，供推荐流并行兜底）。
+  /// 豆瓣条目没有 zlib 的下载/阅读数据，点击走「去找书？」跳书源搜索。
+  Future<List<Book>> _fetchDoubanBooks() async {
+    final dio = Dio(BaseOptions(
+      headers: {
+        'User-Agent':
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+                'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
+                'Mobile/15E148 Safari/604.1',
+        'Referer': 'https://m.douban.com/book/chart/',
+      },
+      connectTimeout: const Duration(seconds: 12),
+      receiveTimeout: const Duration(seconds: 12),
+    ));
+    final r = await dio.get(
+      'https://m.douban.com/rexxar/api/v2/subject_collection/book_hot/items',
+      queryParameters: {'start': 0, 'count': 20},
+    );
+    final raw = (r.data is Map)
+        ? (r.data as Map)['subject_collection_items']
+        : null;
+    final books = <Book>[];
+    if (raw is List) {
+      for (final e in raw) {
+        if (e is! Map) continue;
+        final j = e.cast<String, dynamic>();
+        final title = (j['title'] ?? '').toString().trim();
+        if (title.isEmpty) continue;
+        var cover = '';
+        final c = j['cover'];
+        if (c is String) cover = c;
+        if (c is Map) cover = (c['url'] ?? '').toString();
+        books.add(Book(
+          id: 'douban:${title.hashCode}',
+          hash: '',
+          title: title,
+          author: (j['card_subtitle'] ?? '').toString().trim(),
+          cover: cover,
+          description: (j['description'] ?? '').toString().trim(),
+        ));
+      }
+    }
+    return books;
   }
 
   Future<void> _addHistory(String keyword) async {

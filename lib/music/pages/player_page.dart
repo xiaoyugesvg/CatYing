@@ -176,6 +176,15 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
     }
   }
 
+  /// 按歌曲 id 推一个**深色调**（稳定的伪随机，理由见 `build` 里的注释）。
+  ///
+  /// 亮度压到 0.20：播放页的文字/图标都是**白色系**（约 40 处 `Colors.white`），
+  /// 底色必须够深才读得清 —— 所以这是"深色调"而不是彩色。
+  static Color _songTone(int id) {
+    final hue = ((id.abs() * 2654435761) % 360).toDouble();
+    return HSLColor.fromAHSL(1, hue, 0.42, 0.20).toColor();
+  }
+
   @override
   Widget build(BuildContext context) {
     final song = player.currentSong;
@@ -198,11 +207,17 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
       );
     }
 
+    // ── 随机色调（**每首歌一个，刻意不跟外观/主题**）────────────────
+    // 用户要求：播放器不要一直是黑的 → 改成"随机色调"。
+    // 但**不用真随机**：真随机每次重建都会换色，页面会闪。
+    // 这里用 `song.id` 推色相 → 同一首歌每次进来颜色一致，换歌才变 ✓
+    final tone = _songTone(song.id);
+
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: tone,
       body: Stack(
         children: [
-          // 背景：黑底 + 封面主色渐变（Beans 的 CoverBlurBackground 简化版）
+          // 背景：**该歌的随机色调** + 封面主色渐变（原为黑底 + 主色）
           Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
@@ -210,8 +225,10 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    Color.lerp(Colors.black, _tint, 0.55)!,
-                    Colors.black,
+                    // 顶部：随机色调与封面主色混一点，更有层次
+                    Color.lerp(tone, _tint, 0.45)!,
+                    // 底部：把色调压暗（原来是纯黑，现在是"这一首的颜色"）
+                    Color.lerp(tone, Colors.black, 0.55)!,
                   ],
                   stops: const [0.0, 0.75],
                 ),

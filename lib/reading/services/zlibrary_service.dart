@@ -1123,7 +1123,9 @@ class ZlibraryService extends ChangeNotifier {
       throw ZlibraryException('unavailable', '图书功能暂不可用，请等待恢复');
     }
     Object? lastError;
-    for (final domain in order) {
+    // 最多试 3 个镜像（当前节点优先）：每个最多 6s，整体 ~18s 封顶，
+    // 避免镜像不可达时 WebView 逐个 30s 超时 → 主页"正在加载"卡几分钟
+    for (final domain in order.take(3)) {
       final url = page > 1
           ? 'https://$domain/s/?page=$page'
           : 'https://$domain/';
@@ -1131,7 +1133,9 @@ class ZlibraryService extends ChangeNotifier {
       String? htmlStr;
       for (var attempt = 1; attempt <= 2; attempt++) {
         try {
-          final html = await WebViewImageFetcher().fetchHtml(url);
+          final html = await WebViewImageFetcher()
+              .fetchHtml(url)
+              .timeout(const Duration(seconds: 6));
           if (html.isNotEmpty) {
             htmlStr = html;
             break;

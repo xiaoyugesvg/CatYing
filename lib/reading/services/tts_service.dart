@@ -1,9 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
 import 'package:get/get.dart';
+import 'package:media_kit/media_kit.dart';
+
+import '../models/tts_source.dart';
+import 'tts_source_store.dart';
 
 /// 语音朗读（听书）。
 ///
@@ -15,6 +20,17 @@ import 'package:get/get.dart';
 /// "不新增原生插件"。**新增 pub 依赖若没重新 `pod install`，插件原生库
 /// 不会被链接** → Flutter 启动时找不到插件 → **装完就闪退**
 /// （flutter_tts 就是这么崩的）。TTS 是系统自带能力，没必要为它引插件。
+///
+/// ── 网络朗读源（EasyVoice）─────────────────────────────────────
+/// 「朗读引擎」页里把某个 `easyvoice` 源设为「当前使用」后，朗读会改走
+/// **HTTP 合成 + media_kit 播放**（dio / media_kit 都已在项目依赖里，
+/// 零新增原生插件）：
+///   · 每段 POST `/api/v1/tts/generateJson`（Edge-TTS 免费音色）拿 mp3；
+///   · media_kit 播放该 mp3，念完自动下一段，高亮照旧；
+///   · 暂停 / 继续 / 停止 / 跳段 / 倍速全部由播放器接管；
+///   · 合成失败时按源的「失败自动降级」开关切回系统朗读继续读。
+/// 其余类型（azure/mimo/openai）只做了配置校验，合成尚未接入，
+/// 朗读始终走系统引擎。
 ///
 /// ── 分段策略 ──────────────────────────────────────────────────
 /// 把整章按段落切开、**一段一段念**（不是整段丢给引擎）：
@@ -57,6 +73,19 @@ class TtsService extends GetxService {
   List<String> _segments = [];
   bool _stopRequested = false;
 
+  // ── 网络朗读源（EasyVoice）──────────────
+  final Dio _dio = Dio(BaseOptions(
+    connectTimeout: const Duration(seconds: 8),
+    receiveTimeout: const Duration(seconds: 25),
+  ));
+  /// 当前激活的 easyvoice 源（null = 走系统原生朗读）
+  TtsSource? _netSource;
+  Player? _netPlayer;
+  StreamSubscription<bool>? _netCompleteSub;
+  /// 上一段合成的临时文件（下一段开播前删掉，避免 tmp 堆积）
+  File? _netTmpFile;
+  bool _netSynthesizing = false;
+
   /// 念完最后一段时回调（用于"自动连播下一章"）
   VoidCallback? onFinished;
 
@@ -70,12 +99,27 @@ class TtsService extends GetxService {
     });
   }
 
+  @override
+  void onClose() {
+    // 释放网络播放器与订阅（service 为 permanent，正常不触发，
+    // 但 Get 清空时会走这里，避免播放器/订阅泄漏）
+    _netCompleteSub?.cancel();
+    _netCompleteSub = null;
+    _netPlayer?.dispose();
+    _netPlayer = null;
+    super.onClose();
+  }
+
   // ============================================================
   // 对外
   // ============================================================
 
   /// 开始朗读整段文本
   Future<void> speak(String text, {int startAt = 0}) async {
+    // 刷新当前朗读源：朗读引擎页里选中的 easyvoice 源生效，否则原生
+    await TtsSourceStore.instance.init();
+    final active = TtsSourceStore.instance.active;
+    _netSource = (active != null && active.type == 'easyvoice') ? active : null;
     final segs = splitSegments(text);
     if (segs.isEmpty) {
       lastError.value = '没有可朗读的内容';
@@ -88,11 +132,23 @@ class TtsService extends GetxService {
     _stopRequested = false;
     isSpeaking.value = true;
     isPaused.value = false;
-    await _speakCurrent();
+    if (_netSource != null) {
+      await _speakNetworkCurrent();
+    } else {
+      await _speakCurrent();
+    }
   }
 
   Future<void> pause() async {
     if (!isSpeaking.value) return;
+    if (_netSource != null && !_netSynthesizing) {
+      try {
+        await _netPlayer?.pause();
+      } catch (_) {}
+      isPaused.value = true;
+      isSpeaking.value = false;
+      return;
+    }
     try {
       await _ch.invokeMethod<bool>('pause');
     } catch (_) {}
@@ -104,6 +160,15 @@ class TtsService extends GetxService {
     if (!isPaused.value) return;
     isSpeaking.value = true;
     isPaused.value = false;
+    if (_netSource != null) {
+      // 合成中暂停的：直接等当前段合成完开播即可
+      if (!_netSynthesizing) {
+        try {
+          await _netPlayer?.play();
+        } catch (_) {}
+      }
+      return;
+    }
     try {
       final ok = await _ch.invokeMethod<bool>('resume') ?? false;
       // continueSpeaking 被系统回收时会返回 false：这时从当前段重念，
@@ -116,6 +181,13 @@ class TtsService extends GetxService {
 
   Future<void> stop() async {
     _stopRequested = true;
+    if (_netSource != null) {
+      _netSynthesizing = false;
+      try {
+        await _netPlayer?.stop();
+      } catch (_) {}
+      _clearNetTmp();
+    }
     try {
       await _ch.invokeMethod('stop');
     } catch (_) {}
@@ -130,17 +202,37 @@ class TtsService extends GetxService {
     _stopRequested = false;
     isSpeaking.value = true;
     isPaused.value = false;
-    await _speakCurrent();
+    if (_netSource != null) {
+      _netSynthesizing = false;
+      try {
+        await _netPlayer?.stop();
+      } catch (_) {}
+      _clearNetTmp();
+      await _speakNetworkCurrent();
+    } else {
+      await _speakCurrent();
+    }
   }
 
   Future<void> setRate(double v) async {
     rate.value = v.clamp(0.1, 1.0);
+    if (_netSource != null) {
+      // 正在播的段用播放器实时变速（已合成段的请求参数不再回传）
+      if (isSpeaking.value && !_netSynthesizing) {
+        try {
+          await _netPlayer?.setRate(_netPlaybackRate());
+        } catch (_) {}
+      }
+      return;
+    }
     // 语速变更后从当前段重念，让效果立刻可感知
     if (isSpeaking.value) await _speakCurrent();
   }
 
   Future<void> setPitch(double v) async {
     pitch.value = v.clamp(0.5, 2.0);
+    // 网络源：音调只影响之后新合成的段；正在播的段不重念
+    if (_netSource != null) return;
     if (isSpeaking.value) await _speakCurrent();
   }
 
@@ -172,6 +264,123 @@ class TtsService extends GetxService {
       lastError.value = '朗读失败：$e';
       isSpeaking.value = false;
     }
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // 网络朗读源（EasyVoice）—— HTTP 合成 + media_kit 播放
+  // ══════════════════════════════════════════════════════════════
+  // 不新增任何原生插件：dio 发请求、media_kit 播 mp3，两者都已在
+  // 项目依赖里（main.dart 已 MediaKit.ensureInitialized()）。
+
+  /// 网络分支：合成当前段并播放
+  Future<void> _speakNetworkCurrent() async {
+    if (_stopRequested) return;
+    final i = currentIndex.value;
+    if (i < 0 || i >= _segments.length) return;
+    final seg = _segments[i];
+    if (seg.trim().isEmpty) {
+      _onSegmentDone();
+      return;
+    }
+    final src = _netSource;
+    if (src == null) {
+      await _speakCurrent();
+      return;
+    }
+    _netSynthesizing = true;
+    try {
+      final bytes = await _synthesizeEasyVoice(src, seg);
+      _netSynthesizing = false;
+      if (_stopRequested) return;
+      if (bytes == null || bytes.isEmpty) throw '服务返回空音频';
+      if (!isSpeaking.value) return; // 合成期间被暂停/停止
+      await _playNetBytes(bytes);
+    } catch (e) {
+      _netSynthesizing = false;
+      if (_stopRequested) return;
+      if (src.fallbackToSystem) {
+        // 合成失败 → 按源开关切回系统朗读继续读，提示一次
+        lastError.value = 'EasyVoice 合成失败，已切回系统朗读：$e';
+        isSpeaking.value = true;
+        isPaused.value = false;
+        await _speakCurrent();
+      } else {
+        lastError.value = '合成失败：$e';
+        isSpeaking.value = false;
+      }
+    }
+  }
+
+  /// EasyVoice 合成：POST /api/v1/tts/generateJson → mp3 字节
+  Future<List<int>?> _synthesizeEasyVoice(TtsSource src, String text) async {
+    final base = src.endpoint.trim().replaceAll(RegExp(r'/+$'), '');
+    if (base.isEmpty) throw '接口地址为空';
+    final ratePct = '${(((rate.value - 0.5) / 0.5) * 100).round()}%';
+    final pitchHz = '${((pitch.value - 1.0) * 10).round()}Hz';
+    final voice = src.voice.trim().isEmpty
+        ? 'zh-CN-XiaoxiaoNeural'
+        : src.voice.trim();
+    final r = await _dio.post<List<int>>(
+      '$base/api/v1/tts/generateJson',
+      data: {
+        'data': [
+          {
+            'desc': '旁白',
+            'text': text,
+            'voice': voice,
+            'rate': ratePct,
+            'pitch': pitchHz,
+            'volume': '0%',
+          },
+        ],
+      },
+      options: Options(
+        responseType: ResponseType.bytes,
+        headers: {'Content-Type': 'application/json'},
+        sendTimeout: Duration(seconds: src.timeoutSec),
+        receiveTimeout: Duration(seconds: src.timeoutSec + 10),
+      ),
+    );
+    return r.data;
+  }
+
+  /// 把合成好的 mp3 写临时文件交给 media_kit 播放
+  Future<void> _playNetBytes(List<int> bytes) async {
+    final p = _ensureNetPlayer();
+    final f = File(
+        '${Directory.systemTemp.path}/tts_${DateTime.now().millisecondsSinceEpoch}.mp3');
+    await f.writeAsBytes(bytes, flush: true);
+    _clearNetTmp();
+    _netTmpFile = f;
+    await p.open(Media(f.uri.toString()), play: true);
+    await p.setRate(_netPlaybackRate());
+  }
+
+  /// 懒建网络播放器；播放完成回调推进到下一段
+  Player _ensureNetPlayer() {
+    if (_netPlayer != null) return _netPlayer!;
+    final p = Player();
+    _netCompleteSub = p.stream.completed.listen((done) {
+      if (done) _onSegmentDone();
+    });
+    _netPlayer = p;
+    return p;
+  }
+
+  void _clearNetTmp() {
+    final f = _netTmpFile;
+    _netTmpFile = null;
+    if (f != null && f.existsSync()) {
+      try {
+        f.deleteSync();
+      } catch (_) {}
+    }
+  }
+
+  /// 朗读面板语速 0.1~1.0（0.5=正常）→ 播放器倍速（1.0=正常）
+  double _netPlaybackRate() {
+    final r = rate.value.clamp(0.1, 1.0) / 0.5;
+    return r.clamp(0.2, 2.0);
   }
 
   // ══════════════════════════════════════════════════════════════

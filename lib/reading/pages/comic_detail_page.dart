@@ -456,16 +456,24 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     );
   }
 
-  /// 胶囊按钮（左图标 + 右文字）
+  /// 胶囊按钮（左图标 + 右文字）。
+  /// 不传 [color] 时用"三深灰按钮"样式（参考图 IMG_8471）；传强调色时文字白。
   Widget _buildCapsuleButton({
     required IconData icon,
     required String label,
     required VoidCallback onTap,
     Color? color,
   }) {
-    color ??= JellyTheme.primary;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = color ??
+        (isDark
+            ? Colors.white.withValues(alpha: 0.14)
+            : Colors.black.withValues(alpha: 0.10));
+    final fg = color != null
+        ? Colors.white
+        : (isDark ? Colors.white70 : JellyTheme.textPrimaryLight);
     return Material(
-      color: color,
+      color: bg,
       borderRadius: BorderRadius.circular(20),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -475,13 +483,13 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 15, color: Colors.white),
+              Icon(icon, size: 15, color: fg),
               const SizedBox(width: 4),
               Text(
                 label,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: AppTheme.fontFootnote,
-                  color: Colors.white,
+                  color: fg,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -497,6 +505,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     return _buildCapsuleButton(
       icon: Icons.play_arrow_rounded,
       label: '续读',
+      color: JellyTheme.primary,
       onTap: () {
         final rp = ReadingProgressService().getProgress(_comic.pathWord);
         final chapter = _continueChapter;
@@ -631,19 +640,20 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
   }
 
   Widget _buildTagChip(String tag, bool isDark) {
+    // 题材灰胶囊（参考图 IMG_8471）
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: isDark
-            ? Colors.white.withValues(alpha: 0.08)
-            : JellyTheme.primary.withValues(alpha: 0.08),
+            ? Colors.white.withValues(alpha: 0.10)
+            : Colors.black.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Text(
         tag,
         style: TextStyle(
           fontSize: AppTheme.fontCaption,
-          color: isDark ? Colors.white70 : JellyTheme.primary,
+          color: isDark ? Colors.white70 : JellyTheme.textSecondary,
         ),
       ),
     );
@@ -848,9 +858,9 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
       SliverPadding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
         sliver: SliverGrid(
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 100,
-            childAspectRatio: 2.5,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 4, // 4 列网格（参考图 IMG_8471）
+            childAspectRatio: 2.6,
             crossAxisSpacing: 8,
             mainAxisSpacing: 8,
           ),

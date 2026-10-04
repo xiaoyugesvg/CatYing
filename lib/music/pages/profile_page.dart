@@ -1,15 +1,18 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
 import '../models/third_party_source.dart';
 import '../services/settings_store.dart';
 import '../theme/music_theme.dart';
+import '../widgets/floating_play_button.dart';
 import 'source_manager_page.dart';
 import '../../common/module_theme_store.dart';
 import '../../common/module_theme_sync.dart';
 import '../../common/theme_mode_store.dart';
 import '../../reading/theme/jelly_palette.dart';
 import '../../common/theme.dart';
+import '../../widgets/app_toast.dart';
 
 /// 「我的」页 —— 移植自 Beans 的 `ProfileView.swift`（3350 行，取其主干）。
 ///
@@ -51,6 +54,7 @@ class ProfilePage extends StatelessWidget {
           _AccentPicker(),
           _coverStyleTile(),
           _dustTile(),
+          _floatingBallTile(),
           ]),
 
           // ── 播放 ────────────────────────────────────────────
@@ -94,6 +98,76 @@ class ProfilePage extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// 悬浮球样式：默认图标 / **自定义图片或 GIF**（用户要求能在设置里换）
+  Widget _floatingBallTile() => ValueListenableBuilder<String>(
+        valueListenable: MusicFloatingBallStyle.instance.imagePath,
+        builder: (context, path, _) => ListTile(
+          leading: _iconBox(Icons.bubble_chart_rounded),
+          title: Text('悬浮球样式',
+              style: TextStyle(
+                  color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
+          subtitle: Text(path.isEmpty ? '默认图标' : '自定义图片 / GIF',
+              style: TextStyle(
+                  color: MusicTheme.secondary,
+                  fontSize: AppTheme.fontFootnote)),
+          trailing: Icon(Icons.chevron_right,
+              size: 18, color: MusicTheme.secondary),
+          onTap: () => _pickFloatingBallStyle(context),
+        ),
+      );
+
+  Future<void> _pickFloatingBallStyle(BuildContext context) async {
+    final style = MusicFloatingBallStyle.instance;
+    final act = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: MusicTheme.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.image_rounded, color: MusicTheme.tint),
+              title: Text('选择图片 / GIF',
+                  style: TextStyle(color: MusicTheme.label)),
+              onTap: () => Navigator.pop(ctx, 'pick'),
+            ),
+            ListTile(
+              leading:
+                  Icon(Icons.restart_alt_rounded, color: MusicTheme.tint),
+              title: Text('恢复默认图标',
+                  style: TextStyle(color: MusicTheme.label)),
+              onTap: () => Navigator.pop(ctx, 'reset'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (act == 'reset') {
+      await style.clear();
+      AppToast.show('已恢复默认悬浮球', '');
+      return;
+    }
+    if (act != 'pick') return;
+    try {
+      // ⚠️ file_picker **13.x** 的 API（项目里早有记录，见
+      // `book_source_repo_page.dart:1576`）：
+      //   · `FilePicker.pickFiles(...)` 是**静态方法**（旧版是 `.platform.pickFiles`）
+      //   · 返回 **`List<PlatformFile>`**（旧版返回 `FilePickerResult?`）
+      final files = await FilePicker.pickFiles(type: FileType.image);
+      final p = files.isEmpty ? null : files.first.path;
+      if (p == null || p.isEmpty) return;
+      await style.setImage(p);
+      AppToast.show('悬浮球样式已更新', '');
+    } catch (e) {
+      AppToast.show('选择图片失败', '$e');
+    }
   }
 
   /// 把一组行包成 Beans 式的**分组圆角卡片**（对齐截图④：每组一张卡）。

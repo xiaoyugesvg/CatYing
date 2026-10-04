@@ -17,6 +17,7 @@ import 'package:html/parser.dart';
 
 import 'book_site_config.dart';
 import 'webview_image_fetcher.dart';
+import 'global_proxy.dart';
 
 /// config 源不支持搜索时抛出（UI 提示用 URL 兜底入口）。
 class BookUnsupportedSearchError implements Exception {
@@ -96,20 +97,10 @@ class ConfigBookSource {
     );
     final p = proxy.trim();
     if (p.isNotEmpty) {
-      final parts = p.split(':');
-      if (parts.length == 2) {
-        final host = parts[0].trim();
-        final port = int.tryParse(parts[1].trim()) ?? 0;
-        if (host.isNotEmpty && port > 0) {
-          dio.httpClientAdapter = IOHttpClientAdapter(
-            createHttpClient: () {
-              final client = HttpClient()
-                ..findProxy = (uri) => 'PROXY $host:$port';
-              return client;
-            },
-          );
-        }
-      }
+      applyProxy(dio, p);
+    } else {
+      // 单源未配代理 → 回退全局代理（通用设置 → 网络代理）
+      applyGlobalProxy(dio);
     }
     return dio;
   }

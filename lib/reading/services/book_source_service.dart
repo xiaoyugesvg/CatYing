@@ -209,7 +209,7 @@ class BookSourceService {
   ///
   /// 8 是个折中：足够快（40 个源 ≈ 5 批），又不会把 Node 的事件循环
   /// 和内存压垮（每个源要持有整页 HTML 做 DOM 解析）。
-  static const int maxConcurrent = 8;
+  static const int maxConcurrent = 10;
 
   Future<dynamic> _call(Map<String, dynamic> body) async {
     final port = NodeJSManager.instance.managementPort;

@@ -27,14 +27,27 @@ class TtsSourceStore extends ChangeNotifier {
   static final TtsSourceStore instance = TtsSourceStore._();
 
   static const _kListKey = 'tts_sources_v1';
+  /// 当前正在使用的朗读源 id（空 = 用系统朗读）
+  static const _kActiveKey = 'tts_active_source_v1';
   /// API Key 单独存，前缀 + 源 id
   static const _kKeyPrefix = 'tts_api_key_';
 
   final List<TtsSource> _items = [];
   bool _loaded = false;
+  String _activeId = '';
 
   List<TtsSource> get all => List.unmodifiable(_items);
   bool get isEmpty => _items.isEmpty;
+
+  /// 当前使用中的朗读源（空 = 系统朗读兜底）
+  String get activeId => _activeId;
+  TtsSource? get active {
+    if (_activeId.isEmpty) return null;
+    for (final s in _items) {
+      if (s.id == _activeId) return s;
+    }
+    return null;
+  }
 
   Future<void> init() async {
     if (_loaded) return;
@@ -51,7 +64,20 @@ class TtsSourceStore extends ChangeNotifier {
         // 配置损坏时不要崩 —— 当作没有源，用户重新加
       }
     }
+    _activeId = sp.getString(_kActiveKey) ?? '';
     _loaded = true;
+    notifyListeners();
+  }
+
+  /// 把某个朗读源设为「当前使用」（空字符串 = 回到系统朗读）
+  Future<void> setActive(String id) async {
+    _activeId = id;
+    final sp = await SharedPreferences.getInstance();
+    if (id.isEmpty) {
+      await sp.remove(_kActiveKey);
+    } else {
+      await sp.setString(_kActiveKey, id);
+    }
     notifyListeners();
   }
 
@@ -78,9 +104,11 @@ class TtsSourceStore extends ChangeNotifier {
 
   Future<void> remove(String id) async {
     _items.removeWhere((e) => e.id == id);
+    if (_activeId == id) _activeId = '';
     await _persist();
     final sp = await SharedPreferences.getInstance();
     await sp.remove('$_kKeyPrefix$id');
+    if (_activeId.isEmpty) await sp.remove(_kActiveKey);
   }
 
   /// 读 API Key（不在源配置里 —— 见类文档）

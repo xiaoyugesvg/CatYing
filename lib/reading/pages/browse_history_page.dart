@@ -5,6 +5,7 @@ import '../models/book.dart';
 import '../models/comic.dart';
 import '../services/browse_history_service.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 import '../utils/list_pagination.dart';
 import '../widgets/jelly_book_card.dart';
 import '../widgets/jelly_comic_list_tile.dart';
@@ -104,14 +105,17 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage>
                 Expanded(
                   child: TabBarView(
                     controller: _tabController,
-                    children: const [_ComicHistoryTab(), _BookHistoryTab()],
+                    children: [
+                      _ComicHistoryTab(footprintMode: true),
+                      const _BookHistoryTab(),
+                    ],
                   ),
                 ),
               ],
             )
           : widget.bookOnly
               ? const _BookHistoryTab()
-              : const _ComicHistoryTab(),
+              : const _ComicHistoryTab(footprintMode: true),
     );
   }
 
@@ -204,8 +208,13 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage>
 }
 
 /// 漫画浏览记录列表（懒加载分页，默认 20 条，滑到底加载更多）
+///
+/// [footprintMode]：足迹版（完整条目：简介/章节 + 源角标，参考 IMG_8463）；
+/// 浏览记录版（精简条目：仅标题/作者/别名/热度/收藏，参考 IMG_8462）。
 class _ComicHistoryTab extends StatefulWidget {
-  const _ComicHistoryTab();
+  const _ComicHistoryTab({this.footprintMode = false});
+
+  final bool footprintMode;
 
   @override
   State<_ComicHistoryTab> createState() => _ComicHistoryTabState();
@@ -215,6 +224,8 @@ class _ComicHistoryTabState extends State<_ComicHistoryTab> {
   static const _pageSize = 20;
 
   final ScrollController _scrollController = ScrollController();
+  final TextEditingController _searchController = TextEditingController();
+  String _keyword = '';
   int _displayCount = _pageSize;
 
   @override
@@ -227,16 +238,30 @@ class _ComicHistoryTabState extends State<_ComicHistoryTab> {
   void dispose() {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    final total = BrowseHistoryService().comics.length;
+    final total = _filtered().length;
     if (ListPagination.shouldLoadMore(_scrollController) &&
         _displayCount < total) {
       setState(() => _displayCount += _pageSize);
     }
+  }
+
+  /// 足迹版支持按名称/作者/别名过滤
+  List<Comic> _filtered() {
+    final comics = BrowseHistoryService().comics;
+    if (_keyword.trim().isEmpty) return comics;
+    final kw = _keyword.trim().toLowerCase();
+    return comics
+        .where((c) =>
+            (c.title ?? '').toLowerCase().contains(kw) ||
+            (c.author ?? '').toLowerCase().contains(kw) ||
+            (c.alias ?? '').toLowerCase().contains(kw))
+        .toList();
   }
 
   void _openDetail(Comic comic) {
@@ -256,10 +281,22 @@ class _ComicHistoryTabState extends State<_ComicHistoryTab> {
     return ListenableBuilder(
       listenable: BrowseHistoryService(),
       builder: (context, _) {
-        final comics = BrowseHistoryService().comics;
-        if (comics.isEmpty) return _buildEmpty();
+        final comics = _filtered();
+        if (comics.isEmpty) {
+          return Column(
+            children: [
+              if (widget.footprintMode) _buildSearchBar(context),
+              Expanded(
+                child: _keyword.trim().isEmpty
+                    ? _buildEmpty()
+                    : _buildEmpty(text: '没有找到相关记录'),
+              ),
+            ],
+          );
+        }
         return Column(
           children: [
+            if (widget.footprintMode) _buildSearchBar(context),
             ListPaginationCountBar(total: comics.length, unit: '条'),
             Expanded(
               child: ListView.builder(
@@ -273,7 +310,12 @@ class _ComicHistoryTabState extends State<_ComicHistoryTab> {
                     child: JellyComicListTile(
                       comic: comic,
                       heroTag: comicCoverHeroTag('history', comic),
-                      showSourceBadge: true,
+                      // 右侧列布局：热度+收藏移到卡片最右（参考图）
+                      trailingColumn: true,
+                      // 足迹版显示简介/章节；浏览记录版精简（仅标题/作者/别名）
+                      showDescription: widget.footprintMode,
+                      showMeta: widget.footprintMode,
+                      showSourceBadge: widget.footprintMode,
                       onTap: () => _openDetail(comic),
                     ),
                   );
@@ -283,6 +325,71 @@ class _ComicHistoryTabState extends State<_ComicHistoryTab> {
           ],
         );
       },
+    );
+  }
+
+  /// 足迹版顶部搜索栏（与阅读既有页面内筛选框一致：40 胶囊、图标在左）
+  Widget _buildSearchBar(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+      child: Container(
+        height: 40,
+        decoration: BoxDecoration(
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: TextField(
+          controller: _searchController,
+          onChanged: (v) {
+            setState(() {
+              _keyword = v;
+              _displayCount = _pageSize;
+              if (_scrollController.hasClients) {
+                _scrollController.jumpTo(0);
+              }
+            });
+          },
+          style: TextStyle(
+            fontSize: AppTheme.fontBody,
+            color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+          ),
+          decoration: InputDecoration(
+            isDense: true,
+            filled: false,
+            hintText: '搜索足迹记录',
+            hintStyle: TextStyle(
+              fontSize: AppTheme.fontBody,
+              color: JellyTheme.textSecondary,
+            ),
+            prefixIcon: Icon(
+              Icons.search_rounded,
+              size: 19,
+              color: JellyTheme.textSecondary,
+            ),
+            prefixIconConstraints:
+                const BoxConstraints(minWidth: 38, minHeight: 38),
+            suffixIcon: _keyword.isEmpty
+                ? null
+                : IconButton(
+                    icon: Icon(
+                      Icons.clear_rounded,
+                      size: 17,
+                      color: JellyTheme.textSecondary,
+                    ),
+                    onPressed: () {
+                      _searchController.clear();
+                      setState(() {
+                        _keyword = '';
+                        _displayCount = _pageSize;
+                      });
+                    },
+                  ),
+            border: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(vertical: 10),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -371,7 +478,7 @@ class _BookHistoryTabState extends State<_BookHistoryTab> {
   }
 }
 
-Widget _buildEmpty() {
+Widget _buildEmpty({String text = '暂无浏览记录'}) {
   return Center(
     child: Column(
       mainAxisSize: MainAxisSize.min,
@@ -379,7 +486,7 @@ Widget _buildEmpty() {
         Icon(Icons.history_rounded, size: 56, color: JellyTheme.textSecondary),
         const SizedBox(height: 12),
         Text(
-          '暂无浏览记录',
+          text,
           style: TextStyle(color: JellyTheme.textSecondary),
         ),
       ],

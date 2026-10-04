@@ -21,6 +21,17 @@ class JellyComicListTile extends StatefulWidget {
   /// 是否显示漫画源角标（收藏页 true，搜索页默认 false）
   final bool showSourceBadge;
 
+  /// 右侧固定列布局（参考图 IMG_8462/8463 浏览记录/足迹样式）：
+  /// 热度 + 收藏按钮移到卡片最右侧竖排（热度在上、爱心在下），
+  /// 信息区只留 标题/作者/简介别名/章节，视觉更接近 cmbok 原版。
+  final bool trailingColumn;
+
+  /// 是否显示简介区（浏览记录版隐藏简介、只留别名；足迹版显示简介）
+  final bool showDescription;
+
+  /// 是否显示底部 meta 行（章节数/更新时间；浏览记录版隐藏）
+  final bool showMeta;
+
   const JellyComicListTile({
     super.key,
     required this.comic,
@@ -28,6 +39,9 @@ class JellyComicListTile extends StatefulWidget {
     this.onLongPress,
     this.heroTag,
     this.showSourceBadge = false,
+    this.trailingColumn = false,
+    this.showDescription = true,
+    this.showMeta = true,
   });
 
   @override
@@ -210,7 +224,8 @@ class _JellyComicListTileState extends State<JellyComicListTile>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // 标题 + 热度（同一行）
+                      // 标题（+ 热度：默认布局热度在标题行右侧；
+                      // trailingColumn 时热度移到最右列，标题独占一行）
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -228,14 +243,16 @@ class _JellyComicListTileState extends State<JellyComicListTile>
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          if (comicHasScore(comic)) ...[
+                          if (!widget.trailingColumn &&
+                              comicHasScore(comic)) ...[
                             const SizedBox(width: 8),
                             JellyScoreBadge(comic: comic, isDark: isDark),
                           ],
                         ],
                       ),
                       const SizedBox(height: 6),
-                      // 作者 + 收藏（同一行，收藏靠右，与表格视图一致）
+                      // 作者 + 收藏（同一行，收藏靠右，与表格视图一致；
+                      // trailingColumn 时收藏移到最右列）
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -266,33 +283,39 @@ class _JellyComicListTileState extends State<JellyComicListTile>
                             )
                           else
                             const SizedBox.shrink(),
-                          JellyFavoriteButton(comic: comic, size: 20),
+                          if (!widget.trailingColumn)
+                            JellyFavoriteButton(comic: comic, size: 20),
                         ],
                       ),
-                      const SizedBox(height: 6),
                       // 描述区：固定 2 行高度，优先显示简介，无简介时显示别名
-                      SizedBox(
-                        height: 11 * 1.4 * 2, // fontSize: AppTheme.fontCaption, height:1.4, 2行
-                        child: Text(
-                          (comic.description != null &&
-                                  comic.description!.trim().isNotEmpty)
-                              ? comic.description!.trim()
-                              : (comic.alias != null && comic.alias!.isNotEmpty)
-                              ? '别名：${comic.alias}'
-                              : '',
-                          style: TextStyle(
-                            fontSize: AppTheme.fontCaption,
-                            height: 1.4,
-                            color: isDark
-                                ? Colors.white54
-                                : JellyTheme.textSecondary,
+                      // （浏览记录版 showDescription=false：只显示别名一行）
+                      if (widget.showDescription ||
+                          (comic.alias != null && comic.alias!.isNotEmpty))
+                        SizedBox(
+                          height: (widget.showDescription ? 2 : 1) *
+                              11 *
+                              1.4, // fontSize: fontCaption, height:1.4
+                          child: Text(
+                            (widget.showDescription &&
+                                    comic.description != null &&
+                                    comic.description!.trim().isNotEmpty)
+                                ? comic.description!.trim()
+                                : (comic.alias != null && comic.alias!.isNotEmpty)
+                                ? '别名：${comic.alias}'
+                                : '',
+                            style: TextStyle(
+                              fontSize: AppTheme.fontCaption,
+                              height: 1.4,
+                              color: isDark
+                                  ? Colors.white54
+                                  : JellyTheme.textSecondary,
+                            ),
+                            maxLines: widget.showDescription ? 2 : 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
                       // 底部信息行：章节数 / 更新时间
-                      if (_hasMeta(comic))
+                      if (widget.showMeta && _hasMeta(comic))
                         Wrap(
                           spacing: 10,
                           runSpacing: 4,
@@ -317,6 +340,22 @@ class _JellyComicListTileState extends State<JellyComicListTile>
                   ),
                 ),
               ),
+              // 右侧固定列：热度（上）+ 收藏（下），参考图浏览记录/足迹样式
+              if (widget.trailingColumn) ...[
+                Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      if (comicHasScore(comic))
+                        JellyScoreBadge(comic: comic, isDark: isDark),
+                      const SizedBox(height: 10),
+                      JellyFavoriteButton(comic: comic, size: 20),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),

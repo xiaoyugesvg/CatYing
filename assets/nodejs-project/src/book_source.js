@@ -106,6 +106,41 @@ function absolute(url, base) {
   }
 }
 
+/**
+ * 规范化 Legado 源 header：可能是 JSON 字符串 / @js: 脚本字符串 / 对象。
+ *
+ * ⚠️ 之前直接用 Object.assign({}, source.header || {}) 合并——header 是字符串时
+ * 会被展开成 {"0":"{","1":"\"",...} 这类畸形请求头，源站直接回 HTTP 500。
+ * 这里统一解析成对象再合并。
+ */
+function normalizeHeaders(h) {
+  if (!h) return {};
+  if (typeof h === 'string') {
+    let s = h.trim();
+    if (!s) return {};
+    if (s.startsWith('@js:')) {
+      try {
+        const v = evalRule({
+          rule: s,
+          input: makeInput(''),
+          vars: buildVars({}),
+          ctx: { baseUrl: '' },
+        });
+        s = str(v);
+      } catch (_) {
+        return {};
+      }
+    }
+    try {
+      const obj = JSON.parse(s);
+      return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {};
+    } catch (_) {
+      return {};
+    }
+  }
+  return h;
+}
+
 /** 单源代理：source.proxy = "host:port"，空则直连。 */
 let CURRENT_PROXY = null;
 function setProxy(p) {
@@ -265,13 +300,19 @@ async function search({ source, keyword, page = 1 }) {
   }
 
   const url = absolute(opt.url, base);
-  const headers = Object.assign({}, source.header || {}, opt.headers || {});
+  const headers = Object.assign({}, normalizeHeaders(source.header), opt.headers || {});
 
   let resp;
   try {
     resp = await httpGet(url, headers, opt.method || 'GET', opt.body);
   } catch (e) {
     return { ok: false, error: '搜索请求失败：' + (e.message || e) };
+  }
+  if (resp.status >= 400) {
+    return {
+      ok: false,
+      error: '搜索请求失败：源站返回 HTTP ' + resp.status,
+    };
   }
 
   const rule = source.ruleSearch || {};
@@ -341,7 +382,7 @@ async function bookInfo({ source, bookUrl }) {
   let input;
   let finalUrl = bookUrl;
   try {
-    const resp = await httpGet(bookUrl, source.header || {});
+    const resp = await httpGet(bookUrl, normalizeHeaders(source.header));
     input = makeInputSafe(resp.text);
   } catch (e) {
     // 详情页拿不到也不算致命：目录可能仍能取
@@ -398,7 +439,7 @@ async function toc({ source, tocUrl }) {
   const url = absolute(opt.url, base);
   let text = '';
   try {
-    const resp = await httpGet(url, Object.assign({}, source.header || {}, opt.headers || {}));
+    const resp = await httpGet(url, Object.assign({}, normalizeHeaders(source.header), opt.headers || {}));
     text = resp.text;
   } catch (e) {
     // 有些详情的 tocUrl 是 ajax 接口，失败时退回用 URL 本身当单章
@@ -454,7 +495,7 @@ async function content({ source, chapterUrl }) {
 
   let text = '';
   try {
-    const resp = await httpGet(url, Object.assign({}, source.header || {}, opt.headers || {}));
+    const resp = await httpGet(url, Object.assign({}, normalizeHeaders(source.header), opt.headers || {}));
     text = resp.text;
   } catch (e) {
     return { ok: false, error: '正文请求失败：' + (e.message || e) };
@@ -644,22 +685,38 @@ async function explore({ source, categoryUrl }) {
   }
 
   // 分类 URL 可能带 {{page}} / {{key}} 变量（与 searchUrl 同规则）
-  let rawUrl = applyLegadoVars(categoryUrl, state)
-    .replace(/\{\{\s*page\s*\}\}/g, String(state.page || 1))
-    .replace(/\{page\}/g, String(state.page || 1));
+  let rawUrl;
+  try {
+    rawUrl = applyLegadoVars(categoryUrl, state)
+      .replace(/\{\{\s*page\s*\}\}/g, String(state.page || 1))
+      .replace(/\{page\}/g, String(state.page || 1))
+      // 未识别变量（cookie.getKey / java 等）会留下畸形花括号 → 源站 500，直接清理
+      .replace(/\{\{[^}]*\}\}/g, '');
+  } catch (e) {
+    return { ok: false, error: '分类 URL 处理失败：' + (e.message || e) };
+  }
   const opt = splitUrlOptions(rawUrl);
   const url = absolute(opt.url, base);
+  if (!url) return { ok: false, error: '分类地址为空' };
   let text = '';
+  let status = 0;
   try {
     const resp = await httpGet(
       url,
-      Object.assign({}, source.header || {}, opt.headers || {}),
+      Object.assign({}, normalizeHeaders(source.header), opt.headers || {}),
       opt.method || 'GET',
       opt.body,
     );
+    status = resp.status;
     text = resp.text;
   } catch (e) {
     return { ok: false, error: '分类请求失败：' + (e.message || e) };
+  }
+  if (status >= 400) {
+    return {
+      ok: false,
+      error: '分类请求失败：源站返回 HTTP ' + status,
+    };
   }
 
   const input = makeInputSafe(text);

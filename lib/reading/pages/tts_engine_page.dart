@@ -70,7 +70,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                     ],
                   ),
                 ),
-                for (final t in ['network', 'azure', 'mimo', 'openai'])
+                for (final t in ['network', 'azure', 'mimo', 'openai', 'easyvoice'])
                   ListTile(
                     title: Text(
                       TtsSource.blank(t).typeLabel,
@@ -171,19 +171,29 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                             style: TextStyle(fontSize: AppTheme.fontBody, color: label)),
                         const Spacer(),
                         TextButton(
-                          onPressed: () => ScaffoldMessenger.of(context)
-                              .showSnackBar(const SnackBar(
-                            content: Text('当前还没接入系统 TTS 插件，'
-                                '无法枚举已安装引擎'),
-                            duration: Duration(seconds: 2),
-                          )),
+                          onPressed: () async {
+                            await TtsSourceStore.instance.setActive('');
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context)
+                                .showSnackBar(const SnackBar(
+                              content: Text('已切回系统朗读'),
+                              duration: Duration(seconds: 2),
+                            ));
+                          },
                           child: const Text('切换'),
                         ),
                       ],
                     ),
-                    Text('未取到',
-                        style: TextStyle(
-                            fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
+                    Text(
+                      TtsSourceStore.instance.activeId.isEmpty
+                          ? '系统朗读（使用中）'
+                          : '未使用',
+                      style: TextStyle(
+                          fontSize: AppTheme.fontSubhead,
+                          color: TtsSourceStore.instance.activeId.isEmpty
+                              ? label
+                              : JellyTheme.textSecondary),
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       '未检测到已安装的朗读引擎。若系统设置·文字转语音里能试听，'
@@ -213,7 +223,8 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                   ),
                   child: Text(
                     '还没有添加朗读源。朗读源用来接入系统之外的语音合成服务，'
-                    '音色通常比系统引擎好得多，但需要你自己的 API Key。',
+                    '音色通常比系统引擎好得多（EasyVoice 免费无需 API Key，'
+                    '其余需要你自己的 Key）。',
                     style: TextStyle(
                         fontSize: AppTheme.fontSubhead,
                         height: 1.7,
@@ -231,17 +242,67 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: ListTile(
-                      title: Text(s.name,
-                          style: TextStyle(fontSize: AppTheme.fontHeadline, color: label)),
+                      title: Row(
+                        children: [
+                          Flexible(
+                            child: Text(s.name,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: AppTheme.fontHeadline,
+                                    color: label)),
+                          ),
+                          if (s.id == TtsSourceStore.instance.activeId) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.12)
+                                    : JellyTheme.primary
+                                        .withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text('使用中',
+                                  style: TextStyle(
+                                      fontSize: AppTheme.fontFootnote,
+                                      color: isDark
+                                          ? Colors.white
+                                          : JellyTheme.primary)),
+                            ),
+                          ],
+                        ],
+                      ),
                       subtitle: Text(s.typeLabel,
                           style: TextStyle(
                               fontSize: AppTheme.fontFootnote,
                               color: JellyTheme.textSecondary)),
-                      trailing: IconButton(
-                        icon: Icon(Icons.delete_outline,
-                            size: 20, color: JellyTheme.textSecondary),
-                        onPressed: () =>
-                            TtsSourceStore.instance.remove(s.id),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: Icon(
+                              s.id == TtsSourceStore.instance.activeId
+                                  ? Icons.check_circle_rounded
+                                  : Icons.radio_button_unchecked,
+                              size: 22,
+                              color: s.id == TtsSourceStore.instance.activeId
+                                  ? JellyTheme.primary
+                                  : JellyTheme.textSecondary,
+                            ),
+                            tooltip: s.id == TtsSourceStore.instance.activeId
+                                ? '当前使用中'
+                                : '设为当前使用',
+                            onPressed: () =>
+                                TtsSourceStore.instance.setActive(s.id),
+                          ),
+                          IconButton(
+                            icon: Icon(Icons.delete_outline,
+                                size: 20, color: JellyTheme.textSecondary),
+                            onPressed: () =>
+                                TtsSourceStore.instance.remove(s.id),
+                          ),
+                        ],
                       ),
                       onTap: () async {
                         await Navigator.push(
@@ -277,7 +338,7 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                               fontWeight: FontWeight.w600,
                               color: label)),
                       const Spacer(),
-                      Text('网络导入 / Azure / OpenAI 兼容',
+                      Text('网络导入 / Azure / OpenAI / EasyVoice',
                           style: TextStyle(
                               fontSize: AppTheme.fontFootnote,
                               color: JellyTheme.textSecondary)),

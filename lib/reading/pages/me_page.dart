@@ -5,6 +5,7 @@ import '../services/settings_service.dart';
 import '../services/theme_switch.dart';
 import '../services/zlibrary_service.dart';
 import '../theme/jelly_palette.dart';
+import 'general_settings_page.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/bookshelf_icon.dart';
 import '../widgets/jelly_nav_bar.dart';
@@ -412,6 +413,28 @@ class _MePageState extends State<MePage> {
                             context,
                             MaterialPageRoute(
                               builder: (_) => const BrowseHistoryPage(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // 通用设置：网络代理 / 软件日志 / 缓存清理 / 同步与备份
+                    // （对齐参考图 IMG_8465）
+                    StaggeredEntrance(
+                      key: ValueKey('${_session}_general_settings'),
+                      index: 9,
+                      child: SizedBox(
+                        width: itemWidth,
+                        child: _buildMenuItem(
+                          isDark,
+                          icon: Icons.settings_rounded,
+                          iconBg: JellyTheme.primary,
+                          title: '通用设置',
+                          subtitle: '网络代理 · 日志 · 缓存 · 同步',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const GeneralSettingsPage(),
                             ),
                           ),
                         ),
