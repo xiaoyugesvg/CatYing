@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 import 'music_api.dart';
 import 'settings_store.dart';
+import '../../services/app_log.dart';
 
 /// 下载状态
 enum MusicDownloadStatus { queued, downloading, done, failed }
@@ -86,12 +87,19 @@ class MusicDownloadService extends ChangeNotifier {
       .fold(0, (a, d) => a + d.bytes);
 
   SharedPreferences? _prefs;
-  bool _inited = false;
   bool _busy = false;
 
-  Future<void> init() async {
-    if (_inited) return;
-    _inited = true;
+  /// 正在进行的初始化。
+  ///
+  /// 🔴 用**缓存 Future** 而不是 `bool _inited` 闩锁：闩锁会"先置位再 await"，
+  /// 于是紧接着调用的 `init()` **立刻返回**，此刻 `_prefs` 仍是 `null` →
+  /// `_save()` 里 `if (p == null) return;` 会把**清单写入静默丢掉** ✗
+  /// 后果：下载完的记录重启就没了、已下载的歌被当成"没下载"。
+  Future<void>? _initFuture;
+
+  Future<void> init() => _initFuture ??= _doInit();
+
+  Future<void> _doInit() async {
     try {
       _prefs = await SharedPreferences.getInstance();
       final raw = _prefs!.getString(_kManifest);
@@ -194,7 +202,15 @@ class MusicDownloadService extends ChangeNotifier {
       }
       d.path = file.path;
 
-      await Dio().download(
+      // ⚠️ **必须带超时**：`Dio()` 默认没有 connect/receive 超时 →
+      // 遇到"只回 headers 不给 body"的源，这次 await **永不返回**，
+      // 而 `_pump()` 的串行循环就卡在这里 → **整个下载队列永久停摆** ✗
+      //（用户之后点多少首都不会开始下载，也没有取消入口）。
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 60), // 大文件给足
+      ));
+      await dio.download(
         info.url,
         file.path,
         options: Options(
@@ -220,6 +236,19 @@ class MusicDownloadService extends ChangeNotifier {
     } catch (e) {
       d.status = MusicDownloadStatus.failed;
       d.error = _short(e);
+      // ⚠️ 失败要**删掉半截文件**：否则它留在 `Documents/music/` 里，
+      // 而 `_save()` 只序列化 `done` 条目 → 重启后清单里没有它
+      // → **用户永远删不掉这个文件**（`remove/clearAll` 只能删清单里有的）✗
+      try {
+        if (d.path.isNotEmpty) {
+          final f = File(d.path);
+          if (f.existsSync()) f.deleteSync();
+        }
+      } catch (_) {}
+      d.path = '';
+      d.bytes = 0;
+      // 下载失败以前**既不写日志也不提示**（模块里唯一没有日志的失败分支）✗
+      AppLog.instance.log('[Music] 下载失败 ${d.song.name}: $e');
     }
     notifyListeners();
   }

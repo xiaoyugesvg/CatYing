@@ -6,6 +6,9 @@ import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
 import '../pages/player_page.dart';
+import '../pages/queue_page.dart';
+import '../widgets/quick_actions.dart';
+import '../../common/floating_nav_spec.dart';
 import '../../common/theme.dart';
 
 /// 迷你播放器的布局常量（#8）。
@@ -20,7 +23,11 @@ class MusicMiniPlayerLayout {
   static const double gapAboveNavBar = 6;
 
   /// 左右外边距（与导航栏的 sideMargin 视觉对齐）
-  static const double sideMargin = 10;
+  ///
+  /// 用 `FloatingNavSpec.sideMargin`（=12）而不是自己写 10 ——
+  /// 悬浮导航栏（JellyNavBar）左右边距就是 12，迷你播放器
+  /// 要与它**完全同宽**，边距必须取同一个值，否则两边对不齐。
+  static const double sideMargin = FloatingNavSpec.sideMargin;
 }
 
 /// 底部迷你播放器 —— 移植自 Beans 的 `MiniPlayerView.swift`（dock 形态）。
@@ -31,10 +38,46 @@ class MusicMiniPlayerLayout {
 ///   · 左侧封面 + 歌名/歌手（或当前歌词），右侧播放/暂停 + 下一首
 ///
 /// 点整条打开全屏播放器。没有正在播放的歌曲时**整条隐藏**（不占位）。
-class MiniPlayer extends StatelessWidget {
+class MiniPlayer extends StatefulWidget {
   const MiniPlayer({super.key, required this.onOpen});
 
   final VoidCallback onOpen;
+
+  @override
+  State<MiniPlayer> createState() => _MiniPlayerState();
+}
+
+class _MiniPlayerState extends State<MiniPlayer>
+    with SingleTickerProviderStateMixin {
+  /// 封面旋转动画（与播放器页同一周期，播放转 / 暂停停）
+  late final AnimationController _spin;
+
+  @override
+  void initState() {
+    super.initState();
+    _spin = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 24),
+    );
+    MusicPlayerManager.instance.isPlaying.addListener(_syncSpin);
+    _syncSpin();
+  }
+
+  void _syncSpin() {
+    final p = MusicPlayerManager.instance;
+    if (p.isPlaying.value) {
+      _spin.repeat();
+    } else {
+      _spin.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    MusicPlayerManager.instance.isPlaying.removeListener(_syncSpin);
+    _spin.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +107,7 @@ class MiniPlayer extends StatelessWidget {
           ),
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: onOpen,
+            onTap: widget.onOpen,
             child: Container(
               height: 56,
               padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -85,7 +128,7 @@ class MiniPlayer extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  // 封面 + 强调色光晕
+                  // 封面 + 强调色光晕（封面为圆形旋转 CD 盘）
                   SizedBox(
                     width: 42,
                     height: 42,
@@ -100,13 +143,44 @@ class MiniPlayer extends StatelessWidget {
                             color: MusicTheme.tint.withValues(alpha: 0.32),
                           ),
                         ),
-                        CoverImage(
-                            url: song.coverUrl, size: 36, cornerRadius: 7),
+                        RotationTransition(
+                          turns: _spin,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              ClipOval(
+                                child: CoverImage(
+                                    url: song.coverUrl,
+                                    size: 36,
+                                    circle: true),
+                              ),
+                              // CD 中心孔
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: const Color(0xFF0A0A0C),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(child: _titleColumn(player, song)),
+                  const SizedBox(width: 2),
+                  // 功能快捷排：上一集 / 歌单 / 下载 / 历史 / 收藏
+                  _iconBtn(Icons.skip_previous_rounded, () => player.previous()),
+                  _iconBtn(Icons.queue_music_rounded, () => _openQueue(context)),
+                  _iconBtn(
+                      Icons.download_rounded, () => musicEnqueueDownload(song)),
+                  _iconBtn(Icons.history_rounded, () => showRecentSongsSheet()),
+                  _iconBtn(
+                      Icons.favorite_border_rounded,
+                      () => musicToggleFavorite(song)),
                   _btn(
                     player.isPlaying.value
                         ? Icons.pause_rounded
@@ -179,6 +253,27 @@ class MiniPlayer extends StatelessWidget {
           },
         );
       },
+    );
+  }
+
+  /// 打开播放队列（歌单）
+  void _openQueue(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const MusicQueuePage()),
+    );
+  }
+
+  /// 小功能图标键（上一集/歌单/下载/历史/收藏）—— 30×30 点击区
+  Widget _iconBtn(IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        width: 30,
+        height: 30,
+        alignment: Alignment.center,
+        child: Icon(icon, color: MusicTheme.secondary, size: 19),
+      ),
     );
   }
 

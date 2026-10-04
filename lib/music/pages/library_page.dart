@@ -69,14 +69,26 @@ class _LibraryPageState extends State<LibraryPage>
   }
 
   Future<void> _load() async {
-    // 用**当前**平台拉榜单（原来没传 source → 永远走网易云）
-    final tops =
-        await api.topLists(source: SettingsStore.instance.musicSource.value);
+    // 用**当前**平台拉榜单（原来没传 source → 永远走网易云）。
+    // ⚠️ 用带 `ok` 的变体：以前"请求失败"和"真的没有榜单"都是空列表 ✗ →
+    // 下面 `if (_tops.isNotEmpty)` 会让「榜单」**整块静默消失** ✗
+    //（无提示、无重试）→ 用户以为这个模块就没有榜单 ✓。
+    // 现在失败时插入一条**哨兵项**（id = -1），点它就重试 ✓
+    final tops = await api.topListsResult(
+        source: SettingsStore.instance.musicSource.value);
     final favs = await FavoriteStore.instance.all();
     await MusicLibraryStore.instance.init();
     if (!mounted) return;
     setState(() {
-      _tops = tops;
+      _tops = tops.ok
+          ? tops.list
+          : <TopList>[
+              TopList(
+                id: -1,
+                name: '榜单加载失败 · 点击重试',
+                updateFrequency: tops.error.isEmpty ? '请检查网络后重试' : tops.error,
+              ),
+            ];
       _favorites = favs;
       _recent = List<Song>.of(MusicLibraryStore.instance.recent);
       _loading = false;
@@ -143,7 +155,17 @@ class _LibraryPageState extends State<LibraryPage>
             trailing:
                 Icon(Icons.chevron_right, size: 18, color: MusicTheme.secondary),
             onTap: () => Navigator.of(context).push<void>(
-              MaterialPageRoute(builder: (_) => const LocalMusicPage()),
+              MaterialPageRoute(
+                // 🔴 音乐子页面是 push 到 root Navigator 的 → **不在**
+                // `MusicRootView` 的 `Theme(MusicTheme.themeData())` 作用域里 ✗
+                // → Scaffold/AppBar/Divider/Card 会回落到**影视侧** AppTheme 的配色 ✗
+                //（音乐和影视选不同调色板时，一眼就能看出"这不是音乐页"）
+                // 所以每个 push 点自己包一层音乐主题 ✓（与 playlist_detail_page 一致 ✓）
+                builder: (_) => Theme(
+                  data: MusicTheme.themeData(),
+                  child: const LocalMusicPage(),
+                ),
+              ),
             ),
           ),
           if (_tops.isNotEmpty) ...[
@@ -160,8 +182,11 @@ class _LibraryPageState extends State<LibraryPage>
                   trailing: Icon(Icons.chevron_right,
                       size: 18, color: MusicTheme.secondary),
                   // 进详情也要带平台：否则会拿酷狗的榜单 id 去查网易云（必然空）
-                  onTap: () => openPlaylist(context, t.id, t.name,
-                      source: SettingsStore.instance.musicSource.value),
+                  // id < 0 是"加载失败"的哨兵项 → 点它**重试**而不是进详情 ✓
+                  onTap: t.id < 0
+                      ? _load
+                      : () => openPlaylist(context, t.id, t.name,
+                          source: SettingsStore.instance.musicSource.value),
                 )),
             ],
           ],

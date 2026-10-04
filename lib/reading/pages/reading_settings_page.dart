@@ -3,20 +3,20 @@ import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
 import '../../common/theme.dart';
 
-/// 漫画阅读模式下拉选项顺序（与枚举顺序解耦：枚举末尾为 dissolve/leftToRight/none
-/// 以保持旧持久化 index 不变；这里展示为 从右往左/从左往右/消散/拼页/无动画）
+/// 漫画阅读模式分段选项顺序（对齐参考图 IMG_8567 的 5 段 chips：
+/// 右左 / 左右 / 消散 / 无动画 / 拼页；枚举末尾保持旧持久化 index 不变）
 const _mangaModes = <ReadingMode>[
   ReadingMode.pageTurn,
   ReadingMode.leftToRight,
   ReadingMode.dissolve,
-  ReadingMode.continuous,
   ReadingMode.none,
+  ReadingMode.continuous,
 ];
 
-/// 漫画阅读模式下拉文案
+/// 漫画阅读模式分段文案（短标签，同参考图）
 const _mangaModeLabels = <ReadingMode, String>{
-  ReadingMode.pageTurn: '从右往左',
-  ReadingMode.leftToRight: '从左往右',
+  ReadingMode.pageTurn: '右左',
+  ReadingMode.leftToRight: '左右',
   ReadingMode.dissolve: '消散',
   ReadingMode.continuous: '拼页',
   ReadingMode.none: '无动画',
@@ -127,22 +127,48 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
               ),
               const SizedBox(height: 16),
 
-              // ── 漫画 ────────────────────────────────────────────
+              // ── 漫画（按参考图 IMG_8567/8568：完整 12 项）──────
               _sectionTitle('漫画', isDark),
               const SizedBox(height: 8),
               _buildMangaModeCard(isDark, s),
               const SizedBox(height: 12),
-              // 下面三项在「图书·书源」组里已出现过，但截图里漫画组也有同名开关
-              // （默认值/文案不同：一个说"图书阅读时"、一个说"漫画阅读时"）。
-              // 这里复用同一个设置项，只改文案，避免多出一份互相冲突的状态。
+              // 下面几项与「图书·书源」组同名，但文案按参考图区分
+              // （一个说"图书阅读时"、一个说"漫画阅读时"）；复用同一
+              // 设置项，避免多出一份互相冲突的状态。
               _buildReverseTapCard(isDark, s, manga: true),
               const SizedBox(height: 12),
               _buildDoublePageCard(isDark, s, manga: true),
               const SizedBox(height: 12),
-
-              _buildInkScreenCard(isDark, s),
+              _buildShowHudCard(isDark, s, manga: true),
               const SizedBox(height: 12),
-              _buildPreloadCard(isDark, s),
+              _buildVolumeKeyCard(isDark, s, manga: true),
+              const SizedBox(height: 12),
+              _buildSwitchCard(
+                isDark: isDark,
+                title: '双指缩放',
+                subtitle: '双指捏合放大图片（拼页模式除外）',
+                value: s.pinchZoom,
+                onChanged: s.setPinchZoom,
+              ),
+              const SizedBox(height: 12),
+              _buildSwitchCard(
+                isDark: isDark,
+                title: '记住缩放大小',
+                subtitle: '翻页时保留当前缩放（需开启双指缩放）',
+                value: s.rememberZoom,
+                enabled: s.pinchZoom,
+                onChanged: s.setRememberZoom,
+              ),
+              const SizedBox(height: 12),
+              _buildSwitchCard(
+                isDark: isDark,
+                title: '单手模式',
+                subtitle: '漫画阅读时屏幕左右点击都是下一页',
+                value: s.singleHand,
+                onChanged: s.setSingleHand,
+              ),
+              const SizedBox(height: 12),
+              _buildScreenSleepCard(isDark, s, manga: true),
               const SizedBox(height: 12),
               _buildSwitchCard(
                 isDark: isDark,
@@ -152,6 +178,10 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 value: s.autoAddShelfForManga,
                 onChanged: s.setAutoAddShelfForManga,
               ),
+              const SizedBox(height: 12),
+              _buildPreloadCard(isDark, s),
+              const SizedBox(height: 12),
+              _buildInkScreenCard(isDark, s),
             ],
           );
         },
@@ -205,60 +235,71 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
 
   Widget _buildMangaModeCard(bool isDark, SettingsService s) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
         color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  '漫画阅读模式',
-                  style: TextStyle(
-                    fontSize: AppTheme.fontHeadline,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '从右往左：图片从右翻入（日漫方向）\n从左往右：图片从左翻入\n消散：当前页淡出、下一页淡入\n拼页：上下连续滚动\n无动画：点击直接切换，不滑动',
-                  style: TextStyle(
-                    fontSize: AppTheme.fontFootnote,
-                    color: JellyTheme.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          DropdownButton<ReadingMode>(
-            value: s.readingMode,
-            underline: const SizedBox(),
-            isDense: true,
+          Text(
+            '漫画阅读模式',
             style: TextStyle(
-              fontSize: AppTheme.fontBody,
-              fontWeight: FontWeight.w600,
+              fontSize: AppTheme.fontHeadline,
+              fontWeight: FontWeight.bold,
               color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
             ),
-            dropdownColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-            items: _mangaModes
-                .map(
-                  (m) => DropdownMenuItem(
-                    value: m,
-                    child: Text(_mangaModeLabels[m]!),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '右左：图片从右翻入\n左右：图片从左翻入（日漫方向）\n'
+            '拼页：单独选为上下连续滚动；与右左/左右同选并开启双页时，'
+            '横屏横向无缝连续滑动',
+            style: TextStyle(
+              fontSize: AppTheme.fontFootnote,
+              color: JellyTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // 5 段 chips（参考图 IMG_8567：右左/左右/消散/无动画/拼页）
+          Row(
+            children: [
+              for (var i = 0; i < _mangaModes.length; i++) ...[
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => s.setReadingMode(_mangaModes[i]),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: s.readingMode == _mangaModes[i]
+                            ? JellyTheme.primary
+                            : (isDark
+                                ? Colors.white.withValues(alpha: 0.08)
+                                : Colors.black.withValues(alpha: 0.05)),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        _mangaModeLabels[_mangaModes[i]]!,
+                        style: TextStyle(
+                          fontSize: AppTheme.fontBody,
+                          fontWeight: s.readingMode == _mangaModes[i]
+                              ? FontWeight.w600
+                              : FontWeight.normal,
+                          color: s.readingMode == _mangaModes[i]
+                              ? Colors.white
+                              : (isDark
+                                  ? Colors.white
+                                  : JellyTheme.textPrimaryLight),
+                        ),
+                      ),
+                    ),
                   ),
-                )
-                .toList(),
-            onChanged: (v) {
-              if (v != null) s.setReadingMode(v);
-            },
+                ),
+                if (i < _mangaModes.length - 1) const SizedBox(width: 6),
+              ],
+            ],
           ),
         ],
       ),
@@ -430,7 +471,9 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '开启后：点击左侧下一页、右侧上一页（与默认相反）',
+                  manga
+                      ? '漫画阅读时左点下一页、右点上一页'
+                      : '图书阅读时左点下一页、右点上一页',
                   style: TextStyle(
                     fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
@@ -475,7 +518,9 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '横屏时左右并排显示两页',
+                  manga
+                      ? '漫画横屏左右并排两页（仅翻页模式生效）'
+                      : '图书横屏左右并排两页（仅翻页模式生效）',
                   style: TextStyle(
                     fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
@@ -495,7 +540,8 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
   }
 
   /// 阅读信息栏开关卡片（阅读时角落显示时间、页码、进度等）
-  Widget _buildShowHudCard(bool isDark, SettingsService s) {
+  Widget _buildShowHudCard(bool isDark, SettingsService s,
+      {bool manga = false}) {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
       decoration: BoxDecoration(
@@ -519,7 +565,9 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '阅读时在角落显示时间、页码、进度等',
+                  manga
+                      ? '漫画阅读时在角落显示时间、页码、进度等'
+                      : '图书阅读时在角落显示时间、页码、进度等',
                   style: TextStyle(
                     fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
@@ -539,7 +587,8 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
   }
 
   /// 音量键翻页开关卡片（阅读时按音量上/下键翻页，会接管音量键）
-  Widget _buildVolumeKeyCard(bool isDark, SettingsService s) {
+  Widget _buildVolumeKeyCard(bool isDark, SettingsService s,
+      {bool manga = false}) {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
       decoration: BoxDecoration(
@@ -563,7 +612,9 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '阅读时按音量上/下键翻页（会接管音量键）',
+                  manga
+                      ? '漫画阅读时按音量上/下键翻页，会接管音量键'
+                      : '图书阅读时按音量上/下键翻页，会接管音量键',
                   style: TextStyle(
                     fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
@@ -662,7 +713,8 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
   }
 
   /// 屏幕休眠（下拉：默认跟随系统 / 10 分钟 / 永不息屏）
-  Widget _buildScreenSleepCard(bool isDark, SettingsService s) {
+  Widget _buildScreenSleepCard(bool isDark, SettingsService s,
+      {bool manga = false}) {
     const options = <String, String>{
       'default': '默认',
       '10min': '10 分钟',
@@ -691,8 +743,11 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '图书阅读时是否允许手机休眠：默认跟随系统，'
-                  '可选 10 分钟无操作休眠或永不息屏',
+                  manga
+                      ? '漫画阅读时是否允许手机休眠：默认跟随系统，'
+                          '可选 10 分钟无操作休眠或永不息屏'
+                      : '图书阅读时是否允许手机休眠：默认跟随系统，'
+                          '可选 10 分钟无操作休眠或永不息屏',
                   style: TextStyle(
                     fontSize: AppTheme.fontFootnote,
                     height: 1.5,

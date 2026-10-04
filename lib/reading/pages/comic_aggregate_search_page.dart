@@ -490,7 +490,7 @@ class _ComicAggregateSearchPageState extends State<ComicAggregateSearchPage> {
           children: [
             Icon(
               Icons.search_off_rounded,
-              size: 56,
+              size: 48,
               color: JellyTheme.textSecondary,
             ),
             const SizedBox(height: 16),

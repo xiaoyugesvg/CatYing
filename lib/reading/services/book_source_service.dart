@@ -10,6 +10,7 @@ import '../../services/nodejs_manager.dart';
 import '../models/book_source.dart';
 import '../source/book_site_config.dart';
 import '../source/config_book_source.dart';
+import '../source/global_proxy.dart';
 
 /// 书源搜索到的一本书。
 ///
@@ -140,6 +141,12 @@ class BookSourceService {
   ));
 
   bool _portWarned = false;
+
+  /// 最近一次体检结果缓存（按源 id）。
+  ///
+  /// 「退出页面不中断」：体检页退出后批量任务继续跑，结果写到这里；
+  /// 下次再进体检页先读这里续显，不丢进度。
+  final Map<String, BookSourceHealth> healthCache = {};
 
   // ============================================================
   // 响应缓存 + 并发去重
@@ -328,7 +335,7 @@ class BookSourceService {
     if (source.isConfig) {
       return (
         ok: false,
-        error: '明文 config 源暂不支持分类浏览',
+        error: '该源未配置分类浏览（config 源无 exploreUrl）：可直接搜索找书',
         categories: const <ExploreCategory>[],
       );
     }
@@ -367,7 +374,7 @@ class BookSourceService {
     if (source.isConfig) {
       return (
         ok: false,
-        error: '明文 config 源暂不支持分类浏览',
+        error: '该源未配置分类浏览（config 源无 exploreUrl）：可直接搜索找书',
         list: const <BookSourceResult>[],
       );
     }
@@ -401,20 +408,32 @@ class BookSourceService {
   /// 书籍详情（详情页用；失败时返回 null 由 UI 退回搜索页已有字段）
   Future<Map<String, dynamic>?> bookInfo(
       BookSource source, String bookUrl) async {
+    return (await bookInfoChecked(source, bookUrl)).info;
+  }
+
+  /// 详情（带错误原因）。
+  ///
+  /// 普通调用用 [bookInfo]（失败返回 null）；体检需要区分
+  /// 「网络不通 / 解析失败」，用本方法拿 error。
+  Future<({Map<String, dynamic>? info, String? error})> bookInfoChecked(
+      BookSource source, String bookUrl) async {
     // ── config 明文源：Dart 侧引擎 ─────────────────────────────
     if (source.isConfig) {
       try {
         final info = await _configSource(source)
             .bookInfo(BookSiteResult(title: '', bookUrl: bookUrl));
-        return {
-          'name': info.title,
-          'author': info.author,
-          'coverUrl': info.cover,
-          'intro': info.intro,
-          'lastChapter': info.lastChapter,
-        };
-      } catch (_) {
-        return null;
+        return (
+          info: {
+            'name': info.title,
+            'author': info.author,
+            'coverUrl': info.cover,
+            'intro': info.intro,
+            'lastChapter': info.lastChapter,
+          },
+          error: null,
+        );
+      } catch (e) {
+        return (info: null, error: e.toString());
       }
     }
     final raw = await _callCached(
@@ -427,9 +446,14 @@ class BookSourceService {
       _detailTtl,
     );
     final m = _asMap(raw);
-    if (m['ok'] == false) return null;
+    if (m['ok'] == false) {
+      return (info: null, error: (m['error'] ?? '未知错误').toString());
+    }
     final info = m['info'];
-    return info is Map ? info.cast<String, dynamic>() : null;
+    return (
+      info: info is Map ? info.cast<String, dynamic>() : null,
+      error: null,
+    );
   }
 
   /// 目录
@@ -631,36 +655,72 @@ class BookSourceService {
   // 书源体检（V2.0.7 的「书源体检」功能）
   // ============================================================
 
+  /// 判断异常是否为「网络不通」（超时/拒连/DNS/连接失败）。
+  ///
+  /// 体检按阶段细分「网络不通 / 解析失败」用：网络类 → 可代理复检；
+  /// 解析/规则类 → 复检无意义，直接判失败。
+  static bool _isNetError(Object? e) {
+    if (e == null) return false;
+    if (e is DioException) {
+      return e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.badCertificate;
+    }
+    final s = e.toString().toLowerCase();
+    return s.contains('dioexception') ||
+        s.contains('connection') ||
+        s.contains('refused') ||
+        s.contains('host lookup') ||
+        s.contains('timeout') ||
+        s.contains('超时') ||
+        s.contains('连接') ||
+        s.contains('network') ||
+        s.contains('网络');
+  }
+
   /// 对一个书源做体检：搜索 → 详情 → 目录 → 正文，逐级验证。
   ///
   /// 为什么逐级测而不是只测搜索：
   /// 很多坏源**搜索是好的**（列表页能抓），但详情/目录/正文的规则写错了。
   /// 只测搜索会给出"可用"的假结论，用户点进去才发现看不了。
+  ///
+  /// 关键词用大众小说名（默认「斗破苍穹」）：几乎所有中文书源都有，
+  /// 命中率高、结果稳定 —— 搜 0 条基本可判定解析失败，而不是"词太冷"。
+  ///
+  /// 失败分类对齐原版 Cmbok（search/detail/toc/content 阶段 ×
+  /// ok/network/parseFail）：网络类 → dead（体检页归「网络不通」）；
+  /// 解析/规则类 → partial（体检页归「解析失败」）。
   Future<BookSourceHealth> healthCheck(
     BookSource source, {
-    String keyword = '测试',
+    String keyword = '斗破苍穹',
+    bool retryWithProxy = true,
   }) async {
     final sw = Stopwatch()..start();
     final notes = <String>[];
 
-    // 1) 搜索
+    // 1) 搜索（取书：确认书源里有没有这本书的名称/结果）
     final s = await searchOne(source, keyword);
     if (!s.ok) {
       sw.stop();
-      return BookSourceHealth(
+      final net = _isNetError(s.error);
+      final h = BookSourceHealth(
         source: source,
         level: BookSourceHealthLevel.dead,
         detail: '搜索失败：${s.error}',
         elapsed: sw.elapsed,
       );
+      // 网络不通才代理复检（解析失败代理也无济于事）
+      return net ? await _retryWithProxy(h, keyword: keyword) : h;
     }
     if (s.list.isEmpty) {
       sw.stop();
-      // 搜到 0 条不一定是坏源（可能这个词确实没有），标为"可疑"
+      // 大众书名都搜不到 → 解析失败（不是"词太冷"）
       return BookSourceHealth(
         source: source,
-        level: BookSourceHealthLevel.suspect,
-        detail: '搜索返回 0 条（关键词「$keyword」可能确实无结果）',
+        level: BookSourceHealthLevel.partial,
+        detail: '解析失败：搜索「$keyword」返回 0 条',
         elapsed: sw.elapsed,
       );
     }
@@ -668,43 +728,58 @@ class BookSourceService {
 
     final first = s.list.first;
 
-    // 2) 详情
-    final info = await bookInfo(source, first.bookUrl);
-    if (info == null) {
+    // 2) 详情（书的名称/作者/简介等）
+    final r = await bookInfoChecked(source, first.bookUrl);
+    if (r.info == null) {
       sw.stop();
-      return BookSourceHealth(
+      final net = _isNetError(r.error);
+      final h = BookSourceHealth(
         source: source,
-        level: BookSourceHealthLevel.partial,
-        detail: '搜索可用，但详情规则无效（${notes.join('，')}）',
+        level: net
+            ? BookSourceHealthLevel.dead
+            : BookSourceHealthLevel.partial,
+        detail:
+            '详情${net ? '网络不通' : '解析失败'}：${r.error ?? '规则无效'}',
         elapsed: sw.elapsed,
       );
+      return net ? await _retryWithProxy(h, keyword: keyword) : h;
     }
     notes.add('详情 OK');
 
-    // 3) 目录（详情里带的 tocUrl 优先，否则用 bookUrl）
-    final tocUrl = (info['tocUrl'] ?? first.bookUrl).toString();
+    // 3) 目录（章节列表）
+    final tocUrl = (r.info!['tocUrl'] ?? first.bookUrl).toString();
     final t = await toc(source, tocUrl);
     if (!t.ok || t.list.isEmpty) {
       sw.stop();
-      return BookSourceHealth(
+      final net = _isNetError(t.error);
+      final h = BookSourceHealth(
         source: source,
-        level: BookSourceHealthLevel.partial,
-        detail: '详情可用，但目录规则无效（${notes.join('，')}）',
+        level: net
+            ? BookSourceHealthLevel.dead
+            : BookSourceHealthLevel.partial,
+        detail:
+            '目录${net ? '网络不通' : '解析失败'}：${t.error ?? '规则无效'}',
         elapsed: sw.elapsed,
       );
+      return net ? await _retryWithProxy(h, keyword: keyword) : h;
     }
     notes.add('目录 ${t.list.length} 章');
 
-    // 4) 正文（抽第一章）
+    // 4) 正文（抽第一章，确认能读到字）
     final c = await content(source, t.list.first.url);
     sw.stop();
     if (!c.ok || c.content.trim().isEmpty) {
-      return BookSourceHealth(
+      final net = _isNetError(c.error);
+      final h = BookSourceHealth(
         source: source,
-        level: BookSourceHealthLevel.partial,
-        detail: '目录可用，但正文规则无效（${notes.join('，')}）',
+        level: net
+            ? BookSourceHealthLevel.dead
+            : BookSourceHealthLevel.partial,
+        detail:
+            '正文${net ? '网络不通' : '解析失败'}：${c.error ?? '正文为空'}',
         elapsed: sw.elapsed,
       );
+      return net ? await _retryWithProxy(h, keyword: keyword) : h;
     }
     notes.add('正文 ${c.content.length} 字');
 
@@ -716,16 +791,54 @@ class BookSourceService {
     );
   }
 
+  /// 首次体检失败（搜索就挂）且全局代理开启时，带代理复检一遍。
+  ///
+  /// 对齐原版 Cmbok 体检文案「失败源会自动用代理档案复检一遍」：
+  /// 很多源站直连不通、走代理能通，一次失败就判死太冤。
+  /// 只复检一次、不递归；复检结果更好则用复检结果，否则保留首次结论。
+  Future<BookSourceHealth> _retryWithProxy(
+    BookSourceHealth h, {
+    required String keyword,
+  }) async {
+    final proxy = globalProxyDisplay();
+    if (proxy == null) return h;
+    if (h.source.raw['proxy']?.toString().isNotEmpty ?? false) return h;
+    final proxied = BookSource(
+      raw: () {
+        final m = Map<String, dynamic>.of(h.source.raw);
+        m['proxy'] = proxy;
+        return m;
+      }(),
+      id: h.source.id,
+    );
+    final h2 = await healthCheck(
+      proxied,
+      keyword: keyword,
+      retryWithProxy: false,
+    );
+    if (h2.level.index < h.level.index) {
+      return BookSourceHealth(
+        source: h.source,
+        level: h2.level,
+        detail: '${h2.detail}（代理复检通过）',
+        elapsed: h2.elapsed,
+      );
+    }
+    return h;
+  }
+
   /// 批量体检（并发限流同搜索）
   Future<List<BookSourceHealth>> healthCheckAll(
     List<BookSource> sources, {
     void Function(BookSourceHealth h)? onOne,
     bool Function()? shouldStop,
-    String keyword = '测试',
+    String keyword = '斗破苍穹',
+    int concurrency = maxConcurrent,
   }) async {
     final out = <BookSourceHealth>[];
     final pending = List<BookSource>.of(sources);
     final active = <Future<void>>[];
+    final limit = concurrency.clamp(1, 12);
 
     Future<void> runOne(BookSource src) async {
       BookSourceHealth h;
@@ -745,7 +858,7 @@ class BookSourceService {
 
     while (pending.isNotEmpty || active.isNotEmpty) {
       if (shouldStop != null && shouldStop()) break;
-      while (active.length < maxConcurrent && pending.isNotEmpty) {
+      while (active.length < limit && pending.isNotEmpty) {
         final src = pending.removeAt(0);
         late Future<void> f;
         f = runOne(src).whenComplete(() => active.remove(f));

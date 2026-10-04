@@ -277,7 +277,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
         ),
       ),
       subtitle: Text(
-        loaded ? '刚刚更新' : '未下载',
+        src.statusText(),
         style: TextStyle(
           color: loaded ? AppTheme.textSecondary : AppTheme.textTertiary,
           fontSize: AppTheme.fontFootnote,

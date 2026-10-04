@@ -153,8 +153,27 @@ async function resolveByTemplate(source, song) {
             }
         }
         // 3) 还找不到就深度搜一个 http(s) 地址
+        //
+        // ⚠️ 这一步本质是"猜"：音源响应里通常还有封面 / 头像 / 分享页 /
+        // 试听片段，深度搜到的**第一个** http 串很可能根本不是音频 ✗
+        // 原来直接把它当成功返回 → 上层看到 `ok && url 非空` 就**停止尝试
+        // 下一个音源** → 用户看到的是"播放器报错"，而不是"这个源没解析出音频" ✗
+        // 所以这里必须做**形状校验**：不像音频就如实返回失败并回显搜到的东西。
         if (typeof found !== 'string' || !/^https?:\/\//i.test(found)) {
-            found = findUrlDeep(parsed);
+            const guess = findUrlDeep(parsed);
+            if (typeof guess === 'string' &&
+                /^https?:\/\//i.test(guess) &&
+                looksAudio(guess)) {
+                found = guess;
+            } else {
+                return {
+                    ok: false,
+                    error: guess
+                        ? `响应里没找到音频地址（深度搜到的 ${String(guess).slice(0, 60)} 不像音频）`
+                        : '在响应里没找到播放地址（检查取值路径）',
+                    tried: url,
+                };
+            }
         }
 
         if (typeof found !== 'string' || !/^https?:\/\//i.test(found)) {
@@ -166,6 +185,29 @@ async function resolveByTemplate(source, song) {
             e && e.code === 'ECONNABORTED' ? '音源请求超时' : (e && e.message) || String(e);
         return { ok: false, error: msg, tried: url };
     }
+}
+
+/**
+ * 这个 URL 是否"像音频直链"？（给模板法的深度搜索兜底做形状校验）
+ *
+ * ⚠️ 只看 **pathname**，不看主机名 —— 否则网易图床
+ * `p1.music.126.net/xx.jpg` 会因为主机名里的 `music` 被误判成音频
+ *（我第一版就是这么写的，被 `scripts/verify-resolver-audio.mjs` 当场抓出来 ✗）。
+ * 导出出来就是为了让那个脚本能直接测真函数，而不是"镜像一份逻辑"。
+ */
+export function looksAudio(v) {
+    let path;
+    try {
+        path = new URL(String(v)).pathname.toLowerCase();
+    } catch (_) {
+        path = String(v || '').toLowerCase();
+    }
+    // 图片扩展名 → 直接否（封面/头像最常见的形态）
+    if (/\.(jpg|jpeg|png|webp|gif|bmp|ico|svg)$/.test(path)) return false;
+    // 明确的音频 / HLS / 分片扩展名 → 收
+    if (/\.(mp3|m4a|aac|flac|wav|ogg|opus|m3u8|mp4|ts)$/.test(path)) return true;
+    // 路径里带音频语义（如 `/getPlayUrl`、`/audio/xxx`）→ 收
+    return /(audio|play|song|music|stream)/.test(path);
 }
 
 /**

@@ -109,7 +109,8 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
       if (_modelId.text.trim().isEmpty) problems.add('模型 ID 没填');
     } else if (_s.type == 'easyvoice') {
       if (_endpoint.text.trim().isEmpty) problems.add('接口地址没填');
-      if (_voice.text.trim().isEmpty) problems.add('音色没填');
+      // AI 推荐配音模式下音色可留空（由大模型推荐）
+      if (_voice.text.trim().isEmpty && !_s.useAiVoice) problems.add('音色没填');
     }
     if (_apiKey.text.trim().isEmpty &&
         _s.type != 'easyvoice') {
@@ -295,10 +296,23 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
             ])
           else if (_s.type == 'easyvoice')
             _card(isDark, '音色', [
-              _row('音色', _voice, hint: 'zh-CN-XiaoxiaoNeural', chevron: true),
-              _note('Edge 神经音色，免费。常用：zh-CN-XiaoxiaoNeural（晓晓）、'
-                  'zh-CN-YunxiNeural（云希）、zh-CN-YunyangNeural（云扬）。\n'
-                  '朗读面板的语速 / 音调滑杆会映射为请求里的 rate / pitch。'),
+              _switchRow(
+                  'AI 智能推荐配音',
+                  'EasyVoice 用大模型自动给文本分角色、推荐音色/语速/音调'
+                  '（多角色有声书效果，慢一些）。关闭后固定用下方音色直接合成。',
+                  _s.useAiVoice,
+                  (v) => setState(() => _s = _s.copyWith(useAiVoice: v))),
+              _row('音色', _voice,
+                  hint: _s.useAiVoice
+                      ? '留空让 AI 推荐；填了则优先使用'
+                      : 'zh-CN-XiaoxiaoNeural',
+                  chevron: true),
+              if (!_s.useAiVoice) _action('拉取音色列表'),
+              _note('EasyVoice 走 Edge 神经音色，免费。常用：'
+                  'zh-CN-XiaoxiaoNeural（晓晓）、zh-CN-YunxiNeural（云希）、'
+                  'zh-CN-YunyangNeural（云扬）。\n'
+                  '关闭 AI 推荐时，朗读面板的语速 / 音调滑杆会映射为请求里的 '
+                  'rate / pitch。'),
             ])
           else
             _card(isDark, '音色', [
@@ -554,14 +568,162 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
     return Padding(
       padding: const EdgeInsets.only(left: 78, bottom: 6),
       child: TextButton(
-        onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('拉取音色列表需要该服务的鉴权请求，还没接'),
-              duration: Duration(seconds: 2)),
-        ),
+        onPressed: () => _pullVoices(),
         child: Text(text, style: const TextStyle(fontSize: AppTheme.fontSubhead)),
       ),
     );
+  }
+
+  /// 「拉取音色列表」：easyvoice 从服务端拉取；openai / azure 给内置常用清单；
+  /// 选中即填入音色字段。
+  Future<void> _pullVoices() async {
+    final type = _s.type;
+    if (type == 'easyvoice') {
+      await _pullEasyVoiceVoices();
+    } else if (type == 'openai') {
+      await _pickVoice([
+        'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer',
+        'zh-CN-XiaoxiaoNeural', 'zh-CN-YunxiNeural',
+      ], 'OpenAI 常见音色（也可手填）');
+    } else if (type == 'azure') {
+      await _pickVoice([
+        'zh-CN-XiaoxiaoNeural', 'zh-CN-XiaoxiaoNeural-Lite',
+        'zh-CN-YunxiNeural', 'zh-CN-YunjianNeural',
+        'zh-CN-XiaoyiNeural', 'zh-CN-YunyangNeural',
+        'zh-CN-liaoning-XiaobeiNeural', 'zh-CN-shaanxi-XiaoniNeural',
+      ], 'Azure 常见中文音色（也可手填）');
+    } else {
+      _toast('该类型暂不支持自动拉取，请直接在音色框手填');
+    }
+  }
+
+  /// easyvoice：GET {base}/api/v1/voiceList（失败依次试 /api/v1/voices、
+  /// /api/voices），解析 {code,data:[{Name,...}],success} 结构。
+  Future<void> _pullEasyVoiceVoices() async {
+    final base = _endpoint.text.trim().replaceAll(RegExp(r'/+$'), '');
+    if (base.isEmpty) {
+      _toast('先填接口地址');
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 20),
+      ));
+      List<String> names = [];
+      for (final path in ['/api/v1/voiceList', '/api/v1/voices', '/api/voices']) {
+        try {
+          final r = await dio.get<dynamic>('$base$path');
+          final data = r.data;
+          if (data is List) {
+            names = data
+                .map((e) => e is Map ? _voiceNameOf(e) : '$e')
+                .whereType<String>()
+                .where((s) => s.trim().isNotEmpty)
+                .toList();
+            if (names.isNotEmpty) break;
+          } else if (data is Map) {
+            // 标准：{code, data:[{Name,Gender,ContentCategories,...}], success}
+            final dataList = data['data'];
+            if (dataList is List && dataList.isNotEmpty) {
+              names = dataList
+                  .map((e) => e is Map ? _voiceNameOf(e) : '$e')
+                  .whereType<String>()
+                  .where((s) => s.trim().isNotEmpty)
+                  .toList();
+            }
+            if (names.isEmpty) {
+              for (final k in ['voices', 'voice_list', 'items', 'list']) {
+                final v = data[k];
+                if (v is List && v.isNotEmpty) {
+                  names = v
+                      .map((e) => e is Map ? _voiceNameOf(e) : '$e')
+                      .whereType<String>()
+                      .where((s) => s.trim().isNotEmpty)
+                      .toList();
+                  if (names.isNotEmpty) break;
+                }
+              }
+            }
+            if (names.isNotEmpty) break;
+          }
+        } catch (_) {
+          // 试下一个端点
+        }
+      }
+      if (names.isEmpty) {
+        _toast('服务端没返回音色列表，请确认 easyvoice 版本支持 /voiceList 接口');
+        return;
+      }
+      if (!mounted) return;
+      await _pickVoice(names, 'easyvoice 服务端音色');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  String _voiceNameOf(Map e) {
+    // easyvoice voice.json 用大写 Name 字段
+    for (final k in ['Name', 'name', 'voice', 'voice_id', 'id', 'label', 'display_name']) {
+      final v = e[k];
+      if (v is String && v.trim().isNotEmpty) return v.trim();
+    }
+    return '';
+  }
+
+  /// 音色选择底部弹层：选中即回填音色输入框
+  Future<void> _pickVoice(List<String> voices, String title) async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.7),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+                child: Text(title,
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w700)),
+              ),
+              Divider(height: 1, color: Colors.black.withValues(alpha: 0.08)),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: voices.length,
+                  itemBuilder: (c, i) => ListTile(
+                    dense: true,
+                    title: Text(voices[i],
+                        style: const TextStyle(fontSize: 14)),
+                    onTap: () => Navigator.pop(ctx, voices[i]),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked != null && picked.isNotEmpty) {
+      setState(() => _voice.text = picked);
+    }
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+          content: Text(msg), duration: const Duration(seconds: 2)));
   }
 
   Widget _note(String text) {

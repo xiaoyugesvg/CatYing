@@ -1124,12 +1124,15 @@ class ZlibraryService extends ChangeNotifier {
     }
     Object? lastError;
     // 最多试 3 个镜像（当前节点优先）：每个最多 6s，整体 ~18s 封顶，
-    // 避免镜像不可达时 WebView 逐个 30s 超时 → 主页"正在加载"卡几分钟
+    // 避免镜像不可达时 WebView 逐个 30s 超时 → 主页"正在加载"卡几分钟。
+    //
+    // 直抓「最受欢迎」专用分类页（SSR HTML，比首页 SPA 稳定、无 JS 渲染依赖）：
+    //   /s/?page=N&dsource=mostpopular
+    // 对应站内排序参数 dsource=mostpopular；解析端 _parseHomeHtml 优先取
+    // z-bookcard[dsource="mostpopular"]，缺省回退全量卡片（结构容错）。
     for (final domain in order.take(3)) {
-      final url = page > 1
-          ? 'https://$domain/s/?page=$page'
-          : 'https://$domain/';
-      _log('抓取首页推荐: $url');
+      final url = 'https://$domain/s/?page=$page&dsource=mostpopular';
+      _log('抓取最受欢迎分类页: $url');
       String? htmlStr;
       for (var attempt = 1; attempt <= 2; attempt++) {
         try {
@@ -1581,6 +1584,11 @@ class ZlibraryService extends ChangeNotifier {
               );
             }
             final status = resp.statusCode;
+            // 403：被 Cloudflare 拦截（镜像级反爬），切下一候选
+            if (status == 403) {
+              _log('节点 $domain 返回 403（可能被 Cloudflare 拦截），切下一候选');
+              break;
+            }
             // 404：域名非 z-library 主机，切下一候选
             if (status == 404) {
               any404 = true;
@@ -1604,6 +1612,12 @@ class ZlibraryService extends ChangeNotifier {
             // 429/5xx：同域名退避重试
             if (status != null && _kRetryStatus.contains(status)) {
               if (attempt >= _kMaxRetries) {
+                // 5xx 服务端错误：退避耗尽说明该镜像异常，切下一候选；
+                // 429 是全站限流，切镜像无意义，保持 rate_limited 提示
+                if (status != 429) {
+                  _log('节点 $domain 持续 $status，退避耗尽，切下一候选');
+                  break;
+                }
                 if (domain != _domain) {
                   _domain = domain;
                   await _persistDomain();
@@ -1880,6 +1894,20 @@ class ZlibraryService extends ChangeNotifier {
           finalHost = h.isNotEmpty ? h : url;
         } else {
           finalHost = Uri.tryParse(target)?.host ?? url;
+        }
+        // 业务校验：空响应 / CF 挑战页 / 拦截页不算"可用"，
+        // 否则会出现"探测通过但页面拉不到内容"的假象
+        final body = resp.data;
+        if (body is String) {
+          final t = body.toLowerCase();
+          if (body.isEmpty ||
+              t.contains('just a moment') ||
+              t.contains('cf-chl') ||
+              t.contains('challenge-platform') ||
+              t.contains('__cf_chl')) {
+            _log('探测 $url 返回空内容或 Cloudflare 挑战页，判不可用');
+            return null;
+          }
         }
         return _Probe(finalHost, latency);
       } on DioException catch (e) {

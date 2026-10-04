@@ -262,7 +262,7 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.search_off_rounded, size: 56, color: JellyTheme.textSecondary),
+          Icon(Icons.search_off_rounded, size: 48, color: JellyTheme.textSecondary),
           const SizedBox(height: 12),
           Text(
             '该状态下暂无记录',

@@ -38,6 +38,8 @@ class TtsSource {
     this.extraParams = '',
     this.hiFi = false,
     this.sendsSpeed = false,
+    // EasyVoice「AI 智能推荐配音」：让服务端用大模型自动分角色/音色
+    this.useAiVoice = false,
     // ── 调优 ────────────────────────────────────────────────
     this.maxConcurrency = 2,
     this.minIntervalMs = 200,
@@ -95,6 +97,16 @@ class TtsSource {
   /// ⚠️ 有的服务不认这个字段会**整体报错**，那就关掉。
   /// MiMo 永远不发送（它没有语速字段，见类文档）。
   final bool sendsSpeed;
+
+  /// EasyVoice「AI 智能推荐配音」（useLLM=true）。
+  ///
+  /// 开启后朗读交给 EasyVoice 的大模型：自动把文本按角色分段、
+  /// 推荐音色/语速/音调（多角色有声书效果）；关闭则用 [voice]
+  /// 固定音色直接合成（更快）。
+  final bool useAiVoice;
+
+  /// 只有 easyvoice 支持 AI 推荐配音
+  bool get aiVoiceAvailable => type == 'easyvoice';
 
   // ── 调优 ──────────────────────────────────────────────────
   /// 并发上限：同时在飞的请求数
@@ -169,6 +181,7 @@ class TtsSource {
           endpoint: 'http://192.168.1.100:3000',
           voice: 'zh-CN-XiaoxiaoNeural',
           audioFormat: 'mp3',
+          useAiVoice: true, // 默认打开 AI 智能推荐配音（多角色有声书）
           maxRetries: 2,
         );
       default: // network
@@ -205,6 +218,7 @@ class TtsSource {
     String? extraParams,
     bool? hiFi,
     bool? sendsSpeed,
+    bool? useAiVoice,
     int? maxConcurrency,
     int? minIntervalMs,
     int? prefetchSentences,
@@ -230,6 +244,7 @@ class TtsSource {
       extraParams: extraParams ?? this.extraParams,
       hiFi: hiFi ?? this.hiFi,
       sendsSpeed: sendsSpeed ?? this.sendsSpeed,
+      useAiVoice: useAiVoice ?? this.useAiVoice,
       maxConcurrency: maxConcurrency ?? this.maxConcurrency,
       minIntervalMs: minIntervalMs ?? this.minIntervalMs,
       prefetchSentences: prefetchSentences ?? this.prefetchSentences,
@@ -257,6 +272,7 @@ class TtsSource {
         'extraParams': extraParams,
         'hiFi': hiFi,
         'sendsSpeed': sendsSpeed,
+        'useAiVoice': useAiVoice,
         'maxConcurrency': maxConcurrency,
         'minIntervalMs': minIntervalMs,
         'prefetchSentences': prefetchSentences,
@@ -286,6 +302,7 @@ class TtsSource {
         extraParams: (j['extraParams'] ?? '').toString(),
         hiFi: j['hiFi'] == true,
         sendsSpeed: j['sendsSpeed'] == true,
+        useAiVoice: j['useAiVoice'] == true,
         maxConcurrency: (j['maxConcurrency'] as num?)?.toInt() ?? 2,
         minIntervalMs: (j['minIntervalMs'] as num?)?.toInt() ?? 200,
         prefetchSentences: (j['prefetchSentences'] as num?)?.toInt() ?? 3,

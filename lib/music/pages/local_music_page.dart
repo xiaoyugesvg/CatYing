@@ -78,7 +78,10 @@ class _LocalMusicPageState extends State<LocalMusicPage> {
         ],
       ),
       body: AnimatedBuilder(
-        animation: _svc,
+        // 🔴 还要监听 **player**：列表里高亮"正在播放"读的是 `_player.currentSong`
+        // ✗ → 只监听下载服务的话，**点歌后高亮不会刷新** ✗
+        //（`root_view.dart:100` 用的是同一招 `Listenable.merge` ✓）
+        animation: Listenable.merge([_svc, _player]),
         builder: (_, __) {
           final items = _svc.items;
           if (items.isEmpty) {

@@ -334,7 +334,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, size: 48, color: Colors.red),
+            const Icon(Icons.error_outline, size: 40, color: Colors.red),
             const SizedBox(height: 16),
             Text('加载失败: $_error'),
             const SizedBox(height: 16),

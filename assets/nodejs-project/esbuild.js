@@ -1,8 +1,19 @@
+// 构建脚本（Node 侧 bundle）
+//
+// 🔴 原实现有两个坑，都会给人**假的成功信号**：
+//   1. `esbuild.build(...)` **没有 await** ✗ —— 构建失败时脚本照样正常退出；
+//      而 onEnd 里那句 `readFileSync('dist/main.js')` 会先抛，
+//      于是真正的 esbuild 诊断被压在 unhandled rejection 下面，很难读 ✗
+//   2. `dist/main.js.md5` **全仓没有任何消费方** ✗（`lib/` 里只有 `index.js.md5`
+//      的校验路径）→ 写它属于自娱自乐，还会让人以为存在校验 ✓
+//
+// 现在：await + 检查 errors（失败**非 0 退出** ✓）；md5 默认不写，
+// 需要时 `NODE_MD5=1 npm run build` ✓（保留能力、去掉误导 ✓）。
 import * as esbuild from 'esbuild';
 import fs from 'fs';
 import { createHash } from 'crypto';
 
-esbuild.build({
+const result = await esbuild.build({
     entryPoints: ['src/main.js'],
     outfile: 'dist/main.js',
     bundle: true,
@@ -13,17 +24,23 @@ esbuild.build({
     target: 'node18',
     sourcemap: process.env.NODE_ENV === 'development' ? 'inline' : false,
     external: [],
-    plugins: [genMd5()],
 });
 
-function genMd5() {
-    return {
-        name: 'gen-output-file-md5',
-        setup(build) {
-            build.onEnd(async (_) => {
-                const md5 = createHash('md5').update(fs.readFileSync('dist/main.js')).digest('hex');
-                fs.writeFileSync('dist/main.js.md5', md5);
-            });
-        },
-    };
+if (result.errors.length > 0) {
+    console.error(`构建失败：${result.errors.length} 个错误`);
+    for (const e of result.errors) {
+        console.error(' -', e.text, e.location ? `@ ${e.location.file}:${e.location.line}` : '');
+    }
+    process.exit(1);
+}
+
+// 尺寸与 hash 都打出来：脚本"通过"不能只看退出码 ✓（本项目历史上就踩过
+// "构建脚本不做断言、失败也 exit 0"的坑 ✗），有这两个数就能核对产物真的换了 ✓
+const bytes = fs.statSync('dist/main.js').size;
+console.log(`构建完成：dist/main.js ${bytes} 字节`);
+
+if (process.env.NODE_MD5 === '1') {
+    const md5 = createHash('md5').update(fs.readFileSync('dist/main.js')).digest('hex');
+    fs.writeFileSync('dist/main.js.md5', md5);
+    console.log('dist/main.js.md5 =', md5);
 }

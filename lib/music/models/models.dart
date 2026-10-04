@@ -174,7 +174,11 @@ class Song {
         // 表现就是"整个搜索页只显示这行报错"。用 asInt 宽容转换。
         id: asInt(j['id']),
         name: (j['name'] ?? '').toString(),
-        artists: (j['artists'] ?? '').toString(),
+        // ⚠️ Node 侧（mapTrack / search / 歌手 / 专辑等）发的是**单数** `artist`，
+        // 这里历史上只读复数 `artists` → 6 个接口的歌手名恒为空，
+        // 而界面的 `artists.isEmpty ? album : artists` 会**回落显示专辑名**
+        //（用户看到的是"错的信息"而不是"缺失"）。两边都收，一处修完全部接口。
+        artists: (j['artists'] ?? j['artist'] ?? '').toString(),
         album: (j['album'] ?? '').toString(),
         coverUrl: _firstNonEmpty(j, const ['coverUrl', 'cover', 'picUrl']),
         duration: asDouble(j['duration']),
@@ -259,7 +263,13 @@ class Playlist {
   factory Playlist.fromJson(Map<String, dynamic> j) => Playlist(
         id: asInt(j['id']),
         name: (j['name'] ?? '').toString(),
-        coverUrl: j['coverUrl']?.toString(),
+        // ⚠️ Node 侧歌单接口（personalized / playlistSquare 等）发的是 `cover`，
+        // 这里只读 `coverUrl` → **推荐歌单 / 歌单广场封面恒为 null**（灰占位）。
+        // 而 `topLists` / `playlistDetail` 是手动映射 `e['cover']` 所以正常 ——
+        // 那正是"同一页有的有封面、有的没有"的真正原因。
+        // 与 `Song.fromJson` 保持同一套兜底顺序（那里用的 `_firstNonEmpty`
+        // 是 `Song` 的私有静态方法，`Playlist` 里用不到，所以这里内联写）。
+        coverUrl: (j['coverUrl'] ?? j['cover'] ?? j['picUrl'])?.toString(),
         trackCount: asInt(j['trackCount']),
         description: j['description']?.toString(),
         creator: j['creator']?.toString(),

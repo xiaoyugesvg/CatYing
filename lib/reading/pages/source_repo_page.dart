@@ -25,6 +25,7 @@ import '../source/source_config_store.dart';
 import '../source/source_definition.dart';
 import '../source/source_manager.dart';
 import '../theme/jelly_theme.dart';
+import 'comic_source_edit_page.dart';
 import '../../common/theme.dart';
 
 class SourceRepoPage extends StatefulWidget {
@@ -407,6 +408,41 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
     if (mounted) setState(() {});
   }
 
+  /// 打开漫画源编辑页（改名称/URL/抓取规则）。
+  ///
+  /// 编辑页保存后会 reload 源管理器；从本地配置里取该 id 的
+  /// SourceDefinition 传给编辑页（仓库列表只有 MangaSource 实例，
+  /// 编辑需要 definition 外壳 + 原始 config）。
+  Future<void> _editSource(MangaSource src) async {
+    try {
+      final defs = await SourceConfigStore().loadLocal();
+      SourceDefinition? found;
+      for (final d in defs) {
+        if (d.id == src.id) {
+          found = d;
+          break;
+        }
+      }
+      final def = found;
+      if (def == null) {
+        _toast('找不到该源的配置（可能来自云端缓存，请先从云端更新）');
+        return;
+      }
+      final changed = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ComicSourceEditPage(definition: def),
+        ),
+      );
+      if (changed == true) {
+        await SourceManager().reload();
+        if (mounted) setState(() {});
+      }
+    } catch (e) {
+      _toast('打开编辑失败：${e.toString().split('\n').first}');
+    }
+  }
+
   /// 手动导入卡片。
   ///
   /// ── 为什么要有这个 ────────────────────────────────────────────
@@ -430,6 +466,25 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
       void take(dynamic raw) {
         if (raw is! Map) return;
         final m = raw.cast<String, dynamic>();
+        // Cmbok 导出包装：{seq,id,name,url,enabled,...,json:"<SourceDefinition JSON>"}
+        // 配置本体在 json 字段（字符串），顶层 url 恒为空串 —— 必须先解包再取。
+        if (m['json'] is String && !m.containsKey('config')) {
+          try {
+            final inner = jsonDecode(m['json'] as String);
+            if (inner is List) {
+              for (final x in inner) {
+                take(x);
+              }
+              return;
+            }
+            if (inner is Map) {
+              take(inner);
+              return;
+            }
+          } catch (_) {
+            // 解包失败就当普通对象继续走下方分支
+          }
+        }
         // 单个源对象：有 config 字段
         if (m.containsKey('config') && m['config'] is Map) {
           defs.add(SourceDefinition.fromJson(m));
@@ -694,7 +749,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
         children: [
           Icon(
             Icons.folder_open_rounded,
-            size: 56,
+            size: 48,
             color: JellyTheme.textSecondary.withValues(alpha: 0.55),
           ),
           const SizedBox(height: 20),
@@ -773,53 +828,66 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
             ),
           ),
           const SizedBox(width: 8),
-          _buildSourceIcon(src),
-          const SizedBox(width: 10),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+            child: InkWell(
+              onTap: () => _editSource(src),
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
                   children: [
-                    Flexible(
-                      child: Text(
-                        src.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: AppTheme.fontHeadline,
-                          fontWeight: FontWeight.w600,
-                          color: enabled
-                              ? (isDark
-                                  ? Colors.white
-                                  : JellyTheme.textPrimaryLight)
-                              : JellyTheme.textSecondary,
-                        ),
+                    _buildSourceIcon(src),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  src.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: AppTheme.fontHeadline,
+                                    fontWeight: FontWeight.w600,
+                                    color: enabled
+                                        ? (isDark
+                                            ? Colors.white
+                                            : JellyTheme.textPrimaryLight)
+                                        : JellyTheme.textSecondary,
+                                  ),
+                                ),
+                              ),
+                              if (src.needsMagic) ...[
+                                const SizedBox(width: 6),
+                                Image.asset(
+                                  'assets/icons/magic_stick.png',
+                                  width: 14,
+                                  height: 14,
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            // 标识：优先取 config 里的短名（如 copymanga / zaimanhua），
+                            // 没有就用 id（book 源常见 "config:某某漫画" 这种形式）
+                            _sourceShortId(src),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: AppTheme.fontFootnote,
+                              color: JellyTheme.textSecondary,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    if (src.needsMagic) ...[
-                      const SizedBox(width: 6),
-                      Image.asset(
-                        'assets/icons/magic_stick.png',
-                        width: 14,
-                        height: 14,
-                      ),
-                    ],
                   ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  // 标识：优先取 config 里的短名（如 copymanga / zaimanhua），
-                  // 没有就用 id（book 源常见 "config:某某漫画" 这种形式）
-                  _sourceShortId(src),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: AppTheme.fontFootnote,
-                    color: JellyTheme.textSecondary,
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
           Switch(

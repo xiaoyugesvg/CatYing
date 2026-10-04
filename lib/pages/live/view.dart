@@ -12,10 +12,12 @@ import 'package:media_kit_video/media_kit_video.dart'
 import '../../common/theme.dart';
 import '../../common/system_ui.dart';
 import '../../models/live_models.dart';
+import '../../models/player_engine.dart';
 import '../../services/epg_service.dart';
 import '../../services/live_service.dart';
 import '../../services/main_tab_controller.dart';
 import '../../services/player_fullscreen_controller.dart';
+import '../../services/player_prefs.dart';
 import '../../widgets/app_player.dart';
 import '../../widgets/ios_av_player.dart';
 import '../../widgets/video_player_pip.dart';
@@ -41,6 +43,11 @@ class _LivePageState extends State<LivePage> {
 
   /// iOS：与点播共用 IosAvPlayer（AvEngine）
   IosAvPlayer? _avPlayer;
+
+  /// iOS 是否启用 mpv 备用内核（设置里可切换；默认 AVPlayer，
+  /// 遇到 flv/ts/rtmp 等 AVPlayer 不支持的流时可切到 mpv）
+  bool get _iosUseMpv =>
+      Platform.isIOS && PlayerPrefs.instance.vodEngine.value == PlayerEngine.mpv;
   bool _fullscreen = false;
 
   /// 短剧模式：纯竖屏全屏（复用 _fullscreen 全屏布局，方向锁 portraitUp）
@@ -118,7 +125,7 @@ class _LivePageState extends State<LivePage> {
           _autoplayCurrent();
           return;
         }
-        final useAv = Platform.isIOS && _avPlayer != null;
+        final useAv = Platform.isIOS && !_iosUseMpv && _avPlayer != null;
         if (useAv) {
           // ⚠️ iOS 共享原生 AvEngine（AVPlayer 单例）：点播/音乐最后
           // open 过的话，原生 item 已被它们的内容覆盖，直接 play() 恢复的
@@ -231,11 +238,14 @@ class _LivePageState extends State<LivePage> {
       if (referer.isNotEmpty) 'Referer': referer,
       if (origin.isNotEmpty) 'Origin': origin,
     };
-    if (Platform.isIOS) {
-      // 与点播同一 AVPlayer 内核，进出小窗/手势一致
+    if (Platform.isIOS && !_iosUseMpv) {
+      // 默认 AVPlayer 内核（与点播一致，进出小窗/手势一致）
+      _player?.pause(); // 若之前用 mpv 在播，先停掉避免双声
       _avPlayer ??= IosAvPlayer(config: const AppConfig(title: '猫影直播'));
       _avPlayer!.open(AppMedia(url, httpHeaders: headers));
     } else {
+      // 桌面/Android，或 iOS 切到 mpv 备用内核（通吃 flv/ts/rtmp）
+      _avPlayer?.pause(); // iOS 切回 mpv 时停掉 AVPlayer 避免双声
       _player!.open(Media(url, httpHeaders: headers));
     }
     // 预热原生 PiP，否则点小窗时 AVPlayer 冷启动易失败/黑屏
@@ -243,16 +253,16 @@ class _LivePageState extends State<LivePage> {
       VideoPlayerPip.instance.prepareIos(url: url, headers: headers);
     }
     // 订阅播放错误，避免一直转圈无提示。
-    // ⚠️ 必须监听**实际在播的那个播放器**：iOS 用 AVPlayer（_avPlayer），
-    // 其它平台用 media_kit（_player）。旧写法一律挂 _player 的流 ——
-    // iOS 上 _player 根本没开流，position/error 永远不触发，
+    // ⚠️ 必须监听**实际在播的那个播放器**：iOS 默认用 AVPlayer（_avPlayer），
+    // 切到 mpv 或其它平台用 media_kit（_player）。旧写法一律挂 _player 的流 ——
+    // iOS AVPlayer 路径下 _player 根本没开流，position/error 永远不触发，
     // 「正在加载…」只能等 20 秒兜底才消失（视频早就在播了）。
     _errSub?.cancel();
     _switchReadySub?.cancel();
     _playSub?.cancel();
     _switchTimer?.cancel();
     _playingConfirmTimer?.cancel();
-    final useAv = Platform.isIOS && _avPlayer != null;
+    final useAv = Platform.isIOS && !_iosUseMpv && _avPlayer != null;
     // ⚠️ 不能用 `useAv ? _avPlayer!.stream : _player!.stream` 三元：
     // AppPlayerStreams（video_player）与 PlayerStream（media_kit）没有公共基类，
     // 三元会把它俩推断成 Object，.error/.position/.playing 全部 undefined（编译失败）。
@@ -302,7 +312,8 @@ class _LivePageState extends State<LivePage> {
         _playingConfirmTimer = Timer(const Duration(milliseconds: 2500), () {
           _playingConfirmTimer = null;
           if (!mounted || !_switching) return;
-          final pos = Platform.isIOS
+          final useAvNow = Platform.isIOS && !_iosUseMpv && _avPlayer != null;
+          final pos = useAvNow
               ? (_avPlayer?.state.position ?? Duration.zero)
               : (_player?.state.position ?? Duration.zero);
           if (pos > Duration.zero) {
@@ -823,7 +834,8 @@ class _LivePageState extends State<LivePage> {
 
   Future<void> _pickSource(BuildContext context, LiveController c) async {
     // 导入直播源（m3u/txt URL）——左栏底部 + 号进入。
-    // 与设置页一致：可填「源名称 + 地址」；多源模式追加，单源模式覆盖当前
+    // 与设置页一致：可填「源名称 + 地址」；始终追加新源（名称生效），
+    // 不再出现「单源覆盖当前、名称被丢弃」的行为
     final result = await showDialog<(String, String)>(
       context: context,
       builder: (ctx) {
@@ -879,12 +891,8 @@ class _LivePageState extends State<LivePage> {
     if (result == null || result.$2.isEmpty) return;
     final url = result.$2.trim();
     final name = result.$1.trim();
-    // 已有多个源 → 追加新源（不覆盖）；单源 → 保持原覆盖行为
-    if (c.sources.length > 1) {
-      await c.addSource(url, name: name.isEmpty ? null : name);
-    } else {
-      await c.reloadFromUrl(url);
-    }
+    // 始终走 addSource：追加新源（名称生效），而不是覆盖当前
+    await c.addSource(url, name: name.isEmpty ? null : name);
     if (mounted) {
       c.selectGroup(0);
       _autoplayCurrent();
@@ -1079,7 +1087,7 @@ class _LivePageState extends State<LivePage> {
     //（引擎不再提交该平台视图的图层 → 原生视图被移除）。
     // 只隐藏画面，**不 dispose 播放器**，音频与播放进度都保留。
     final routeIsCurrent = ModalRoute.of(context)?.isCurrent ?? true;
-    final isIosAv = Platform.isIOS && _avPlayer != null;
+    final isIosAv = Platform.isIOS && !_iosUseMpv && _avPlayer != null;
 
     return Container(
       color: Colors.black,
@@ -1567,7 +1575,7 @@ class _LivePageState extends State<LivePage> {
                             ),
                           ),
                           subtitle: Text(
-                            isActive ? '当前播放' : '未下载',
+                            isActive ? '当前播放' : src.statusText(),
                             style: TextStyle(
                               color: isActive
                                   ? AppTheme.accentColor.withValues(alpha: 0.7)

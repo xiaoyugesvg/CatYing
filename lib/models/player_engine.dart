@@ -30,14 +30,15 @@ enum PlayerEngine {
 
   /// 实际可供用户选择的播放器列表
   ///
-  /// 按「本仓库真正支持的目标平台」过滤，避免 iOS 上出现选了就不可用的内核：
   /// - Apple（iOS / macOS）：avplayer 为默认主内核（与系统小窗共用同一 AVPlayer），
-  ///   webview 用于网页播放页；mpv 在本仓库无 iOS/macOS 原生库，不列出。
+  ///   mpv（media_kit_libs_ios_video）为备用内核（支持 flv/ts/rtmp 等 AVPlayer
+  ///   不支持的直播格式；默认不启用，用户在设置里切换），
+  ///   webview 用于网页播放页。
   /// - Android：mpv + webview（无 AVPlayer）。
   /// - 桌面（Windows / Linux）：mpv（window_manager 小窗路径）。
   static List<PlayerEngine> get availableEngines {
     if (Platform.isIOS || Platform.isMacOS) {
-      return const [PlayerEngine.avplayer, PlayerEngine.webview];
+      return const [PlayerEngine.avplayer, PlayerEngine.mpv, PlayerEngine.webview];
     }
     if (Platform.isAndroid) {
       return const [PlayerEngine.mpv, PlayerEngine.webview];

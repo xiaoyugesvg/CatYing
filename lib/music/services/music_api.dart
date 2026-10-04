@@ -349,6 +349,28 @@ class MusicApi {
     );
   }
 
+  /// 热门搜索词。
+  ///
+  /// ⚠️ 这次是**语义补齐**：以前"请求失败"和"真的没有热词"**都返回空列表** ✗
+  /// → `warmUpMusicData()` 于是**永远以为预热成功** → 首页那条
+  /// 「音乐数据加载失败 · 点击重试」提示条是**死 UI** ✗
+  ///（`_doCall` 把一切异常吞成 `{ok:false}`，不抛异常，所以 try/catch 永远 catch 不到 ✓）。
+  /// 现在把 `ok` 单独带出来 ✓；`hotSearch()` 保持原样，既有调用方不受影响 ✓。
+  Future<({bool ok, List<String> list, String error})> hotSearchResult() async {
+    final r = await _call({'action': 'hotSearch'});
+    final m = _asMap(r);
+    final ok = m['ok'] != false; // Node 侧失败会带 ok:false
+    final l = m['list'];
+    final list = l is List
+        ? l.map((e) => e.toString()).where((e) => e.isNotEmpty).toList()
+        : const <String>[];
+    return (
+      ok: ok && list.isNotEmpty,
+      list: list,
+      error: ok ? '' : (m['error'] ?? '热门搜索获取失败').toString(),
+    );
+  }
+
   /// 热门搜索词
   Future<List<String>> hotSearch() async {
     final r = await _call({'action': 'hotSearch'});
@@ -542,6 +564,32 @@ class MusicApi {
   // 发现页
   // ============================================================
 
+  /// 榜单列表（带 `ok`）。
+  ///
+  /// ⚠️ 原版 `topLists()` **失败与"真的没有榜单"都返回 `[]`** ✗ →
+  /// `library_page` 的 `if (_tops.isNotEmpty)` 在 Node 后台未就绪时会让
+  /// 「榜单」**整块静默消失** ✗（无提示、无重试）→ 用户以为这个模块没有榜单 ✓。
+  /// 这个变体把成败带出来；原方法保留不动，既有调用方零影响 ✓。
+  Future<({bool ok, List<TopList> list, String error})> topListsResult(
+      {SongSource source = SongSource.netease}) async {
+    final r = await _call({'action': 'topLists', 'source': source.key});
+    final m = _asMap(r);
+    final list = _listOf(r, 'list')
+        .map((e) => TopList(
+              id: asInt(e['id']),
+              name: (e['name'] ?? '').toString(),
+              coverUrl: e['cover']?.toString(),
+              updateFrequency: e['updateFrequency']?.toString(),
+            ))
+        .toList();
+    return (
+      // 成功但确实没内容，对界面来说同样是"没得显示" → 计为失败以便触发重试 ✓
+      ok: m['ok'] != false && list.isNotEmpty,
+      list: list,
+      error: (m['error'] ?? '榜单获取失败').toString(),
+    );
+  }
+
   /// 榜单列表
   Future<List<TopList>> topLists({SongSource source = SongSource.netease}) async {
     final r = await _call({'action': 'topLists', 'source': source.key});
@@ -612,6 +660,29 @@ class MusicApi {
   Future<List<Song>> simiSongs(int id) async {
     final r = await _call({'action': 'simiSongs', 'id': id});
     return _listOf(r, 'list').map(Song.fromJson).toList();
+  }
+
+  /// 歌曲评论（带 `ok`）。
+  ///
+  /// ⚠️ 原版 `comments()` **完全不看 `ok`** ✗ → 接口失败时返回空列表 ✗ →
+  /// `comment_sheet` 一路走到「**还没有评论**」✗ ——
+  /// 把"**请求失败**"显示成了"没有评论" ✓；而且翻页失败会把已加载的
+  /// 整页评论**替换成错误页** ✗。
+  /// 这个变体把成败带出来；原方法保留不动，既有调用方零影响 ✓。
+  Future<({bool ok, List<SongComment> list, String error})> commentsResult(
+      int id,
+      {int limit = 30, int offset = 0}) async {
+    final r = await _call(
+        {'action': 'comments', 'id': id, 'limit': limit, 'offset': offset});
+    final m = _asMap(r);
+    final list = _listOf(r, 'list').map(SongComment.fromJson).toList();
+    return (
+      // ⚠️ **空列表不算失败** —— 这首歌真的可能没有评论 ✓
+      // 只有 Node 明确回 ok:false 才是失败 ✓（这正是原版分不清的那件事）
+      ok: m['ok'] != false,
+      list: list,
+      error: (m['error'] ?? '评论获取失败').toString(),
+    );
   }
 
   /// 歌曲评论

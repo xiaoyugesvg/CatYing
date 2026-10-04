@@ -296,13 +296,16 @@ class BookshelfService extends ChangeNotifier {
   }
 
   /// 设置某本书的书架归属（先清空再添加，用于多选弹窗）
-  /// [meta] 为 Book/Comic 的 JSON 快照，让书架页不依赖收藏夹即可展示与打开
+  /// [meta] 为 Book/Comic 的 JSON 快照，让书架页不依赖收藏夹即可展示与打开。
+  /// 注意：未传 meta 时自动保留该书现有快照（[findItemMeta]），
+  /// 避免"全量覆盖"把本地导入书等仅靠快照显示的条目清成空 → 书架不显示。
   Future<void> setBookshelvesForItem(
     List<String> bookshelfIds,
     String itemId,
     BookshelfItemType type, {
     String? meta,
   }) async {
+    meta ??= findItemMeta(itemId, type);
     _items.removeWhere((i) => i.itemId == itemId && i.type == type);
     final now = DateTime.now().millisecondsSinceEpoch;
     for (final shelfId in bookshelfIds) {

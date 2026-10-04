@@ -603,11 +603,19 @@ class _DiscoverPageState extends State<DiscoverPage>
       out.add(SliverPadding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         sliver: SliverGrid(
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 3,
             mainAxisSpacing: 14,
             crossAxisSpacing: 12,
-            childAspectRatio: 0.68,
+            // 🔴 与喜马拉雅分类页同款问题：固定比例**两头堵** ✗ ——
+            // 宽屏格子被拉高、底部大片留白；窄屏 + 系统大字号时内容溢出 ✗。
+            // 改成按**可用宽度**算格子高（1:1 封面 + 两行标题，随字号缩放）✓
+            mainAxisExtent: () {
+              final w =
+                  (MediaQuery.sizeOf(context).width - 16 * 2 - 12 * 2) / 3;
+              final ts = MediaQuery.textScalerOf(context);
+              return w + 8 + ts.scale(12) * 1.35 * 2 + 6;
+            }(),
           ),
           delegate: SliverChildBuilderDelegate(
             (c, i) => _rankCard(_topLists[i]),
@@ -624,11 +632,19 @@ class _DiscoverPageState extends State<DiscoverPage>
       out.add(SliverPadding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         sliver: SliverGrid(
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 3,
             crossAxisSpacing: 10,
             mainAxisSpacing: 14,
-            childAspectRatio: 0.66,
+            // 🔴 同榜单/分类页：固定比例**两头堵** ✗（宽屏格子被拉高、底部大片留白；
+            // 窄屏 + 系统大字号溢出）→ 改成按**可用宽度**算格子高
+            //（1:1 封面 + 一行标题，随字号缩放）✓
+            mainAxisExtent: () {
+              final w =
+                  (MediaQuery.sizeOf(context).width - 16 * 2 - 10 * 2) / 3;
+              final ts = MediaQuery.textScalerOf(context);
+              return w + 8 + ts.scale(12) * 1.35 + 6;
+            }(),
           ),
           delegate: SliverChildBuilderDelegate(
             (c, i) {

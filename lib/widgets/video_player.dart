@@ -1528,6 +1528,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
   }
 
+  /// 顶栏返回键：全屏/沉浸态先退出全屏（还原方向锁），再执行页面返回。
+  ///
+  /// 修复：旧实现（全屏时直接 `widget.onBack`）会把 iOS 横屏方向锁
+  /// （'videoFullscreen' landscape）带出全屏——返回详情页后整个 App
+  /// 滞留横屏，且短剧/抖音模式也不会被清理。
+  Future<void> _handleHeaderBack() async {
+    final currentlyFull = WindowFullScreen.instance.isActive || _isImmersive;
+    if (currentlyFull) {
+      await _exitFullScreen();
+    }
+    widget.onBack?.call();
+  }
+
   Future<void> _onUserExitFullscreen() async {
     AppLog.instance.log(
       '=== _onUserExitFullscreen: _isNativeFullscreen=$_isNativeFullscreen, isPip=${VideoPlayerPip.instance.isActive} ===',
@@ -2474,10 +2487,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         child: Row(
           children: [
             // 返回键：与右侧功能键同一套玻璃底衬，保持整条顶栏视觉一致
+            // ⚠️ 全屏/沉浸态必须先退全屏再返回：旧实现全屏时直接 onBack，
+            // 横屏方向锁（'videoFullscreen' landscape）无人解锁 →
+            // 返回后详情页/整个界面滞留横屏。
             _iconButton(
               icon: Icons.arrow_back_ios_new,
               size: 17,
-              onTap: widget.onBack ?? () => Navigator.of(context).maybePop(),
+              onTap: _handleHeaderBack,
             ),
 
             // 网速/缓冲状态：紧跟返回键右侧（用户要求）
@@ -3949,16 +3965,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         // 顶栏避让状态栏（功能栏高度 contentH=38）：
         // - 竖屏内嵌（默认详情页播放器，pad.top>0）：外层（详情页）已垫
         //   一条与状态栏等高的黑条（已减半），不重复加 pad.top，留 4px 呼吸，
-        //   并按用户要求整体再下移 **1 个功能栏高度**（+38）
+        //   并按下移 **1 个功能栏高度**（+38）要求整体下移；本轮再往上
+        //   收 8px（38→30），即"再往上移动一点点"。
         // - 纯竖屏全屏（短剧/抖音，immersive 下 pad.top=0）：贴顶，仅 8px
         //   呼吸（总间距 = topBarTopPadding 8 + 8 = 16，用户既定 8+8=16）
-        // - 横屏全屏（pad.top=0）：16，比原 24 更贴顶，iOS 横屏状态栏
-        //   若与按钮挤行则回调
+        // - 横屏全屏（pad.top=0）：8，总间距 16（top 8 + 8），比原 24
+        //   更贴顶，本轮再往上收 8px。
         padding: EdgeInsets.only(
           top: top +
               (pad.top > 0
-                  ? 4 + 38
-                  : (_dramaMode || _douyinMode ? 8 : 16)),
+                  ? 4 + 30
+                  : (_dramaMode || _douyinMode ? 8 : 8)),
           left: 4 + pad.left,
           right: 4 + pad.right,
           bottom: 8,

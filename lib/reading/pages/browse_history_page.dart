@@ -357,7 +357,7 @@ class _ComicHistoryTabState extends State<_ComicHistoryTab> {
           decoration: InputDecoration(
             isDense: true,
             filled: false,
-            hintText: '搜索足迹记录',
+            hintText: widget.footprintMode ? '搜索漫画' : '搜索足迹记录',
             hintStyle: TextStyle(
               fontSize: AppTheme.fontBody,
               color: JellyTheme.textSecondary,
@@ -483,7 +483,7 @@ Widget _buildEmpty({String text = '暂无浏览记录'}) {
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.history_rounded, size: 56, color: JellyTheme.textSecondary),
+        Icon(Icons.history_rounded, size: 48, color: JellyTheme.textSecondary),
         const SizedBox(height: 12),
         Text(
           text,

@@ -31,6 +31,7 @@ import 'reading/models/book_source.dart';
 import 'reading/services/tts_service.dart';
 import 'music/services/settings_store.dart';
 import 'music/services/player_manager.dart';
+import 'music/services/download_service.dart';
 import 'common/module_theme_store.dart';
 import 'common/module_theme_sync.dart';
 import 'common/theme_mode_store.dart';
@@ -194,6 +195,11 @@ void main() async {
   // #4/#5：音乐库（最近播放 + 收藏）—— 要在 PlayerManager 之前
     // 准备好，否则第一首播放时 addRecent 还在 init 中
     await MusicLibraryStore.instance.init();
+    // 🔴 下载清单**必须在 PlayerManager 之前**初始化：
+    // `player_manager` 的"本地优先播放"是**同步**读 `bySong()`，
+    // 清单还没加载 → 已下载的歌被当成没下载 → 走去网络解析
+    //（离线直接播不了；等于"下载了也白下"）。
+    await MusicDownloadService.instance.init();
     await MusicPlayerManager.instance.init();
 
   // 首页导航栏功能开关与顺序（设置 → 主页页面）

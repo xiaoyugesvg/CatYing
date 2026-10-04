@@ -73,10 +73,21 @@ import { KUGOU_VENDOR, KUGOU_DEPS } from './kugou_vendor.js';
 //    **影视 spider / 阅读书源 / 音乐 共用的同一个进程**，而它是**全进程**级开关
 //    —— 改它会影响影视与阅读的出网方式（用户明确要求别影响它们）。
 //    酷狗自己的代理只需 `KUGOU_API_PROXY`（只有上游 vendor 读它）。
+//
+//    🔧 修复：酷狗默认直连，但部分网络下酷狗接口会被拒/超时。
+//    「有代理就用代理」—— 跟随全局 `HTTP_PROXY`/`HTTPS_PROXY`
+//    （用户配了系统代理/环境代理时酷狗自动走代理；没配就直连，
+//    行为与之前完全一致）。优先级：KUGOU_BRIDGE_PROXY > 全局代理 > 直连。
 // ────────────────────────────────────────────────────────────────
 const BRIDGE_PROXY = String(process.env.KUGOU_BRIDGE_PROXY || '').trim();
+const GLOBAL_PROXY = String(
+    process.env.HTTP_PROXY || process.env.http_proxy ||
+    process.env.HTTPS_PROXY || process.env.https_proxy || ''
+).trim();
 if (BRIDGE_PROXY) {
     process.env.KUGOU_API_PROXY = BRIDGE_PROXY;
+} else if (GLOBAL_PROXY) {
+    process.env.KUGOU_API_PROXY = GLOBAL_PROXY;
 } else {
     delete process.env.KUGOU_API_PROXY;
 }

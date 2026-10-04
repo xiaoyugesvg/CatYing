@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import 'music_components.dart';
 import '../services/music_api.dart';
 import '../theme/music_theme.dart';
 import '../../common/theme.dart';
@@ -68,7 +69,12 @@ class _CommentSheetState extends State<_CommentSheet> {
       _loadingMore = true;
     });
     try {
-      final list = await MusicApi.instance.comments(
+      // ⚠️ 改用带 `ok` 的变体：原来调 `comments()`，它**把失败完全吞掉** ✗ →
+      // 接口失败时返回空列表 → 于是显示「还没有评论」✗
+      //（把"请求失败"说成了"没有评论" ✓）。现在能分清：
+      //   · `ok:false`  → 失败 → 显示错误 + 重试（重试按钮**已经存在**于下面 ✓）
+      //   · 空列表      → 真的没有评论 ✓
+      final r = await MusicApi.instance.commentsResult(
         widget.song.id,
         limit: _pageSize,
         offset: _items.length,
@@ -77,6 +83,17 @@ class _CommentSheetState extends State<_CommentSheet> {
       setState(() {
         _loading = false;
         _loadingMore = false;
+        if (!r.ok) {
+          _error = r.error.isEmpty ? '评论加载失败' : r.error;
+          // ⚠️ **刻意不动 `_hasMore`、也不清空 `_items`** ✓
+          //   · 不动 `_hasMore` → 下面的「重试」按钮点了能真的重来 ✓
+          //   · 不清 `_items` → 翻页失败时**已加载的评论不会消失** ✓
+          //     （原来 `_hasMore = false` + 错误页整页替换 → 翻页一失败，前面
+          //      已看到的评论全被换成一张错误页 ✗）
+          return;
+        }
+        _error = ''; // 成功就清掉上一次的错误
+        final list = r.list;
         if (list.isEmpty) {
           _hasMore = false;
           return;
@@ -244,16 +261,10 @@ class _CommentTile extends StatelessWidget {
                           fontSize: AppTheme.fontFootnote),
                     ),
                   )
-                : Image.network(
-                    avatar,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      color: MusicTheme.fill,
-                      alignment: Alignment.center,
-                      child: Icon(Icons.person,
-                          size: 18, color: MusicTheme.secondary),
-                    ),
-                  ),
+                // ✅ 改用共用的 `CoverImage`（和封面同一条链路）：
+                //   · 走 App 的**磁盘缓存 + 浏览器 UA 头** → 不再每次滚动都重新下载 ✗
+                //   · 自带占位与失败降级（下面手写的那一套 Hero/占位可以退休了 ✓）
+                : CoverImage(url: avatar, size: 34, circle: true),
           ),
         ),
         const SizedBox(width: 10),

@@ -45,7 +45,6 @@ const http = axios.create({ timeout: 15000, headers: { 'User-Agent': UA } });
  * —— 这是本数据源的已知取舍：**搜索结果只给专辑，必须先进专辑才能播**。
  */
 const urlCache = new Map();
-const albumMeta = new Map(); // albumId → {name, cover, nickname}
 
 function humanize(e) {
     if (e && e.response) return '接口返回 HTTP ' + e.response.status;
@@ -110,6 +109,10 @@ export async function ximalayaCategory(categoryId, page = 1) {
 export async function ximalayaAlbum(albumId) {
     const aid = String(albumId || '').trim();
     if (!aid) return { ok: false, error: '缺少专辑 id' };
+    // ⚠️ 每进一张专辑就**清空旧直链缓存**（播放地址本来就是"进过专辑才能播"的语义）。
+    // 否则 `urlCache` 只增不减：单张专辑实测可到 5991 集，而 Node 进程与 App 同生命周期
+    // → 长时间刷有声书会让内存持续增长。
+    urlCache.clear();
     const base =
         `${TRACK_HOST}/mobile/others/ca/album/track/${aid}/true/0/200?albumId=${aid}`;
     try {
@@ -117,7 +120,11 @@ export async function ximalayaAlbum(albumId) {
         const j = first.data || {};
         const album = j.album || {};
         const tracks = (j.tracks && j.tracks.list) || [];
-        const maxPageId = (j.tracks && j.tracks.maxPageId) || 1;
+        // ⚠️ `maxPageId` 由服务端决定且**没有上限**：实测有专辑到 15 页（5991 集）。
+        // 每页一次请求（15s 超时）→ 不夹取的话最坏能阻塞好几分钟，
+        // 期间这条 `/music/api` 一直挂着。封顶 30 页。
+        const rawMaxPage = Number((j.tracks && j.tracks.maxPageId) || 1);
+        const maxPageId = Math.min(Number.isFinite(rawMaxPage) ? rawMaxPage : 1, 30);
 
         const all = tracks.slice();
         for (let p = 2; p <= maxPageId; p++) {
@@ -131,11 +138,6 @@ export async function ximalayaAlbum(albumId) {
         }
 
         const cover = String(album.coverLarge || '');
-        albumMeta.set(aid, {
-            name: String(album.title || ''),
-            cover,
-            nickname: String((album.nickname || (album.user && album.user.nickname)) || ''),
-        });
 
         const list = [];
         let skipped = 0; // 没有直链的集数（版权受限）—— 报给上层，别装成功

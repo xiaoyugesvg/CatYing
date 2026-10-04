@@ -27,16 +27,39 @@ Future<bool> musicToggleFavorite(Song song) async {
   return on;
 }
 
-/// 加入下载（去重、串行、清单持久化都在下载服务里）
+/// 加入下载（去重、串行、清单持久化都在下载服务里）。
+///
+/// ⚠️ 提示必须**按真实结果**给：`enqueue()` 对"已在清单里"的歌是**静默忽略**的，
+/// 而这里原来**无条件**弹「已加入下载」→ 对一首**已经下好**的歌再点，
+/// 仍然说"已加入下载"，用户以为会下第二遍 ✗
 Future<void> musicEnqueueDownload(Song song) async {
-  await MusicDownloadService.instance.enqueue(song);
+  final svc = MusicDownloadService.instance;
+  await svc.init();
+  if (svc.isDownloaded(song)) {
+    AppToast.show('这首歌已经下载过了', song.name);
+    return;
+  }
+  // 排队中/下载中的也不重复提示（失败的可重来）
+  final exist = svc.bySong(song);
+  if (exist != null && exist.status != MusicDownloadStatus.failed) {
+    AppToast.show('已在下载队列里', song.name);
+    return;
+  }
+  await svc.enqueue(song);
   AppToast.show('已加入下载', song.name);
 }
 
 /// 迷你播放器的**长按快捷条**：收藏 / 历史 / 下载。
 ///
+/// ⚠️ **已确认全项目 0 调用** ✓（`grep showMiniPlayerActions` 只有这个定义本身 ✓）——
+/// 迷你播放器的长按快捷条是用户自己实现的（见 `mini_player.dart` ✓），与它无关 ✓。
+///
+/// 标 `@Deprecated` 而不是直接删除：函数体有 ~120 行 ✗，删除需要**整段精确匹配**
+/// （读写之间行号会漂），风险不对称 ✗。真要清掉时：**从这一行到文件末尾整段删除**即可 ✓。
+///
 /// 为什么走长按而不是摆在底栏：用户要求底栏要**短**（不能比悬浮菜单栏长），
 /// 六个键摆不下 —— 所以三个常用键直接摆（⏮⏯⏭），这三个放长按。
+@Deprecated('无调用方：迷你播放器长按已用独立实现，本函数待删除')
 Future<void> showMiniPlayerActions(Song song) async {
   final ctx = VideoPlayerPip.navigatorKey.currentContext;
   if (ctx == null || !ctx.mounted) return;

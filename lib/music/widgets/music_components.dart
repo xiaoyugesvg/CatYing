@@ -11,6 +11,7 @@ import '../theme/music_theme.dart';
 import '../../common/theme.dart';
 import '../../widgets/app_toast.dart';
 import 'comment_sheet.dart';
+import 'quick_actions.dart';
 import '../pages/playlist_page.dart';
 
 /// 音乐模块的通用 UI 组件 —— 对应 Beans 的 `Components.swift` / `SongCell.swift`。
@@ -62,6 +63,14 @@ class _CoverImageState extends State<CoverImage> {
   static const int _maxRetries = 2;
   int _attempts = 0;
 
+  /// 与 Node 侧音乐源同款的浏览器 UA。
+  ///
+  /// 网易云/酷狗图床**对无 UA 的请求可能直接 403/拒载**（喜马拉雅已证实），
+  /// `CachedNetworkImage` 默认不带 UA —— 必须显式带上，否则封面就是灰块。
+  static const String _ua =
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+      'AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
+
   @override
   void didUpdateWidget(CoverImage old) {
     super.didUpdateWidget(old);
@@ -83,15 +92,12 @@ class _CoverImageState extends State<CoverImage> {
   @override
   Widget build(BuildContext context) {
     final radius = widget.circle ? widget.size / 2 : widget.cornerRadius;
-    // ⚠️ 网易云封面**降级为 http** —— 这是**实测驱动的规避**，不是拍脑袋：
-    //   · 「新歌速递 / 搜索」的封面是 `http://p1/p2.music.126.net/...` → App 里**能显示** ✓
-    //   · 「推荐歌单 / 排行榜」的封面是 `https://p1.music.126.net/...` → App 里**一直空白** ✗
-    // 同一 CDN、我本机裸请求 https 那张也是 200 ✓ —— 所以问题在 App 侧这条 https 路径上。
-    // 在**渲染层**统一降级（单点改动，不用去改 Song/Playlist/TopList 三个模型）。
-    var u = (widget.url ?? '').trim();
-    if (u.startsWith('https://') && u.contains('.music.126.net/')) {
-      u = 'http://${u.substring('https://'.length)}';
-    }
+    // 注：这里曾经有一段"把网易云 https 封面降级为 http"的规避代码，**已移除** ——
+    // 那个改动是**基于相关性猜的**（"能出图的都是 http"），而真因另有其人：
+    // `Playlist.fromJson` 以前只读 `coverUrl`，而 Node 发的是 `cover` →
+    // 推荐歌单/歌单广场的封面**根本没有 URL**（不是协议问题）。真因已在模型层修掉。
+    // 降级的副作用是"同一张图按 http/https 各存一份缓存"，去掉更好。
+    final u = (widget.url ?? '').trim();
     Widget child;
     if (u.isEmpty) {
       child = _placeholder(radius);
@@ -106,6 +112,9 @@ class _CoverImageState extends State<CoverImage> {
         width: widget.size,
         height: widget.size,
         fit: BoxFit.cover,
+        // 图床对无 UA 的请求可能 403/拒载（网易、喜马拉雅都证实过）——
+        // CachedNetworkImage 默认不带 UA，必须显式带上浏览器 UA。
+        httpHeaders: const {'User-Agent': _ua},
         // 加载失败退回占位（不显示破图图标），并安排一次重试
         errorBuilder: (_, __, ___) {
           _scheduleRetry();
@@ -365,6 +374,18 @@ Future<void> showSongActions(
             ),
           ),
           const Divider(height: 1),
+          // 🔴 收藏：**菜单里原来根本没有这一项**，而音乐库的空态文案却写着
+          // "在歌曲右侧菜单里可以收藏" → 用户按提示找不到入口 ✗
+          // 现在补上，并复用共用动作（与迷你播放器快捷条、播放页红心同一套逻辑）。
+          ListTile(
+            leading:
+                Icon(Icons.favorite_border_rounded, color: MusicTheme.tint),
+            title: Text('收藏', style: TextStyle(color: MusicTheme.label)),
+            onTap: () {
+              Navigator.pop(ctx);
+              musicToggleFavorite(song);
+            },
+          ),
           ListTile(
             leading: Icon(Icons.playlist_play_rounded, color: MusicTheme.tint),
             title: Text('下一首播放', style: TextStyle(color: MusicTheme.label)),

@@ -124,10 +124,14 @@ class _SearchPageState extends State<SearchPage>
       _artists = const [];
       _albums = const [];
     });
-    await _pushHistory(k);
-    if (!mounted || epoch != _runEpoch) return;
-
+    // 🔴 `_pushHistory` **必须放进 try**：
+    // 它原本在 try **之外**（下一行才是 `try {`）→ 一旦它抛异常（写历史失败），
+    // 流程就**跳过了下面的 catch** → `_loading` 永远停在 `true` ✗
+    // → 搜索页**永久转圈**，而且再搜也救不回来（新的一次搜索又会走到这一行 ✗）。
+    // 这就是"永久转圈"的最短路径。
     try {
+      await _pushHistory(k);
+      if (!mounted || epoch != _runEpoch) return;
       switch (_kind) {
         case _Kind.song:
           // 平台由「平台切换条」决定（默认网易云；不传时 Node 侧也默认 netease）
@@ -571,7 +575,16 @@ class _SearchPageState extends State<SearchPage>
         // ⚠️ 喜马拉雅的"搜索结果"其实是**专辑**（有声书没有单曲概念）。
         // 必须走专辑页、**不能直接播** —— 它的播放直链是跟着专辑单集列表
         // 一起返回的，直接拿专辑 id 去播只会得到"没取到直链"。
-        if (SettingsStore.instance.musicSource.value == SongSource.ximalaya) {
+        // 🔴 按"**这批结果实际来自哪个平台**"渲染，而不是读**全局当前平台** ✗。
+        // 原来读全局：搜完**再切平台**（比如切到喜马拉雅）→ 上一次的
+        // 网易云结果会被当成"喜马拉雅专辑"渲染 ✗ / 反过来喜马拉雅的**专辑**
+        // 被当单曲渲染 → **点了必然播失败** ✗。
+        // 用结果自带的 `Song.source` 最可靠（它就是这批数据的真实来源 ✓）；
+        // 结果为空时才退回全局值（此时渲染什么都不会有影响 ✓）。
+        final fromXimalaya = _songs.isNotEmpty
+            ? _songs.first.source == SongSource.ximalaya
+            : SettingsStore.instance.musicSource.value == SongSource.ximalaya;
+        if (fromXimalaya) {
           return ListView.builder(
             padding: const EdgeInsets.only(bottom: 150),
             itemCount: _songs.length,

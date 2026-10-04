@@ -26,8 +26,8 @@ class JellyExpandableSearch extends StatefulWidget {
     /// 输入框里的提示文字（搜索书架 / 搜索收藏 / 搜索漫画 / 搜索图书 …）
     this.hintText = '搜索',
 
-    /// 胶囊高度（默认 36，不超过同排圆钮图标高度；可整体调大）
-    this.height = 36,
+    /// 胶囊高度（默认 32，参考影视首页右上角小胶囊；可整体调大）
+    this.height = 32,
 
     /// 胶囊最大宽度（默认 null 不限；顶栏 Expanded 撑开时用于控制长度，
     /// 传值后内部 Align+ConstrainedBox 生效，不会与 Expanded 的 tight 约束冲突）
@@ -139,7 +139,7 @@ class _JellyExpandableSearchState extends State<JellyExpandableSearch> {
                 cursorWidth: 2,
                 cursorRadius: const Radius.circular(1),
                 style: TextStyle(
-                  fontSize: AppTheme.fontHeadline,
+                  fontSize: AppTheme.fontSubhead,
                   height: 1.0,
                   color: fg,
                 ),
@@ -150,7 +150,7 @@ class _JellyExpandableSearchState extends State<JellyExpandableSearch> {
                 decoration: InputDecoration(
                   hintText: widget.hintText,
                   hintStyle: TextStyle(
-                    fontSize: AppTheme.fontHeadline,
+                    fontSize: AppTheme.fontSubhead,
                     color: hintColor,
                   ),
                   border: InputBorder.none,

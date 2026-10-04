@@ -202,15 +202,23 @@ class ProfilePage extends StatelessWidget {
         child: Icon(icon, size: 17, color: MusicTheme.tint),
       );
 
+  /// 开关行。
+  ///
+  /// 🔴 原来用 `StatefulBuilder` + `setLocal(() {})`：那只重建**本行**，
+  /// 而 `value` 是**调用时捕获的旧值** → 拨动开关后它立刻**弹回原位** ✗
+  ///（设置其实**已经保存**，只是显示不动 → 用户以为"第三方源没打开"）。
+  /// 这里改成直接跟随 `SettingsStore.useThirdPartySources` 这个 Notifier，
+  /// 拨动后由它推新值，不会再回弹。（本页只有这一个开关，所以直接绑定。）
   Widget _switchTile({
     required String label,
     String? subtitle,
     required bool value,
     required ValueChanged<bool> onChanged,
   }) =>
-      StatefulBuilder(
-        builder: (context, setLocal) => SwitchListTile(
-          value: value,
+      ValueListenableBuilder<bool>(
+        valueListenable: SettingsStore.instance.useThirdPartySources,
+        builder: (context, v, _) => SwitchListTile(
+          value: v,
           activeThumbColor: MusicTheme.tint,
           contentPadding: const EdgeInsets.symmetric(horizontal: 16),
           title: Text(label,
@@ -220,10 +228,7 @@ class ProfilePage extends StatelessWidget {
               : Text(subtitle,
                   style: TextStyle(
                       color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
-          onChanged: (v) {
-            onChanged(v);
-            setLocal(() {});
-          },
+          onChanged: onChanged,
         ),
       );
 

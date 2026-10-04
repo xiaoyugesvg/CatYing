@@ -20,6 +20,10 @@ class JellyBookCard extends StatefulWidget {
   /// 封面 Hero 动画 tag（与详情页一致；为空则不启用共享元素过渡）
   final String? heroTag;
 
+  /// 名称位置是否显示收藏按钮（搜索/推荐页 false，对齐参考图"名称位置不加收藏"；
+  /// 收藏页/足迹页默认 true 保留）
+  final bool showFavorite;
+
   const JellyBookCard({
     super.key,
     required this.book,
@@ -27,6 +31,7 @@ class JellyBookCard extends StatefulWidget {
     this.onTap,
     this.onLongPress,
     this.heroTag,
+    this.showFavorite = true,
   });
 
   @override
@@ -275,7 +280,8 @@ class _JellyBookCardState extends State<JellyBookCard>
                 bottom: 0,
                 left: 0,
                 right: 0,
-                height: 50,
+                // 黑渐变减薄（原 50/0.7 太厚，参考图只覆盖书名一行）
+                height: 28,
                 child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -283,7 +289,7 @@ class _JellyBookCardState extends State<JellyBookCard>
                       end: Alignment.bottomCenter,
                       colors: [
                         Colors.transparent,
-                        Colors.black.withValues(alpha: 0.7),
+                        Colors.black.withValues(alpha: 0.55),
                       ],
                     ),
                   ),
@@ -343,7 +349,8 @@ class _JellyBookCardState extends State<JellyBookCard>
                     ],
                   ),
                 ),
-                _buildFavoriteButton(),
+                // 名称位置不加收藏（搜索/推荐页）：右侧留空让书名占满
+                if (widget.showFavorite) _buildFavoriteButton(),
               ],
             ),
           ),
@@ -411,7 +418,7 @@ class _JellyBookCardState extends State<JellyBookCard>
             ),
           ),
         ),
-        // 右侧：格式标签 + 收藏按钮 垂直对齐
+        // 右侧：格式标签 + 收藏按钮 垂直对齐（showFavorite=false 时只留标签）
         Padding(
           padding: const EdgeInsets.only(right: 8),
           child: Column(
@@ -432,8 +439,10 @@ class _JellyBookCardState extends State<JellyBookCard>
                   ),
                 ),
               ),
-              const SizedBox(height: 8),
-              _buildFavoriteButton(),
+              if (widget.showFavorite) ...[
+                const SizedBox(height: 8),
+                _buildFavoriteButton(),
+              ],
             ],
           ),
         ),

@@ -84,11 +84,33 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
       backgroundColor:
           _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
       appBar: AppBar(
-        title: Text(widget.bookName,
-            style: TextStyle(
-                fontSize: AppTheme.fontTitle3,
-                fontWeight: FontWeight.w700,
-                color: _titleColor)),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(widget.bookName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: AppTheme.fontTitle3,
+                      fontWeight: FontWeight.w700,
+                      color: _titleColor)),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: JellyTheme.primary.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text('换源',
+                  style: TextStyle(
+                      fontSize: AppTheme.fontCaption,
+                      color: JellyTheme.primary,
+                      fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
         actions: const [SizedBox(width: 4)],
       ),
       body: Column(

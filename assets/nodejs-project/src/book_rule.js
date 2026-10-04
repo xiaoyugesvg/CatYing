@@ -86,7 +86,10 @@ function splitRule(rule) {
       const prev = buf.replace(/\s+$/, '');
       // 路径属性（前面以 / 结尾）不切；其余 @word 都切
       const isPathAttr = prev.endsWith('/');
-      if (!isPathAttr && mm && VALUE_KEY.test(mm[1]) && buf.trim() !== '') {
+      // 元素步骤（Legado 官方：@tag.li / @class.x / @id.y / @children）
+      // 也是 @ 分段的一环——不切的话整段被当成一个 CSS 选择器 → 匹配 0。
+      const isElementStep = /^(tag|class|id|children|parent|self)\b/.test(rest);
+      if (!isPathAttr && mm && (VALUE_KEY.test(mm[1]) || isElementStep) && buf.trim() !== '') {
         parts.push(buf.trim());
         buf = '';
         continue; // 丢掉这个 @
@@ -608,8 +611,29 @@ function runJs(expr, ctx) {
   };
   sandbox.globalThis = sandbox;
 
+  // ── jsLib（skybook / Legado 源的公共脚本库）────────────
+  //
+  // skybook 类源（jsLib 内嵌混淆 JS）的规则大量调用 jsLib 定义的函数
+  // （签名、加解密、格式化等）。原引擎**不执行 jsLib** → 这些函数
+  // 全是 undefined → 规则求值失败 → URL 畸形 → 源站 500 / 解析空。
+  // 这里在**同一个 vm context**里先跑 jsLib、再跑规则表达式，
+  // jsLib 定义的全局函数就能被规则引用（与 Legado 语义一致）。
+  const jsLibCode = ctx && ctx.jsLib;
+  function execJsLib(context) {
+    if (!jsLibCode) return;
+    try {
+      new vm.Script(String(jsLibCode), { filename: 'jsLib.js' })
+        .runInContext(context, { timeout: 5000 });
+    } catch (jsErr) {
+      // jsLib 失败不阻断规则求值：部分源的 jsLib 依赖 DOM/网络/同步
+      // 请求，这里宽松处理，避免一个坏 jsLib 拖垮所有规则。
+      console.error('[BookRule] jsLib 执行失败：', (jsErr && jsErr.message) || jsErr);
+    }
+  }
+
   try {
     const context = vm.createContext(sandbox);
+    execJsLib(context);
     const script = new vm.Script(`(function(){ return (${expr}); })()`, {
       filename: 'book-rule.js',
     });
@@ -618,7 +642,18 @@ function runJs(expr, ctx) {
     // 有些写法是语句而非表达式（带 return），再试一次
     try {
       const context = vm.createContext(sandbox);
-      const script = new vm.Script(`(function(){ ${expr} })()`, {
+      execJsLib(context);
+      const body = String(expr);
+      // ⚠️ Legado/Rhino 语义：@js 规则返回**最后一条表达式语句**的值。
+      // 语句式脚本（`var t=…;var m=…;m?m[1]:'';`）没有 return 关键字，
+      // 原实现直接执行 → 返回 undefined → 详情字段（author/kind…）全空。
+      // 这里把最后一个顶层表达式语句补上 return。
+      const lastInfo = splitLastStatement(body);
+      let wrapped = body;
+      if (lastInfo.last && !/^(var|let|const|if|for|while|switch|function|return|do|try|throw|break|continue)\b/.test(lastInfo.last)) {
+        wrapped = body + (body.endsWith(';') || body.endsWith('}') ? '' : ';') + ' return (' + lastInfo.last + ');';
+      }
+      const script = new vm.Script(`(function(){ ${wrapped} })()`, {
         filename: 'book-rule.js',
       });
       return script.runInContext(context, { timeout: 5000 });
@@ -628,9 +663,93 @@ function runJs(expr, ctx) {
   }
 }
 
+/**
+ * 在语句式脚本里找"最后一条顶层语句"（跳过字符串/括号内的 ; 与 }）。
+ */
+function splitLastStatement(body) {
+  let depth = 0;
+  let inStr = null;
+  const seps = [-1];
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (inStr) {
+      if (ch === inStr && body[i - 1] !== '\\') inStr = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') { inStr = ch; continue; }
+    if (ch === '{' || ch === '(' || ch === '[') depth++;
+    else if (ch === '}' || ch === ')' || ch === ']') {
+      // ⚠️ 顶层块结束的 `}`（depth 由 1 → 0）是语句分隔符，必须先判再减。
+      // 原实现先 depth-- 再判 SEP，`}` 永远进不了 seps；判 depth===0 也错
+      // （`}` 闭合配对 `{` 时 depth 至少是 1）→ 正确判据是 depth===1。
+      if (ch === '}' && depth === 1) seps.push(i);
+      depth = Math.max(0, depth - 1);
+    }
+    else if (depth === 0 && (ch === ';')) seps.push(i);
+  }
+  // 从后往前找最后一段**非空**的顶层语句（结尾 `;` 后为空时回溯）
+  for (let k = seps.length - 1; k > 0; k--) {
+    const seg = body.slice(seps[k - 1] + 1, seps[k]).trim();
+    if (seg) return { last: seg };
+  }
+  return { last: body.slice(seps[0] + 1).trim() };
+}
+
 // ============================================================
 // 核心：对「当前节点/文档」求一条规则
 // ============================================================
+
+/**
+ * 对整条规则求值，并执行 Legado 的 `##正则##替换`（可链式）。
+ * 拆分放在最外层：`a||b##r##rep` = (a/b 兜底取值) 后整体替换。
+ */
+function evalRule(params) {
+  if (params.rule == null) return params.isList ? [] : '';
+  const raw0 = String(params.rule).trim();
+  let hashPairs = null;
+  let base = raw0;
+  const hi = raw0.indexOf('##');
+  if (hi >= 0) {
+    const tail = raw0.slice(hi + 2);
+    const segs = tail.split('##');
+    const pairs = [];
+    for (let i = 0; i + 1 < segs.length; i += 2) pairs.push([segs[i], segs[i + 1]]);
+    if (segs.length % 2 === 1) pairs.push([segs[segs.length - 1], '']);
+    // 防御：replacement 里混入顶层 || 或 {{ → 放弃顶层 ##，
+    // 原样交给 || 分支逐段处理（段级再拆 ##）。
+    const bad = pairs.some(([, rep]) => rep.includes('||') || rep.includes('{{'));
+    if (!bad) { base = raw0.slice(0, hi); hashPairs = pairs; }
+  }
+  const v = evalRuleCore({ ...params, rule: base });
+  if (!hashPairs) return v;
+  if (params.isList) {
+    if (!Array.isArray(v)) return v;
+    return v.map((x) => (typeof x === 'string' ? applyHashReplace(x, hashPairs) : x));
+  }
+  if (typeof v !== 'string') return v;
+  return applyHashReplace(v, hashPairs);
+}
+
+/** 依次执行 ##regex##replacement 全局替换 */
+function applyHashReplace(s, pairs) {
+  let out = s;
+  for (const [re, rep] of pairs) {
+    try { out = out.replace(new RegExp(re, 'g'), rep); } catch (_) { /* 非法正则跳过 */ }
+  }
+  return out;
+}
+
+/** @js 的 result：把节点/文档包装转成可读 HTML 字符串 */
+function nodeOrDocToString(input) {
+  if (input && input.__cheerio) {
+    const $ = input.__cheerio;
+    if (input.__nodes && input.__nodes.length) {
+      return input.__nodes.map((n) => $.html(n)).join('\n');
+    }
+    try { return $.root().html() || ''; } catch (_) { return ''; }
+  }
+  return input == null ? '' : input;
+}
 
 /**
  * @param {object} p
@@ -641,7 +760,7 @@ function runJs(expr, ctx) {
  * @param {boolean} p.isList  是否要求返回列表
  * @returns {any} 字符串 或 字符串数组 或 对象
  */
-function evalRule({ rule, input, vars = {}, ctx = {}, isList = false }) {
+function evalRuleCore({ rule, input, vars = {}, ctx = {}, isList = false }) {
   if (rule == null) return isList ? [] : '';
   const raw = String(rule).trim();
 
@@ -664,13 +783,42 @@ function evalRule({ rule, input, vars = {}, ctx = {}, isList = false }) {
   let r = applyVars(raw, vars).trim();
   if (!r) return isList ? [] : '';
 
+  // ── || 多规则兜底（Legado 语义：前者为空/失败才试后者）──
+  // 在 splitRule 之前拆分，这样 `a@text||b@text`、`@css:x||@css:y`
+  // 都能逐段完整解析；拆分跳过 {{ }} 变量内部，防止误拆。
+  if (r.includes('||')) {
+    const segments = splitTopLevelOr(r);
+    if (segments.length > 1) {
+      for (const seg of segments) {
+        const segRaw = seg.trim();
+        if (!segRaw) continue;
+        let out;
+        try {
+          out = evalRule({ rule: segRaw, input, vars, ctx, isList });
+        } catch (_) {
+          continue; // 该段解析失败 → 试下一段
+        }
+        if (isList) {
+          if (Array.isArray(out) && out.length > 0) return out;
+        } else if (out != null && out !== '') {
+          return out;
+        }
+      }
+      return isList ? [] : '';
+    }
+  }
+
   const { prefix, parts } = splitRule(r);
 
   // ── @js: ──────────────────────────────────────────────
   if (prefix === 'js') {
+    // ⚠️ Legado 语义：@js 的 result 必须是**可读字符串**（当前节点的
+    // HTML / 整个文档的 HTML / 原始文本）。原实现直接传 input ——
+    // 节点/文档包装对象 `''+result` 会变成 "[object Object]"，
+    // 导致所有基于 result.match(...) 的 author/kind 规则静默取空。
     const out = runJs(parts[0], {
     ...ctx,
-    result: input,
+    result: nodeOrDocToString(input),
     // java.getElements 要用到当前文档与作用域节点
     __cheerio: input && input.__cheerio ? input.__cheerio : ctx.__cheerio,
     __nodes: input && input.__nodes ? input.__nodes : ctx.__nodes,
@@ -905,7 +1053,11 @@ function walkParts($, nodes, parts, isList) {
     }
   }
   const arr = cur.toArray();
-  if (isList) return arr.map((n) => toText($, n));
+  // ⚠️ 列表规则末段是「选择器」时，必须返回**节点数组**（后续
+  // chapterName/chapterUrl 等规则以每个节点为 input 再取值）。
+  // 原来这里返回 toText 数组，导致 `class.list.clearfix.0@tag.li@tag.a`
+  // 这类多段目录规则取到的是文本而不是节点 → 目录永远为空。
+  if (isList) return arr.map((n) => makeNodeInput($, [n]));
   return arr.length > 0 ? toText($, arr[0]) : '';
 }
 
@@ -918,6 +1070,25 @@ function makeInput(html) {
 /** 把节点数组包装成可继续 evalRule 的 input */
 function makeNodeInput($, nodes) {
   return { __cheerio: $, __nodes: nodes };
+}
+
+/**
+ * 按顶层 `||` 拆分规则串（跳过 {{ }} 变量内部，防止变量值含 || 被误拆）。
+ */
+function splitTopLevelOr(s) {
+  const out = [];
+  let depth = 0;
+  let cur = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    const next = s[i + 1];
+    if (ch === '{' && next === '{') { depth++; cur += ch + next; i++; continue; }
+    if (ch === '}' && next === '}') { if (depth > 0) depth--; cur += ch + next; i++; continue; }
+    if (depth === 0 && ch === '|' && next === '|') { out.push(cur); cur = ''; i++; continue; }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
 }
 
 /** 统一的「取列表」入口 */
@@ -975,6 +1146,27 @@ function evalList({ rule, input, vars, ctx }) {
   // Legado 步骤归一化（class./tag./id. + 位置）—— 不转的话
   // `class.comics-card …` 会被当成"标签名 class"，静默匹配 0 条。
   sel = normLegadoStep(sel);
+  // || 兜底：列表选择器 `class.excerpt||class.post||…` 依次尝试，取首个非空
+  if (sel.includes('||')) {
+    const sels = splitTopLevelOr(sel);
+    if (sels.length > 1) {
+      for (const one of sels) {
+        const s = normLegadoStep(one.trim());
+        if (!s) continue;
+        let ns;
+        try {
+          ns = scope ? $(scope).find(s) : $(s);
+        } catch (_) {
+          continue;
+        }
+        const arr = ns.toArray();
+        if (arr.length > 0) {
+          return arr.map((n) => makeNodeInput($, [n]));
+        }
+      }
+      return [];
+    }
+  }
   // ⚠️ 这里**不能**只看"是否以 . 开头"就送去 XPath 转换：
   // `.book-list li` 是合法 CSS 类选择器，但 xpathToCss 会把前导点吃掉，
   // 返回 `book-list li`（当成标签名）→ 匹配 0 条。

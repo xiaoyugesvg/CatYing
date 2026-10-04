@@ -602,7 +602,7 @@ class _DownloadPageState extends State<DownloadPage>
                     svc.tasks.isEmpty
                         ? Icons.download_for_offline_rounded
                         : Icons.search_off_rounded,
-                    size: 64,
+                    size: 48,
                     color: JellyTheme.textSecondary,
                   ),
                   const SizedBox(height: 16),
@@ -727,7 +727,7 @@ class _DownloadPageState extends State<DownloadPage>
                     svc.tasks.isEmpty
                         ? Icons.download_for_offline_rounded
                         : Icons.search_off_rounded,
-                    size: 64,
+                    size: 48,
                     color: JellyTheme.textSecondary,
                   ),
                   const SizedBox(height: 16),

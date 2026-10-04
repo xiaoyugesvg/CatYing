@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import '../models/book_source.dart';
 import '../services/book_source_service.dart';
 import 'book_source_editor_page.dart';
+import 'book_source_health_page.dart';
 import 'book_source_login_page.dart';
 import '../theme/jelly_theme.dart';
 import '../../common/theme.dart';
@@ -273,18 +274,46 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     return AppBar(
       centerTitle: true,
       title: _searching
-          ? TextField(
-              controller: _searchCtrl,
-              autofocus: true,
-              style: TextStyle(fontSize: AppTheme.fontHeadline, color: _titleColor),
-              decoration: InputDecoration(
-                hintText: '搜索书源',
-                hintStyle:
-                    TextStyle(fontSize: AppTheme.fontHeadline, color: JellyTheme.textSecondary),
-                border: InputBorder.none,
-                isDense: true,
+          // 收小的固定胶囊搜索框（参考影视首页右上角样式：高 32 圆角）
+          ? SizedBox(
+              width: 210,
+              height: 32,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: _isDark
+                      ? JellyTheme.cardDark
+                      : JellyTheme.cardLight,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.search_rounded,
+                        size: 16, color: JellyTheme.textSecondary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: TextField(
+                        controller: _searchCtrl,
+                        autofocus: true,
+                        style: TextStyle(
+                            fontSize: AppTheme.fontFootnote,
+                            color: _titleColor),
+                        decoration: InputDecoration(
+                          hintText: '搜索书源',
+                          hintStyle: TextStyle(
+                              fontSize: AppTheme.fontFootnote,
+                              color: JellyTheme.textSecondary),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                        onChanged: (v) =>
+                            setState(() => _keyword = v.trim()),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              onChanged: (v) => setState(() => _keyword = v.trim()),
             )
           : Text(
               _selectMode ? '已选 ${_selected.length}' : '书源仓库',
@@ -298,7 +327,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         // 分享（截图右上第一个）：导出全部书源 JSON
         IconButton(
           tooltip: '分享书源',
-          icon: Icon(Icons.ios_share_rounded, color: _titleColor),
+          icon: Icon(Icons.ios_share_rounded, size: 20, color: _titleColor),
           onPressed: store.isEmpty ? null : _shareAll,
         ),
         // 体检（截图右上第二个，盾牌带 +）：V2.0.7 的「书源体检」
@@ -306,17 +335,20 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
           tooltip: '书源体检',
           icon: _healthChecking
               ? const SizedBox(
-                  width: 18,
-                  height: 18,
+                  width: 16,
+                  height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2))
-              : Icon(Icons.verified_user_rounded, color: _titleColor),
+              : Icon(Icons.verified_user_rounded, size: 20, color: _titleColor),
           onPressed:
               (store.isEmpty || _healthChecking) ? null : _runHealthCheck,
         ),
         // 搜索 + 多选放在体检之后（截图里没有，但少了不好用）
         IconButton(
           tooltip: _searching ? '关闭搜索' : '搜索书源',
-          icon: Icon(_searching ? Icons.close_rounded : Icons.search_rounded),
+          icon: Icon(
+            _searching ? Icons.close_rounded : Icons.search_rounded,
+            size: 20,
+          ),
           onPressed: () => setState(() {
             _searching = !_searching;
             if (!_searching) {
@@ -329,7 +361,8 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
           IconButton(
             tooltip: _selectMode ? '退出多选' : '多选',
             icon: Icon(
-                _selectMode ? Icons.done_rounded : Icons.checklist_rounded),
+                _selectMode ? Icons.done_rounded : Icons.checklist_rounded,
+                size: 20),
             onPressed: () => setState(() {
               _selectMode = !_selectMode;
               _selected.clear();
@@ -428,7 +461,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.menu_book_outlined,
-                  size: 56,
+                  size: 48,
                   color: JellyTheme.textSecondary.withValues(alpha: 0.55)),
               const SizedBox(height: 20),
               Text('还没有书源',
@@ -1674,7 +1707,28 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     final out = <BookSource>[];
     void take(dynamic e) {
       if (e is! Map) return;
-      final s = BookSource.fromJson(e.cast<String, dynamic>());
+      final m = e.cast<String, dynamic>();
+      // Cmbok 导出包装：{seq,id,name,url,enabled,...,json:"<Legado 书源 JSON>"}
+      // 书源本体在 json 字段（字符串），顶层没有 bookSourceName/bookSourceUrl ——
+      // 必须先解包再走 BookSource.fromJson，否则整包判"没解析出书源"。
+      if (m['json'] is String && !m.containsKey('bookSourceName')) {
+        try {
+          final inner = jsonDecode(m['json'] as String);
+          if (inner is List) {
+            for (final x in inner) {
+              take(x);
+            }
+            return;
+          }
+          if (inner is Map) {
+            take(inner);
+            return;
+          }
+        } catch (_) {
+          // 解包失败就当普通对象继续走下方分支
+        }
+      }
+      final s = BookSource.fromJson(m);
       if (s != null) out.add(s);
     }
 
@@ -1702,35 +1756,14 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   Future<void> _runHealthCheck() async {
     final targets = _visible;
     if (targets.isEmpty) return;
-
-    setState(() {
-      _healthChecking = true;
-      _health.clear();
-    });
-    _toast('开始体检 ${targets.length} 个书源…');
-
-    await BookSourceService.instance.healthCheckAll(
-      targets,
-      // 边测边刷新：40 个源最慢的要一分钟，等全部结束才出结果体验很差
-      onOne: (h) {
-        if (!mounted) return;
-        setState(() => _health[h.source.id] = h);
-      },
+    // 完整「书源体检」页：并发选择 → 逐源体检（取书→详情→目录→正文）→
+    // 统计分组列表 → 一键优化 / 清理（对齐参考图 IMG_8554~8561）
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BookSourceHealthPage(),
+      ),
     );
-
-    if (!mounted) return;
-    setState(() => _healthChecking = false);
-
-    final ok = _health.values
-        .where((h) => h.level == BookSourceHealthLevel.healthy)
-        .length;
-    final partial = _health.values
-        .where((h) => h.level == BookSourceHealthLevel.partial)
-        .length;
-    final dead = _health.values
-        .where((h) => h.level == BookSourceHealthLevel.dead)
-        .length;
-    _toast('体检完成：可用 $ok · 部分可用 $partial · 失效 $dead');
   }
 
   /// 体检标记：小圆点 + 文字（可用/部分可用/可疑/失效）

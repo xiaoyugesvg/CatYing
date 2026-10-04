@@ -349,9 +349,13 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
       type: BookshelfItemType.book,
       title: '加入书架',
       meta: jsonEncode({
-        'name': _name,
+        // 书架按 Book 结构解析（id/title/author/cover），
+        // 否则书架里书名/封面为空；sourceName/bookUrl 为自定义字段（解析忽略）。
+        'id': 'book-${_result.bookUrl}',
+        'hash': '',
+        'title': _name,
         'author': _author,
-        'coverUrl': _cover,
+        'cover': _cover,
         'sourceName': _result.source.name,
         'bookUrl': _result.bookUrl,
       }),

@@ -275,6 +275,18 @@ class ThirdPartySourceStore {
     await _persist();
   }
 
+  /// 排序：把 id 对应的音源向上（delta=-1）或向下（delta=+1）移动一格。
+  /// 越界时静默忽略（已经是顶/底就没有可移动的余地）。
+  Future<void> move(String id, int delta) async {
+    final i = _items.indexWhere((e) => e.id == id);
+    final j = i + delta;
+    if (i < 0 || j < 0 || j >= _items.length) return;
+    final t = _items[i];
+    _items[i] = _items[j];
+    _items[j] = t;
+    await _persist();
+  }
+
   Future<void> removeAll() async {
     _items.clear();
     await _persist();

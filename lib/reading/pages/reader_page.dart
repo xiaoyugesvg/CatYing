@@ -2360,7 +2360,7 @@ class _ReaderPageState extends State<ReaderPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, size: 48, color: Colors.red),
+            const Icon(Icons.error_outline, size: 40, color: Colors.red),
             const SizedBox(height: 16),
             Text('加载失败: $_error', style: TextStyle(color: _inkTextColor)),
             const SizedBox(height: 16),
@@ -2440,7 +2440,7 @@ class _ReaderPageState extends State<ReaderPage> {
                 children: [
                   Icon(
                     Icons.broken_image,
-                    size: 48,
+                    size: 40,
                     color: JellyTheme.textSecondary,
                   ),
                   const SizedBox(height: 8),
@@ -3020,16 +3020,17 @@ class _ReaderPageState extends State<ReaderPage> {
                 children: [
                   Text(
                     widget.comic.title,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: AppTheme.fontBody,
-                      color: JellyTheme.textSecondary,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   Text(
                     _currentChapter.title,
                     style: TextStyle(
                       fontSize: AppTheme.fontFootnote,
-                      color: JellyTheme.textSecondary,
+                      color: Colors.white.withValues(alpha: 0.75),
                     ),
                   ),
                 ],
@@ -3116,31 +3117,25 @@ class _ReaderPageState extends State<ReaderPage> {
                           ),
                         ],
                       ),
-                      // 设置 + 目录按钮（纯图标，右对齐，同图书阅读器）
+                      // 底部按钮行：番茄钟 / 设置 / 目录 三按钮居中等距
+                      // （对齐参考图 IMG_8575：三个图标一行均匀分布）
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
-                          // 左侧占位，宽度≈右侧两按钮，使番茄按钮居中
-                          const SizedBox(width: 96),
                           const PomodoroButton(),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              TextButton(
-                                onPressed: _showReaderSettingsSheet,
-                                child: const Icon(
-                                  Icons.settings_rounded,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              TextButton(
-                                onPressed: _showToc,
-                                child: const Icon(
-                                  Icons.menu_book_rounded,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ],
+                          TextButton(
+                            onPressed: _showReaderSettingsSheet,
+                            child: const Icon(
+                              Icons.settings_rounded,
+                              color: Colors.white,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _showToc,
+                            child: const Icon(
+                              Icons.menu_book_rounded,
+                              color: Colors.white,
+                            ),
                           ),
                         ],
                       ),

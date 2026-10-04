@@ -203,7 +203,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                   color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                   child: Icon(
                     Icons.menu_book_rounded,
-                    size: 56,
+                    size: 48,
                     color: JellyTheme.textSecondary,
                   ),
                 )

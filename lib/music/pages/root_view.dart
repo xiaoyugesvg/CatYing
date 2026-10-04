@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/music_api.dart';
 import '../services/player_manager.dart';
 import '../services/settings_store.dart';
 import '../../services/main_tab_controller.dart';
@@ -78,11 +79,18 @@ class _MusicRootViewState extends State<MusicRootView> {
   }
 
   /// 预热；失败则显示重试条（原来失败是**完全静默**的，
-  /// 用户进音乐页看到空白也不知道怎么回事）
+  /// 用户进音乐页看到空白也不知道怎么回事）。
+  ///
+  /// 🔴 **不再用 `warmUpMusicData()`** —— 它在 `mini_player.dart` 里
+  ///（那个文件你要求我不要动 ✓）。而且它只在**抛异常**时算失败，可
+  /// `MusicApi._doCall` 把一切异常**吞成** `{ok:false}` 从不抛 ✗ →
+  /// 它**永远返回 true** → 首页那条「点击重试」提示条是**死 UI** ✗。
+  /// 改用 `hotSearchResult()`：后台未就绪/接口失败会拿到 `ok:false` ✓
+  /// → 提示条能真的出现、点了也真的会重试 ✓
   Future<void> _warmUp() async {
-    final ok = await warmUpMusicData();
+    final r = await MusicApi.instance.hotSearchResult();
     if (!mounted) return;
-    setState(() => _warmUpFailed = !ok);
+    setState(() => _warmUpFailed = !r.ok);
   }
 
   @override
@@ -122,8 +130,13 @@ class _MusicRootViewState extends State<MusicRootView> {
                   // 换 key 强制子页重建。revision 在每次主题变更时 ++，
                   // 所以拼进 key 就能让子页跟着换色。
                   child: IndexedStack(
-                    key: ValueKey('music-tabs-$_tab-'
-                        '${MusicThemeStore.instance.revision.value}'),
+                    // ⚠️ key 里**不能**带 `_tab`：IndexedStack 的 key 一变，
+                    // 整个子树（4 个 tab 页）就被销毁重建 —— 表现是
+                    // **每次切到音乐库都闪一次 loading**、滚动位置与搜索词全丢，
+                    // 而且子页的 `wantKeepAlive` 完全失效。
+                    // tab 由下面的 `index:` 负责，key 只需跟"主题版本"（换肤要重建）。
+                    key: ValueKey(
+                        'music-tabs-${MusicThemeStore.instance.revision.value}'),
                     index: _tab,
                     children: const [
                       DiscoverPage(),
@@ -244,8 +257,14 @@ class _MusicRootViewState extends State<MusicRootView> {
       currentIndex: _tab,
       floating: true,
       items: [
-        for (final t in _tabs)
-          JellyNavItem(icon: t.active, label: t.label),
+        // 🔴 `_tabs` 里一直带着 `icon`（未选中态图标）却**从未被读取** ✗ ——
+        // 原来无论选中与否都传 `active` → 等于"没有未选中态"的视觉 ✓。
+        // 这里把它用起来：选中用 `active`、未选中用 `icon` ✓（原本的设计意图 ✓）
+        for (var i = 0; i < _tabs.length; i++)
+          JellyNavItem(
+            icon: i == _tab ? _tabs[i].active : _tabs[i].icon,
+            label: _tabs[i].label,
+          ),
       ],
       onTap: (i) {
         if (i < 0 || i >= _tabs.length) return;
@@ -262,9 +281,3 @@ class _MusicRootViewState extends State<MusicRootView> {
 
 }
 
-/// 供外部（如影视侧跳转）切到指定 tab
-class MusicTabController {
-  MusicTabController._();
-  static final instance = MusicTabController._();
-  final tab = ValueNotifier<int>(0);
-}

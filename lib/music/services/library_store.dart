@@ -47,7 +47,16 @@ class MusicLibraryStore extends ChangeNotifier {
   final ValueNotifier<int> revisionProxy = ValueNotifier<int>(0);
 
   SharedPreferences? _prefs;
-  bool _inited = false;
+
+  /// 正在进行的初始化。
+  ///
+  /// 🔴 原来是 `bool _inited` 闩锁：它**先置位再 await** → 紧接着调用的
+  /// `init()` 会**立刻返回**，而此刻 `_prefs` 仍是 `null` → `_persist()` 里的
+  /// `if (p == null) return;` 把写入**静默丢掉** ✗
+  /// 后果正是最难查的那一类：**冷启动第一次播放不记「最近播放」、
+  /// 收藏 / 队列 / 歌单偶发不落盘**。
+  /// 改成缓存 Future：并发与后续调用者会**等它真正完成**。
+  Future<void>? _initFuture;
 
   /// 任何变更后统一 bump 一次。
   ///
@@ -60,9 +69,9 @@ class MusicLibraryStore extends ChangeNotifier {
     revisionProxy.value++;
   }
 
-  Future<void> init() async {
-    if (_inited) return;
-    _inited = true;
+  Future<void> init() => _initFuture ??= _doInit();
+
+  Future<void> _doInit() async {
     try {
       _prefs = await SharedPreferences.getInstance();
       _recent

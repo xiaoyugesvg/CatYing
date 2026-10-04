@@ -62,6 +62,16 @@ class CmbokConstants {
   /// 节点失效也没关系 —— 探测失败的会被跳过；
   /// 运行时若发生 301/302 重定向，新域名会自动追加进来。
   static const List<String> zLibraryDefaultDomains = [
+    // ⓪ 原版 Cmbok 实测可用节点（用户设备当前节点 86110101.xyz 验证可直连，
+    // 候选顺序照抄原版 zlibrary_url_candidates 持久化配置）——**必须排最前**，
+    // 否则全新安装会先试下面那些旧节点，全部超时 → 图书页"节点有问题"。
+    'free2read.cc',
+    '26h2.tech',
+    '86110101.xyz',
+    'loves.works',
+    'toffeeboba.com',
+    'zh.zlibrary.by',
+    'zlib.bz',
     // ① 中文节点优先（界面中文、中文书更多）
     'zh.z-lib.gd',
     'zh.zlib.li',
@@ -80,7 +90,6 @@ class CmbokConstants {
     // ③ 镜像兜底
     'intl.su',
     // ④ 已知不可用，仅作老配置兼容（最后兜底）
-    'zh.zlibrary.by',
   ];
 
   /// 每页加载数量

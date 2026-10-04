@@ -215,99 +215,37 @@ class _BookSearchPageState extends State<BookSearchPage>
     }
   }
 
-  /// 拉取 z-library 首页推荐（走当前节点域名）作图书主页推荐流。
+  /// 拉取 z-library「最受欢迎」直抓（走当前节点域名）作图书主页推荐流。
   ///
-  /// 豆瓣（Dio 直连，通常 1~3s）与 zlib（WebView，可能较慢）**并行**：
-  /// 豆瓣先到就先显示，避免"正在加载推荐书籍"长时间空转；zlib 拉到后
-  /// 无缝替换成 zlib 数据。zlib 全失败、豆瓣也失败才置 _recFailed。
+  /// 不再使用豆瓣兜底：推荐流数据源只有 z-library 最受欢迎分类页
+  /// （zlibrary_service.fetchHomeRecommendations 直抓 /s/?dsource=mostpopular，
+  /// SSR HTML + 结构容错）。失败且当前无内容才置 _recFailed。
   Future<void> _loadRecommendations() async {
     if (_recLoading) return;
     _recLoading = true;
     _recFailed = false;
     if (mounted) setState(() {});
-    // zlib 后台尝试（最多 3 镜像 × 6s ≈ 18s 封顶），成功返回数据、失败返回 null
-    final zlibF = ZlibraryService().fetchHomeRecommendations().then<
-        SearchResult<Book>?>(
-      (r) => r,
-      onError: (Object e) {
-        _log('首页推荐拉取失败: $e');
-        return null;
-      },
-    );
-    // 1) 豆瓣热门榜先出 → 立即显示，主页不再空转
     try {
-      final doubanBooks = await _fetchDoubanBooks();
+      final r = await ZlibraryService().fetchHomeRecommendations();
       if (!mounted) return;
-      if (doubanBooks.isNotEmpty) {
-        setState(() {
-          _recBooks = doubanBooks;
-          _recIsDouban = true;
+      setState(() {
+        if (r.items.isNotEmpty) {
+          _recBooks = r.items;
+          _recIsDouban = false;
           _recFailed = false;
-        });
-        _log('豆瓣兜底推荐: ${doubanBooks.length} 本');
-      }
+        } else {
+          _recFailed = true;
+        }
+      });
     } catch (e) {
-      _log('豆瓣兜底推荐失败: $e');
+      _log('首页推荐拉取失败: $e');
+      if (!mounted) return;
+      setState(() {
+        if (_recBooks.isEmpty) _recFailed = true;
+      });
     }
-    // 2) zlib 结果到了：成功则替换豆瓣；失败且当前无内容才置失败
-    final zlibResult = await zlibF;
-    if (!mounted) return;
-    setState(() {
-      if (zlibResult != null && zlibResult.items.isNotEmpty) {
-        _recBooks = zlibResult.items;
-        _recIsDouban = false;
-        _recFailed = false;
-      } else if (_recBooks.isEmpty) {
-        _recFailed = true;
-      }
-    });
     _recLoading = false;
     if (mounted) setState(() {});
-  }
-
-  /// 拉豆瓣「热门榜」（book_hot）返回书籍列表（不 setState，供推荐流并行兜底）。
-  /// 豆瓣条目没有 zlib 的下载/阅读数据，点击走「去找书？」跳书源搜索。
-  Future<List<Book>> _fetchDoubanBooks() async {
-    final dio = Dio(BaseOptions(
-      headers: {
-        'User-Agent':
-            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
-                'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
-                'Mobile/15E148 Safari/604.1',
-        'Referer': 'https://m.douban.com/book/chart/',
-      },
-      connectTimeout: const Duration(seconds: 12),
-      receiveTimeout: const Duration(seconds: 12),
-    ));
-    final r = await dio.get(
-      'https://m.douban.com/rexxar/api/v2/subject_collection/book_hot/items',
-      queryParameters: {'start': 0, 'count': 20},
-    );
-    final raw = (r.data is Map)
-        ? (r.data as Map)['subject_collection_items']
-        : null;
-    final books = <Book>[];
-    if (raw is List) {
-      for (final e in raw) {
-        if (e is! Map) continue;
-        final j = e.cast<String, dynamic>();
-        final title = (j['title'] ?? '').toString().trim();
-        if (title.isEmpty) continue;
-        var cover = '';
-        final c = j['cover'];
-        if (c is String) cover = c;
-        if (c is Map) cover = (c['url'] ?? '').toString();
-        books.add(Book(
-          id: 'douban:${title.hashCode}',
-          hash: '',
-          title: title,
-          author: (j['card_subtitle'] ?? '').toString().trim(),
-          cover: cover,
-          description: (j['description'] ?? '').toString().trim(),
-        ));
-      }
-    }
-    return books;
   }
 
   Future<void> _addHistory(String keyword) async {
@@ -672,53 +610,17 @@ class _BookSearchPageState extends State<BookSearchPage>
   void _onViewModeChangedExternal() {
     if (!mounted) return;
     final target = BookViewMode().isGrid ? 0 : 1;
-    if (_tabController.index != target) {
+    // ⚠️ 必须同时判 `indexIsChanging`：动画进行中 index 仍是旧值，
+    // 若此时用户又点了另一侧，index==target 会误判"已就位"不触发 animateTo，
+    // 动画继续飞向旧目标 → 视图"切不回来"。动画中一律强制重定向。
+    if (_tabController.index != target || _tabController.indexIsChanging) {
       _tabController.animateTo(target);
     }
   }
 
-  /// 推荐区点击：豆瓣兜底条目（无 zlib 数据）→ 弹「去找书？」跳书源搜索；
-  /// zlib 推荐直接进详情。
+  /// 推荐区点击：zlib 推荐直接进详情。
   void _onRecTap(Book book) {
-    if (_recIsDouban) {
-      _confirmGoSearch(book.title);
-    } else {
-      _openDetail(book);
-    }
-  }
-
-  /// 「去找书？」确认框（与豆瓣排行页同款）：确认后按书名跳书源搜索。
-  Future<void> _confirmGoSearch(String title) async {
-    final go = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        content: Text(
-          '去找书？\n跳转到图书搜索，按书名「$title」搜索',
-          textAlign: TextAlign.center,
-          style: const TextStyle(height: 1.5),
-        ),
-        actionsAlignment: MainAxisAlignment.center,
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('去搜索'),
-          ),
-        ],
-      ),
-    );
-    if (go == true && mounted) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => BookSearchPage(initialKeyword: title),
-        ),
-      );
-    }
+    _openDetail(book);
   }
 
   void _openDetail(Book book) async {
@@ -1028,7 +930,7 @@ class _BookSearchPageState extends State<BookSearchPage>
     return JellyExpandableSearch(
       controller: _searchController,
       hintText: '搜索图书',
-      maxWidth: 240,
+      maxWidth: 200,
       onFocusChange: (f) => setState(() {
         if (f && _searchController.text.isEmpty) {
           _historyVisible = true;
@@ -1202,7 +1104,7 @@ class _BookSearchPageState extends State<BookSearchPage>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.cloud_off_rounded, size: 64, color: JellyTheme.textSecondary),
+            Icon(Icons.cloud_off_rounded, size: 48, color: JellyTheme.textSecondary),
             const SizedBox(height: 16),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -1233,7 +1135,7 @@ class _BookSearchPageState extends State<BookSearchPage>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.search_off_rounded,
-                size: 64, color: JellyTheme.textSecondary),
+                size: 48, color: JellyTheme.textSecondary),
             const SizedBox(height: 16),
             Text('没有找到相关图书',
                 style: TextStyle(color: JellyTheme.textSecondary)),
@@ -1283,7 +1185,7 @@ class _BookSearchPageState extends State<BookSearchPage>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.book_rounded, size: 64, color: JellyTheme.textSecondary),
+            Icon(Icons.book_rounded, size: 48, color: JellyTheme.textSecondary),
             const SizedBox(height: 16),
             Text(_recFailed ? '推荐书籍加载失败' : '暂无推荐内容',
                 style: TextStyle(color: JellyTheme.textSecondary)),
@@ -1386,8 +1288,8 @@ class _BookSearchPageState extends State<BookSearchPage>
       builder: (context, constraints) {
         final cols = _adaptiveColumns(
           constraints.maxWidth,
-          min: 2,
-          target: 170,
+          min: 3,
+          target: 118,
         );
         return MasonryGridView.count(
           controller: _gridScrollController,
@@ -1419,6 +1321,7 @@ class _BookSearchPageState extends State<BookSearchPage>
                 isGrid: true,
                 heroTag: bookCoverHeroTag('search', book),
                 onTap: () => _openDetail(book),
+                showFavorite: false,
               ),
             );
           },
@@ -1434,8 +1337,8 @@ class _BookSearchPageState extends State<BookSearchPage>
       builder: (context, constraints) {
         final cols = _adaptiveColumns(
           constraints.maxWidth,
-          min: 2,
-          target: 170,
+          min: 3,
+          target: 118,
         );
         return CustomScrollView(
           slivers: [
@@ -1498,6 +1401,7 @@ class _BookSearchPageState extends State<BookSearchPage>
                       isGrid: true,
                       heroTag: bookCoverHeroTag('rec', book),
                       onTap: () => _onRecTap(book),
+                      showFavorite: false,
                     );
                   },
                   childCount: _recBooks.length,
@@ -1549,6 +1453,7 @@ class _BookSearchPageState extends State<BookSearchPage>
                 isGrid: false,
                 heroTag: bookCoverHeroTag('search', book),
                 onTap: () => _openDetail(book),
+                showFavorite: false,
               ),
             );
           },

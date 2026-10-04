@@ -1,4 +1,3357 @@
 {
  "version": 1,
- "sources": []
+ "sources": [
+  {
+   "type": "api",
+   "engine": "manhuaren",
+   "config": {
+    "id": "manhuaren",
+    "name": "漫画人",
+    "base": "https://www.manhuaren.com/",
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "categories": [
+     {
+      "value": "rexue",
+      "name": "热血"
+     },
+     {
+      "value": "aiqing",
+      "name": "恋爱"
+     },
+     {
+      "value": "xiaoyuan",
+      "name": "校园"
+     },
+     {
+      "value": "weiniang",
+      "name": "伪娘"
+     },
+     {
+      "value": "maoxian",
+      "name": "冒险"
+     },
+     {
+      "value": "zhichang",
+      "name": "职场"
+     },
+     {
+      "value": "hougong",
+      "name": "后宫"
+     },
+     {
+      "value": "zhiyu",
+      "name": "治愈"
+     },
+     {
+      "value": "kehuan",
+      "name": "科幻"
+     },
+     {
+      "value": "qingxiaoshuo1",
+      "name": "轻小说"
+     },
+     {
+      "value": "lizhi",
+      "name": "励志"
+     },
+     {
+      "value": "shenghuoqinqing",
+      "name": "生活"
+     },
+     {
+      "value": "zhanzheng",
+      "name": "战争"
+     },
+     {
+      "value": "xuanyi",
+      "name": "悬疑"
+     },
+     {
+      "value": "zhentan",
+      "name": "推理"
+     },
+     {
+      "value": "gaoxiao",
+      "name": "搞笑"
+     },
+     {
+      "value": "qihuan",
+      "name": "奇幻"
+     },
+     {
+      "value": "mofa",
+      "name": "魔法"
+     },
+     {
+      "value": "dongfangshengui",
+      "name": "神鬼"
+     },
+     {
+      "value": "mengxi",
+      "name": "萌系"
+     },
+     {
+      "value": "lishi",
+      "name": "历史"
+     },
+     {
+      "value": "meishi",
+      "name": "美食"
+     },
+     {
+      "value": "tongren",
+      "name": "同人"
+     },
+     {
+      "value": "jingji",
+      "name": "运动"
+     },
+     {
+      "value": "jizhan",
+      "name": "机甲"
+     }
+    ],
+    "categoryPageSize": 10,
+    "search": {
+     "path": "search.ashx",
+     "queryKey": "t",
+     "languageKey": "language",
+     "languageValue": "1",
+     "removeHtmlKey": "isremovehtml",
+     "removeHtmlValue": "1",
+     "fields": {
+      "id": "ID",
+      "title": "Title",
+      "url": "Url",
+      "lastPartUrl": "LastPartUrl",
+      "lastPartName": "LastPartName"
+     }
+    },
+    "category": {
+     "firstPagePath": "/manhua-{slug}/",
+     "nextPagePath": "dm5.ashx",
+     "action": "getclasscomics",
+     "pageKey": "pageindex",
+     "sizeKey": "pagesize",
+     "tagIdKey": "tagid",
+     "fixedParams": {
+      "categoryid": "0",
+      "status": "0",
+      "usergroup": "0",
+      "pay": "-1",
+      "areaid": "0",
+      "sort": "10",
+      "iscopyright": "0"
+     },
+     "listField": "UpdateComicItems",
+     "itemFields": {
+      "id": "ID",
+      "title": "Title",
+      "url": "UrlKey",
+      "cover": "ShowPicUrlB",
+      "author": "Author",
+      "lastPartUrl": "LastPartUrl",
+      "lastPartName": "ShowLastPartName",
+      "status": "Status"
+     },
+     "htmlListItemDom": "ul.manga-list-2 > li",
+     "htmlCoverDom": ".manga-list-2-cover-img",
+     "htmlTitleDom": ".manga-list-2-title a",
+     "htmlUrlDom": ".manga-list-2-title a",
+     "slugToTagId": {
+      "rexue": "31",
+      "aiqing": "26",
+      "xiaoyuan": "1",
+      "weiniang": "5",
+      "maoxian": "2",
+      "zhichang": "6",
+      "hougong": "8",
+      "zhiyu": "9",
+      "kehuan": "25",
+      "qingxiaoshuo1": "156",
+      "lizhi": "10",
+      "shenghuoqinqing": "11",
+      "zhanzheng": "12",
+      "xuanyi": "17",
+      "zhentan": "33",
+      "gaoxiao": "37",
+      "qihuan": "14",
+      "mofa": "15",
+      "dongfangshengui": "20",
+      "mengxi": "21",
+      "lishi": "4",
+      "meishi": "7",
+      "tongren": "30",
+      "jingji": "34",
+      "jizhan": "40"
+     }
+    },
+    "detail": {
+     "coverDom": ".detail-main-cover img",
+     "titleDom": ".detail-main-info-title",
+     "authorDom": ".detail-main-info-author a",
+     "descDom": ".detail-desc",
+     "tagDom": ".detail-main-info-class span a",
+     "chapterGroupDom": "ul[id^=\"detail-list-select-\"]",
+     "chapterItemDom": "li",
+     "chapterLinkDom": "a.chapteritem",
+     "chapterNameDom": ".detail-list-2-info-title",
+     "chapterDateDom": ".detail-list-2-info-subtitle"
+    },
+    "chapterImage": {
+     "imageArrayVar": "newImgs",
+     "ensureHttps": true
+    },
+    "home": [
+     {
+      "id": "latest",
+      "title": "最近更新",
+      "path": "dm5.ashx",
+      "method": "GET",
+      "params": {
+       "action": "getclasscomics",
+       "pageindex": "1",
+       "pagesize": "10"
+      },
+      "listField": "UpdateComicItems",
+      "fields": {
+       "id": "ID",
+       "title": "Title",
+       "url": "UrlKey",
+       "cover": "ShowPicUrlB",
+       "author": "Author"
+      }
+     },
+     {
+      "id": "rexue",
+      "title": "热血",
+      "path": "dm5.ashx",
+      "method": "GET",
+      "params": {
+       "action": "getclasscomics",
+       "pageindex": "1",
+       "pagesize": "10",
+       "tagid": "31"
+      },
+      "listField": "UpdateComicItems",
+      "fields": {
+       "id": "ID",
+       "title": "Title",
+       "url": "UrlKey",
+       "cover": "ShowPicUrlB",
+       "author": "Author"
+      }
+     },
+     {
+      "id": "aiqing",
+      "title": "恋爱",
+      "path": "dm5.ashx",
+      "method": "GET",
+      "params": {
+       "action": "getclasscomics",
+       "pageindex": "1",
+       "pagesize": "10",
+       "tagid": "26"
+      },
+      "listField": "UpdateComicItems",
+      "fields": {
+       "id": "ID",
+       "title": "Title",
+       "url": "UrlKey",
+       "cover": "ShowPicUrlB",
+       "author": "Author"
+      }
+     },
+     {
+      "id": "gaoxiao",
+      "title": "搞笑",
+      "path": "dm5.ashx",
+      "method": "GET",
+      "params": {
+       "action": "getclasscomics",
+       "pageindex": "1",
+       "pagesize": "10",
+       "tagid": "37"
+      },
+      "listField": "UpdateComicItems",
+      "fields": {
+       "id": "ID",
+       "title": "Title",
+       "url": "UrlKey",
+       "cover": "ShowPicUrlB",
+       "author": "Author"
+      }
+     },
+     {
+      "id": "qihuan",
+      "title": "奇幻",
+      "path": "dm5.ashx",
+      "method": "GET",
+      "params": {
+       "action": "getclasscomics",
+       "pageindex": "1",
+       "pagesize": "10",
+       "tagid": "14"
+      },
+      "listField": "UpdateComicItems",
+      "fields": {
+       "id": "ID",
+       "title": "Title",
+       "url": "UrlKey",
+       "cover": "ShowPicUrlB",
+       "author": "Author"
+      }
+     },
+     {
+      "id": "xuanyi",
+      "title": "悬疑",
+      "path": "dm5.ashx",
+      "method": "GET",
+      "params": {
+       "action": "getclasscomics",
+       "pageindex": "1",
+       "pagesize": "10",
+       "tagid": "17"
+      },
+      "listField": "UpdateComicItems",
+      "fields": {
+       "id": "ID",
+       "title": "Title",
+       "url": "UrlKey",
+       "cover": "ShowPicUrlB",
+       "author": "Author"
+      }
+     }
+    ],
+    "url": "https://www.manhuaren.com/"
+   }
+  },
+  {
+   "type": "config",
+   "config": {
+    "name": "瓜子漫画",
+    "url": "https://www.guazimanhua.com/",
+    "comic_cover_dom": ".mobile-comic-cover",
+    "comic_name_dom": ".mobile-comic-title",
+    "comic_author_dom": ".cinema-strip div",
+    "author_label": "作者",
+    "comic_desc_dom": ".mobile-comic-desc",
+    "comic_status_dom": ".mobile-comic-meta",
+    "comic_tags_dom": ".mobile-comic-tags",
+    "tags_split": "/",
+    "comic_hot_dom": ".cinema-strip div",
+    "hot_label": "热度",
+    "chapter_name_dom": ".all-chapter-grid a",
+    "chapter_link_dom": ".all-chapter-grid a",
+    "img_dom": ".reading-image",
+    "img_attr": "src",
+    "use_frame": 0,
+    "img_load_mode": 0,
+    "search_url": "/category.php?keyword={q}",
+    "search_result_dom": ".grid .card",
+    "search_title_dom": "h3 a",
+    "search_cover_dom": "img.cover",
+    "search_manga_url_dom": "a.cover-wrap",
+    "categories": {
+     "cid": {
+      "title": "题材",
+      "options": [
+       {
+        "value": "",
+        "name": "全部"
+       },
+       {
+        "value": "13",
+        "name": "热血"
+       },
+       {
+        "value": "25",
+        "name": "玄幻"
+       },
+       {
+        "value": "31",
+        "name": "奇幻"
+       },
+       {
+        "value": "22",
+        "name": "科幻"
+       },
+       {
+        "value": "9",
+        "name": "恋爱"
+       },
+       {
+        "value": "5",
+        "name": "霸总"
+       },
+       {
+        "value": "42",
+        "name": "都市"
+       },
+       {
+        "value": "8",
+        "name": "穿越"
+       },
+       {
+        "value": "23",
+        "name": "古风"
+       },
+       {
+        "value": "29",
+        "name": "校园"
+       },
+       {
+        "value": "30",
+        "name": "冒险"
+       },
+       {
+        "value": "54",
+        "name": "动作"
+       },
+       {
+        "value": "11",
+        "name": "悬疑"
+       },
+       {
+        "value": "21",
+        "name": "灵异"
+       },
+       {
+        "value": "14",
+        "name": "恐怖"
+       },
+       {
+        "value": "15",
+        "name": "搞笑"
+       },
+       {
+        "value": "148",
+        "name": "系统"
+       },
+       {
+        "value": "97",
+        "name": "逆袭"
+       },
+       {
+        "value": "61",
+        "name": "复仇"
+       },
+       {
+        "value": "55",
+        "name": "脑洞"
+       },
+       {
+        "value": "41",
+        "name": "耽美"
+       },
+       {
+        "value": "17",
+        "name": "真人"
+       },
+       {
+        "value": "27",
+        "name": "其它"
+       }
+      ]
+     },
+     "city": {
+      "title": "地区",
+      "options": [
+       {
+        "value": "",
+        "name": "全部"
+       },
+       {
+        "value": "338",
+        "name": "国漫"
+       },
+       {
+        "value": "42",
+        "name": "大陆"
+       },
+       {
+        "value": "78",
+        "name": "日韩"
+       },
+       {
+        "value": "77",
+        "name": "港台"
+       },
+       {
+        "value": "43",
+        "name": "欧美"
+       }
+      ]
+     },
+     "audience": {
+      "title": "受众",
+      "options": [
+       {
+        "value": "",
+        "name": "全部"
+       },
+       {
+        "value": "1",
+        "name": "男频"
+       },
+       {
+        "value": "2",
+        "name": "女频"
+       }
+      ]
+     },
+     "is_end": {
+      "title": "进度",
+      "options": [
+       {
+        "value": "",
+        "name": "全部"
+       },
+       {
+        "value": "2",
+        "name": "连载中"
+       },
+       {
+        "value": "1",
+        "name": "已完结"
+       }
+      ]
+     },
+     "sort": {
+      "title": "排序",
+      "options": [
+       {
+        "value": "",
+        "name": "默认"
+       },
+       {
+        "value": "daily",
+        "name": "今日热门"
+       },
+       {
+        "value": "hits",
+        "name": "人气"
+       },
+       {
+        "value": "update",
+        "name": "更新"
+       },
+       {
+        "value": "score",
+        "name": "评分"
+       }
+      ]
+     }
+    },
+    "category_url": "/category.php?cid={cid}&city={city}&audience={audience}&is_end={is_end}&sort={sort}",
+    "category_page_url": "/category.php?cid={cid}&city={city}&audience={audience}&is_end={is_end}&sort={sort}&page={page}",
+    "category_list_dom": ".grid .card",
+    "category_cover_dom": "img.cover",
+    "category_title_dom": "h3 a",
+    "category_url_dom": "a.cover-wrap",
+    "category_page_size": 36,
+    "home": [
+     {
+      "id": "daily",
+      "title": "今日热门",
+      "url": "/category.php?sort=daily",
+      "limit": 36
+     },
+     {
+      "id": "latest",
+      "title": "最近更新",
+      "url": "/update.php",
+      "listDom": ".mobile-update-grid .mobile-update-card",
+      "coverDom": "img",
+      "titleDom": "h2 a",
+      "urlDom": "h2 a",
+      "limit": 30
+     },
+     {
+      "id": "hits",
+      "title": "人气排行",
+      "url": "/top.php",
+      "listDom": ".mobile-rank-grid .mobile-rank-card",
+      "coverDom": "img",
+      "titleDom": "h2 a",
+      "urlDom": "h2 a",
+      "limit": 30
+     },
+     {
+      "id": "score",
+      "title": "高分推荐",
+      "url": "/category.php?sort=score",
+      "limit": 36
+     }
+    ],
+    "recommend_list_dom": ".recommend-grid .rec",
+    "recommend_cover_dom": "img",
+    "recommend_title_dom": "h3",
+    "recommend_url_dom": "a",
+    "recommend_limit": 5
+   }
+  },
+  {
+   "type": "config",
+   "config": {
+    "name": "顶漫画",
+    "url": "https://www.dingmanhua.com/",
+    "comic_cover_dom": ".manga-detail .manga-cover img",
+    "comic_name_dom": ".manga-detail .manga-info h1",
+    "comic_author_dom": ".manga-meta .meta-author #mangaAuthor",
+    "comic_desc_dom": ".manga-description #mangaDescription",
+    "comic_status_dom": ".manga-meta .meta-status",
+    "status_label": "状态",
+    "comic_tags_dom": ".manga-tags .tag",
+    "chapter_click_dom": "#loadMoreBtn",
+    "chapter_name_dom": "#chaptersGrid a",
+    "chapter_link_dom": "#chaptersGrid a",
+    "img_dom": ".comic-container .images img",
+    "use_frame": 1,
+    "img_attr": "data-src",
+    "img_load_mode": 2,
+    "cross_origin": 1,
+    "search_url": "search?query={q}",
+    "search_result_dom": ".manga-grid .manga-card",
+    "search_manga_url_dom": "a",
+    "search_cover_dom": "img",
+    "categories": {
+     "category": {
+      "title": "地区",
+      "options": [
+       {
+        "value": "0",
+        "name": "全部"
+       },
+       {
+        "value": "1",
+        "name": "日本"
+       },
+       {
+        "value": "3",
+        "name": "大陆"
+       },
+       {
+        "value": "4",
+        "name": "韩国"
+       },
+       {
+        "value": "14",
+        "name": "港台"
+       },
+       {
+        "value": "15",
+        "name": "其他"
+       }
+      ]
+     },
+     "tag": {
+      "title": "题材",
+      "options": [
+       {
+        "value": "0",
+        "name": "全部"
+       },
+       {
+        "value": "1",
+        "name": "悬疑"
+       },
+       {
+        "value": "2",
+        "name": "欢乐"
+       },
+       {
+        "value": "3",
+        "name": "搞笑"
+       },
+       {
+        "value": "4",
+        "name": "玄幻"
+       },
+       {
+        "value": "5",
+        "name": "冒险"
+       },
+       {
+        "value": "6",
+        "name": "爱情"
+       },
+       {
+        "value": "7",
+        "name": "百合"
+       },
+       {
+        "value": "8",
+        "name": "推理"
+       },
+       {
+        "value": "9",
+        "name": "热血"
+       },
+       {
+        "value": "10",
+        "name": "异界"
+       },
+       {
+        "value": "11",
+        "name": "轻改"
+       },
+       {
+        "value": "12",
+        "name": "奇幻"
+       },
+       {
+        "value": "13",
+        "name": "校园"
+       },
+       {
+        "value": "14",
+        "name": "妹控"
+       },
+       {
+        "value": "15",
+        "name": "生活"
+       },
+       {
+        "value": "16",
+        "name": "竞技"
+       },
+       {
+        "value": "17",
+        "name": "同人"
+       },
+       {
+        "value": "18",
+        "name": "伪娘"
+       },
+       {
+        "value": "19",
+        "name": "东方"
+       },
+       {
+        "value": "20",
+        "name": "美食"
+       },
+       {
+        "value": "21",
+        "name": "格斗"
+       },
+       {
+        "value": "22",
+        "name": "战争"
+       },
+       {
+        "value": "23",
+        "name": "舰娘"
+       },
+       {
+        "value": "24",
+        "name": "治愈"
+       },
+       {
+        "value": "25",
+        "name": "魔幻"
+       },
+       {
+        "value": "26",
+        "name": "职场"
+       },
+       {
+        "value": "27",
+        "name": "性转"
+       },
+       {
+        "value": "28",
+        "name": "萌系"
+       },
+       {
+        "value": "29",
+        "name": "后宫"
+       },
+       {
+        "value": "30",
+        "name": "节操"
+       },
+       {
+        "value": "31",
+        "name": "魔法"
+       },
+       {
+        "value": "32",
+        "name": "科幻"
+       },
+       {
+        "value": "33",
+        "name": "穿越"
+       },
+       {
+        "value": "34",
+        "name": "仙侠"
+       },
+       {
+        "value": "35",
+        "name": "都市"
+       },
+       {
+        "value": "36",
+        "name": "异能"
+       },
+       {
+        "value": "37",
+        "name": "网游"
+       },
+       {
+        "value": "38",
+        "name": "短篇"
+       },
+       {
+        "value": "39",
+        "name": "女主"
+       },
+       {
+        "value": "40",
+        "name": "恐怖"
+       },
+       {
+        "value": "41",
+        "name": "重生"
+       },
+       {
+        "value": "42",
+        "name": "日常"
+       },
+       {
+        "value": "43",
+        "name": "侦探"
+       },
+       {
+        "value": "44",
+        "name": "言情"
+       },
+       {
+        "value": "45",
+        "name": "生存"
+       },
+       {
+        "value": "46",
+        "name": "武侠"
+       },
+       {
+        "value": "47",
+        "name": "系统"
+       },
+       {
+        "value": "48",
+        "name": "励志"
+       },
+       {
+        "value": "49",
+        "name": "末世"
+       },
+       {
+        "value": "50",
+        "name": "转生"
+       },
+       {
+        "value": "51",
+        "name": "长篇"
+       },
+       {
+        "value": "52",
+        "name": "修仙"
+       },
+       {
+        "value": "53",
+        "name": "末日"
+       },
+       {
+        "value": "54",
+        "name": "灵异"
+       },
+       {
+        "value": "55",
+        "name": "游戏"
+       },
+       {
+        "value": "56",
+        "name": "爱倩"
+       },
+       {
+        "value": "57",
+        "name": "销毁"
+       },
+       {
+        "value": "58",
+        "name": "病娇"
+       },
+       {
+        "value": "59",
+        "name": "音乐"
+       },
+       {
+        "value": "60",
+        "name": "爆笑"
+       },
+       {
+        "value": "61",
+        "name": "机战"
+       },
+       {
+        "value": "62",
+        "name": "复仇"
+       },
+       {
+        "value": "63",
+        "name": "舞蹈"
+       },
+       {
+        "value": "64",
+        "name": "战斗"
+       },
+       {
+        "value": "65",
+        "name": "逆袭"
+       },
+       {
+        "value": "66",
+        "name": "历史"
+       },
+       {
+        "value": "67",
+        "name": "恋爱"
+       },
+       {
+        "value": "68",
+        "name": "养成"
+       },
+       {
+        "value": "69",
+        "name": "四格"
+       },
+       {
+        "value": "70",
+        "name": "宫廷"
+       },
+       {
+        "value": "71",
+        "name": "诡异"
+       },
+       {
+        "value": "72",
+        "name": "惊悚"
+       },
+       {
+        "value": "73",
+        "name": "耽美"
+       },
+       {
+        "value": "74",
+        "name": "彩色"
+       },
+       {
+        "value": "75",
+        "name": "其他"
+       },
+       {
+        "value": "76",
+        "name": "TL"
+       },
+       {
+        "value": "77",
+        "name": "宅系"
+       },
+       {
+        "value": "78",
+        "name": "FATE"
+       },
+       {
+        "value": "79",
+        "name": "C103"
+       },
+       {
+        "value": "80",
+        "name": "C105"
+       },
+       {
+        "value": "81",
+        "name": "歡樂向"
+       },
+       {
+        "value": "82",
+        "name": "愛情"
+       },
+       {
+        "value": "83",
+        "name": "冒險"
+       },
+       {
+        "value": "84",
+        "name": "神鬼"
+       },
+       {
+        "value": "85",
+        "name": "轻小说"
+       },
+       {
+        "value": "86",
+        "name": "格鬥"
+       },
+       {
+        "value": "87",
+        "name": "後宮"
+       },
+       {
+        "value": "88",
+        "name": "C106"
+       },
+       {
+        "value": "89",
+        "name": "C107"
+       },
+       {
+        "value": "90",
+        "name": "穿越"
+       },
+       {
+        "value": "91",
+        "name": "性转换"
+       },
+       {
+        "value": "92",
+        "name": "AA"
+       }
+      ]
+     }
+    },
+    "category_url": "/sort?category={category}&tag={tag}",
+    "category_page_url": "/sort?category={category}&tag={tag}&page={page}",
+    "category_list_dom": ".main-content .manga-grid .manga-card",
+    "category_cover_dom": ".manga-image img",
+    "category_title_dom": ".manga-title",
+    "category_url_dom": "a",
+    "category_page_size": 24,
+    "home": [
+     {
+      "id": "hot",
+      "title": "热门漫画",
+      "url": "/hot",
+      "listDom": ".all-rank-board .all-rank-row",
+      "coverDom": ".all-rank-work img",
+      "titleDom": ".all-rank-work strong",
+      "urlDom": "",
+      "limit": 24
+     },
+     {
+      "id": "new",
+      "title": "最近更新",
+      "url": "/new",
+      "listDom": ".update-columns .update-item",
+      "coverDom": ".update-thumb img",
+      "titleDom": ".update-copy strong",
+      "urlDom": "",
+      "limit": 24
+     }
+    ],
+    "recommend_list_dom": "#recommendationsGrid .manga-card",
+    "recommend_cover_dom": "img",
+    "recommend_title_dom": ".manga-title",
+    "recommend_url_dom": "a",
+    "recommend_limit": 5
+   }
+  },
+  {
+   "type": "config",
+   "config": {
+    "name": "漫画160",
+    "url": "https://www.mh160mh.com/",
+    "comic_cover_dom": ".mh-date-bgpic img",
+    "comic_name_dom": ".mh-date-info-name h4",
+    "comic_author_dom": "meta[property=\"og:novel:author\"]",
+    "comic_desc_dom": ".work-introd .work-ov p",
+    "comic_status_dom": "meta[property=\"og:novel:status\"]",
+    "comic_tags_dom": "meta[property=\"og:novel:category\"]",
+    "comic_hot_dom": "#g_div_hits",
+    "chapter_name_dom": "#mh-chapter-list-ol-0 li a",
+    "chapter_link_dom": "#mh-chapter-list-ol-0 li a",
+    "img_dom": "#commicBox .charpetBox img",
+    "use_frame": 1,
+    "img_attr": "data-original",
+    "img_load_mode": 1,
+    "cross_origin": 1,
+    "search_url": "/statics/searchelxt1e1.aspx?key={q}",
+    "search_result_dom": ".mh-search-list li",
+    "search_manga_url_dom": "a",
+    "search_cover_dom": "img",
+    "categories": {
+     "category": {
+      "title": "类型",
+      "options": [
+       {
+        "value": "all",
+        "name": "全部"
+       },
+       {
+        "value": "wanjie",
+        "name": "完结"
+       },
+       {
+        "value": "lianzai",
+        "name": "连载中"
+       },
+       {
+        "value": "zaixian_rhmh",
+        "name": "日韩"
+       },
+       {
+        "value": "zaixian_dlmh",
+        "name": "内地"
+       },
+       {
+        "value": "zaixian_gtmh",
+        "name": "港台"
+       },
+       {
+        "value": "zaixian_ommh",
+        "name": "欧美"
+       },
+       {
+        "value": "rexue",
+        "name": "热血"
+       },
+       {
+        "value": "gedou",
+        "name": "格斗"
+       },
+       {
+        "value": "kehuan4",
+        "name": "科幻"
+       },
+       {
+        "value": "jingji",
+        "name": "竞技"
+       },
+       {
+        "value": "gaoxiao",
+        "name": "搞笑"
+       },
+       {
+        "value": "tuili",
+        "name": "推理"
+       },
+       {
+        "value": "kongbu",
+        "name": "恐怖"
+       },
+       {
+        "value": "danmei",
+        "name": "耽美"
+       },
+       {
+        "value": "shaonv",
+        "name": "少女"
+       },
+       {
+        "value": "lianai",
+        "name": "恋爱"
+       },
+       {
+        "value": "shenghuo",
+        "name": "生活"
+       },
+       {
+        "value": "zhanzheng",
+        "name": "战争"
+       },
+       {
+        "value": "gushi",
+        "name": "故事"
+       }
+      ]
+     }
+    },
+    "category_url": "/kanmanhua/{category}",
+    "category_page_url": "/kanmanhua/{category}/{page}.html",
+    "category_list_dom": ".mh-search-result .mh-search-list li",
+    "category_cover_dom": "img",
+    "category_title_dom": "h4",
+    "category_url_dom": "a",
+    "category_page_size": 12,
+    "home": [
+     {
+      "id": "popularity",
+      "title": "热门人气",
+      "url": "/kanmanhua/allhit",
+      "limit": 12
+     },
+     {
+      "id": "latest",
+      "title": "最近更新",
+      "url": "/kanmanhua/zaixian_recent.html",
+      "listDom": ".mh-search-list li",
+      "coverDom": "img",
+      "titleDom": "h4",
+      "urlDom": "a",
+      "limit": 12
+     }
+    ],
+    "recommend_list_dom": ".mh-nlook ul li",
+    "recommend_cover_dom": ".mh-nlook-w img",
+    "recommend_title_dom": ".mh-works-txt h5 a",
+    "recommend_url_dom": ".mh-works-txt h5 a",
+    "recommend_limit": 5
+   }
+  },
+  {
+   "type": "config",
+   "config": {
+    "name": "来漫画",
+    "icon": "https://www.comemh8.com/template/skin4_20110501/images/logo.png",
+    "url": "https://www.comemh8.com/",
+    "comic_cover_dom": ".info_cover .cover img",
+    "comic_name_dom": ".intro_l .title h1",
+    "comic_author_dom": ".info p.w260",
+    "author_label": "原著作者",
+    "comic_desc_dom": ".introduction",
+    "comic_status_dom": "meta[property=\"og:novel:status\"]",
+    "comic_tags_dom": "meta[property=\"og:novel:category\"]",
+    "chapter_name_dom": ".plist.pnormal ul li a",
+    "chapter_link_dom": ".plist.pnormal ul a",
+    "img_dom": ".img-box.J_shareContent img",
+    "img_script": "var h; if (parseInt(mhInfo.chapterId) > 542724) { var hosts = [\"xwdf.tgmhfc.uk\",\"mhreswhm.tgmhfc.uk\",\"qwe123.tgmhfc.uk\",\"resmhpic.tgmhfc.uk\",\"reszxc.tgmhfc.uk\"]; h = \"https://\" + hosts[Math.floor(Math.random()*hosts.length)]; } else { h = \"https://mhpic6.tgmhfc.uk\"; } return mhInfo.images.map(function(e){ return h + mhInfo.path + e; });",
+    "img_load_mode": 2,
+    "search_url": "/e/search/?key={q}",
+    "search_encoding": "gb2312",
+    "page_encoding": "gb2312",
+    "search_result_dom": "#dmList li",
+    "search_title_dom": "dl dt a",
+    "search_manga_url_dom": "dl dt a",
+    "search_cover_dom": ".pic img",
+    "categories": [
+     {
+      "value": "rexue",
+      "name": "热血"
+     },
+     {
+      "value": "gedou",
+      "name": "格斗"
+     },
+     {
+      "value": "kehuan",
+      "name": "科幻"
+     },
+     {
+      "value": "jingji",
+      "name": "竞技"
+     },
+     {
+      "value": "gaoxiao",
+      "name": "搞笑"
+     },
+     {
+      "value": "tuili",
+      "name": "推理"
+     },
+     {
+      "value": "kongbu",
+      "name": "恐怖"
+     },
+     {
+      "value": "danmei",
+      "name": "耽美"
+     },
+     {
+      "value": "shaonv",
+      "name": "少女"
+     },
+     {
+      "value": "lianai",
+      "name": "恋爱"
+     },
+     {
+      "value": "shenghuo",
+      "name": "生活"
+     },
+     {
+      "value": "zhanzheng",
+      "name": "战争"
+     },
+     {
+      "value": "gushi",
+      "name": "故事"
+     },
+     {
+      "value": "baihe",
+      "name": "百合"
+     },
+     {
+      "value": "weiniang",
+      "name": "伪娘"
+     },
+     {
+      "value": "qita",
+      "name": "其他"
+     }
+    ],
+    "category_url": "/kanmanhua/{slug}/",
+    "category_page_url": "/kanmanhua/{slug}/{page}.html",
+    "category_list_dom": "div.dmList li",
+    "category_cover_dom": ".cover .pic img",
+    "category_title_dom": "dl dt a",
+    "category_url_dom": "dl dt a",
+    "category_next_page_dom": "a#k_1",
+    "home": [
+     {
+      "id": "serial",
+      "title": "热门连载",
+      "url": "",
+      "listDom": ".cmd_list ul[0] li",
+      "coverDom": ".cover img",
+      "titleDom": ".cover h3",
+      "urlDom": ".cover a"
+     },
+     {
+      "id": "new",
+      "title": "最新上架",
+      "url": "",
+      "listDom": ".icmd_cover_list ul li",
+      "coverDom": ".cover img",
+      "titleDom": ".cover h3",
+      "urlDom": ".cover a"
+     }
+    ],
+    "recommend_list_dom": "#similarList ul li",
+    "recommend_cover_dom": "p.cover img",
+    "recommend_title_dom": "li > a[title]",
+    "recommend_url_dom": "li > a[title]",
+    "recommend_limit": 5
+   }
+  },
+  {
+   "type": "config",
+   "config": {
+    "name": "来漫画2",
+    "icon": "https://lmanhua.com/novel/images/readnovel-logo.png",
+    "url": "https://lmanhua.com/",
+    "comic_cover_dom": ".info-holder .book img",
+    "comic_name_dom": ".col-xs-12.col-sm-8.col-md-8.desc .title",
+    "comic_author_dom": ".info [itemprop=\"author\"]",
+    "comic_desc_dom": ".desc-text",
+    "comic_status_dom": ".info .info-chitiet .text-primary",
+    "comic_tags_dom": ".info [itemprop=\"genre\"]",
+    "comic_hot_dom": ".info .glyphicon-eye-open ~ span",
+    "chapter_name_dom": "#list-chapter .list-chapter a",
+    "chapter_link_dom": "#list-chapter .list-chapter a",
+    "chapter_paged_url": "{base}?p={page}",
+    "chapter_page_count_dom": "ul.pagination-chap",
+    "img_dom": ".chapter-content img",
+    "use_frame": 1,
+    "img_attr": "data-original",
+    "img_referer": "none",
+    "img_load_mode": 1,
+    "cross_origin": 1,
+    "search_url": "/e/search/index.php?keyboard={q}&show=title,writer,byr&searchget=1",
+    "author_search_url": "/e/search/index.php?keyboard={q}&show=writer&searchget=1",
+    "search_result_dom": "div.home-truyendecu",
+    "search_manga_url_dom": "a",
+    "search_cover_dom": "img",
+    "search_title_dom": ".caption a",
+    "categories": [
+     {
+      "value": "1",
+      "name": "国漫"
+     },
+     {
+      "value": "2",
+      "name": "韩国"
+     },
+     {
+      "value": "3",
+      "name": "日本"
+     },
+     {
+      "value": "4",
+      "name": "欧美"
+     },
+     {
+      "value": "5",
+      "name": "港台"
+     }
+    ],
+    "category_url": "/manga{slug}",
+    "category_page_url": "/manga{slug}/page{page}.html",
+    "category_list_dom": "div.home-truyendecu",
+    "category_url_dom": "a",
+    "category_cover_dom": "img",
+    "category_title_dom": ".caption a",
+    "category_page_size": 20,
+    "category_page_start": 0,
+    "home": [
+     {
+      "id": "hot",
+      "title": "热门推荐",
+      "url": "/popular",
+      "limit": 30
+     },
+     {
+      "id": "new",
+      "title": "最近更新",
+      "url": "/latest",
+      "limit": 30
+     },
+     {
+      "id": "release",
+      "title": "最新入库",
+      "url": "/release",
+      "limit": 30
+     }
+    ]
+   }
+  },
+  {
+   "type": "config",
+   "config": {
+    "name": "包子漫画(国内)",
+    "url": "https://cn.bzmanga.com/",
+    "comic_name_dom": ".comics-detail__title",
+    "comic_cover_dom": ".de-info__box amp-img",
+    "comic_author_dom": ".comics-detail__author",
+    "comic_desc_dom": ".comics-detail__desc",
+    "comic_status_dom": ".tag-list .tag",
+    "comic_tags_dom": ".tag-list .tag ~ .tag",
+    "chapter_name_dom": "#chapter-items a,#chapters_other_list a",
+    "chapter_link_dom": "#chapter-items a,#chapters_other_list a",
+    "img_dom": ".comic-contain__item",
+    "img_attr": "data-src",
+    "use_frame": 0,
+    "img_load_mode": 1,
+    "cross_origin": 1,
+    "url_rewrites": {
+     "s1.bzcdn.net": "static-tw.baozimh.com"
+    },
+    "search_url": "/search?q={q}",
+    "search_result_dom": ".comics-card",
+    "search_manga_url_dom": "a",
+    "search_cover_dom": "amp-img",
+    "categories": {
+     "theme": {
+      "title": "题材",
+      "options": [
+       {
+        "value": "all",
+        "name": "全部"
+       },
+       {
+        "value": "lianai",
+        "name": "恋爱"
+       },
+       {
+        "value": "chunai",
+        "name": "纯爱"
+       },
+       {
+        "value": "gufeng",
+        "name": "古风"
+       },
+       {
+        "value": "yineng",
+        "name": "异能"
+       },
+       {
+        "value": "xuanyi",
+        "name": "悬疑"
+       },
+       {
+        "value": "juqing",
+        "name": "剧情"
+       },
+       {
+        "value": "kehuan",
+        "name": "科幻"
+       },
+       {
+        "value": "qihuan",
+        "name": "奇幻"
+       },
+       {
+        "value": "xuanhuan",
+        "name": "玄幻"
+       },
+       {
+        "value": "chuanyue",
+        "name": "穿越"
+       },
+       {
+        "value": "mouxian",
+        "name": "冒险"
+       },
+       {
+        "value": "tuili",
+        "name": "推理"
+       },
+       {
+        "value": "wuxia",
+        "name": "武侠"
+       },
+       {
+        "value": "gedou",
+        "name": "格斗"
+       },
+       {
+        "value": "zhanzheng",
+        "name": "战争"
+       },
+       {
+        "value": "rexie",
+        "name": "热血"
+       },
+       {
+        "value": "gaoxiao",
+        "name": "搞笑"
+       },
+       {
+        "value": "danuzhu",
+        "name": "大女主"
+       },
+       {
+        "value": "dushi",
+        "name": "都市"
+       },
+       {
+        "value": "zongcai",
+        "name": "总裁"
+       },
+       {
+        "value": "hougong",
+        "name": "后宫"
+       },
+       {
+        "value": "richang",
+        "name": "日常"
+       },
+       {
+        "value": "hanman",
+        "name": "韩漫"
+       },
+       {
+        "value": "shaonian",
+        "name": "少年"
+       },
+       {
+        "value": "qita",
+        "name": "其它"
+       }
+      ]
+     },
+     "status": {
+      "title": "进度",
+      "options": [
+       {
+        "value": "all",
+        "name": "全部"
+       },
+       {
+        "value": "serial",
+        "name": "连载中"
+       },
+       {
+        "value": "pub",
+        "name": "已完结"
+       }
+      ]
+     },
+     "region": {
+      "title": "作品地区",
+      "options": [
+       {
+        "value": "all",
+        "name": "全部"
+       },
+       {
+        "value": "cn",
+        "name": "国漫"
+       },
+       {
+        "value": "jp",
+        "name": "日本"
+       },
+       {
+        "value": "kr",
+        "name": "韩国"
+       },
+       {
+        "value": "en",
+        "name": "欧美"
+       }
+      ]
+     },
+     "english": {
+      "title": "字母",
+      "options": [
+       {
+        "value": "%2a",
+        "name": "全部"
+       },
+       {
+        "value": "ABCD",
+        "name": "ABCD"
+       },
+       {
+        "value": "EFGH",
+        "name": "EFGH"
+       },
+       {
+        "value": "IJKL",
+        "name": "IJKL"
+       },
+       {
+        "value": "MNOP",
+        "name": "MNOP"
+       },
+       {
+        "value": "QRST",
+        "name": "QRST"
+       },
+       {
+        "value": "UVW",
+        "name": "UVW"
+       },
+       {
+        "value": "XYZ",
+        "name": "XYZ"
+       },
+       {
+        "value": "0-9",
+        "name": "0-9"
+       }
+      ]
+     }
+    },
+    "category_url": "/classify?type={theme}&region={region}&state={status}&filter={english}",
+    "category_page_url": "/classify?type={theme}&region={region}&state={status}&filter={english}&page={page}",
+    "category_list_dom": ".comics-card",
+    "category_cover_dom": "amp-img",
+    "category_url_dom": "a",
+    "category_page_size": 36,
+    "home": [
+     {
+      "id": "recommend",
+      "title": "推荐漫画",
+      "url": "https://cn.bzmanga.com/index2",
+      "listDom": ".index-recommend-items[0] .comics-card",
+      "coverDom": "amp-img",
+      "titleDom": ".comics-card__title .text-truncate",
+      "urlDom": ".comics-card__poster"
+     }
+    ],
+    "recommend_list_dom": "div.recommend.pure-g div.recommend--item a[href*=\"/comic/\"]",
+    "recommend_cover_dom": "amp-img",
+    "recommend_title_dom": "span",
+    "recommend_url_dom": "",
+    "recommend_limit": 5
+   }
+  },
+  {
+   "type": "config",
+   "config": {
+    "name": "漫画客",
+    "url": "http://m.yumanhua.com/",
+    "comic_cover_dom": ".book-cover img",
+    "comic_name_dom": ".book-name h1.name",
+    "comic_author_dom": ".comic-info-detail p",
+    "comic_desc_dom": ".cartoon-introduction p",
+    "comic_status_dom": ".comic-info-detail p",
+    "comic_tags_dom": ".comic-tags span",
+    "author_label": "作者",
+    "status_label": "更新",
+    "tags_split": " ",
+    "chapter_name_dom": ".chaplist-box li a",
+    "chapter_link_dom": ".chaplist-box li a",
+    "chapter_click_dom": ".chaplist-more button",
+    "img_dom": ".main_img .chapter-img-box img",
+    "img_attr": "data-src",
+    "use_frame": 1,
+    "img_script": "var out=[];var injected=false;for (var t=0;t<12;t++){var imgs=document.querySelectorAll('.main_img .chapter-img-box img');out=[];for (var i=0;i<imgs.length;i++){var u=imgs[i].getAttribute('data-src');if (u && u.indexOf('http')===0) out.push(u);}if (out.length>0) return out;if (!injected && typeof window.__c0rst96!=='undefined'){injected=true;try{if (typeof window.jQuery==='undefined'){await new Promise(function(res){var s=document.createElement('script');s.src='/static/js/jquery.js';s.onload=res;s.onerror=res;document.head.appendChild(s);});}await new Promise(function(res){var s=document.createElement('script');s.src='/static/js/all2.js?v=2.3';s.onload=res;s.onerror=res;document.head.appendChild(s);});}catch(e){}}await new Promise(function(r){setTimeout(r,400);});}return out;",
+    "img_referer": "none",
+    "img_load_mode": 0,
+    "chapter_sort_by_order": false,
+    "use_webview_fetch": false,
+    "page_encoding": "utf-8",
+    "category_page_method": "POST",
+    "category_post_path": "/data/sort",
+    "category_post_body": {
+     "s": "{theme}",
+     "p": "{page}"
+    },
+    "category_list_field": "data",
+    "category_json_fields": {
+     "url": "id",
+     "title": "name",
+     "cover": "imgurl",
+     "author": "author"
+    },
+    "category_page_size": 20,
+    "category_page_start": 1,
+    "categories": {
+     "theme": {
+      "title": "分类",
+      "options": [
+       {
+        "value": "1",
+        "name": "冒险"
+       },
+       {
+        "value": "2",
+        "name": "热血"
+       },
+       {
+        "value": "3",
+        "name": "都市"
+       },
+       {
+        "value": "4",
+        "name": "玄幻"
+       },
+       {
+        "value": "5",
+        "name": "悬疑"
+       },
+       {
+        "value": "6",
+        "name": "耽美"
+       },
+       {
+        "value": "7",
+        "name": "恋爱"
+       },
+       {
+        "value": "8",
+        "name": "生活"
+       },
+       {
+        "value": "9",
+        "name": "搞笑"
+       },
+       {
+        "value": "10",
+        "name": "穿越"
+       },
+       {
+        "value": "11",
+        "name": "修真"
+       },
+       {
+        "value": "12",
+        "name": "后宫"
+       },
+       {
+        "value": "13",
+        "name": "女主"
+       },
+       {
+        "value": "14",
+        "name": "古风"
+       },
+       {
+        "value": "15",
+        "name": "连载"
+       },
+       {
+        "value": "16",
+        "name": "完结"
+       }
+      ]
+     }
+    },
+    "home": [
+     {
+      "id": "featured",
+      "title": "精选漫画",
+      "url": "/",
+      "limit": 6,
+      "listDom": ".mults .mult-body ul li",
+      "listIndex": 0,
+      "coverDom": ".m-img img",
+      "titleDom": ".card-title",
+      "urlDom": "a[title]"
+     },
+     {
+      "id": "today",
+      "title": "今日推荐",
+      "url": "/",
+      "limit": 6,
+      "listDom": ".mults .mult-body ul li",
+      "listIndex": 1,
+      "coverDom": ".m-img img",
+      "titleDom": ".card-title",
+      "urlDom": "a[title]"
+     },
+     {
+      "id": "popular",
+      "title": "人气漫画",
+      "url": "/",
+      "limit": 6,
+      "listDom": ".mults .mult-body ul li",
+      "listIndex": 2,
+      "coverDom": ".m-img img",
+      "titleDom": ".card-title",
+      "urlDom": "a[title]"
+     },
+     {
+      "id": "new",
+      "title": "新漫上架",
+      "url": "/",
+      "limit": 6,
+      "listDom": ".mults .mult-body ul li",
+      "listIndex": 3,
+      "coverDom": ".m-img img",
+      "titleDom": ".card-title",
+      "urlDom": "a[title]"
+     },
+     {
+      "id": "finished",
+      "title": "完结·一次爽翻天",
+      "url": "/",
+      "limit": 6,
+      "listDom": ".mults .mult-body ul li",
+      "listIndex": 4,
+      "coverDom": ".m-img img",
+      "titleDom": ".card-title",
+      "urlDom": "a[title]"
+     }
+    ],
+    "url_rewrites": {
+     "%25": "%"
+    }
+   },
+   "needsMagic": true
+  },
+  {
+   "type": "config",
+   "config": {
+    "name": "动漫细说",
+    "icon": "https://comic.acgn.cc/themes/acgn/images/logo.jpg",
+    "url": "https://comic.acgn.cc/",
+    "comic_name_dom": ".list_navbox h3",
+    "comic_author_dom": ".load01_r li.mss",
+    "author_label": "漫畫作者",
+    "comic_status_dom": ".load01_r li.mss",
+    "status_label": "漫畫狀態",
+    "comic_tags_dom": ".load01_r a[href*=\"cate\"]",
+    "chapter_name_dom": "#comic_chapter a",
+    "chapter_link_dom": "#comic_chapter a",
+    "img_dom": "#pic_list img",
+    "use_frame": 1,
+    "img_load_mode": 3,
+    "next_page_selector": ".nextPageButton:eq(1)",
+    "page_label_selector": "#select1",
+    "categories": [
+     {
+      "value": "1",
+      "name": "冒險"
+     },
+     {
+      "value": "2",
+      "name": "搞笑"
+     },
+     {
+      "value": "3",
+      "name": "格鬥"
+     },
+     {
+      "value": "4",
+      "name": "科幻"
+     },
+     {
+      "value": "5",
+      "name": "愛情"
+     },
+     {
+      "value": "6",
+      "name": "偵探"
+     },
+     {
+      "value": "7",
+      "name": "競技"
+     },
+     {
+      "value": "8",
+      "name": "魔法"
+     },
+     {
+      "value": "9",
+      "name": "東方神鬼"
+     },
+     {
+      "value": "10",
+      "name": "校園"
+     },
+     {
+      "value": "11",
+      "name": "恐怖"
+     },
+     {
+      "value": "12",
+      "name": "其他"
+     },
+     {
+      "value": "13",
+      "name": "四格"
+     },
+     {
+      "value": "14",
+      "name": "生活親情"
+     },
+     {
+      "value": "15",
+      "name": "百合"
+     },
+     {
+      "value": "16",
+      "name": "偽娘"
+     },
+     {
+      "value": "17",
+      "name": "懸疑"
+     },
+     {
+      "value": "20",
+      "name": "後宮"
+     },
+     {
+      "value": "31",
+      "name": "職場"
+     }
+    ],
+    "category_url": "/cate-{slug}.htm",
+    "category_page_url": "/cate-{slug}.htm?page={page}",
+    "category_list_dom": ".content_block",
+    "category_cover_dom": ".thumb",
+    "category_title_dom": ".list_r a",
+    "category_url_dom": ".list_r a",
+    "category_page_size": 36,
+    "home": [
+     {
+      "id": "latest",
+      "title": "最新漫画",
+      "url": "",
+      "listDom": ".tabs-panel li",
+      "coverDom": "img",
+      "titleDom": "div>a",
+      "urlDom": "div>a",
+      "limit": 12
+     }
+    ],
+    "recommend_list_dom": ".tbox.relation ul li",
+    "recommend_cover_dom": "img",
+    "recommend_title_dom": "a",
+    "recommend_url_dom": "a",
+    "recommend_limit": 5
+   },
+   "needsMagic": true
+  },
+  {
+   "type": "config",
+   "config": {
+    "name": "MANGA",
+    "url": "https://www.mangabz.com/",
+    "comic_name_dom": ".detail-info-title",
+    "comic_cover_dom": ".detail-info-cover",
+    "comic_author_dom": ".detail-info-tip a[href*=\"search\"]",
+    "comic_desc_dom": ".detail-info-content",
+    "comic_status_dom": ".detail-info-tip span",
+    "status_label": "狀態",
+    "comic_tags_dom": ".detail-info-tip .item",
+    "chapter_name_dom": "#chapterlistload a",
+    "chapter_link_dom": "#chapterlistload a",
+    "img_dom": "#cp_image",
+    "use_frame": 1,
+    "img_attr": "src",
+    "img_script": "return (typeof newImgs!==\"undefined\"&&newImgs)?newImgs:[];",
+    "img_load_mode": 1,
+    "cross_origin": 1,
+    "categories": {
+     "theme": {
+      "title": "题材",
+      "options": [
+       {
+        "value": "0",
+        "name": "全部"
+       },
+       {
+        "value": "31",
+        "name": "熱血"
+       },
+       {
+        "value": "26",
+        "name": "戀愛"
+       },
+       {
+        "value": "1",
+        "name": "校園"
+       },
+       {
+        "value": "2",
+        "name": "冒險"
+       },
+       {
+        "value": "25",
+        "name": "科幻"
+       },
+       {
+        "value": "11",
+        "name": "生活"
+       },
+       {
+        "value": "17",
+        "name": "懸疑"
+       },
+       {
+        "value": "15",
+        "name": "魔法"
+       },
+       {
+        "value": "34",
+        "name": "運動"
+       }
+      ]
+     },
+     "status": {
+      "title": "进度",
+      "options": [
+       {
+        "value": "0",
+        "name": "全部"
+       },
+       {
+        "value": "1",
+        "name": "连载中"
+       },
+       {
+        "value": "2",
+        "name": "已完结"
+       }
+      ]
+     },
+     "sort": {
+      "title": "排序",
+      "options": [
+       {
+        "value": "2",
+        "name": "按时间"
+       },
+       {
+        "value": "10",
+        "name": "按热度"
+       }
+      ]
+     }
+    },
+    "category_url": "/manga-list-{theme}-{status}-{sort}/",
+    "category_page_url": "/manga-list-{theme}-{status}-{sort}-p{page}/",
+    "category_list_dom": ".mh-item",
+    "category_cover_dom": ".mh-cover",
+    "category_title_dom": ".title a",
+    "category_url_dom": "a",
+    "category_page_size": 12,
+    "home": [
+     {
+      "id": "hot",
+      "title": "热门漫画",
+      "url": "",
+      "listDom": ".index-manga-list[0] .index-manga-item",
+      "coverDom": "img",
+      "titleDom": ".index-manga-item-title",
+      "urlDom": "a",
+      "limit": 3
+     },
+     {
+      "id": "popularity",
+      "title": "人气推荐",
+      "url": "",
+      "listDom": ".index-manga-list[2] .index-manga-item",
+      "coverDom": "img",
+      "titleDom": ".index-manga-item-title",
+      "urlDom": "a",
+      "limit": 12
+     },
+     {
+      "id": "new",
+      "title": "上升最快",
+      "url": "",
+      "listDom": ".carousel-right-list .carousel-right-item",
+      "coverDom": "img",
+      "titleDom": ".carousel-right-item-subtitle",
+      "urlDom": "a",
+      "limit": 6
+     }
+    ]
+   },
+   "needsMagic": true
+  },
+  {
+   "type": "config",
+   "config": {
+    "name": "怪兽漫画",
+    "url": "http://guaishoumanhua.net/",
+    "comic_cover_dom": ".cover-img",
+    "comic_name_dom": ".detail-title",
+    "comic_author_dom": ".meta span",
+    "author_label": "作者",
+    "comic_desc_dom": ".details p",
+    "comic_status_dom": ".meta span",
+    "status_label": "状态",
+    "chapter_name_dom": "",
+    "chapter_link_dom": ".chapters-list .chapter-link",
+    "img_dom": ".chapter-img",
+    "img_attr": "data-src",
+    "img_script": "var p=new URLSearchParams(location.search),c=p.get(\"comic\"),h=p.get(\"chapter\"); if(!h){return [];} var info=await fetch(\"http://www.guaishoumanhua.net:8001/test/get_chapter_info?chapter_id=\"+encodeURIComponent(h)).then(function(r){return r.json();}); var n=Number(info.total_pages||0),a=[]; for(var i=1;i<=n;i++){a.push(i<=5?new URL(\"static/images/chapters/chapter_\"+c+\"_\"+h+\"_\"+i+\".webp\",location.href).href:\"http://www.guaishoumanhua.net:8001/test/image/\"+h+\"/\"+i);} return a;",
+    "use_frame": 1,
+    "img_load_mode": 0,
+    "search_url": "/search.html?wd={q}",
+    "search_result_dom": "#resultBox .comic-card",
+    "search_title_dom": ".comic-name",
+    "search_cover_dom": ".comic-cover",
+    "search_manga_url_dom": "a",
+    "use_webview_fetch": true,
+    "categories": {
+     "category": {
+      "title": "分类",
+      "options": [
+       {
+        "value": "37",
+        "name": "日本"
+       },
+       {
+        "value": "38",
+        "name": "中国"
+       },
+       {
+        "value": "41",
+        "name": "美国"
+       },
+       {
+        "value": "42",
+        "name": "韩国"
+       },
+       {
+        "value": "44",
+        "name": "少年漫"
+       },
+       {
+        "value": "45",
+        "name": "少女漫"
+       },
+       {
+        "value": "47",
+        "name": "青年漫"
+       },
+       {
+        "value": "49",
+        "name": "耽美"
+       },
+       {
+        "value": "50",
+        "name": "百合"
+       },
+       {
+        "value": "52",
+        "name": "现代"
+       },
+       {
+        "value": "53",
+        "name": "校园"
+       },
+       {
+        "value": "57",
+        "name": "武侠"
+       },
+       {
+        "value": "59",
+        "name": "玄幻"
+       },
+       {
+        "value": "60",
+        "name": "科幻"
+       },
+       {
+        "value": "62",
+        "name": "搞笑"
+       },
+       {
+        "value": "64",
+        "name": "动作"
+       },
+       {
+        "value": "69",
+        "name": "冒险"
+       },
+       {
+        "value": "70",
+        "name": "恐怖"
+       },
+       {
+        "value": "71",
+        "name": "悬疑"
+       },
+       {
+        "value": "81",
+        "name": "热血"
+       },
+       {
+        "value": "123",
+        "name": "彩漫"
+       },
+       {
+        "value": "128",
+        "name": "爱情"
+       },
+       {
+        "value": "131",
+        "name": "魔幻"
+       },
+       {
+        "value": "132",
+        "name": "日常"
+       },
+       {
+        "value": "135",
+        "name": "治愈"
+       },
+       {
+        "value": "144",
+        "name": "推理"
+       },
+       {
+        "value": "147",
+        "name": "奇幻"
+       }
+      ]
+     }
+    },
+    "category_url": "/classifications/{category}/index.html",
+    "category_page_url": "/classifications/{category}/page_{page}.html",
+    "category_list_dom": ".comic-grid .comic-card",
+    "category_cover_dom": ".comic-cover",
+    "category_title_dom": ".comic-name",
+    "category_url_dom": "a",
+    "category_page_size": 48,
+    "category_page_start": 1,
+    "home": [
+     {
+      "id": "featured",
+      "title": "编辑推荐",
+      "url": "",
+      "listDom": ".carousel-item",
+      "coverDom": ".carousel-cover",
+      "titleDom": ".carousel-title",
+      "urlDom": "a",
+      "limit": 5
+     },
+     {
+      "id": "hot",
+      "title": "分类热门",
+      "url": "",
+      "listDom": ".container > .comic-row:nth-child(2) .comic-card, .container > .comic-row:nth-child(3) .comic-card",
+      "coverDom": ".comic-cover",
+      "titleDom": ".comic-name",
+      "urlDom": "a",
+      "limit": 12
+     },
+     {
+      "id": "japan",
+      "title": "日漫",
+      "url": "",
+      "listDom": ".container > .comic-row:nth-child(5) .comic-card, .container > .comic-row:nth-child(6) .comic-card",
+      "coverDom": ".comic-cover",
+      "titleDom": ".comic-name",
+      "urlDom": "a",
+      "limit": 12
+     },
+     {
+      "id": "china",
+      "title": "国漫",
+      "url": "",
+      "listDom": ".container > .comic-row:nth-child(8) .comic-card, .container > .comic-row:nth-child(9) .comic-card",
+      "coverDom": ".comic-cover",
+      "titleDom": ".comic-name",
+      "urlDom": "a",
+      "limit": 12
+     },
+     {
+      "id": "korea",
+      "title": "韩漫",
+      "url": "",
+      "listDom": ".container > .comic-row:nth-child(11) .comic-card, .container > .comic-row:nth-child(12) .comic-card",
+      "coverDom": ".comic-cover",
+      "titleDom": ".comic-name",
+      "urlDom": "a",
+      "limit": 12
+     },
+     {
+      "id": "usa",
+      "title": "美漫",
+      "url": "",
+      "listDom": ".container > .comic-row:nth-child(14) .comic-card, .container > .comic-row:nth-child(15) .comic-card",
+      "coverDom": ".comic-cover",
+      "titleDom": ".comic-name",
+      "urlDom": "a",
+      "limit": 12
+     }
+    ]
+   }
+  },
+  {
+   "type": "config",
+   "config": {
+    "name": "W漫画",
+    "url": "https://www.wmanhua.com/",
+    "search_url": "/search?query={q}",
+    "search_result_dom": ".card-main .card-content",
+    "search_title_dom": "h3.cardtitle",
+    "search_manga_url_dom": "a[href*='/comic/']",
+    "search_cover_dom": "img.lazy",
+    "comic_cover_dom": "img.cover.lazy",
+    "comic_name_dom": ".info h1",
+    "comic_author_dom": ".info .author",
+    "author_label": "作者：",
+    "comic_status_dom": ".status",
+    "status_label": "状态：",
+    "comic_desc_dom": ".description",
+    "comic_tags_dom": ".info .author a[href*='/sort?tag=']",
+    "chapter_script": "var m = document.body.innerHTML.match(/const contentId = '(\\d+)'/); if (!m) return null; return { apiUrl: location.origin + '/comic/' + m[1], linkBase: new URL(location.pathname, location.href).href };",
+    "chapter_json_script": "var items = json && json.data && json.data.chapters; if (!Array.isArray(items)) return []; return items.filter(function(x){ return x && x.chapterName; }).map(function(x){ return { name: x.chapterName, url: '/chapter/' + x.contentId + '-' + x.id + '.html' }; });",
+    "chapter_api_body": "{}",
+    "use_frame": 1,
+    "img_script": "var items = Array.prototype.slice.call(document.querySelectorAll('img.comic-image')); return items.map(function(im){ return im.getAttribute('data-src') || im.src; }) .filter(function(u){ return u && u.indexOf('loading.svg') < 0 && u.indexOf('404.png') < 0 && u.indexOf('click_reload') < 0; });",
+    "concurrent_rate": "5/1000",
+    "categories": {
+     "category": {
+      "title": "地区",
+      "options": [
+       {
+        "value": "0",
+        "name": "全部",
+        "isAll": true
+       },
+       {
+        "value": "1",
+        "name": "日本漫画"
+       },
+       {
+        "value": "2",
+        "name": "韩国漫画"
+       },
+       {
+        "value": "3",
+        "name": "大陆漫画"
+       },
+       {
+        "value": "4",
+        "name": "港台漫画"
+       },
+       {
+        "value": "5",
+        "name": "漫画"
+       }
+      ]
+     },
+     "tag": {
+      "title": "题材",
+      "options": [
+       {
+        "value": "0",
+        "name": "全部",
+        "isAll": true
+       },
+       {
+        "value": "1",
+        "name": "欢乐"
+       },
+       {
+        "value": "2",
+        "name": "生活"
+       },
+       {
+        "value": "3",
+        "name": "爱情"
+       },
+       {
+        "value": "4",
+        "name": "奇幻"
+       },
+       {
+        "value": "5",
+        "name": "冒险"
+       },
+       {
+        "value": "6",
+        "name": "轻改"
+       },
+       {
+        "value": "7",
+        "name": "魔幻"
+       },
+       {
+        "value": "8",
+        "name": "重生"
+       },
+       {
+        "value": "9",
+        "name": "修仙"
+       },
+       {
+        "value": "10",
+        "name": "校园"
+       },
+       {
+        "value": "11",
+        "name": "悬疑"
+       },
+       {
+        "value": "12",
+        "name": "侦探"
+       },
+       {
+        "value": "13",
+        "name": "玄幻"
+       },
+       {
+        "value": "14",
+        "name": "职场"
+       },
+       {
+        "value": "15",
+        "name": "搞笑"
+       },
+       {
+        "value": "16",
+        "name": "格斗"
+       },
+       {
+        "value": "17",
+        "name": "游戏"
+       },
+       {
+        "value": "18",
+        "name": "灵异"
+       },
+       {
+        "value": "19",
+        "name": "性转"
+       },
+       {
+        "value": "20",
+        "name": "仙侠"
+       },
+       {
+        "value": "21",
+        "name": "都市"
+       },
+       {
+        "value": "22",
+        "name": "后宫"
+       },
+       {
+        "value": "23",
+        "name": "穿越"
+       },
+       {
+        "value": "24",
+        "name": "百合"
+       },
+       {
+        "value": "25",
+        "name": "转生"
+       },
+       {
+        "value": "26",
+        "name": "女主"
+       },
+       {
+        "value": "27",
+        "name": "热血"
+       },
+       {
+        "value": "28",
+        "name": "末世"
+       },
+       {
+        "value": "29",
+        "name": "异界"
+       },
+       {
+        "value": "30",
+        "name": "异能"
+       },
+       {
+        "value": "31",
+        "name": "长篇"
+       },
+       {
+        "value": "32",
+        "name": "宫廷"
+       },
+       {
+        "value": "33",
+        "name": "萌系"
+       },
+       {
+        "value": "34",
+        "name": "系统"
+       },
+       {
+        "value": "35",
+        "name": "魔法"
+       },
+       {
+        "value": "36",
+        "name": "科幻"
+       },
+       {
+        "value": "37",
+        "name": "日常"
+       },
+       {
+        "value": "38",
+        "name": "惊悚"
+       },
+       {
+        "value": "39",
+        "name": "末日"
+       },
+       {
+        "value": "40",
+        "name": "历史"
+       },
+       {
+        "value": "41",
+        "name": "四格"
+       },
+       {
+        "value": "42",
+        "name": "音乐"
+       },
+       {
+        "value": "43",
+        "name": "伪娘"
+       },
+       {
+        "value": "44",
+        "name": "武侠"
+       },
+       {
+        "value": "45",
+        "name": "励志"
+       },
+       {
+        "value": "46",
+        "name": "机战"
+       },
+       {
+        "value": "47",
+        "name": "耽美"
+       },
+       {
+        "value": "48",
+        "name": "复仇"
+       },
+       {
+        "value": "49",
+        "name": "养成"
+       },
+       {
+        "value": "50",
+        "name": "同人"
+       },
+       {
+        "value": "51",
+        "name": "舰娘"
+       },
+       {
+        "value": "52",
+        "name": "东方"
+       },
+       {
+        "value": "53",
+        "name": "治愈"
+       },
+       {
+        "value": "54",
+        "name": "美食"
+       },
+       {
+        "value": "55",
+        "name": "言情"
+       },
+       {
+        "value": "56",
+        "name": "逆袭"
+       },
+       {
+        "value": "57",
+        "name": "竞技"
+       },
+       {
+        "value": "58",
+        "name": "节操"
+       },
+       {
+        "value": "59",
+        "name": "战争"
+       },
+       {
+        "value": "60",
+        "name": "爆笑"
+       },
+       {
+        "value": "61",
+        "name": "爱倩"
+       },
+       {
+        "value": "62",
+        "name": "生存"
+       },
+       {
+        "value": "63",
+        "name": "恐怖"
+       },
+       {
+        "value": "64",
+        "name": "妹控"
+       },
+       {
+        "value": "65",
+        "name": "战斗"
+       },
+       {
+        "value": "67",
+        "name": "舞蹈"
+       },
+       {
+        "value": "68",
+        "name": "诡异"
+       },
+       {
+        "value": "69",
+        "name": "网游"
+       },
+       {
+        "value": "70",
+        "name": "病娇"
+       },
+       {
+        "value": "71",
+        "name": "推理"
+       },
+       {
+        "value": "72",
+        "name": "恋爱"
+       },
+       {
+        "value": "73",
+        "name": "彩色"
+       },
+       {
+        "value": "74",
+        "name": "其他"
+       },
+       {
+        "value": "75",
+        "name": "TL"
+       },
+       {
+        "value": "76",
+        "name": "宅系"
+       },
+       {
+        "value": "77",
+        "name": "FATE"
+       },
+       {
+        "value": "78",
+        "name": "C103"
+       },
+       {
+        "value": "79",
+        "name": "C105"
+       },
+       {
+        "value": "80",
+        "name": "歡樂向"
+       },
+       {
+        "value": "81",
+        "name": "愛情"
+       },
+       {
+        "value": "82",
+        "name": "冒險"
+       },
+       {
+        "value": "83",
+        "name": "神鬼"
+       },
+       {
+        "value": "84",
+        "name": "轻小说"
+       },
+       {
+        "value": "85",
+        "name": "格鬥"
+       },
+       {
+        "value": "86",
+        "name": "後宮"
+       },
+       {
+        "value": "87",
+        "name": "C106"
+       },
+       {
+        "value": "88",
+        "name": "C107"
+       },
+       {
+        "value": "89",
+        "name": "穿越"
+       },
+       {
+        "value": "90",
+        "name": "性转换"
+       },
+       {
+        "value": "91",
+        "name": "AA"
+       }
+      ]
+     }
+    },
+    "category_url": "/sort?category={category}&tag={tag}",
+    "category_page_url": "/sort?category={category}&tag={tag}&page={page}",
+    "category_page_start": 1,
+    "category_list_dom": ".card-main .card-content",
+    "category_title_dom": "h3.cardtitle",
+    "category_url_dom": "a[href*='/comic/']",
+    "category_cover_dom": "img.lazy",
+    "category_next_page_dom": "a[href*='page=']",
+    "home": [
+     {
+      "id": "latest",
+      "title": "最近更新",
+      "url": "/new",
+      "listDom": ".card-main .card-content",
+      "coverDom": "img.lazy",
+      "titleDom": "h3.cardtitle",
+      "urlDom": "a[href*='/comic/']",
+      "limit": 20
+     },
+     {
+      "id": "hot",
+      "title": "热门漫画",
+      "url": "/hot",
+      "listDom": ".card-main .card-content",
+      "coverDom": "img.lazy",
+      "titleDom": "h3.cardtitle",
+      "urlDom": "a[href*='/comic/']",
+      "limit": 20
+     }
+    ]
+   }
+  },
+  {
+   "type": "config",
+   "config": {
+    "name": "追更漫画",
+    "url": "https://www.zhuigeng.cc/",
+    "icon": "https://www.zhuigeng.cc/template/pc/zhuigeng/images/favicon.ico",
+    "use_frame": 1,
+    "categories": {
+     "region": {
+      "title": "地区",
+      "options": [
+       {
+        "value": "1",
+        "name": "国产漫画"
+       },
+       {
+        "value": "2",
+        "name": "日本漫画"
+       },
+       {
+        "value": "3",
+        "name": "韩国漫画"
+       },
+       {
+        "value": "4",
+        "name": "欧美漫画"
+       }
+      ]
+     }
+    },
+    "category_url": "/category/list/{region}",
+    "category_list_dom": ".video-content-item",
+    "category_cover_dom": ".video-img",
+    "category_title_dom": ".video-name a",
+    "category_url_dom": ".video-name a",
+    "home": [
+     {
+      "id": "guochan",
+      "title": "国产漫画",
+      "url": "/",
+      "listIndex": 0
+     },
+     {
+      "id": "riben",
+      "title": "日本漫画",
+      "url": "/",
+      "listIndex": 1
+     },
+     {
+      "id": "hanguo",
+      "title": "韩国漫画",
+      "url": "/",
+      "listIndex": 2
+     },
+     {
+      "id": "oumei",
+      "title": "欧美漫画",
+      "url": "/",
+      "listIndex": 3
+     }
+    ],
+    "comic_cover_dom": ".block-fea.lazyload",
+    "comic_name_dom": "h1.detail-info-title a",
+    "comic_author_dom": ".detail-info-text > p.mb-0",
+    "author_label": "作者",
+    "comic_desc_dom": ".ewave-collapse-item > p.mb-0",
+    "comic_tags_dom": ".detail-info-text ul.row li:first-child a",
+    "chapter_link_dom": "ul.playlist li a",
+    "chapter_name_dom": "ul.playlist li a",
+    "chapter_url_pattern": "/chapter/",
+    "img_decode_script": "// 从章节页响应文本提取 params 并解密出图片 URL 数组\nvar _m = result.match(/var\\s+tpl_path\\s*=\\s*'[^']*'\\s*,\\s*params\\s*=\\s*'([^']+)'/);\nimg = [];\nif (_m) {\n  var _b64 = _m[1];\n  var _ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';\n  var _bytes = [];\n  var _buf = 0, _bits = 0;\n  for (var _i = 0; _i < _b64.length; _i++) {\n    var _c = _b64.charAt(_i);\n    if (_c === '=') break;\n    var _v = _ALPHA.indexOf(_c);\n    if (_v < 0) continue;\n    _buf = (_buf << 6) | _v;\n    _bits += 6;\n    if (_bits >= 8) {\n      _bits -= 8;\n      _bytes.push((_buf >> _bits) & 255);\n    }\n  }\n  // ---------- AES-128-CBC 解密（纯 JS） ----------\n  var _S = [0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,\n    0xca,0x82,0xc9,0x7d,0xfa,0x59,0x47,0xf0,0xad,0xd4,0xa2,0xaf,0x9c,0xa4,0x72,0xc0,\n    0xb7,0xfd,0x93,0x26,0x36,0x3f,0xf7,0xcc,0x34,0xa5,0xe5,0xf1,0x71,0xd8,0x31,0x15,\n    0x04,0xc7,0x23,0xc3,0x18,0x96,0x05,0x9a,0x07,0x12,0x80,0xe2,0xeb,0x27,0xb2,0x75,\n    0x09,0x83,0x2c,0x1a,0x1b,0x6e,0x5a,0xa0,0x52,0x3b,0xd6,0xb3,0x29,0xe3,0x2f,0x84,\n    0x53,0xd1,0x00,0xed,0x20,0xfc,0xb1,0x5b,0x6a,0xcb,0xbe,0x39,0x4a,0x4c,0x58,0xcf,\n    0xd0,0xef,0xaa,0xfb,0x43,0x4d,0x33,0x85,0x45,0xf9,0x02,0x7f,0x50,0x3c,0x9f,0xa8,\n    0x51,0xa3,0x40,0x8f,0x92,0x9d,0x38,0xf5,0xbc,0xb6,0xda,0x21,0x10,0xff,0xf3,0xd2,\n    0xcd,0x0c,0x13,0xec,0x5f,0x97,0x44,0x17,0xc4,0xa7,0x7e,0x3d,0x64,0x5d,0x19,0x73,\n    0x60,0x81,0x4f,0xdc,0x22,0x2a,0x90,0x88,0x46,0xee,0xb8,0x14,0xde,0x5e,0x0b,0xdb,\n    0xe0,0x32,0x3a,0x0a,0x49,0x06,0x24,0x5c,0xc2,0xd3,0xac,0x62,0x91,0x95,0xe4,0x79,\n    0xe7,0xc8,0x37,0x6d,0x8d,0xd5,0x4e,0xa9,0x6c,0x56,0xf4,0xea,0x65,0x7a,0xae,0x08,\n    0xba,0x78,0x25,0x2e,0x1c,0xa6,0xb4,0xc6,0xe8,0xdd,0x74,0x1f,0x4b,0xbd,0x8b,0x8a,\n    0x70,0x3e,0xb5,0x66,0x48,0x03,0xf6,0x0e,0x61,0x35,0x57,0xb9,0x86,0xc1,0x1d,0x9e,\n    0xe1,0xf8,0x98,0x11,0x69,0xd9,0x8e,0x94,0x9b,0x1e,0x87,0xe9,0xce,0x55,0x28,0xdf,\n    0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16];\n  var _invS = [0x52,0x09,0x6a,0xd5,0x30,0x36,0xa5,0x38,0xbf,0x40,0xa3,0x9e,0x81,0xf3,0xd7,0xfb,\n    0x7c,0xe3,0x39,0x82,0x9b,0x2f,0xff,0x87,0x34,0x8e,0x43,0x44,0xc4,0xde,0xe9,0xcb,\n    0x54,0x7b,0x94,0x32,0xa6,0xc2,0x23,0x3d,0xee,0x4c,0x95,0x0b,0x42,0xfa,0xc3,0x4e,\n    0x08,0x2e,0xa1,0x66,0x28,0xd9,0x24,0xb2,0x76,0x5b,0xa2,0x49,0x6d,0x8b,0xd1,0x25,\n    0x72,0xf8,0xf6,0x64,0x86,0x68,0x98,0x16,0xd4,0xa4,0x5c,0xcc,0x5d,0x65,0xb6,0x92,\n    0x6c,0x70,0x48,0x50,0xfd,0xed,0xb9,0xda,0x5e,0x15,0x46,0x57,0xa7,0x8d,0x9d,0x84,\n    0x90,0xd8,0xab,0x00,0x8c,0xbc,0xd3,0x0a,0xf7,0xe4,0x58,0x05,0xb8,0xb3,0x45,0x06,\n    0xd0,0x2c,0x1e,0x8f,0xca,0x3f,0x0f,0x02,0xc1,0xaf,0xbd,0x03,0x01,0x13,0x8a,0x6b,\n    0x3a,0x91,0x11,0x41,0x4f,0x67,0xdc,0xea,0x97,0xf2,0xcf,0xce,0xf0,0xb4,0xe6,0x73,\n    0x96,0xac,0x74,0x22,0xe7,0xad,0x35,0x85,0xe2,0xf9,0x37,0xe8,0x1c,0x75,0xdf,0x6e,\n    0x47,0xf1,0x1a,0x71,0x1d,0x29,0xc5,0x89,0x6f,0xb7,0x62,0x0e,0xaa,0x18,0xbe,0x1b,\n    0xfc,0x56,0x3e,0x4b,0xc6,0xd2,0x79,0x20,0x9a,0xdb,0xc0,0xfe,0x78,0xcd,0x5a,0xf4,\n    0x1f,0xdd,0xa8,0x33,0x88,0x07,0xc7,0x31,0xb1,0x12,0x10,0x59,0x27,0x80,0xec,0x5f,\n    0x60,0x51,0x7f,0xa9,0x19,0xb5,0x4a,0x0d,0x2d,0xe5,0x7a,0x9f,0x93,0xc9,0x9c,0xef,\n    0xa0,0xe0,0x3b,0x4d,0xae,0x2a,0xf5,0xb0,0xc8,0xeb,0xbb,0x3c,0x83,0x53,0x99,0x61,\n    0x17,0x2b,0x04,0x7e,0xba,0x77,0xd6,0x26,0xe1,0x69,0x14,0x63,0x55,0x21,0x0c,0x7d];\n\n  var _R = [0x02,0x03,0x01,0x01, 0x01,0x02,0x03,0x01, 0x01,0x01,0x02,0x03, 0x03,0x01,0x01,0x02];\n  var _keyBytes = [];\n  var _keyStr = '9S8$vJnU2ANeSRoF';\n  for (var _k = 0; _k < 16; _k++) _keyBytes.push(_keyStr.charCodeAt(_k));\n  // 密钥扩展：AES-128 → 176 字节轮密钥\n  var _Rcon = [0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,0x1b,0x36];\n  var _w = [];\n  for (var _x = 0; _x < 16; _x++) _w.push(_keyBytes[_x]);\n  for (var _wi = 4; _wi < 44; _wi++) {\n    var _t = _w.slice((_wi-1)*4, (_wi-1)*4+4);\n    if (_wi % 4 === 0) {\n      _t = [_t[1], _t[2], _t[3], _t[0]];\n      for (var _q = 0; _q < 4; _q++) _t[_q] = _S[_t[_q]];\n      _t[0] = _t[0] ^ _Rcon[(_wi/4)-1];\n    }\n    for (var _q2 = 0; _q2 < 4; _q2++) {\n      _w.push(_w[(_wi-4)*4+_q2] ^ _t[_q2]);\n    }\n  }\n  function _xt(_a, _b) {\n    var _r = 0;\n    while (_b) {\n      if (_b & 1) _r ^= _a;\n      _a = (_a << 1) ^ (_a & 0x80 ? 0x1b : 0);\n      _b >>= 1;\n    }\n    return _r & 255;\n  }\n  function _decBlock(_in, _w) {\n    var _s = _in.slice();\n    // 初始 AddRoundKey（最后一组轮密钥）\n    for (var _i2 = 0; _i2 < 16; _i2++) _s[_i2] ^= _w[160 + _i2];\n    for (var _round = 9; _round >= 0; _round--) {\n      // InvShiftRows\n      var _t2 = _s.slice();\n      _s[1] = _t2[13]; _s[5] = _t2[1]; _s[9] = _t2[5]; _s[13] = _t2[9];\n      _s[2] = _t2[10]; _s[6] = _t2[14]; _s[10] = _t2[2]; _s[14] = _t2[6];\n      _s[3] = _t2[7]; _s[7] = _t2[11]; _s[11] = _t2[15]; _s[15] = _t2[3];\n      // InvSubBytes\n      for (var _i3 = 0; _i3 < 16; _i3++) _s[_i3] = _invS[_s[_i3]];\n      // AddRoundKey（轮密钥 _round*16.._round*16+15）\n      for (var _i4 = 0; _i4 < 16; _i4++) _s[_i4] ^= _w[_round*16 + _i4];\n      // InvMixColumns（最后一轮 _round==0 不做）\n      if (_round > 0) {\n        for (var _col = 0; _col < 4; _col++) {\n          var _o = _col * 4;\n          var _a0 = _s[_o], _a1 = _s[_o+1], _a2 = _s[_o+2], _a3 = _s[_o+3];\n          _s[_o]   = _xt(_a0,14) ^ _xt(_a1,11) ^ _xt(_a2,13) ^ _xt(_a3,9);\n          _s[_o+1] = _xt(_a0,9)  ^ _xt(_a1,14) ^ _xt(_a2,11) ^ _xt(_a3,13);\n          _s[_o+2] = _xt(_a0,13) ^ _xt(_a1,9)  ^ _xt(_a2,14) ^ _xt(_a3,11);\n          _s[_o+3] = _xt(_a0,11) ^ _xt(_a1,13) ^ _xt(_a2,9)  ^ _xt(_a3,14);\n        }\n      }\n    }\n    return _s;\n  }\n  var _iv = _bytes.slice(0, 16);\n  var _ct = _bytes.slice(16);\n  var _pt = [];\n  var _prev = _iv;\n  for (var _blk = 0; _blk + 16 <= _ct.length; _blk += 16) {\n    var _blkBytes = _ct.slice(_blk, _blk + 16);\n    var _dec = _decBlock(_blkBytes, _w);\n    for (var _j = 0; _j < 16; _j++) _pt.push(_dec[_j] ^ _prev[_j]);\n    _prev = _blkBytes;\n  }\n  // PKCS7 去填充\n  var _pad = _pt[_pt.length - 1];\n  if (_pad > 0 && _pad <= 16 && _pad <= _pt.length) {\n    var _ok = true;\n    for (var _p = _pt.length - _pad; _p < _pt.length; _p++) {\n      if (_pt[_p] !== _pad) { _ok = false; break; }\n    }\n    if (_ok) _pt.length -= _pad;\n  }\n  // 字节 → UTF-8 字符串\n  var _utf8 = '';\n  for (var _u = 0; _u < _pt.length; ) {\n    var _b1 = _pt[_u++];\n    if (_b1 < 0x80) _utf8 += String.fromCharCode(_b1);\n    else if (_b1 < 0xe0 && _u < _pt.length) _utf8 += String.fromCharCode((( _b1 & 0x1f) << 6) | (_pt[_u++] & 0x3f));\n    else if (_u + 1 < _pt.length) _utf8 += String.fromCharCode(((_b1 & 0x0f) << 12) | ((_pt[_u++] & 0x3f) << 6) | (_pt[_u++] & 0x3f));\n  }\n  var _obj = JSON.parse(_utf8);\n  img = (_obj && Array.isArray(_obj.images)) ? _obj.images : [];\n}"
+   }
+  },
+  {
+   "type": "api",
+   "engine": "copymanga",
+   "config": {
+    "id": "copymanga",
+    "name": "拷贝漫画",
+    "base": "https://api.copy4000.com/",
+    "referer": "https://2025copy.com/",
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "home": [
+     {
+      "id": "hot",
+      "title": "热门漫画",
+      "path": "api/v3/search/comic",
+      "params": {
+       "format": "json",
+       "platform": "1",
+       "q": "",
+       "limit": 30,
+       "offset": 0,
+       "ordering": "-popular"
+      },
+      "listField": "list",
+      "limit": 30
+     },
+     {
+      "id": "latest",
+      "title": "最近更新",
+      "path": "api/v3/search/comic",
+      "params": {
+       "format": "json",
+       "platform": "1",
+       "q": "",
+       "limit": 30,
+       "offset": 0,
+       "ordering": "-datetime_updated"
+      },
+      "listField": "list",
+      "limit": 30
+     }
+    ],
+    "url": "https://api.copy4000.com/"
+   }
+  },
+  {
+   "type": "config",
+   "config": {
+    "name": "热辣漫画",
+    "url": "https://www.manga2026.xyz/",
+    "search_url": "/api/v3/search/comic?offset=0&platform=2&limit=30&q={q}",
+    "search_list_field": "results.list",
+    "search_json_fields": {
+     "url": "/comic/{path_word}",
+     "title": "name",
+     "cover": "cover"
+    },
+    "search_page_size": 31,
+    "categories": {
+     "theme": {
+      "title": "题材",
+      "options": [
+       {
+        "value": "",
+        "name": "全部",
+        "isAll": true
+       },
+       {
+        "value": "aiqing",
+        "name": "爱情"
+       },
+       {
+        "value": "huanlexiang",
+        "name": "欢乐向"
+       },
+       {
+        "value": "maoxian",
+        "name": "冒险"
+       },
+       {
+        "value": "qihuan",
+        "name": "奇幻"
+       },
+       {
+        "value": "baihe",
+        "name": "百合"
+       },
+       {
+        "value": "xiaoyuan",
+        "name": "校园"
+       },
+       {
+        "value": "kehuan",
+        "name": "科幻"
+       },
+       {
+        "value": "dongfang",
+        "name": "东方"
+       },
+       {
+        "value": "danmei",
+        "name": "耽美"
+       },
+       {
+        "value": "shenghuo",
+        "name": "生活"
+       },
+       {
+        "value": "gedou",
+        "name": "格斗"
+       },
+       {
+        "value": "qingxiaoshuo",
+        "name": "轻小说"
+       },
+       {
+        "value": "xuanyi",
+        "name": "悬疑"
+       },
+       {
+        "value": "teenslove",
+        "name": "TL"
+       },
+       {
+        "value": "mengxi",
+        "name": "萌系"
+       },
+       {
+        "value": "shengui",
+        "name": "神鬼"
+       },
+       {
+        "value": "zhichang",
+        "name": "职场"
+       },
+       {
+        "value": "zhiyu",
+        "name": "治愈"
+       },
+       {
+        "value": "jiecao",
+        "name": "节操"
+       },
+       {
+        "value": "sige",
+        "name": "四格"
+       },
+       {
+        "value": "changtiao",
+        "name": "长条"
+       },
+       {
+        "value": "jianniang",
+        "name": "舰娘"
+       },
+       {
+        "value": "gaoxiao",
+        "name": "搞笑"
+       },
+       {
+        "value": "jingji",
+        "name": "竞技"
+       },
+       {
+        "value": "weiniang",
+        "name": "伪娘"
+       },
+       {
+        "value": "mohuan",
+        "name": "魔幻"
+       },
+       {
+        "value": "rexue",
+        "name": "热血"
+       },
+       {
+        "value": "xingzhuanhuan",
+        "name": "性转换"
+       },
+       {
+        "value": "meishi",
+        "name": "美食"
+       },
+       {
+        "value": "lizhi",
+        "name": "励志"
+       },
+       {
+        "value": "COLOR",
+        "name": "彩色"
+       },
+       {
+        "value": "hougong",
+        "name": "后宫"
+       },
+       {
+        "value": "zhentan",
+        "name": "侦探"
+       },
+       {
+        "value": "jingsong",
+        "name": "惊悚"
+       },
+       {
+        "value": "aa",
+        "name": "AA"
+       },
+       {
+        "value": "yinyuewudao",
+        "name": "音乐舞蹈"
+       },
+       {
+        "value": "yishijie",
+        "name": "异世界"
+       },
+       {
+        "value": "zhanzheng",
+        "name": "战争"
+       },
+       {
+        "value": "lishi",
+        "name": "历史"
+       },
+       {
+        "value": "jizhan",
+        "name": "机战"
+       },
+       {
+        "value": "dushi",
+        "name": "都市"
+       },
+       {
+        "value": "chuanyue",
+        "name": "穿越"
+       },
+       {
+        "value": "chongsheng",
+        "name": "重生"
+       },
+       {
+        "value": "kongbu",
+        "name": "恐怖"
+       },
+       {
+        "value": "shengcun",
+        "name": "生存"
+       },
+       {
+        "value": "wuxia",
+        "name": "武侠"
+       },
+       {
+        "value": "zhaixi",
+        "name": "宅系"
+       },
+       {
+        "value": "zhuansheng",
+        "name": "转生"
+       },
+       {
+        "value": "fate",
+        "name": "FATE"
+       },
+       {
+        "value": "Uncensored",
+        "name": "无修正"
+       },
+       {
+        "value": "xianxia",
+        "name": "仙侠"
+       },
+       {
+        "value": "loveLive",
+        "name": "LoveLive"
+       },
+       {
+        "value": "qita",
+        "name": "其他"
+       }
+      ]
+     },
+     "ordering": {
+      "title": "排序",
+      "options": [
+       {
+        "value": "-datetime_updated",
+        "name": "最新更新"
+       },
+       {
+        "value": "-popular",
+        "name": "热门"
+       }
+      ]
+     }
+    },
+    "category_url": "/comics?type=1&theme={theme}&ordering={ordering}&offset=0&limit=50",
+    "category_list_dom": ".exemptComicItem",
+    "category_cover_dom": ".exemptComicItem-img img",
+    "category_title_dom": ".twoLines",
+    "category_url_dom": ".exemptComicItem-img a",
+    "home": [
+     {
+      "id": "latest",
+      "title": "最新更新",
+      "url": "/comics?type=1&ordering=-datetime_updated&offset=0&limit=50"
+     },
+     {
+      "id": "popular",
+      "title": "热门漫画",
+      "url": "/comics?type=1&ordering=-popular&offset=0&limit=50"
+     }
+    ],
+    "comic_name_dom": ".comicParticulars-title-right h6",
+    "comic_cover_dom": ".comicParticulars-left-img img",
+    "comic_author_dom": ".comicParticulars-title-right a[href^=\"/author/\"]",
+    "comic_desc_dom": "p.intro",
+    "comic_status_dom": ".comicParticulars-title-right li",
+    "comic_tags_dom": ".comicParticulars-tag a",
+    "chapter_api_url": "/api/v3/comic/{path_word}/group/default/chapters?limit=500&offset={offset}",
+    "chapter_url_id_regex": "/comic/([^/?#]+)",
+    "chapter_list_field": "results.list",
+    "chapter_json_fields": {
+     "name": "name",
+     "url": "/comic/{comic_path_word}/chapter/{uuid}"
+    },
+    "chapter_page_size": 500,
+    "chapter_api_method": "GET",
+    "use_frame": 1,
+    "img_decode_script": "var m1 = result.match(/var cct = '([^']+)'/);\nvar m2 = result.match(/var contentKey = '([^']+)'/);\nvar img = [];\nif (m1 && m2) {\n  var ck = m2[1];\n  var c = java.createSymmetricCrypto('AES/CBC/PKCS7Padding', m1[1], ck.substring(0, 16));\n  var plain = c.decryptStr(ck.substring(16));\n  var arr = JSON.parse(plain);\n  img = arr.map(function (x) { return typeof x === 'string' ? x : (x && x.url); })\n    .filter(function (u) { return !!u; });\n}",
+    "img_dom": ".comicContent-list img",
+    "img_attr": "data-src",
+    "status_label": "狀態",
+    "login_url": "https://www.manga2026.xyz/web/login"
+   },
+   "needsMagic": true,
+   "nsfw": true
+  },
+  {
+   "type": "api",
+   "engine": "zaimanhua",
+   "config": {
+    "id": "zaimanhua",
+    "name": "再漫画",
+    "base": "https://manhua.zaimanhua.com/",
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "envelope": {
+     "codeField": "errno",
+     "dataField": "data",
+     "msgField": "errmsg",
+     "successCode": 0
+    },
+    "search": {
+     "path": "app/v1/search/index",
+     "queryKey": "keyword",
+     "pageKey": "page",
+     "sizeKey": "size",
+     "size": 20,
+     "listField": "list",
+     "idField": "id",
+     "fields": {
+      "title": "title",
+      "cover": "cover",
+      "authors": "authors",
+      "status": "status",
+      "hot": "hot_hits"
+     }
+    },
+    "category": {
+     "filterTypePath": "api/v1/comic1/filter_type",
+     "filterPath": "api/v1/comic1/filter",
+     "titles": {
+      "sortType": "排序",
+      "audience": "受众",
+      "cate": "类别",
+      "firstLetter": "首字母",
+      "status": "状态",
+      "theme": "题材"
+     },
+     "listField": "comicList",
+     "totalField": "totalNum",
+     "idField": "id",
+     "optionNameField": "name",
+     "fields": {
+      "name": "name",
+      "cover": "cover",
+      "authors": "authors",
+      "status": "status"
+     }
+    },
+    "detail": {
+     "path": "api/v1/comic2/comic/detail",
+     "idKey": "id",
+     "infoField": "comicInfo",
+     "fields": {
+      "title": "title",
+      "cover": "cover",
+      "description": "description",
+      "hotStr": "hotNumStr"
+     },
+     "tagFields": {
+      "authors": "authorsTagList",
+      "status": "statusTagList",
+      "tagName": "tagName"
+     },
+     "canReadField": "canRead",
+     "chapterListField": "chapterList",
+     "groupTitleField": "title",
+     "groupDataField": "data",
+     "chapterFields": {
+      "id": "chapter_id",
+      "title": "chapter_title",
+      "order": "chapter_order",
+      "updateTime": "updatetime"
+     }
+    },
+    "chapterImage": {
+     "path": "api/v1/comic2/chapter/detail",
+     "comicIdKey": "comic_id",
+     "chapterIdKey": "chapter_id",
+     "infoField": "chapterInfo",
+     "pageUrlField": "page_url"
+    },
+    "hotUnits": {
+     "万": 10000,
+     "千": 1000
+    },
+    "delistedStatus": "已下架",
+    "delistedTextPrefix": "⚠️ 该漫画章节已被源站下架删除，暂无法阅读",
+    "home": [
+     {
+      "id": "latest",
+      "title": "最新更新",
+      "path": "api/v1/comic1/filter",
+      "params": {
+       "page": "1",
+       "size": "20",
+       "sortType": "0"
+      },
+      "listField": "comicList",
+      "fields": {
+       "id": "id",
+       "title": "name",
+       "cover": "cover",
+       "authors": "authors",
+       "status": "status"
+      }
+     },
+     {
+      "id": "serial",
+      "title": "连载中",
+      "path": "api/v1/comic1/filter",
+      "params": {
+       "page": "1",
+       "size": "20",
+       "status": "1"
+      },
+      "listField": "comicList",
+      "fields": {
+       "id": "id",
+       "title": "name",
+       "cover": "cover",
+       "authors": "authors",
+       "status": "status"
+      }
+     },
+     {
+      "id": "finished",
+      "title": "已完结",
+      "path": "api/v1/comic1/filter",
+      "params": {
+       "page": "1",
+       "size": "20",
+       "status": "2"
+      },
+      "listField": "comicList",
+      "fields": {
+       "id": "id",
+       "title": "name",
+       "cover": "cover",
+       "authors": "authors",
+       "status": "status"
+      }
+     },
+     {
+      "id": "maoxian",
+      "title": "冒险",
+      "path": "api/v1/comic1/filter",
+      "params": {
+       "page": "1",
+       "size": "20",
+       "theme": "1"
+      },
+      "listField": "comicList",
+      "fields": {
+       "id": "id",
+       "title": "name",
+       "cover": "cover",
+       "authors": "authors",
+       "status": "status"
+      }
+     },
+     {
+      "id": "gaoxiao",
+      "title": "搞笑",
+      "path": "api/v1/comic1/filter",
+      "params": {
+       "page": "1",
+       "size": "20",
+       "theme": "2"
+      },
+      "listField": "comicList",
+      "fields": {
+       "id": "id",
+       "title": "name",
+       "cover": "cover",
+       "authors": "authors",
+       "status": "status"
+      }
+     }
+    ],
+    "url": "https://manhua.zaimanhua.com/"
+   }
+  }
+ ]
 }

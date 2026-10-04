@@ -54,6 +54,9 @@ class _XimalayaCategoryPageState extends State<XimalayaCategoryPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // push 出来的页面不在 `MusicRootView` 的音乐主题作用域内 ✗ →
+      // 不显式指定会回落影视配色；与「我的歌单 / 喜马拉雅专辑」同做法 ✓
+      backgroundColor: MusicTheme.background,
       appBar: AppBar(title: const Text('有声书')),
       body: _loading
           ? Center(
@@ -190,12 +193,30 @@ class _AlbumListPageState extends State<_AlbumListPage> {
                     Expanded(
                       child: GridView.builder(
                         padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
+                        // 🔴 原来用固定比例 `childAspectRatio: 0.66` ✗ —— **两头堵**：
+                        //   · 宽屏：格子高 = 宽/0.66 → 被拉得很高、底部大片留白 ✗
+                        //   · 窄屏 + 系统大字号：内容（1:1 封面 + 2 行标题 + 副标题）
+                        //     仍会超出格子高 → **溢出** ✗
+                        // 改成"**按可用宽度算格子高**"：格宽 = (屏宽 - 内边距 - 间距)/列数，
+                        // 高度 = 封面(等于格宽) + 文字区（随系统字号缩放）✓ → 两边都不畸形 ✓
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
                           mainAxisSpacing: 16,
                           crossAxisSpacing: 12,
-                          childAspectRatio: 0.66,
+                          mainAxisExtent: () {
+                            final w = (MediaQuery.sizeOf(context).width -
+                                    16 * 2 -
+                                    12) /
+                                2;
+                            final ts = MediaQuery.textScalerOf(context);
+                            // 6(间距) + 2 行标题 + 2(间距) + 1 行副标题 + 8(余量)
+                            return w +
+                                6 +
+                                ts.scale(12) * 1.35 * 2 +
+                                2 +
+                                ts.scale(11) * 1.35 +
+                                8;
+                          }(),
                         ),
                         itemCount: _items.length,
                         itemBuilder: (_, i) {

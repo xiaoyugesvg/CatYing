@@ -809,7 +809,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                 _sendOk
                     ? Icons.check_circle_rounded
                     : Icons.error_outline_rounded,
-                size: 64,
+                size: 48,
                 color: _sendOk
                     ? Colors.green
                     : (isDark ? Colors.redAccent : Colors.red),

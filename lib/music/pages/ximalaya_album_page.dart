@@ -61,6 +61,11 @@ class _XimalayaAlbumPageState extends State<XimalayaAlbumPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // 🔴 这是 push 到 root Navigator 的页面 → **不在** `MusicRootView` 的
+      // `Theme(MusicTheme.themeData())` 作用域内 ✗ → 不显式指定就会回落到
+      // **影视侧** AppTheme 的 `scaffoldBackgroundColor`（选了不同调色板时一眼看出 ✗）。
+      // 与「我的歌单」同一做法：只拉正底色，不动 Scaffold 右括号（最小改动 ✓）。
+      backgroundColor: MusicTheme.background,
       appBar: AppBar(
         title: Text(_albumName.isEmpty ? '专辑' : _albumName,
             maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -167,14 +172,27 @@ class _XimalayaAlbumPageState extends State<XimalayaAlbumPage> {
                               : MusicTheme.secondary,
                           fontSize: AppTheme.fontFootnote)),
                 ),
-                title: Text(
-                  s.name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: playing ? MusicTheme.tint : MusicTheme.label,
-                    fontWeight: playing ? FontWeight.w600 : FontWeight.w400,
-                  ),
+                title: Row(
+                  children: [
+                    Icon(
+                      Icons.audiotrack_rounded,
+                      size: 15,
+                      color: playing ? MusicTheme.tint : MusicTheme.secondary,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        s.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: playing ? MusicTheme.tint : MusicTheme.label,
+                          fontWeight:
+                              playing ? FontWeight.w600 : FontWeight.w400,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 // 单集：只播放（方案 C）—— 反馈由**悬浮播放球**提供，不打断浏览
                 onTap: () => _player.playQueue(_songs, index: i),

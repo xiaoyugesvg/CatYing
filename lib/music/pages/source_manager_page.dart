@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -10,17 +13,40 @@ import '../theme/music_theme.dart';
 import '../../common/theme.dart';
 
 /// 音源管理页 —— 移植自 Beans 的 `ThirdPartySourceManagerSheet.swift`。
+/// 界面样式对齐洛雪（LX Music）"自定义音源"设置页（参考图 IMG_8538）：
+///   标题「自定义音源」+ 右上角「完成」；
+///   导入区内嵌三 tab（文本 / 链接 / 文件）+「识别并导入」按钮；
+///   音源列表 = 名称 / 类型·音质标签 / 描述 + 编辑·排序·删除 + 数量角标。
 ///
-/// ── 这是你明确要求保留的功能 ──────────────────────────────────
+/// ── 功能不变 ──────────────────────────────────────────────────
 /// 用户可以自己导入音源（文本粘贴 / 从文件 / 从 URL），
 /// 支持两种形态（见 `ThirdPartySource`）：
 ///   · **模板法** `kind: keyword` —— 用 `{name}` `{artist}` `{id}` 占位符拼 URL
 ///   · **脚本法** `kind: script`  —— 整份 LX 脚本，能力更强
-///
 /// 导入解析器按 5 种格式依次尝试（JSON / 完整 LX 脚本 / JS 嵌 JSON /
 /// 注释头 / 宽松脚本），异常宽容 —— 用户收集来的源格式五花八门。
-class SourceManagerPage extends StatelessWidget {
+class SourceManagerPage extends StatefulWidget {
   const SourceManagerPage({super.key});
+
+  @override
+  State<SourceManagerPage> createState() => _SourceManagerPageState();
+}
+
+class _SourceManagerPageState extends State<SourceManagerPage> {
+  /// 导入区当前 tab：0=文本，1=链接，2=文件
+  int _tab = 0;
+  final _textCtrl = TextEditingController();
+  final _urlCtrl = TextEditingController();
+  String? _pickedName;
+  String? _pickedContent;
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _textCtrl.dispose();
+    _urlCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,18 +59,22 @@ class SourceManagerPage extends StatelessWidget {
           backgroundColor: Colors.transparent,
           elevation: 0,
           iconTheme: IconThemeData(color: MusicTheme.label),
-          title: Text('音源管理',
-              style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
+          title: Text('自定义音源',
+              style:
+                  TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
           actions: [
             IconButton(
               tooltip: 'LX 引擎自检',
               icon: Icon(Icons.verified_outlined, color: MusicTheme.tint),
               onPressed: () => runLxSelfTest(context),
             ),
-            IconButton(
-              tooltip: '导入音源',
-              icon: Icon(Icons.add, color: MusicTheme.tint),
-              onPressed: () => showImportSheet(context),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('完成',
+                  style: TextStyle(
+                      color: MusicTheme.tint,
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: FontWeight.w600)),
             ),
           ],
         ),
@@ -52,22 +82,16 @@ class SourceManagerPage extends StatelessWidget {
           valueListenable: store.revision,
           builder: (context, _, __) {
             final list = store.all;
-            if (list.isEmpty) return _empty(context);
             return ListView(
               padding: const EdgeInsets.only(bottom: 40),
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                  child: Text(
-                    '共 ${list.length} 个音源，${store.enabled.length} 个已启用。\n'
-                    '播放时会优先用内置的公开接口；只有它拿不到音源时才尝试这里。',
-                    style: TextStyle(
-                        color: MusicTheme.secondary,
-                        fontSize: AppTheme.fontFootnote,
-                        height: 1.5),
-                  ),
-                ),
-                ...list.map((s) => _tile(context, store, s)),
+                _intro(),
+                _importCard(context),
+                _listHeader(list.length),
+                if (list.isEmpty)
+                  _emptyHint()
+                else
+                  ...list.map((s) => _tile(context, store, s)),
               ],
             );
           },
@@ -76,96 +100,420 @@ class SourceManagerPage extends StatelessWidget {
     );
   }
 
-  Widget _empty(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.extension_outlined,
-                  size: 42, color: MusicTheme.secondary.withValues(alpha: 0.5)),
-              const SizedBox(height: 14),
-              Text('还没有导入音源',
-                  style:
-                      TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
-              const SizedBox(height: 8),
-              Text(
-                '支持粘贴 JSON / LX 脚本，或从文件、网址导入。\n'
-                '导入后可以单独启用/停用。',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    color: MusicTheme.secondary,
-                    fontSize: AppTheme.fontFootnote,
-                    height: 1.6),
-              ),
-              const SizedBox(height: 20),
-              FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: MusicTheme.tint,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-                onPressed: () => showImportSheet(context),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('导入音源'),
-              ),
-            ],
-          ),
+  // ── 顶部说明（对齐参考图两行说明）────────────────────────────
+  Widget _intro() => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '支持本地文件、远程URL和粘贴文本。',
+              style: TextStyle(
+                  color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '支持LX User API的JSON、JS、本地文件与在线URL；在线导入后会保存本地副本。',
+              style: TextStyle(
+                  color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
+            ),
+          ],
         ),
       );
 
-  Widget _tile(BuildContext context, ThirdPartySourceStore store,
-      ThirdPartySource s) {
-    return ListTile(
-      leading: Container(
-        width: 34,
-        height: 34,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: MusicTheme.tint.withValues(alpha: 0.13),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(
-          s.isScript ? Icons.code_rounded : Icons.link_rounded,
-          size: 17,
-          color: MusicTheme.tint,
-        ),
+  // ── 导入区（内嵌卡片：文本 / 链接 / 文件 + 识别并导入）────────
+  Widget _importCard(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: MusicTheme.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+            color: MusicTheme.label.withValues(alpha: 0.06), width: 0.5),
       ),
-      title: Text(s.name,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-              color: MusicTheme.label,
-              fontSize: AppTheme.fontHeadline,
-              fontWeight: FontWeight.w500)),
-      subtitle: Text(
-        '${s.isScript ? "LX 脚本" : "模板"} · 音质 ${s.quality}'
-        '${s.headers.isEmpty ? "" : " · ${s.headers.length} 个请求头"}',
-        style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Switch(
-            value: s.enabled,
-            activeThumbColor: MusicTheme.tint,
-            onChanged: (v) => store.setEnabled(s.id, v),
+          Text('导入音源',
+              style: TextStyle(
+                  color: MusicTheme.label,
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 10),
+          _segmented(),
+          const SizedBox(height: 12),
+          if (_tab == 0)
+            TextField(
+              controller: _textCtrl,
+              maxLines: 6,
+              minLines: 3,
+              style:
+                  TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
+              cursorColor: MusicTheme.tint,
+              decoration: InputDecoration(
+                hintText: '粘贴JSON/配置/脚本内容',
+                hintStyle:
+                    TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead),
+                filled: false,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: MusicTheme.divider, width: 0.5),
+                ),
+              ),
+            )
+          else if (_tab == 1)
+            TextField(
+              controller: _urlCtrl,
+              keyboardType: TextInputType.url,
+              style:
+                  TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
+              cursorColor: MusicTheme.tint,
+              decoration: InputDecoration(
+                hintText: 'https://…',
+                hintStyle:
+                    TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead),
+                filled: false,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: MusicTheme.divider, width: 0.5),
+                ),
+              ),
+            )
+          else
+            _fileRow(context),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: MusicTheme.tint,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: _busy ? null : () => _import(context),
+              child: Text(_busy ? '导入中…' : '识别并导入'),
+            ),
           ),
-          IconButton(
-            tooltip: '测试这个音源',
-            icon: Icon(Icons.play_circle_outline,
-                size: 19, color: MusicTheme.tint),
-            onPressed: () => testSource(context, s),
-          ),
-          IconButton(
-            icon: Icon(Icons.delete_outline,
-                size: 19, color: MusicTheme.secondary),
-            onPressed: () => _confirmDelete(context, store, s),
+          const SizedBox(height: 8),
+          Text(
+            '支持JSON数组、LX User API导出JSON、JS脚本、`SERVER_SCRIPT_CONFIG`片段，以及`@name`/`@template`头部格式。',
+            style: TextStyle(
+                color: MusicTheme.secondary,
+                fontSize: AppTheme.fontCaption,
+                height: 1.5),
           ),
         ],
       ),
-      onTap: () => _showDetail(context, s),
     );
+  }
+
+  /// 文本 / 链接 / 文件 三 tab（自绘分段，选中主题色）
+  Widget _segmented() {
+    const labels = ['文本', '链接', '文件'];
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: MusicTheme.fill,
+        borderRadius: BorderRadius.circular(11),
+      ),
+      child: Row(
+        children: List.generate(3, (i) {
+          final selected = i == _tab;
+          return Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() => _tab = i),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: selected ? MusicTheme.tint : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(labels[i],
+                    style: TextStyle(
+                      color: selected ? Colors.white : MusicTheme.secondary,
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight:
+                          selected ? FontWeight.w600 : FontWeight.w400,
+                    )),
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _fileRow(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: _pickFile,
+      child: Container(
+        width: double.infinity,
+        padding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        decoration: BoxDecoration(
+          border: Border.all(color: MusicTheme.divider, width: 0.5),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.insert_drive_file_outlined,
+                size: 20, color: MusicTheme.tint),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _pickedName ?? '点击选择本地音源文件（JSON / JS）',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: _pickedName == null
+                        ? MusicTheme.secondary
+                        : MusicTheme.label,
+                    fontSize: AppTheme.fontSubhead),
+              ),
+            ),
+            Icon(Icons.folder_open_rounded,
+                size: 18, color: MusicTheme.secondary),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickFile() async {
+    try {
+      // file_picker 13：pickFiles 是静态方法，直接返回 List<PlatformFile>
+      final res = await FilePicker.pickFiles(type: FileType.any);
+      if (res.isEmpty) return;
+      final f = res.first;
+      if (f.path == null) return;
+      final content = await File(f.path!).readAsString();
+      if (!mounted) return;
+      setState(() {
+        _pickedName = f.name;
+        _pickedContent = content;
+      });
+    } catch (e) {
+      _toast(context, '读取文件失败：$e');
+    }
+  }
+
+  Future<void> _import(BuildContext context) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      var n = 0;
+      if (_tab == 0) {
+        final text = _textCtrl.text.trim();
+        if (text.isEmpty) {
+          _toast(context, '请先粘贴音源内容');
+          return;
+        }
+        n = await SourceImportParser.importIntoStore(text);
+      } else if (_tab == 1) {
+        final url = _urlCtrl.text.trim();
+        if (url.isEmpty) {
+          _toast(context, '请输入音源链接');
+          return;
+        }
+        // importIntoStore 内部会识别 URL 并自动下载解析（保存本地副本）
+        n = await SourceImportParser.importIntoStore(url, fallbackName: url);
+      } else {
+        if (_pickedContent == null) {
+          _toast(context, '请先选择文件');
+          return;
+        }
+        n = await SourceImportParser.importIntoStore(_pickedContent!);
+      }
+      if (!mounted) return;
+      _toast(context, n > 0 ? '已导入 $n 个音源' : '这些音源已存在，未重复导入');
+    } on SourceImportException catch (e) {
+      if (!mounted) return;
+      _toast(context, '无法识别：${e.message}');
+    } catch (e) {
+      if (!mounted) return;
+      _toast(context, '导入失败：$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _toast(BuildContext context, String msg) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  // ── 音源列表标题行 + 数量角标 ────────────────────────────────
+  Widget _listHeader(int count) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+        child: Row(
+          children: [
+            Text('音源列表',
+                style: TextStyle(
+                    color: MusicTheme.label,
+                    fontSize: AppTheme.fontHeadline,
+                    fontWeight: FontWeight.w600)),
+            const Spacer(),
+            Text('$count',
+                style: TextStyle(
+                    color: MusicTheme.tint,
+                    fontSize: AppTheme.fontHeadline,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ),
+      );
+
+  Widget _emptyHint() => Padding(
+        padding: const EdgeInsets.fromLTRB(40, 30, 40, 10),
+        child: Text(
+          '还没有导入音源。\n在上方粘贴 / 链接 / 文件导入后，播放时内置接口拿不到地址会自动尝试这里。',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+              color: MusicTheme.secondary,
+              fontSize: AppTheme.fontFootnote,
+              height: 1.6),
+        ),
+      );
+
+  // ── 音源条目（对齐参考图：名称 / 标签 / 描述 + 编辑·排序·删除）──
+  Widget _tile(BuildContext context, ThirdPartySourceStore store,
+      ThirdPartySource s) {
+    final tagText =
+        '${s.isScript ? "脚本" : "KEYWORD"}·${s.quality}${s.isScript ? "" : "·${s.urlPath}"}';
+    final desc = s.isScript
+        ? 'LX 脚本 · ${(s.script ?? '').length} 字符'
+        : (s.template.isEmpty ? '（无模板）' : s.template);
+    final descExtra = s.headers.isEmpty ? '' : ' · ${s.headers.length} 个请求头';
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 4),
+      decoration: BoxDecoration(
+        color: MusicTheme.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+            color: MusicTheme.label.withValues(alpha: 0.06), width: 0.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(s.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: MusicTheme.label,
+                            fontSize: AppTheme.fontHeadline,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 4),
+                    _tag(tagText),
+                    const SizedBox(height: 4),
+                    Text('$desc$descExtra',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: MusicTheme.secondary,
+                            fontSize: AppTheme.fontFootnote)),
+                  ],
+                ),
+              ),
+              Switch(
+                value: s.enabled,
+                activeThumbColor: MusicTheme.tint,
+                onChanged: (v) => store.setEnabled(s.id, v),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              _action(Icons.play_circle_outline, '测试',
+                  () => testSource(context, s)),
+              _action(Icons.edit_outlined, '编辑',
+                  () => _showDetail(context, s)),
+              _action(Icons.swap_vert, '排序',
+                  () => _sortMenu(context, store, s)),
+              _action(Icons.delete_outline, '删除',
+                  () => _confirmDelete(context, store, s)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tag(String text) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: MusicTheme.tint.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(text,
+            style: TextStyle(
+                color: MusicTheme.tint,
+                fontSize: AppTheme.fontCaption,
+                fontWeight: FontWeight.w600)),
+      );
+
+  Widget _action(IconData icon, String label, VoidCallback onTap) =>
+      TextButton.icon(
+        style: TextButton.styleFrom(
+          foregroundColor: MusicTheme.secondary,
+          minimumSize: const Size(0, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          visualDensity: VisualDensity.compact,
+        ),
+        onPressed: onTap,
+        icon: Icon(icon, size: 16),
+        label: Text(label,
+            style: TextStyle(
+                color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
+      );
+
+  Future<void> _sortMenu(BuildContext context,
+      ThirdPartySourceStore store, ThirdPartySource s) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: MusicTheme.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.arrow_upward, color: MusicTheme.tint),
+              title: Text('上移',
+                  style: TextStyle(
+                      color: MusicTheme.label, fontSize: AppTheme.fontSubhead)),
+              onTap: () => Navigator.pop(ctx, 'up'),
+            ),
+            ListTile(
+              leading: Icon(Icons.arrow_downward, color: MusicTheme.tint),
+              title: Text('下移',
+                  style: TextStyle(
+                      color: MusicTheme.label, fontSize: AppTheme.fontSubhead)),
+              onTap: () => Navigator.pop(ctx, 'down'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == 'up') await store.move(s.id, -1);
+    if (action == 'down') await store.move(s.id, 1);
   }
 
   Future<void> _confirmDelete(BuildContext context, ThirdPartySourceStore store,
@@ -175,9 +523,11 @@ class SourceManagerPage extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         backgroundColor: MusicTheme.card,
         title: Text('删除音源',
-            style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
+            style:
+                TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
         content: Text('确定删除「${s.name}」？',
-            style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
+            style: TextStyle(
+                color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -255,209 +605,20 @@ class SourceManagerPage extends StatelessWidget {
             SizedBox(
               width: 66,
               child: Text(k,
-                  style:
-                      TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
+                  style: TextStyle(
+                      color: MusicTheme.secondary,
+                      fontSize: AppTheme.fontFootnote)),
             ),
             Expanded(
               child: Text(v,
                   style: TextStyle(
-                      color: MusicTheme.label, fontSize: AppTheme.fontFootnote, height: 1.5)),
+                      color: MusicTheme.label,
+                      fontSize: AppTheme.fontFootnote,
+                      height: 1.5)),
             ),
           ],
         ),
       );
-}
-
-/// 导入弹层：粘贴文本 / 从剪贴板 / 从网址
-Future<void> showImportSheet(BuildContext context) async {
-  final ctrl = TextEditingController();
-
-  await showModalBottomSheet<void>(
-    context: context,
-    backgroundColor: MusicTheme.card,
-    isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
-    builder: (ctx) => Padding(
-      // 键盘避让：底部按 viewInsets 抬高，输入框不被挡
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.viewInsetsOf(ctx).bottom,
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: MusicTheme.secondary.withValues(alpha: 0.35),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              Text('导入音源',
-                  style: TextStyle(
-                      color: MusicTheme.label,
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.w600)),
-              const SizedBox(height: 6),
-              Text(
-                '支持：JSON 数组 / {"sources":[...]} / 完整 LX 脚本 / '
-                '注释头（@name @template）/ 任意 JS 脚本',
-                style: TextStyle(
-                    color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote, height: 1.5),
-              ),
-              const SizedBox(height: 10),
-              // ── ⚠️ 协议说明（可展开）──────────────────────────────
-              //
-              // 用户最容易踩的坑：拿一份**只注册了 `request`** 的 LX 脚本
-              // 导进来，播放时报「脚本未实现 musicUrl（它提供：request）」——
-              // 那不是网络问题，是**脚本没注册音乐地址这个 action**。
-              //
-              // LX 里 `request` 是"脚本自己要发 HTTP 请求"的**事件名**，
-              // 而 `musicUrl` 才是**要被引擎调用的 action**；
-              // `lx.request(url, options, cb)` 则是注入给脚本**调用**的
-              // HTTP 客户端（不是要注册的事件）。三者很容易混。
-              //
-              // 把正确写法直接给出来，比让用户去猜有用得多。
-              Theme(
-                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                child: ExpansionTile(
-                  tilePadding: EdgeInsets.zero,
-                  childrenPadding: const EdgeInsets.only(bottom: 6),
-                  iconColor: MusicTheme.secondary,
-                  collapsedIconColor: MusicTheme.secondary,
-                  title: Text(
-                    '脚本要写成什么样？（点开看示例）',
-                    style: TextStyle(
-                        color: MusicTheme.tint,
-                        fontSize: AppTheme.fontFootnote,
-                        fontWeight: FontWeight.w600),
-                  ),
-                  children: [
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: MusicTheme.fill,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: SelectableText(
-                        "// ✅ 写法 1：lx.on\n"
-                        "lx.on('musicUrl', async (info) => {\n"
-                        "  return { url: 'https://cdn.example.com/' + info.musicInfo.id + '.mp3' };\n"
-                        "});\n\n"
-                        "// ✅ 写法 2：module.exports\n"
-                        "module.exports = {\n"
-                        "  musicUrl: async (info) => ({ url: 'https://…' })\n"
-                        "};\n\n"
-                        "// ❌ 只注册 request 会报「脚本未实现 musicUrl」\n"
-                        "//    因为 request 是「脚本自己要发请求」的事件名，\n"
-                        "//    而 musicUrl 才是引擎真正要调用的 action。",
-                        style: TextStyle(
-                          color: MusicTheme.label,
-                          fontSize: AppTheme.fontCaption,
-                          height: 1.45,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: ctrl,
-                maxLines: 6,
-                minLines: 3,
-                style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
-                cursorColor: MusicTheme.tint,
-                decoration: InputDecoration(
-                  hintText: '在此粘贴音源内容…',
-                  hintStyle:
-                      TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead),
-                  // 透明底：去掉灰填充；补一条细边框保持粘贴区可辨识
-                  filled: false,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                      color: MusicTheme.divider,
-                      width: 0.5,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  TextButton.icon(
-                    onPressed: () async {
-                      final d = await Clipboard.getData('text/plain');
-                      final t = d?.text;
-                      if (t != null && t.isNotEmpty) {
-                        ctrl.text = t;
-                      }
-                    },
-                    icon: Icon(Icons.content_paste_rounded,
-                        size: 16, color: MusicTheme.tint),
-                    label: Text('粘贴剪贴板',
-                        style: TextStyle(
-                            color: MusicTheme.tint, fontSize: AppTheme.fontSubhead)),
-                  ),
-                  const Spacer(),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: MusicTheme.tint,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                    ),
-                    onPressed: () async {
-                      final text = ctrl.text.trim();
-                      if (text.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('请先粘贴音源内容')),
-                        );
-                        return;
-                      }
-                      try {
-                        final n = await SourceImportParser.importIntoStore(text);
-                        if (!context.mounted) return;
-                        Navigator.pop(ctx);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(n > 0
-                                ? '已导入 $n 个音源'
-                                : '这些音源已存在，未重复导入'),
-                          ),
-                        );
-                      } on SourceImportException catch (e) {
-                        // 解析失败要给出**具体原因**，否则用户不知道该改什么
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('无法识别：${e.message}')),
-                        );
-                      }
-                    },
-                    child: const Text('导入'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
-  );
-
-  ctrl.dispose();
 }
 
 /// 极简 JSON 编码（避免为了一个小功能再引依赖；只处理本模块的数据结构）
@@ -500,7 +661,6 @@ class JsonEncoderShim {
   }
 }
 
-
 /// 测试单个音源：用一首固定的歌去解析，把结果（成功地址 / 失败原因）显示出来。
 ///
 /// 为什么用固定测试曲：用户需要判断"是音源坏了还是这首歌找不到"，
@@ -528,26 +688,37 @@ Future<void> testSource(BuildContext context, ThirdPartySource s) async {
       backgroundColor: MusicTheme.card,
       title: Text(r.ok ? '音源可用' : '音源不可用',
           style: TextStyle(
-              color: r.ok ? MusicTheme.sage : Colors.redAccent, fontSize: AppTheme.fontHeadline)),
+              color: r.ok ? MusicTheme.sage : Colors.redAccent,
+              fontSize: AppTheme.fontHeadline)),
       content: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
             Text('音源：${s.name}',
-                style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
+                style: TextStyle(
+                    color: MusicTheme.secondary,
+                    fontSize: AppTheme.fontFootnote)),
             Text('方式：${s.isScript ? "LX 脚本" : "模板"}',
-                style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
+                style: TextStyle(
+                    color: MusicTheme.secondary,
+                    fontSize: AppTheme.fontFootnote)),
             const SizedBox(height: 10),
             if (r.ok) ...[
               Text('解析到播放地址：',
-                  style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead)),
+                  style: TextStyle(
+                      color: MusicTheme.label,
+                      fontSize: AppTheme.fontSubhead)),
               const SizedBox(height: 4),
               SelectableText(r.url,
-                  style: TextStyle(color: MusicTheme.tint, fontSize: AppTheme.fontFootnote)),
+                  style: TextStyle(
+                      color: MusicTheme.tint,
+                      fontSize: AppTheme.fontFootnote)),
             ] else
               Text(r.error.isEmpty ? '未返回播放地址' : r.error,
-                  style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead)),
+                  style: TextStyle(
+                      color: MusicTheme.label,
+                      fontSize: AppTheme.fontSubhead)),
           ],
         ),
       ),
@@ -615,7 +786,8 @@ Future<void> runLxSelfTest(BuildContext context) async {
                 '超时 ${info['timeoutMs']}ms · '
                 '脚本上限 ${asInt(info['maxScriptChars']) ~/ 1024}KB · '
                 '沙箱已开',
-                style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
+                style: TextStyle(
+                    color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
               ),
               const SizedBox(height: 10),
               ...cases.map((c) {
@@ -630,18 +802,18 @@ Future<void> runLxSelfTest(BuildContext context) async {
                         children: [
                           Icon(ok ? Icons.check_circle : Icons.cancel,
                               size: 14,
-                              color: ok
-                                  ? MusicTheme.sage
-                                  : Colors.redAccent),
+                              color: ok ? MusicTheme.sage : Colors.redAccent),
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text('${m['name']}',
                                 style: TextStyle(
-                                    color: MusicTheme.label, fontSize: AppTheme.fontSubhead)),
+                                    color: MusicTheme.label,
+                                    fontSize: AppTheme.fontSubhead)),
                           ),
                           Text('${m['ms']}ms',
                               style: TextStyle(
-                                  color: MusicTheme.secondary, fontSize: AppTheme.fontCaption)),
+                                  color: MusicTheme.secondary,
+                                  fontSize: AppTheme.fontCaption)),
                         ],
                       ),
                       if (m['error'] != null)
@@ -649,7 +821,8 @@ Future<void> runLxSelfTest(BuildContext context) async {
                           padding: const EdgeInsets.only(left: 20, top: 2),
                           child: Text('${m['error']}',
                               style: TextStyle(
-                                  color: MusicTheme.secondary, fontSize: AppTheme.fontCaption)),
+                                  color: MusicTheme.secondary,
+                                  fontSize: AppTheme.fontCaption)),
                         ),
                     ],
                   ),

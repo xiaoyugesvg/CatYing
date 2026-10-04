@@ -265,7 +265,7 @@ class _ComicDownloadRecordsPageState extends State<ComicDownloadRecordsPage> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.file_download_off_rounded,
-              size: 56, color: JellyTheme.textSecondary),
+              size: 48, color: JellyTheme.textSecondary),
           const SizedBox(height: 12),
           Text(
             '暂无下载任务',

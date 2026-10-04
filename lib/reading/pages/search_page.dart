@@ -53,6 +53,17 @@ class _SourceSearchState {
   int searchSession = 0;
 }
 
+/// 板块流的一个板块（参考图 IMG_8579/8580：标题 + 3 列封面网格）
+class _ComicHomeSection {
+  _ComicHomeSection({required this.title, required this.groups});
+
+  final String title;
+  final List<FilterGroup> groups; // 该板块对应的分类组合（板块1=全默认）
+  List<Comic> items = [];
+  bool loading = false;
+  String? error;
+}
+
 /// 漫画搜索页面（果冻风悬浮搜索框）
 class SearchPage extends StatefulWidget {
   /// 是否为当前激活的 tab（用于触发结果瀑布入场动画）
@@ -95,6 +106,12 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   List<FilterGroup> _categoryGroups = []; // 缓存的分类维度（首次拉取后复用）
   bool _categoriesLoaded = false; // 分类维度是否已拉取
   bool _categoryMode = false; // 分类浏览模式（与关键词搜索互斥）
+
+  /// 板块流模式（参考图 IMG_8579/8580）：进源默认展示「最近更新」+ 分类板块流，
+  /// 每板块 3 列封面网格，整页滚动懒加载
+  bool _homeMode = false;
+  List<_ComicHomeSection> _homeSections = [];
+  int _homeLoaded = 0; // 已加载完成的板块数（懒加载指针）
 
   bool _pendingSearch = false; // 搜索中途切源/换词积压，待当前搜索结束后补搜
   bool _categorySheetOpening = false; // 分类筛选弹窗防连点守卫
@@ -220,6 +237,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     SourceManager().setCurrent(src);
     final needSearch = _loadState(src.id); // 恢复该源缓存，不触碰共享搜索框
     final willSearch = needSearch && autoSearch;
+    _homeMode = false; // 切源一律退出板块流（目标源内容由下方逻辑重建）
     if (mounted) setState(() => _isSearching = willSearch);
     // 切源后仅将当前源 chip 居中可见（不强制回顶，保留结果列表滚动位置）
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -240,7 +258,8 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     }
   }
 
-  /// 切源后无关键词时自动加载该源的分类浏览内容。
+  /// 切源后无关键词时自动加载该源的首页板块流（参考图 IMG_8579/8580：
+  /// 「最近更新」+ 各分类板块，3 列封面网格整页滚动）。
   /// 源不支持分类 / 拉取失败 / 无分类维度时静默保持现状（不影响搜索）。
   Future<void> _autoLoadCategoryContent() async {
     if (_categorySheetOpening) return;
@@ -257,12 +276,163 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         _categoriesLoaded = true;
       }
       if (!mounted || groups.isEmpty) return;
-      _applyCategories(groups);
+      _buildHomeSections(groups);
     } catch (e) {
-      _log('自动分类浏览失败: $e');
+      _log('自动首页板块流失败: $e');
     } finally {
       _categorySheetOpening = false;
     }
+  }
+
+  /// 构建板块流：板块 1 = 默认列表（最近更新/全部），后续 = 第一个分类维度的
+  /// 各选项（跳过「全部」）逐个成板块。构建后立即加载前 2 个板块。
+  void _buildHomeSections(List<FilterGroup> groups) {
+    final sections = <_ComicHomeSection>[];
+    sections.add(_ComicHomeSection(title: '最近更新', groups: groups));
+    if (groups.isNotEmpty) {
+      final first = groups.first;
+      for (final opt in first.options) {
+        if (opt.isAll) continue;
+        sections.add(
+          _ComicHomeSection(
+            title: opt.name,
+            groups: [first.copyWith(selected: opt)],
+          ),
+        );
+      }
+    }
+    if (sections.isEmpty) return;
+    setState(() {
+      _homeSections = sections;
+      _homeLoaded = 0;
+      _homeMode = true;
+      _categoryMode = false;
+      _result = SearchResult.empty();
+      _resultKeyword = '';
+      _keyword = '';
+      _searchController.clear();
+      _historyVisible = false;
+    });
+    _loadHomeSection(0);
+    _loadHomeSection(1);
+  }
+
+  /// 加载单个板块（getCategoryList 第一页；已加载/加载中跳过）
+  Future<void> _loadHomeSection(int i) async {
+    if (i >= _homeSections.length) return;
+    final s = _homeSections[i];
+    if (s.loading || s.items.isNotEmpty) return;
+    s.loading = true;
+    if (mounted) setState(() {});
+    try {
+      final srcId = SourceManager().current.id;
+      final page = await SourceManager().current.getCategoryList(
+        s.groups,
+        page: 0,
+      );
+      if (!mounted || SourceManager().current.id != srcId) return;
+      s.items = page.items.map(cmangaToComic).toList();
+      s.error = null;
+    } catch (e) {
+      _log('板块「${s.title}」加载失败: $e');
+      s.error = '加载失败';
+    } finally {
+      s.loading = false;
+      _homeLoaded = i + 1 > _homeLoaded ? i + 1 : _homeLoaded;
+      if (mounted) setState(() {});
+    }
+  }
+
+  /// 板块流懒加载：滚动接近底部时加载下一板块
+  void _loadMoreHomeSections() {
+    if (_homeLoaded >= _homeSections.length) return;
+    _loadHomeSection(_homeLoaded);
+  }
+
+  /// 板块流渲染：整页滚动，板块标题 + 3 列封面网格
+  Widget _buildHomeSectionFlow() {
+    return NotificationListener<ScrollNotification>(
+      onNotification: (n) {
+        if (n.metrics.pixels > n.metrics.maxScrollExtent - 600) {
+          _loadMoreHomeSections();
+        }
+        return false;
+      },
+      child: ListView(
+        padding: EdgeInsets.only(bottom: 12 + JellyNavBar.contentBottomAvoid),
+        children: [
+          for (var i = 0; i < _homeSections.length; i++)
+            _homeSectionBlock(i),
+        ],
+      ),
+    );
+  }
+
+  Widget _homeSectionBlock(int i) {
+    final s = _homeSections[i];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+          child: Text(
+            s.title,
+            style: TextStyle(
+              fontSize: AppTheme.fontTitle3,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white
+                  : JellyTheme.textPrimaryLight,
+            ),
+          ),
+        ),
+        if (s.loading && s.items.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              ),
+            ),
+          )
+        else if (s.error != null && s.items.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Center(
+              child: Text(
+                s.error!,
+                style: TextStyle(
+                    fontSize: AppTheme.fontSubhead,
+                    color: JellyTheme.textSecondary),
+              ),
+            ),
+          )
+        else
+          GridView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              childAspectRatio: 0.56,
+            ),
+            itemCount: s.items.length,
+            itemBuilder: (c, j) {
+              final comic = s.items[j];
+              return JellyComicCard(
+                comic: comic,
+                heroTag: comicCoverHeroTag('home', comic),
+                onTap: () => _onComicTap(comic),
+                compact: true,
+              );
+            },
+          ),
+      ],
+    );
   }
 
   /// 切源后将对应 chip 滚动到可视区中部（源较多时防当前 chip 跑出屏幕）
@@ -360,6 +530,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       _log('关键词为空，跳过');
       return;
     }
+    if (!loadMore) _homeMode = false; // 新搜索退出板块流
 
     final srcId = SourceManager().current.id;
     // 捕获本次搜索词：loadMore 用产生当前结果的词，新搜索用共享词；防止中途变化导致缓存错配
@@ -476,7 +647,10 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   void _onViewModeChangedExternal() {
     if (!mounted) return;
     final target = ViewMode().isGrid ? 0 : 1;
-    if (_tabController.index != target) {
+    // ⚠️ 必须同时判 `indexIsChanging`：动画进行中 index 仍是旧值，
+    // 若此时用户又点了另一侧，index==target 会误判"已就位"不触发 animateTo，
+    // 动画继续飞向旧目标 → 视图"切不回来"。动画中一律强制重定向。
+    if (_tabController.index != target || _tabController.indexIsChanging) {
       _tabController.animateTo(target);
     }
   }
@@ -574,7 +748,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     return JellyExpandableSearch(
       controller: _searchController,
       hintText: '搜索漫画',
-      maxWidth: 240,
+      maxWidth: 200,
       onFocusChange: (f) => setState(() {
         if (f) {
           if (_searchController.text.isEmpty) {
@@ -595,28 +769,29 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     final sources = SourceManager().enabledSources;
     final currentId = SourceManager().current.id;
     final chips = <Widget>[];
-    // 「聚搜」入口：跨所有漫画源一键聚合搜索（参考 cmbok 引导）
-    chips.add(_buildAggregateChip(isDark));
-    chips.add(const SizedBox(width: 8));
     for (var i = 0; i < sources.length; i++) {
       if (i > 0) chips.add(const SizedBox(width: 8));
       final src = sources[i];
       final key = _chipKeys.putIfAbsent(src.id, () => GlobalKey());
       chips.add(_buildSourceChip(src, src.id == currentId, isDark, key: key));
     }
-    return LayoutBuilder(
-      builder: (context, constraints) => SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(minWidth: constraints.maxWidth),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.max,
-            children: chips,
+    return Row(
+      children: [
+        // 「聚搜」固定在第一位，不随源 chip 横向滑动（对齐参考图）
+        _buildAggregateChip(isDark),
+        const SizedBox(width: 8),
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: chips,
+            ),
           ),
         ),
-      ),
+      ],
     );
   }
 
@@ -773,7 +948,10 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   /// 视图切换独立按钮（右上角）：点一下切网格/列表，图标显示目标视图。
   /// 样式与 JellyIconMenuButton / JellyRingButton 一致（圆形描边）。
   Widget _buildViewToggleButton(bool isDark) {
-    final isGrid = _tabController.index == 0;
+    // 动画进行中用插值判断当前视图，避免动画中点击误判方向"切不回来"
+    final isGrid = _tabController.indexIsChanging
+        ? (_tabController.animation?.value.round() ?? 0) == 0
+        : _tabController.index == 0;
     return Tooltip(
       message: isGrid ? '切换到列表视图' : '切换到网格视图',
       child: Material(
@@ -1079,6 +1257,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     FocusScope.of(context).unfocus(); // 分类模式不聚焦搜索框，避免弹键盘
     _categoryGroups = groups;
     _categoryMode = true;
+    _homeMode = false; // 分类弹窗确认 → 退出板块流进单分类浏览
     _keyword = '';
     _resultKeyword = '';
     _searchController.clear();
@@ -1395,7 +1574,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
               hasConfigured
                   ? Icons.lock_outline_rounded
                   : Icons.cloud_off_rounded,
-              size: 64,
+              size: 48,
               color: JellyTheme.textSecondary,
             ),
             const SizedBox(height: 16),
@@ -1500,7 +1679,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
           children: [
             Icon(
               Icons.search_off_rounded,
-              size: 64,
+              size: 48,
               color: JellyTheme.textSecondary,
             ),
             const SizedBox(height: 16),
@@ -1513,6 +1692,11 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       );
     }
 
+    // 板块流模式（进源默认）：最近更新 + 分类板块整页滚动（参考图 8579/8580）
+    if (_homeMode && _homeSections.isNotEmpty) {
+      return _buildHomeSectionFlow();
+    }
+
     // 未搜索 = 初始界面
     if (_result.items.isEmpty && _keyword.isEmpty && !_categoryMode) {
       return Center(
@@ -1521,7 +1705,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
           children: [
             Icon(
               Icons.palette_rounded,
-              size: 64,
+              size: 48,
               color: JellyTheme.textSecondary,
             ),
             const SizedBox(height: 16),
@@ -1633,8 +1817,8 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       builder: (context, constraints) {
         final cols = _adaptiveColumns(
           constraints.maxWidth,
-          min: 2,
-          target: 170,
+          min: 3,
+          target: 118,
         );
         return MasonryGridView.count(
           controller: _gridScrollController,
@@ -1665,6 +1849,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 comic: comic,
                 heroTag: comicCoverHeroTag('search', comic),
                 onTap: () => _onComicTap(comic),
+                compact: true,
               ),
             );
           },

@@ -912,7 +912,7 @@ class _ComicFavoritesTabState extends State<_ComicFavoritesTab> {
               children: [
                 Icon(
                   Icons.favorite_border_rounded,
-                  size: 64,
+                  size: 48,
                   color: JellyTheme.textSecondary,
                 ),
                 const SizedBox(height: 16),
@@ -1164,7 +1164,7 @@ class _BookFavoritesTabState extends State<_BookFavoritesTab> {
                   kw.isEmpty
                       ? Icons.favorite_border_rounded
                       : Icons.search_off_rounded,
-                  size: 64,
+                  size: 48,
                   color: JellyTheme.textSecondary,
                 ),
                 const SizedBox(height: 16),

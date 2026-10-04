@@ -25,6 +25,7 @@ class _DownloadSettingsPageState extends State<DownloadSettingsPage> {
   int _bookCacheChapters = 0;
   // 在线漫画图片缓存统计
   int _imageCacheBytes = 0;
+  int _imageCacheCount = 0;
   bool _cacheLoaded = false;
 
   @override
@@ -37,28 +38,37 @@ class _DownloadSettingsPageState extends State<DownloadSettingsPage> {
     final bookBytes = await BookContentCacheService.instance.sizeBytes();
     final chapters = await _bookCacheFileCount();
     var imageBytes = 0;
+    var imageCount = 0;
     try {
-      imageBytes = await _imageCacheSize();
+      final (b, n) = await _imageCacheStats();
+      imageBytes = b;
+      imageCount = n;
     } catch (_) {}
     if (!mounted) return;
     setState(() {
       _bookCacheBytes = bookBytes;
       _bookCacheChapters = chapters;
       _imageCacheBytes = imageBytes;
+      _imageCacheCount = imageCount;
       _cacheLoaded = true;
     });
   }
 
   /// 统计 appImageCacheManager 磁盘缓存（临时目录 cached_network_image_ce）
-  Future<int> _imageCacheSize() async {
+  /// 返回（字节数, 张数），对应参考图「图片 23.8 MB·56 张·目录 59.7 KB」。
+  Future<(int, int)> _imageCacheStats() async {
     final tmp = await getTemporaryDirectory();
     final dir = Directory('${tmp.path}/cached_network_image_ce');
-    if (!await dir.exists()) return 0;
+    if (!await dir.exists()) return (0, 0);
     var total = 0;
+    var count = 0;
     await for (final e in dir.list(recursive: true, followLinks: false)) {
-      if (e is File) total += await e.length();
+      if (e is File) {
+        total += await e.length();
+        count++;
+      }
     }
-    return total;
+    return (total, count);
   }
 
   Future<int> _bookCacheFileCount() async {
@@ -171,14 +181,6 @@ class _DownloadSettingsPageState extends State<DownloadSettingsPage> {
                 onChanged: (v) => s.setOnlineBookCacheGb(v.round()),
               ),
               const SizedBox(height: 12),
-              _buildSwitchCard(
-                isDark: isDark,
-                title: '缓存全本固定保护',
-                subtitle: '已下载全本的书不会被临时缓存淘汰',
-                value: s.protectFullBookCache,
-                onChanged: s.setProtectFullBookCache,
-              ),
-              const SizedBox(height: 12),
               _buildCacheStatCard(
                 isDark: isDark,
                 title: '临时缓存',
@@ -227,7 +229,7 @@ class _DownloadSettingsPageState extends State<DownloadSettingsPage> {
                 isDark: isDark,
                 title: '图片缓存',
                 text: _cacheLoaded
-                    ? '图片 ${_fmt(_imageCacheBytes)} · 目录 ${_fmt(_imageCacheBytes)}'
+                    ? '图片 ${_fmt(_imageCacheBytes)} · $_imageCacheCount 张'
                     : '统计中…',
                 onClear: _clearImageCache,
               ),

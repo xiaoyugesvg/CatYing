@@ -44,6 +44,18 @@ class SiteConfig {
   chapterScript; // 章节列表 JS（详情页 WebView 内执行返回 {apiUrl,linkBase}；空=Dio 解析 chapterLinkDom）
   final String
   chapterJsonScript; // 章节 JSON 解析 JS（注入 json+linkBase 执行返回 [{name,url}]；配合 chapterScript 的 apiUrl）
+
+  // JSON 章节 API 直连模式（声明式，无需 WebView；如热辣漫画 /api/v3/comic/.../chapters）：
+  //   详情 URL 经 chapterUrlIdRegex 提取捕获组 -> 替换 chapterApiUrl 模板里
+  //   非 {offset}/{page} 的占位（按出现顺序）-> Dio GET/POST -> 响应 JSON 按
+  //   chapterListField 点路径取列表 -> chapterJsonFields 映射 name/url。
+  //   模板含 {offset} 时按 chapterPageSize 翻页，直到结果数 < pageSize 或无新增。
+  final String chapterApiUrl; // JSON 章节接口 URL 模板（{offset} 分页占位 + 捕获组占位）
+  final String chapterUrlIdRegex; // 从详情 URL 提取捕获组的正则（组1..N 按序替换模板占位）
+  final String chapterListField; // 结果列表点路径（如 results.list；空=响应本身是数组）
+  final Map<String, String>? chapterJsonFields; // 章节字段映射：name/url（值=字段名/点路径/Field[0]/{Field} 模板）
+  final int chapterPageSize; // 满页判定（>0 时结果数满页即有下一页）
+  final String chapterApiMethod; // 请求方法（空/GET=GET，POST=POST JSON）
   final String imgReferer; // 图片 Referer（空=site.url，'none'=不发，其他=自定义值）
   final int imgLoadMode; // 1=滚动 2=滚到底 3=下一页
   final String nextPageSelector; // 下一页选择器（imgLoadMode=3）
@@ -154,6 +166,12 @@ class SiteConfig {
     this.imgScript = '',
     this.chapterScript = '',
     this.chapterJsonScript = '',
+    this.chapterApiUrl = '',
+    this.chapterUrlIdRegex = '',
+    this.chapterListField = '',
+    this.chapterJsonFields,
+    this.chapterPageSize = 0,
+    this.chapterApiMethod = '',
     this.imgReferer = '',
     this.imgLoadMode = 1,
     this.nextPageSelector = '',
@@ -217,6 +235,16 @@ class SiteConfig {
     imgScript: (j['img_script'] as String?) ?? '',
     chapterScript: (j['chapter_script'] as String?) ?? '',
     chapterJsonScript: (j['chapter_json_script'] as String?) ?? '',
+    chapterApiUrl: (j['chapter_api_url'] as String?) ?? '',
+    chapterUrlIdRegex: (j['chapter_url_id_regex'] as String?) ?? '',
+    chapterListField: (j['chapter_list_field'] as String?) ?? '',
+    chapterJsonFields: (j['chapter_json_fields'] is Map)
+        ? (j['chapter_json_fields'] as Map).map(
+            (k, v) => MapEntry(k.toString(), v.toString()),
+          )
+        : null,
+    chapterPageSize: (j['chapter_page_size'] as num?)?.toInt() ?? 0,
+    chapterApiMethod: (j['chapter_api_method'] as String?) ?? '',
     imgReferer: (j['img_referer'] as String?) ?? '',
     imgLoadMode: (j['img_load_mode'] as num?)?.toInt() ?? 1,
     nextPageSelector: (j['next_page_selector'] as String?) ?? '',
@@ -311,6 +339,12 @@ class SiteConfig {
     'img_script': imgScript,
     'chapter_script': chapterScript,
     'chapter_json_script': chapterJsonScript,
+    'chapter_api_url': chapterApiUrl,
+    'chapter_url_id_regex': chapterUrlIdRegex,
+    'chapter_list_field': chapterListField,
+    'chapter_json_fields': chapterJsonFields,
+    'chapter_page_size': chapterPageSize,
+    'chapter_api_method': chapterApiMethod,
     'img_referer': imgReferer,
     'img_load_mode': imgLoadMode,
     'next_page_selector': nextPageSelector,

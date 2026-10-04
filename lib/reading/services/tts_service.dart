@@ -120,7 +120,14 @@ class TtsService extends GetxService {
     await TtsSourceStore.instance.init();
     final active = TtsSourceStore.instance.active;
     _netSource = (active != null && active.type == 'easyvoice') ? active : null;
-    final segs = splitSegments(text);
+    var segs = splitSegments(text);
+    // EasyVoice「AI 推荐配音」：一次 AI 分析给一段才有意义，
+    // 把小段合并成 ~1500 字大段再发（服务端内部会再按角色切）
+    if (_netSource != null &&
+        _netSource!.useAiVoice &&
+        _netSource!.aiVoiceAvailable) {
+      segs = _mergeSegmentsForAi(segs);
+    }
     if (segs.isEmpty) {
       lastError.value = '没有可朗读的内容';
       return;
@@ -137,6 +144,24 @@ class TtsService extends GetxService {
     } else {
       await _speakCurrent();
     }
+  }
+
+  /// 把小段合并成 ≤2000 字的大段（AI 推荐配音用，避免每 120 字调一次大模型）
+  static List<String> _mergeSegmentsForAi(List<String> segs) {
+    const limit = 2000;
+    final out = <String>[];
+    final buf = StringBuffer();
+    for (final s in segs) {
+      if (buf.length > 0 && buf.length + s.length > limit) {
+        out.add(buf.toString().trim());
+        buf.clear();
+      }
+      buf.write(s);
+      buf.write('\n');
+    }
+    final rest = buf.toString().trim();
+    if (rest.isNotEmpty) out.add(rest);
+    return out;
   }
 
   Future<void> pause() async {
@@ -311,8 +336,11 @@ class TtsService extends GetxService {
     }
   }
 
-  /// EasyVoice 合成：POST /api/v1/tts/generateJson → mp3 字节
+  /// EasyVoice 合成：AI 推荐配音走任务接口，否则走 generateJson 直出 mp3
   Future<List<int>?> _synthesizeEasyVoice(TtsSource src, String text) async {
+    if (src.useAiVoice && src.aiVoiceAvailable) {
+      return _synthesizeEasyVoiceAi(src, text);
+    }
     final base = src.endpoint.trim().replaceAll(RegExp(r'/+$'), '');
     if (base.isEmpty) throw '接口地址为空';
     final ratePct = '${(((rate.value - 0.5) / 0.5) * 100).round()}%';
@@ -342,6 +370,73 @@ class TtsService extends GetxService {
       ),
     );
     return r.data;
+  }
+
+  /// EasyVoice「AI 智能推荐配音」（useLLM=true）：
+  /// POST /api/v1/create 建任务 → 轮询 /api/v1/task/{id} →
+  /// 完成后 GET /api/v1/download/{file} 取整段 mp3（多角色有声书）。
+  Future<List<int>?> _synthesizeEasyVoiceAi(TtsSource src, String text) async {
+    final base = src.endpoint.trim().replaceAll(RegExp(r'/+$'), '');
+    if (base.isEmpty) throw '接口地址为空';
+    final body = <String, dynamic>{
+      'text': text,
+      'useLLM': true,
+    };
+    // 用户手填了音色 → 带上让服务端优先用；空则由大模型推荐
+    if (src.voice.trim().isNotEmpty) body['voice'] = src.voice.trim();
+
+    final create = await _dio.post<Map<String, dynamic>>(
+      '$base/api/v1/create',
+      data: body,
+      options: Options(
+        headers: {'Content-Type': 'application/json'},
+        sendTimeout: Duration(seconds: src.timeoutSec),
+        receiveTimeout: Duration(seconds: src.timeoutSec + 10),
+      ),
+    );
+    final cdata = create.data;
+    final taskId = (cdata?['data'] is Map)
+        ? ((cdata!['data'] as Map)['id']?.toString() ?? '')
+        : '';
+    if (taskId.isEmpty) throw 'EasyVoice 未返回任务 ID';
+
+    // 轮询任务状态（2s 间隔，最长 180s）
+    final deadline = DateTime.now().add(const Duration(seconds: 180));
+    while (DateTime.now().isBefore(deadline)) {
+      if (_stopRequested) throw '已停止朗读';
+      await Future.delayed(const Duration(seconds: 2));
+      final r = await _dio.get<Map<String, dynamic>>(
+        '$base/api/v1/task/$taskId',
+        options: Options(receiveTimeout: const Duration(seconds: 20)),
+      );
+      final d = r.data?['data'];
+      if (d is! Map) continue;
+      final status = (d['status']?.toString() ?? '').toLowerCase();
+      final result = d['result'];
+      if (result is Map) {
+        final file = result['file']?.toString() ??
+            result['audio']?.toString() ??
+            '';
+        if (file.isNotEmpty) {
+          final dl = await _dio.get<List<int>>(
+            '$base/api/v1/download/$file',
+            options: Options(
+              responseType: ResponseType.bytes,
+              receiveTimeout: const Duration(seconds: 90),
+            ),
+          );
+          return dl.data;
+        }
+      }
+      if (status == 'failed' || status == 'error') {
+        final msg = d['message']?.toString() ?? '合成失败';
+        throw 'EasyVoice 任务失败：$msg';
+      }
+      if (status == 'completed' || status == 'done' || status == 'success') {
+        throw 'EasyVoice 任务完成但没有音频文件';
+      }
+    }
+    throw 'EasyVoice 合成超时（180s），请稍后重试';
   }
 
   /// 把合成好的 mp3 写临时文件交给 media_kit 播放

@@ -104,7 +104,11 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   Widget _header(String name) {
     return SliverAppBar(
       pinned: true,
-      expandedHeight: 300,
+      // 🔴 原来 `expandedHeight: 300` → 头部**可用高度只有 300-84-12 = 204px**，
+      // 而内容最少 ≈221px（128 封面 + 12 + 标题 + 4 + 副标题 + 12 + 33 按钮行）✗
+      // → FlexibleSpaceBar 里**必然 RenderFlex overflow**（按钮被裁掉）✗；
+      // 标题两行时约 257px，溢出更多 ✗。抬到 360 给足余量 ✓
+      expandedHeight: 360,
       backgroundColor: Colors.transparent,
       iconTheme: IconThemeData(color: MusicTheme.label),
       flexibleSpace: FlexibleSpaceBar(

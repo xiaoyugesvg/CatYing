@@ -60,6 +60,13 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
   bool _exploreLoading = false;
   String? _exploreError;
 
+  /// 板块流模式（参考图 IMG_8581/8582）：exploreUrl 全部分类逐板块展示
+  bool _exploreHomeMode = true;
+  final Map<String, List<BookSourceResult>> _catBooksCache = {};
+  final Map<String, bool> _catLoading = {};
+  final Map<String, String?> _catError = {};
+  int _exploreVisibleSections = 2; // 懒加载：初始渲染前 2 个板块
+
   bool _searching = false;
   String _keyword = '';
 
@@ -169,6 +176,9 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
 
   /// 把 Node 引擎透传的原始异常文本转成简短中文提示（用户可读）。
   String _friendlyError(String raw) {
+    if (raw.contains('没有配置 exploreUrl') || raw.contains('未配置 exploreUrl')) {
+      return '该源未配置分类浏览（无 exploreUrl）：可直接用上方搜索找书；如需首页板块，可在源编辑里补充 exploreUrl';
+    }
     if (raw.contains('status code of 500')) {
       return '该源分类接口返回服务器错误（HTTP 500）：接口可能失效或被源站拒绝，请换一个书源或更新书源配置';
     }
@@ -219,6 +229,11 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       _cats = [];
       _activeCat = null;
       _exploreList = [];
+      _catBooksCache.clear();
+      _catLoading.clear();
+      _catError.clear();
+      _exploreVisibleSections = 2;
+      _exploreHomeMode = true;
     });
     final r = await BookSourceService.instance.exploreCategories(source);
     if (!mounted || source.id != _selectedSourceId) return;
@@ -231,24 +246,70 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
     }
     setState(() {
       _cats = r.categories;
-      _activeCat = r.categories.first;
       _exploreLoading = false;
     });
-    await _loadCatBooks(source, r.categories.first);
+    // 板块流：并发加载前 2 个板块（懒加载，滚动追加）
+    final src = source;
+    for (final c in r.categories.take(_exploreVisibleSections)) {
+      unawaited(_loadSection(src, c));
+    }
   }
 
-  /// 加载某个分类的书籍列表（ruleExplore）。
+  /// 板块流：加载单个板块的书籍（exploreBooks → 缓存）
+  Future<void> _loadSection(BookSource source, ExploreCategory cat) async {
+    if (_catLoading[cat.url] == true) return;
+    setState(() => _catLoading[cat.url] = true);
+    final r = await BookSourceService.instance.exploreBooks(source, cat.url);
+    if (!mounted || source.id != _selectedSourceId) return;
+    setState(() {
+      _catLoading[cat.url] = false;
+      if (r.ok) {
+        _catBooksCache[cat.url] = r.list;
+        _catError[cat.url] = null;
+      } else {
+        _catError[cat.url] = r.error ?? '加载失败';
+        _catBooksCache[cat.url] ??= const [];
+      }
+    });
+  }
+
+  /// 板块流懒加载：滚动接近底部时追加下一板块
+  void _loadMoreSections() {
+    if (_exploreVisibleSections >= _cats.length) return;
+    final next = _cats[_exploreVisibleSections];
+    setState(() => _exploreVisibleSections++);
+    if (_catBooksCache[next.url] == null && _catLoading[next.url] != true) {
+      final src = store.enabled.firstWhere(
+        (s) => s.id == _selectedSourceId,
+        orElse: () => store.enabled.first,
+      );
+      if (src.id == _selectedSourceId) unawaited(_loadSection(src, next));
+    }
+  }
+
+  /// 加载某个分类的书籍列表（ruleExplore）：单分类视图（板块流点击"分类"进入）。
   Future<void> _loadCatBooks(BookSource source, ExploreCategory cat) async {
     setState(() {
+      _exploreHomeMode = false; // 退出板块流，显示单分类
       _exploreLoading = true;
       _exploreError = null;
       _activeCat = cat;
       _exploreList = [];
     });
+    // 板块流缓存命中则直接复用
+    final cached = _catBooksCache[cat.url];
+    if (cached != null && cached.isNotEmpty) {
+      setState(() {
+        _exploreLoading = false;
+        _exploreList = cached;
+      });
+      return;
+    }
     final r = await BookSourceService.instance.exploreBooks(source, cat.url);
     if (!mounted || source.id != _selectedSourceId) return;
     setState(() {
       _exploreLoading = false;
+      _catBooksCache[cat.url] = r.ok ? r.list : const [];
       if (r.ok) {
         _exploreList = r.list;
       } else {
@@ -326,26 +387,29 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
         // 原来是"AppBar 里只放标题+拉绳+图标组，搜索框在下面单独一行"。
         // 截图里是一行，所以把搜索框并进 AppBar 的 title。
         // 用 Expanded 撑开，右侧 actions 才不会被长标题/长搜索框挤掉。
-        title: Row(
-          children: [
-            Text('书源',
-                style: TextStyle(
-                    fontSize: AppTheme.fontTitle2,
-                    fontWeight: FontWeight.w700,
-                    color: _titleColor)),
-            const SizedBox(width: 4),
-            JellyPullCord(
-              // ⚠️ 限高，否则绳子把整行撑到 50px 导致同排控件错位
-              height: 40,
-              tooltip: '切换到图书',
-              // 书源页是 push 进来的，所以"切回图书"就是 pop。
-              // 用 pop 而不是再 push 一个图书页：否则连点几下会在栈里
-              // 堆出一串页面，返回键要按很多次才出得去。
-              onTap: () => Navigator.maybePop(context),
-            ),
-            const SizedBox(width: 10),
-            Expanded(child: _searchField()),
-          ],
+        title: Padding(
+          padding: const EdgeInsets.only(left: 12),
+          child: Row(
+            children: [
+              Text('书源',
+                  style: TextStyle(
+                      fontSize: AppTheme.fontTitle2,
+                      fontWeight: FontWeight.w700,
+                      color: _titleColor)),
+              const SizedBox(width: 4),
+              JellyPullCord(
+                // ⚠️ 限高，否则绳子把整行撑到 50px 导致同排控件错位
+                height: 40,
+                tooltip: '切换到图书',
+                // 书源页是 push 进来的，所以"切回图书"就是 pop。
+                // 用 pop 而不是再 push 一个图书页：否则连点几下会在栈里
+                // 堆出一串页面，返回键要按很多次才出得去。
+                onTap: () => Navigator.maybePop(context),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: _searchField()),
+            ],
+          ),
         ),
         actions: [
           // 刷新（重新搜索当前关键词；未搜索时重载分类浏览）
@@ -437,17 +501,19 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       height: 40,
       child: Row(
         children: [
+          // 聚搜固定在第一位，不随源列表滑动（对齐参考图）
+          Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: _sourceChip('聚搜', ''),
+          ),
+          const SizedBox(width: 8),
           Expanded(
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
-              itemCount: sources.length + 1, // +聚搜
+              padding: const EdgeInsets.fromLTRB(0, 4, 4, 4),
+              itemCount: sources.length,
               separatorBuilder: (_, _) => const SizedBox(width: 8),
-              itemBuilder: (context, i) {
-                if (i == 0) return _sourceChip('聚搜', '');
-                final s = sources[i - 1];
-                return _sourceChip(s.name, s.id);
-              },
+              itemBuilder: (context, i) => _sourceChip(sources[i].name, sources[i].id),
             ),
           ),
           Padding(
@@ -634,7 +700,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
     return JellyExpandableSearch(
       controller: _ctrl,
       hintText: '搜索书源图书',
-      maxWidth: 240,
+      maxWidth: 200,
       onSubmitted: (value) => _run(value),
       onChanged: (value) => setState(() {}),
       trailing: _searching
@@ -736,7 +802,11 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
             children: [
               Expanded(
                 child: Text(
-                  '${src.name}·${_activeCat?.title ?? '分类'}',
+                  // 板块流模式只显示源名（参考图 8581/8582 主体直接是分类板块）；
+                  // 单分类视图显示「源名·分类名」
+                  _exploreHomeMode
+                      ? src.name
+                      : '${src.name}·${_activeCat?.title ?? '分类'}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -765,6 +835,46 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
   }
 
   Widget _exploreGrid() {
+    // 板块流模式（默认）：exploreUrl 全部分类逐板块整页滚动（参考图 IMG_8581/8582）
+    if (_exploreHomeMode && _cats.isNotEmpty) {
+      final src = store.enabled.firstWhere(
+        (s) => s.id == _selectedSourceId,
+        orElse: () => store.enabled.first,
+      );
+      return NotificationListener<ScrollNotification>(
+        onNotification: (n) {
+          if (n.metrics.pixels >
+              n.metrics.maxScrollExtent - 600) {
+            _loadMoreSections();
+          }
+          return false;
+        },
+        child: ListView.builder(
+          padding: const EdgeInsets.only(bottom: 24),
+          physics: const AlwaysScrollableScrollPhysics(),
+          itemCount: _exploreVisibleSections + 1,
+          itemBuilder: (c, i) {
+            if (i == _exploreVisibleSections) {
+              // 底部：正在加载更多板块 / 已全部加载
+              if (_exploreVisibleSections >= _cats.length) {
+                return const SizedBox(height: 8);
+              }
+              return const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Center(
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2.5),
+                  ),
+                ),
+              );
+            }
+            return _sectionBlock(src, _cats[i]);
+          },
+        ),
+      );
+    }
     if (_exploreLoading && _exploreList.isEmpty) {
       return const Center(
         child: SizedBox(
@@ -788,6 +898,85 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       ),
       itemCount: _exploreList.length,
       itemBuilder: (context, i) => _exploreTile(_exploreList[i]),
+    );
+  }
+
+  /// 板块流：单个板块 = 标题行 + 3 列封面网格
+  Widget _sectionBlock(BookSource src, ExploreCategory cat) {
+    final items = _catBooksCache[cat.url] ?? const <BookSourceResult>[];
+    final loading = _catLoading[cat.url] == true;
+    final err = _catError[cat.url];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  cat.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontTitle3,
+                    fontWeight: FontWeight.w700,
+                    color: _titleColor,
+                  ),
+                ),
+              ),
+              // 进入单分类视图
+              GestureDetector(
+                onTap: () => _loadCatBooks(src, cat),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text('查看全部',
+                      style: TextStyle(
+                          fontSize: AppTheme.fontFootnote,
+                          color: JellyTheme.primary)),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (loading && items.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              ),
+            ),
+          )
+        else if (err != null && items.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Center(
+              child: Text(
+                err,
+                style: TextStyle(
+                    fontSize: AppTheme.fontSubhead,
+                    color: JellyTheme.textSecondary),
+              ),
+            ),
+          )
+        else
+          GridView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              mainAxisSpacing: 14,
+              crossAxisSpacing: 12,
+              childAspectRatio: 0.56,
+            ),
+            itemCount: items.length,
+            itemBuilder: (context, i) => _exploreTile(items[i]),
+          ),
+      ],
     );
   }
 
@@ -1030,7 +1219,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.menu_book_outlined,
-                size: 56,
+                size: 48,
                 color: JellyTheme.textSecondary.withValues(alpha: 0.55)),
             const SizedBox(height: 20),
             Text('还没有书源',

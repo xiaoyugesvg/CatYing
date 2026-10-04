@@ -113,7 +113,7 @@ function absolute(url, base) {
  * 会被展开成 {"0":"{","1":"\"",...} 这类畸形请求头，源站直接回 HTTP 500。
  * 这里统一解析成对象再合并。
  */
-function normalizeHeaders(h) {
+function normalizeHeaders(h, jsLib) {
   if (!h) return {};
   if (typeof h === 'string') {
     let s = h.trim();
@@ -124,7 +124,7 @@ function normalizeHeaders(h) {
           rule: s,
           input: makeInput(''),
           vars: buildVars({}),
-          ctx: { baseUrl: '' },
+          ctx: ruleCtx('', { jsLib }),
         });
         s = str(v);
       } catch (_) {
@@ -273,6 +273,17 @@ function str(v) {
   return String(v).trim();
 }
 
+/**
+ * 规则求值上下文：baseUrl + 源级 jsLib（skybook 混淆脚本库）。
+ *
+ * jsLib 必须在**规则求值前**先执行（book_rule.js 的 runJs 里做），
+ * 规则里的 `@js:` / `{{java.xxx}}` 才能调用到 jsLib 定义的函数。
+ * 全部求值入口统一走这里，避免漏传。
+ */
+function ruleCtx(baseUrl, source) {
+  return { baseUrl, jsLib: (source && source.jsLib) || '' };
+}
+
 // ============================================================
 // 搜索
 // ============================================================
@@ -300,7 +311,7 @@ async function search({ source, keyword, page = 1 }) {
   }
 
   const url = absolute(opt.url, base);
-  const headers = Object.assign({}, normalizeHeaders(source.header), opt.headers || {});
+  const headers = Object.assign({}, normalizeHeaders(source.header, source.jsLib), opt.headers || {});
 
   let resp;
   try {
@@ -325,7 +336,7 @@ async function search({ source, keyword, page = 1 }) {
 
   let items;
   try {
-    items = evalList({ rule: rule.bookList, input, vars, ctx: { baseUrl: url } });
+    items = evalList({ rule: rule.bookList, input, vars, ctx: ruleCtx(url, source) });
   } catch (e) {
     return { ok: false, error: 'bookList 规则失败：' + e.message };
   }
@@ -335,7 +346,7 @@ async function search({ source, keyword, page = 1 }) {
     const pick = (r) => {
       if (!r) return '';
       try {
-        return str(evalRule({ rule: r, input: node, vars, ctx: { baseUrl: url } }));
+        return str(evalRule({ rule: r, input: node, vars, ctx: ruleCtx(url, source) }));
       } catch (_) {
         return '';
       }
@@ -374,7 +385,7 @@ async function bookInfo({ source, bookUrl }) {
         rule: rule.init,
         input: makeInput(''),
         vars: buildVars(state),
-        ctx: { baseUrl: bookUrl, result: bookUrl },
+        ctx: Object.assign({}, ruleCtx(bookUrl, source), { result: bookUrl }),
       });
     } catch (_) {/* 忽略 */}
   }
@@ -382,7 +393,7 @@ async function bookInfo({ source, bookUrl }) {
   let input;
   let finalUrl = bookUrl;
   try {
-    const resp = await httpGet(bookUrl, normalizeHeaders(source.header));
+    const resp = await httpGet(bookUrl, normalizeHeaders(source.header, source.jsLib));
     input = makeInputSafe(resp.text);
   } catch (e) {
     // 详情页拿不到也不算致命：目录可能仍能取
@@ -393,7 +404,7 @@ async function bookInfo({ source, bookUrl }) {
   const pick = (r, dflt = '') => {
     if (!r) return dflt;
     try {
-      const v = str(evalRule({ rule: r, input, vars, ctx: { baseUrl: bookUrl } }));
+      const v = str(evalRule({ rule: r, input, vars, ctx: ruleCtx(bookUrl, source) }));
       return v || dflt;
     } catch (_) {
       return dflt;
@@ -439,7 +450,7 @@ async function toc({ source, tocUrl }) {
   const url = absolute(opt.url, base);
   let text = '';
   try {
-    const resp = await httpGet(url, Object.assign({}, normalizeHeaders(source.header), opt.headers || {}));
+    const resp = await httpGet(url, Object.assign({}, normalizeHeaders(source.header, source.jsLib), opt.headers || {}));
     text = resp.text;
   } catch (e) {
     // 有些详情的 tocUrl 是 ajax 接口，失败时退回用 URL 本身当单章
@@ -455,7 +466,7 @@ async function toc({ source, tocUrl }) {
 
   let items;
   try {
-    items = evalList({ rule: rule.chapterList, input, vars, ctx: { baseUrl: url } });
+    items = evalList({ rule: rule.chapterList, input, vars, ctx: ruleCtx(url, source) });
   } catch (e) {
     return { ok: false, error: 'chapterList 规则失败：' + e.message };
   }
@@ -465,7 +476,7 @@ async function toc({ source, tocUrl }) {
     const pick = (r) => {
       if (!r) return '';
       try {
-        return str(evalRule({ rule: r, input: node, vars, ctx: { baseUrl: url } }));
+        return str(evalRule({ rule: r, input: node, vars, ctx: ruleCtx(url, source) }));
       } catch (_) {
         return '';
       }
@@ -495,7 +506,7 @@ async function content({ source, chapterUrl }) {
 
   let text = '';
   try {
-    const resp = await httpGet(url, Object.assign({}, normalizeHeaders(source.header), opt.headers || {}));
+    const resp = await httpGet(url, Object.assign({}, normalizeHeaders(source.header, source.jsLib), opt.headers || {}));
     text = resp.text;
   } catch (e) {
     return { ok: false, error: '正文请求失败：' + (e.message || e) };
@@ -503,7 +514,7 @@ async function content({ source, chapterUrl }) {
 
   const input = makeInputSafe(text);
   const vars = buildVars(state);
-  const ctx = { baseUrl: url, chapterUrl: url };
+  const ctx = Object.assign({}, ruleCtx(url, source), { chapterUrl: url });
 
   let raw = '';
   try {
@@ -621,7 +632,7 @@ async function login({ url, method = 'POST', body, contentType, headers }) {
  *   2. @js: 前缀，脚本生成上面的数组
  *   3. 单个链接（视为「全部」一个分类）
  */
-function parseExploreCategories(raw, state, base) {
+function parseExploreCategories(raw, state, base, jsLib) {
   let s = String(raw || '').trim();
   if (!s) return [];
   s = applyLegadoVars(s, state);
@@ -631,7 +642,7 @@ function parseExploreCategories(raw, state, base) {
         rule: s,
         input: makeInput(''),
         vars: buildVars(state),
-        ctx: { baseUrl: base },
+        ctx: ruleCtx(base, { jsLib }),
       });
       s = str(v);
     } catch (_) {
@@ -671,7 +682,7 @@ async function explore({ source, categoryUrl }) {
   if (!categoryUrl) {
     const raw = source.exploreUrl;
     if (!raw) return { ok: false, error: '该源没有配置 exploreUrl（发现地址）' };
-    const cats = parseExploreCategories(raw, state, base);
+    const cats = parseExploreCategories(raw, state, base, source.jsLib);
     if (cats.length === 0) {
       return { ok: false, error: 'exploreUrl 解析失败（需 JSON 分类数组或单个链接）' };
     }
@@ -679,9 +690,12 @@ async function explore({ source, categoryUrl }) {
   }
 
   // 2) 分类书籍列表
-  const rule = source.ruleExplore || {};
+  // ⚠️ Legado 常见形态：exploreUrl 配了分类，但 ruleExplore 没写（或只写一半）。
+  // 分类页与搜索页同构时选择器一致 —— 缺失字段回退复用 ruleSearch，
+  // 让"有 exploreUrl 但没配 ruleExplore"的源也能拉出板块内容（改代码兜底）。
+  const rule = Object.assign({}, source.ruleSearch || {}, source.ruleExplore || {});
   if (!rule.bookList) {
-    return { ok: false, error: '该源没有配置 ruleExplore.bookList' };
+    return { ok: false, error: '该源没有配置 ruleExplore.bookList（且无 ruleSearch 可回退）' };
   }
 
   // 分类 URL 可能带 {{page}} / {{key}} 变量（与 searchUrl 同规则）
@@ -703,7 +717,7 @@ async function explore({ source, categoryUrl }) {
   try {
     const resp = await httpGet(
       url,
-      Object.assign({}, normalizeHeaders(source.header), opt.headers || {}),
+      Object.assign({}, normalizeHeaders(source.header, source.jsLib), opt.headers || {}),
       opt.method || 'GET',
       opt.body,
     );
@@ -724,7 +738,7 @@ async function explore({ source, categoryUrl }) {
 
   let items;
   try {
-    items = evalList({ rule: rule.bookList, input, vars, ctx: { baseUrl: url } });
+    items = evalList({ rule: rule.bookList, input, vars, ctx: ruleCtx(url, source) });
   } catch (e) {
     return { ok: false, error: 'ruleExplore.bookList 规则失败：' + e.message };
   }
@@ -735,7 +749,7 @@ async function explore({ source, categoryUrl }) {
       if (!r) return '';
       let v = '';
       try {
-        v = str(evalRule({ rule: r, input: node, vars, ctx: { baseUrl: url } }));
+        v = str(evalRule({ rule: r, input: node, vars, ctx: ruleCtx(url, source) }));
       } catch (_) {
         return '';
       }

@@ -187,6 +187,13 @@ class _PlaylistListPageState extends State<PlaylistListPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // 🔴 「我的歌单」是 push 到 root Navigator 的 → **不在**
+      // `MusicRootView` 的 `Theme(MusicTheme.themeData())` 作用域里 ✗ →
+      // 不显式指定的话，页面底色会取**影视侧** AppTheme 的 `scaffoldBackgroundColor`
+      //（音乐与影视选不同调色板时一眼就能看出不对 ✗）。
+      // 包整棵 Theme 要动到 Scaffold 的右括号，风险大；这里按最小改动
+      // 先把**底色**拉到音乐主题 ✓（同一批次里其余页面用同样做法 ✓）。
+      backgroundColor: MusicTheme.background,
       appBar: AppBar(
         title: const Text('我的歌单'),
         actions: [

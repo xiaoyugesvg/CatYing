@@ -21,6 +21,10 @@ class JellyComicCard extends StatefulWidget {
   /// 是否显示漫画源角标（收藏页 true，搜索页默认 false）
   final bool showSourceBadge;
 
+  /// 紧凑模式（搜索/推荐卡片，对齐参考图：仅封面+名称，
+  /// 去掉收藏按钮、热度徽标与作者胶囊——名称位置不加收藏）
+  final bool compact;
+
   const JellyComicCard({
     super.key,
     required this.comic,
@@ -28,6 +32,7 @@ class JellyComicCard extends StatefulWidget {
     this.onLongPress,
     this.heroTag,
     this.showSourceBadge = false,
+    this.compact = false,
   });
 
   @override
@@ -222,7 +227,23 @@ class _JellyComicCardState extends State<JellyComicCard>
                 ),
               ),
               // 信息区
-              Padding(
+              if (widget.compact)
+                // 紧凑模式：仅名称（参考图样式，无收藏/热度/作者胶囊）
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                  child: Text(
+                    widget.comic.title,
+                    style: TextStyle(
+                      fontSize: AppTheme.fontFootnote,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                )
+              else
+                Padding(
                 padding: const EdgeInsets.all(12.0),
                 child: SizedBox(
                   height: 50, // 固定信息区高度，保证卡片高度一致

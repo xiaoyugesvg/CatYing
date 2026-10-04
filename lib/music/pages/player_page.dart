@@ -47,8 +47,19 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
   /// 拖动进度时的临时值（避免拖动中进度条跳回）
   double? _dragging;
 
+  /// 给**深底**用的强调色。
+  ///
+  /// 🔴 播放页底色**永远是深色**（每首歌的深色色调，亮度压到 0.20），
+  /// 但 `MusicTheme.tint` 会跟着**全局明暗**走 ✗ →
+  /// 全局用浅色主题时 `tint` 是个**暗色** ✗ → 用在深底上时
+  /// **歌词（`:1223` 的画笔）、进度条、红心几乎看不见** ✗。
+  /// 所以这里统一取"与白色混合后的浅色"✓（只用 `Colors.white`/`Color.lerp`，
+  /// 不依赖别的 API —— `MusicAccent.tintLight` 是**实例** getter，静态用不了 ✗）。
+  static Color get _darkTint =>
+      Color.lerp(Colors.white, MusicTheme.tint, 0.35) ?? MusicTheme.tint;
+
   /// 封面取色得到的背景色（拿不到就用强调色）
-  Color _tint = MusicTheme.tint;
+  Color _tint = _darkTint;
 
   final _lyricScroll = ScrollController();
 
@@ -161,7 +172,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
   Future<void> _extractTint() async {
     final url = player.currentSong?.coverUrl;
     if (url == null || url.isEmpty) {
-      if (mounted) setState(() => _tint = MusicTheme.tint);
+      if (mounted) setState(() => _tint = _darkTint);
       return;
     }
     try {
@@ -172,7 +183,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
       if (!mounted) return;
       if (scheme.primary != _tint) setState(() => _tint = scheme.primary);
     } catch (_) {
-      if (mounted) setState(() => _tint = MusicTheme.tint);
+      if (mounted) setState(() => _tint = _darkTint);
     }
   }
 
@@ -451,13 +462,61 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
               const SizedBox(height: 22),
               _qualityChip(),
               const SizedBox(height: 10),
-              Text(
-                '轻点封面查看歌词',
-                style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.35), fontSize: AppTheme.fontCaption),
-              ),
+              // 封面下方：自动显示当前歌词行（滚动更新）；无歌词时给提示。
+              SizedBox(height: 60, child: _coverLyricPreview()),
             ],
           ),
+        );
+      },
+    );
+  }
+
+  /// 封面下方的歌词预览 —— 显示当前正在唱的行（最多 2 行，超出省略）。
+  /// 点击封面任意处（整块 Expanded 的 GestureDetector）进入全屏歌词。
+  Widget _coverLyricPreview() {
+    return ValueListenableBuilder<List<LyricLine>>(
+      valueListenable: player.lyrics,
+      builder: (context, lines, __) {
+        if (lines.isEmpty) {
+          return Align(
+            alignment: Alignment.center,
+            child: Text(
+              '轻点封面查看全部歌词',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.35),
+                  fontSize: AppTheme.fontCaption),
+            ),
+          );
+        }
+        return ValueListenableBuilder<int>(
+          valueListenable: player.lyricIndex,
+          builder: (context, idx, ___) {
+            final li = (idx < 0 ? 0 : idx).clamp(0, lines.length - 1);
+            final line = lines[li];
+            final text = (line.translation != null && line.translation!.isNotEmpty)
+                ? '${line.text} · ${line.translation}'
+                : line.text;
+            return AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              child: Align(
+                key: ValueKey('lyric-preview-$li-$text'),
+                alignment: Alignment.center,
+                child: Text(
+                  text,
+                  textAlign: TextAlign.center,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.92),
+                    fontSize: AppTheme.fontBody,
+                    fontWeight: FontWeight.w600,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+            );
+          },
         );
       },
     );
@@ -525,10 +584,10 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                     child:
                         CoverImage(url: song.coverUrl, size: 132, circle: true),
                   ),
-                  // 中心轴孔
+                // 中心轴孔
                   Container(
-                    width: 12,
-                    height: 12,
+                    width: 8,
+                    height: 8,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: const Color(0xFF0A0A0C),
@@ -590,10 +649,10 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                     ]),
                   ),
                 ),
-                // 中心孔（CD 的标志性特征）
+                // 中心孔（CD 的标志性特征，缩小版）
                 Container(
-                  width: 54,
-                  height: 54,
+                  width: 28,
+                  height: 28,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: const Color(0xFF0A0A0C),
@@ -610,7 +669,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
     );
   }
 
-  // ── 封面形态 3：方形 —— 不旋转的圆角封面（最"干净"）──
+  // ── 封面形态 3：方形 —— 统一改成圆形旋转 CD 盘（原方形形态废弃）──
   Widget _squareCover(dynamic song) {
     return SizedBox(
       width: 280,
@@ -619,17 +678,29 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
         alignment: Alignment.center,
         children: [
           _glow(280, 0.35),
-          Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.5),
-                    blurRadius: 28,
-                    offset: const Offset(0, 10)),
+          RotationTransition(
+            turns: _spin,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                ClipOval(
+                  child:
+                      CoverImage(url: song.coverUrl, size: 244, circle: true),
+                ),
+                // 中心孔
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0xFF0A0A0C),
+                    border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.18),
+                        width: 1),
+                  ),
+                ),
               ],
             ),
-            child: CoverImage(url: song.coverUrl, size: 244, cornerRadius: 18),
           ),
         ],
       ),
@@ -675,7 +746,30 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                     offset: const Offset(0, 8)),
               ],
             ),
-            child: CoverImage(url: song.coverUrl, size: 168, cornerRadius: 14),
+            // 中间小卡也改成圆形旋转 CD 盘
+            child: RotationTransition(
+              turns: _spin,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  ClipOval(
+                    child: CoverImage(
+                        url: song.coverUrl, size: 168, circle: true),
+                  ),
+                  Container(
+                    width: 20,
+                    height: 20,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: const Color(0xFF0A0A0C),
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.18),
+                          width: 1),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),

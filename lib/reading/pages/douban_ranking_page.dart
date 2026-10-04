@@ -598,7 +598,7 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 56, color: JellyTheme.textSecondary),
+            Icon(icon, size: 48, color: JellyTheme.textSecondary),
             const SizedBox(height: 16),
             Text(title,
                 style: TextStyle(

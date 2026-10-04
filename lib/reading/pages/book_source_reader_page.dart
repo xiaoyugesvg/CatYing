@@ -1,10 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:screen_brightness/screen_brightness.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/book_source.dart';
@@ -14,6 +18,7 @@ import '../services/book_paginator.dart';
 import '../services/book_source_service.dart';
 import '../services/reader_notes_service.dart';
 import '../services/tts_service.dart';
+import '../services/ai_service.dart';
 import '../widgets/book_page_curl.dart';
 import '../widgets/color_picker_dialog.dart';
 import '../widgets/pomodoro_button.dart';
@@ -77,6 +82,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   int _bgIndex = AppBrightness.isLight.value ? 0 : 5;
   /// 自定义背景色（主题 tab「自定义」，参考图 IMG_8500；null = 用 _bgs）
   Color? _customBgColor;
+
+  /// 自定义背景图片路径（「选择图片」选图后复制到应用文档目录；
+  /// 非空时优先于颜色作为正文背景）
+  String? _customBgPath;
+  /// 日夜切换时记住的浅色背景索引（从夜间切回时还原）
+  int _dayBgIndex = 0;
   bool _showBar = true;
 
   // ── 排版（截图 IMG_8491~8499 全文可调）───────────────────────
@@ -306,8 +317,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         if (fs != null && fs >= 12 && fs <= 30) _fontSize = fs;
         if (lh != null && lh >= 1.2 && lh <= 3.0) _lineHeight = lh;
         if (bg != null && bg >= 0 && bg < _bgs.length) _bgIndex = bg;
+        final dayBg = p.getInt('reading.dayBgIndex');
+        if (dayBg != null && dayBg >= 0 && dayBg < _bgs.length) {
+          _dayBgIndex = dayBg;
+        }
         final bgC = p.getInt('reading.bgCustom');
         if (bgC != null) _customBgColor = Color(bgC);
+        final bgPath = p.getString('reading.bgCustomPath');
+        if (bgPath != null && File(bgPath).existsSync()) _customBgPath = bgPath;
         final uc = p.getInt('reading.underlineColor');
         if (uc != null) _underlineColor = Color(uc);
         final us = p.getInt('reading.underlineStyle');
@@ -358,10 +375,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       await p.setDouble('reading.fontSize', _fontSize);
       await p.setDouble('reading.lineHeight', _lineHeight);
       await p.setInt('reading.bgIndex', _bgIndex);
+      await p.setInt('reading.dayBgIndex', _dayBgIndex);
       if (_customBgColor != null) {
         await p.setInt('reading.bgCustom', _customBgColor!.toARGB32());
       } else {
         await p.remove('reading.bgCustom');
+      }
+      if (_customBgPath != null) {
+        await p.setString('reading.bgCustomPath', _customBgPath!);
+      } else {
+        await p.remove('reading.bgCustomPath');
       }
       if (_underlineColor != null) {
         await p.setInt('reading.underlineColor', _underlineColor!.toARGB32());
@@ -542,49 +565,66 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   @override
   Widget build(BuildContext context) {
     final bg = _bgs[_bgIndex];
+    final useImgBg =
+        _customBgPath != null && File(_customBgPath!).existsSync();
     return Scaffold(
-      backgroundColor: bg[0],
-      body: GestureDetector(
-        // 点屏幕中间切换菜单栏；点左/右 1/3 翻章
-        onTapUp: (d) {
-          final w = MediaQuery.of(context).size.width;
-          final x = d.globalPosition.dx;
-          if (_showBar) {
-            setState(() => _showBar = false);
-            return;
-          }
-          if (x < w * 0.3) {
-            _go(-1);
-          } else if (x > w * 0.7) {
-            _go(1);
-          } else {
-            setState(() => _showBar = true);
-          }
-        },
-        child: SafeArea(
-          child: Stack(
-            children: [
-              Column(
+      backgroundColor: useImgBg ? Colors.transparent : bg[0],
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 背景层：自定义图片优先（cover 铺满），否则内置/自定义色
+          if (useImgBg)
+            Image.file(
+              File(_customBgPath!),
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              errorBuilder: (_, __, ___) => Container(color: bg[0]),
+            )
+          else
+            Container(color: bg[0]),
+          GestureDetector(
+            // 点屏幕中间切换菜单栏；点左/右 1/3 翻章
+            onTapUp: (d) {
+              final w = MediaQuery.of(context).size.width;
+              final x = d.globalPosition.dx;
+              if (_showBar) {
+                setState(() => _showBar = false);
+                return;
+              }
+              if (x < w * 0.3) {
+                _go(-1);
+              } else if (x > w * 0.7) {
+                _go(1);
+              } else {
+                setState(() => _showBar = true);
+              }
+            },
+            child: SafeArea(
+              child: Stack(
                 children: [
-                  Expanded(child: _contentArea(bg[1])),
-                  _ttsMiniBar(bg[1]),
-                  _bottomNav(bg[1]),
+                  Column(
+                    children: [
+                      Expanded(child: _contentArea(bg[1])),
+                      _ttsMiniBar(bg[1]),
+                      _bottomNav(bg[1]),
+                    ],
+                  ),
+                  if (_showBar) _topBar(bg[1]),
+                  if (_showBar) _settingsPanel(bg[1]),
+                  // 番茄钟浮层（复用 2.0.3 原有的 PomodoroButton）
+                  if (_showPomodoro)
+                    Positioned(
+                      right: 12,
+                      bottom: 180,
+                      child: const PomodoroButton(),
+                    ),
+                  // 阅读悬浮球（截图里右下角那个球：单击翻页/双击菜单/拖动移动）
+                  if (!_showBar) _readingBall(bg[1]),
                 ],
               ),
-              if (_showBar) _topBar(bg[1]),
-              if (_showBar) _settingsPanel(bg[1]),
-              // 番茄钟浮层（复用 2.0.3 原有的 PomodoroButton）
-              if (_showPomodoro)
-                Positioned(
-                  right: 12,
-                  bottom: 180,
-                  child: const PomodoroButton(),
-                ),
-              // 阅读悬浮球（截图里右下角那个球：单击翻页/双击菜单/拖动移动）
-              if (!_showBar) _readingBall(bg[1]),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -1298,6 +1338,98 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     }
   }
 
+  /// 顶栏日夜切换：浅色背景 ↔ 夜间背景（记住切走前的浅色索引）
+  void _toggleDayNight() {
+    setState(() {
+      if (_customBgColor != null || _customBgPath != null) {
+        // 自定义背景（色/图）时：清除并进入夜间，浅色索引记回默认白
+        _customBgColor = null;
+        _customBgPath = null;
+        _dayBgIndex = 0;
+        _bgIndex = 5;
+      } else if (_bgIndex == 5) {
+        _bgIndex = _dayBgIndex;
+      } else {
+        _dayBgIndex = _bgIndex;
+        _bgIndex = 5;
+      }
+      _savePrefs();
+    });
+  }
+
+  /// 顶栏亮度：底部滑杆调系统屏幕亮度（screen_brightness）
+  Future<void> _showBrightnessSheet() async {
+    final fg = _fg;
+    final bgTop = _bgTop;
+    double current = 1.0;
+    try {
+      current = await ScreenBrightness().current;
+    } catch (_) {}
+    if (current < 0.05) current = 1.0; // 系统"自动亮度"返回 0 时按 1 展示
+    final v = current.clamp(0.1, 1.0);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheet) {
+          var value = v;
+          return Container(
+            decoration: BoxDecoration(
+              color: bgTop,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(18)),
+            ),
+            padding: EdgeInsets.only(
+                top: 14,
+                bottom: MediaQuery.of(context).padding.bottom + 14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.brightness_6_rounded, size: 18, color: fg),
+                    const SizedBox(width: 8),
+                    Text('亮度',
+                        style: TextStyle(
+                            fontSize: AppTheme.fontSubhead,
+                            fontWeight: FontWeight.w700,
+                            color: fg)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Row(
+                    children: [
+                      Icon(Icons.brightness_low_rounded,
+                          size: 18, color: fg.withValues(alpha: 0.5)),
+                      Expanded(
+                        child: Slider(
+                          value: value,
+                          min: 0.1,
+                          max: 1.0,
+                          activeColor: fg,
+                          inactiveColor: fg.withValues(alpha: 0.2),
+                          onChanged: (nv) {
+                            setSheet(() => value = nv);
+                            ScreenBrightness().setScreenBrightness(nv);
+                          },
+                        ),
+                      ),
+                      Icon(Icons.brightness_high_rounded,
+                          size: 18, color: fg.withValues(alpha: 0.5)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
 
   Widget _topBar(Color fg) {
     return Positioned(
@@ -1338,15 +1470,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 ],
               ),
             ),
-            // 三个图标：搜索 / 刷新 / 书签（截图 IMG_8110）
+            // 功能图标：搜索 / 刷新 / 书签 / 朗读 / 亮度 / 日夜 / 编辑
             IconButton(
               tooltip: '搜索全书',
-              icon: Icon(Icons.search_rounded, size: 22, color: fg),
+              icon: Icon(Icons.search_rounded, size: 20, color: fg),
               onPressed: _showBookSearch,
             ),
             IconButton(
               tooltip: '刷新本章',
-              icon: Icon(Icons.refresh_rounded, size: 22, color: fg),
+              icon: Icon(Icons.refresh_rounded, size: 20, color: fg),
               onPressed: () => _loadChapter(_index),
             ),
             IconButton(
@@ -1357,10 +1489,39 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 _bookmarks.isEmpty
                     ? Icons.bookmark_border_rounded
                     : Icons.bookmark_rounded,
-                size: 22,
+                size: 20,
                 color: fg,
               ),
               onPressed: () => _showAddBookmark(0),
+            ),
+            IconButton(
+              tooltip: '朗读',
+              icon: Icon(Icons.record_voice_over_outlined,
+                  size: 20, color: fg),
+              onPressed: () => _showTtsSheet(),
+            ),
+            IconButton(
+              tooltip: '亮度',
+              icon: Icon(Icons.brightness_6_rounded, size: 20, color: fg),
+              onPressed: _showBrightnessSheet,
+            ),
+            IconButton(
+              tooltip: _bgIndex == 5 && _customBgColor == null
+                  ? '切换白天'
+                  : '切换夜间',
+              icon: Icon(
+                _bgIndex == 5 && _customBgColor == null
+                    ? Icons.light_mode_outlined
+                    : Icons.dark_mode_outlined,
+                size: 20,
+                color: fg,
+              ),
+              onPressed: _toggleDayNight,
+            ),
+            IconButton(
+              tooltip: '编辑（划线与笔记）',
+              icon: Icon(Icons.edit_outlined, size: 20, color: fg),
+              onPressed: () => _showToc(initialTab: 2),
             ),
           ],
         ),
@@ -2434,10 +2595,46 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     );
   }
 
-  /// 「选择图片」：当前项目未集成 image_picker，走系统文件选择无法跨平台
-  /// 统一；这里给出提示（参考图 8502 仅"内置"有面板，选择图片保持占位）。
+  /// 「选择图片」：相册选图 → 复制到应用文档目录 → 设为正文背景
+  ///（优先于自定义颜色与内置背景，_savePrefs 持久化路径）
   Future<void> _showImageBgPicker(void Function(VoidCallback) upd) async {
-    _toast('选择图片需要系统图库授权，暂时未接入；先用「内置」或「自定义背景」');
+    final XFile? picked;
+    try {
+      picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 4096,
+        maxHeight: 4096,
+        imageQuality: 90,
+      );
+    } catch (e) {
+      _toast('打开相册失败：$e');
+      return;
+    }
+    if (picked == null) return; // 用户取消
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      final dir = Directory('${docs.path}/reader_bg');
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+      final dest =
+          '${dir.path}/bg_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      await File(picked.path).copy(dest);
+      // 删掉旧的自定义背景图（避免文档目录堆积）
+      final old = _customBgPath;
+      upd(() {
+        _customBgPath = dest;
+        _customBgColor = null; // 图片背景优先于颜色
+      });
+      if (old != null && old != dest) {
+        try {
+          final f = File(old);
+          if (f.existsSync()) f.deleteSync();
+        } catch (_) {}
+      }
+      _savePrefs();
+      _toast('已应用自定义背景图片');
+    } catch (e) {
+      _toast('保存图片失败：$e');
+    }
   }
 
   /// 「文字」tab：字号/字重/段间距/字间距/行距/字体/标题对齐/隐藏重复标题
@@ -4005,11 +4202,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     );
   }
 
-  /// AI 面板。
-  ///
-  /// ⚠️ **没有 AI 服务就做不了摘要**。这里不假装有：
-  /// 把可用的动作列出来，点「总结本章」时如果没配 API 就如实说。
-  /// 若要真接，需要：① 一个 API Key 的输入界面 ② 一个 chat 接口调用。
+  /// AI 面板（真实可用）：四个动作走 OpenAI 兼容 chat 接口，
+  /// 未配置时引导填写自己的接口地址 / API Key / 模型名。
   void _showAiSummary() {
     showModalBottomSheet<void>(
       context: context,
@@ -4035,6 +4229,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                             color: _fg)),
                     const Spacer(),
                     IconButton(
+                      tooltip: 'AI 接口配置',
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _showAiConfig();
+                      },
+                      icon: Icon(Icons.settings_outlined,
+                          size: 20, color: _fgMuted),
+                    ),
+                    IconButton(
                       onPressed: () => Navigator.pop(ctx),
                       icon: Icon(Icons.close_rounded,
                           size: 20, color: _fgMuted),
@@ -4050,16 +4253,337 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       size: 20, color: _fgMuted),
                   onTap: () {
                     Navigator.pop(ctx);
-                    _toast('AI 功能需要 API Key —— 还没做配置界面');
+                    _runAiAction(a);
                   },
                 ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
                 child: Text(
-                  'AI 需要接入一个对话接口（自己的 API Key）。'
-                  '这一步还没做 —— 所以这里点了不会有结果，不假装能总结。',
+                  'AI 调用你自己的对话接口（OpenAI 兼容）。未配置时点动作会先弹配置：'
+                  '接口地址 / API Key / 模型名（支持 DeepSeek、通义、智谱、本地 vLLM 等）。',
                   style: TextStyle(
                       fontSize: AppTheme.fontFootnote, height: 1.7, color: _fgMuted),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// AI 接口配置 sheet：接口地址 / API Key / 模型名
+  Future<void> _showAiConfig() async {
+    final ai = AiService();
+    final baseCtrl = TextEditingController(text: ai.baseUrl);
+    final keyCtrl = TextEditingController(text: ai.apiKey);
+    final modelCtrl = TextEditingController(text: ai.model);
+    final fg = _fg;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: _bgTop,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        ),
+        padding:
+            EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom + 10),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('AI 接口配置',
+                    style: TextStyle(
+                        fontSize: AppTheme.fontTitle3,
+                        fontWeight: FontWeight.w700,
+                        color: fg)),
+                const SizedBox(height: 4),
+                Text(
+                  'OpenAI 兼容对话接口，Key 只存在本机。默认填 DeepSeek，'
+                  '可改成通义/智谱/Moonshot/本地 vLLM 的地址。',
+                  style: TextStyle(fontSize: AppTheme.fontFootnote, height: 1.6, color: _fgMuted),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: baseCtrl,
+                  style: TextStyle(color: fg),
+                  decoration: InputDecoration(
+                    labelText: '接口地址',
+                    hintText: 'https://api.deepseek.com',
+                    labelStyle: TextStyle(color: _fgMuted),
+                    hintStyle: TextStyle(color: _fgMuted),
+                    isDense: true,
+                    border: UnderlineInputBorder(
+                        borderSide: BorderSide(color: _fgMuted.withValues(alpha: 0.3))),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: keyCtrl,
+                  style: TextStyle(color: fg),
+                  obscureText: true,
+                  decoration: InputDecoration(
+                    labelText: 'API Key',
+                    hintText: 'sk-…',
+                    labelStyle: TextStyle(color: _fgMuted),
+                    hintStyle: TextStyle(color: _fgMuted),
+                    isDense: true,
+                    border: UnderlineInputBorder(
+                        borderSide: BorderSide(color: _fgMuted.withValues(alpha: 0.3))),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: modelCtrl,
+                  style: TextStyle(color: fg),
+                  decoration: InputDecoration(
+                    labelText: '模型名',
+                    hintText: 'deepseek-chat',
+                    labelStyle: TextStyle(color: _fgMuted),
+                    hintStyle: TextStyle(color: _fgMuted),
+                    isDense: true,
+                    border: UnderlineInputBorder(
+                        borderSide: BorderSide(color: _fgMuted.withValues(alpha: 0.3))),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    TextButton(
+                      onPressed: () async {
+                        if (keyCtrl.text.trim().isEmpty) {
+                          _toast('先填 API Key 才能测试');
+                          return;
+                        }
+                        _toast('正在测试连接…');
+                        try {
+                          final savedBase = baseCtrl.text.trim();
+                          final savedKey = keyCtrl.text.trim();
+                          final savedModel =
+                              modelCtrl.text.trim().isEmpty ? 'deepseek-chat' : modelCtrl.text.trim();
+                          final tmp = AiService()
+                            ..baseUrl = savedBase.isEmpty
+                                ? 'https://api.deepseek.com'
+                                : savedBase
+                            ..apiKey = savedKey
+                            ..model = savedModel;
+                          final r = await tmp.chat(
+                            system: '你是连接测试助手。',
+                            user: '请只回复两个字：正常',
+                            timeout: const Duration(seconds: 30),
+                          );
+                          _toast('连接成功：$r');
+                        } catch (e) {
+                          _toast('连接失败：$e');
+                        }
+                      },
+                      child: Text('测试连接',
+                          style: TextStyle(fontSize: 13, color: JellyTheme.primary)),
+                    ),
+                    const Spacer(),
+                    FilledButton(
+                      onPressed: () async {
+                        await ai.saveConfig(
+                          baseUrl: baseCtrl.text,
+                          apiKey: keyCtrl.text,
+                          model: modelCtrl.text,
+                        );
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        _toast('AI 配置已保存');
+                      },
+                      child: const Text('保存并返回'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 执行 AI 动作：未配置先弹配置；已配置直接调用
+  Future<void> _runAiAction(String action) async {
+    final ai = AiService();
+    if (!ai.isConfigured) {
+      _toast('先配置 AI 接口');
+      _showAiConfig();
+      return;
+    }
+    if (action == '问答') {
+      _askAiQuestion();
+      return;
+    }
+    final chapterText = _paragraphs.join('\n');
+    final body =
+        chapterText.length > 8000 ? chapterText.substring(0, 8000) : chapterText;
+    if (body.trim().isEmpty) {
+      _toast('本章没有可用的正文内容');
+      return;
+    }
+    final String system;
+    final String user;
+    switch (action) {
+      case '总结本章':
+        system = '你是小说阅读助手。用简体中文给出本章的简洁总结'
+            '（人物/事件/伏笔要点，200 字以内）。';
+        user = '《${widget.bookName}》本章内容：\n$body';
+      case '解释这段':
+        system = '你是小说阅读助手，用简体中文通俗解释文中的关键剧情'
+            '与难懂之处，300 字以内。';
+        user = '《${widget.bookName}》本章内容：\n$body';
+      case '生成书评':
+        system = '你是资深书评人，用简体中文写一段 150 字左右的短书评'
+            '（风格/亮点/阅读感受）。';
+        user = '《${widget.bookName}》本章内容：\n$body';
+      default:
+        return;
+    }
+    _showAiLoading(action, () => ai.chat(system: system, user: user));
+  }
+
+  /// 问答：先弹输入框，再用本章做上下文回答
+  Future<void> _askAiQuestion() async {
+    final ai = AiService();
+    final ctrl = TextEditingController();
+    final question = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _bgTop,
+        title: Text('问 AI', style: TextStyle(color: _fg)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: TextStyle(color: _fg),
+          decoration: const InputDecoration(hintText: '输入你的问题'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('取消', style: TextStyle(color: _fgMuted)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('提问'),
+          ),
+        ],
+      ),
+    );
+    if (question == null || question.isEmpty) return;
+    final chapterText = _paragraphs.join('\n');
+    final body =
+        chapterText.length > 8000 ? chapterText.substring(0, 8000) : chapterText;
+    _showAiLoading(
+      '问答',
+      () => ai.chat(
+        system: '你是小说阅读助手，基于给出的本章内容用简体中文回答读者问题。'
+            '内容无关时如实说明。',
+        user: '《${widget.bookName}》本章内容：\n$body\n\n读者问题：$question',
+      ),
+    );
+  }
+
+  /// 调 AI 并展示结果（loading → 结果 sheet / 错误 toast）
+  Future<void> _showAiLoading(String title, Future<String> Function() task) async {
+    final fg = _fg;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          backgroundColor: _bgTop,
+          content: Row(
+            children: [
+              const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              ),
+              const SizedBox(width: 16),
+              Text('$title中…', style: TextStyle(color: fg)),
+            ],
+          ),
+        ),
+      ),
+    );
+    String? result;
+    String? error;
+    try {
+      result = await task();
+    } catch (e) {
+      error = '$e';
+    }
+    if (!mounted) return;
+    Navigator.pop(context); // 关 loading
+    if (error != null) {
+      _toast('AI 失败：$error');
+      return;
+    }
+    _showAiResult(title, result ?? '（无返回内容）');
+  }
+
+  /// AI 结果展示 sheet（可选中复制）
+  void _showAiResult(String title, String content) {
+    final fg = _fg;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        constraints:
+            BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.8),
+        decoration: BoxDecoration(
+          color: _bgTop,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 12, 6),
+                child: Row(
+                  children: [
+                    Text(title,
+                        style: TextStyle(
+                            fontSize: AppTheme.fontTitle3,
+                            fontWeight: FontWeight.w700,
+                            color: fg)),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: '复制结果',
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: content));
+                        _toast('已复制');
+                      },
+                      icon: Icon(Icons.copy_rounded, size: 20, color: _fgMuted),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: Icon(Icons.close_rounded,
+                          size: 20, color: _fgMuted),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1, color: fg.withValues(alpha: 0.1)),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                  child: SelectableText(
+                    content,
+                    style: TextStyle(
+                        fontSize: 14, height: 1.7, color: fg),
+                  ),
                 ),
               ),
             ],

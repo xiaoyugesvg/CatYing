@@ -205,7 +205,16 @@ class BookSourceStore {
   static const _kBundledLegadoPath = 'assets/config/legado_sources.json';
   // 内置源一次性初始化标记：首次启动补入内置源后置位，
   // 之后用户增删/改名/改规则均以用户状态为准，不再被内置重置。
+  // （新版本已由 _kBundledFp 指纹机制接管；保留常量兼容旧数据。）
   static const _kBundledInitDone = 'book_sources_bundled_init_done';
+  // 内置源资产指纹：assets 内置文件内容变化（内置包更新/首次安装）时
+  // 重新补入（同 id 跳过、不清已有）；指纹不变则永不重复补入，
+  // 用户增删改不受影响。与漫画源 SourceConfigStore 同一套语义。
+  static const _kBundledFp = 'book_sources_bundled_fp';
+  // 旧内置残留清理标记：一次性。删除本地 prefs 里不在「当前内置」
+  // （legado 224 + book_sources 空）中的旧源（旧版 763 精选包残留），
+  // 仓库回到仅当前内置（224）。之后用户手动导入的新源不受影响。
+  static const _kLegacyPruneDone = 'book_sources_legacy_prune_done';
 
   final List<BookSource> _items = [];
   List<BookSource> get all => List.unmodifiable(_items);
@@ -226,6 +235,8 @@ class BookSourceStore {
       }
       // 出厂内置明文书源：装上即有（用户已导入同 id 则跳过，不清已有）
       await _loadBundled();
+      // 旧内置残留清理：删除不在当前内置中的旧源（仅一次）。
+      await _pruneLegacyBundled();
     } catch (e) {
       debugPrint('[BookSource] 加载失败: $e');
     }
@@ -233,13 +244,21 @@ class BookSourceStore {
   }
 
   /// 加载 assets 内置书源：明文 config 源（book_sources.json）
-  /// + Legado 精选源包（legado_sources.json，10 源）。
+  /// + Legado 精选源包（legado_sources.json）。
   /// 仅在**首次**启动补入（_kBundledInitDone 标记）；之后用户增删/
   /// 改名/改规则均以用户状态为准，内置源不再重复补入或重置。
+  ///
+  /// V2 指纹机制：以 assets 内容指纹为准 —— 指纹变化（内置包更新/
+  /// 全新安装）才补入（同 id 跳过、不清已有）；指纹不变永不重复补入。
   Future<void> _loadBundled() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (prefs.getBool(_kBundledInitDone) ?? false) return;
+      // 两个内置文件的合并指纹：任一文件内容变化都会触发补入。
+      final textA = await rootBundle.loadString(_kBundledSourcesPath);
+      final textB = await rootBundle.loadString(_kBundledLegadoPath);
+      final fp = '${textA.length + textB.length}:'
+          '${textA.hashCode ^ textB.hashCode}';
+      if ((prefs.getString(_kBundledFp) ?? '') == fp) return;
       var added = 0;
       added += await _loadBundledFile(_kBundledSourcesPath);
       added += await _loadBundledFile(_kBundledLegadoPath);
@@ -247,9 +266,55 @@ class BookSourceStore {
         debugPrint('[BookSource] 内置书源补入 $added 个');
         await _persist();
       }
-      await prefs.setBool(_kBundledInitDone, true);
+      await prefs.setString(_kBundledFp, fp);
     } catch (e) {
       debugPrint('[BookSource] 内置书源初始化失败: $e');
+    }
+  }
+
+  /// 旧内置残留清理：删除本地 prefs 里不在「当前内置」id 集合中的旧源
+  /// （旧版 763 精选包残留），仓库回到仅当前内置（224）。
+  /// 用 SharedPreferences 标记保证仅执行一次（失败不置位，下次重试）；
+  /// 之后用户手动导入的新源不受影响。
+  Future<void> _pruneLegacyBundled() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(_kLegacyPruneDone) ?? false) return;
+      final builtin = <String>{};
+      for (final path in [_kBundledSourcesPath, _kBundledLegadoPath]) {
+        final text = await rootBundle.loadString(path);
+        final decoded = jsonDecode(text);
+        void take(dynamic e) {
+          if (e is! Map) return;
+          final id = (e['bookSourceUrl'] as String?) ?? '';
+          if (id.isNotEmpty) builtin.add(id);
+        }
+
+        if (decoded is List) {
+          for (final e in decoded) {
+            take(e);
+          }
+        } else if (decoded is Map) {
+          final m = decoded.cast<String, dynamic>();
+          if (m['sources'] is List) {
+            for (final e in (m['sources'] as List)) {
+              take(e);
+            }
+          } else {
+            take(m);
+          }
+        }
+      }
+      final before = _items.length;
+      _items.removeWhere((s) => !builtin.contains(s.id));
+      if (_items.length != before) {
+        debugPrint('[BookSource] 清理旧内置书源: $before -> ${_items.length}');
+        await _persist();
+      }
+      await prefs.setBool(_kLegacyPruneDone, true);
+      debugPrint('[BookSource] 旧内置书源清理完成');
+    } catch (e) {
+      debugPrint('[BookSource] 旧内置书源清理失败: $e');
     }
   }
 

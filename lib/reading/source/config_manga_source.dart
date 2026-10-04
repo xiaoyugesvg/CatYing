@@ -153,6 +153,133 @@ class ConfigMangaSource extends MangaSource {
     return utf8.decode(bytes, allowMalformed: true);
   }
 
+  /// ── JSON 章节 API 直连模式（声明式章节接口，如热辣漫画 /api/v3/comic/.../chapters）──
+  /// 详情 URL 经 chapterUrlIdRegex 提取捕获组 -> 替换 chapterApiUrl 模板占位
+  /// （{offset} 页码，其余 {xxx} 按出现顺序用捕获组）-> Dio GET/POST ->
+  /// chapterListField 点路径取列表 -> chapterJsonFields 映射 name/url ->
+  /// 模板含 {offset} 时按 chapterPageSize 翻页，直到结果数 < pageSize 或无新增。
+  Future<List<Map<String, String>>> _fetchChaptersFromJsonApi(
+    String detailUrl,
+  ) async {
+    final captures = _captureGroups(detailUrl, site.chapterUrlIdRegex);
+    var offset = 0;
+    final out = <Map<String, String>>[];
+    var prevCount = -1;
+    while (true) {
+      var url = site.chapterApiUrl.replaceAll('{offset}', offset.toString());
+      url = _fillRemaining(url, captures);
+      url = _resolveUrl(url, site.url);
+      final text = await _fetchJsonText(url);
+      if (text == null || text.isEmpty) break;
+      Object? obj;
+      try {
+        obj = jsonDecode(text);
+      } catch (_) {
+        _log('章节 JSON 解析失败: $url');
+        break;
+      }
+      final list = _diveJson(obj, site.chapterListField);
+      if (list is! List || list.isEmpty) break;
+      for (final item in list) {
+        if (item is! Map) continue;
+        final name = _mapFieldValue(item, site.chapterJsonFields?['name'] ?? '');
+        var u = _mapFieldValue(item, site.chapterJsonFields?['url'] ?? '');
+        if (u.isNotEmpty) u = _fillRemaining(u, captures);
+        if (u.isEmpty) continue;
+        out.add({'name': name, 'url': u});
+      }
+      if (!site.chapterApiUrl.contains('{offset}')) break;
+      if (out.length == prevCount) break; // 无新增，防死循环
+      prevCount = out.length;
+      if (site.chapterPageSize > 0 && list.length < site.chapterPageSize) break;
+      offset += site.chapterPageSize > 0 ? site.chapterPageSize : 1;
+      if (offset > 200000) break; // 安全上限
+    }
+    return out;
+  }
+
+  /// 从输入文本按正则提取捕获组（组1..N）。
+  List<String> _captureGroups(String input, String regex) {
+    if (regex.isEmpty) return const [];
+    final m = RegExp(regex).firstMatch(input);
+    if (m == null) return const [];
+    return [for (var i = 1; i <= m.groupCount; i++) m.group(i) ?? ''];
+  }
+
+  /// 把模板中 {xxx} 占位（{offset}/{page} 保留）按出现顺序替换为捕获组。
+  String _fillRemaining(String template, List<String> captures) {
+    if (captures.isEmpty) return template;
+    var idx = 0;
+    return template.replaceAllMapped(RegExp(r'\{([^}]+)\}'), (m) {
+      final name = m.group(1)!;
+      if (name == 'offset' || name == 'page') return m.group(0)!;
+      if (idx < captures.length) return captures[idx++];
+      return m.group(0)!;
+    });
+  }
+
+  /// 字段映射取值：字段名 / 点路径 / Field[0] / {Field} 模板。
+  /// 模板中条目里真实存在的字段先替换（未命中保留占位，交给捕获组）。
+  String _mapFieldValue(Map<dynamic, dynamic> item, String spec) {
+    if (spec.isEmpty) return '';
+    if (spec.contains('{')) {
+      return spec.replaceAllMapped(RegExp(r'\{([^}]+)\}'), (m) {
+        final v = _diveJson(item, m.group(1)!);
+        if (v is String || v is num) return v.toString();
+        return m.group(0)!;
+      });
+    }
+    final v = _diveJson(item, spec);
+    if (v is String) return v;
+    if (v is num) return v.toString();
+    return '';
+  }
+
+  /// 点路径下钻（支持 arr[0] 段；空路径返回 root 本身）。
+  Object? _diveJson(Object? root, String path) {
+    if (path.isEmpty) return root;
+    var cur = root;
+    for (final seg in path.split('.')) {
+      final m = RegExp(r'^(.+)\[(\d+)\]$').firstMatch(seg);
+      if (m != null) {
+        final key = m.group(1)!;
+        final idx = int.parse(m.group(2)!);
+        if (key.isNotEmpty && cur is Map) cur = cur[key];
+        if (cur is List) {
+          cur = (idx >= 0 && idx < cur.length) ? cur[idx] : null;
+        } else {
+          cur = null;
+        }
+      } else if (cur is Map) {
+        cur = cur[seg];
+      } else {
+        cur = null;
+      }
+      if (cur == null) return null;
+    }
+    return cur;
+  }
+
+  /// 请求 JSON 文本（GET 默认；chapterApiMethod=POST 时 POST）。
+  Future<String?> _fetchJsonText(String url) async {
+    try {
+      final opts = Options(
+        headers: {...imageHeaders, 'Referer': site.url},
+        responseType: ResponseType.bytes,
+      );
+      final method = site.chapterApiMethod.toUpperCase();
+      final resp = method == 'POST'
+          ? await _dio.post<List<int>>(url, options: opts)
+          : await _dio.get<List<int>>(url, options: opts);
+      final data = resp.data;
+      if (data == null || data.isEmpty) return null;
+      return utf8.decode(data, allowMalformed: true);
+    } catch (e) {
+      _log('章节 JSON 请求失败: $url -> $e');
+      return null;
+    }
+  }
+
   /// 封面终处理：
   ///   1) cover_url_pattern 非空（如摸摸）：渲染 DOM 里封面是 blob/_ipx 地址
   ///      不可直连，从漫画 URL 提取 comicId 按模板生成直连封面 URL；
@@ -500,6 +627,27 @@ class ConfigMangaSource extends MangaSource {
           ),
         );
       }
+    } else if (site.chapterApiUrl.isNotEmpty) {
+      // JSON 章节 API 直连模式（热辣漫画等声明式章节接口）：
+      // 详情 URL 经 chapterUrlIdRegex 提取捕获组 -> 模板拼 URL -> Dio GET/POST
+      // -> chapterListField 点路径取列表 -> chapterJsonFields 映射 name/url -> 分页。
+      final apiList = await _fetchChaptersFromJsonApi(detailUrl);
+      var order = 0;
+      for (final c in apiList) {
+        final chapterUrl = _resolveUrl(c['url'] ?? '', site.url);
+        if (chapterUrl.isEmpty || !seen.add(chapterUrl)) continue;
+        chapters.add(
+          CChapter(
+            id: chapterUrl,
+            sourceId: id,
+            mangaId: manga.id,
+            name: c['name'] ?? '',
+            url: chapterUrl,
+            order: order++,
+          ),
+        );
+      }
+      _log('章节 JSON API: $detailUrl -> ${chapters.length} 章');
     } else {
       var order = _parseChapters(doc, detailUrl, manga, chapters, seen, 0);
       if (site.chapterPageCountDom.isNotEmpty &&

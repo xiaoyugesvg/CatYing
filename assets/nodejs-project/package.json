@@ -4,7 +4,6 @@
     "description": "CatVodOpen nodejs config api server demo.",
     "type": "module",
     "scripts": {
-        "dev": "cross-env DEV_HTTP_PORT=3006 nodemon --config nodemon.json --inspect src/dev.js",
         "_build": "rimraf dist && node esbuild.js",
         "build": "cross-env NODE_ENV=production npm run _build",
         "build:dbg": "cross-env NODE_ENV=development npm run _build"

@@ -115,10 +115,10 @@ class _JellyPullCordState extends State<JellyPullCord> {
   }
 }
 
-// 尺寸常量（理由见类注释：按截图 3x 量得后换算成逻辑像素）
-const double _cordHeight = 50;
+// 尺寸常量（用户多次要求"拉绳图标再小点"：环 16→12、绳高 50→40）
+const double _cordHeight = 40;
 const double _lineWidth = 2;
-const double _ringSize = 16;
+const double _ringSize = 12;
 const double _ringStroke = 1.5;
 
 /// 组件宽度 = 绳粗与环外径的较大者（环比线粗，所以实际就是环宽）。

@@ -1142,16 +1142,6 @@ class _BookshelfPageState extends State<BookshelfPage>
                                   },
                                 ),
                                 const SizedBox(width: 8),
-                                // 排序（短横线 + 上下箭头的图标，与截图一致）
-                                // 长按 = 打开「管理书架」（排序 + 显隐 + 批量删除）
-                                _buildCircleIcon(
-                                  isDark: isDark,
-                                  icon: Icons.swap_vert_rounded,
-                                  tooltip: '排序方式（长按管理书架）',
-                                  onTap: _showSortSheet,
-                                  onLongPress: _showManageShelves,
-                                ),
-                                const SizedBox(width: 8),
                                 // 搜索：与首页右上角同款小胶囊（收起=圆钮，
                                 // 点击展开、图标在左、提示「搜索书架」），
                                 // 提交直接进搜索浮层出结果
@@ -1159,7 +1149,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                                   child: JellyExpandableSearch(
                                     controller: _searchController,
                                     hintText: '搜索书架',
-                                    maxWidth: 240,
+                                    maxWidth: 200,
                                     onSubmitted: (v) => _openSearch(v),
                                     onChanged: (v) => setState(() {}),
                                   ),
@@ -1730,24 +1720,6 @@ class _BookshelfPageState extends State<BookshelfPage>
   /// 原来这个方法在 **4 个页面里各写了一份**（书架/图书搜索/收藏/我的），
   /// 实现逐字雷同、改一处不影响其它三处。现在留这个薄委托，
   /// 只为让调用点（这一排 2 个按钮）不用改。
-  Widget _buildCircleIcon({
-    required bool isDark,
-    required IconData icon,
-    required String tooltip,
-    required VoidCallback onTap,
-    VoidCallback? onLongPress,
-    double size = 36,
-  }) {
-    return AppIconButton(
-      icon: icon,
-      tooltip: tooltip,
-      onTap: onTap,
-      onLongPress: onLongPress,
-      isDark: isDark,
-      size: size,
-    );
-  }
-
   /// 深色实心圆按钮（闪电：导入/导出）
   ///
   /// ⚠️ 原来是橙色 `0xFFF19841` —— 与水墨书香（黑白灰）不符。
@@ -2786,39 +2758,43 @@ class _BookshelfPageState extends State<BookshelfPage>
               );
 
               // 固定按钮（管理书架 / 排序方式）：图标固定，不随标签滑动
+              // 对齐参考样式：左侧**列表图标 + 上下箭头**两个小图标（无圆底）
+              final iconColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
               final fixedButtons = Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _buildCircleIcon(
-                    isDark: isDark,
-                    icon: Icons.library_books_rounded,
+                  IconButton(
                     tooltip: '管理书架',
-                    onTap: _showManageShelves,
+                    icon: Icon(Icons.view_list_rounded, size: 20, color: iconColor),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    onPressed: _showManageShelves,
                   ),
-                  const SizedBox(width: 6),
-                  _buildCircleIcon(
-                    isDark: isDark,
-                    icon: Icons.swap_vert_rounded,
+                  IconButton(
                     tooltip: '排序方式',
-                    onTap: _showSortSheet,
+                    icon: Icon(Icons.swap_vert_rounded, size: 20, color: iconColor),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    onPressed: _showSortSheet,
                   ),
                 ],
               );
 
-              // 固定按钮在**右侧**（对齐参考样式：标签栏右侧管理/排序图标），
+              // 固定按钮在**左侧**（用户多次点名"管理/排序移到左边"，
+              // 对齐参考样式：标签行左侧列表图标+排序箭头，右侧下拉箭头），
               // 标签行占满剩余宽度；内容不足时居中，超出则横向滚动
-              //（固定按钮宽度 78 = 36+6+36，加 16 左侧留白与 4 间距）
-              const fixedWidth = 78.0;
+              //（固定按钮宽度 68 = 32+4+32，加 16 左侧留白与 4 间距）
+              const fixedWidth = 68.0;
               return Row(
                 children: [
+                  fixedButtons,
+                  const SizedBox(width: 4),
                   Expanded(
                     child: totalWidth + 16 + fixedWidth + 4 <=
                             constraints.maxWidth
                         ? Center(child: scrollView)
                         : scrollView,
                   ),
-                  const SizedBox(width: 4),
-                  fixedButtons,
                 ],
               );
             },

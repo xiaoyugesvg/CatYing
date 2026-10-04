@@ -106,7 +106,7 @@ class LiveService extends GetxService {
   static const String _defaultSingleName = '自定义直播源';
   String get displayName => _persistedName ?? _defaultSingleName;
 
-  /// 从 tvbox JSON 的 lives 数组加载（多源：默认只加载第一个源，其余标记"未下载"）
+  /// 从 tvbox JSON 的 lives 数组加载（多源：默认只加载第一个源）
   Future<void> loadFromLivesJson(List<dynamic> lives) async {
     isLoading.value = true;
     error.value = null;
@@ -118,6 +118,7 @@ class LiveService extends GetxService {
       _notifySources(const []);
       announcements.value = [];
       final built = <LiveSource>[];
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
       for (var i = 0; i < _rawLives!.length; i++) {
         final map = _rawLives![i];
         final name = (map['name'] ?? '直播源${i + 1}').toString();
@@ -127,9 +128,21 @@ class LiveService extends GetxService {
               .map((e) => e.toString())
               .where((t) => t.trim().isNotEmpty));
         }
-        built.add(LiveSource(name: name, loaded: i == 0));
+        // 第一个源即将自动加载 → 视为「刚刚更新」并持久化，
+        // 避免后续 loadSource 重建列表时时间回退成安装时间
+        final ts = map['updatedAt'];
+        final oldTs = ts is int ? ts : nowMs;
+        if (i == 0) {
+          map['updatedAt'] = nowMs;
+        }
+        built.add(LiveSource(
+          name: name,
+          loaded: i == 0,
+          updatedAt: i == 0 ? nowMs : oldTs,
+        ));
       }
       _notifySources(built);
+      await _persistLives();
       if (_rawLives!.isNotEmpty) {
         await _loadSourceLocked(0);
         selectedSourceIndex.value = 0;
@@ -150,13 +163,19 @@ class LiveService extends GetxService {
     error.value = null;
     try {
       await _loadSourceLocked(index);
+      // 加载成功 → 该源视为「刚刚更新」并持久化
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      _rawLives![index]['updatedAt'] = nowMs;
+      await _persistLives();
       // 名称以 _rawLives 为准，避免改名后仍显示旧 sources[i].name
       final next = <LiveSource>[];
       for (var i = 0; i < _rawLives!.length; i++) {
         final n = (_rawLives![i]['name']?.toString() ?? '').trim();
+        final ts = _rawLives![i]['updatedAt'];
         next.add(LiveSource(
           name: n.isEmpty ? '直播源${i + 1}' : n,
           loaded: i == index,
+          updatedAt: i == index ? nowMs : (ts is int ? ts : nowMs),
         ));
       }
       _notifySources(next);
@@ -272,7 +291,13 @@ class LiveService extends GetxService {
         channels.value = cached;
         _rebuildGroups();
         _rawLives = null;
-        _notifySources([LiveSource(name: displayName, loaded: true)]);
+        _notifySources([
+          LiveSource(
+            name: displayName,
+            loaded: true,
+            updatedAt: DateTime.now().millisecondsSinceEpoch,
+          )
+        ]);
         selectedSourceIndex.value = 0;
       }
       final body = await _fetch(url);
@@ -283,7 +308,13 @@ class LiveService extends GetxService {
       channels.value = list;
       _rebuildGroups();
       _rawLives = null;
-      _notifySources([LiveSource(name: displayName, loaded: true)]);
+      _notifySources([
+        LiveSource(
+          name: displayName,
+          loaded: true,
+          updatedAt: DateTime.now().millisecondsSinceEpoch,
+        )
+      ]);
       selectedSourceIndex.value = 0;
       if (list.isEmpty) {
         error.value = '未解析到频道';
@@ -333,12 +364,17 @@ class LiveService extends GetxService {
       final newItem = <String, dynamic>{
         'name': name?.trim().isEmpty ?? true ? '直播源${sources.length + 1}' : name!,
         'url': url,
+        'updatedAt': DateTime.now().millisecondsSinceEpoch,
       };
       if (_rawLives == null) {
         // 单源模式 → 先把当前的转成多源第一项，再追加新源
         if (_persistedUrl != null && _persistedUrl!.isNotEmpty) {
           _rawLives = [
-            {'name': displayName, 'url': _persistedUrl},
+            {
+              'name': displayName,
+              'url': _persistedUrl,
+              'updatedAt': DateTime.now().millisecondsSinceEpoch,
+            },
             newItem,
           ];
         } else {
@@ -351,7 +387,11 @@ class LiveService extends GetxService {
         _rawLives!.add(newItem);
         _notifySources([
           ...sources,
-          LiveSource(name: newItem['name'] as String, loaded: false),
+          LiveSource(
+            name: newItem['name'] as String,
+            loaded: false,
+            updatedAt: newItem['updatedAt'] as int,
+          ),
         ]);
         await _persistLives();
         // 加载新增的源
@@ -411,14 +451,19 @@ class LiveService extends GetxService {
         if (trimmedUrl != null && trimmedUrl.isNotEmpty) {
           _rawLives![index]['url'] = trimmedUrl;
         }
+        // 编辑也算一次更新
+        _rawLives![index]['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
         await _persistLives();
         // 先按 _rawLives 刷名称，再（可选）重载 URL —— 即使重载失败名称也要生效
         final list = <LiveSource>[];
+        final nowMs = DateTime.now().millisecondsSinceEpoch;
         for (var i = 0; i < _rawLives!.length; i++) {
           final n = (_rawLives![i]['name']?.toString() ?? '').trim();
+          final ts = _rawLives![i]['updatedAt'];
           list.add(LiveSource(
             name: n.isEmpty ? '直播源${i + 1}' : n,
             loaded: sources.length > i ? sources[i].loaded : false,
+            updatedAt: ts is int ? ts : nowMs,
           ));
         }
         _notifySources(list);
@@ -431,7 +476,13 @@ class LiveService extends GetxService {
           await _persistName(trimmedName);
         }
         // 立刻把名称刷进列表，不依赖 loadFromUrl 是否成功
-        _notifySources([LiveSource(name: displayName, loaded: true)]);
+        _notifySources([
+          LiveSource(
+            name: displayName,
+            loaded: true,
+            updatedAt: DateTime.now().millisecondsSinceEpoch,
+          )
+        ]);
         if (trimmedUrl != null && trimmedUrl.isNotEmpty) {
           await loadFromUrl(trimmedUrl);
         }
@@ -684,9 +735,32 @@ class LiveService extends GetxService {
   }
 }
 
-/// 直播源条目（参考图：名称 + 刚刚更新/未下载 状态）
+/// 直播源条目（名称 + 加载态 + 最近更新时间）
 class LiveSource {
   final String name;
   final bool loaded;
-  const LiveSource({required this.name, required this.loaded});
+
+  /// 最近一次更新/安装时间（毫秒时间戳），用于状态文案
+  final int? updatedAt;
+
+  const LiveSource({
+    required this.name,
+    required this.loaded,
+    this.updatedAt,
+  });
+
+  /// 状态文案：30 分钟内 →「刚刚更新」，否则显示日期
+  String statusText({DateTime? now}) {
+    final t = updatedAt;
+    if (t == null) return '刚刚添加';
+    final n = now ?? DateTime.now();
+    final dt = DateTime.fromMillisecondsSinceEpoch(t);
+    final diff = n.difference(dt);
+    if (diff < const Duration(minutes: 30)) return '刚刚更新';
+    String two(int v) => v.toString().padLeft(2, '0');
+    if (dt.year != n.year) {
+      return '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}';
+    }
+    return '${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}';
+  }
 }

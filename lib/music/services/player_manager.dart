@@ -140,6 +140,21 @@ class MusicPlayerManager extends ChangeNotifier {
 
     _player = Player();
 
+    // 🔴 **订阅播放错误流** —— 全项目原来**从未订阅** `stream.error` ✗
+    // media_kit 的取流/解码/网络失败大多走这条流；不订阅的话：
+    //   · 失败时**界面上什么都没有**（我做的错误弹窗也不会触发 ✗）
+    //   · 日志里也查不到
+    // 所以这条是"错误可见性"的地基。
+    //
+    // 这里刻意**不保存订阅引用**（`dispose()` 全仓无调用者、Player 与 App
+    // 同生命周期），以保持最小改动；将来若要真正 dispose，记得在这里存引用。
+    _player.stream.error.listen((e) {
+      final msg = '$e';
+      AppLog.instance.log('[Music] 播放流错误: $msg');
+      // 走既有的错误出口（会弹"播放失败"全文弹窗）
+      lastError.value = '播放出错：$msg';
+    });
+
     _posSub = _player.stream.position.listen((p) {
       position.value = p;
       final idx = LyricParser.indexAt(
@@ -348,6 +363,11 @@ class MusicPlayerManager extends ChangeNotifier {
     try {
       if (_queue.isNotEmpty) return; // 用户已经点过歌了，别覆盖
       final saved = await MusicLibraryStore.instance.loadQueue();
+      // 🔴 `await` 之后**必须复查一次**：`loadQueue()` 内部要 await 初始化，
+      // 这个窗口里用户完全可能已经点了一首歌（`_load` 会换掉 `_queue`）。
+      // 不复查的话，恢复流程会把队列换成"旧队 + 新歌"的混合体、
+      // 把 `_currentSong` 指回旧歌，而**音频并不会换** → 界面 A、声音 B。
+      if (_queue.isNotEmpty) return;
       if (saved.songs.isEmpty) return;
       _queue.addAll(saved.songs);
       _index = saved.index.clamp(0, _queue.length - 1);
@@ -404,6 +424,9 @@ class MusicPlayerManager extends ChangeNotifier {
         : await MusicApi.instance
             .songUrl(song.id, quality: wantQuality, source: song.source);
     if (epoch != _loadEpoch) return; // 已被更新的点歌取代，丢弃本次结果
+    // 第三方音源要用**它自己配的** headers（UA/Referer/Cookie）。
+    // 在 if 分支里声明会出作用域，所以提到这里。
+    Map<String, String> sourceHeaders = const {};
     if (r.ok && r.url.isNotEmpty) {
       url = r.url;
       quality = r.qualityText;
@@ -431,6 +454,10 @@ class MusicPlayerManager extends ChangeNotifier {
           url = sr.url;
           fromSource = sr.source?.name ?? '';
           quality = sr.source?.quality ?? '';
+          // 🔴 **关键**：把"这个源自己配的 headers"带上。
+          // 很多第三方源必须带 UA/Referer/Cookie 才给流 ——
+          // 不透传的表现就是"地址拿到了但播不了"（这条一直缺 ✗）。
+          sourceHeaders = sr.source?.headers ?? const {};
         } else {
           // 都失败：把「内置为什么失败」+「每个源为什么失败」一起说清楚
           final detail = UnblockService.instance.describeFailure();
@@ -438,7 +465,12 @@ class MusicPlayerManager extends ChangeNotifier {
           // ⚠️ 完整原因**必须**进日志：toast 会把长文本截断
           //（用户实测只看到 `…car_conv2: GD接口失败: Clie…`，看不到真正原因）
           AppLog.instance.log('[Music] 取播放地址失败（${song.name}）: $full');
-          lastError.value = full;
+          // ⚠️ `ValueNotifier` **只在值变化时通知** → 连续两首同类失败
+          //（比如两首都要会员、或同一个源连续失败）时，第二次的文案**一模一样**
+          // → 监听器根本不会被调用 → **用户什么都看不到，以为"点了没反应"** ✗
+          // 这里用一个**不可见**的后缀强制"值必变"：视觉上文字不变，
+          // 但每次都会触发一次通知（两次交替，永远不相等）。
+          lastError.value = full == lastError.value ? '$full ' : full;
           await _silenceForFailure(song);
           notifyListeners();
           return;
@@ -449,7 +481,8 @@ class MusicPlayerManager extends ChangeNotifier {
         AppLog.instance.log('[Music] 取播放地址失败（${song.name}）: $msg'
             '（第三方音源开关=${SettingsStore.instance.useThirdPartySources.value}，'
             '已启用 ${ThirdPartySourceStore.instance.enabled.length} 个）');
-        lastError.value = msg;
+        // 同一条失败连续出现时也要能弹（见上面那段注释）
+        lastError.value = msg == lastError.value ? '$msg ' : msg;
         await _silenceForFailure(song);
         notifyListeners();
         return;
@@ -471,7 +504,12 @@ class MusicPlayerManager extends ChangeNotifier {
       // 这里用 `r.headers`：第三方音源路径下 `r` 是内置接口的失败结果
       //（headers 为空），不会误传别人的头。
       await _player.open(
-        Media(url, httpHeaders: r.headers),
+        // headers：内置接口带的（`r.headers`）优先；而第三方音源路径下 `r`
+        // 是**失败的内置结果**（headers 为空）→ 这时用那个源自己配的 headers ✓
+        Media(
+          url,
+          httpHeaders: r.headers.isNotEmpty ? r.headers : sourceHeaders,
+        ),
         play: autoplay,
       );
     } catch (e, st) {
@@ -500,9 +538,16 @@ class MusicPlayerManager extends ChangeNotifier {
     unawaited(MusicLibraryStore.instance.saveQueue(_queue, _index));
   }
 
-  Future<void> _loadLyric(int id, SongSource source) async {
+  /// 取歌词。**必须带代次校验** —— `_load` 里别处都做了"await 后丢弃过期结果"，
+  /// 只有这一处漏了：快速点 A→B 时，A 的歌词慢回来会把 B 的界面覆盖掉
+  ///（表现就是"**歌词串到上一首**"，而且不会自愈）。
+  ///
+  /// 默认参数取**调用瞬间**的 `_loadEpoch`，所以调用点不用改。
+  Future<void> _loadLyric(int id, SongSource source, [int? epoch]) async {
+    final mine = epoch ?? _loadEpoch;
     try {
       final l = await MusicApi.instance.lyric(id, source: source);
+      if (mine != _loadEpoch) return; // 已经切歌 → 丢弃这次结果
       if (l == null) return;
       // #9：**优先逐字歌词（YRC）**，拿不到再回落到标准 LRC。
       // 两条路的 `LyricLine.text` 都是一行原文，
@@ -515,8 +560,10 @@ class MusicPlayerManager extends ChangeNotifier {
         lyrics.value,
         position.value + Duration(milliseconds: lyricOffset.value),
       );
-    } catch (_) {
-      // 歌词拿不到就不显示，不打扰用户
+    } catch (e) {
+      // 歌词拿不到不打扰用户（不弹窗），但**要能查**：
+      // 否则"所有歌都没歌词"这种系统性故障完全不可排查。
+      AppLog.instance.log('[Music] 歌词获取失败 id=$id: $e');
     }
   }
 

@@ -1,12 +1,15 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../pages/player_page.dart';
+import 'music_components.dart';
 import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
+import '../../services/app_log.dart';
 import '../../services/main_tab_controller.dart';
 import '../../widgets/video_player_pip.dart';
 
@@ -45,6 +48,11 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
   /// 是否展开出「上一首 / 播放暂停 / 下一首」三个键
   bool _open = false;
 
+  /// **C 方案**：贴边且收起时把球"半藏"进屏幕边缘（露出约 62%），
+  /// 此时**封面不旋转**（静止的半圆在边上更安静）；
+  /// 拖动中 / 展开时球全部露出 → 封面旋转 ✓
+  bool _tucked = true;
+
   void _openPlayer() {
     final nav = VideoPlayerPip.navigatorKey.currentState;
     if (nav == null) return;
@@ -67,6 +75,19 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
       if (!Get.isRegistered<MainTabController>() ||
           MainTabController.instance.selectedTab.value !=
               MainTabController.musicTabIndex) {
+        // 🔴 切走音乐 tab 时**复位展开态**：这个 State 在切 tab 时不会被销毁
+        //（`SizedBox.shrink()` 只是不渲染子树 ✗）→ 去影视 tab 待一会儿再回音乐，
+        // 悬浮球会**莫名处于展开状态** ✗。build 期间不能 setState → 后置回调 ✓
+        if (_open || !_tucked) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && (_open || !_tucked)) {
+              setState(() {
+                _open = false;
+                _tucked = true;
+              });
+            }
+          });
+        }
         return const SizedBox.shrink();
       }
       return _ball(context);
@@ -84,16 +105,24 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
 
         final screen = MediaQuery.of(context).size;
         final pad = MediaQuery.of(context).padding;
-        final maxX = (screen.width - _size - 8).clamp(8.0, screen.width);
+        final maxX = (screen.width - _size - pad.right - 4).clamp(pad.left + 4, screen.width);
         final maxY =
             (screen.height - _size - pad.bottom - 8).clamp(90.0, screen.height);
 
         // 默认：右下、避开底部导航与迷你播放器
         final pos = _pos ??
             Offset(screen.width - _size - 16, screen.height - pad.bottom - 96);
-        final x = pos.dx.clamp(8.0, maxX);
+        // 用 `pos` 判断贴哪一侧（不能用 x —— 半藏后 x 可能为负）
+        final toLeft = pos.dx + _size / 2 < screen.width / 2;
+        // C 方案：**贴边且收起** → 半藏（露出约 62%）；拖动中/展开 → 全露
+        final tucked = _tucked && !_open;
+        final tuck = _size * 0.38;
+        final x = tucked
+            ? (toLeft
+                ? pad.left - tuck
+                : screen.width - _size - pad.right + tuck)
+            : pos.dx.clamp(pad.left + 4, maxX);
         final y = pos.dy.clamp(80.0, maxY);
-        final toLeft = x + _size / 2 < screen.width / 2;
 
         // 展开的控制条**横向**长出来（朝屏幕中间），所以球的垂直位置不变 ——
         // 这正是为了避免"一展开球就往下跑"。
@@ -113,17 +142,37 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
           _ctrl(Icons.skip_next_rounded, () => player.next()),
         ];
 
-        return Positioned(
-          // 贴左时按 left 定位（右侧长出来）；贴右时按 right 定位（左侧长出来）
-          left: toLeft ? x : null,
-          right: toLeft ? null : (screen.width - x - _size),
-          top: y,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: toLeft
-                ? [ _ballCircle(player), if (_open) ...controls ]
-                : [ if (_open) ...controls, _ballCircle(player) ],
-          ),
+        return Stack(
+          children: [
+            // 展开时：整屏透明点击层 —— 点任意空白处收起（再点同处才透传）。
+            // 这样"收起"不再依赖那个显眼的大 × 关闭按钮。
+            if (_open)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: () => setState(() => _open = false),
+                ),
+              ),
+            Positioned(
+              // 贴左时按 left 定位（右侧长出来）；贴右时按 right 定位（左侧长出来）
+              left: toLeft ? x : null,
+              right: toLeft ? null : (screen.width - x - _size),
+              top: y,
+              // 🔴 展开条宽度 ≈ 球(54) + 3 个键(各 ~40) ✗ → 在**极窄屏 /
+              // 系统大字号**下会超出屏幕，报 RenderFlex overflow ✗。
+              // 用 `FittedBox(scaleDown)` 让它在放不下时**整体等比缩小** ✓
+              //（比硬编码宽度稳：宽屏原样、窄屏自动缩小 ✓）。
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: toLeft
+                      ? [_ballCircle(player), if (_open) ...controls]
+                      : [if (_open) ...controls, _ballCircle(player)],
+                ),
+              ),
+            ),
+          ],
         );
       },
     );
@@ -165,37 +214,51 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
   /// 主球（圆形本体）：**点击展开/收起**，**长按进播放页**，可拖动
   Widget _ballCircle(MusicPlayerManager player) {
     return GestureDetector(
+      // 拖动一开始就"拔出来"（全露，封面转起来）
+      onPanStart: (_) {
+        if (_tucked) setState(() => _tucked = false);
+      },
       onPanUpdate: (d) {
         final screen = MediaQuery.of(context).size;
         final pad = MediaQuery.of(context).padding;
-        final maxX = (screen.width - _size - 8).clamp(8.0, screen.width);
+        final maxX = (screen.width - _size - pad.right - 4).clamp(pad.left + 4, screen.width);
         final maxY =
             (screen.height - _size - pad.bottom - 8).clamp(90.0, screen.height);
+        final minX = pad.left + 4;
+        // 注：上界 `maxX` 上方已声明（这里不重复声明）；
+        // 松手吸附时会用"安全区版本"重新算上界，所以最终落点一定贴边。
         final cur = _pos ??
             Offset(screen.width - _size - 16, screen.height - pad.bottom - 96);
         setState(() {
           _pos = Offset(
-            (cur.dx + d.delta.dx).clamp(8.0, maxX),
+            (cur.dx + d.delta.dx).clamp(minX, maxX),
             (cur.dy + d.delta.dy).clamp(80.0, maxY),
           );
         });
       },
-      // 松手吸附到最近的左右边（半藏式，不挡内容）
+      // 松手吸附到最近的左右边（**贴着安全区边缘 4px**）
       onPanEnd: (_) {
         final screen = MediaQuery.of(context).size;
         final pad = MediaQuery.of(context).padding;
-        final maxX = (screen.width - _size - 8).clamp(8.0, screen.width);
+        final minX = pad.left + 4;
+        final maxX = (screen.width - _size - pad.right - 4).clamp(minX, screen.width);
         final cur = _pos ??
             Offset(screen.width - _size - 16, screen.height - pad.bottom - 96);
         final toLeft = cur.dx + _size / 2 < screen.width / 2;
         setState(() {
-          _pos = Offset(toLeft ? 8 : maxX, cur.dy);
+          _pos = Offset(toLeft ? minX : maxX, cur.dy);
+          // 松手 → 贴边并**半藏**（C 方案）；封面随之停止旋转
+          _tucked = true;
         });
       },
       // 点击 = 展开/收起控制键（用户要求：点一下要能播放/暂停/上下首）
       onTap: () => setState(() => _open = !_open),
       // 长按 = 进播放页（用户要求）
       onLongPress: _openPlayer,
+      // 🔴 必须显式 opaque：默认 `deferToChild` 时，**只有子组件绘制到的区域**
+      // 才接收手势 —— 用户从球的透明边角按下拖动时，整个拖动都不会触发 ✗
+      // 这正是"悬浮球拖不动/贴不了边"的原因。
+      behavior: HitTestBehavior.opaque,
       child: Material(
         color: Colors.transparent,
         child: Container(
@@ -218,31 +281,54 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
           ),
           child: ClipOval(
             child: MusicFloatingBallStyle.instance.imagePath.value.isNotEmpty
+                // ① 用户自定义了图片/GIF → 就用它（GIF 自己会动，不再叠加旋转）
                 ? Image.file(
                     File(MusicFloatingBallStyle.instance.imagePath.value),
                     width: _size,
                     height: _size,
                     fit: BoxFit.cover,
-                    // 文件被删/格式不支持 → 回落到默认图标，不留白洞
-                    errorBuilder: (_, __, ___) => _ballIcon(player),
+                    // 文件被删/格式不支持 → 回落到封面/图标，不留白洞
+                    errorBuilder: (_, __, ___) => _ballCover(player),
                   )
-                : _ballIcon(player),
+                // ② 默认 = **正在播放的封面**，播放时像唱片一样旋转
+                : _ballCover(player),
           ),
         ),
       ),
     );
   }
 
-  /// 默认样式：显示当前播放状态的图标
+  /// 默认样式：显示当前播放状态的图标。
+  ///
+  /// 展开/收起时**保持同一个状态图标** —— 不再变成大 × 关闭按钮
+  /// （用户反馈：那个关闭按钮太突出）。收起靠「点空白处」或「再点主球」。
+  /// 默认样式：**当前歌曲封面**，播放时像唱片一样旋转。
+  ///
+  /// ⚠️ 旋转角用**播放进度**驱动，不用 `AnimationController`：
+  ///   · 不需要 `TickerProvider`（少一套生命周期与 dispose）
+  ///   · **暂停时进度不再前进 → 自动停在原角度** ✓
+  ///   · 切歌后进度归零 → 从 0 开始转 ✓
+  /// 20 秒一圈（唱片观感）。封面取不到 → 回落状态图标（不留白洞）。
+  Widget _ballCover(MusicPlayerManager player) {
+    final cover = (player.currentSong?.coverUrl ?? '').trim();
+    if (cover.isEmpty) return _ballIcon(player);
+    // C 方案：半藏（贴边且收起）时**不转**；全露（拖动/展开）时才转
+    final spinning = !(_tucked && !_open);
+    final angle = spinning
+        ? player.position.value.inMilliseconds / 20000 * 2 * math.pi
+        : 0.0;
+    return Transform.rotate(
+      angle: angle,
+      child: CoverImage(url: cover, size: _size, cornerRadius: 0),
+    );
+  }
+
   Widget _ballIcon(MusicPlayerManager player) => Icon(
-        // 收起时显示当前播放状态；展开时表示"再点收起"
-        _open
-            ? Icons.close_rounded
-            : (player.isBuffering.value
-                ? Icons.hourglass_bottom_rounded
-                : (player.isPlaying.value
-                    ? Icons.pause_rounded
-                    : Icons.play_arrow_rounded)),
+        player.isBuffering.value
+            ? Icons.hourglass_bottom_rounded
+            : (player.isPlaying.value
+                ? Icons.pause_rounded
+                : Icons.play_arrow_rounded),
         color: Colors.white,
         size: 26,
       );
@@ -265,11 +351,19 @@ class MusicFloatingBallStyle {
   final ValueNotifier<String> imagePath = ValueNotifier<String>('');
 
   SharedPreferences? _prefs;
-  bool _inited = false;
 
-  Future<void> init() async {
-    if (_inited) return;
-    _inited = true;
+  /// 正在进行的初始化。
+  ///
+  /// 🔴 原来这里是 `bool _inited` 闩锁：它**先置 true 再 `await`**，
+  /// 于是紧接着调用的 `init()` 会**立刻返回**，而此刻 `_prefs` 还是 `null` →
+  /// `setImage()` 里的 `await _prefs?.setString(...)` 被 `?.` **静默跳过** ✗
+  /// 表现就是：用户选的图片**当次能显示（内存已改）、重启后消失** ✗
+  /// 改成缓存 `Future`，并发/后续调用者会**等它真正完成**。
+  Future<void>? _initFuture;
+
+  Future<void> init() => _initFuture ??= _doInit();
+
+  Future<void> _doInit() async {
     try {
       _prefs = await SharedPreferences.getInstance();
       final saved = _prefs!.getString(_kKey) ?? '';
@@ -287,10 +381,16 @@ class MusicFloatingBallStyle {
   Future<void> setImage(String path) async {
     await init();
     imagePath.value = path;
+    // 不再用 `?.` 静默吞掉：真的存不下时至少能在日志里看到
+    final p = _prefs;
+    if (p == null) {
+      AppLog.instance.log('[Music] 悬浮球样式写入失败：prefs 未就绪');
+      return;
+    }
     try {
-      await _prefs?.setString(_kKey, path);
-    } catch (_) {
-      /* 存不下不影响本次显示 */
+      await p.setString(_kKey, path);
+    } catch (e) {
+      AppLog.instance.log('[Music] 悬浮球样式写入失败: $e');
     }
   }
 
