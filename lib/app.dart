@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'music/widgets/floating_play_button.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'common/theme.dart';
@@ -233,6 +234,12 @@ class _TVBoxAppState extends State<TVBoxApp> with WidgetsBindingObserver {
                         overlayAlpha: 0.3,
                       ),
                       out,
+                      // ── 悬浮播放球（方案 C）──────────────────────────
+                      // 可拖动、点击进播放页；没有在播的歌时它自己隐藏。
+                      // 挂在这一层 → **一处挂载覆盖所有路由**（含 push 出去的
+                      // 歌单详情/喜马拉雅专辑/本地音乐，那些页面**没有**迷你
+                      // 播放器，所以以前"点歌后除了声音没有任何反馈"）。
+                      const MusicFloatingPlayButton(),
                     ],
                   );
                 },

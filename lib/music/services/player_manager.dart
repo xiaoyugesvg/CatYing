@@ -127,7 +127,15 @@ class MusicPlayerManager extends ChangeNotifier {
       // "正在尝试音源 2/3：xxx" 这类是进度信息，用中性色；
       // 其余（无免费音源 / 播放失败）按错误显示。
       final isProgress = msg.startsWith('正在尝试音源');
-      AppToast.show(msg, '', isError: !isProgress);
+      if (isProgress) {
+        // 进度信息（"正在尝试音源 2/3：xxx"）用气泡就够了
+        AppToast.show(msg, '', isError: false);
+        return;
+      }
+      // 🔴 真错误 → **弹窗显示全文**：气泡是 `maxLines: 1`，会把
+      // "内置接口没有免费音源；car_conv2: GD接口失败: …" 截断，
+      // 而可排查的信息恰恰在后半段（用户反馈过"看不到完整的日志"）。
+      AppToast.detail('播放失败', msg);
     });
 
     _player = Player();

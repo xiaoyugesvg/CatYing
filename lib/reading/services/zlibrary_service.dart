@@ -1114,61 +1114,79 @@ class ZlibraryService extends ChangeNotifier {
 
   /// 抓取 z-library 首页热门/推荐图书（图书主页"推荐"数据源）。
   ///
-  /// 走当前节点域名 `https://$_domain/`，由 WebView 自动过 CF 挑战，
-  /// 解析首页的 `z-bookcard` 卡片（与分类页同一解析器）。
-  /// 失败抛 [ZlibraryException]（unavailable / fail）。
+  /// 走**候选镜像域名**（当前域名优先，失败自动切下一个镜像），由 WebView
+  /// 自动过 CF 挑战；任一镜像成功即把该节点写回 `_domain` 并持久化。
+  /// 全部镜像都失败才抛 [ZlibraryException]（unavailable / fail）。
   Future<SearchResult<Book>> fetchHomeRecommendations({int page = 1}) async {
-    if (_domain.isEmpty) {
+    final order = _candidateOrder();
+    if (order.isEmpty) {
       throw ZlibraryException('unavailable', '图书功能暂不可用，请等待恢复');
     }
-    final url = page > 1
-        ? 'https://$_domain/s/?page=$page'
-        : 'https://$_domain/';
-    _log('抓取首页推荐: $url');
-    String? htmlStr;
     Object? lastError;
-    for (var attempt = 1; attempt <= 3; attempt++) {
-      try {
-        final html = await WebViewImageFetcher().fetchHtml(url);
-        if (html.isNotEmpty) {
-          htmlStr = html;
-          break;
+    for (final domain in order) {
+      final url = page > 1
+          ? 'https://$domain/s/?page=$page'
+          : 'https://$domain/';
+      _log('抓取首页推荐: $url');
+      String? htmlStr;
+      for (var attempt = 1; attempt <= 2; attempt++) {
+        try {
+          final html = await WebViewImageFetcher().fetchHtml(url);
+          if (html.isNotEmpty) {
+            htmlStr = html;
+            break;
+          }
+          lastError = StateError('首页返回空 HTML');
+        } catch (e) {
+          lastError = e;
         }
-        lastError = StateError('首页返回空 HTML');
-      } catch (e) {
-        lastError = e;
+        _log('$domain 第 $attempt/2 次失败: $lastError');
+        if (attempt < 2) {
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
       }
-      _log('首页第 $attempt/3 次失败: $lastError');
-      if (attempt < 3) {
-        await Future.delayed(const Duration(milliseconds: 800));
+      if (htmlStr == null) {
+        _log('节点 $domain 失败，自动切下一镜像');
+        continue;
       }
+      final books = _parseHomeHtml(htmlStr);
+      if (books.isEmpty) {
+        _log('$domain 解析到 0 条，HTML 长度=${htmlStr.length}，切下一镜像');
+        continue;
+      }
+      // 节点可用 → 写回 _domain 并持久化
+      if (domain != _domain) {
+        _domain = domain;
+        await _persistDomain();
+      }
+      _setUnavailable(false);
+      _log('首页推荐解析到 ${books.length} 条（$domain），前两条: '
+          '${books.take(2).map((b) => b.title).join(", ")}');
+      return SearchResult<Book>(
+        items: books,
+        total: books.length,
+        currentPage: page,
+        totalPages: 1,
+      );
     }
-    if (htmlStr == null) {
-      _log('首页 3 次均失败: $lastError');
-      throw ZlibraryException('fail', '推荐加载失败，请稍后重试');
-    }
-    final books = _parseHomeHtml(htmlStr);
-    if (books.isEmpty) {
-      _log('首页解析到 0 条，HTML 长度=${htmlStr.length}');
-      throw ZlibraryException('fail', '推荐解析失败');
-    }
-    _log('首页推荐解析到 ${books.length} 条，前两条: '
-        '${books.take(2).map((b) => b.title).join(", ")}');
-    return SearchResult<Book>(
-      items: books,
-      total: books.length,
-      currentPage: page,
-      totalPages: 1,
-    );
+    _setUnavailable(true);
+    _log('所有镜像首页推荐均失败: $lastError');
+    throw ZlibraryException('fail', '推荐加载失败，请稍后重试');
   }
 
-  /// 解析 z-library 首页 HTML（热门/推荐区块，卡片结构与分类页相同）。
+  /// 解析 z-library 首页 HTML（推荐区块，卡片结构与分类页相同）。
   ///
-  /// 首页可能有多个区块（今日图书/热门图书/最新上架等），全部
-  /// `z-bookcard` 一并收集，按 id 去重，保持 DOM 顺序。
+  /// 首页有多个区块（最受欢迎 / 今日图书 / 最新上架等），优先只取
+  /// **最受欢迎**（`z-bookcard[dsource="mostpopular"]`，对应站内
+  /// `?dsource=mostpopular` 区块）；新版若无 dsource 属性则回退收集全部
+  /// `z-bookcard`，按 id 去重，保持 DOM 顺序。
   List<Book> _parseHomeHtml(String htmlStr) {
     final doc = html_parser.parse(htmlStr);
-    final rows = doc.querySelectorAll('z-bookcard');
+    var rows = doc.querySelectorAll('z-bookcard[dsource="mostpopular"]');
+    if (rows.isEmpty) {
+      // 兼容旧版 DOM：没有 dsource 属性 → 全量卡片
+      rows = doc.querySelectorAll('z-bookcard');
+    }
     final books = <Book>[];
     final seenIds = <String>{};
     for (final r in rows) {

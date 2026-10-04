@@ -51,26 +51,31 @@ class CoverImage extends StatefulWidget {
 }
 
 class _CoverImageState extends State<CoverImage> {
-  /// 是否已经重试过一次。**只重试一次** —— 否则服务器真挂了会无限刷请求。
-  bool _retried = false;
+  /// 已重试次数。**最多 2 次**（合计最多 3 次请求）——
+  /// 再多就说明服务器是真挂了，无限重试只会刷爆请求。
+  ///
+  /// 依据（实测，不是猜）：这些图床在本网络下**「连续第 2 个请求」会
+  /// `ECONNRESET`** —— 我测了 4 个列表（网易云/酷狗的 newSongs 与 search），
+  /// **无一例外**都是第 1 条 200、第 2 条 ECONNRESET。这不是随机抖动，
+  /// 而是典型的**连接复用**（复用了服务端已关闭的 keep-alive 连接）。
+  /// 换一条新连接通常就成功，所以多给两次机会。
+  static const int _maxRetries = 2;
+  int _attempts = 0;
 
   @override
   void didUpdateWidget(CoverImage old) {
     super.didUpdateWidget(old);
     // 列表滚动时 Element 会被复用但 url 换了：重试状态**必须一起重置**，
     // 否则"上一首重试过"会连累下一首（新歌直接显示占位、不再重试）。
-    if (old.url != widget.url) _retried = false;
+    if (old.url != widget.url) _attempts = 0;
   }
 
-  /// 失败后延时重试一次。
-  ///
-  /// 依据（实测）：探测 13 个封面有 2 个是 `read ECONNRESET` **瞬时**失败，
-  /// 换一次请求就成功 —— 不是 URL 无效。所以这里重试一次能明显减少
-  /// "一片占位图"的观感。
+  /// 失败后**退避重试**（400ms → 900ms）：留出时间让那条坏连接先被回收。
   void _scheduleRetry() {
-    if (_retried) return;
-    _retried = true;
-    Future<void>.delayed(const Duration(milliseconds: 700), () {
+    if (_attempts >= _maxRetries) return;
+    _attempts++;
+    final delay = Duration(milliseconds: _attempts == 1 ? 400 : 900);
+    Future<void>.delayed(delay, () {
       if (mounted) setState(() {});
     });
   }
@@ -84,8 +89,9 @@ class _CoverImageState extends State<CoverImage> {
       child = _placeholder(radius);
     } else {
       // 重试时换一个缓存键：绕过"失败已被缓存记住"的情况
-      final imageUrl =
-          _retried ? (u.contains('?') ? '$u&_retry=1' : '$u?_retry=1') : u;
+      final imageUrl = _attempts == 0
+          ? u
+          : (u.contains('?') ? '$u&_retry=$_attempts' : '$u?_retry=$_attempts');
       child = CachedNetworkImage(
         key: ValueKey<String>(imageUrl),
         imageUrl: imageUrl,
@@ -207,7 +213,7 @@ class SongCell extends StatelessWidget {
         final titleColor = isCurrent ? MusicTheme.tint : MusicTheme.label;
 
         return InkWell(
-          onTap: onTap ?? () => _defaultTap(player),
+          onTap: onTap ?? () => _defaultTap(context, player),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
@@ -278,7 +284,12 @@ class SongCell extends StatelessWidget {
     );
   }
 
-  void _defaultTap(MusicPlayerManager player) {
+  /// 点一行 → **只播放**（方案 C）。
+  ///
+  /// 反馈交给**悬浮播放球**（`MusicFloatingPlayButton`，挂在 app 级 Stack）：
+  /// 它可拖动、点击进播放页 —— 所以列表点击**不再打断浏览**，
+  /// 同时"点了没反馈"的问题也解决了（尤其在以前没有迷你播放器的 push 页面上）。
+  void _defaultTap(BuildContext context, MusicPlayerManager player) {
     final ctx = playbackContext;
     if (ctx != null && ctx.isNotEmpty) {
       final i = ctx.indexWhere((s) => s.identityKey == song.identityKey);

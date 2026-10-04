@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../common/theme.dart';
 
@@ -39,6 +40,53 @@ class AppToast {
 
   /// 在 App 顶层调用一次，注入 `MaterialApp` 的 navigatorKey。
   static void init(GlobalKey<NavigatorState> key) => _key = key;
+
+  /// **弹窗显示完整长文本** —— 用于"气泡装不下"的错误（音乐播放失败就是）。
+  ///
+  /// 为什么必须有它：`show()` 的气泡 [title] 是**截断**的（`maxLines: 1`），
+  /// 音乐的错误（例如「内置接口没有免费音源；car_conv2: GD接口失败: GD接…」）
+  /// 会被切掉，而**恰恰是后半段**才是可排查的信息。
+  ///
+  /// 正文用 `SelectableText`（可长按选中）+「复制全文」按钮，让用户能把**全文**
+  /// 复制出来；长文本可滚动、上限半屏高。
+  static void detail(String title, String body) {
+    final ctx = _key?.currentContext ?? _key?.currentState?.overlay?.context;
+    if (ctx == null) {
+      // App 还没挂载（拿不到 context）→ 退回气泡，至少不静默
+      show(title, body, isError: true);
+      return;
+    }
+    showDialog<void>(
+      context: ctx,
+      builder: (dctx) => AlertDialog(
+        title: Text(title, style: const TextStyle(fontSize: 17)),
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(dctx).size.height * 0.5,
+          ),
+          child: SingleChildScrollView(
+            child: SelectableText(
+              body,
+              style: const TextStyle(fontSize: 13, height: 1.45),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: body));
+              Navigator.pop(dctx);
+            },
+            child: const Text('复制全文'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
 
   /// 显示一条顶部气泡。
   ///

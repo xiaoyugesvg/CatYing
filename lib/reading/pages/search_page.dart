@@ -231,6 +231,37 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       } else {
         _doSearch();
       }
+    } else if (_keyword.isEmpty && src.supportsCategories) {
+      // 无关键词且源支持分类：自动加载该源分类内容（对标书源页——
+      // 选中单源即展示内容，而不是"输入关键词开始搜索"空态）
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _autoLoadCategoryContent();
+      });
+    }
+  }
+
+  /// 切源后无关键词时自动加载该源的分类浏览内容。
+  /// 源不支持分类 / 拉取失败 / 无分类维度时静默保持现状（不影响搜索）。
+  Future<void> _autoLoadCategoryContent() async {
+    if (_categorySheetOpening) return;
+    final src = SourceManager().current;
+    if (!src.supportsCategories) return;
+    _categorySheetOpening = true;
+    try {
+      List<FilterGroup> groups;
+      if (_categoriesLoaded && _categoryGroups.isNotEmpty) {
+        groups = _categoryGroups;
+      } else {
+        groups = await src.fetchCategories();
+        _categoryGroups = groups;
+        _categoriesLoaded = true;
+      }
+      if (!mounted || groups.isEmpty) return;
+      _applyCategories(groups);
+    } catch (e) {
+      _log('自动分类浏览失败: $e');
+    } finally {
+      _categorySheetOpening = false;
     }
   }
 
@@ -543,6 +574,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     return JellyExpandableSearch(
       controller: _searchController,
       hintText: '搜索漫画',
+      maxWidth: 240,
       onFocusChange: (f) => setState(() {
         if (f) {
           if (_searchController.text.isEmpty) {
@@ -738,6 +770,48 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       );
   }
 
+  /// 视图切换独立按钮（右上角）：点一下切网格/列表，图标显示目标视图。
+  /// 样式与 JellyIconMenuButton / JellyRingButton 一致（圆形描边）。
+  Widget _buildViewToggleButton(bool isDark) {
+    final isGrid = _tabController.index == 0;
+    return Tooltip(
+      message: isGrid ? '切换到列表视图' : '切换到网格视图',
+      child: Material(
+        color: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () {
+            FocusScope.of(context).unfocus();
+            _tabController.animateTo(isGrid ? 1 : 0);
+          },
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              // 参考样式：黑色实心圆 + 白色图标；深色模式反转为白圆 + 深色图标
+              color: isDark ? Colors.white : const Color(0xFF17181C),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.14),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Center(
+              child: Icon(
+                isGrid ? Icons.view_list_rounded : Icons.grid_view_rounded,
+                size: 20,
+                color: isDark ? const Color(0xFF17181C) : Colors.white,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 分类筛选按钮（视图切换右边；不支持分类的源置灰）
   Widget _buildCategoryButton(bool isDark) {
     final source = SourceManager().current;
@@ -878,65 +952,72 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                             final g = draft[gi];
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 12),
-                              child: Column(
+                              child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 8),
-                                    child: Text(
-                                      g.title,
-                                      style: TextStyle(
-                                        fontSize: AppTheme.fontSubhead,
-                                        fontWeight: FontWeight.w600,
-                                        color: labelColor,
+                                  // 左标签（固定宽度，对齐参考样式：左标签右选项）
+                                  SizedBox(
+                                    width: 56,
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(top: 6),
+                                      child: Text(
+                                        g.title,
+                                        style: TextStyle(
+                                          fontSize: AppTheme.fontSubhead,
+                                          fontWeight: FontWeight.w600,
+                                          color: labelColor,
+                                        ),
                                       ),
                                     ),
                                   ),
-                                  Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    children: g.options.map((o) {
-                                      final selected =
-                                          g.selected?.value == o.value ||
-                                          (g.selected == null && o.isAll);
-                                      return GestureDetector(
-                                        onTap: () {
-                                          setSheetState(() {
-                                            draft[gi] = o.isAll
-                                                ? g.copyWith(
-                                                    clearSelected: true,
-                                                  )
-                                                : g.copyWith(selected: o);
-                                          });
-                                        },
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 6,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: selected
-                                                ? JellyTheme.primary
-                                                : chipColor,
-                                            borderRadius: BorderRadius.circular(
-                                              14,
+                                  // 右侧选项 chips（横排换行）
+                                  Expanded(
+                                    child: Wrap(
+                                      spacing: 8,
+                                      runSpacing: 8,
+                                      children: g.options.map((o) {
+                                        final selected =
+                                            g.selected?.value == o.value ||
+                                            (g.selected == null && o.isAll);
+                                        return GestureDetector(
+                                          onTap: () {
+                                            setSheetState(() {
+                                              draft[gi] = o.isAll
+                                                  ? g.copyWith(
+                                                      clearSelected: true,
+                                                    )
+                                                  : g.copyWith(selected: o);
+                                            });
+                                          },
+                                          child: Container(
+                                            padding:
+                                                const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 6,
                                             ),
-                                          ),
-                                          child: Text(
-                                            o.name,
-                                            style: TextStyle(
-                                              fontSize: AppTheme.fontFootnote,
-                                              fontWeight: selected
-                                                  ? FontWeight.w600
-                                                  : FontWeight.normal,
+                                            decoration: BoxDecoration(
                                               color: selected
-                                                  ? Colors.white
-                                                  : chipTextColor,
+                                                  ? JellyTheme.primary
+                                                  : chipColor,
+                                              borderRadius:
+                                                  BorderRadius.circular(14),
+                                            ),
+                                            child: Text(
+                                              o.name,
+                                              style: TextStyle(
+                                                fontSize: AppTheme.fontFootnote,
+                                                fontWeight: selected
+                                                    ? FontWeight.w600
+                                                    : FontWeight.normal,
+                                                color: selected
+                                                    ? Colors.white
+                                                    : chipTextColor,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                      );
-                                    }).toList(),
+                                        );
+                                      }).toList(),
+                                    ),
                                   ),
                                 ],
                               ),
@@ -1161,7 +1242,11 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
           SafeArea(
             top: !widget.showBackButton,
             bottom: false,
-            child: SizedBox(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
               // 高度跟着布局走：原来是"标题行 + 居中的搜索行"两行(152)，
               // 现在只有一行。搜索换成了可展开胶囊（高 50），
               // 行高 = headerTop(8) + 50 = 58。
@@ -1189,49 +1274,15 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                           // 搜索框占满中间（原来固定屏宽 40% 且居中）
                           Expanded(child: _searchField()),
                           const SizedBox(width: 8),
-                          // 指环切换菜单：**只保留视图 + 分类筛选**
-                          // （历史/收藏/下载/源管理已收敛到右侧聚合按钮）
-                          JellyRingButton(
-                            isDark: isDark,
-                            tooltip: '视图与分类',
-                            menuBuilder: (ctx) => JellyRingMenuPanel(
-                              isDark: isDark,
-                              title: '视图与分类',
-                              children: [
-                                // 视图切换（网格/列表）
-                                JellyRingMenuRow(
-                                  isDark: isDark,
-                                  label: '视图',
-                                  child: AnimatedBuilder(
-                                    animation: _tabController.animation!,
-                                    builder: (context, _) =>
-                                        JellySegmentedToggle(
-                                      index: _tabController.animation!.value,
-                                      onChanged: (i) {
-                                        FocusScope.of(context).unfocus();
-                                        _tabController.animateTo(i);
-                                      },
-                                      segments: const [
-                                        JellySegmentData(
-                                            icon: Icons.grid_view_rounded),
-                                        JellySegmentData(
-                                            icon: Icons.view_list_rounded),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                // 分类筛选（不支持分类的源置灰）
-                                JellyRingMenuRow(
-                                  isDark: isDark,
-                                  label: '分类筛选',
-                                  child: _buildCategoryButton(isDark),
-                                ),
-                              ],
-                            ),
-                          ),
+                          // 视图切换：独立按钮放右上角（点一下切网格/列表）
+                          _buildViewToggleButton(isDark),
+                          const SizedBox(width: 6),
+                          // 分类筛选：右上角按钮直接弹分类筛选内容
+                          // （不支持分类的源置灰）
+                          _buildCategoryButton(isDark),
                           const SizedBox(width: 6),
                           // 聚合菜单：漫画源仓库 / 浏览历史 / 收藏 / 下载
-                          // （纯图标下拉菜单栏）
+                          // （一列竖排下拉菜单，从按钮正下方展开）
                           JellyIconMenuButton(
                             isDark: isDark,
                             tooltip: '源 · 历史 · 收藏 · 下载',
@@ -1252,8 +1303,8 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                 onTap: () => Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (_) => const BrowseHistoryPage(
-                                        showTabs: false),
+                                    // 历史统一界面：漫画/图书聚合（showTabs 默认 true）
+                                    builder: (_) => const BrowseHistoryPage(),
                                   ),
                                 ),
                               ),
@@ -1263,8 +1314,9 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                 onTap: () => Navigator.push(
                                   context,
                                   MaterialPageRoute(
+                                    // 收藏统一界面：漫画/图书聚合 + 返回按钮
                                     builder: (_) =>
-                                        const FavoritesPage(comicOnly: true),
+                                        const FavoritesPage(showBackButton: true),
                                   ),
                                 ),
                               ),
@@ -1287,18 +1339,17 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                   // 第二行（搜索框 + 视图切换 + 分类按钮）已删除 ——
                   // 搜索框并进标题行（Expanded 撑开），
                   // 视图切换与分类按钮随图标组放在其右侧。
-                  // 源切换小标签（标题行下方）
-                  Positioned(
-                    top: widget.showBackButton ? 52 : 50,
-                    left: 12,
-                    right: 12,
-                    child: ListenableBuilder(
-                      listenable: SourceManager(),
-                      builder: (context, _) => _buildSourceChips(isDark),
-                    ),
-                  ),
                 ],
               ),
+                ),
+                // 源切换小标签：从 Stack 里移出（Stack 高仅 58，原来
+                // top:50/52 的 chip 行超出被裁掉 → 源 tab 栏看不见），
+                // 现在紧贴标题行下方常显（聚搜 + 各源 chip 横向滑动）
+                ListenableBuilder(
+                  listenable: SourceManager(),
+                  builder: (context, _) => _buildSourceChips(isDark),
+                ),
+              ],
             ),
           ),
           Expanded(

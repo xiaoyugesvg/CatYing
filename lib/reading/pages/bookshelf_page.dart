@@ -1159,6 +1159,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                                   child: JellyExpandableSearch(
                                     controller: _searchController,
                                     hintText: '搜索书架',
+                                    maxWidth: 240,
                                     onSubmitted: (v) => _openSearch(v),
                                     onChanged: (v) => setState(() {}),
                                   ),
@@ -2804,6 +2805,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                 ],
               );
 
+              // 固定按钮在**右侧**（对齐参考样式：标签栏右侧管理/排序图标），
               // 标签行占满剩余宽度；内容不足时居中，超出则横向滚动
               //（固定按钮宽度 78 = 36+6+36，加 16 左侧留白与 4 间距）
               const fixedWidth = 78.0;

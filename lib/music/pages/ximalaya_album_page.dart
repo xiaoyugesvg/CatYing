@@ -176,6 +176,7 @@ class _XimalayaAlbumPageState extends State<XimalayaAlbumPage> {
                     fontWeight: playing ? FontWeight.w600 : FontWeight.w400,
                   ),
                 ),
+                // 单集：只播放（方案 C）—— 反馈由**悬浮播放球**提供，不打断浏览
                 onTap: () => _player.playQueue(_songs, index: i),
               );
             },

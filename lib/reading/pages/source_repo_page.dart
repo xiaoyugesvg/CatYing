@@ -126,7 +126,7 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
               SourceManager().reorder(ids);
               setState(() {});
             },
-            itemCount: sources.length + (sources.isEmpty ? 0 : 0) + 2,
+            itemCount: sources.length + 1,
             itemBuilder: (context, i) {
               // 前两块固定：云端卡片 + 计数/筛选/清空
               if (i == 0) {
@@ -241,12 +241,12 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
       ),
     );
     if (ok != true) return;
-    // SourceConfigStore 没有 removeById —— 它的 API 是
-    // loadLocal / saveLocal 这一对，所以读出来过滤再写回。
-    final left = (await SourceConfigStore().loadLocal())
-        .where((d) => !SourceManager().sources.any((s) => s.id == d.id))
-        .toList();
-    await SourceConfigStore().saveLocal(left);
+    // 清空 = 删除文档目录覆盖层 + 置「已清空」标记：
+    // 这样 loadLocal 不再回退出厂内置源，源列表真正清到 0 个。
+    // （之前用 saveLocal([]) 写空文件，loadLocal 视为"无配置"又回退内置源，
+    //   导致清空看起来失效。）
+    await SourceConfigStore().resetToLocal();
+    await SourceConfigStore().markCleared();
     await SourceManager().reload();
     if (mounted) setState(() {});
   }

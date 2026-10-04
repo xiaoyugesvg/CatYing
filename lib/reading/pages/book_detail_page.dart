@@ -245,8 +245,8 @@ class _BookDetailPageState extends State<BookDetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // 封面独占顶部
-          Center(child: _buildCover(isDark)),
+          // 封面独占顶部（放大到 210 宽，贴近参考样式）
+          Center(child: _buildCover(isDark, width: 210)),
           const SizedBox(height: 16),
           // 标题
           //
@@ -309,27 +309,11 @@ class _BookDetailPageState extends State<BookDetailPage> {
             ),
           ],
           const SizedBox(height: 14),
-          // 元信息 chips
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (book.extension != null && book.extension!.isNotEmpty)
-                _chip(book.extension!.toUpperCase(), isDark, highlight: true),
-              if (book.year != null && book.year!.isNotEmpty)
-                _chip(book.year!, isDark),
-              if (book.language != null && book.language!.isNotEmpty)
-                _chip(book.language!, isDark),
-              if (book.filesizeString != null &&
-                  book.filesizeString!.isNotEmpty)
-                _chip(book.filesizeString!, isDark),
-              if (_pagesInt(book) > 0) _chip('${_pagesInt(book)} 页', isDark),
-              if (book.publisher != null && book.publisher!.isNotEmpty)
-                _chip(book.publisher!, isDark),
-              if (book.identifier != null && book.identifier!.isNotEmpty)
-                _chip('ISBN: ${book.identifier}', isDark),
-            ],
+          // 元信息标签：一行并排（EPUB / 年份 / 语言 / 大小 / 页数），
+          // 对齐参考样式；出版社 / ISBN 不再混在这一行（出版社单独在简介下方）
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: _metaChips(book, isDark),
           ),
           const SizedBox(height: 16),
           // 收藏 / 书架 / 阅读 / 下载 胶囊
@@ -349,9 +333,42 @@ class _BookDetailPageState extends State<BookDetailPage> {
             const SizedBox(height: 20),
             _buildSynopsis(desc, titleColor, secondaryColor),
           ],
+          // 出版社：单独一行，放在简介下方（对齐参考样式）
+          if (book.publisher != null && book.publisher!.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              book.publisher!,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                color: secondaryColor,
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  /// 元信息标签行：扩展名 / 年份 / 语言 / 大小 / 页数（一行并排，带间距）
+  List<Widget> _metaChips(Book book, bool isDark) {
+    final chips = <Widget>[
+      if (book.extension != null && book.extension!.isNotEmpty)
+        _chip(book.extension!.toUpperCase(), isDark, highlight: true),
+      if (book.year != null && book.year!.isNotEmpty)
+        _chip(book.year!, isDark),
+      if (book.language != null && book.language!.isNotEmpty)
+        _chip(book.language!, isDark),
+      if (book.filesizeString != null && book.filesizeString!.isNotEmpty)
+        _chip(book.filesizeString!, isDark),
+      if (_pagesInt(book) > 0) _chip('${_pagesInt(book)} 页', isDark),
+    ];
+    final out = <Widget>[];
+    for (var i = 0; i < chips.length; i++) {
+      if (i > 0) out.add(const SizedBox(width: 6));
+      out.add(chips[i]);
+    }
+    return out;
   }
 
   int _pagesInt(Book book) {
@@ -521,7 +538,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Text(
-          '简介',
+          '内容简介',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: AppTheme.fontHeadline,

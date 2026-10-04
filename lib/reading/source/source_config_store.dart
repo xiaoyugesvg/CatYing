@@ -31,6 +31,9 @@ const _kDocFileName = 'sources.json';
 const _kBundledSourcesPath = 'assets/config/sources.json';
 // 云端源迁移标记：升级到本版本时一次性清除本地源覆盖层（旧版本缓存/自定义）。
 const _kCloudOnlyMigrationDone = 'source_cloud_only_migration_done';
+// 用户主动「清空」标记：置位后 loadLocal 不再回退内置源（清空=彻底无源，
+// 直到云端更新 / 导入新源）。避免清空后内置源兜底回来，让"清空"看起来失效。
+const _kSourcesCleared = 'sources_cleared';
 
 class SourceConfigStore {
   SourceConfigStore._();
@@ -78,6 +81,18 @@ class SourceConfigStore {
       _log('文档目录配置读取失败: $e');
     }
 
+    // 用户主动「清空」过：文档目录无配置时也不再回退内置源，
+    // 保持无源状态（直到云端更新 / 导入新源）。
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(_kSourcesCleared) ?? false) {
+        _log('用户已清空漫画源，跳过内置源兜底');
+        return [];
+      }
+    } catch (e) {
+      _log('读取清空标记失败: $e');
+    }
+
     // 出厂内置源兜底：文档目录无配置（首次安装/清缓存后）时读 assets，
     // 保证装上即有源，无需用户手动导入。
     try {
@@ -103,7 +118,25 @@ class SourceConfigStore {
     final file = File('${dir.path}/$_kDocFileName');
     final fileObj = SourceConfigFile(version: 1, sources: defs);
     await file.writeAsString(jsonEncode(fileObj.toJson()));
+    // 有写入即视为用户重新拥有源配置：清除「已清空」标记，恢复内置兜底语义。
+    await clearClearedFlag();
     _log('已写入文档目录配置: ${defs.length} 源');
+  }
+
+  /// 标记「用户已清空漫画源」：此后 loadLocal 不回退内置源。
+  Future<void> markCleared() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kSourcesCleared, true);
+    _log('已标记清空漫画源（不回退内置源）');
+  }
+
+  /// 清除「已清空」标记（写入新配置 / 云端更新后调用）。
+  Future<void> clearClearedFlag() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_kSourcesCleared) ?? false) {
+      await prefs.setBool(_kSourcesCleared, false);
+      _log('已清除清空标记');
+    }
   }
 
   /// 删除文档目录覆盖层（清空云端缓存，回到无源状态）。

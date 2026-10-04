@@ -3948,17 +3948,17 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       child: Padding(
         // 顶栏避让状态栏（功能栏高度 contentH=38）：
         // - 竖屏内嵌（默认详情页播放器，pad.top>0）：外层（详情页）已垫
-        //   一条与状态栏等高的黑条，不重复加 pad.top，留 4px 呼吸，
+        //   一条与状态栏等高的黑条（已减半），不重复加 pad.top，留 4px 呼吸，
         //   并按用户要求整体再下移 **1 个功能栏高度**（+38）
-        // - 纯竖屏全屏（短剧/抖音，immersive 下 pad.top=0）：4px 呼吸 +
-        //   整体下移 **半个功能栏高度**（+19）
-        // - 横屏全屏（pad.top=0，iOS 横屏状态栏实际占据顶部约 24px）：
-        //   保持 24，不与状态栏时间/电量挤同一行
+        // - 纯竖屏全屏（短剧/抖音，immersive 下 pad.top=0）：贴顶，仅 8px
+        //   呼吸（总间距 = topBarTopPadding 8 + 8 = 16，用户既定 8+8=16）
+        // - 横屏全屏（pad.top=0）：16，比原 24 更贴顶，iOS 横屏状态栏
+        //   若与按钮挤行则回调
         padding: EdgeInsets.only(
           top: top +
               (pad.top > 0
                   ? 4 + 38
-                  : (_dramaMode || _douyinMode ? 4 + 19 : 24)),
+                  : (_dramaMode || _douyinMode ? 8 : 16)),
           left: 4 + pad.left,
           right: 4 + pad.right,
           bottom: 8,

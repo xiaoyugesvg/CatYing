@@ -219,13 +219,36 @@ class _FavoritesPageState extends State<FavoritesPage>
                     ? '图书收藏'
                     : (widget.comicOnly ? '漫画收藏' : '收藏')),
                 actions: [
-                  if (contentTabs.length < 2 &&
-                      !widget.bookOnly &&
-                      !widget.comicOnly)
+                  // 聚合模式（从漫画/图书/书源页 push 进来，showBackButton=true）：
+                  // 标题行在 AppBar 下方会隐藏，所以把漫画/图书切换胶囊 + 搜索按钮放进 AppBar
+                  if (!widget.bookOnly && !widget.comicOnly) ...[
+                    if (contentTabs.length >= 2)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: AnimatedBuilder(
+                          animation: _tabController.animation!,
+                          builder: (context, _) => JellySegmentedToggle(
+                            index: _tabController.animation!.value,
+                            onChanged: (i) => _tabController.animateTo(i),
+                            height: 36,
+                            segmentWidth: 40,
+                            segments: contentTabs
+                                .map(
+                                  (t) => JellySegmentData(
+                                    icon: t == NavTab.manga
+                                        ? Icons.palette_rounded
+                                        : Icons.book_rounded,
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ),
+                      ),
                     Padding(
                       padding: const EdgeInsets.only(right: 12),
                       child: _buildSearchButton(size: 36),
                     ),
+                  ],
                 ],
               )
             : null,

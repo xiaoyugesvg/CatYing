@@ -716,7 +716,9 @@ class _DetailPageState extends State<DetailPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 0. 状态栏高度黑边（与直播播放器上方一致）
+            // 0. 状态栏高度黑边（与直播播放器上方一致）——高度减半：
+            //   仍覆盖状态栏区域发浅色图标，但不再厚厚一条，
+            //   顶栏与状态栏之间更紧凑（播放器顶栏自带下推间距，不重叠）
             if (topBar > 0)
               // 这一条正好覆盖状态栏区域 → 发浅色图标。
               // 本页刻意不放 AppBar（见 Scaffold 上方注释），没有 AppBar
@@ -725,7 +727,7 @@ class _DetailPageState extends State<DetailPage> {
               AnnotatedRegion<SystemUiOverlayStyle>(
                 value: SystemUiOverlayStyle.light,
                 child: SizedBox(
-                  height: topBar,
+                  height: topBar / 2,
                   child: const ColoredBox(color: Colors.black),
                 ),
               ),

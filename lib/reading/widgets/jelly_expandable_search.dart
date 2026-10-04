@@ -29,6 +29,10 @@ class JellyExpandableSearch extends StatefulWidget {
     /// 胶囊高度（默认 36，不超过同排圆钮图标高度；可整体调大）
     this.height = 36,
 
+    /// 胶囊最大宽度（默认 null 不限；顶栏 Expanded 撑开时用于控制长度，
+    /// 传值后内部 Align+ConstrainedBox 生效，不会与 Expanded 的 tight 约束冲突）
+    this.maxWidth,
+
     /// 外部 controller（搜索历史/联动用）；不传则内部自建
     this.controller,
 
@@ -48,6 +52,7 @@ class JellyExpandableSearch extends StatefulWidget {
   final ValueChanged<String> onSubmitted;
   final String hintText;
   final double height;
+  final double? maxWidth;
   final TextEditingController? controller;
   final ValueChanged<bool>? onFocusChange;
   final ValueChanged<String>? onChanged;
@@ -99,26 +104,24 @@ class _JellyExpandableSearchState extends State<JellyExpandableSearch> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bg = isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
+    // 底色与页面背景一致（用户要求去掉"灰色长条"）：透明底 + 细边框
+    // 保持可辨识，不再用卡片色 + 阴影。
     final fg = isDark ? Colors.white : JellyTheme.textPrimaryLight;
     final hintColor = JellyTheme.textSecondary;
     final h = widget.height;
 
-    return SizedBox(
+    final searchBar = SizedBox(
       height: h,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: bg,
+          color: Colors.transparent,
           borderRadius: BorderRadius.circular(h / 2),
-          boxShadow: [
-            BoxShadow(
-              color: isDark
-                  ? Colors.black.withValues(alpha: 0.30)
-                  : Colors.black.withValues(alpha: 0.06),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.18)
+                : Colors.black.withValues(alpha: 0.12),
+            width: 1,
+          ),
         ),
         child: Row(
           children: [
@@ -175,5 +178,18 @@ class _JellyExpandableSearchState extends State<JellyExpandableSearch> {
         ),
       ),
     );
+
+    // 顶栏 Expanded 撑开时用 maxWidth 限制胶囊长度（Align 转 loose 约束，
+    // 否则 ConstrainedBox 会被 Expanded 的 tight 宽度吞掉）
+    if (widget.maxWidth != null) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: widget.maxWidth!),
+          child: searchBar,
+        ),
+      );
+    }
+    return searchBar;
   }
 }

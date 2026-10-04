@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 import '../../widgets/common_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
@@ -99,6 +100,8 @@ class _BookSearchPageState extends State<BookSearchPage>
   List<Book> _recBooks = [];
   bool _recLoading = false;
   bool _recFailed = false;
+  /// 推荐流来源：false = z-library 首页热门；true = zlib 失败后的豆瓣热门榜兜底
+  bool _recIsDouban = false;
 
   ScrollController get _activeScrollController =>
       _tabController.index == 0 ? _gridScrollController : _listScrollController;
@@ -214,7 +217,8 @@ class _BookSearchPageState extends State<BookSearchPage>
 
   /// 拉取 z-library 首页推荐（走当前节点域名）作图书主页推荐流。
   ///
-  /// 失败静默（只置 _recFailed），不阻塞搜索/分类等其它入口。
+  /// 失败静默（只置 _recFailed），不阻塞搜索/分类等其它入口；
+  /// zlib 拉不到时自动切豆瓣「热门榜」兜底，保证主页有推荐可看。
   Future<void> _loadRecommendations() async {
     if (_recLoading) return;
     _recLoading = true;
@@ -226,13 +230,73 @@ class _BookSearchPageState extends State<BookSearchPage>
       setState(() {
         _recBooks = result.items;
         _recFailed = result.items.isEmpty;
+        _recIsDouban = false;
       });
     } catch (e) {
       _log('首页推荐拉取失败: $e');
-      if (mounted) setState(() => _recFailed = true);
+      if (!mounted) return;
+      // zlib 失败 → 豆瓣热门榜兜底
+      await _loadDoubanFallback();
     } finally {
       _recLoading = false;
       if (mounted) setState(() {});
+    }
+  }
+
+  /// z-library 推荐失败时的兜底：拉豆瓣「热门榜」（book_hot）填充推荐区。
+  /// 豆瓣条目没有 zlib 的下载/阅读数据，点击走「去找书？」跳书源搜索。
+  Future<void> _loadDoubanFallback() async {
+    if (!mounted) return;
+    try {
+      final dio = Dio(BaseOptions(
+        headers: {
+          'User-Agent':
+              'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+                  'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
+                  'Mobile/15E148 Safari/604.1',
+          'Referer': 'https://m.douban.com/book/chart/',
+        },
+        connectTimeout: const Duration(seconds: 12),
+        receiveTimeout: const Duration(seconds: 12),
+      ));
+      final r = await dio.get(
+        'https://m.douban.com/rexxar/api/v2/subject_collection/book_hot/items',
+        queryParameters: {'start': 0, 'count': 20},
+      );
+      final raw = (r.data is Map)
+          ? (r.data as Map)['subject_collection_items']
+          : null;
+      final books = <Book>[];
+      if (raw is List) {
+        for (final e in raw) {
+          if (e is! Map) continue;
+          final j = e.cast<String, dynamic>();
+          final title = (j['title'] ?? '').toString().trim();
+          if (title.isEmpty) continue;
+          var cover = '';
+          final c = j['cover'];
+          if (c is String) cover = c;
+          if (c is Map) cover = (c['url'] ?? '').toString();
+          books.add(Book(
+            id: 'douban:${title.hashCode}',
+            hash: '',
+            title: title,
+            author: (j['card_subtitle'] ?? '').toString().trim(),
+            cover: cover,
+            description: (j['description'] ?? '').toString().trim(),
+          ));
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _recBooks = books;
+        _recIsDouban = books.isNotEmpty;
+        _recFailed = books.isEmpty;
+      });
+      _log('豆瓣兜底推荐: ${books.length} 本');
+    } catch (e) {
+      _log('豆瓣兜底推荐失败: $e');
+      if (mounted) setState(() => _recFailed = true);
     }
   }
 
@@ -603,6 +667,50 @@ class _BookSearchPageState extends State<BookSearchPage>
     }
   }
 
+  /// 推荐区点击：豆瓣兜底条目（无 zlib 数据）→ 弹「去找书？」跳书源搜索；
+  /// zlib 推荐直接进详情。
+  void _onRecTap(Book book) {
+    if (_recIsDouban) {
+      _confirmGoSearch(book.title);
+    } else {
+      _openDetail(book);
+    }
+  }
+
+  /// 「去找书？」确认框（与豆瓣排行页同款）：确认后按书名跳书源搜索。
+  Future<void> _confirmGoSearch(String title) async {
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Text(
+          '去找书？\n跳转到图书搜索，按书名「$title」搜索',
+          textAlign: TextAlign.center,
+          style: const TextStyle(height: 1.5),
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('去搜索'),
+          ),
+        ],
+      ),
+    );
+    if (go == true && mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => BookSearchPage(initialKeyword: title),
+        ),
+      );
+    }
+  }
+
   void _openDetail(Book book) async {
     FocusScope.of(context).unfocus(); // 进详情前先收起键盘与历史弹层
     // 分类页来源（hash 是 dl/{slug}，无 eapi hash）：先搜索匹配 bookId 拿 eapi hash
@@ -769,10 +877,33 @@ class _BookSearchPageState extends State<BookSearchPage>
                           // 垂直错位、圆环还会探出压到搜索框上。
                           height: 40,
                           tooltip: '书源',
+                          // 拉窗帘进入书源页：页面从顶部往下覆盖出现（窗帘放下），
+                          // 返回时反向往上收起（窗帘拉回）
                           onTap: () => Navigator.push(
                             context,
-                            MaterialPageRoute(
-                              builder: (_) => const BookSourceSearchPage(),
+                            PageRouteBuilder(
+                              transitionDuration: const Duration(
+                                milliseconds: 380,
+                              ),
+                              reverseTransitionDuration: const Duration(
+                                milliseconds: 320,
+                              ),
+                              pageBuilder: (_, __, ___) =>
+                                  const BookSourceSearchPage(),
+                              transitionsBuilder: (_, animation, __, child) {
+                                final curved = CurvedAnimation(
+                                  parent: animation,
+                                  curve: Curves.easeOutCubic,
+                                  reverseCurve: Curves.easeInCubic,
+                                );
+                                return SlideTransition(
+                                  position: Tween<Offset>(
+                                    begin: const Offset(0, -1),
+                                    end: Offset.zero,
+                                  ).animate(curved),
+                                  child: child,
+                                );
+                              },
                             ),
                           ),
                         ),
@@ -817,9 +948,8 @@ class _BookSearchPageState extends State<BookSearchPage>
                               onTap: () => Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  // 图书足迹页（参考图 IMG_8398）
-                                  builder: (_) => const BrowseHistoryPage(
-                                      showTabs: false, bookOnly: true),
+                                  // 历史统一界面：漫画/图书聚合（showTabs 默认 true）
+                                  builder: (_) => const BrowseHistoryPage(),
                                 ),
                               ),
                             ),
@@ -829,9 +959,9 @@ class _BookSearchPageState extends State<BookSearchPage>
                               onTap: () => Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  // 图书页进收藏 → 图书收藏独立页（参考图 IMG_8395）
+                                  // 收藏统一界面：漫画/图书聚合 + 返回按钮
                                   builder: (_) =>
-                                      const FavoritesPage(bookOnly: true),
+                                      const FavoritesPage(showBackButton: true),
                                 ),
                               ),
                             ),
@@ -888,6 +1018,7 @@ class _BookSearchPageState extends State<BookSearchPage>
     return JellyExpandableSearch(
       controller: _searchController,
       hintText: '搜索图书',
+      maxWidth: 240,
       onFocusChange: (f) => setState(() {
         if (f && _searchController.text.isEmpty) {
           _historyVisible = true;
@@ -1315,7 +1446,9 @@ class _BookSearchPageState extends State<BookSearchPage>
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      'Z-Library 首页热门',
+                      _recIsDouban
+                          ? '豆瓣热门榜（z-library 暂不可用）'
+                          : 'Z-Library 最受欢迎',
                       style: TextStyle(
                           fontSize: AppTheme.fontFootnote,
                           color: JellyTheme.textSecondary),
@@ -1354,7 +1487,7 @@ class _BookSearchPageState extends State<BookSearchPage>
                       book: book,
                       isGrid: true,
                       heroTag: bookCoverHeroTag('rec', book),
-                      onTap: () => _openDetail(book),
+                      onTap: () => _onRecTap(book),
                     );
                   },
                   childCount: _recBooks.length,

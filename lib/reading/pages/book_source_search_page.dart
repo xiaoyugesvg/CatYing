@@ -167,6 +167,29 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
     setState(() => _searching = false);
   }
 
+  /// 把 Node 引擎透传的原始异常文本转成简短中文提示（用户可读）。
+  String _friendlyError(String raw) {
+    if (raw.contains('status code of 500')) {
+      return '该源分类接口返回服务器错误（HTTP 500）：接口可能失效或被源站拒绝，请换一个书源或更新书源配置';
+    }
+    if (raw.contains('status code of 404')) {
+      return '该源分类接口不存在（HTTP 404）：书源 exploreUrl 已失效，请更新书源';
+    }
+    if (raw.contains('status code of 403')) {
+      return '该源拒绝了访问（HTTP 403）：可能需要登录或请求头，请换源';
+    }
+    if (raw.contains('Connection timed out') ||
+        raw.contains('timed out') ||
+        raw.contains('SocketException')) {
+      return '连接超时：源站响应太慢，请重试或换源';
+    }
+    final m = RegExp(r'status code of (\d+)').firstMatch(raw);
+    if (m != null) {
+      return '该源分类接口返回 HTTP ${m.group(1)} 错误：接口失效或源站拒绝，请换源或更新书源';
+    }
+    return raw.length > 60 ? '${raw.substring(0, 60)}…' : raw;
+  }
+
   /// 切到某个源后：未搜索时加载该源的分类浏览（exploreUrl）。
   Future<void> _loadExploreIfNeeded() async {
     if (_selectedSourceId.isEmpty) {
@@ -202,7 +225,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
     if (!r.ok || r.categories.isEmpty) {
       setState(() {
         _exploreLoading = false;
-        _exploreError = r.error ?? '该源没有配置分类浏览';
+        _exploreError = _friendlyError(r.error ?? '该源没有配置分类浏览');
       });
       return;
     }
@@ -229,7 +252,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       if (r.ok) {
         _exploreList = r.list;
       } else {
-        _exploreError = r.error ?? '加载分类失败';
+        _exploreError = _friendlyError(r.error ?? '加载分类失败');
       }
     });
   }
@@ -342,9 +365,8 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
-                    // 与图书共用的足迹页
-                    builder: (_) => const BrowseHistoryPage(
-                        showTabs: false, bookOnly: true),
+                    // 历史统一界面：漫画/图书聚合（showTabs 默认 true）
+                    builder: (_) => const BrowseHistoryPage(),
                   ),
                 ),
               ),
@@ -354,8 +376,8 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
-                    // 与图书共用的图书收藏页
-                    builder: (_) => const FavoritesPage(bookOnly: true),
+                    // 收藏统一界面：漫画/图书聚合 + 返回按钮
+                    builder: (_) => const FavoritesPage(showBackButton: true),
                   ),
                 ),
               ),
@@ -606,6 +628,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
     return JellyExpandableSearch(
       controller: _ctrl,
       hintText: '搜索书源图书',
+      maxWidth: 240,
       onSubmitted: (value) => _run(value),
       onChanged: (value) => setState(() {}),
       trailing: _searching
