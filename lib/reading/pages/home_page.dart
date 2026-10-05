@@ -21,6 +21,7 @@ import '../widgets/bookshelf_icon.dart';
 import '../widgets/jelly_nav_bar.dart';
 import '../widgets/notification_popup.dart';
 import '../widgets/theme_background.dart';
+import 'shell_embedded_page.dart';
 import 'book_reader_page.dart';
 import 'book_search_page.dart';
 import 'bookshelf_page.dart';
@@ -378,7 +379,16 @@ class _HomePageState extends State<HomePage> {
                 children: [
                   const NotificationPopup(),
                   Expanded(
-                    child: IndexedStack(index: currentIndex, children: pages),
+                    // ✅ **内嵌子页优先，且底栏始终由外壳渲染**（本轮重构 ✓）
+                    //   来源 = `shell_embedded_page.dart` 的全局 `ValueNotifier` ✓
+                    //   ⇒ 书源页 / 搜索页用它打开（不再 `Navigator.push` 全屏 ✗）
+                    //     ⇒ **底部胶囊导航栏照常显示** ✓✓（与漫画/图书页一致 ✓）
+                    child: ValueListenableBuilder<Widget?>(
+                      valueListenable: shellEmbeddedPage,
+                      builder: (_, embedded, __) =>
+                          embedded ??
+                          IndexedStack(index: currentIndex, children: pages),
+                    ),
                   ),
                 ],
               ),

@@ -57,7 +57,7 @@ class _XimalayaCategoryPageState extends State<XimalayaCategoryPage> {
       // push 出来的页面不在 `MusicRootView` 的音乐主题作用域内 ✗ →
       // 不显式指定会回落影视配色；与「我的歌单 / 喜马拉雅专辑」同做法 ✓
       backgroundColor: MusicTheme.background,
-      appBar: AppBar(title: const Text('有声书')),
+      appBar: AppBar(title: const Text('喜马拉雅')),
       body: _loading
           ? Center(
               child: SizedBox(
@@ -300,7 +300,7 @@ class _AlbumGridCard extends StatelessWidget {
           const SizedBox(height: 2),
           // Beans 的副标题就是「平台 · 作者」两段式
           Text(
-            '喜马拉雅 · ${artist.isEmpty ? '有声书' : artist}',
+            '喜马拉雅 · ${artist.isEmpty ? '主播' : artist}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(color: MusicTheme.secondary, fontSize: 11),

@@ -1192,13 +1192,25 @@ class ZlibraryService extends ChangeNotifier {
     //   全部失败/为空才**落到**下面的 WebView+HTML 逻辑 ✓（**原样保留** ✓ 双保险 ✓）。
     // 端点顺序 ✓：`most-popular`（最受欢迎 ✓ 对应你截图的区块）→ `popular` → `recent` ✓
     //   ℹ️ 未知端点会返回 404/空 ✓ 不会误判成成功 ✓（有 `items.isNotEmpty` 这道闸 ✓）
+    // ✅ **端点与请求方式都已按官方文档校正**（本轮 ✓ 依据：
+    //   https://github.com/baroxyton/zlibrary-eapi-documentation ✓ 这是 z-library Android App
+    //   的 eapi 文档 ✓ —— 它明确写着 **`/eapi/book/most-popular`（GET）** ✓✓）：
+    //   · `/eapi/book/most-popular`（**GET** ✓）← 首页「**最受欢迎**」✓（你截图那个区块 ✓）
+    //   · `/eapi/book/recently`（**GET** ✓）   ← 「最近更新」✓
+    //   · `/eapi/user/book/recommended`（**GET** ✓）← 「推荐」（需登录 ✓ 未登录会失败 → 跳过 ✓）
+    //   ⚠️ **上轮我写错了两处** ✗（在此更正 ✓）：
+    //      ① 用了 `_post(...)`（POST+body）✗ —— 而这三个都是 **GET** ✓ ⇒ 必然失败 ✗✓
+    //      ② 猜的 `/eapi/book/popular` ✗ 与 `/eapi/book/recent` ✗ **都不存在** ✓
+    //         真实是 `most-popular` ✓ 与 `recently` ✓（差一个字母 ✓）
+    //   ℹ️ 文档另注 ✓：请求**必须带 User-Agent** ✓（本服务已有 ✓）；
+    //      账号类端点需 `remix-userid`/`remix-userkey` 头 ✓（本服务 `_cookies(...)` 已处理 ✓）
     for (final path in const [
       '/eapi/book/most-popular',
-      '/eapi/book/popular',
-      '/eapi/book/recent',
+      '/eapi/book/recently',
+      '/eapi/user/book/recommended',
     ]) {
       try {
-        final res = await _post(path, data: {'page': page, 'limit': 24});
+        final res = await _get(path); // ← **GET**（不是 _post ✗）
         final parsed = _parseSearch(res);
         if (parsed.items.isNotEmpty) {
           _log('首页推荐：接口 $path 命中 ${parsed.items.length} 条（走 eapi ✓）');

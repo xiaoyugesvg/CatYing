@@ -6,13 +6,16 @@ import '../services/music_api.dart';
 import '../services/player_manager.dart';
 import '../services/settings_store.dart';
 import '../theme/music_theme.dart';
+import '../theme/discover_preset.dart';
 import '../widgets/music_components.dart';
+import '../widgets/discover_sections.dart';
 import 'playlist_detail_page.dart';
 import 'ximalaya_album_page.dart';
 import '../../widgets/app_page_loading.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/app_empty_view.dart';
 import '../../common/theme.dart';
+import '../../services/app_log.dart';
 
 /// 发现页（主页）—— 支持多平台：网易云 / 酷狗 / 喜马拉雅
 ///
@@ -42,8 +45,30 @@ class _DiscoverPageState extends State<DiscoverPage>
   List<String> _cats = const ['全部'];
   String _cat = '全部';
 
+  /// 发现页视觉预设（aurora / paper / midnight）。
+  ///
+  /// ⚠️ 它是**页面自己的偏好**，不覆盖全局主题 ——
+  /// 颜色仍全部来自 `MusicTheme`，预设只决定背景与卡片材质。
+  DiscoverPreset _preset = DiscoverPreset.aurora;
+
   // QQ 音乐（公开接口）：热搜关键词
   List<String> _hotKeywords = const [];
+
+  /// QQ 排行榜（免登录可拿，实测 30 个榜单）
+  List<TopList> _qqTopLists = const [];
+
+  /// QQ 歌单广场（免登录可拿，实测 20 个歌单）
+  List<Playlist> _qqSquare = const [];
+
+  /// QQ 歌单广场分类名（实测 40 个）。
+  ///
+  /// ⚠️ **只用来展示"有哪些分类"，不做切换** ——
+  /// QQ 的 `categoryId` 是**数字**（如 10000000=全部），而 Dart 侧
+  /// `playlistCatlist()` 的返回被设计成**名字列表**（网易云/酷狗用名字）。
+  /// 名字 → 数字 id 的映射在 Node 侧没暴露，所以硬做切换会把 id 猜错 →
+  /// 用户点了"华语"却拿到"全部"（**假功能**）。
+  /// 宁可不给切换，也不要给一个点了没用的按钮。
+  List<String> _qqCats = const [];
 
   /// QQ「热门歌手」—— **从热搜词搜出的歌里派生的真实歌手名**。
   ///
@@ -67,6 +92,8 @@ class _DiscoverPageState extends State<DiscoverPage>
   void initState() {
     super.initState();
     _source = SettingsStore.instance.musicSource.value;
+    // 视觉预设：读上次选的（默认 aurora）
+    _preset = SettingsStore.instance.discoverPreset;
     _loadAll();
   }
 
@@ -114,6 +141,30 @@ class _DiscoverPageState extends State<DiscoverPage>
     _hotKeywords = h.ok ? h.list : const [];
     // 热搜失败不阻塞页面（搜索/播放仍可用）
     if (!h.ok) _error = h.error;
+
+    // ── QQ 的免登录发现页数据（排行榜 / 歌单广场 / 分类）─────────
+    //
+    // ⚠️ 这三样**免登录就能拿**（已实测 HTTP 200），
+    //    与"播放地址"完全不同（那个必须 QQ 登录 Cookie）。
+    //    文案上必须说清这个区别，否则用户会以为"既然能看到榜单，
+    //    那应该也能播" → 点了播放失败 → 以为 App 坏了。
+    try {
+      final results = await Future.wait([
+        api.topLists(source: SongSource.qq),
+        // ⚠️ Dart 侧 `playlistSquare` 的参数是 **`cat`（分类名）**，
+        //    QQ 的 Node 实现会把它当 categoryId 解析 ——
+        //    不传时用 "全部"（Node 侧会兜底成 10000000）。
+        api.playlistSquare(cat: '全部', limit: 12, source: SongSource.qq),
+        api.playlistCatlist(source: SongSource.qq),
+      ]);
+      if (!mounted) return;
+      _qqTopLists = results[0] as List<TopList>;
+      _qqSquare = results[1] as List<Playlist>;
+      _qqCats = (results[2] as List<String>).take(20).toList();
+    } catch (e) {
+      // 免登录接口失败不该阻塞整页（热搜/搜索仍可用）
+      AppLog.instance.log('[Discover] QQ 发现页数据加载失败: $e');
+    }
 
     // ── 派生"热门歌手"行 ────────────────────────────────────────
     //
@@ -221,24 +272,37 @@ class _DiscoverPageState extends State<DiscoverPage>
     if (_loading) {
       return AppPageLoading(color: MusicTheme.tint);
     }
-    return RefreshIndicator(
-      color: MusicTheme.tint,
-      onRefresh: _loadAll,
-      child: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(child: _header()),
-          SliverToBoxAdapter(child: _sourceTabs()),
-          // Beans 主页顶部是**两张并排大卡**（每日推荐 / 私人漫游）。
-          // 这里映射到**真实可用**的功能，不做假入口：
-          //   · 每日推荐 → 直接播当天「新歌速递」
-          //   · 私人漫游 → 从「我的收藏」随机漫游（没收藏就明确提示）
-          SliverToBoxAdapter(child: _bigCards()),
-          if (_error.isNotEmpty)
-            SliverToBoxAdapter(child: _errorBox()),
-          ..._buildSections(),
-          const SliverToBoxAdapter(child: SizedBox(height: 150)),
-        ],
-      ),
+    // ── 视觉预设：决定背景与卡片材质（**颜色仍全从全局主题派生**）──
+    //
+    // 见 `discover_preset.dart` 的说明：预设只改"怎么画"，
+    // 不改配色，所以三套预设 + 7 套全局主题 + 明暗 都能正确组合。
+    final style = DiscoverStyle.of(_preset);
+    return Stack(
+      children: [
+        // 背景层铺满，且**不吃触摸**
+        Positioned.fill(
+          child: DiscoverBackdrop(style: style),
+        ),
+        RefreshIndicator(
+          color: style.accent,
+          onRefresh: _loadAll,
+          child: CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(child: _header(style)),
+              SliverToBoxAdapter(child: _sourceTabs(style)),
+              // Beans 主页顶部是**两张并排大卡**（每日推荐 / 私人漫游）。
+              // 这里映射到**真实可用**的功能，不做假入口：
+              //   · 每日推荐 → 直接播当天「新歌速递」
+              //   · 私人漫游 → 从「我的收藏」随机漫游（没收藏就明确提示）
+              SliverToBoxAdapter(child: _bigCards(style)),
+              if (_error.isNotEmpty)
+                SliverToBoxAdapter(child: _errorBox()),
+              ..._buildSections(style),
+              const SliverToBoxAdapter(child: SizedBox(height: 150)),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -250,7 +314,7 @@ class _DiscoverPageState extends State<DiscoverPage>
   // 顶部两张并排大卡（对齐 Beans 主页排版）
   // ============================================================
 
-  Widget _bigCards() {
+  Widget _bigCards(DiscoverStyle style) {
     // ── 这两张卡依赖"新歌速递"和"收藏"──────────────────────────
     // 新歌速递（`newSongs`）在 QQ / 喜马拉雅下**不可用**
     // （QQ 侧 Node 明确返回 ok:false，需要登录态）。
@@ -387,90 +451,7 @@ class _DiscoverPageState extends State<DiscoverPage>
     favs.shuffle();
     MusicPlayerManager.instance.playQueue(favs, index: 0);
   }
-
-  /// 排行榜卡（对齐 Beans 原版）：
-  ///   封面（1:1）**上面叠榜单名的大字** → 卡下：名称 + 更新频率。
-  ///
-  /// 说明为什么这里出现 `Colors.white`：封面上的叠字必须靠**图片对比**保证
-  /// 可读性（Beans 也是这么做的），主题色在任意封面上都可能读不清 ——
-  /// 这属于"图上文字"，不是页面配色，所以不违反"外观系统不变"。
-  Widget _rankCard(TopList t) {
-    final freq = (t.updateFrequency ?? '').trim();
-    return GestureDetector(
-      onTap: () => openPlaylist(context, t.id, t.name, source: _source),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AspectRatio(
-            aspectRatio: 1,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  LayoutBuilder(
-                    builder: (c, cons) => CoverImage(
-                      url: t.coverUrl,
-                      size: cons.maxWidth,
-                      cornerRadius: 0,
-                    ),
-                  ),
-                  // 底部压暗，保证叠字可读
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.50),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 8,
-                    right: 8,
-                    bottom: 8,
-                    child: Text(
-                      t.name,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        height: 1.15,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(t.name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  color: MusicTheme.label,
-                  fontSize: AppTheme.fontFootnote,
-                  fontWeight: FontWeight.w600,
-                  height: 1.2)),
-          if (freq.isNotEmpty) ...[
-            const SizedBox(height: 2),
-            Text(freq,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    color: MusicTheme.secondary, fontSize: 11)),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _header() {
+  Widget _header(DiscoverStyle style) {
     final h = DateTime.now().hour;
     final greet = h < 6
         ? '夜深了'
@@ -492,31 +473,58 @@ class _DiscoverPageState extends State<DiscoverPage>
               children: [
                 Text(greet,
                     style: TextStyle(
-                        color: MusicTheme.label,
+                        color: style.primary,
                         fontSize: AppTheme.fontPageTitle,
                         fontWeight: FontWeight.w700)),
                 const SizedBox(height: 2),
                 Text(
+                  // 副标题：不同来源给不同的引导语
+                  //（原来这里三元两支**完全一样**，是死代码，一并修掉）
                   _source == SongSource.ximalaya
-                      ? '今天想听点什么？'
+                      ? '有声书与播客，听点想听的'
                       : '今天想听点什么？',
                   style: TextStyle(
-                      color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead),
+                      color: style.secondary, fontSize: AppTheme.fontSubhead),
                 ),
               ],
             ),
           ),
+          // ── 视觉预设切换（三套：青碧玻璃 / 纸感 / 午夜）──────────
+          //
+          // ⚠️ 放在标题右侧而不是设置页深处：它是**浏览时的即时观感**，
+          // 用户想边看边切，不该为了换皮肤去翻设置。
+          GestureDetector(
+            onTap: () => _pickPreset(style),
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: style.cardFill.withValues(alpha: style.fillAlpha),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: style.primary.withValues(alpha: 0.10),
+                  width: 0.8,
+                ),
+              ),
+              child: Icon(Icons.auto_awesome_outlined,
+                  color: style.primary, size: 19),
+            ),
+          ),
+          const SizedBox(width: 8),
           GestureDetector(
             onTap: () => _openSearchAll(),
             child: Container(
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: MusicTheme.fill,
+                color: style.cardFill.withValues(alpha: style.fillAlpha),
                 shape: BoxShape.circle,
+                border: Border.all(
+                  color: style.primary.withValues(alpha: 0.10),
+                  width: 0.8,
+                ),
               ),
-              child: Icon(Icons.search_rounded,
-                  color: MusicTheme.label, size: 21),
+              child: Icon(Icons.search_rounded, color: style.primary, size: 21),
             ),
           ),
         ],
@@ -525,49 +533,159 @@ class _DiscoverPageState extends State<DiscoverPage>
   }
 
   /// 平台切换胶囊（和搜索页同款）
-  Widget _sourceTabs() {
+  /// 平台切换器 —— **等宽分段胶囊**（对齐 Beans 的 providerPicker）。
+  ///
+  /// ── 与旧版的差别（照 Beans 规格抄的）─────────────────────────
+  /// 旧版：一排不定宽的小胶囊，选中项填 `MusicTheme.tint` 纯色。
+  /// Beans：**外层一个大胶囊**，里面各平台**等宽分段**，
+  ///        选中段填**实心胶囊**（Beans 用平台品牌色）。
+  ///
+  /// ── 🔴 我**故意没用平台品牌色**（这是与 Beans 的唯一偏离）──────
+  /// Beans 给网易云红 / QQ 绿 / 酷狗蓝。但那意味着
+  /// **切到 QQ 时整个选择器是绿的，而页面其它地方还是主题色** ——
+  /// 用户明确要求"整体外观和主题系统统一"，三个品牌色会直接破坏它
+  ///（尤其全局主题换成紫色系时，红/绿/蓝三色并排会很花）。
+  ///
+  /// 所以这里**统一用 `style.accent`（= 全局主题主色）**，
+  /// 靠**等宽分段 + 实心胶囊 + 白字**来体现"选中"，
+  /// 不引入任何写死的色值。
+  Widget _sourceTabs(DiscoverStyle style) {
     final tabs = const [
       _SourceTab(source: SongSource.netease, label: '网易云'),
       _SourceTab(source: SongSource.qq, label: 'QQ音乐'),
       _SourceTab(source: SongSource.kugou, label: '酷狗'),
-      _SourceTab(source: SongSource.ximalaya, label: '有声书'),
+      _SourceTab(source: SongSource.ximalaya, label: '喜马拉雅'),
     ];
+    final isPaper = style.preset == DiscoverPreset.paper;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-      child: Row(
-        children: [
-          for (final t in tabs)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: GestureDetector(
-                onTap: () => _switchSource(t.source),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: _source == t.source
-                        ? MusicTheme.tint
-                        : MusicTheme.fill,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Text(
-                    t.label,
-                    style: TextStyle(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          // 玻璃系用半透明底 + 描边；paper 用实心卡片色
+          color: isPaper
+              ? style.cardFill
+              : style.cardFill.withValues(alpha: style.fillAlpha),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: style.primary.withValues(alpha: isPaper ? 0.07 : 0.10),
+            width: 0.8,
+          ),
+        ),
+        child: Row(
+          children: [
+            for (final t in tabs)
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _switchSource(t.source),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    decoration: BoxDecoration(
+                      // 选中 = 实心主题色胶囊；未选 = 透明
                       color: _source == t.source
-                          ? Colors.white
-                          : MusicTheme.label,
-                      fontSize: AppTheme.fontCaption,
-                      fontWeight: _source == t.source
-                          ? FontWeight.w600
-                          : FontWeight.w400,
+                          ? style.accent
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      t.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: _source == t.source
+                            ? Colors.white
+                            : style.secondary,
+                        fontSize: AppTheme.fontSubhead,
+                        fontWeight: _source == t.source
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
+  }
+
+  /// 选视觉预设（底部弹窗，三选一 + 一句话说明）
+  Future<void> _pickPreset(DiscoverStyle style) async {
+    final picked = await showModalBottomSheet<DiscoverPreset>(
+      context: context,
+      backgroundColor: MusicTheme.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('发现页外观',
+                      style: TextStyle(
+                          color: MusicTheme.label,
+                          fontSize: AppTheme.fontTitle3,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  Text(
+                    // ⚠️ 这句是**必须的**：用户会以为换预设 = 换主题。
+                    // 说清"只改背景与卡片材质，配色仍跟全局主题"，
+                    // 否则他会去报告"换了预设颜色没变"的假 bug。
+                    '只影响发现页的背景与卡片材质；配色仍跟随全局主题（设置 → 主题与外观）。',
+                    style: TextStyle(
+                        color: MusicTheme.secondary,
+                        fontSize: AppTheme.fontCaption,
+                        height: 1.45),
+                  ),
+                ],
+              ),
+            ),
+            for (final p in DiscoverPreset.values)
+              ListTile(
+                leading: Icon(
+                  switch (p) {
+                    DiscoverPreset.aurora => Icons.blur_on_rounded,
+                    DiscoverPreset.paper => Icons.layers_outlined,
+                    DiscoverPreset.midnight => Icons.nightlight_round,
+                  },
+                  color: p == _preset ? style.accent : MusicTheme.secondary,
+                ),
+                title: Text(p.label,
+                    style: TextStyle(color: MusicTheme.label)),
+                subtitle: Text(
+                  switch (p) {
+                    DiscoverPreset.aurora => '氛围光斑 + 粒子，玻璃质感',
+                    DiscoverPreset.paper => '纯色底 + 实心卡片，最省电',
+                    DiscoverPreset.midnight => '深色渐变舞台',
+                  },
+                  style: TextStyle(
+                      color: MusicTheme.secondary,
+                      fontSize: AppTheme.fontCaption),
+                ),
+                trailing: p == _preset
+                    ? Icon(Icons.check_rounded, color: style.accent, size: 20)
+                    : null,
+                onTap: () => Navigator.pop(ctx, p),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _preset = picked);
+    // 持久化（下次进发现页保持）
+    await SettingsStore.instance.setDiscoverPreset(picked);
   }
 
   void _openSearchAll() {
@@ -606,14 +724,14 @@ class _DiscoverPageState extends State<DiscoverPage>
   // 版块
   // ============================================================
 
-  List<Widget> _buildSections() {
+  List<Widget> _buildSections(DiscoverStyle style) {
     if (_source == SongSource.ximalaya) {
       return _buildXimalayaSections();
     }
     if (_source == SongSource.qq) {
       return _buildQQSections();
     }
-    return _buildMusicSections();
+    return _buildMusicSections(style);
   }
 
   /// QQ 音乐板块。
@@ -752,7 +870,97 @@ class _DiscoverPageState extends State<DiscoverPage>
       ));
     }
 
-    // ── 能力说明（QQ 没有排行榜/歌单，说清楚而不是留空）────────
+    // ── QQ 排行榜（**免登录可拿**，实测 30 个榜单）──────────────
+    //
+    // ⚠️ 点进去必须用 `isTopList: true` —— QQ 的 topId 不是歌单 id，
+    //    用歌单接口查会得到空列表（实测 topListSongs 5 条 / playlistDetail 0 条）。
+    if (_qqTopLists.isNotEmpty) {
+      out.add(const SliverToBoxAdapter(child: SectionTitle(title: '排行榜')));
+      out.add(SliverToBoxAdapter(
+        child: RankListCard(
+          style: _presetStyle(),
+          items: _qqTopLists,
+          onTap: (t) => openPlaylist(
+            context,
+            t.id,
+            t.name,
+            source: SongSource.qq,
+            isTopList: true,
+          ),
+        ),
+      ));
+    }
+
+    // ── QQ 歌单广场（**免登录可拿**，实测 20 个歌单）────────────
+    if (_qqSquare.isNotEmpty) {
+      out.add(const SliverToBoxAdapter(
+          child: SectionTitle(title: 'QQ歌单广场')));
+
+      // ── 分类名横滑 ────────────────────────────────────────────
+      //
+      // ⚠️ 这些**不是"切换分类"按钮** —— 因为 QQ 的 categoryId 是数字，
+      //    而 Dart 侧 `playlistCatlist()` 只回了**名字**，名字→数字 id
+      //    的映射没暴露。硬做切换就是把 id 猜错，用户点"华语"却拿到"全部"
+      //    （**假功能**，比没有更糟）。
+      //
+      // 所以改成**点名字 → 直接用这个名字搜 QQ**：
+      //     · 语义干净（用户点"华语"就是想看华语歌）
+      //     · 真的有效（搜索是免登录可用的）
+      //     · 不假装自己是分类切换
+      if (_qqCats.isNotEmpty) {
+        out.add(SliverToBoxAdapter(
+          child: SizedBox(
+            height: 38,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+              itemCount: _qqCats.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (c, i) {
+                final name = _qqCats[i];
+                return GestureDetector(
+                  onTap: () => showSearch<void>(
+                    context: context,
+                    delegate: _QuickSearchDelegate(
+                        source: SongSource.qq, initialQuery: name),
+                  ),
+                  child: Container(
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: MusicTheme.fill,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      name,
+                      style: TextStyle(
+                          color: MusicTheme.secondary,
+                          fontSize: AppTheme.fontCaption),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ));
+      }
+
+      out.add(SliverToBoxAdapter(
+        child: PlaylistGrid(
+          style: _presetStyle(),
+          items: _qqSquare,
+          onTap: (p) => openPlaylist(context, p.id, p.name, source: SongSource.qq),
+        ),
+      ));
+    }
+
+    // ── 🔴 关键提示：**能看 ≠ 能播**（这是用户最容易误解的一点）──
+    //
+    // 上面的热搜/歌手/排行榜/歌单广场**全部免登录可用**，
+    // 但点歌播放**必须 QQ 登录**（vkey 要登录 Cookie）——
+    // 5 首实测全部拿不到地址。
+    //
+    // 不写清楚的话，用户看到榜单点进去点播放 → 失败 → 以为 App 坏了。
     out.add(SliverToBoxAdapter(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 22, 16, 0),
@@ -765,16 +973,29 @@ class _DiscoverPageState extends State<DiscoverPage>
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.info_outline, size: 17),
+              Icon(Icons.info_outline, size: 17, color: MusicTheme.tint),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  'QQ 音乐免登录只提供搜索。想听什么直接搜，或点上面的热搜 / 歌手。\n'
-                  '排行榜、歌单广场需要登录态，暂不可用。',
-                  style: TextStyle(
-                      color: MusicTheme.secondary,
-                      fontSize: AppTheme.fontFootnote,
-                      height: 1.55),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('QQ 可以搜、可以看，但不能直接播',
+                        style: TextStyle(
+                            color: MusicTheme.label,
+                            fontSize: AppTheme.fontFootnote,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 4),
+                    Text(
+                      '搜索 / 热搜 / 歌手 / 排行榜 / 歌单广场都是免登录的；\n'
+                      '但 QQ 的播放地址必须登录（会员校验）。\n'
+                      '想听 QQ 的歌，请把声音源导进来 —— 点歌失败时会自动'
+                      '尝试你导入的源，并让你挑用哪个。',
+                      style: TextStyle(
+                          color: MusicTheme.secondary,
+                          fontSize: AppTheme.fontCaption,
+                          height: 1.55),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -786,29 +1007,33 @@ class _DiscoverPageState extends State<DiscoverPage>
     return out;
   }
 
-  List<Widget> _buildMusicSections() {
+  /// 当前预设的样式（`_buildQQSections` 也需要，单独抽一个 getter）
+  DiscoverStyle _presetStyle() => DiscoverStyle.of(_preset);
+
+  List<Widget> _buildMusicSections(DiscoverStyle style) {
     final out = <Widget>[];
 
+    // ── 每日推荐（Beans 规格：108 封面 + VIP 标 + 播放徽标 + 均衡器）──
+    //
+    // 数据源：`_newSongs`（新歌速递）。Beans 的「每日推荐」在网易云下取
+    // `dailySongs`，本项目没有那个接口，所以用"新歌速递"当每日更新内容 ——
+    // 语义一致（每天变、30 首），不是假入口。
     if (_newSongs.isNotEmpty) {
-      out.add(const SliverToBoxAdapter(
-          child: SectionTitle(title: '新歌速递')));
+      final playing = MusicPlayerManager.instance.currentSong?.identityKey;
       out.add(SliverToBoxAdapter(
-        child: HorizontalCards(
-          itemCount: _newSongs.length,
-          height: 212,
-          itemWidth: 152,
-          itemBuilder: (c, i) {
-            final s = _newSongs[i];
-            return CoverCard(
-              coverUrl: s.coverUrl,
-              title: s.name,
-              subtitle: s.artists,
-              width: 152,
-              badge: s.isVIP ? 'VIP' : null,
-              onTap: () => MusicPlayerManager.instance
-                  .playQueue(_newSongs, index: i),
-            );
-          },
+        child: SectionTitle(
+          title: '每日推荐',
+          action: '查看全部',
+          onAction: () => _showAllNewSongs(style),
+        ),
+      ));
+      out.add(SliverToBoxAdapter(
+        child: DailySongsRow(
+          style: style,
+          songs: _newSongs,
+          playingKey: playing,
+          isPlaying: MusicPlayerManager.instance.isPlaying.value,
+          onPlay: (i) => MusicPlayerManager.instance.playQueue(_newSongs, index: i),
         ),
       ));
     }
@@ -835,72 +1060,120 @@ class _DiscoverPageState extends State<DiscoverPage>
       ));
     }
 
+    // ── 排行榜（Beans 规格：**单卡片内竖排**，前 3 名主题色，收起 3/展开 10）──
+    //
+    // ⚠️ 原来这里是 **3 列大图网格**（注释说"对齐 Beans"），但 Beans 真实
+    //    规格是**一张卡片里的竖排行**（名次 + 52 封面 + 榜名 + 更新频率）。
+    //    3 列大图在榜单只有 3~5 个时很浪费，也看不出"排名"的意味。
     if (_topLists.isNotEmpty) {
       out.add(const SliverToBoxAdapter(child: SectionTitle(title: '排行榜')));
-      // 对齐 Beans：**3 列大图卡**（不是横向小卡），卡下两行 = 名称 + 更新频率
-      out.add(SliverPadding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        sliver: SliverGrid(
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
-            mainAxisSpacing: 14,
-            crossAxisSpacing: 12,
-            // 🔴 与喜马拉雅分类页同款问题：固定比例**两头堵** ✗ ——
-            // 宽屏格子被拉高、底部大片留白；窄屏 + 系统大字号时内容溢出 ✗。
-            // 改成按**可用宽度**算格子高（1:1 封面 + 两行标题，随字号缩放）✓
-            mainAxisExtent: () {
-              final w =
-                  (MediaQuery.sizeOf(context).width - 16 * 2 - 12 * 2) / 3;
-              final ts = MediaQuery.textScalerOf(context);
-              return w + 8 + ts.scale(12) * 1.35 * 2 + 6;
-            }(),
-          ),
-          delegate: SliverChildBuilderDelegate(
-            (c, i) => _rankCard(_topLists[i]),
-            childCount: _topLists.length,
+      out.add(SliverToBoxAdapter(
+        child: RankListCard(
+          style: style,
+          items: _topLists,
+          onTap: (t) => Navigator.of(context).push<void>(
+            MaterialPageRoute(
+              builder: (_) => PlaylistDetailPage(id: t.id, title: t.name),
+            ),
           ),
         ),
       ));
     }
 
+    // ── 歌单广场（Beans 规格：**固定 2 列网格**，144 封面，收起 6/展开）──
     if (_square.isNotEmpty) {
       out.add(SliverToBoxAdapter(
-        child: SectionTitle(title: '歌单广场', action: '$_cat', onAction: _pickCat),
+        child: SectionTitle(
+          title: '歌单广场',
+          action: '$_cat',
+          onAction: _pickCat,
+        ),
       ));
-      out.add(SliverPadding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        sliver: SliverGrid(
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 14,
-            // 🔴 同榜单/分类页：固定比例**两头堵** ✗（宽屏格子被拉高、底部大片留白；
-            // 窄屏 + 系统大字号溢出）→ 改成按**可用宽度**算格子高
-            //（1:1 封面 + 一行标题，随字号缩放）✓
-            mainAxisExtent: () {
-              final w =
-                  (MediaQuery.sizeOf(context).width - 16 * 2 - 10 * 2) / 3;
-              final ts = MediaQuery.textScalerOf(context);
-              return w + 8 + ts.scale(12) * 1.35 + 6;
-            }(),
-          ),
-          delegate: SliverChildBuilderDelegate(
-            (c, i) {
-              final p = _square[i];
-              return CoverCard(
-                coverUrl: p.coverUrl,
-                title: p.name,
-                subtitle: p.creator,
-                width: double.infinity,
-                onTap: () => openPlaylist(context, p.id, p.name, source: _source),
-              );
-            },
-            childCount: _square.length,
-          ),
+      out.add(SliverToBoxAdapter(
+        child: PlaylistGrid(
+          style: style,
+          items: _square,
+          onTap: (p) => openPlaylist(context, p.id, p.name, source: _source),
         ),
       ));
     }
     return out;
+  }
+
+  /// 「每日推荐 → 查看全部」弹窗（Beans 的 DailySongsSheet）
+  Future<void> _showAllNewSongs(DiscoverStyle style) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: MusicTheme.card,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(ctx).height * 0.7,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 12, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text('今日推荐',
+                          style: TextStyle(
+                              color: MusicTheme.label,
+                              fontSize: AppTheme.fontTitle3,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                    // 只给**真的能用**的两个入口（不放假按钮）
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: style.accent,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(999)),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        MusicPlayerManager.instance
+                            .playQueue(_newSongs, index: 0);
+                      },
+                      child: const Text('播放全部'),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: style.accent,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(999)),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        final list = List<Song>.of(_newSongs)..shuffle();
+                        MusicPlayerManager.instance.playQueue(list, index: 0);
+                      },
+                      child: const Text('随机'),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 24),
+                  itemCount: _newSongs.length,
+                  itemBuilder: (c, i) => SongCell(
+                    song: _newSongs[i],
+                    index: i,
+                    playbackContext: _newSongs,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   List<Widget> _buildXimalayaSections() {

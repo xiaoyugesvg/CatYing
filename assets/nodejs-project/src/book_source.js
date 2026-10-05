@@ -295,8 +295,24 @@ async function search({ source, keyword, page = 1 }) {
   state.key = keyword;
   state.page = page;
 
-  let rawUrl = source.searchUrl;
-  if (!rawUrl) return { ok: false, error: '该源没有配置 searchUrl' };
+  // ✅ **兼容 Legado 规范字段名**（重构 ✓）—— 原来只认 `searchUrl` ✗：
+  //   而 Legado 书源（含 yckceo / 631 源包 / gedoor/legado 生态）用的都是
+  //   **`ruleSearchUrl`** ✓✓ ⇒ 只读 `searchUrl` 会**永远拿不到地址** ✗
+  //   ⇒ 表现为"搜索必然失败"✗（这也解释了"同一份源在别的实现里能用、在这不能用"✓）
+  //   ℹ️ 下面 `:301-306` 的 `{{key}}`/`{{page}}`/`{key}`/`{page}` 替换**本来就是对的** ✓，无需动 ✓
+  //   ℹ️ 兼容三种写法 ✓：`searchUrl`（本引擎旧名 ✓）· `ruleSearchUrl`（Legado ✓）
+  //      · `ruleSearch.url`（部分源把地址写在 ruleSearch 对象里 ✓）
+  let rawUrl =
+    source.searchUrl ||
+    source.ruleSearchUrl ||
+    (source.ruleSearch && source.ruleSearch.url) ||
+    '';
+  if (!rawUrl) {
+    return {
+      ok: false,
+      error: '该源没有配置搜索地址（searchUrl / ruleSearchUrl 都没有）',
+    };
+  }
 
   // {{key}} {{page}}
   rawUrl = applyLegadoVars(rawUrl, state)
@@ -723,7 +739,14 @@ async function explore({ source, categoryUrl }) {
 
   // 1) 分类列表
   if (!categoryUrl) {
-    const raw = source.exploreUrl;
+    // ✅ **兼容 Legado 规范字段名**（重构 ✓）—— 原来只认 `exploreUrl` ✗：
+    //   Legado 书源用的是 **`ruleExploreUrl`** ✓✓ ⇒ 只读 `exploreUrl` 会走不到分类 ✗
+    //   （这正是「该源分类接口返回服务器错误 / 无分类」的一大来源 ✓）
+    const raw =
+      source.exploreUrl ||
+      source.ruleExploreUrl ||
+      (source.ruleExplore && source.ruleExplore.url) ||
+      '';
     if (!raw) {
       // ⚠️ 无 exploreUrl 的源：自动抓站点首页导航，把真实分类链接探测成
       // 板块（改代码兜底，不需要改源文件）。失败则退回提示。
@@ -898,4 +921,155 @@ function cleanText(t) {
   return s.trim();
 }
 
-export { search as bsSearch, bookInfo as bsBookInfo, toc as bsToc, content as bsContent, login as bsLogin, explore as bsExplore, splitUrlOptions, decodeBody };
+// ✅ **Legado 字段归一化**（重构 ✓ —— 单点修复，6 个入口同时受益 ✓）
+//
+// 病根 ✓：Legado 书源的字段是**扁平**的 ✓：
+//   `ruleSearchUrl` / `ruleSearchList` / `ruleSearchName` / `ruleSearchAuthor` /
+//   `ruleSearchKind` / `ruleSearchLastChapter` / `ruleSearchIntroduce` /
+//   `ruleSearchCoverUrl` / `ruleSearchNoteUrl` ✓✓
+//   以及 `ruleExploreUrl` / `ruleExploreList` / … ✓（Legado 只有 `ruleBookInfo{…}` 与 `ruleToc{…}` 是**嵌套**的 ✓）
+// 而本引擎历史实现读的是**嵌套**写法 ✗：`source.searchUrl` ✗ / `source.ruleSearch.bookList` ✗ /
+//   `source.exploreUrl` ✗ —— 两者**对不上** ✓ ⇒ 搜索 / 分类**永远读不到规则** ✗✓
+//   ⇒ 这正是"同一份源在别的实现里能用、在本引擎不能用"的**完整原因** ✓✓
+//
+// 做法 ✓：在**导出边界**把扁平字段补成引擎要的嵌套结构 ✓（**不改任何业务逻辑** ✓ 最小风险 ✓）：
+//   · 已有嵌套值时不覆盖 ✓（兼容老的自定义源 ✓ 双写法都行 ✓）
+function normalizeLegadoSource(src) {
+  if (!src || typeof src !== 'object') return src;
+  const s = Object.assign({}, src);
+
+  const rs = Object.assign({}, s.ruleSearch || {});
+  const rsMap = {
+    url: 'ruleSearchUrl',
+    bookList: 'ruleSearchList',
+    name: 'ruleSearchName',
+    author: 'ruleSearchAuthor',
+    kind: 'ruleSearchKind',
+    lastChapter: 'ruleSearchLastChapter',
+    introduce: 'ruleSearchIntroduce',
+    coverUrl: 'ruleSearchCoverUrl',
+    noteUrl: 'ruleSearchNoteUrl',
+    // ✅ **同时补 NexHub 文档里的规范嵌套键名**（本轮 ✓）——
+    //   它的权威示例用的是 `ruleSearch.{bookList,bookName,bookAuthor,bookCoverUrl,bookUrl,bookLastChapter}` ✓
+    //   而本引擎历史实现读 `rule.{name,author,coverUrl,noteUrl}` ✗
+    //   ⇒ 实测发现：只补前者时 **`bookUrl` 是空的** ✗（详情点不进去 ✓）
+    //   ⇒ 那就**两套都填** ✓✓ —— 引擎读哪个都能拿到 ✓（多填几个键零成本 ✓ 不会冲突 ✓）
+    bookName: 'ruleSearchName',
+    bookAuthor: 'ruleSearchAuthor',
+    bookCoverUrl: 'ruleSearchCoverUrl',
+    bookUrl: 'ruleSearchNoteUrl',
+    bookKind: 'ruleSearchKind',
+    bookLastChapter: 'ruleSearchLastChapter',
+    bookIntroduce: 'ruleSearchIntroduce',
+  };
+  for (const [k, flat] of Object.entries(rsMap)) {
+    if (rs[k] == null && s[flat] != null) rs[k] = s[flat];
+  }
+  s.ruleSearch = rs;
+
+  const re = Object.assign({}, s.ruleExplore || {});
+  const reMap = {
+    url: 'ruleExploreUrl',
+    bookList: 'ruleExploreList',
+    name: 'ruleExploreName',
+    author: 'ruleExploreAuthor',
+    kind: 'ruleExploreKind',
+    lastChapter: 'ruleExploreLastChapter',
+    introduce: 'ruleExploreIntroduce',
+    coverUrl: 'ruleExploreCoverUrl',
+    noteUrl: 'ruleExploreNoteUrl',
+    // ✅ 与搜索侧同理 ✓：**两套命名都填** ✓（NexHub 规范名 + 引擎旧名 ✓）
+    bookName: 'ruleExploreName',
+    bookAuthor: 'ruleExploreAuthor',
+    bookCoverUrl: 'ruleExploreCoverUrl',
+    bookUrl: 'ruleExploreNoteUrl',
+    bookKind: 'ruleExploreKind',
+    bookLastChapter: 'ruleExploreLastChapter',
+    bookIntroduce: 'ruleExploreIntroduce',
+  };
+  for (const [k, flat] of Object.entries(reMap)) {
+    if (re[k] == null && s[flat] != null) re[k] = s[flat];
+  }
+  s.ruleExplore = re;
+
+  // 顶层 URL 名也一并补 ✓（与上面 `search`/`explore` 内的兜底**双保险** ✓）
+  if (!s.searchUrl && s.ruleSearchUrl) s.searchUrl = s.ruleSearchUrl;
+  if (!s.exploreUrl && s.ruleExploreUrl) s.exploreUrl = s.ruleExploreUrl;
+
+  // ✅ **旧版"全扁平"方言 → 3.x 嵌套**（本轮补齐 ✓ 关键 ✓）
+  //
+  // 依据 ✓：yckceo / 631 源包 / 早期 Legado 的源**全部是扁平**的 ✓：
+  //   `ruleBookName` ✓ `ruleChapterList` ✓ `ruleContentUrl` ✓ `ruleBookContent` ✓ …
+  // 而本引擎（与 NexHub 文档里的权威示例 ✓）读的是**嵌套** ✗：
+  //   `ruleBookInfo.{name,author,coverUrl,intro,kind,lastChapter}` ✓
+  //   `ruleToc.{chapterList,chapterName,chapterUrl,nextTocUrl}` ✓
+  //   `ruleContent.{content,title,nextContentUrl}` ✓
+  // ⚠️ 我上轮**只补了搜索/发现两组** ✗ ⇒ 详情/目录/正文**仍读不到** ✗
+  //   ⇒ 这正是"搜索分类失败 ✓ 点进去同样失败 ✓"的完整原因 ✓✓
+  // ℹ️ 只在**扁平键存在**且**嵌套键缺失**时才补 ✓
+  //   ⇒ 新版源（本来就嵌套 ✓）零影响 ✓；不存在的键自然跳过 ✓ 不会引入错误 ✓
+  const bi = Object.assign({}, s.ruleBookInfo || {});
+  const biMap = {
+    name: 'ruleBookName',
+    author: 'ruleBookAuthor',
+    coverUrl: 'ruleCoverUrl',
+    intro: 'ruleIntroduce',
+    kind: 'ruleBookKind',
+    lastChapter: 'ruleBookLastChapter',
+  };
+  for (const [k, flat] of Object.entries(biMap)) {
+    if (bi[k] == null && s[flat] != null) bi[k] = s[flat];
+  }
+  s.ruleBookInfo = bi;
+
+  const tc = Object.assign({}, s.ruleToc || {});
+  const tcMap = {
+    chapterList: 'ruleChapterList',
+    chapterName: 'ruleChapterName',
+    chapterUrl: 'ruleContentUrl',
+    nextTocUrl: 'ruleChapterUrlNext',
+  };
+  for (const [k, flat] of Object.entries(tcMap)) {
+    if (tc[k] == null && s[flat] != null) tc[k] = s[flat];
+  }
+  s.ruleToc = tc;
+
+  const ct = Object.assign({}, s.ruleContent || {});
+  const ctMap = {
+    content: 'ruleBookContent',
+    title: 'ruleBookContentTitle',
+    nextContentUrl: 'ruleContentNextUrl',
+  };
+  for (const [k, flat] of Object.entries(ctMap)) {
+    if (ct[k] == null && s[flat] != null) ct[k] = s[flat];
+  }
+  s.ruleContent = ct;
+
+  return s;
+}
+
+/** 包一层：入口收到的 `args.source` 先归一化 ✓（6 个入口共用 ✓） */
+function withNorm(fn) {
+  return (args) => fn(Object.assign({}, args, { source: normalizeLegadoSource(args && args.source) }));
+}
+
+// ⚠️ 注意 ✓：**不能**写 `export { withNorm(search) as bsSearch }` ✗ ——
+//   ESM 的 `export {}` **只接受标识符** ✓，不接受调用表达式 ✗
+//   （本轮 `node --check` 当场抓到该语法错 ✓ 已改为"先建常量、再导出" ✓）
+const bsSearch = withNorm(search);
+const bsBookInfo = withNorm(bookInfo);
+const bsToc = withNorm(toc);
+const bsContent = withNorm(content);
+const bsLogin = withNorm(login);
+const bsExplore = withNorm(explore);
+
+export {
+  bsSearch,
+  bsBookInfo,
+  bsToc,
+  bsContent,
+  bsLogin,
+  bsExplore,
+  splitUrlOptions,
+  decodeBody,
+};

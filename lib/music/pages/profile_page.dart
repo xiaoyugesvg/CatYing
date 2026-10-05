@@ -69,12 +69,15 @@ class ProfilePage extends StatelessWidget {
             value: store.useThirdPartySources.value,
             onChanged: (v) => store.setUseThirdPartySources(v),
           ),
-          _switchTile(
-            label: '跨平台匹配',
-            subtitle: 'VIP 歌自动去其它平台找同一首（带防错配校验）',
-            value: store.crossPlatformMatch.value,
-            onChanged: (v) => store.setCrossPlatformMatch(v),
-          ),
+          // ⚠️ 「跨平台匹配」开关**已移除**（用户 2026 决定：不要跨平台）。
+          //
+          // 实测它救不了 VIP 歌（QQ《晴天》在酷狗同名 9 条全 no_free_source，
+          // 能播的只有片段/翻唱），而且会让"点歌"多几秒等待。
+          // 保留开关只会让人误以为"开了就能听 VIP"，所以直接不给入口。
+          //
+          // `CrossPlatformMatcher` 实现**保留**（没删代码），
+          // `SettingsStore.crossPlatformMatch` 也保留（默认 false）——
+          // 以后想恢复只需把上面那个开关加回来。
           ]),
 
           // ── 音源 ────────────────────────────────────────────

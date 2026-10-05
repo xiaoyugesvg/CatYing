@@ -148,6 +148,23 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _ensureChipVisible(SourceManager().current);
     });
+    // ✅ **进页面就自动加载"第一个源"的内容**（本轮 ✓ 用户原话：
+    //   "漫画不是进去就显示，要他么的点击"✗）
+    //   根因 ✗：`initState` 里**没有任何"加载内容"的调用** ✓ ——
+    //     只有 `_loadHistory()`（那是**搜索历史** ✗ 不是内容 ✓）和 `_ensureChipVisible()`（只滚 chip 位置 ✗）
+    //     ⇒ 所以进去只有空态「输入关键词开始搜索漫画」✗，**必须手动点一下源 chip** ✓ 才会加载 ✓
+    //   修法 ✓：**复用** `_switchSource` 里那段现成逻辑（`:252-257` ✓）——
+    //     它的注释本来就写着「选中单源即展示内容，而不是"输入关键词开始搜索"空态」✓✓
+    //   ⚠️ 但**不能**直接调 `_switchSource(current)` ✗：`:235` 有 `if (src.id == current.id) return;`
+    //      ⇒ **同源会提前 return** ✗✓（这正是最容易写错的地方 ✓）⇒ 直接调那个加载函数 ✓
+    //   ℹ️ 条件与 `:252` 保持一致 ✓（无关键词 + 该源支持分类 ✓）⇒ 有历史关键词/不支持分类时**行为不变** ✓
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final src = SourceManager().current;
+      if (_keyword.isEmpty && src.supportsCategories) {
+        _autoLoadCategoryContent();
+      }
+    });
     _maybeTriggerGuide();
   }
 

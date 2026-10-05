@@ -25,6 +25,7 @@ import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/staggered_entrance.dart';
 import 'book_detail_page.dart';
 import 'book_source_search_page.dart';
+import 'shell_embedded_page.dart';
 import 'douban_ranking_page.dart';
 import 'browse_history_page.dart';
 import 'book_download_records_page.dart';
@@ -805,33 +806,14 @@ class _BookSearchPageState extends State<BookSearchPage>
                           tooltip: '书源',
                           // 拉窗帘进入书源页：页面从顶部往下覆盖出现（窗帘放下），
                           // 返回时反向往上收起（窗帘拉回）
-                          onTap: () => Navigator.push(
-                            context,
-                            PageRouteBuilder(
-                              transitionDuration: const Duration(
-                                milliseconds: 380,
-                              ),
-                              reverseTransitionDuration: const Duration(
-                                milliseconds: 320,
-                              ),
-                              pageBuilder: (_, __, ___) =>
-                                  const BookSourceSearchPage(),
-                              transitionsBuilder: (_, animation, __, child) {
-                                final curved = CurvedAnimation(
-                                  parent: animation,
-                                  curve: Curves.easeOutCubic,
-                                  reverseCurve: Curves.easeInCubic,
-                                );
-                                return SlideTransition(
-                                  position: Tween<Offset>(
-                                    begin: const Offset(0, -1),
-                                    end: Offset.zero,
-                                  ).animate(curved),
-                                  child: child,
-                                );
-                              },
-                            ),
-                          ),
+                          // ✅ **改成"外壳内嵌"**（本轮重构 ✓）—— 用户要的"**悬浮菜单栏**"
+                          //   就是**底部那条 5 项胶囊导航栏** ✓（`home_page.dart` 的 `JellyNavBar` ✓）。
+                          //   原来这里是 `Navigator.push` + `PageRouteBuilder`（380ms 下滑转场 ✓）
+                          //   ⇒ **全屏推出** ✗ ⇒ 底栏被盖掉 ✗✓（用户截图："书源页没有底栏"✓）
+                          //   ⇒ 现在把页面交给外壳渲染 ✓ ⇒ **底栏照常显示** ✓✓
+                          //   ℹ️ 转场交给外壳的统一过渡（不再自定义 380ms 下滑 ✓ 与其它子页一致 ✓）
+                          onTap: () =>
+                              openEmbeddedPage(const BookSourceSearchPage()),
                         ),
                         const SizedBox(width: 10),
                         // 搜索框占据剩余宽度（Expanded 让右侧图标始终贴边）

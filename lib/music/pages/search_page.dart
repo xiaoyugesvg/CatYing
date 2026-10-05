@@ -226,7 +226,7 @@ class _SearchPageState extends State<SearchPage>
                   Icon(Icons.headphones_rounded,
                       size: 13, color: MusicTheme.secondary),
                   const SizedBox(width: 4),
-                  Text('有声书',
+                  Text('喜马拉雅',
                       style: TextStyle(
                           color: MusicTheme.label,
                           fontSize: AppTheme.fontCaption)),
@@ -599,7 +599,7 @@ class _SearchPageState extends State<SearchPage>
                     style: TextStyle(
                         color: MusicTheme.label,
                         fontSize: AppTheme.fontHeadline)),
-                subtitle: Text(a.artists.isEmpty ? '有声书专辑' : a.artists,
+                subtitle: Text(a.artists.isEmpty ? '喜马拉雅专辑' : a.artists,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(

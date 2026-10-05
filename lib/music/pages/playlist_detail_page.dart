@@ -18,18 +18,41 @@ Future<void> openPlaylist(
   int id,
   String title, {
   SongSource source = SongSource.netease,
+  bool isTopList = false,
 }) {
   return Navigator.of(context).push(
-    MaterialPageRoute(builder: (_) => PlaylistDetailPage(id: id, title: title, source: source)),
+    MaterialPageRoute(
+      builder: (_) => PlaylistDetailPage(
+        id: id,
+        title: title,
+        source: source,
+        isTopList: isTopList,
+      ),
+    ),
   );
 }
 
 class PlaylistDetailPage extends StatefulWidget {
-  const PlaylistDetailPage({super.key, required this.id, required this.title, this.source = SongSource.netease});
+  const PlaylistDetailPage({
+    super.key,
+    required this.id,
+    required this.title,
+    this.source = SongSource.netease,
+    this.isTopList = false,
+  });
 
   final int id;
   final String title;
   final SongSource source;
+
+  /// 这个 id 是**榜单**还是**歌单**？
+  ///
+  /// 🔴 **QQ 必须区分**：QQ 的榜单 id（topId，如 62）**不是歌单 id** ——
+  /// 拿它去查歌单接口（`playlistDetail`）会得到**空列表**
+  ///（实测：topListSongs 5 条，playlistDetail 0 条）。
+  /// 网易云/酷狗两者恰好通用，但显式标记更清楚，
+  /// 也避免"QQ 榜单点进去是空的"这个坑。
+  final bool isTopList;
 
   @override
   State<PlaylistDetailPage> createState() => _PlaylistDetailPageState();
@@ -53,6 +76,29 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       _loading = true;
       _error = '';
     });
+
+    // ── 榜单 vs 歌单：走**不同接口**（QQ 必须区分，见 isTopList 的说明）──
+    if (widget.isTopList) {
+      final r = await api.topListSongs(widget.id, source: widget.source);
+      if (!mounted) return;
+      setState(() {
+        // 榜单没有"歌单信息"（名字/封面/描述）→ 用一个最小占位，
+        // 让标题走 widget.title（调用方从榜单列表带过来的名字）
+        _pl = Playlist(
+          id: widget.id,
+          name: widget.title,
+          coverUrl: r.list.isNotEmpty ? r.list.first.coverUrl : null,
+        );
+        _songs = r.list;
+        _loading = false;
+        if (!r.ok && r.list.isEmpty) {
+          // ⚠️ 区分"接口失败"和"榜单确实没歌"，否则用户不知道要不要重试
+          _error = r.error.isNotEmpty ? r.error : '该榜单暂无歌曲';
+        }
+      });
+      return;
+    }
+
     final (pl, songs) = await api.playlistDetail(widget.id, source: widget.source);
     if (!mounted) return;
     setState(() {

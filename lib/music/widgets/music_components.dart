@@ -307,6 +307,14 @@ class SongCell extends StatelessWidget {
   /// 它可拖动、点击进播放页 —— 所以列表点击**不再打断浏览**，
   /// 同时"点了没反馈"的问题也解决了（尤其在以前没有迷你播放器的 push 页面上）。
   void _defaultTap(BuildContext context, MusicPlayerManager player) {
+    // 🔴 **把当前页面的 context 交给播放器** —— 内置接口拿不到地址时，
+    // 它会弹「选音源」弹窗；弹窗必须挂在**用户当前这个 Navigator** 上，
+    // 否则会弹到别的页面后面（用户以为"点了没反应"）。
+    //
+    // ⚠️ 这里是**最合适**的挂钩点：所有歌曲列表都用 `SongCell`，
+    // 一处挂上就覆盖了绝大多数点歌路径，不必改 15 个调用方。
+    player.attachContext(context);
+
     final ctx = playbackContext;
     if (ctx != null && ctx.isNotEmpty) {
       final i = ctx.indexWhere((s) => s.identityKey == song.identityKey);

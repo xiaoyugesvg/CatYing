@@ -33,14 +33,29 @@ class SourceManagerPage extends StatefulWidget {
 }
 
 class _SourceManagerPageState extends State<SourceManagerPage> {
-  /// 导入区当前 tab：0=文本，1=链接，2=文件
-  ///
-  /// ⚠️ **共用**：两张卡（洛雪 / MusicFree）各自渲染自己的那组输入，
-  /// 但 tab 状态是同一个 —— 因为用户一次只会在其中一张卡里操作，
-  /// 而且共用能让"我选了链接"在两张卡之间保持一致，减少重复点击。
-  int _tab = 0;
-  final _textCtrl = TextEditingController();
-  final _urlCtrl = TextEditingController();
+  // ── 🔴 每张卡**各有一套**输入状态（这是修的一个真 bug）──────────
+  //
+  // 原来只有一对 `_tab` / `_textCtrl` / `_urlCtrl`，两张卡都用它 →
+  //   · 在洛雪卡输入 → **MusicFree 卡的输入框里也显示同样的文字** ✗
+  //     （两张卡同时渲染，用同一个 controller = 同一条文本）
+  //   · 在洛雪卡打好字 → 切到 MusicFree 卡打字 → 切回来，
+  //     **原来的字被覆盖了** ✗
+  //   · tab 也串：在洛雪卡选"链接"，MusicFree 卡也跟着变 ✗
+  //
+  // 现在按 [_CardKind] 索引分开存。用户"在两个框里放不同内容"是
+  // 完全合理的使用方式（比如洛雪源和 MusicFree 源各粘一份）。
+  final _tab = <_CardKind, int>{
+    _CardKind.lx: 0,
+    _CardKind.musicFree: 0,
+  };
+  final _textCtrl = <_CardKind, TextEditingController>{
+    _CardKind.lx: TextEditingController(),
+    _CardKind.musicFree: TextEditingController(),
+  };
+  final _urlCtrl = <_CardKind, TextEditingController>{
+    _CardKind.lx: TextEditingController(),
+    _CardKind.musicFree: TextEditingController(),
+  };
   String? _pickedName;
   String? _pickedContent;
   bool _busy = false;
@@ -50,8 +65,12 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
 
   @override
   void dispose() {
-    _textCtrl.dispose();
-    _urlCtrl.dispose();
+    for (final c in _textCtrl.values) {
+      c.dispose();
+    }
+    for (final c in _urlCtrl.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -213,19 +232,20 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _segmented(),
+                // ⚠️ 用**本卡**的 tab 与 controller（见 _tab/_textCtrl 的说明）
+                _segmented(kind),
                 const SizedBox(height: 12),
-                if (_tab == 0)
+                if (_tab[kind] == 0)
                   _inputBox(
-                    controller: _textCtrl,
+                    controller: _textCtrl[kind]!,
                     hint: isLx
                         ? '粘贴洛雪源的 JSON 配置 或 JS 脚本'
                         : '粘贴 MusicFree 插件内容（module.exports = { platform, getMediaSource }）',
                     maxLines: 6,
                   )
-                else if (_tab == 1)
+                else if (_tab[kind] == 1)
                   _inputBox(
-                    controller: _urlCtrl,
+                    controller: _urlCtrl[kind]!,
                     hint: isLx
                         ? 'https://…/音源.js'
                         : 'https://…/plugin.js（会自动下载并保存本地副本）',
@@ -339,7 +359,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   }
 
   /// 文本 / 链接 / 文件 三 tab（自绘分段，选中主题色）
-  Widget _segmented() {
+  Widget _segmented(_CardKind kind) {
     const labels = ['文本', '链接', '文件'];
     return Container(
       height: 36,
@@ -350,11 +370,11 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       ),
       child: Row(
         children: List.generate(3, (i) {
-          final selected = i == _tab;
+          final selected = i == _tab[kind];
           return Expanded(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: () => setState(() => _tab = i),
+              onTap: () => setState(() => _tab[kind] = i),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 alignment: Alignment.center,
@@ -436,17 +456,21 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      // ── 取输入内容（三 tab 各自来源）──────────────────────────
+      // ── 取输入内容（三 tab 各自来源，且只取**本卡**的）────────
+      //
+      // ⚠️ 必须用 `_tab[kind]` / `_textCtrl[kind]` —— 用共用索引会把
+      //    另一张卡的内容导进来（见 `_textCtrl` 字段上的说明）。
+      final tab = _tab[kind]!;
       String content;
       String? fallback;
-      if (_tab == 0) {
-        content = _textCtrl.text.trim();
+      if (tab == 0) {
+        content = _textCtrl[kind]!.text.trim();
         if (content.isEmpty) {
           _toast(context, '请先粘贴音源内容');
           return;
         }
-      } else if (_tab == 1) {
-        content = _urlCtrl.text.trim();
+      } else if (tab == 1) {
+        content = _urlCtrl[kind]!.text.trim();
         if (content.isEmpty) {
           _toast(context, '请输入音源链接');
           return;

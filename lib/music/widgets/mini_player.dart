@@ -22,6 +22,33 @@ class MusicMiniPlayerLayout {
   /// 迷你播放器与悬浮导航栏之间的间距
   static const double gapAboveNavBar = 6;
 
+  /// 迷你播放器**容器高度**（对应 `Container(height: 56)`）。
+  ///
+  /// ⚠️ 提升成常量是为了让**悬浮播放球**能算出"迷你条上方"的位置：
+  /// 播放球原来固定距底 96，而迷你条占
+  /// `86(导航栏) + 62(迷你条) ~ 148` —— 于是球**压在迷你条上**
+  ///（用户实测反馈）。两边用同一组常量，以后改迷你条高度
+  /// 播放球会**自动跟着让位**。
+  static const double barHeight = 56;
+
+  /// 迷你播放器**整条占的高度**（含它自己那层底部 padding）。
+  ///
+  /// ⚠️ 实测结构（别想当然）：外层是
+  ///     `padding: EdgeInsets.fromLTRB(sideMargin, 0, sideMargin, gapAboveNavBar)`
+  /// 即**底部就是 `gapAboveNavBar`(6)**，**没有**独立的 vertical padding。
+  /// 所以整条占 = `barHeight + gapAboveNavBar` = 62。
+  ///
+  /// 布局链：`Column[ MiniPlayer, JellyNavBar ]`（贴底）
+  ///   → 导航栏自身 `bottomMargin(20) + barHeight(66)` = 86
+  ///   → 迷你条底部 padding 6，容器 56
+  ///   → **迷你条顶边距屏幕底 = 86 + 6 + 56 = 148**
+  static const double totalHeight = barHeight + gapAboveNavBar;
+
+  /// 迷你播放器**顶边**距屏幕底部的距离（**不含**系统安全区）
+  static const double topFromBottom = FloatingNavSpec.bottomMargin +
+      FloatingNavSpec.barHeight +
+      totalHeight;
+
   /// 左右外边距（与导航栏的 sideMargin 视觉对齐）
   ///
   /// 用 `FloatingNavSpec.sideMargin`（=12）而不是自己写 10 ——

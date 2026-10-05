@@ -14,6 +14,14 @@
  *   · songUrl(id, quality)                → { ok, url, br, type, size } | no_free_source | { ok:false, error }
  *   · lyric(id)                           → { ok, lyric, tlyric }
  *   · hotSearch()                         → { ok, list:[{id,name}] }
+ *
+ *   ── 以下**全部免登录**（播放地址才需要登录）──
+ *   · topLists()                          → { ok, list:[{id,name,cover,updateFrequency}] }
+ *   · topListSongs(topId, limit)          → { ok, list:[Song…], total }
+ *   · playlistSquare(catId, limit)        → { ok, list:[{id,name,cover,trackCount,creator}] }
+ *   · playlistCategories()                → { ok, list:[{id,name}] }
+ *   · recommendPlaylists(limit)           → { ok, list:[…] }（兜底，可能为空）
+ *   · playlistSongs(dissId, limit)        → { ok, list:[Song…], total }
  *   · selfTest()                          → { ok, modules:[...] }（不联网）
  *
  * id 契约：Dart 侧 `Song.id` 是 int，所以对外 id = QQ 数字 songid；
@@ -76,31 +84,77 @@ function coverURL(albumMid, size = '300x300') {
     return albumMid ? `https://y.gtimg.cn/music/photo_new/T002R${size}M000${albumMid}.jpg` : '';
 }
 
-/** 把 client_search_cp 的歌曲条目映射成统一结构 */
+/**
+ * 把 QQ 各接口的歌曲条目映射成统一结构。
+ *
+ * ── 🔴 为什么要容忍**两套完全不同的字段名**（实测，不是猜）─────────
+ * QQ 不同接口的歌曲结构差别很大：
+ *
+ *  ① `search_for_qq_cp`（搜索）：
+ *     `songid` / `songmid` / `songname` / `singer:[{name}]` /
+ *     `albummid` / `interval` / `file.media_mid`
+ *
+ *  ② `fcg_ucc_getcdinfo_byids_cp`（歌单歌曲）：
+ *     `id` / **`mid`** / `name` / `singer:[{name}]` /
+ *     `album.mid` / `interval` / `file.media_mid`
+ *
+ *  ③ `musicToplist...GetDetail`（榜单歌曲）：
+ *     `songId` / **没有 mid** / `title` / **`singerName` 是字符串** /
+ *     `albumMid` / **没有 interval** / **没有 media mid**
+ *
+ * 只按 ① 实现时，② 和 ③ 会被 `if (!item.songmid) return null` **全丢掉**
+ * —— 实测表现就是 `topListSongs` / `playlistSongs` 返回 `list: []`
+ *（接口 ok=true 但一条都没有，最难查的那种）。
+ */
 function mapSong(item) {
-    if (!item || !item.songmid) return null;
-    const songid = Number(item.songid) || 0;
-    const mid = String(item.songmid);
+    if (!item || typeof item !== 'object') return null;
+
+    // ① mid：三个接口三种写法
+    const mid = String(
+        item.songmid || item.mid || (item.file && item.file.media_mid) || ''
+    );
+    // ② 数字 id：三种写法（榜单只有 songId）
+    const songid = Number(item.songid || item.songId || item.id || 0) || 0;
+    // ⚠️ 两者都缺 → 这条没法用（vkey 必须要 mid）
+    if (!mid && !songid) return null;
+
+    // ③ 歌手：可能是数组（{name}）也可能是**斜杠分隔的字符串**
+    let artist = '';
+    if (Array.isArray(item.singer)) {
+        artist = item.singer.map((s) => s && (s.name || s.title)).filter(Boolean).join('、');
+    } else if (typeof item.singerName === 'string') {
+        // 榜单：`"Hawk Nelson/Jonathan Steingard"` → 统一成中文顿号
+        artist = item.singerName.split('/').map((s) => s.trim()).filter(Boolean).join('、');
+    } else if (typeof item.singer === 'string') {
+        artist = item.singer;
+    }
+
+    // ④ 专辑：可能嵌套对象（歌单）也可能是顶层字段（搜索/榜单）
+    const albumObj = (item.album && typeof item.album === 'object') ? item.album : {};
+    const albumMid = String(item.albummid || item.albumMID || item.albumMid || albumObj.mid || '');
+
     const mediaMid = String(
         (item.file && item.file.media_mid) || item.strMediaMid || item.media_mid || ''
     );
-    const singers = Array.isArray(item.singer) ? item.singer : [];
     const pay = item.pay || {};
-    const fee = Number(item.fee != null ? item.fee : (pay.pay_play != null ? pay.pay_play : (pay.payplay || 0)));
-    const m = {
-        // 对外 id 用数字 songid（Dart Song.id 是 int）
+    const fee = Number(
+        item.fee != null ? item.fee
+            : (pay.pay_play != null ? pay.pay_play : (pay.payplay || 0)),
+    );
+
+    return {
+        // 对外 id 用数字 id（Dart Song.id 是 int）
         id: songid,
-        name: String(item.songname || ''),
-        artist: singers.map((s) => s && s.name).filter(Boolean).join('、'),
-        album: String(item.albumname || item.albumName || ''),
-        albumId: String(item.albummid || item.albumMID || ''),
-        cover: coverURL(item.albummid || item.albumMID),
+        name: String(item.songname || item.name || item.title || ''),
+        artist,
+        album: String(item.albumname || item.albumName || albumObj.name || albumObj.title || ''),
+        albumId: albumMid,
+        cover: coverURL(albumMid),
         duration: Number(item.interval) || 0,
         fee,
         songmid: mid,
         mediaMid,
     };
-    return m;
 }
 
 /**
@@ -332,6 +386,269 @@ async function hotSearch() {
 }
 
 // ────────────────────────────────────────────────────────────────
+// 发现页：排行榜 / 歌单广场 / 推荐歌单 / 榜单歌曲
+//
+// ⚠️ 这四个都是**免登录**的（实测 HTTP 200）——
+//    与"播放地址"不同（那个必须带 QQ 登录 Cookie，
+//    见 `songUrl` 的注释与 `no_free_source` 的返回）。
+//
+// 参考 Beans-Music 的实现：
+//   · 排行榜   → `musicToplist.ToplistInfoServer / GetAll`
+//   · 歌单广场 → `fcg_get_diss_by_tag.fcg`（按分类）
+//   · 推荐歌单 → `music.srfDissInfo.RecommendPlaylist / GetRecommendPlaylist`
+//   · 榜单歌曲 → `musicToplist.ToplistInfoServer / GetDetail`
+// ────────────────────────────────────────────────────────────────
+
+/** musicu.fcg 统一 POST（免登录也能用） */
+async function musicu(payload, timeout = TIMEOUT_MS) {
+    const r = await axios.post('https://u.y.qq.com/cgi-bin/musicu.fcg', payload, {
+        headers: Object.assign({}, QQ_HEADERS, {
+            'Content-Type': 'application/json',
+            // musicu 对 UA 敏感：用桌面 IE 的反而稳（Beans 同款）
+            'User-Agent': 'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)',
+            Referer: 'https://y.qq.com/',
+        }),
+        timeout,
+    });
+    return r.data || {};
+}
+
+/** 按路径取值（QQ 的返回嵌套很深且各接口不一致） */
+function at(obj, ...path) {
+    let cur = obj;
+    for (const k of path) {
+        if (cur == null || typeof cur !== 'object') return undefined;
+        cur = cur[k];
+    }
+    return cur;
+}
+
+/** 歌单封面（QQ 有三个尺寸模板；给空就返回空串，让 Dart 侧走占位图） */
+function playlistCover(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    if (s.startsWith('http')) return s.replace(/^http:/, 'https:');
+    if (s.startsWith('//')) return 'https:' + s;
+    // QQ 的 logo 字段常是相对路径
+    return 'https://y.gtimg.cn' + (s.startsWith('/') ? '' : '/') + s;
+}
+
+/**
+ * 排行榜列表（30 个榜单，分 4 组）。
+ *
+ * 对齐网易云/酷狗的 `topLists()` 返回：
+ *   `{ ok, list: [{ id, name, cover, updateFrequency }] }`
+ */
+async function topLists() {
+    try {
+        const data = await musicu({
+            comm: { ct: 24, cv: 0 },
+            req_1: {
+                module: 'musicToplist.ToplistInfoServer',
+                method: 'GetAll',
+                param: {},
+            },
+        });
+        const groups = at(data, 'req_1', 'data', 'group') || [];
+        const out = [];
+        for (const g of groups) {
+            for (const t of (g && g.toplist) || []) {
+                const id = Number(t.topId || t.id || 0);
+                const name = String(t.topTitle || t.title || '').trim();
+                if (!id || !name) continue;
+                out.push({
+                    id,
+                    name,
+                    cover: playlistCover(t.frontPicUrl || t.headPicUrl || t.picUrl),
+                    // QQ 没有"更新频率"字段，用榜单说明的第一个词兜底
+                    updateFrequency: String(t.updateTime || t.listName || 'QQ 峰尖榜'),
+                    // ⚠️ 保留原始字段：Dart 侧拿 id 去查榜单歌曲时要用
+                    songCount: Number(t.songCnt || 0) || 0,
+                });
+            }
+        }
+        return { ok: true, list: out };
+    } catch (e) {
+        return { ok: false, error: humanize(e) };
+    }
+}
+
+/**
+ * 榜单里的歌曲（Beans 的 `topListSongs`）。
+ *
+ * @returns `{ ok, list:[Song…], total }`
+ */
+async function topListSongs(topId, limit = 30) {
+    try {
+        const data = await musicu({
+            comm: { ct: 24, cv: 0 },
+            req_1: {
+                module: 'musicToplist.ToplistInfoServer',
+                method: 'GetDetail',
+                param: {
+                    topId: Number(topId),
+                    offset: 0,
+                    num: Math.min(Math.max(limit, 1), 100),
+                    period: '',
+                },
+            },
+        });
+        const raw = at(data, 'req_1', 'data', 'data', 'song') || [];
+        const list = raw.map(mapSong).filter(Boolean);
+        rememberTracks(list);
+        return { ok: true, list, total: Number(at(data, 'req_1', 'data', 'data', 'total') || list.length) };
+    } catch (e) {
+        return { ok: false, error: humanize(e) };
+    }
+}
+
+/**
+ * 歌单广场（按分类）。
+ *
+ * @param categoryId 分类 id（`10000000` = 全部）；见 [playlistCategories]
+ * @param limit      数量
+ */
+async function playlistSquare(categoryId = 10000000, limit = 20, sortId = 5) {
+    try {
+        const n = Math.min(Math.max(limit, 1), 60);
+        const url = 'https://c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_by_tag.fcg'
+            + '?format=json&outCharset=utf-8&picmid=1'
+            + `&categoryId=${Number(categoryId) || 10000000}`
+            + `&sortId=${Number(sortId) || 5}`
+            + `&sin=0&ein=${n - 1}`;
+        const r = await axios.get(url, {
+            headers: Object.assign({}, QQ_HEADERS, { Referer: 'https://y.qq.com/' }),
+            timeout: TIMEOUT_MS,
+        });
+        const raw = at(r.data, 'data', 'list') || [];
+        const list = [];
+        for (const it of raw) {
+            const id = Number(it.dissid || it.diss_id || 0);
+            const name = String(it.dissname || it.diss_name || '').trim();
+            if (!id || !name) continue;
+            list.push({
+                id,
+                name,
+                cover: playlistCover(it.imgurl || it.picurl || it.logo),
+                trackCount: Number(it.listennum || it.song_cnt || 0) || 0,
+                creator: String(it.creator && it.creator.name ? it.creator.name : '').trim(),
+            });
+        }
+        return { ok: true, list };
+    } catch (e) {
+        return { ok: false, error: humanize(e) };
+    }
+}
+
+/** 歌单广场分类（`[{id, name}]`，第一项固定"全部"） */
+async function playlistCategories() {
+    try {
+        const r = await axios.get(
+            'https://c.y.qq.com/splcloud/fcgi-bin/fcg_get_diss_tag_conf.fcg?format=json&outCharset=utf-8',
+            { headers: Object.assign({}, QQ_HEADERS, { Referer: 'https://y.qq.com/' }), timeout: TIMEOUT_MS },
+        );
+        const out = [{ id: 10000000, name: '全部' }];
+        const seen = new Set(['10000000']);
+        // QQ 的分类是**递归嵌套**的（tags → 子 tags），必须深度遍历
+        const walk = (v) => {
+            if (v == null) return;
+            if (Array.isArray(v)) {
+                v.forEach(walk);
+                return;
+            }
+            if (typeof v !== 'object') return;
+            const id = Number(v.categoryId || v.category_id || v.tag_id || v.id || 0);
+            const name = String(v.categoryName || v.category_name || v.tag_name || v.name || '').trim();
+            if (id > 0 && name && !seen.has(String(id))) {
+                seen.add(String(id));
+                out.push({ id, name });
+            }
+            Object.values(v).forEach(walk);
+        };
+        walk(at(r.data, 'data'));
+        return { ok: true, list: out.slice(0, 40) };
+    } catch (e) {
+        return { ok: false, error: humanize(e) };
+    }
+}
+
+/**
+ * 推荐歌单（musicu）。
+ *
+ * ── 🔴 实测：**不可用**（2026，免登录）──────────────────────────
+ * `music.srfDissInfo.RecommendPlaylist` 返回
+ *     `{ req_1: { code: 500003, subcode: 860100001 } }`   ← **无 data**
+ * 所以免登录拿不到推荐歌单。保留这个函数只是为了让调用方拿到
+ * **明确原因**（而不是空列表让人以为"接口通了但没数据"）。
+ *
+ * 需要推荐歌单时应该走 [playlistSquare]（那个实测 20 个歌单可用）。
+ */
+async function recommendPlaylists(limit = 12) {
+    try {
+        const data = await musicu({
+            comm: { ct: 24, cv: 0 },
+            req_1: {
+                module: 'music.srfDissInfo.RecommendPlaylist',
+                method: 'GetRecommendPlaylist',
+                param: { uin: 0, lastDissid: 0, songtype: 1, scene: 0 },
+            },
+        });
+        const code = Number(at(data, 'req_1', 'code') || 0);
+        if (code !== 0) {
+            return { ok: false, error: `QQ 推荐歌单接口不可用（code=${code}，需登录或已风控）` };
+        }
+        const raw = at(data, 'req_1', 'data', 'v_playlist') || [];
+        const list = [];
+        for (const it of raw) {
+            const id = Number(it.tid || it.dissid || it.id || 0);
+            const name = String(it.title || it.dissname || '').trim();
+            if (!id || !name) continue;
+            list.push({
+                id,
+                name,
+                cover: playlistCover(it.cover || it.pic_url || it.logo),
+                trackCount: Number(it.songnum || it.song_cnt || 0) || 0,
+                creator: '',
+            });
+            if (list.length >= limit) break;
+        }
+        return { ok: true, list };
+    } catch (e) {
+        return { ok: false, error: humanize(e) };
+    }
+}
+
+/** 歌单里的歌曲（fcg_ucc_getcdinfo_byids_cp，免登录可拿普通歌单） */
+async function playlistSongs(dissId, limit = 100) {
+    try {
+        const n = Math.min(Math.max(limit, 1), 300);
+        const url = 'https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg'
+            + '?type=1&json=1&utf8=1&onlysong=0&new_format=1'
+            + `&disstid=${Number(dissId)}`
+            + '&loginUin=0&hostUin=0&format=json&inCharset=utf8&outCharset=utf-8'
+            + '&notice=0&platform=yqq.json&needNewCode=0';
+        const r = await axios.get(url, {
+            headers: Object.assign({}, QQ_HEADERS, {
+                Referer: 'https://y.qq.com/n/yqq/playlist',
+            }),
+            timeout: TIMEOUT_MS,
+        });
+        const cdlist = at(r.data, 'cdlist') || [];
+        const raw = at(cdlist[0] || {}, 'songlist') || [];
+        const list = [];
+        for (const it of raw.slice(0, n)) {
+            // 有的返回把歌包在 track_info 里
+            const song = mapSong(it.track_info || it);
+            if (song) list.push(song);
+        }
+        rememberTracks(list);
+        return { ok: true, list, total: raw.length };
+    } catch (e) {
+        return { ok: false, error: humanize(e) };
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
 // 工具
 // ────────────────────────────────────────────────────────────────
 
@@ -363,4 +680,11 @@ export {
     lyric,
     hotSearch,
     selfTest,
+    // ── 发现页（全部免登录）──
+    topLists,
+    topListSongs,
+    playlistSquare,
+    playlistCategories,
+    recommendPlaylists,
+    playlistSongs,
 };

@@ -27,6 +27,15 @@ import '../../common/theme.dart';
 ///
 /// 没做的（Beans 有、这里略）：音效均衡器、DJ 可视化、评论、
 /// 下载、歌单编辑、分享 —— 这些依赖账号或额外依赖，按需求裁剪。
+/// 底部控制栏（进度条 + 控制行 + 指示线）占的高度。
+///
+/// 对齐 Beans 的 `deckInset = 116`：**内容区必须按这个值避让**，
+/// 否则歌名 / 预览歌词 / 歌词末行会被控制栏盖住。
+///
+/// ⚠️ Beans 是**硬编码 116**（不是自动测量）—— 照抄这个做法：
+/// 稳定、可预测；自动测量会在控制栏内容变化时抖动。
+const double _kDeckInset = 116;
+
 class MusicPlayerPage extends StatefulWidget {
   const MusicPlayerPage({super.key});
 
@@ -38,7 +47,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
     with SingleTickerProviderStateMixin {
   final player = MusicPlayerManager.instance;
 
-  /// 封面旋转动画
+/// 封面旋转动画
   late final AnimationController _spin;
 
   /// true = 显示歌词；false = 显示封面
@@ -793,6 +802,18 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
   // 歌词视图
   // ============================================================
 
+  /// 歌词首行/末行的**居中占位高度** = 视口高的一半。
+  ///
+  /// 为什么取一半：`ListView` 的第一个 item 顶到滚动起点，
+  /// 要让**首行落在屏幕中央**，它前面就得有"半个视口"的空白。
+  /// 用视口高而不是固定值，才能在各种屏幕尺寸下都居中。
+  double _lyricTopPad(BuildContext context) {
+    final h = MediaQuery.sizeOf(context).height;
+    // 上下各让出一点安全区，避免首行贴到刘海/底部横条
+    final safe = MediaQuery.viewPaddingOf(context);
+    return (h - safe.top - safe.bottom) / 2;
+  }
+
   Widget _lyricView() {
     return ValueListenableBuilder<List<LyricLine>>(
       valueListenable: player.lyrics,
@@ -841,9 +862,25 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
               padding: const EdgeInsets.symmetric(horizontal: 28),
               itemCount: lines.length + 2,
               itemBuilder: (c, i) {
-                // 上下各留一屏空白，方便"居中"效果
-                if (i == 0 || i == lines.length + 1) {
-                  return const SizedBox(height: 180);
+                // ── 上下占位（对齐 Beans 的歌词视口 `padding(.vertical, 210)`）──
+                //
+                // Beans 给歌词视口**整体**加纵向内边距，目的只有一个：
+                // **让第一行和最后一行也能滚到屏幕中央**。
+                // 没有它时，首行永远卡在顶部、末行到不了中间。
+                //
+                // 这里原来是两头各写死 180。看着差不多，但有两个问题：
+                //   1. 用**固定 180** 而不是"半个视口高" → 屏幕越高，
+                //      首行离中央越远（大屏上偏移很明显）
+                //   2. 底部那个占位同时还要**给控制栏让位**，两个职责混在一起
+                //
+                // 现在分开：
+                //   · 顶部占位 = 视口高的一半 → 首行正好落在中央
+                //   · 底部占位 = 同上 + [_kDeckInset] → 再让出控制栏
+                if (i == 0) {
+                  return SizedBox(height: _lyricTopPad(context));
+                }
+                if (i == lines.length + 1) {
+                  return SizedBox(height: _lyricTopPad(context) + _kDeckInset);
                 }
                 final li = i - 1;
                 final line = lines[li];

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show BuildContext;
 import 'package:media_kit/media_kit.dart';
 
 import '../models/models.dart';
@@ -13,7 +14,11 @@ import '../../services/audio_focus.dart';
 import '../../services/app_log.dart';
 import 'library_store.dart';
 import '../../widgets/app_toast.dart';
-import 'cross_platform_matcher.dart';
+// ⚠️ `cross_platform_matcher.dart` **不再 import** ——
+// 用户明确要求"不要搜索其他平台"，回退链已移除跨平台匹配。
+// 实现代码仍保留在 services/cross_platform_matcher.dart（需要时加回 import 即可）。
+import '../widgets/source_picker_sheet.dart';
+import '../../widgets/video_player_pip.dart' show VideoPlayerPip;
 
 /// 播放模式（对齐 Beans 的循环/随机语义）
 enum PlayMode {
@@ -58,6 +63,39 @@ class MusicPlayerManager extends ChangeNotifier {
   /// 没有它时：连点两首歌，先发的请求后回来 → 把界面/歌词/播放地址覆盖成
   /// 上一首（"界面显示 A、声音播 B"），歌词也会串到别的歌。
   int _loadEpoch = 0;
+
+  /// 调用方传入的 `BuildContext`，**只用来弹"选音源"弹窗**。
+  ///
+  /// ── 为什么需要它（不能只用全局 navigatorKey）──────────────────
+  /// 弹窗要挂在**用户当前所在的那个 Navigator** 上：如果用户在音乐 tab 里
+  /// 点歌，却弹到影视页的 navigator 上，会出现"弹窗在后面/位置错乱"。
+  /// 所以由调用方（点歌的那个页面）把 context 传进来；
+  /// 拿不到时才回退到全局 key。
+  ///
+  /// ⚠️ **不能长期持有** —— 页面销毁后 context 就失效了。
+  /// 所以每次 `playQueue/playSong` 时覆盖，用完不清（下一个调用会覆盖）。
+  BuildContext? _pickerContext;
+
+  /// 由 UI 层调用，把"当前页面 context"告诉播放器（用于弹选源弹窗）
+  void attachContext(BuildContext context) => _pickerContext = context;
+
+  /// 弹窗用的 context。
+  ///
+  /// ⚠️ 优先用调用方传进来的（挂在**用户当前那个 Navigator** 上）；
+  /// 兜底才用全局 key —— 直接用全局 key 在"用户在音乐 tab 点歌"
+  /// 之外的情况下可能弹错位置。
+  BuildContext get _pickerCtx =>
+      _pickerContext ?? VideoPlayerPip.navigatorKey.currentContext!;
+
+  /// 失败摘要：告诉用户"试了 N 个源，M 个不行"。
+  ///
+  /// ⚠️ 只给**数量级**信息，不把 12 条错误全塞进弹窗
+  ///（详情在 `UnblockService.lastAttempts`，失败时另有 toast/日志）。
+  String _failedSummary(int okCount) {
+    final failed = UnblockService.instance.lastAttempts.length;
+    if (failed == 0) return '';
+    return '另有 $failed 个音源试过但没拿到地址（详情见日志）';
+  }
 
   /// 播放状态
   final isPlaying = ValueNotifier<bool>(false);
@@ -436,116 +474,76 @@ class MusicPlayerManager extends ChangeNotifier {
           ? '内置接口没有免费音源'
           : (r.message.isNotEmpty ? r.message : '内置接口取地址失败');
 
-      // ── 回退①：**跨平台匹配** ──────────────────────────────────
+      // ══════════════════════════════════════════════════════════
+      // 回退：**试全部第三方音源 → 弹窗让用户选**
+      // ══════════════════════════════════════════════════════════
       //
-      // 为什么排在第三方源**前面**：
-      //   · 更快（一次搜索 + 一次取址）
-      //   · 更可靠（官方接口的免费比例远高于第三方源）
-      //   · 更准（官方元数据完整，能靠"歌名+歌手+时长"三重校验防错配）
+      // ── 为什么是"用户选"而不是"程序挑第一个"（用户 2026 决定）────
+      // 实测：**同一个音源对不同歌的可用性差别很大**，而且多个源都能播时
+      // 它们往往**不是同一个版本/音质**（一个 320K 一个 128K，一个原版
+      // 一个 Live）。程序"挑第一个成功的"等于替用户做了他更清楚的选择。
       //
-      // ⚠️ 这一条**只在离线缓存未命中、且本平台确实拿不到时**才走，
-      // 所以不会拖慢正常播放。
-      var crossMsg = '';
-      if (SettingsStore.instance.crossPlatformMatch.value) {
-        switching.value = true;
-        lastError.value = '正在其它平台找「${song.name}」…';
-        notifyListeners();
-
-        // ── 🔴 关键：要**逐个试候选**，不能只试最高分那一条 ──────────
-        //
-        // 实测（`_probe_url_availability.cjs`）：**同一平台、同一首歌，
-        // 不同条目的可播性完全不同**：
-        //   kugou「晴天」 id=32100650 无免费音源 / id=130783548 有地址
-        //   kugou「稻香」 id=32042828 无免费音源 / id=259470438 有地址
-        //   netease「晴天」 id=2652820720 无免费音源 / id=3440441479 有地址
-        //
-        // 只试最高分那条时，恰好撞上"无免费音源"的条目就会误判失败
-        //（而同一首其实有能播的条目）。
-        final matches = await CrossPlatformMatcher.instance.findAll(song);
-        var tried = 0;
-        for (final m in matches) {
-          if (epoch != _loadEpoch) return; // 用户又点了别的歌
-          // ⚠️ 候选**不去重**（见 CrossPlatformMatcher.findAll 的说明），
-          // 所以数量可能到 maxCandidates（15）。这是有意的：同一首的多个
-          // 条目可播性差别很大，多试一个就多一分听到的可能。
-          // 开销可控 —— 每个候选只是一次取址请求（失败通常很快）。
-          tried++;
-          lastError.value = '正在试 ${m.song.source.displayName} 的「${m.song.name}」'
-              '（$tried/${matches.length}）…';
-          notifyListeners();
-
-          final cr = await MusicApi.instance.songUrl(
-            m.song.id,
-            quality: wantQuality,
-            source: m.song.source,
-          );
-          if (epoch != _loadEpoch) return;
-          if (cr.ok && cr.url.isNotEmpty) {
-            url = cr.url;
-            fromSource = '${m.song.source.displayName}（跨平台）';
-            quality = cr.qualityText;
-            // 明确告诉用户"这首歌是从别的平台找来的"——
-            // 不提示的话用户会以为"我在 QQ 点的歌怎么显示网易云"。
-            lastError.value =
-                '「${song.name}」在本平台无免费音源，已用 ${m.song.source.displayName} 的同曲播放（${m.reason}）';
-            AppLog.instance.log('[Music] 跨平台命中：${song.name} '
-                '(${song.source.displayName}) → ${m.song.source.displayName} '
-                'id=${m.song.id} score=${m.score} ${m.reason}'
-                '（第 $tried/${matches.length} 个候选）');
-            break;
-          }
-        }
-        switching.value = false;
-
-        if (url.isEmpty) {
-          crossMsg = matches.isEmpty
-              ? '其它平台没找到可信的同一首'
-              : '找到 ${matches.length} 个候选（试了 $tried 个）但都拿不到播放地址';
-        }
-      }
-
-      // 回退到第三方音源（仅当开关打开且确有启用的源）
+      // 所以：全试一遍 → 全列出来 → 用户点哪个放哪个。
+      //
+      // ⚠️ 跨平台匹配（CrossPlatformMatcher）已**移除出回退链**：
+      //    用户明确说"不要搜索其他平台"。实现代码保留在
+      //    `cross_platform_matcher.dart`，但这里不再调用。
       if (SettingsStore.instance.useThirdPartySources.value &&
           ThirdPartySourceStore.instance.enabled.isNotEmpty) {
         switching.value = true;
         notifyListeners();
-        final sr = await UnblockService.instance.resolve(
+        final results = await UnblockService.instance.resolveAll(
           song,
-          onProgress: (i, total, name) {
-            // 逐个试可能要几秒，必须反馈"正在试第 N/M 个"，
-            // 否则用户以为卡死了
-            lastError.value = '正在尝试音源 $i/$total：$name';
+          onProgress: (done, total) {
+            // 全试要几秒，必须反馈进度，否则用户以为卡死了
+            lastError.value = '正在试音源 $done/$total…';
           },
         );
         switching.value = false;
-        if (epoch != _loadEpoch) return; // 同上：期间用户又点了别的歌
-        if (sr.ok && sr.url.isNotEmpty) {
-          url = sr.url;
-          fromSource = sr.source?.name ?? '';
-          quality = sr.source?.quality ?? '';
-          // 🔴 **关键**：把"这个源自己配的 headers"带上。
-          // 很多第三方源必须带 UA/Referer/Cookie 才给流 ——
-          // 不透传的表现就是"地址拿到了但播不了"（这条一直缺 ✗）。
+        if (epoch != _loadEpoch) return; // 期间用户又点了别的歌
+
+        if (results.isNotEmpty) {
+          // ── 弹窗让用户选 ────────────────────────────────────
           //
-          // 优先级：**解析时源现返回的 headers**（`sr.headers`）优先于
-          // 源配置里静态填的（`source.headers`）——
-          // MusicFree 插件的 `getMediaSource` 会**按歌**返回不同 headers
-          //（签名/token 之类），静态配置不可能预先知道。
-          sourceHeaders = sr.headers.isNotEmpty
-              ? sr.headers
-              : (sr.source?.headers ?? const {});
+          // ⚠️ 只有一条时**照样弹** —— 让用户知道"这首歌是靠哪个源播的"，
+          // 而不是莫名其妙开始播放（源出问题时这个信息很关键）。
+          final picked = await SourcePickerSheet.show(
+            _pickerCtx,
+            song: song,
+            results: results,
+            failedNote: _failedSummary(results.length),
+          );
+          if (epoch != _loadEpoch) return;
+
+          if (picked != null) {
+            url = picked.url;
+            fromSource = picked.source?.name ?? '';
+            quality = picked.source?.quality ?? '';
+            // 🔴 必须把源自己配的 headers 带上：很多源不带 UA/Referer/Cookie
+            // 就只给空流（表现是"地址拿到了但播不了"）。
+            // 优先用**解析时现返回的** headers（MusicFree 插件会按歌给签名）。
+            sourceHeaders = picked.headers.isNotEmpty
+                ? picked.headers
+                : (picked.source?.headers ?? const {});
+            AppLog.instance.log('[Music] 用户选择音源：${picked.source?.name}'
+                '（${results.length} 个可用）');
+          } else {
+            // 用户主动取消 —— 这是**正常操作**，不该报错
+            AppLog.instance.log('[Music] 用户取消了音源选择（${song.name}，'
+                '${results.length} 个可用）');
+            switching.value = false;
+            notifyListeners();
+            return;
+          }
         } else {
-          // 都失败：把「内置为什么失败」+「每个源为什么失败」一起说清楚
+          // 所有源都失败：把「内置为什么失败」+「每个源为什么失败」说清楚
           final detail = UnblockService.instance.describeFailure();
           final full = detail.isEmpty ? builtinMsg : '$builtinMsg；$detail';
           // ⚠️ 完整原因**必须**进日志：toast 会把长文本截断
-          //（用户实测只看到 `…car_conv2: GD接口失败: Clie…`，看不到真正原因）
           AppLog.instance.log('[Music] 取播放地址失败（${song.name}）: $full');
-          // ⚠️ `ValueNotifier` **只在值变化时通知** → 连续两首同类失败
-          //（比如两首都要会员、或同一个源连续失败）时，第二次的文案**一模一样**
-          // → 监听器根本不会被调用 → **用户什么都看不到，以为"点了没反应"** ✗
-          // 这里用一个**不可见**的后缀强制"值必变"：视觉上文字不变，
-          // 但每次都会触发一次通知（两次交替，永远不相等）。
+          // ⚠️ `ValueNotifier` **只在值变化时通知** → 连续两首同类失败时
+          // 文案一模一样 → 监听器不被调用 → **用户什么都看不到** ✗
+          // 用一个**不可见**后缀强制"值必变"（两次交替，永远不相等）。
           lastError.value = full == lastError.value ? '$full ' : full;
           await _silenceForFailure(song);
           notifyListeners();
@@ -553,16 +551,10 @@ class MusicPlayerManager extends ChangeNotifier {
         }
       } else {
         // 没有可用音源时，明确告知 —— 这是正常业务结果（VIP/独家），不是异常
-        //
-        // ⚠️ 把跨平台的结果也带上（`crossMsg`）：
-        //   "没找到可信的同一首" 和 "找到了但取地址也失败"
-        //   对用户是不同的信息 —— 前者说明确实没辙，后者说明源有问题。
-        var msg = r.noFreeSource ? '这首没有免费音源（可能需要会员）' : builtinMsg;
-        if (crossMsg.isNotEmpty) msg = '$msg；跨平台：$crossMsg';
+        final msg = r.noFreeSource ? '这首没有免费音源（可能需要会员）' : builtinMsg;
         AppLog.instance.log('[Music] 取播放地址失败（${song.name}）: $msg'
             '（导入的音乐源开关=${SettingsStore.instance.useThirdPartySources.value}，'
-            '已启用 ${ThirdPartySourceStore.instance.enabled.length} 个，'
-            '跨平台匹配=${SettingsStore.instance.crossPlatformMatch.value}）');
+            '已启用 ${ThirdPartySourceStore.instance.enabled.length} 个）');
         // 同一条失败连续出现时也要能弹（见上面那段注释）
         lastError.value = msg == lastError.value ? '$msg ' : msg;
         await _silenceForFailure(song);

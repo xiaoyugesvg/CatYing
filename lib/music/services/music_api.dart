@@ -746,6 +746,35 @@ class MusicApi {
         .toList();
   }
 
+  /// **榜单里的歌曲**（QQ 需要走 `topListSongs`，网易云/酷狗用 `playlistDetail`）。
+  ///
+  /// ── 🔴 为什么必须区分（QQ 特有）──────────────────────────────
+  /// QQ 的"榜单 id"（topId，如 62）**不是歌单 id**：
+  ///   · 拿它去查 `playlistDetail`（歌单接口）→ 查不到（列表为空）
+  ///   · 必须走 `musicToplist.ToplistInfoServer/GetDetail`
+  /// 网易云/酷狗的榜单 id 恰好也能当歌单 id 用，所以只有 QQ 需要这条分支。
+  ///
+  /// [ok] 带出来是为了区分"接口失败"和"榜单确实没歌"（同 [topListsResult] 的理由）。
+  Future<({bool ok, List<Song> list, String error})> topListSongs(
+    int id, {
+    int limit = 100,
+    SongSource source = SongSource.qq,
+  }) async {
+    final r = await _call({
+      'action': 'topListSongs',
+      'id': id,
+      'limit': limit,
+      'source': source.key,
+    });
+    final m = _asMap(r);
+    final list = _listOf(r, 'list').map(Song.fromJson).toList();
+    return (
+      ok: m['ok'] != false && list.isNotEmpty,
+      list: list,
+      error: (m['error'] ?? '榜单歌曲获取失败').toString(),
+    );
+  }
+
   /// 推荐歌单（首页"推荐歌单"）
   Future<List<Playlist>> personalized({int limit = 20, SongSource source = SongSource.netease}) async {
     final r = await _call({'action': 'personalized', 'limit': limit, 'source': source.key});

@@ -1,3 +1,8 @@
+import 'dart:io';
+
+// ⚠️ `kIsWeb` 在 **`foundation.dart`** ✓ —— 我原以为 `material.dart` 会一并导出 ✗
+//（实测报 `Undefined name 'kIsWeb'` ✗ ⇒ `error=1` ✓）⇒ 必须显式导入 ✓
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'music/widgets/floating_play_button.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +18,8 @@ import 'common/appearance_sync.dart';
 import 'common/theme_mode_store.dart';
 import 'services/main_tab_controller.dart';
 import 'pages/content_view.dart';
+// ✅ **隐藏 WebView 的挂载点**（本轮 ✓）—— 见下方根 builder 里的说明 ✓
+import 'reading/source/webview_image_fetcher.dart';
 
 /// 上一次打过的外观签名 —— 用**顶层变量**而不是实例字段：
 /// 日志去重本身是"进程级"的（同一时刻只会有一个 App 实例在跑）。
@@ -177,6 +184,30 @@ class _TVBoxAppState extends State<TVBoxApp> with WidgetsBindingObserver {
                 debugShowCheckedModeBanner: false,
                 builder: (context, child) {
                   Widget out = child ?? const SizedBox.shrink();
+                  // ✅ **把 1px 隐藏 WebView 挂到根 Stack**（本轮修复 ✓ 关键 ✓）
+                  //
+                  // 依据 ✓：`webview_image_fetcher.dart:11` 的设计原文就是
+                  //   「全局单例：持 WebViewController，通过 **buildHiddenWebView()**
+                  //     在**根 Stack** 挂 1px 隐藏 WebView」✓
+                  // 而实测 ✗：**全仓库没有任何地方调用 `buildHiddenWebView()`** ✗
+                  //   （只有 `:11` 注释 ✓ 与 `:83` 定义 ✓）
+                  //   ⇒ 于是所有依赖它的能力**实际是死的** ✗✓：
+                  //     · 配置了 `use_webview_fetch` 的**漫画源** ✗
+                  //     · 书源里写 `{"webView":true}` 的源 ✗（Legado 常见 ✓）
+                  //     · 引擎报的「该源的搜索需要浏览器内核（webView），当前不支持」✗
+                  //   ⇒ 挂上之后才能真的拿到"**渲染后的 HTML**" ✓（真浏览器栈 ✓
+                  //     反爬 / Cloudflare 挑战 / JS 渲染站能过 ✓）
+                  //
+                  // ⚠️ **桌面端必须跳过** ✓：`webview_image_fetcher.dart:54` 明确写了
+                  //   「桌面端无对应 WebViewPlatform，构造 `WebViewController` 会触发断言 ✗」
+                  //   ⇒ 只在 iOS / Android 挂 ✓（`kIsWeb` 由 `material.dart` 一并导出 ✓）
+                  //
+                  // ℹ️ 只有 1px 且在最上层 ✓（原设计如此 ✓）⇒ **不影响任何交互与观感** ✓
+                  if (!kIsWeb && (Platform.isIOS || Platform.isAndroid)) {
+                    out = Stack(
+                      children: [out, WebViewImageFetcher().buildHiddenWebView()],
+                    );
+                  }
                   if (scale > 0 && (scale - 1.0).abs() >= 0.001) {
                     out = MediaQuery(
                       data: MediaQuery.of(context)

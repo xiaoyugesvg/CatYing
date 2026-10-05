@@ -8,6 +8,7 @@ import '../theme/music_theme.dart';
 import '../widgets/mini_player.dart';
 import 'discover_page.dart';
 import 'library_page.dart';
+import 'charts_page.dart';
 import 'profile_page.dart';
 import 'search_page.dart';
 import '../../reading/widgets/jelly_nav_bar.dart';
@@ -16,7 +17,7 @@ import '../../common/theme.dart';
 /// 音乐模块的 App 骨架 —— 移植自 Beans 的 `RootView.swift`。
 ///
 /// ── 结构（与 Beans 一致）──────────────────────────────────────
-///   4 个 tab：主页(发现) / 搜索 / 音乐库 / 我的
+///   5 个 tab：主页(发现) / 搜索 / 乐库 / 榜单 / 我的
 ///   底部自绘悬浮导航栏（Beans 旧系统走自绘胶囊底栏）
 ///   迷你播放器**浮在导航栏之上**，有正在播放的歌才显示
 ///
@@ -45,13 +46,29 @@ class MusicRootView extends StatefulWidget {
 class _MusicRootViewState extends State<MusicRootView> {
   int _tab = 0;
 
+  /// 底栏 5 项（主页 / 搜索 / 乐库 / 榜单 / 我的）。
+  ///
+  /// ── 用户 2026 的改动 ─────────────────────────────────────────
+  ///   · `音乐库` → **`乐库`**（名字短一点，5 项时底栏更不挤）
+  ///   · **新增 `榜单`**：榜单原来挤在乐库页**最底部**，
+  ///     那个页面已经有"我的内容/正在播放/最近播放/收藏"四块，
+  ///     榜单要滚很久才看得到；而且它是**发现**性质，不是"我的东西"。
+  ///     拆出来职责清楚（乐库=我的，榜单=去发现）。
+  ///
+  /// ⚠️ 5 项时每个格子变窄 → 长标签会换行/挤压，
+  ///    所以标签都控制在 **2~3 个汉字**。
   static const _tabs = <({String label, IconData icon, IconData active})>[
     (label: '主页', icon: Icons.home_outlined, active: Icons.home_rounded),
     (label: '搜索', icon: Icons.search_rounded, active: Icons.search_rounded),
     (
-      label: '音乐库',
+      label: '乐库',
       icon: Icons.library_music_outlined,
       active: Icons.library_music_rounded,
+    ),
+    (
+      label: '榜单',
+      icon: Icons.leaderboard_outlined,
+      active: Icons.leaderboard_rounded,
     ),
     (
       label: '我的',
@@ -59,7 +76,7 @@ class _MusicRootViewState extends State<MusicRootView> {
       active: Icons.person_rounded,
     ),
   ];
-  // 音乐底栏 = **4 项**（主页 / 搜索 / 音乐库 / 我的）。
+  // 音乐底栏 = **5 项**（主页 / 搜索 / 乐库 / 榜单 / 我的）。
   //
   // 原先第 5 项是「影视」—— 它不是本模块的 tab，只是"跳出音乐"的入口：
   // 永远不高亮、点了行为与别人不同，本质上是个假 tab。
@@ -131,17 +148,20 @@ class _MusicRootViewState extends State<MusicRootView> {
                   // 所以拼进 key 就能让子页跟着换色。
                   child: IndexedStack(
                     // ⚠️ key 里**不能**带 `_tab`：IndexedStack 的 key 一变，
-                    // 整个子树（4 个 tab 页）就被销毁重建 —— 表现是
-                    // **每次切到音乐库都闪一次 loading**、滚动位置与搜索词全丢，
+                    // 整个子树（5 个 tab 页）就被销毁重建 —— 表现是
+                    // **每次切到乐库都闪一次 loading**、滚动位置与搜索词全丢，
                     // 而且子页的 `wantKeepAlive` 完全失效。
                     // tab 由下面的 `index:` 负责，key 只需跟"主题版本"（换肤要重建）。
                     key: ValueKey(
                         'music-tabs-${MusicThemeStore.instance.revision.value}'),
                     index: _tab,
+                    // ⚠️ 顺序必须与 `_tabs` **严格一一对应**
+                    //（主页 / 搜索 / 乐库 / 榜单 / 我的）
                     children: const [
                       DiscoverPage(),
                       SearchPage(),
                       LibraryPage(),
+                      ChartsPage(),
                       ProfilePage(),
                     ],
                   ),

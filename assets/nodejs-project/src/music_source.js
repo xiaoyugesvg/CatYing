@@ -469,16 +469,36 @@ async function handleMusicApi(body) {
         }
     }
 
-    // ── QQ：热搜走自己实现，其余发现页接口明确不支持（无登录态）──
+    // ── QQ：热搜 + **免登录的发现页接口**走自己实现 ──────────────
+    //
+    // ⚠️ 关键区分（别再混为一谈）：
+    //   · **发现页**（排行榜/歌单广场/推荐/榜单歌曲/歌单歌曲）→ **免登录可用**
+    //     （已实测 HTTP 200：排行榜 30 个榜单、歌单广场 20 个歌单）
+    //   · **播放地址**（`url` 动作）→ **必须带 QQ 登录 Cookie**，
+    //     免登录一律拿不到（5 首实测全部 no_free_source）
+    //   · 其它需要登录态的接口 → 明确返回原因（不是笼统的"未知 action"）
     if (isQq) {
         switch (action) {
             case 'hotSearch':
                 return qq.hotSearch();
             case 'qqSelfTest':
                 return qq.selfTest();
-            case 'personalized':
+            // ── 免登录的发现页能力（本次新增）──
+            case 'topLists':
+                return qq.topLists();
+            case 'topListSongs':
+                return qq.topListSongs(body.id, body.limit);
             case 'playlistSquare':
+                return qq.playlistSquare(
+                    body.categoryId != null ? body.categoryId : body.cat,
+                    body.limit);
             case 'playlistCatlist':
+                return qq.playlistCategories();
+            case 'personalized':
+                return qq.recommendPlaylists(body.limit);
+            case 'playlistDetail':
+                return qq.playlistSongs(body.id, body.limit);
+            // ── 需要登录态：给**明确原因** ──
             case 'comments':
             case 'simiSongs':
             case 'searchArtists':
@@ -487,10 +507,13 @@ async function handleMusicApi(body) {
             case 'artistAlbums':
             case 'albumSongs':
             case 'resolveBySource':
-            case 'topLists':
-            case 'playlistDetail':
             case 'newSongs':
-                return { ok: false, error: 'QQ 暂不支持该接口（需要登录态）', action, source: 'qq' };
+                return {
+                    ok: false,
+                    error: 'QQ 该接口需要登录态（本 App 未接入 QQ 登录）',
+                    action,
+                    source: 'qq',
+                };
             default:
                 return { ok: false, error: '未知 action: ' + action };
         }

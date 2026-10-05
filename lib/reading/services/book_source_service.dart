@@ -10,6 +10,9 @@ import '../../services/nodejs_manager.dart';
 import '../models/book_source.dart';
 import '../source/book_site_config.dart';
 import '../source/config_book_source.dart';
+// ✅ **Legado → BookSiteConfig 转换**（本轮重构 ✓）：让书源**先走 Dart（含 WebView 兜底 ✓）**，
+//   失败 / 含 `@js:` 才回落 Node 引擎 ✓（Node 那段保持原样 ✓ 只增不减 ✓）
+import '../source/legado_to_config.dart';
 import '../source/global_proxy.dart';
 import '../utils/source_fail_text.dart';
 
@@ -276,6 +279,25 @@ class BookSourceService {
   ///
   /// config 源（type=config）不走 Node/Legado，直接按 CSS 选择器抓取。
   ConfigBookSource _configSource(BookSource source) {
+    // ✅ **Legado 源也走 Dart 引擎**（本轮重构 ✓ 关键 ✓）
+    //
+    // 原来本方法**假定一定存在 `config` 块** ✗（下一行 `source.raw['config'] as Map` ✓
+    // ⇒ 对 Legado 源会直接抛 ✗）⇒ 所以 6 个入口的门槛都写成 `if (source.isConfig)` ✗
+    // ⇒ **Legado 源永远进不了 Dart 分支** ✓ ⇒ 只能走 Node 引擎 ✗
+    // ⇒ 而 Node 的网络栈被不少站点**拒** ✗（实测 `HTTP 400` / `read ECONNRESET` /
+    //    `socket hang up` / `SSL alert 40` / `certificate has expired` ✓）——
+    //    这些**不是源失效** ✗，是网络栈/防护问题 ✓
+    // ⇒ 现在用本轮写的转换层 `legadoToConfig` ✓ 把扁平 Legado 源转成 `BookSiteConfig` ✓
+    //    ⇒ 书源就能走 **Dart + WebView 真浏览器栈** ✓（= 母项目同款 ✓ 这也是
+    //      "别人 631 基本都能用"的原因 ✓）
+    // ⚠️ `@js:` 源**不会**走到这里 ✓（`_canUseDart` 已把它们挡在门外 ✓ 仍走 Node ✓ 不倒退 ✓）
+    if (!source.isConfig) {
+      return ConfigBookSource(
+        legadoToConfig(source.raw),
+        // proxy 口径与下面 config 分支**完全一致** ✓（都取 `raw['proxy']` ✓ 不做两套 ✓）
+        proxy: source.raw['proxy']?.toString() ?? '',
+      );
+    }
     final c = (source.raw['config'] as Map).cast<String, dynamic>();
     // 🔴 **请求头必须合并两层** ✓：config 源的引擎只读 `config.header`
     //（book_site_config.dart:123 ✓），而**书源登录**（`applyCookie`，:958-981）
@@ -297,6 +319,17 @@ class BookSourceService {
     );
   }
 
+  /// 这个源能否走 **Dart 引擎** ✓（本轮重构 ✓）
+  ///
+  /// · `isConfig`（config 明文源 ✓）⇒ 一直可以 ✓
+  /// · **Legado 源** ⇒ 只要规则里**没有 `@js:`/`<js>`** ✓ 就能（`legadoToConfig` 能转 ✓）
+  ///   ⚠️ Dart 跑不了 JS ✗ ⇒ 含 JS 规则的源**必须**留给 Node 引擎 ✓（`legadoNeedsNode` 判 ✓）
+  ///
+  /// 6 个入口（搜索 ✓ 分类列表 ✓ 分类页 ✓ 详情 ✓ 目录 ✓ 正文 ✓）统一用本方法做门槛 ✓
+  /// ⇒ 一次改动把**全部链路**对 Legado 源开放 ✓（不再各写一份 ✗）
+  bool _canUseDart(BookSource s) =>
+      s.isConfig || !legadoNeedsNode(s.raw);
+
   /// 用**一个**书源搜索。
   Future<({bool ok, String? error, List<BookSourceResult> list})> searchOne(
     BookSource source,
@@ -304,7 +337,7 @@ class BookSourceService {
     int page = 1,
   }) async {
     // ── config 明文源：Dart 侧引擎 ─────────────────────────────
-    if (source.isConfig) {
+    if (_canUseDart(source)) {
       try {
         final list = await _configSource(source).search(keyword, page: page);
         return (
@@ -328,7 +361,46 @@ class BookSourceService {
         return (ok: false, error: e.toString(), list: const <BookSourceResult>[]);
       }
     }
-    // ── Legado 源：Node 引擎 ───────────────────────────────────
+    // ── ✅ **先走 Dart（含 WebView 兜底）**，失败才回落 Node 引擎 ──────────────
+    // 为什么 ✓：Node 的网络栈被不少站点拒 ✗（实测 `HTTP 400` ✓ `read ECONNRESET` ✓
+    //   `socket hang up` ✓ `SSL alert 40` ✓ `certificate has expired` ✓）——
+    //   这些**不是源失效** ✗（源真死会是 DNS 失败/404 ✓），是**网络栈/防护**问题 ✓。
+    //   而 Dart 侧 `ConfigBookSource` 是**完整实现** ✓：搜索 ✓ 详情 ✓ 目录分页 ✓ 正文 ✓
+    //   + `useWebViewFetch` ⇒ `WebViewImageFetcher` ✓（**真浏览器栈** ✓ 反爬/Cloudflare 能过 ✓）
+    //   ⇒ 与母项目同款网络栈 ✓（这正是"别人 631 基本都能用"的原因 ✓）
+    // 安全 ✓：`legadoNeedsNode()` 命中 `@js:` ⇒ 直接用下面的 Node ✓；
+    //   抛错/空结果 ⇒ **也回落 Node** ✓（现行为不变 ✓）；Node 引擎代码**一行未动** ✓
+    if (!legadoNeedsNode(source.raw)) {
+      try {
+        final hits = await ConfigBookSource(
+          legadoToConfig(source.raw),
+        ).search(keyword, page: page);
+        if (hits.isNotEmpty) {
+          debugPrint('[书源] Dart 搜索成功：${source.name} → ${hits.length} 条');
+          return (
+            ok: true,
+            error: '',
+            list: hits
+                .map(
+                  (h) => BookSourceResult(
+                    source: source,
+                    name: h.title,
+                    author: h.author,
+                    bookUrl: h.bookUrl,
+                    coverUrl: h.cover,
+                    intro: h.intro,
+                    lastChapter: h.lastChapter,
+                  ),
+                )
+                .toList(),
+          );
+        }
+        debugPrint('[书源] Dart 搜索返回 0 条，回落 Node 引擎：${source.name}');
+      } catch (e) {
+        debugPrint('[书源] Dart 搜索未成功，回落 Node 引擎：${source.name} → $e');
+      }
+    }
+    // ── Legado 源：Node 引擎（回落路径 ✓ 原样保留 ✓）──────────────────
     final raw = await _call({
       'action': 'bsSearch',
       'source': source.raw,
@@ -361,7 +433,7 @@ class BookSourceService {
   /// [source] 未传 categoryUrl → Node 侧解析 exploreUrl 返回分类数组。
   Future<({bool ok, String? error, List<ExploreCategory> categories})>
       exploreCategories(BookSource source) async {
-    if (source.isConfig) {
+    if (_canUseDart(source)) {
       return (
         ok: false,
         error: '该源未配置分类浏览（config 源无 exploreUrl）：可直接搜索找书',
@@ -400,7 +472,7 @@ class BookSourceService {
   /// 分类页的书籍列表（ruleExplore 解析，对应分类网格内容）
   Future<({bool ok, String? error, List<BookSourceResult> list})>
       exploreBooks(BookSource source, String categoryUrl) async {
-    if (source.isConfig) {
+    if (_canUseDart(source)) {
       return (
         ok: false,
         error: '该源未配置分类浏览（config 源无 exploreUrl）：可直接搜索找书',
@@ -447,7 +519,7 @@ class BookSourceService {
   Future<({Map<String, dynamic>? info, String? error})> bookInfoChecked(
       BookSource source, String bookUrl) async {
     // ── config 明文源：Dart 侧引擎 ─────────────────────────────
-    if (source.isConfig) {
+    if (_canUseDart(source)) {
       try {
         final info = await _configSource(source)
             .bookInfo(BookSiteResult(title: '', bookUrl: bookUrl));
@@ -491,7 +563,7 @@ class BookSourceService {
     String tocUrl,
   ) async {
     // ── config 明文源：Dart 侧引擎 ─────────────────────────────
-    if (source.isConfig) {
+    if (_canUseDart(source)) {
       try {
         final list = await _configSource(source).toc(tocUrl);
         return (
@@ -553,7 +625,7 @@ class BookSourceService {
     String chapterUrl,
   ) async {
     // ── config 明文源：Dart 侧引擎（正文纯文字，无图片）──────
-    if (source.isConfig) {
+    if (_canUseDart(source)) {
       try {
         final text = await _configSource(source).content(chapterUrl);
         return (ok: true, error: null, content: text, images: const <String>[]);

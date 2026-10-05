@@ -36,23 +36,37 @@ class SourceResolveResult {
 /// ── 职责边界（重要）───────────────────────────────────────────
 /// Dart 侧负责：
 ///   · 从 [ThirdPartySourceStore] 取**已启用**的音源
-///   · 按顺序逐个试，记录每个的失败原因
+///   · 逐个/并发试，记录每个的失败原因
 ///   · 决定"内置接口失败后要不要回退到音源"
 /// Node 侧负责**纯解析**（模板填充 / 脚本沙箱执行）。
 ///
 /// 这样音源列表的**唯一事实来源是 Dart**，Node 不囤一份，
 /// 不会出现两边不一致的问题。
 ///
-/// ── 为什么要逐个试而不是选一个 ────────────────────────────────
-/// 用户导入的源质量参差，第一个可能正好挂了。全试一遍的成本可控
-/// （每个超时 12s，但正常的几十毫秒就回来了），换来的是"可用率高很多"。
-/// 顺序按用户导入顺序，前面的是他更信任的。
+/// ── 两种用法（区别很重要）────────────────────────────────────
+///   · [resolve]    —— 逐个试，**命中第一个就返回**（旧的自动模式）
+///   · [resolveAll] —— 试**全部**，返回**所有成功的结果**，
+///                    交给用户选（新交互：弹窗让用户决定用哪个）
+///
+/// 用户 2026 的决定：**用 [resolveAll] + 弹窗**。理由是自己选比程序猜更可靠 ——
+/// 同一个源对不同歌的可用性差别很大，程序挑的第一个未必是用户想要的。
 class UnblockService {
   UnblockService._();
   static final UnblockService instance = UnblockService._();
 
   /// 单个音源的解析在 Node 侧也有超时，这里只做整体上限保护
   static const _maxTries = 8;
+
+  /// [resolveAll] 的上限（试太多会明显变慢）
+  static const _maxTriesAll = 12;
+
+  /// [resolveAll] 的并发数。
+  ///
+  /// ⚠️ 必须限流：一次并发 12 个脚本请求会
+  ///   · 让 Node 侧同时跑 12 个 vm 沙箱（内存/CPU 尖峰）
+  ///   · 被源站当成攻击（风控）
+  /// 4 个是"够快又不激进"的平衡点。
+  static const _concurrency = 4;
 
   /// 最近一次解析的逐条失败原因（给"为什么都失败了"提供依据）
   final lastAttempts = <String>[];
@@ -99,6 +113,71 @@ class UnblockService {
       ok: false,
       error: lastAttempts.isEmpty ? '所有音源都没解析出播放地址' : '所有音源都失败了',
     );
+  }
+
+  /// **试全部已启用的音源，返回所有成功的结果**（不提前返回）。
+  ///
+  /// ── 与 [resolve] 的区别（这是用户 2026 要的交互）──────────────
+  /// [resolve] 命中第一个就返回 —— **程序替用户选了**。
+  /// 但实测同一个源对不同歌的可用性差别很大，程序挑的第一个未必是用户想要的
+  ///（比如两个源都能播，但一个音质更好 / 另一个是不同版本）。
+  ///
+  /// 所以改成：**全都试，把成功的列出来，弹窗让用户决定用哪个。**
+  ///
+  /// ── 实现要点 ────────────────────────────────────────────────
+  /// · **限流并发**（[_concurrency] = 4）：不限流会同时跑 12 个 vm 沙箱
+  ///   并把源站当攻击（风控）
+  /// · 结果顺序 = **源列表顺序**（用户导入的顺序，前面的他更信任）
+  /// · 失败原因仍逐个记进 [lastAttempts]（全失败时展示）
+  ///
+  /// [onProgress] 报"已试 N/M"，供 UI 显示进度。
+  Future<List<SourceResolveResult>> resolveAll(
+    Song song, {
+    void Function(int done, int total)? onProgress,
+  }) async {
+    lastAttempts.clear();
+    final sources = ThirdPartySourceStore.instance.enabled.take(_maxTriesAll).toList();
+    if (sources.isEmpty) return const [];
+
+    // 结果槽位：按**源顺序**保留，成功的填进去
+    final slots = List<SourceResolveResult?>.filled(sources.length, null);
+    var done = 0;
+    var next = 0;
+
+    /// 单个 worker：不断从 next 取下一个源，直到取完
+    Future<void> worker() async {
+      while (true) {
+        final i = next;
+        if (i >= sources.length) return;
+        next++;
+        final s = sources[i];
+        try {
+          final r = await MusicApi.instance.resolveBySource(s, song);
+          if (r.ok && r.url.isNotEmpty) {
+            slots[i] = SourceResolveResult(
+              ok: true,
+              url: r.url,
+              kind: r.kind,
+              source: s,
+              headers: r.headers,
+            );
+          } else {
+            lastAttempts
+                .add('${s.name}：${r.message.isEmpty ? "未返回地址" : r.message}');
+          }
+        } catch (e) {
+          lastAttempts.add('${s.name}：$e');
+        }
+        done++;
+        onProgress?.call(done, sources.length);
+      }
+    }
+
+    await Future.wait(
+      List.generate(_concurrency.clamp(1, sources.length), (_) => worker()),
+    );
+
+    return slots.whereType<SourceResolveResult>().toList();
   }
 
   /// 只试某一个音源（音源管理页的"测试"按钮用）

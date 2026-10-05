@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../pages/player_page.dart';
 import 'music_components.dart';
+import 'mini_player.dart';
 import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../../services/app_log.dart';
@@ -41,6 +42,12 @@ class MusicFloatingPlayButton extends StatefulWidget {
 
 class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
   static const double _size = 54;
+
+  /// 球与迷你播放条之间的视觉间隙
+  ///
+  /// 8 是"看得出是两层、又不显得空"的值（和迷你条自己的
+  /// `gapAboveNavBar = 6` 同一量级）。
+  static const double _bottomGap = 8;
 
   /// 拖动后的位置；null = 用默认位置（右下、迷你播放器上方）
   Offset? _pos;
@@ -109,9 +116,27 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
         final maxY =
             (screen.height - _size - pad.bottom - 8).clamp(90.0, screen.height);
 
-        // 默认：右下、避开底部导航与迷你播放器
-        final pos = _pos ??
-            Offset(screen.width - _size - 16, screen.height - pad.bottom - 96);
+        // ── 默认位置：右下、**让开整个迷你播放条** ──────────────────
+        //
+        // 🔴 修的真实问题（用户实测反馈）：
+        // 原来这里写死 `- 96`，而底部实际占用是
+        //     导航栏 86（bottomMargin 20 + barHeight 66）
+        //   + 迷你条 62（gap 6 + 容器 56）
+        //   = 距底 148 才在迷你条之上
+        // → 球在 96 的位置**正好压在迷你条上**（右端被遮）。
+        //
+        // 现在按 `MusicMiniPlayerLayout.topFromBottom` 算（=148），
+        // 再留 8 的视觉间隙 → **156**。
+        // ⚠️ 用常量而不是再写一个数字：以后改迷你条高度，
+        //    球的位置会**自动跟着让位**，不会又压上去。
+        //
+        // 迷你条只在本页有正在播放的歌时出现 —— 而本组件同样是
+        // "没有正在播放的歌就整体隐藏"（见上面 `song == null`），
+        // 所以**两者同生同灭**，不需要再判断一次。
+        final defaultY = screen.height -
+            pad.bottom -
+            (MusicMiniPlayerLayout.topFromBottom + _bottomGap);
+        final pos = _pos ?? Offset(screen.width - _size - 16, defaultY);
         // 用 `pos` 判断贴哪一侧（不能用 x —— 半藏后 x 可能为负）
         final toLeft = pos.dx + _size / 2 < screen.width / 2;
         // C 方案：**贴边且收起** → 半藏（露出约 62%）；拖动中/展开 → 全露
@@ -228,7 +253,8 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
         // 注：上界 `maxX` 上方已声明（这里不重复声明）；
         // 松手吸附时会用"安全区版本"重新算上界，所以最终落点一定贴边。
         final cur = _pos ??
-            Offset(screen.width - _size - 16, screen.height - pad.bottom - 96);
+            Offset(screen.width - _size - 16,
+            screen.height - pad.bottom - (MusicMiniPlayerLayout.topFromBottom + _bottomGap));
         setState(() {
           _pos = Offset(
             (cur.dx + d.delta.dx).clamp(minX, maxX),
@@ -243,7 +269,8 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
         final minX = pad.left + 4;
         final maxX = (screen.width - _size - pad.right - 4).clamp(minX, screen.width);
         final cur = _pos ??
-            Offset(screen.width - _size - 16, screen.height - pad.bottom - 96);
+            Offset(screen.width - _size - 16,
+            screen.height - pad.bottom - (MusicMiniPlayerLayout.topFromBottom + _bottomGap));
         final toLeft = cur.dx + _size / 2 < screen.width / 2;
         setState(() {
           _pos = Offset(toLeft ? minX : maxX, cur.dy);

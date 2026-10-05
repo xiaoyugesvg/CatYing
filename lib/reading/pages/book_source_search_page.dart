@@ -15,6 +15,9 @@ import 'browse_history_page.dart';
 import 'favorites_page.dart';
 import '../../common/theme.dart';
 import '../utils/source_fail_text.dart';
+// ✅ **外壳内嵌子页**（本轮重构 ✓）：本页由 `home_page.dart` 的外壳渲染 ✓
+//   ⇒ 底部胶囊导航栏（"悬浮菜单栏"）**照常显示** ✓✓；返回用 `closeEmbeddedPage()` ✓
+import 'shell_embedded_page.dart';
 
 /// 书源搜索页 —— 用已导入的 Legado 书源跨站搜小说。
 ///
@@ -412,9 +415,19 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                 height: 40,
                 tooltip: '切换到图书',
                 // 书源页是 push 进来的，所以"切回图书"就是 pop。
-                // 用 pop 而不是再 push 一个图书页：否则连点几下会在栈里
+                // ✅ **内嵌模式下的返回**（本轮重构 ✓）：本页现在由**外壳**渲染 ✓
+                //   （`openEmbeddedPage(...)` ✓）⇒ 它**不在**导航栈里 ✗
+                //   ⇒ 必须调 `closeEmbeddedPage()` 回到原 tab ✓（底栏仍在 ✓）
+                // ℹ️ 非内嵌（万一还有别处 push 进来 ✓）仍走原来的 `maybePop` ✓ 两种都安全 ✓
+                // 原注释保留 ✓：用 pop 而不是再 push 一个图书页：否则连点几下会在栈里
                 // 堆出一串页面，返回键要按很多次才出得去。
-                onTap: () => Navigator.maybePop(context),
+                onTap: () {
+                  if (shellEmbeddedPage.value != null) {
+                    closeEmbeddedPage();
+                  } else {
+                    Navigator.maybePop(context);
+                  }
+                },
               ),
               const SizedBox(width: 10),
               Expanded(child: _searchField()),
