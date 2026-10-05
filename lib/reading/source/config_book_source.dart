@@ -107,6 +107,17 @@ class ConfigBookSource {
     'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
         '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    // ✅ **补齐"像浏览器"的请求头**（本轮 ✓ —— 与下载侧同款修法 ✓）：
+    //   为什么 ✗：不少源站/云防护对**请求头太素**的请求**直接回 500** ✓
+    //   （实测：体检 223 个源**全 500** ✓ —— 除占位符根因外，这一层也是共性原因 ✓）
+    //   下载侧当初就是靠浏览器 UA 从 **403** 变正常的 ✓✓（`download_service:177-178` 的注释 ✓）
+    //   ⚠️ 顺序 ✓：这几个**默认值放在 `...site.header` 之前** ✓
+    //     ⇒ 源自己配的同名头**仍然优先** ✓✓（不夺走源的定制能力 ✓）
+    'Accept':
+        'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    // 常见站会校验 Referer（从首页点进内页的"自然路径"✓）；用源自己的首页作默认 ✓
+    if (site.url.isNotEmpty) 'Referer': site.url,
     ...site.header,
   };
 
@@ -160,7 +171,17 @@ class ConfigBookSource {
     if (tpl == null || tpl.isEmpty) {
       throw BookUnsupportedSearchError('源「${site.name}」暂不支持搜索');
     }
+    // ✅ **Legado 标准占位符 `{{key}}` / `{{page}}` 兼容**（本轮根因修复 ✓✓）
+    //   **为什么必须** ✗：Legado 书源用的是**双花括号** ✓（如
+    //   `http://…/search.php?searchkey={{key}}` ✓）；而本引擎原来**只认单花括号** `{q}` ✗
+    //   ⇒ `{{key}}` **从不被替换** ✗ → URL 里带着**字面量** `{{key}}` 发出去 ✓
+    //   ⇒ 站点收到垃圾参数 → 返回 **HTTP 500 / 错误页** ✗
+    //   ⇒ 实测现象 ✓：**223 个源全部 500** ✓、分类接口 500 ✓、搜索无结果 ✓ —— **同一根因** ✓✓
+    //   ⚠️ 顺序**先双后单** ✗：若先做 `{q}`/`{page}` ✓，`{{key}}` 会被**拆坏** ✓（保双括号优先 ✓）
+    //   ℹ️ 单花括号写法**保留** ✓：老的自定义源（`{q}` ✓）行为**一字不变** ✓（向后兼容 ✓）
     var url = tpl
+        .replaceAll('{{key}}', _encodeQuery(query))
+        .replaceAll('{{page}}', (page + site.searchPageStart - 1).toString())
         .replaceAll('{q}', _encodeQuery(query))
         .replaceAll('{page}', (page + site.searchPageStart - 1).toString());
     if (!url.startsWith('http')) url = _resolveUrl(url);
@@ -279,6 +300,12 @@ class ConfigBookSource {
       final pageCount = _maxPage(doc, site.tocPageCountDom!);
       for (var p = 2; p <= pageCount; p++) {
         final pageUrl = site.tocPageUrl!
+            // ✅ **同样兼容 Legado 双花括号**（本轮 ✓ 与搜索处同一根因 ✓）——
+            //   你的源若把目录分页写成 `{{base}}` / `{{page}}` ✓，原来**不会被替换** ✗
+            //   ⇒ 会请求到带字面量花括号的畸形 URL ✗ ⇒ 表现为"**能搜到、点进去目录不全/打不开**"✗
+            //   ⚠️ 依旧**先双后单** ✓（否则 `{{base}}` 会被 `{base}` 那条拆坏 ✗）
+            .replaceAll('{{base}}', base)
+            .replaceAll('{{page}}', p.toString())
             .replaceAll('{base}', base)
             .replaceAll('{page}', p.toString());
         try {

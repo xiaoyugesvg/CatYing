@@ -252,6 +252,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
   List<BookBlock> get _blocks => _content?.flatBlocks ?? [];
   List<int> get _chapterStarts => _content?.chapterStarts ?? [];
 
+  /// ✅ **本地图书的划线缓存**（本会话第 4 轮 ✓）—— key = **段号** ✓（`PageEntry.blockIndex` ✓
+  /// 已保证可信 ✓ 含长段落分块 ✓），value = 该段的笔记 ✓（颜色/批注都在里面 ✓）。
+  /// 用途 ✓：① 渲染时给该段加底色（**回显** ✓）② 划完线后立即刷新它 ✓（否则"刚划的不显示"✗）。
+  Map<int, ReaderNote> _notesByBlock = {};
+
   /// 懒分页下的显示总页数：已排完（_ongoingPaginator 已置空）用 _pages.length，
   /// 否则按 已排页数 × 总块数 / 已排块数 估算，随补排推进收敛到真实值。
   int get _displayTotalPages {
@@ -270,6 +275,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
     if (pf != null) {
       // 过渡页已解析 + 分页 + 缓存命中参数，直接复用，跳过 _load / _paginate
       _content = pf.content;
+      // ✅ **填充划线缓存（预取路径）**（本轮 ✓）—— `forBook` **同步** ✓ 无需 await ✓
+      //   ⚠️ 这条路径与"正常加载"那条**都要填** ✗（只填一处 = "有时显示有时不显示"✗ 最难受的 bug）
+      _notesByBlock = {
+        for (final n in ReaderNotesService.instance
+            .forBook('local', widget.task.title))
+          n.paragraphIndex: n,
+      };
       _pages = pf.pages;
       _imageRatios.addAll(pf.ratios);
       _imageNaturalWidths.addAll(pf.naturalWidths);
@@ -526,6 +538,12 @@ class _BookReaderPageState extends State<BookReaderPage> {
       if (!mounted) return;
       setState(() {
         _content = content;
+        // ✅ **填充划线缓存（正常加载路径）**（本轮 ✓）—— 与预取路径**同一段逻辑** ✓
+        _notesByBlock = {
+          for (final n in ReaderNotesService.instance
+              .forBook('local', widget.task.title))
+            n.paragraphIndex: n,
+        };
         _loading = false;
       });
       _contentFingerprint = BookPageCacheService.contentFingerprint(content);
@@ -1484,7 +1502,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           for (var i = 0; i < entries.length; i++) ...[
-            _buildEntry(entries[i], textColor, contentWidth),
+            _noteWrap(entries[i].blockIndex,
+                _buildEntry(entries[i], textColor, contentWidth)),
             if (i < entries.length - 1) SizedBox(height: _typo.blockSpacing),
           ],
         ],
@@ -1865,6 +1884,25 @@ class _BookReaderPageState extends State<BookReaderPage> {
   }
 
   // ---------------- 块渲染（两模式共用） ----------------
+
+  /// ✅ **划线回显：命中该段就加一层底色**（本会话第 4 轮 ✓）。
+  ///
+  /// 为什么包在**调用点** ✗ 而不是改 `_buildEntry` 内部：
+  ///   那里是一个 ~50 行的 `SelectableText(...)` 块 ✓，**整体复刻风险高** ✗；
+  ///   包在外层则**零侵入** ✓ 且对**所有块类型**都成立 ✓（段落 ✓ 标题 ✓ 图片 ✓）。
+  /// ℹ️ 颜色用**笔记自己的** `color` ✓（最忠实 ✓ 与划线时选的颜色一致 ✓）；半透明 ✓ 不挡字 ✓。
+  Widget _noteWrap(int blockIndex, Widget child) {
+    final n = _notesByBlock[blockIndex];
+    if (n == null) return child;
+    return Container(
+      decoration: BoxDecoration(
+        color: Color(n.color).withValues(alpha: 0.22),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: child,
+    );
+  }
 
   Widget _buildEntry(PageEntry entry, Color textColor, double contentWidth) {
     final block = entry.block;

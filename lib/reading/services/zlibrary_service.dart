@@ -10,6 +10,7 @@ import '../models/book_category.dart';
 import '../models/search_result.dart';
 import '../source/webview_image_fetcher.dart';
 import '../source/global_proxy.dart';
+import '../utils/source_fail_text.dart';
 import 'builtin_accounts.dart';
 import 'remote_config_service.dart';
 import 'settings_service.dart';
@@ -252,7 +253,17 @@ class ZlibraryService extends ChangeNotifier {
     } catch (e) {
       _domain = saved; // 探测失败就回滚，别把用户配好的地址弄坏
       await _persistDomain();
-      return (ok: false, message: '连不上：${e.toString().split('\n').first}');
+      // ✅ **把异常翻成人话**（本轮 ✓）—— 原来直接拼 `e.toString()` ✗，
+      //   于是节点面板/登录页显示的就是截图上那句「**连不上：DioException [unknown]: null**」✗
+      //   （用户看不懂 ✓ 我们也判断不出是**超时 / 证书 / 连接被拒** ✗）。
+      //   ⇒ 复用**统一失败表** ✓（`utils/source_fail_text.dart` ✓）：
+      //     与豆瓣那句「连不上豆瓣，可能需要代理或网络受限」**同一种表达习惯** ✓（这就是"统一"✓）；
+      //     并把**原文**附在括号里 ✓（便于排查 ✓ 不丢信息 ✓ 与其它页面同款 ✓）
+      final fail = describeSourceFail(e, what: 'Cmbok 服务器');
+      return (
+        ok: false,
+        message: '${fail.text}（${e.toString().split('\n').first}）',
+      );
     }
   }
 
@@ -1169,6 +1180,38 @@ class ZlibraryService extends ChangeNotifier {
   /// 自动过 CF 挑战；任一镜像成功即把该节点写回 `_domain` 并持久化。
   /// 全部镜像都失败才抛 [ZlibraryException]（unavailable / fail）。
   Future<SearchResult<Book>> fetchHomeRecommendations({int page = 1}) async {
+    // ✅ **先走 eapi 接口**（本轮 ✓ —— 与「搜索」同一套传输与解析 ✓✓）
+    //
+    // 为什么必须改 ✗：原来这里**只有** WebView 抓 `/s/?page=N&dsource=mostpopular` 的
+    //   **老式 SSR HTML** ✗（解析 `z-bookcard[dsource="mostpopular"]` ✓），
+    //   而新镜像（如 `z-library.my`）那个页是 **JS 渲染** ✗ ⇒
+    //   **HTML 抓到了、却解析出 0 条** ✗✗ —— 这正是"搜索能出、推荐死活不显示"的根因 ✓
+    //   （搜索走 `/eapi/book/search` ✓ 已在真机验证可用 ✓✓）
+    //
+    // 策略 ✓：**多端点依次尝试** → 命中即**早返回** ✓；
+    //   全部失败/为空才**落到**下面的 WebView+HTML 逻辑 ✓（**原样保留** ✓ 双保险 ✓）。
+    // 端点顺序 ✓：`most-popular`（最受欢迎 ✓ 对应你截图的区块）→ `popular` → `recent` ✓
+    //   ℹ️ 未知端点会返回 404/空 ✓ 不会误判成成功 ✓（有 `items.isNotEmpty` 这道闸 ✓）
+    for (final path in const [
+      '/eapi/book/most-popular',
+      '/eapi/book/popular',
+      '/eapi/book/recent',
+    ]) {
+      try {
+        final res = await _post(path, data: {'page': page, 'limit': 24});
+        final parsed = _parseSearch(res);
+        if (parsed.items.isNotEmpty) {
+          _log('首页推荐：接口 $path 命中 ${parsed.items.length} 条（走 eapi ✓）');
+          return parsed;
+        }
+        _log('首页推荐：接口 $path 返回 0 条');
+      } catch (e) {
+        final f = describeSourceFail(e, what: 'z-library 首页');
+        _log('首页推荐：接口 $path 失败 -> ${f.text}（$e）');
+      }
+    }
+    _log('首页推荐：eapi 三个端点都不可用 → 回退 WebView+HTML 老逻辑');
+
     final order = _candidateOrder();
     if (order.isEmpty) {
       throw ZlibraryException('unavailable', '图书功能暂不可用，请等待恢复');

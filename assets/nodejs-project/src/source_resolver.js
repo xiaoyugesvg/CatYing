@@ -22,7 +22,8 @@
 import axios from 'axios';
 import { loadScript, runAction } from './lx_engine.js';
 // MusicFree 插件适配层（独立一套入口，不影响上面的 LX 路径）
-import { looksLikeMusicFree, loadMusicFreePlugin, pickMediaGetter, normalizeMedia } from './musicfree_adapter.js';
+import { looksLikeMusicFree, loadMusicFreePlugin, pickMediaGetter, normalizeMedia,
+         pickAction, normalizeSearchResult, normalizeLyric } from './musicfree_adapter.js';
 
 /** 模板法请求超时 */
 const TEMPLATE_TIMEOUT_MS = 12000;
@@ -282,6 +283,76 @@ async function resolveMusicFree(source, song) {
     return { ok: true, url: media.url, headers: media.headers };
 }
 
+/**
+ * MusicFree 插件的**非取址 action**（搜索 / 歌词）。
+ *
+ * ── 为什么单独一个函数而不是塞进 resolveMusicFree ────────────────
+ * 两者签名与返回形态完全不同：
+ *   · `getMediaSource(musicItem, quality)` -> `{url, headers}`
+ *   · `search(query, page, type)`          -> `{isEnd, data:[musicItem]}`
+ *   · `getLyric(musicItem)`                -> `{lyric, tlyric}`
+ * 混在一起会让"参数怎么传"变得不可读（位置参数个数都不一样）。
+ *
+ * @param action 'search' | 'lyric'
+ * @param args   该 action 的位置参数
+ */
+async function resolveMusicFreeAction(source, action, args) {
+    const script = String(source.script || '');
+    if (!script.trim()) return { ok: false, error: '插件没有内容' };
+
+    const loaded = await loadMusicFreePlugin(script, loadScript);
+    if (!loaded.ok) return { ok: false, error: loaded.error };
+
+    const picked = pickAction(loaded.handlers, action);
+    if (!picked) {
+        const want = action === 'search' ? 'search' : 'getLyric';
+        return {
+            ok: false,
+            error:
+                `该 MusicFree 插件不支持 ${action}（缺 ${want}）` +
+                `；它提供：${(loaded.actions || []).join(', ') || '无'}`,
+        };
+    }
+
+    const r = await runAction({ [picked.name]: picked.fn }, picked.name, args, {
+        spread: true,
+    });
+    if (!r.ok) return { ok: false, error: r.error };
+
+    if (action === 'search') {
+        const n = normalizeSearchResult(r.result);
+        return { ok: true, list: n.list, isEnd: n.isEnd };
+    }
+    if (action === 'lyric') {
+        const n = normalizeLyric(r.result);
+        return { ok: true, lyric: n.lyric, tlyric: n.tlyric };
+    }
+    return { ok: false, error: '未知 action: ' + action };
+}
+
+/**
+ * MusicFree 插件的**搜索**。
+ * 签名：`search(query, page, type)` —— `type` 默认 'music'。
+ */
+export async function searchByMusicFree(source, keyword, page = 1, type = 'music') {
+    return resolveMusicFreeAction(source, 'search', [String(keyword || ''), page, type]);
+}
+
+/**
+ * MusicFree 插件的**歌词**。
+ * 签名：`getLyric(musicItem)`。
+ */
+export async function lyricByMusicFree(source, song) {
+    const musicItem = {
+        id: song && song.id != null ? String(song.id) : '',
+        title: song && song.name ? String(song.name) : '',
+        artist: song && song.artists ? String(song.artists) : '',
+        album: song && song.album ? String(song.album) : '',
+        duration: (song && song.duration) || 0,
+    };
+    return resolveMusicFreeAction(source, 'lyric', [musicItem]);
+}
+
 /** 判断一份脚本是否该走 MusicFree 适配层 */
 export function isMusicFreeScript(script) {
     return looksLikeMusicFree(script);
@@ -507,4 +578,6 @@ async function resolveSource(source, song) {
     return Object.assign({ kind }, r);
 }
 
+// ⚠️ searchByMusicFree / lyricByMusicFree 已经在声明处 `export async function`
+// 导出过了 —— 不要在这里重复列出（重复导出是 SyntaxError）。
 export { resolveSource, resolveByTemplate, resolveByScript, fillTemplate, pickByPath };

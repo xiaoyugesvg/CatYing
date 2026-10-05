@@ -52,8 +52,24 @@ class SourceManager extends ChangeNotifier {
   // 搜索/分类返回空；详情/章节/取图抛描述性错误，被调用方现有 try/catch 接住提示用户。
   final MangaSource _noSource = _NoSource();
 
-  /// 当前源。零源时返回 [_noSource] 哨兵（不抛异常），保证 UI/封面头等各处不崩。
-  MangaSource get current => _current ?? _noSource;
+  /// 当前源。**没有当前源时 → 用「第一个启用源」兜底** ✓；真零源（全被停用/无源）才返回
+  /// [_noSource] 哨兵（不抛异常 ✓ 保证 UI/封面头各处不崩 ✓）。
+  ///
+  /// ✅ **本轮修正**（用户："**漫画页要显示第一个源**" ✓）——
+  ///   原来这里写的是 `_current ?? _noSource` ✗ ⇒ 首次安装 / 没选过源 / 当前源被停用时，
+  ///   `current` 返回的是**空源哨兵** ✗ ⇒ **漫画页什么都没有** ✗✓（不是"没网络"，是"没源"✓）。
+  ///   ⇒ 现在：**按注册顺序取第一个未被停用的源** ✓✓
+  ///     （`_sources` 是 `LinkedHashMap` 语义 ✓ 顺序 = 加载顺序 = 「漫画源仓库」里的显示顺序 ✓
+  ///      所以它就是用户眼中的"**第一个源**" ✓）
+  ///   ℹ️ 这样"开箱即用" ✓：装上就有内置漫画源 ✓ → 漫画页**直接显示第一个源的内容** ✓✓
+  MangaSource get current {
+    final c = _current;
+    if (c != null) return c;
+    for (final s in _sources.values) {
+      if (!_disabledIds.contains(s.id)) return s;
+    }
+    return _noSource;
+  }
 
   /// 所有已注册源
   List<MangaSource> get sources => _sources.values.toList();

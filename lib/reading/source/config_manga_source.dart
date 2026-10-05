@@ -198,7 +198,13 @@ class ConfigMangaSource extends MangaSource {
     final out = <Map<String, String>>[];
     var prevCount = -1;
     while (true) {
-      var url = site.chapterApiUrl.replaceAll('{offset}', offset.toString());
+      // ✅ **同样兼容 Legado 双花括号**（本轮 ✓ 与搜索处同一根因 ✓）：
+      //   Legado 源常写 `{{offset}}` ✓，原来**只认单花括号** ✗ ⇒ 占位符不被替换 ✗
+      //   ⇒ URL 里带字面量花括号 ✓ → 章节接口 500 / 返回空 ✗（表现为"**详情有、目录打不开**"✗）
+      //   ⚠️ **先双后单** ✓；单括号保留 ✓（老源自定义写法不变 ✓）
+      var url = site.chapterApiUrl
+          .replaceAll('{{offset}}', offset.toString())
+          .replaceAll('{offset}', offset.toString());
       url = _fillRemaining(url, captures);
       url = _resolveUrl(url, site.url);
       final text = await _fetchJsonText(url);
@@ -323,7 +329,10 @@ class ConfigMangaSource extends MangaSource {
     if (site.coverUrlPattern.isNotEmpty) {
       final m = RegExp(site.coverIdRegex).firstMatch(comicUrlForId);
       if (m != null) {
-        return site.coverUrlPattern.replaceAll('{comicId}', m.group(1)!);
+        // ✅ 封面模板也兼容双花括号 ✓（同款 ✓ 先双后单 ✓）—— 否则封面地址会带字面量 `{{comicId}}` ✗
+        return site.coverUrlPattern
+            .replaceAll('{{comicId}}', m.group(1)!)
+            .replaceAll('{comicId}', m.group(1)!);
       }
     }
     if (c.isEmpty || c.startsWith('data:') || c.startsWith('blob:')) return c;
@@ -358,6 +367,13 @@ class ConfigMangaSource extends MangaSource {
       q = Uri.encodeQueryComponent(query);
     }
     var url = tpl
+        // ✅ **Legado 双花括号兼容**（本轮 ✓ 与书源侧同一根因 ✓）：
+        //   Legado 漫画源常用 `{{key}}` / `{{page}}` ✓，而引擎原来**只认单花括号** ✗
+        //   ⇒ 占位符不被替换 ✗ → URL 带字面量花括号 ✓ → 站点 500 / 无结果 ✗
+        //   ⚠️ **先双后单** ✓（否则 `{{key}}` 会被 `{q}` 那条拆坏 ✗）；单括号**保留** ✓（向后兼容 ✓）
+        .replaceAll('{{key}}', q)
+        .replaceAll('{{q}}', q)
+        .replaceAll('{{page}}', (page + 1).toString())
         .replaceAll('{q}', q)
         .replaceAll('{page}', (page + 1).toString());
     if (!url.startsWith('http')) url = _resolveUrl(url);
@@ -370,6 +386,10 @@ class ConfigMangaSource extends MangaSource {
     final String html;
     if (site.searchMethod.toUpperCase() == 'POST') {
       final body = site.searchPostBody
+          // ✅ 请求体里**同样**兼容双花括号 ✓（规则与上面 URL **完全一致** ✓ 免得两处不一致 ✗）
+          .replaceAll('{{key}}', q)
+          .replaceAll('{{q}}', q)
+          .replaceAll('{{page}}', (page + 1).toString())
           .replaceAll('{q}', q)
           .replaceAll('{page}', (page + 1).toString());
       html = await _fetchHtmlByPost(url, body);
@@ -502,6 +522,9 @@ class ConfigMangaSource extends MangaSource {
       url = url.replaceAll('{$key}', value);
     });
     url = url
+        // ✅ **兼容 Legado 双花括号**（本轮 ✓ 先双后单 ✓）—— 否则分类分页会带字面量 `{{slug}}`/`{{page}}` ✗
+        .replaceAll('{{slug}}', slugVal)
+        .replaceAll('{{page}}', (page + site.categoryPageStart).toString())
         .replaceAll('{slug}', slugVal) // 旧版兼容
         .replaceAll('{page}', (page + site.categoryPageStart).toString());
     if (!url.startsWith('http')) url = _resolveUrl(url);
@@ -758,6 +781,9 @@ class ConfigMangaSource extends MangaSource {
         _log('章节分页: base=$base, 总页数=$pageCount');
         for (var p = 2; p <= pageCount; p++) {
           final pageUrl = site.chapterPagedUrl
+              // ✅ **兼容 Legado 双花括号**（本轮 ✓ 先双后单 ✓）—— 章节分页同款隐患 ✗
+              .replaceAll('{{base}}', base)
+              .replaceAll('{{page}}', p.toString())
               .replaceAll('{base}', base)
               .replaceAll('{page}', p.toString());
           try {

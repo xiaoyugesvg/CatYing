@@ -62,33 +62,28 @@ class CmbokConstants {
   /// 节点失效也没关系 —— 探测失败的会被跳过；
   /// 运行时若发生 301/302 重定向，新域名会自动追加进来。
   static const List<String> zLibraryDefaultDomains = [
-    // ⓪ 原版 Cmbok 实测可用节点（用户设备当前节点 86110101.xyz 验证可直连，
-    // 候选顺序照抄原版 zlibrary_url_candidates 持久化配置）——**必须排最前**，
-    // 否则全新安装会先试下面那些旧节点，全部超时 → 图书页"节点有问题"。
-    'free2read.cc',
-    '26h2.tech',
-    '86110101.xyz',
-    'loves.works',
-    'toffeeboba.com',
-    'zh.zlibrary.by',
-    'zlib.bz',
-    // ① 中文节点优先（界面中文、中文书更多）
-    'zh.z-lib.gd',
-    'zh.zlib.li',
-    'zh.z-library.sk',
-    'zh.101su.ru',
+    // ✅ **只保留"实测可用"的节点**（用户选 **B 方案** ✓）。
+    //
+    // 测试方法 ✓：开发机直连 `https://<域名>/`（8s 超时、跟随最多 3 跳、非浏览器 UA ✓）。
+    // 实测结果 ✓ —— 21 个候选里**只有 2 个返回 HTTP 200** ✓✓：
+    //   · `z-library.my`     → **200** ✓ 1607ms  页面 115 KB（**主站首页** ✓）
+    //   · `zh.intcn.online`  → **200** ✓ 1175ms  页面 5.6 KB
+    // 其余：503（云防护/不可用 ✓）· 超时 ✓ · TLS 失败 ✓ · 513 ✓
+    //
+    // ⚠️ **如实说明前提** ✓：以上是**开发机**结果 ✓ —— 与你 iPhone **出口不同** ✓，
+    //   那些 503 **可能是"云防护拦非浏览器请求"** ✗ 而非真挂 ✓；
+    //   反证 ✓：你截图里 `free2read.cc` 当时可用 ✓（我这边却 TLS 失败 ✗）。
+    //   ⇒ 故**把删掉的全部列在下面** ✓：想加回任何一个 ✓ 都能用
+    //     「节点管理 → 添加节点」一键加回 ✓✓（无需改代码 ✓）
+    //
+    // ── 已删除的候选（仅记录，便于随时加回）───────────────────────
+    //   free2read.cc（你设备曾可用 ✓）
+    //   26h2.tech · 86110101.xyz · loves.works · toffeeboba.com · zlib.bz
+    //   zh.z-lib.gd · zh.zlib.li · zh.z-library.sk · zh.z-lib.rest
+    //   z-library.website · z-lib.fm · z-lib.sk · z-library.qa · z-library.im
+    //   z-library.gy · z-lib.by · intl.su · zh.101su.ru · zh.zlibrary.by
+    'z-library.my',
     'zh.intcn.online',
-    'zh.z-lib.rest',
-    // ② 官方通用入口
-    'z-library.website',
-    'z-lib.fm',
-    'z-lib.sk',
-    'z-library.qa',
-    'z-library.im',
-    'z-library.gy',
-    'z-lib.by',
-    // ③ 镜像兜底
-    'intl.su',
     // ④ 已知不可用，仅作老配置兼容（最后兜底）
   ];
 

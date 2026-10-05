@@ -93,6 +93,109 @@ export function pickMediaGetter(handlers) {
 }
 
 /**
+ * 找 MusicFree 插件的**其它 action**（搜索 / 歌词 / 专辑信息）。
+ *
+ * ── MusicFree 的标准签名（照它的插件生态）──────────────────────
+ *   `search(query, page, type)`   —— type ∈ 'music'|'album'|'sheet'|'artist'
+ *   `getLyric(musicItem)`         —— 返回 `{ lyric, tlyric? }` 或字符串
+ *   `getAlbumInfo(albumItem)`     —— 返回 `{ coverUrl?, description?, … }`
+ *   `getMusicInfo(musicItem)`     —— 补充封面等元信息
+ *
+ * ⚠️ 这些都是**可选的**：插件只实现自己支持的那几个。
+ * 缺了返回 null，由调用方给出"该插件不支持 xxx"的明确提示，
+ * 而不是静默失败。
+ */
+export function pickAction(handlers, action) {
+    if (!handlers) return null;
+    const map = {
+        search: ['search'],
+        lyric: ['getLyric', 'getLyricNew'],
+        albumInfo: ['getAlbumInfo', 'getAlbumInfoNew'],
+        musicInfo: ['getMusicInfo'],
+    };
+    for (const name of map[action] || []) {
+        if (typeof handlers[name] === 'function') {
+            return { name, fn: handlers[name] };
+        }
+    }
+    return null;
+}
+
+/**
+ * 把 MusicFree `search()` 的返回值归一化成统一结构。
+ *
+ * MusicFree 的 search 返回形态（不同插件/版本）：
+ *   · `{ isEnd: false, data: [musicItem, …] }`   —— **当前标准**
+ *   · `[musicItem, …]`                            —— 早期
+ *   · `{ data: { list: [...] } }`
+ *
+ * musicItem 字段（照 MusicFree）：
+ *   `{ id, title, artist, album, duration(秒), artwork, url? }`
+ *
+ * ⚠️ 这里把 MusicFree 的字段名映射成**本 App 的字段名**
+ *（`title`→`name`、`artist`→`artists`、`artwork`→`cover`），
+ * 这样 Dart 侧不用再区分两套模型。
+ */
+export function normalizeSearchResult(raw) {
+    if (raw == null) return { ok: true, list: [], isEnd: true };
+
+    let arr = null;
+    let isEnd = false;
+    if (Array.isArray(raw)) {
+        arr = raw;
+    } else if (typeof raw === 'object') {
+        if (Array.isArray(raw.data)) {
+            arr = raw.data;
+            isEnd = raw.isEnd === true;
+        } else if (raw.data && Array.isArray(raw.data.list)) {
+            arr = raw.data.list;
+            isEnd = raw.isEnd === true || raw.data.isEnd === true;
+        } else if (Array.isArray(raw.list)) {
+            arr = raw.list;
+        }
+    }
+    if (!arr) return { ok: true, list: [], isEnd: true };
+
+    const out = [];
+    for (const it of arr) {
+        if (!it || typeof it !== 'object') continue;
+        const id = it.id != null ? String(it.id) : '';
+        if (!id) continue;
+        out.push({
+            id,
+            name: str(it.title || it.name || it.songName),
+            artists: str(it.artist || it.artists || it.singer),
+            album: str(it.album || it.albumName),
+            cover: str(it.artwork || it.coverUrl || it.cover || it.picUrl),
+            // ⚠️ MusicFree 的 duration 是**秒**，本 App 也是秒 → 不换算
+            duration: Number(it.duration) || 0,
+            fee: 0,
+        });
+    }
+    return { ok: true, list: out, isEnd: isEnd || out.length === 0 };
+}
+
+/**
+ * 把 MusicFree `getLyric()` 的返回值归一化。
+ * @returns {{lyric:string, tlyric:string}}
+ */
+export function normalizeLyric(raw) {
+    if (raw == null) return { lyric: '', tlyric: '' };
+    if (typeof raw === 'string') return { lyric: raw, tlyric: '' };
+    if (typeof raw === 'object') {
+        return {
+            lyric: str(raw.lyric || raw.rawLrc || raw.lrc),
+            tlyric: str(raw.tlyric || raw.translation),
+        };
+    }
+    return { lyric: '', tlyric: '' };
+}
+
+function str(v) {
+    return v == null ? '' : String(v);
+}
+
+/**
  * 把 MusicFree 插件的返回值归一化成播放地址。
  *
  * 插件返回形态很多（实测与社区文档）：

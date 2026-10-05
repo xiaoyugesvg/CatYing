@@ -69,6 +69,12 @@ class ProfilePage extends StatelessWidget {
             value: store.useThirdPartySources.value,
             onChanged: (v) => store.setUseThirdPartySources(v),
           ),
+          _switchTile(
+            label: '跨平台匹配',
+            subtitle: 'VIP 歌自动去其它平台找同一首（带防错配校验）',
+            value: store.crossPlatformMatch.value,
+            onChanged: (v) => store.setCrossPlatformMatch(v),
+          ),
           ]),
 
           // ── 音源 ────────────────────────────────────────────

@@ -13,6 +13,7 @@ import '../../services/audio_focus.dart';
 import '../../services/app_log.dart';
 import 'library_store.dart';
 import '../../widgets/app_toast.dart';
+import 'cross_platform_matcher.dart';
 
 /// 播放模式（对齐 Beans 的循环/随机语义）
 enum PlayMode {
@@ -435,6 +436,74 @@ class MusicPlayerManager extends ChangeNotifier {
           ? '内置接口没有免费音源'
           : (r.message.isNotEmpty ? r.message : '内置接口取地址失败');
 
+      // ── 回退①：**跨平台匹配** ──────────────────────────────────
+      //
+      // 为什么排在第三方源**前面**：
+      //   · 更快（一次搜索 + 一次取址）
+      //   · 更可靠（官方接口的免费比例远高于第三方源）
+      //   · 更准（官方元数据完整，能靠"歌名+歌手+时长"三重校验防错配）
+      //
+      // ⚠️ 这一条**只在离线缓存未命中、且本平台确实拿不到时**才走，
+      // 所以不会拖慢正常播放。
+      var crossMsg = '';
+      if (SettingsStore.instance.crossPlatformMatch.value) {
+        switching.value = true;
+        lastError.value = '正在其它平台找「${song.name}」…';
+        notifyListeners();
+
+        // ── 🔴 关键：要**逐个试候选**，不能只试最高分那一条 ──────────
+        //
+        // 实测（`_probe_url_availability.cjs`）：**同一平台、同一首歌，
+        // 不同条目的可播性完全不同**：
+        //   kugou「晴天」 id=32100650 无免费音源 / id=130783548 有地址
+        //   kugou「稻香」 id=32042828 无免费音源 / id=259470438 有地址
+        //   netease「晴天」 id=2652820720 无免费音源 / id=3440441479 有地址
+        //
+        // 只试最高分那条时，恰好撞上"无免费音源"的条目就会误判失败
+        //（而同一首其实有能播的条目）。
+        final matches = await CrossPlatformMatcher.instance.findAll(song);
+        var tried = 0;
+        for (final m in matches) {
+          if (epoch != _loadEpoch) return; // 用户又点了别的歌
+          // ⚠️ 候选**不去重**（见 CrossPlatformMatcher.findAll 的说明），
+          // 所以数量可能到 maxCandidates（15）。这是有意的：同一首的多个
+          // 条目可播性差别很大，多试一个就多一分听到的可能。
+          // 开销可控 —— 每个候选只是一次取址请求（失败通常很快）。
+          tried++;
+          lastError.value = '正在试 ${m.song.source.displayName} 的「${m.song.name}」'
+              '（$tried/${matches.length}）…';
+          notifyListeners();
+
+          final cr = await MusicApi.instance.songUrl(
+            m.song.id,
+            quality: wantQuality,
+            source: m.song.source,
+          );
+          if (epoch != _loadEpoch) return;
+          if (cr.ok && cr.url.isNotEmpty) {
+            url = cr.url;
+            fromSource = '${m.song.source.displayName}（跨平台）';
+            quality = cr.qualityText;
+            // 明确告诉用户"这首歌是从别的平台找来的"——
+            // 不提示的话用户会以为"我在 QQ 点的歌怎么显示网易云"。
+            lastError.value =
+                '「${song.name}」在本平台无免费音源，已用 ${m.song.source.displayName} 的同曲播放（${m.reason}）';
+            AppLog.instance.log('[Music] 跨平台命中：${song.name} '
+                '(${song.source.displayName}) → ${m.song.source.displayName} '
+                'id=${m.song.id} score=${m.score} ${m.reason}'
+                '（第 $tried/${matches.length} 个候选）');
+            break;
+          }
+        }
+        switching.value = false;
+
+        if (url.isEmpty) {
+          crossMsg = matches.isEmpty
+              ? '其它平台没找到可信的同一首'
+              : '找到 ${matches.length} 个候选（试了 $tried 个）但都拿不到播放地址';
+        }
+      }
+
       // 回退到第三方音源（仅当开关打开且确有启用的源）
       if (SettingsStore.instance.useThirdPartySources.value &&
           ThirdPartySourceStore.instance.enabled.isNotEmpty) {
@@ -484,10 +553,16 @@ class MusicPlayerManager extends ChangeNotifier {
         }
       } else {
         // 没有可用音源时，明确告知 —— 这是正常业务结果（VIP/独家），不是异常
-        final msg = r.noFreeSource ? '这首没有免费音源（可能需要会员）' : builtinMsg;
+        //
+        // ⚠️ 把跨平台的结果也带上（`crossMsg`）：
+        //   "没找到可信的同一首" 和 "找到了但取地址也失败"
+        //   对用户是不同的信息 —— 前者说明确实没辙，后者说明源有问题。
+        var msg = r.noFreeSource ? '这首没有免费音源（可能需要会员）' : builtinMsg;
+        if (crossMsg.isNotEmpty) msg = '$msg；跨平台：$crossMsg';
         AppLog.instance.log('[Music] 取播放地址失败（${song.name}）: $msg'
             '（导入的音乐源开关=${SettingsStore.instance.useThirdPartySources.value}，'
-            '已启用 ${ThirdPartySourceStore.instance.enabled.length} 个）');
+            '已启用 ${ThirdPartySourceStore.instance.enabled.length} 个，'
+            '跨平台匹配=${SettingsStore.instance.crossPlatformMatch.value}）');
         // 同一条失败连续出现时也要能弹（见上面那段注释）
         lastError.value = msg == lastError.value ? '$msg ' : msg;
         await _silenceForFailure(song);

@@ -30,7 +30,7 @@ import axios from 'axios';
 // LX 脚本引擎（沙箱 + 超时，见文件头说明为什么不会像 flutter_tts 那样闪退）
 import { loadScript, runAction, engineInfo } from './lx_engine.js';
 // 第三方音源解析（模板法 / 脚本法）
-import { resolveSource } from './source_resolver.js';
+import { resolveSource, searchByMusicFree, lyricByMusicFree } from './source_resolver.js';
 // ── 多平台：酷狗（第三方库 KuGouMusicApi 的 ESM 桥接层）──────────
 // 见 `kugou_source.js` 文件头（来源/许可/设备身份 bootstrap）。
 // 这里只 import 函数；上游 CJS 代码在桥接层内部用 createRequire 加载。
@@ -286,6 +286,51 @@ async function resolveBySourceAction(source, song) {
 }
 
 /**
+ * MusicFree 插件的**搜索**。
+ *
+ * body: { action:'searchByMusicFree', source:{...}, keyword, page?, type? }
+ *
+ * ⚠️ 只有 `kind:'musicfree'` 的源能用 —— LX 脚本没有 `search()`。
+ * 传错 kind 时给**明确错误**（而不是返回空列表让上层以为"没搜到"）。
+ */
+async function searchByMusicFreeAction(source, keyword, page, type) {
+    if (!source || typeof source !== 'object') {
+        return { ok: false, error: '音源数据无效' };
+    }
+    if (source.enabled === false) {
+        return { ok: false, error: '该音源已停用' };
+    }
+    if (source.kind !== 'musicfree') {
+        return {
+            ok: false,
+            error: `该音源不是 MusicFree 插件（kind=${source.kind || '未设置'}），不支持 search`,
+        };
+    }
+    if (!keyword || !String(keyword).trim()) {
+        return { ok: false, error: '搜索关键词为空' };
+    }
+    return searchByMusicFree(source, keyword, page || 1, type || 'music');
+}
+
+/**
+ * MusicFree 插件的**歌词**。
+ *
+ * body: { action:'lyricByMusicFree', source:{...}, song:{id,name,artists,album,duration} }
+ */
+async function lyricByMusicFreeAction(source, song) {
+    if (!source || typeof source !== 'object') {
+        return { ok: false, error: '音源数据无效' };
+    }
+    if (source.kind !== 'musicfree') {
+        return {
+            ok: false,
+            error: `该音源不是 MusicFree 插件（kind=${source.kind || '未设置'}），不支持 getLyric`,
+        };
+    }
+    return lyricByMusicFree(source, song);
+}
+
+/**
  * 平台别名归一化。
  *
  * ⚠️ 为什么要有这个函数（而不是直接在 switch 里比字符串）：
@@ -491,6 +536,17 @@ async function handleMusicApi(body) {
         // ── 第三方音源解析（模板法 / 脚本法）─────────────
         case 'resolveBySource':
             return resolveBySourceAction(body.source, body.song);
+        // ── MusicFree 插件的其它能力（搜索 / 歌词）──────────
+        //
+        // ⚠️ 这两个**只对 `kind:'musicfree'` 的源有效** ——
+        // LX 脚本没有 `search()`/`getLyric()` 概念（它的能力面是
+        // `musicUrl`/`lyric`/`pic`，走 `resolveBySource` 的 action 参数）。
+        // 传了别的 kind 会得到明确错误，而不是静默返回空列表。
+        case 'searchByMusicFree':
+            return searchByMusicFreeAction(
+                body.source, body.keyword, body.page, body.type);
+        case 'lyricByMusicFree':
+            return lyricByMusicFreeAction(body.source, body.song);
         // ── LX 引擎自检（沙箱 / 超时 / crypto 是否真的生效）──
         case 'lxSelfTest':
             return lxSelfTest();
@@ -779,4 +835,6 @@ export {
     searchArtists, searchAlbums, artistSongs, artistAlbums, albumSongs,
     lxSelfTest,
     resolveBySourceAction,
+    searchByMusicFreeAction,
+    lyricByMusicFreeAction,
 };

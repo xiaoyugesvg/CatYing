@@ -14,6 +14,7 @@ class SettingsStore {
 
   static const _kQuality = AudioQuality.storageKey;
   static const _kSourceEnabled = 'music.sourceEnabled';
+  static const String _kCrossPlatform = 'music.crossPlatformMatch';
   static const _kMusicSource = 'music.platform';
 
   /// 优先音质
@@ -21,6 +22,18 @@ class SettingsStore {
 
   /// 是否启用第三方音源（关掉就只用内置公开接口）
   final useThirdPartySources = ValueNotifier<bool>(true);
+
+  /// 是否启用**跨平台匹配**（默认开）。
+  ///
+  /// 开启后：某平台的歌拿不到播放地址（VIP/无版权）时，
+  /// 会去**其它平台**找同一首歌，用那边的地址播放。
+  ///
+  /// 例：QQ 的《晴天》要会员 → 自动用网易云/酷狗的《晴天》播。
+  /// 匹配带**三重防错配**（歌名归一化相等 + 歌手交集 + 时长差 ≤10s），
+  /// 找不到可信的同一首就**不播**（宁可没有，也不放错歌）。
+  ///
+  /// 默认 **true**：这是"VIP 歌听不了"的主要解法之一。
+  final crossPlatformMatch = ValueNotifier<bool>(true);
 
   /// 当前音乐**平台**（搜索/发现用哪个内置数据源）。
   ///
@@ -48,6 +61,7 @@ class SettingsStore {
     }
     if (parsed != null) audioQuality.value = parsed;
     useThirdPartySources.value = prefs.getBool(_kSourceEnabled) ?? true;
+    crossPlatformMatch.value = prefs.getBool(_kCrossPlatform) ?? true;
     // 没存过 / 存的是未知值 → `fromKey` 会兜底成 netease（行为不变）
     musicSource.value = SongSource.fromKey(prefs.getString(_kMusicSource));
     // 音源列表也在这里一起初始化，保证进音乐 tab 前就绪
@@ -62,6 +76,11 @@ class SettingsStore {
   Future<void> setUseThirdPartySources(bool v) async {
     useThirdPartySources.value = v;
     (await SharedPreferences.getInstance()).setBool(_kSourceEnabled, v);
+  }
+
+  Future<void> setCrossPlatformMatch(bool v) async {
+    crossPlatformMatch.value = v;
+    (await SharedPreferences.getInstance()).setBool(_kCrossPlatform, v);
   }
 
   /// 切换音乐平台（搜索/发现用哪个内置数据源）。

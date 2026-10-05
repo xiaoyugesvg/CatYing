@@ -42,6 +42,23 @@ class _ZlibraryNodesSheetState extends State<ZlibraryNodesSheet> {
 
   ZlibraryService get _svc => ZlibraryService();
 
+  @override
+  void initState() {
+    super.initState();
+    // ✅ **打开面板即自动测一遍**（本轮 ✓）—— 原来**必须手动点「一键测试」才看得到节点** ✗：
+    //   不点就只有一个输入框 ✓ ⇒ 用户以为"**没有节点 / 不能更换**"✗✓
+    //   （你截图那一刻正是这个初始态 ✓ —— 这不是"域名不显示"，而是**没触发测试** ✓）
+    //
+    // ℹ️ 为什么放**帧后** ✗：`_probeAll()` 内部会 `setState` ✓ ——
+    //   在 `initState` 里同步调用会在 **build 期间**触发 setState ✗（Flutter 会报错 ✓）
+    //   ⇒ 用 `addPostFrameCallback` 等首帧画完再跑 ✓✓
+    // ℹ️ `probeAll()` 是**只读**的 ✓（只填 `_rows` ✓ **不会**改当前节点 ✗ 不会自作主张切换 ✓）
+    //   ⇒ 所以"打开面板"这个动作**没有副作用** ✓ 安全 ✓
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _probeAll();
+    });
+  }
+
   /// 一键测试全部节点 ✓（**只读** ✓ 不会改当前节点 ✓）
   Future<void> _probeAll() async {
     setState(() {

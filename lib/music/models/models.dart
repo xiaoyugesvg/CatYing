@@ -178,7 +178,14 @@ class Song {
         // 这里历史上只读复数 `artists` → 6 个接口的歌手名恒为空，
         // 而界面的 `artists.isEmpty ? album : artists` 会**回落显示专辑名**
         //（用户看到的是"错的信息"而不是"缺失"）。两边都收，一处修完全部接口。
-        artists: (j['artists'] ?? j['artist'] ?? '').toString(),
+        //
+        // 顺序：**`artist` 放前面** —— 它才是 Node 的实际字段名（实测确认
+        // kugou/qq/netease 三个 search 都只回 `artist`）。把真实字段名排
+        // 第一位，语义更清楚，也不依赖 fallback 恰好能兜住。
+        //
+        // 🔴 这个字段一旦为空，**跨平台匹配的防翻唱校验会被跳过**（
+        // 见 cross_platform_matcher），所以它不是"显示问题"而是正确性问题。
+        artists: (j['artist'] ?? j['artists'] ?? j['singer'] ?? '').toString(),
         album: (j['album'] ?? '').toString(),
         coverUrl: _firstNonEmpty(j, const ['coverUrl', 'cover', 'picUrl']),
         duration: asDouble(j['duration']),

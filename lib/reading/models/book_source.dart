@@ -259,8 +259,17 @@ class BookSourceStore {
     revision.value++;
   }
 
-  /// 加载 assets 内置书源：明文 config 源（book_sources.json）
-  /// + Legado 精选源包（legado_sources.json）。
+  /// 加载 assets 内置书源：明文 config 源（`book_sources.json`）
+  /// + Legado 源包（`legado_sources.json`）。
+  ///
+  /// ⚠️ **现状已更正**（本轮 ✓ 原来这里写着"+ Legado **精选**源包"✗，那已不成立 ✓）：
+  ///   · `book_sources.json` ✓ 内容为空数组（Cmbok 占位 ✓）
+  ///   · **`legado_sources.json` 已按用户要求清空为 `[]`** ✓✓ ⇒ **出厂不再自带任何小说书源** ✓
+  ///     （原 1.8 MB / 631 个源 ✓；备份在 `C:\Users\24647\Downloads\legado_sources.backup.json` ✓
+  ///      **还原方法** ✓：用它覆盖回 `assets/config/legado_sources.json` ✓ 重装即可 ✓）
+  ///   · **漫画源不受影响** ✓（`assets/config/sources.json` 15 个官方源原样保留 ✓）
+  ///   ℹ️ 本方法对"空数组 / 文件缺失"**都安全** ✓：读取包在 `try` 里 ✓，
+  ///     且逐文件读取走 [_loadBundledFile]（自带 `try`）✓ ⇒ 解析出 0 个源、**不抛异常** ✓
   /// 仅在**首次**启动补入（内置补入标记）；之后用户增删/
   /// 改名/改规则均以用户状态为准，内置源不再重复补入或重置。
   ///

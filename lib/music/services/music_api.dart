@@ -373,10 +373,7 @@ class MusicApi {
     final r = await _call({'action': 'hotSearch', 'source': source.key});
     final m = _asMap(r);
     final ok = m['ok'] != false; // Node 侧失败会带 ok:false
-    final l = m['list'];
-    final list = l is List
-        ? l.map((e) => e.toString()).where((e) => e.isNotEmpty).toList()
-        : const <String>[];
+    final list = parseHotKeywords(m['list']);
     return (
       ok: ok && list.isNotEmpty,
       list: list,
@@ -387,10 +384,54 @@ class MusicApi {
   /// 热门搜索词
   Future<List<String>> hotSearch({SongSource source = SongSource.netease}) async {
     final r = await _call({'action': 'hotSearch', 'source': source.key});
-    final m = _asMap(r);
-    final l = m['list'];
-    if (l is! List) return const [];
-    return l.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
+    return parseHotKeywords(_asMap(r)['list']);
+  }
+
+  /// 把 Node 的 `hotSearch` 结果统一成**关键词字符串**列表。
+  ///
+  /// ── 🔴 为什么要专门一个函数（真实 bug）──────────────────────
+  /// Node 侧 `hotSearch` **两条分支返回的形状不一样**：
+  ///   · 网易云：`{ok:true, list:['周杰伦','林俊杰',…]}`      —— 字符串数组
+  ///   · QQ    ：`{ok:true, list:[{id:'0',name:'我们的歌'},…]}` —— **对象数组**
+  ///     （见 `qq_source.js` 的 `hotSearch`：`{ id: String(i), name: k }`）
+  ///
+  /// 这里原来是 `l.map((e) => e.toString())` —— 对字符串没问题，
+  /// 但 `Map.toString()` 会产出
+  ///     **`"{id: 0, name: 我们的歌}"`**
+  /// 于是 QQ 音乐的热搜格子里直接显示了这串 Dart Map 字面量 ✗
+  ///（用户实测截图就是这个）。
+  ///
+  /// 现在：字符串直接用；Map 则按 `name`/`k`/`key`/`keyword` 取值；
+  /// 一个 key 都没命中就**丢弃**（不退回 `toString()`，那正是 bug 根源）。
+  ///
+  /// [raw] 是 Node 返回的 `list` 字段（`List`，元素可能是 String 或 Map）。
+  static List<String> parseHotKeywords(dynamic raw) {
+    if (raw is! List) return const [];
+    const nameKeys = ['name', 'k', 'key', 'keyword', 'word', 'first'];
+    final out = <String>[];
+    for (final e in raw) {
+      String v;
+      if (e is String) {
+        v = e;
+      } else if (e is Map) {
+        v = '';
+        for (final k in nameKeys) {
+          final got = e[k];
+          if (got is String && got.trim().isNotEmpty) {
+            v = got;
+            break;
+          }
+        }
+        // ⚠️ 一个 key 都没命中时**直接丢弃**，不要退回 toString()
+        // —— 那正是会显示成 "{id: 0, name: …}" 的根源
+        if (v.isEmpty) continue;
+      } else {
+        v = e?.toString() ?? '';
+      }
+      v = v.trim();
+      if (v.isNotEmpty) out.add(v);
+    }
+    return out;
   }
 
   /// 搜索建议（Beans 的搜索页有这项，用热门词兜底）
@@ -593,6 +634,73 @@ class MusicApi {
   Future<Map<String, dynamic>> lxSelfTest() async {
     final r = await _call({'action': 'lxSelfTest'});
     return _asMap(r);
+  }
+
+  // ============================================================
+  // MusicFree 插件的 search / getLyric
+  // ============================================================
+
+  /// 用 **MusicFree 插件**搜索。
+  ///
+  /// ⚠️ 只对 `kind: 'musicfree'` 的源有效 —— LX 脚本没有 `search()` 概念
+  ///（它的能力面是 `musicUrl`/`lyric`/`pic`）。传别的 kind，Node 侧会
+  /// 返回**明确的错误**而不是空列表（否则上层会以为"没搜到"）。
+  ///
+  /// [type]：MusicFree 的 `'music' | 'album' | 'sheet' | 'artist'`，
+  /// 默认 `'music'`。
+  Future<MusicListResult<Song>> searchByMusicFree(
+    ThirdPartySource source,
+    String keyword, {
+    int page = 1,
+    String type = 'music',
+  }) async {
+    if (keyword.trim().isEmpty) {
+      return const MusicListResult(ok: false, message: '请输入关键词');
+    }
+    final r = await _call({
+      'action': 'searchByMusicFree',
+      'source': source.toJson(),
+      'keyword': keyword,
+      'page': page,
+      'type': type,
+    });
+    final m = _asMap(r);
+    if (m['ok'] != true) {
+      return MusicListResult(ok: false, message: (m['error'] ?? '').toString());
+    }
+    // Node 侧 `normalizeSearchResult` 已经把 MusicFree 的字段名
+    // （title/artist/artwork）映射成本 App 的（name/artists/cover），
+    // 所以这里可以直接走 Song.fromJson。
+    return MusicListResult<Song>(
+      ok: true,
+      list: _listOf(r, 'list').map(Song.fromJson).toList(),
+    );
+  }
+
+  /// 用 **MusicFree 插件**取歌词。
+  ///
+  /// 返回 null 表示"拿不到"（插件不支持 / 该曲无歌词 / 服务端限流）——
+  /// 调用方应静默降级（没有歌词不算错误）。
+  Future<MusicLyric?> lyricByMusicFree(
+    ThirdPartySource source,
+    Song song,
+  ) async {
+    final r = await _call({
+      'action': 'lyricByMusicFree',
+      'source': source.toJson(),
+      'song': {
+        'id': song.id,
+        'name': song.name,
+        'artists': song.artists,
+        'album': song.album,
+        'duration': song.duration,
+      },
+    });
+    final m = _asMap(r);
+    if (m['ok'] != true) return null;
+    final lyric = (m['lyric'] ?? '').toString();
+    if (lyric.trim().isEmpty) return null;
+    return MusicLyric(lyric: lyric, translation: (m['tlyric'] ?? '').toString());
   }
 
   // ============================================================

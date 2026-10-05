@@ -45,6 +45,13 @@ class _DiscoverPageState extends State<DiscoverPage>
   // QQ 音乐（公开接口）：热搜关键词
   List<String> _hotKeywords = const [];
 
+  /// QQ「热门歌手」—— **从热搜词搜出的歌里派生的真实歌手名**。
+  ///
+  /// 为什么是派生的：QQ 没有免登录的歌手列表接口
+  /// （`searchArtists` 在 Node 里对 QQ 直接返回 ok:false）。
+  /// 详见 [_loadQQ]。
+  List<String> _qqArtists = const [];
+
   // 喜马拉雅数据
   List<({String id, String name})> _xmCategories = const [];
   List<Song> _xmFeatured = const []; // 精选专辑（取若干分类的头部内容）
@@ -107,6 +114,39 @@ class _DiscoverPageState extends State<DiscoverPage>
     _hotKeywords = h.ok ? h.list : const [];
     // 热搜失败不阻塞页面（搜索/播放仍可用）
     if (!h.ok) _error = h.error;
+
+    // ── 派生"热门歌手"行 ────────────────────────────────────────
+    //
+    // ⚠️ **为什么不用 `searchArtists`**：QQ 侧的 `searchArtists` 在 Node 里
+    // 明确返回 `{ok:false, error:'QQ 暂不支持该接口（需要登录态）'}`
+    // —— QQ 没有免登录的歌手列表接口。
+    //
+    // 但**搜索是免登录的**，所以从热搜词搜出来的歌里收集歌手并去重，
+    // 得到的就是**真实的 QQ 歌手**（不是造假入口）。
+    // 点一下按歌手名搜索，能直接拿到他的歌。
+    if (_hotKeywords.isNotEmpty) {
+      final picked = _hotKeywords.take(4).toList();
+      final results = await Future.wait(
+        picked.map((k) => api.search(k, limit: 10, source: SongSource.qq)),
+      );
+      if (!mounted) return;
+      final seen = <String>{};
+      final artists = <String>[];
+      for (final r in results) {
+        if (!r.ok) continue;
+        for (final s in r.list) {
+          // 一首歌可能有多个歌手（"周杰伦、方文山"），拆开各自成项
+          for (final a in s.artists.split(RegExp(r'[、/,&]'))) {
+            final name = a.trim();
+            if (name.isEmpty || name.length > 12) continue;
+            if (seen.add(name)) artists.add(name);
+          }
+        }
+      }
+      _qqArtists = artists.take(14).toList();
+    } else {
+      _qqArtists = const [];
+    }
   }
 
   // ── 音乐平台（网易云 / 酷狗）──────────────────────────────────────
@@ -211,6 +251,15 @@ class _DiscoverPageState extends State<DiscoverPage>
   // ============================================================
 
   Widget _bigCards() {
+    // ── 这两张卡依赖"新歌速递"和"收藏"──────────────────────────
+    // 新歌速递（`newSongs`）在 QQ / 喜马拉雅下**不可用**
+    // （QQ 侧 Node 明确返回 ok:false，需要登录态）。
+    // 所以 QQ 页如果照常渲染，会得到一个**点不动的"每日推荐"假卡**
+    // （用户实测截图：副标题停在兜底文案"每天更新的新歌"）✗
+    //
+    // 宁可**不显示**，也不要给一个按下去没反应的入口。
+    if (_source == SongSource.qq) return const SizedBox.shrink();
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
       child: Row(
@@ -567,9 +616,89 @@ class _DiscoverPageState extends State<DiscoverPage>
     return _buildMusicSections();
   }
 
-  /// QQ 音乐板块：热搜关键词（公开接口能拿到的就是这些）
+  /// QQ 音乐板块。
+  ///
+  /// ── 与网易云/酷狗的差别（决定了这里的排版）──────────────────────
+  /// QQ 是**免登录只有搜索类接口**的平台（见 `music_source.js` 里
+  /// `isQq` 分支的 action 白名单）。所以没有：
+  ///   · 排行榜（`topLists`）        → 不造假数据
+  ///   · 歌单广场（`playlistSquare`）→ 同上
+  ///   · 新歌速递（`newSongs`）      → 同上
+  ///   · 歌手列表（`searchArtists`）→ 用**搜索派生**的真实歌手替代
+  ///
+  /// 能拿到并真正有用的就三样，正好按"大→小"的视觉节奏排：
+  ///   · 热门歌手 —— 圆头像行（和网易云的"歌手"行同款视觉）
+  ///   · 热搜关键词 —— 前三名用主题色
+  ///   · 能力说明 —— 明确告诉用户"想听什么直接搜"
   List<Widget> _buildQQSections() {
     final out = <Widget>[];
+
+    // ── 热门歌手（圆头像行，视觉上对齐网易云的"歌手"）──────────
+    if (_qqArtists.isNotEmpty) {
+      out.add(const SliverToBoxAdapter(child: SectionTitle(title: '热门歌手')));
+      out.add(SliverToBoxAdapter(
+        child: SizedBox(
+          height: 118,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: _qqArtists.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 16),
+            itemBuilder: (c, i) {
+              final name = _qqArtists[i];
+              return GestureDetector(
+                onTap: () => showSearch<void>(
+                  context: context,
+                  delegate: _QuickSearchDelegate(
+                      source: SongSource.qq, initialQuery: name),
+                ),
+                child: SizedBox(
+                  width: 64,
+                  child: Column(
+                    children: [
+                      // ⚠️ QQ 搜索**不返回歌手头像**，所以这里用"首字圆形块"
+                      // 而不是空头像 —— 空白圆圈比首字更难看，也更容易被
+                      // 误认为加载失败。
+                      Container(
+                        width: 64,
+                        height: 64,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: MusicTheme.fill,
+                          border: Border.all(
+                              color: MusicTheme.tint.withValues(alpha: 0.25),
+                              width: 1),
+                        ),
+                        child: Text(
+                          name.characters.first,
+                          style: TextStyle(
+                              color: MusicTheme.tint,
+                              fontSize: AppTheme.fontTitle2,
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            color: MusicTheme.label,
+                            fontSize: AppTheme.fontFootnote),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ));
+    }
+
+    // ── 热搜关键词（两列，前三名用主题色）─────────────────────
     if (_hotKeywords.isNotEmpty) {
       out.add(const SliverToBoxAdapter(child: SectionTitle(title: 'QQ音乐热搜')));
       out.add(SliverPadding(
@@ -587,7 +716,8 @@ class _DiscoverPageState extends State<DiscoverPage>
               return GestureDetector(
                 onTap: () => showSearch<void>(
                   context: context,
-                  delegate: _QuickSearchDelegate(source: SongSource.qq, initialQuery: kw),
+                  delegate:
+                      _QuickSearchDelegate(source: SongSource.qq, initialQuery: kw),
                 ),
                 child: Container(
                   alignment: Alignment.centerLeft,
@@ -621,6 +751,38 @@ class _DiscoverPageState extends State<DiscoverPage>
         ),
       ));
     }
+
+    // ── 能力说明（QQ 没有排行榜/歌单，说清楚而不是留空）────────
+    out.add(SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 22, 16, 0),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: MusicTheme.fill,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.info_outline, size: 17),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'QQ 音乐免登录只提供搜索。想听什么直接搜，或点上面的热搜 / 歌手。\n'
+                  '排行榜、歌单广场需要登录态，暂不可用。',
+                  style: TextStyle(
+                      color: MusicTheme.secondary,
+                      fontSize: AppTheme.fontFootnote,
+                      height: 1.55),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ));
+
     return out;
   }
 

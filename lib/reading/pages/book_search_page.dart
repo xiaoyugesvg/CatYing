@@ -235,6 +235,11 @@ class _BookSearchPageState extends State<BookSearchPage>
           _recIsDouban = false;
           _recFailed = false;
         } else {
+          // ✅ **补上"抓到但解析出 0 条"的日志**（本轮 ✓）—— 原来这条分支**一个字都不记** ✗
+          //   ⇒ 用户只看到"推荐书籍加载失败"✗，我们**无法判断**是"没抓到"还是"抓到了没解析出" ✗✓
+          //   （"没抓到"会走下面的 catch ✓ 那条**本来就有**日志 ✓）
+          //   ⇒ 现在这条也留痕 ✓：**能一眼分清**是"网络/被拒"✗ 还是"**HTML 结构变了**"✗✓
+          _log('首页推荐拉取成功但**解析出 0 条**（可能是首页 HTML 结构变了 / 区块选择器失效）');
           _recFailed = true;
         }
       });

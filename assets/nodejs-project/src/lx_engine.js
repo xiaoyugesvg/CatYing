@@ -33,6 +33,29 @@ import axios from 'axios';
 /** 脚本硬超时（毫秒）。超时即中断，绝不让它占住事件循环。 */
 const SCRIPT_TIMEOUT_MS = 8000;
 
+/**
+ * 插件/脚本**异步调用**的超时（毫秒）。
+ *
+ * ── 🔴 为什么要和 SCRIPT_TIMEOUT_MS 分开（实测踩到）────────────
+ * 原来 `runAction` 的外层 `Promise.race` 用的是 `SCRIPT_TIMEOUT_MS`
+ *（8 秒），可这 8 秒原本是给 `vm.runInContext` 的**CPU 硬杀**用的 ——
+ * 两者语义完全不同：
+ *
+ *   · `vm.runInContext` 超时 = 脚本**死循环**占住事件循环 → 必须 8s 砍掉
+ *   · `runAction` 超时      = 插件在**等网络** → 纯 I/O，不吃 CPU，
+ *                             给 8 秒会误杀正常请求
+ *
+ * 实测（`_probe_mf_timing.cjs`，酷我搜索接口）：
+ *   · 光一次 axios 请求在沙箱里就要 **2281 / 3102 / 4932 ms**（波动很大）
+ *   · 真实 MusicFree 插件 `search()` 端到端 **1269 / 7295 / 8020 ms**
+ *   → 第 3 次直接撞上 8 秒被判"处理超时" ✗
+ *     （而同样的请求**直连**永远是 HTTP 200，所以这不是源的问题）
+ *
+ * 所以：CPU 硬杀保持 8s，异步等待放宽到 20s。
+ * 注意 `vm.runInContext` 仍用 [SCRIPT_TIMEOUT_MS] —— 死循环照样被砍。
+ */
+const ACTION_TIMEOUT_MS = 20000;
+
 /** 脚本大小上限（字符）。超过直接拒绝，避免解析本身把内存吃爆。 */
 const MAX_SCRIPT_CHARS = 512 * 1024;
 
@@ -683,8 +706,11 @@ export async function runAction(handlers, action, payload, opts) {
                 : fn(payload);
         const result = await Promise.race([
             Promise.resolve(invoke()),
+            // ⚠️ 用 ACTION_TIMEOUT_MS（20s）而不是 SCRIPT_TIMEOUT_MS（8s）——
+            // 这里是**等插件发网络请求**，属于 I/O 等待，不是 CPU 占用。
+            // 见 ACTION_TIMEOUT_MS 的定义处（实测 8s 会误杀正常的搜索请求）。
             new Promise((_, rej) =>
-                setTimeout(() => rej(new Error('处理超时')), SCRIPT_TIMEOUT_MS),
+                setTimeout(() => rej(new Error('处理超时')), ACTION_TIMEOUT_MS),
             ),
         ]);
         return { ok: true, result };

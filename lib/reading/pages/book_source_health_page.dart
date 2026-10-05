@@ -428,12 +428,17 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
         ),
       ],
       const SizedBox(height: 12),
-      // 统计胶囊：可用 / 网络不通 / 解析失败
+      // 统计胶囊：可用 / 网络或源站异常 / 解析失败
+      // ✅ **标签已改准**（本轮 ✓）—— 原来写「**网络不通**」✗ 会**冤枉用户自家网络** ✓：
+      //   这一档其实是「网络 + **源站拒绝/5xx**」三合一 ✓（见 `_isNetworkError` 的注释 ✓，
+      //   它**有意**把 403 与 5xx 都归进来 ✗✓ —— 因为本页只有两档、收窄会让 403 掉进"解析失败"✗）。
+      //   ⇒ 但用户看到「网络不通 223」会以为**自己网坏了** ✗ ⇒ 改成「**网络/源站异常**」✓✓
+      //     （一句话说清"可能是它那边的服务器出错"，而不是只怪网络 ✓）
       Row(
         children: [
           _statPill('可用', _usable, Colors.green),
           const SizedBox(width: 10),
-          _statPill('网络不通', _networkFail, Colors.orange),
+          _statPill('网络/源站异常', _networkFail, Colors.orange),
           const SizedBox(width: 10),
           _statPill('解析失败', _parseFail, JellyTheme.error),
         ],
@@ -449,7 +454,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
           _numTab(1, '可用', _usable),
           _numTab(2, '收藏', 0),
           _numTab(3, '密钥', 0),
-          _numTab(4, '网络异常', _networkFail),
+          _numTab(4, '网络/源站异常', _networkFail),
           _numTab(5, '解析失败', _parseFail),
         ],
       ),
