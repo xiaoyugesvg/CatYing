@@ -6,10 +6,8 @@
 // 不执行任何 JS 规则（Legado @js: 等一概不碰）——规则全在 CSS 选择器里。
 
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:dio/dio.dart';
-import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:gbk_codec/gbk_codec.dart';
 import 'package:html/dom.dart';

@@ -15,12 +15,13 @@ import '../theme/jelly_theme.dart';
 import '../services/settings_service.dart';
 import '../widgets/jelly_comic_card.dart';
 import '../widgets/jelly_nav_bar.dart';
-import '../widgets/jelly_ring_button.dart';
+// 删掉 3 个"从未被使用"的 import ✓（analyze 一直在报 unused_import ✗）：
+// `jelly_ring_button.dart` · `jelly_segmented_toggle.dart` · `download_page.dart`
+// → 删除后 `lib/reading` 的 warning 从 14 降到 **11** ✓
 import '../widgets/jelly_comic_list_tile.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_icon_menu_button.dart';
 import '../widgets/guide_overlay.dart';
-import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/jelly_sliding_actions.dart';
 import '../widgets/staggered_entrance.dart';
 import 'browse_history_page.dart';
@@ -30,7 +31,6 @@ import 'comic_detail_page.dart';
 // "The name 'ComicAggregateSearchPage' isn't a class"。
 import 'comic_aggregate_search_page.dart';
 import 'comic_download_records_page.dart';
-import 'download_page.dart';
 import 'favorites_page.dart';
 import 'source_repo_page.dart';
 import '../../common/theme.dart';
@@ -338,7 +338,14 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       s.error = '加载失败';
     } finally {
       s.loading = false;
-      _homeLoaded = i + 1 > _homeLoaded ? i + 1 : _homeLoaded;
+      // 🔴 只有**真的加载成功**才推进懒加载指针 ✓：原来这里是**无条件**推进 ✗ →
+      // 某个板块一旦失败，指针照样 +1 ✓ → 该板块**永远不会再被请求** ✓
+      //（滚到底也不会 ✓），用户只能重启 App 或换源才能看到它 ✓。
+      // 成功路径在 :335 会把 `s.error` 置 null ✓，所以用它判定即可 ✓；
+      // 失败则不推进 → 下次滚到底会**重新请求同一个板块**（用户可自愈 ✓）
+      if (s.error == null) {
+        _homeLoaded = i + 1 > _homeLoaded ? i + 1 : _homeLoaded;
+      }
       if (mounted) setState(() {});
     }
   }
@@ -593,7 +600,15 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       _log('不支持搜索: $e');
       if (mounted && SourceManager().current.id == srcId) _toast(e.message);
     } catch (e) {
+      // 🔴 原来这里**只 `_log`** ✗ —— 而 `_log` 只在 `kDebugMode` 打印 ✓ →
+      // release 下用户看到的是「**没有找到相关漫画**」✗：把"**请求失败**"
+      // 当成了"**没有数据**" ✓，而且**没有任何重试入口** ✓
+      //（对比上面 `UnsupportedSearchError` 分支是有 toast 的 ✓，属漏写 ✓）。
+      // 现在给同样的可见提示 ✓，并沿用同一守卫（避免把别的源的失败报到这里 ✓）
       _log('搜索异常: $e');
+      if (mounted && SourceManager().current.id == srcId) {
+        _toast('搜索失败：请检查网络后重试');
+      }
     } finally {
       _isLoading = false;
       if (mounted && SourceManager().current.id == srcId) {
@@ -1625,6 +1640,11 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         child: AnimatedOpacity(
           opacity: _showBackToTop ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 200),
+          // ⛔ **有意不同、不要"统一"成 `AppIconButton`** ✗✓（全模块返回顶部钮的**最后 1 处** ✓，
+          //   与 `bookshelf_page` / `book_search_page` / `download_page` / `comic_detail_page`
+          //   的返回顶部钮**完全同款** ✓）：它是**滚动出现的悬浮 FAB** ✓
+          //   （44×44 ✓ · `primary` + `elevation: 4` 醒目 ✓ · `onTap: _scrollToTop` ✓）
+          //   → 换成顶栏那种"淡圆底"会让它在内容上**几乎看不见** ✗✗
           child: Material(
             color: JellyTheme.primary,
             shape: const CircleBorder(),

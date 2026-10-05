@@ -35,18 +35,43 @@ const _fieldGroups = <_FieldGroup>[
     ('comic_name_dom', '名称', '详情页名称选择器'),
     ('comic_author_dom', '作者', '详情页作者选择器'),
     ('comic_desc_dom', '简介', '详情页简介选择器'),
-    ('comic_status_dom', '状态', '详情页状态选择器'),
-    ('comic_tags_dom', '标签', '详情页标签选择器'),
-    ('comic_hot_dom', '热度', '详情页热度选择器'),
+    // ✅ **本段前言已更正**（本会话 ✓）—— 它原来写着「下面 5 个字段**引擎侧还没实现** ✗、
+    //   用户填了**完全无效** ✓、属于"界面骗人" ✗」，那是**当时的实情** ✓；
+    //   但本会话把这几个键**逐个接通**了 ✓✓（消费点见下 ↓），所以那段话**已不成立** ✗。
+    //   ⇒ 现在**按事实**说明 ✓：**下面这些键引擎都会读** ✓；
+    //     每一项的语义/边界都在自己的 hint 里写清了 ✓（**不夸大、不假装覆盖全部语义** ✗）。
+    // ✅ **这 5 个键现已全部实现并生效** ✓（本会话收口 ✓）——
+    //   ⇒ 上面那段"下面 5 个字段**引擎都没实现**"的说法**已完全不成立** ✗，特此更正 ✓：
+    //      `status_label` ✓ **已实现**（站点没给状态时用它兜底 ✓ 见 `config_manga_source` 详情解析 ✓）
+    //      `chapter_click_dom` ✓ **已实现**（WebView 取章节前先点它展开目录 ✓ `_doFetchChapters` ✓）
+    //      `concurrent_rate` ✓ **已实现**（两处并发池改读源配置 ✓ 上限 clamp 1~8 ✓ 没填=默认 8 ✓）
+    //      `tags_split` ✓ **已实现**（单元素里塞一串标签 → 按分隔符拆开 ✓）
+    //      `search_method` / `search_post_body` ✓ **已实现**（搜索 GET/POST 分派 ✓ `_fetchHtmlByPost` ✓）
+    //   ℹ️ 唯一"如实标注"的边界 ✓：`concurrent_rate` 只实现「**同时并发数上限**」这一种语义 ✓
+    //      （Legado 里可能还含"每秒请求数"✗ —— 没有假装覆盖 ✓）
+    //   ✅ `tags_split` **已实现** ✓（本轮 ✓ 见 `config_manga_source` 的标签收集处 ✓）→ 标注已摘 ✓
+    //   ⇒ 留空 = 行为不变 ✓；填了才拆 ✓（服务"单元素里塞了一串标签"的源 ✓）
+    //   完成链（供以后对照 ✓）：`SiteConfig` 加字段 + fromJson/toJson ✓ →
+    //   `config_manga_source` 详情解析里取值 ✓ → `CManga` →
+    //   `comicToCManga` / `cmangaToComic` ✓（这两层**本来就映射好了** ✓）
+    ('comic_status_dom', '状态', '详情页状态选择器（取元素文本 ✓）'),
+    ('comic_tags_dom', '标签', '详情页标签选择器（**匹配多个元素** ✓，逐个取文本成列表 ✓）'),
+    ('comic_hot_dom', '热度', '详情页热度选择器（从中取数字作为热度 ✓）'),
     ('author_label', '作者标签', '作者区前缀文本（取 label 后剩余）'),
-    ('status_label', '状态标签', '状态区前缀文本'),
-    ('tags_split', '标签分隔符', '标签拆分字符，如 ,'),
+    ('status_label', '状态标签', '站点没给状态时用它兜底（如 连载中）✓；留空=站点没给就不显示 ✓'),
+    ('tags_split', '标签分隔符', '标签在一个元素里用它分隔（如 逗号）✓；留空=每个元素算一个标签 ✓'),
   ]),
   _FieldGroup('章节', [
     ('chapter_name_dom', '章节名', '章节列表名称选择器'),
     ('chapter_link_dom', '章节链接', '章节列表链接选择器'),
     ('chapter_url_pattern', '链接模板', '章节链接 URL 模板'),
-    ('chapter_click_dom', '点击选择器', 'WebView 点击后抓取的选择器'),
+    // ✅ **`chapter_click_dom` 已实现**（本会话 ✓）—— 原来这里写着"引擎侧也没有实现"✗，
+    //   现已**实现并接线** ✓✓：`webview_image_fetcher._doFetchChapters()` 在 `_loadPage(url)` 之后
+    //   会**先点这个选择器**（`runJavaScript` 注入 ✓）→ 给 1.5s 渲染宽限 → 再走 chapterScript ✓；
+    //   调用点 `config_manga_source` 已把 `site.chapterClickDom` 传进去 ✓。
+    //   ℹ️ 留空 ✓ → WebView 侧**整段跳过** ✓（与从前完全一致 ✓ 现有源零影响 ✓）；
+    //     点击"成功/未命中"都会写**日志** ✓（日志页能看到是哪一步的问题 ✓）。
+    ('chapter_click_dom', '点击选择器', 'WebView 取章节前先点它展开目录 ✓；留空=不点（多数源无需）✓'),
   ]),
   _FieldGroup('图片', [
     ('img_dom', '图片容器', '章节页图片节点选择器'),
@@ -56,7 +81,11 @@ const _fieldGroups = <_FieldGroup>[
     ('img_load_mode', '加载模式', '1=滚动 2=滚到底 3=下一页'),
     ('use_frame', '取图方式', '0=直连 1=WebView'),
     ('cross_origin', '跨域', '0=同源 1=跨源'),
-    ('concurrent_rate', '限流', '次数/间隔毫秒，如 3/1000'),
+    // ✅ `concurrent_rate` **已实现**（本会话 ✓）—— 原来这里写着"引擎未实现"✗，现已接线 ✓✓：
+    //   `webview_image_fetcher` 的两处并发池（下标探测取图 ✓ / AES 直下 ✓）原先**写死 8** ✗，
+    //   现在都读 `site.concurrentRate` ✓：`>0` 用它（**上限 clamp 1~8** ✓），**没填/0 → 仍是 8** ✓（零影响 ✓）
+    //   ℹ️ 语义如实说明 ✓：实现的是「**同时并发数上限**」这一种 ✓（不是"每秒请求数" ✗）
+    ('concurrent_rate', '限流', '同时并发上限 ✓（1~8，超出按 8 算）；留空/0 = 用引擎默认（8）✓'),
   ]),
   _FieldGroup('搜索', [
     ('search_url', '搜索URL', '搜索 URL 模板，{q} 占位'),
@@ -65,8 +94,15 @@ const _fieldGroups = <_FieldGroup>[
     ('search_cover_dom', '结果封面', '结果封面选择器'),
     ('search_manga_url_dom', '结果链接', '结果详情链接选择器'),
     ('search_encoding', '编码', '关键词编码，默认 utf-8'),
-    ('search_method', '请求方式', 'GET 或 POST'),
-    ('search_post_body', 'POST 体', 'POST 表单体，{q}/{page} 占位'),
+    // ✅ **搜索现已支持 GET 与 POST** ✓（本轮实现 ✓ —— 见 `config_manga_source.search()`
+    //   里的分派 ✓ 与新增的 `_fetchHtmlByPost()` ✓）⇒ 这两项**不再是"未实现"** ✗✓：
+    //   · 留空 / 填 `GET` → 与从前**完全一样** ✓（GET + HTML 选择器 ✓，**向后兼容** ✓）
+    //   · 填 `POST` → 用下方「POST 体」作请求体发 POST ✓（Legado 源里用 POST 搜索的那批 ✓）
+    //     请求体与 URL 一样支持 `{q}`（关键词）与 `{page}`（页码）占位 ✓✓
+    //   ⚠️ 如实说明一处边界 ✓：若该源同时开了「WebView 抓取」✓，那条路**只支持 GET** ✗ ——
+    //     此时 POST 会**如实改走 Dio 并记一条日志** ✓（**不会静默把 POST 变成 GET** ✗）。
+    ('search_method', '请求方式', '留空/GET=GET ✓；填 POST 则用下方请求体（对应 Legado 的 search_method）'),
+    ('search_post_body', 'POST 体', 'POST 时的请求体 ✓，支持 {q} / {page} 占位（仅请求方式=POST 时生效）'),
   ]),
   _FieldGroup('分类', [
     ('category_url', '分类第1页', '分类 URL 模板'),
@@ -160,13 +196,27 @@ class _ComicSourceEditPageState extends State<ComicSourceEditPage> {
       }
       if (_isApi) {
         // api 源：只改显示名称，协议字段原样保留
-        next.addAll(_config);
+        // ✅ 只补「表单里没有的键」（脚本类/分类结构等隐藏字段 ✓）：
+        // 这里原来是 `next.addAll(_config)` ✗ —— 它在**收集完表单值之后**执行 ✓，
+        // 于是**把用户刚改的值整体覆盖回旧值** ✗（表现：任何已有字段改了都不生效、
+        // 清空也删不掉，界面却提示"保存成功" ✓）。
+        // `putIfAbsent` 才是正确语义：表单值优先，缺失的才用旧配置兜底 ✓
+        for (final e in _config.entries) {
+          next.putIfAbsent(e.key, () => e.value);
+        }
         next['name'] = name;
       } else {
         final vUrl = _ctrls['url']!.text.trim();
         final vIcon = _ctrls['icon']!.text.trim();
         // 保留未在表单里的隐藏字段（脚本类/分类结构等）
-        next.addAll(_config);
+        // ✅ 只补「表单里没有的键」（脚本类/分类结构等隐藏字段 ✓）：
+        // 这里原来是 `next.addAll(_config)` ✗ —— 它在**收集完表单值之后**执行 ✓，
+        // 于是**把用户刚改的值整体覆盖回旧值** ✗（表现：任何已有字段改了都不生效、
+        // 清空也删不掉，界面却提示"保存成功" ✓）。
+        // `putIfAbsent` 才是正确语义：表单值优先，缺失的才用旧配置兜底 ✓
+        for (final e in _config.entries) {
+          next.putIfAbsent(e.key, () => e.value);
+        }
         next['name'] = name;
         next['url'] = vUrl;
         if (vIcon.isNotEmpty) {

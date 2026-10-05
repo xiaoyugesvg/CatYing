@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import '../source/global_proxy.dart';
 import 'package:flutter/material.dart';
 
 import '../models/tts_source.dart';
@@ -39,6 +40,13 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
   final _styleTag = TextEditingController();
   final _extraParams = TextEditingController();
   final _apiKey = TextEditingController();
+  // 🔴 这两个原来是在 `build` 里**每次重建都 new 一个** ✗（见下面「情绪风格」/
+  // 「音频格式」两行 ✓）→ 拖动/输入每帧泄漏一个 controller ✓。
+  // ✓ 改成与上面 10 个同款的**持久字段** ✓，并在 `dispose()` 的循环里一并释放 ✓。
+  // 它们是**只读展示**用（`readOnly: true` ✓），所以调用处用
+  // `..text = …` 级联**每次重建同步一次** ✓，不会显示旧值 ✓
+  final _emotion = TextEditingController();
+  final _audioFormat = TextEditingController();
 
   bool _busy = false;
   String? _testResult;
@@ -67,6 +75,7 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
     for (final c in [
       _name, _endpoint, _region, _customHost, _modelId, _voice,
       _stylePrompt, _styleTag, _extraParams, _apiKey,
+      _emotion, _audioFormat, // ← 新加的两个也必须在这里释放 ✓（否则等于换个地方泄漏 ✗）
     ]) {
       c.dispose();
     }
@@ -172,6 +181,12 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
       connectTimeout: const Duration(seconds: 8),
       receiveTimeout: Duration(seconds: timeoutSec ?? 20),
     ));
+    // ✅ **「测试合成」也走「网络代理」**（本轮接上 ✓）—— 这处就是朗读引擎页里
+    //   「**测试**」按钮发出的那次 `POST /api/v1/tts/generateJson` ✓（拿 mp3 校验 ✓）。
+    //   ℹ️ 安全依据 ✓：本处 **`Dio(BaseOptions(...))` 纯构造** ✗✓（无自定义适配器 / UA ✓）
+    //     → 挂代理不影响任何东西 ✓
+    //   · 代理**关闭** ✓ → 返回 false ✓ **一行不改** ✓（与从前完全一致 ✓✓）
+    applyGlobalProxy(dio);
     final r = await dio.post<List<int>>(
       '$base/api/v1/tts/generateJson',
       data: {
@@ -255,7 +270,7 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
             _card(isDark, '音色', [
               _row('音色', _voice, hint: 'zh-CN-XiaoxiaoNeural', chevron: true),
               _action('拉取音色列表'),
-              _row('情绪风格', TextEditingController(text: _s.emotion),
+              _row('情绪风格', _emotion..text = _s.emotion,
                   hint: '未设置', chevron: true, readOnly: true),
               _switchRow('高保真音质', '48kHz（默认 24kHz）。更清晰，流量约翻倍',
                   _s.hiFi, (v) => setState(() => _s = _s.copyWith(hiFi: v))),
@@ -281,7 +296,7 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
           else if (_s.type == 'openai')
             _card(isDark, '音色与格式', [
               _row('音色', _voice, hint: '各家自己的音色标识，如 alloy'),
-              _row('音频格式', TextEditingController(text: _s.audioFormat),
+              _row('音频格式', _audioFormat..text = _s.audioFormat,
                   hint: 'mp3', chevron: true, readOnly: true),
               _switchRow('发送语速参数', '把语速作为 speed 字段发送。'
                   '有的服务不认这个字段会整体报错，那就关掉',
@@ -611,6 +626,10 @@ class _TtsSourceEditPageState extends State<TtsSourceEditPage> {
         connectTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 20),
       ));
+      // ✅ **「拉取音色列表」也走「网络代理」**（本轮接上 ✓）—— 这处是朗读引擎页里
+      //   「拉取音色」发出的那次 `/api/v1/voiceList` 探测 ✓（决定音色下拉有没有内容 ✓）。
+      //   ℹ️ 安全依据 ✓：同样是**纯构造** ✗✓（无自定义适配器 / UA ✓）→ 直接挂安全 ✓
+      applyGlobalProxy(dio);
       List<String> names = [];
       for (final path in ['/api/v1/voiceList', '/api/v1/voices', '/api/voices']) {
         try {

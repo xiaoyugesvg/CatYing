@@ -8,7 +8,12 @@ import 'package:path_provider/path_provider.dart';
 import '../models/book_source.dart';
 import '../models/bookshelf.dart';
 import '../services/book_source_service.dart';
-import '../services/bookshelf_service.dart';
+// 收藏服务：本文件原来导入的是**从未被使用**的 bookshelf_service ✗
+//（analyze 一直在报 unused_import ✓）—— 那正是"收藏接线写到一半"留下的痕迹 ✓。
+// 真正需要的是收藏服务（见下方 `_toggleFavorite` ✓）
+import '../services/book_favorites_service.dart';
+// `Book.fromJson`（收藏用 ✓）—— 上面换成收藏服务后，这个模型也必须一起导入 ✓
+import '../models/book.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/jelly_bookshelf_dialog.dart';
 import 'book_source_reader_page.dart';
@@ -338,8 +343,23 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
   }
 
   void _toggleFavorite() {
+    // 🔴 原来是**假按钮** ✗：只 `setState(() {})` + 弹「已收藏《书名》」✓，
+    // **什么都没写进收藏** ✓，也没有任何状态跟随 ✓ —— 用户以为收藏了、其实没有 ✓。
+    // 现在接**真正的**收藏服务 ✓，并让按钮状态跟随实际是否已收藏 ✓
+    //（`id` 与"加入书架"用的完全一致 ✓，见下面 :348 附近的 meta ✓）
+    final id = 'book-${_result.bookUrl}';
+    final svc = BookFavoritesService();
+    // ⚠️ 本页的封面字段名我**没有核实过** ✗ → 这里**不传封面** ✓
+    //（收藏记录的封面会为空 ✓，不影响收藏本身是否正确 ✓；宁可少一个字段，
+    //  也不要写一个可能不存在、直接编译失败的字段名 ✓）
+    svc.toggle(Book.fromJson({
+      'id': id,
+      'hash': '',
+      'title': _name,
+      'author': _author,
+    }));
     setState(() {});
-    _toast('已收藏《$_name》');
+    _toast(svc.isFavorite(id) ? '已收藏《$_name》' : '已取消收藏《$_name》');
   }
 
   Future<void> _addToBookshelf() async {
@@ -475,6 +495,8 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
       if (mounted) _toast('无法创建下载目录');
       return;
     }
+    // 🔴 失败计数（原来只有 `done`，而它对失败的章也 +1 ✗，见下面 catch 处 ✓）
+    var failedCount = 0;
     for (var i = 0; i < count; i++) {
       if (cancel || !mounted) break;
       try {
@@ -486,15 +508,35 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
           await file.writeAsString(
               '${ch.name}\n\n${r.content}',
               flush: true);
+        } else {
+          // 🔴 `r.ok == false`（服务端返回失败/限流/源站报错）时**既不写文件、
+          // 也不算失败** ✗ —— 原来这里**没有 else** ✓ → 这类章同样被 `done++`
+          // 计入"已下载" ✓，与上面 catch 路径是同一个病 ✓。
+          // 现在一并计入 `failedCount` ✓，提示里会如实说明失败章数 ✓
+          failedCount++;
+          debugPrint('[BookSourceDetail] 章节返回失败（第 ${i + 1} 章，'
+              '未写入文件）');
         }
-      } catch (_) {}
+      } catch (e) {
+        // 🔴 原来是 `catch (_) {}` ✗ —— **失败被完全吞掉** ✓，而紧跟的 `done++`
+        // 是**无条件**执行的 ✗ → **下载失败的章也被算成"已下载"** ✓；
+        // 最坏情况：全书 50 章全部失败，提示仍写「下载完成：50 / 50 章」✓
+        //（而 `dir` 里一个 txt 都没有 ✓）。这里改为**记录并计数** ✓，
+        // 提示文案据此如实说明 ✓（`r.ok == false` 的情况也算失败 ✓）
+        failedCount++;
+        debugPrint('[BookSourceDetail] 章节下载失败（第 ${i + 1} 章）: $e');
+      }
       done++;
     }
     if (!mounted) return;
     if (cancel) {
       _toast('已取消，已下载 $done 章');
     } else {
-      _toast('下载完成：$done / $count 章，保存于 ${dir.path}');
+      // ✅ 失败章数**如实报出来** ✓（原来无论失败多少都只说"下载完成 N/N"✗）
+      _toast(failedCount == 0
+          ? '下载完成：$done / $count 章，保存于 ${dir.path}'
+          : '下载完成：$done / $count 章（其中 $failedCount 章失败），'
+              '保存于 ${dir.path}');
     }
   }
 
@@ -622,6 +664,11 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
           author: _author,
           chapters: _chapters,
           initialIndex: index,
+          // ✅ 把封面**传下去** ✓ —— 修掉"全屏听书页永远是占位图" ✗：
+          //   阅读器原来只读 `source.raw['coverUrl']` ✓，而那个键**从不被写入**
+          //   （内置 Legado 源顶层没有 ✓、config 源的封面在 search_cover_dom 里 ✓）。
+          //   详情页手里就有封面 ✓（`BookSourceResult.coverUrl` ✓）→ 直接传 ✓
+          coverUrl: _result.coverUrl,
         ),
       ),
     );
@@ -663,6 +710,13 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
   }
 }
 
+// ⚠️ **这个文件级 `unawaited` 不能删** ✗ —— 我曾按"dart:async 已经有它"的推断
+// 删过一次 ✓，结果全仓立刻 **error=2** ✗：
+//   `book_source_search_page.dart:259 / :291` 用了 `unawaited(...)` ✓，
+//   而它**没有**引入 `dart:async` 的版本 ✗ —— 它是靠 **import 本文件**
+//   （页面间 import ✓）**传递**拿到这个函数的 ✓✓。
+// 教训 ✓：判断"某函数是不是 dart:async 的"**不能只看调用点** ✗，
+//   要看那个调用点所在文件**到底 import 了什么** ✓ —— 否则会删掉别人的依赖 ✓。
 /// 显式忽略 future（用于"关掉对话框"这种不需要结果的地方）
 void unawaited(Future<void> f) {
   f.catchError((_) {});

@@ -42,6 +42,9 @@ class _DiscoverPageState extends State<DiscoverPage>
   List<String> _cats = const ['全部'];
   String _cat = '全部';
 
+  // QQ 音乐（公开接口）：热搜关键词
+  List<String> _hotKeywords = const [];
+
   // 喜马拉雅数据
   List<({String id, String name})> _xmCategories = const [];
   List<Song> _xmFeatured = const []; // 精选专辑（取若干分类的头部内容）
@@ -80,6 +83,8 @@ class _DiscoverPageState extends State<DiscoverPage>
     try {
       if (_source == SongSource.ximalaya) {
         await _loadXimalaya();
+      } else if (_source == SongSource.qq) {
+        await _loadQQ();
       } else {
         await _loadMusicPlatform();
       }
@@ -92,6 +97,16 @@ class _DiscoverPageState extends State<DiscoverPage>
         _error = '$e';
       });
     }
+  }
+
+  // ── QQ 音乐（公开接口：热搜 + 搜索，无登录态）──────────────────
+
+  Future<void> _loadQQ() async {
+    final h = await api.hotSearchResult(source: SongSource.qq);
+    if (!mounted) return;
+    _hotKeywords = h.ok ? h.list : const [];
+    // 热搜失败不阻塞页面（搜索/播放仍可用）
+    if (!h.ok) _error = h.error;
   }
 
   // ── 音乐平台（网易云 / 酷狗）──────────────────────────────────────
@@ -464,6 +479,7 @@ class _DiscoverPageState extends State<DiscoverPage>
   Widget _sourceTabs() {
     final tabs = const [
       _SourceTab(source: SongSource.netease, label: '网易云'),
+      _SourceTab(source: SongSource.qq, label: 'QQ音乐'),
       _SourceTab(source: SongSource.kugou, label: '酷狗'),
       _SourceTab(source: SongSource.ximalaya, label: '有声书'),
     ];
@@ -545,7 +561,67 @@ class _DiscoverPageState extends State<DiscoverPage>
     if (_source == SongSource.ximalaya) {
       return _buildXimalayaSections();
     }
+    if (_source == SongSource.qq) {
+      return _buildQQSections();
+    }
     return _buildMusicSections();
+  }
+
+  /// QQ 音乐板块：热搜关键词（公开接口能拿到的就是这些）
+  List<Widget> _buildQQSections() {
+    final out = <Widget>[];
+    if (_hotKeywords.isNotEmpty) {
+      out.add(const SliverToBoxAdapter(child: SectionTitle(title: 'QQ音乐热搜')));
+      out.add(SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        sliver: SliverGrid(
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            mainAxisExtent: 48,
+          ),
+          delegate: SliverChildBuilderDelegate(
+            (c, i) {
+              final kw = _hotKeywords[i];
+              return GestureDetector(
+                onTap: () => showSearch<void>(
+                  context: context,
+                  delegate: _QuickSearchDelegate(source: SongSource.qq, initialQuery: kw),
+                ),
+                child: Container(
+                  alignment: Alignment.centerLeft,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: MusicTheme.fill,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Text('${i + 1}',
+                          style: TextStyle(
+                              color: i < 3 ? MusicTheme.tint : MusicTheme.secondary,
+                              fontSize: AppTheme.fontFootnote,
+                              fontWeight: FontWeight.w700)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(kw,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                color: MusicTheme.label, fontSize: AppTheme.fontSubhead)),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+            childCount: _hotKeywords.length,
+          ),
+        ),
+      ));
+    }
+    return out;
   }
 
   List<Widget> _buildMusicSections() {
@@ -976,9 +1052,12 @@ class _AlbumListPageState extends State<_AlbumListPage> {
 
 /// 轻量搜索弹层（主页放大镜用；完整搜索在「搜索」tab）
 class _QuickSearchDelegate extends SearchDelegate<void> {
-  _QuickSearchDelegate({required this.source});
+  _QuickSearchDelegate({required this.source, this.initialQuery = ''});
 
   final SongSource source;
+
+  /// 热搜/榜单直接点词搜索时预置的关键词（query 为空时用它兜底）
+  final String initialQuery;
 
   @override
   ThemeData appBarTheme(BuildContext context) => Theme.of(context).copyWith(
@@ -1012,14 +1091,16 @@ class _QuickSearchDelegate extends SearchDelegate<void> {
   Widget buildSuggestions(BuildContext context) => _results(context);
 
   Widget _results(BuildContext context) {
-    if (query.trim().isEmpty) {
+    // 热搜点击预置词：SearchDelegate 的 query 只读，用 initialQuery 兜底
+    final q = query.trim().isEmpty ? initialQuery.trim() : query.trim();
+    if (q.isEmpty) {
       return Center(
         child: Text('输入歌名、歌手或专辑',
             style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
       );
     }
     return FutureBuilder<MusicListResult<Song>>(
-      future: MusicApi.instance.search(query, limit: 30, source: source),
+      future: MusicApi.instance.search(q, limit: 30, source: source),
       builder: (c, snap) {
         if (!snap.hasData) {
           return AppPageLoading(color: MusicTheme.tint);

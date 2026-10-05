@@ -1013,6 +1013,10 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         child: AnimatedOpacity(
           opacity: _showBackToTop ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 200),
+          // ⛔ **有意不同、不要"统一"成 `AppIconButton`** ✗✓（与 `bookshelf_page` /
+          //   `book_search_page` / `download_page` 的返回顶部钮**同款** ✓）：
+          //   它是**滚动出现的悬浮 FAB** ✓（`primary` + `elevation: 4` 醒目 ✓），
+          //   不是顶栏同族圆钮 ✗ → 换"淡圆底"会几乎看不见 ✗✗
           child: Material(
             color: JellyTheme.primary,
             shape: const CircleBorder(),

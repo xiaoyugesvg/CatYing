@@ -669,6 +669,49 @@ function parseExploreCategories(raw, state, base, jsLib) {
 }
 
 /**
+ * 无 exploreUrl 的书源：抓站点首页，把导航栏里的真实分类链接探测成板块。
+ * 站点导航常见形态：`<a href="/xxx/">分类名</a>`（短文本、同域）。
+ * 过滤掉功能链接（登录/搜索/排行/推荐等）与重复路径；最多取 8 个分类。
+ */
+const HOME_PROBE_BLACKLIST =
+  /^(首页|男频首页|女频首页|分类|全部|排行榜|排行|热门|最新|新书|完本|推荐|书单|热门作者|作者|搜索|登录|注册|关于|帮助|书架|我的|下载|客户端|APP|APP下载|小说|更多|下一页|上一页)$/;
+
+async function probeHomeCategories(source, base) {
+  try {
+    const resp = await httpGet(base, normalizeHeaders(source && source.header));
+    const html = String((resp && resp.text) || '');
+    if (!html) return [];
+    const links = [];
+    const seen = new Set();
+    let host;
+    try { host = new URL(base).hostname; } catch (_) { host = ''; }
+    const re = /<a[^>]+href="([^"]+)"[^>]*>([^<]{1,12})<\/a>/g;
+    let m;
+    while ((m = re.exec(html))) {
+      const href = String(m[1] || '').trim();
+      const txt = String(m[2] || '').replace(/[\[\]【】　\s]/g, '').trim();
+      if (!txt || txt.length > 10 || txt.length < 2) continue;
+      if (HOME_PROBE_BLACKLIST.test(txt)) continue;
+      let abs;
+      try { abs = absolute(href, base); } catch (_) { continue; }
+      if (!abs) continue;
+      try {
+        const u = new URL(abs);
+        if (host && u.hostname !== host) continue; // 只收站内分类
+        if (u.pathname === '/' || u.pathname === '/index.html') continue;
+        if (seen.has(u.pathname)) continue;
+        seen.add(u.pathname);
+      } catch (_) { continue; }
+      links.push({ title: txt, url: abs });
+      if (links.length >= 8) break;
+    }
+    return links;
+  } catch (_) {
+    return [];
+  }
+}
+
+/**
  * 发现/分类浏览：
  *   · 不传 categoryUrl → 返回 exploreUrl 的分类列表
  *   · 传 categoryUrl   → 抓分类页，用 ruleExplore 解析书籍列表
@@ -681,7 +724,13 @@ async function explore({ source, categoryUrl }) {
   // 1) 分类列表
   if (!categoryUrl) {
     const raw = source.exploreUrl;
-    if (!raw) return { ok: false, error: '该源没有配置 exploreUrl（发现地址）' };
+    if (!raw) {
+      // ⚠️ 无 exploreUrl 的源：自动抓站点首页导航，把真实分类链接探测成
+      // 板块（改代码兜底，不需要改源文件）。失败则退回提示。
+      const probed = await probeHomeCategories(source, base);
+      if (probed.length) return { ok: true, categories: probed, probed: true };
+      return { ok: false, error: '该源没有配置 exploreUrl（发现地址），且首页分类自动探测未命中' };
+    }
     const cats = parseExploreCategories(raw, state, base, source.jsLib);
     if (cats.length === 0) {
       return { ok: false, error: 'exploreUrl 解析失败（需 JSON 分类数组或单个链接）' };

@@ -34,12 +34,19 @@ class SourceManagerPage extends StatefulWidget {
 
 class _SourceManagerPageState extends State<SourceManagerPage> {
   /// 导入区当前 tab：0=文本，1=链接，2=文件
+  ///
+  /// ⚠️ **共用**：两张卡（洛雪 / MusicFree）各自渲染自己的那组输入，
+  /// 但 tab 状态是同一个 —— 因为用户一次只会在其中一张卡里操作，
+  /// 而且共用能让"我选了链接"在两张卡之间保持一致，减少重复点击。
   int _tab = 0;
   final _textCtrl = TextEditingController();
   final _urlCtrl = TextEditingController();
   String? _pickedName;
   String? _pickedContent;
   bool _busy = false;
+
+  /// 列表类型筛选：'' = 全部 / 'lx' = 洛雪音乐源 / 'musicfree' = MusicFree 源
+  String _kindFilter = '';
 
   @override
   void dispose() {
@@ -59,7 +66,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
           backgroundColor: Colors.transparent,
           elevation: 0,
           iconTheme: IconThemeData(color: MusicTheme.label),
-          title: Text('自定义音源',
+          title: Text('音乐源',
               style:
                   TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
           actions: [
@@ -81,15 +88,28 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         body: ValueListenableBuilder<int>(
           valueListenable: store.revision,
           builder: (context, _, __) {
-            final list = store.all;
+            final all = store.all;
+            // 类型筛选：'' = 全部 / 'lx' = 洛雪 / 'musicfree' = MusicFree
+            final list = _kindFilter.isEmpty
+                ? all
+                : all.where((s) {
+                    if (_kindFilter == 'musicfree') return s.isMusicFree;
+                    // 洛雪一侧包含 LX 脚本 + 模板法（都是洛雪生态）
+                    return !s.isMusicFree;
+                  }).toList();
+            final lxCount = all.where((s) => !s.isMusicFree).length;
+            final mfCount = all.where((s) => s.isMusicFree).length;
             return ListView(
               padding: const EdgeInsets.only(bottom: 40),
               children: [
                 _intro(),
-                _importCard(context),
+                // ── 两个**独立**的导入入口（洛雪 / MusicFree）────────
+                _sourceCard(context, _CardKind.lx),
+                _sourceCard(context, _CardKind.musicFree),
+                _filterRow(all.length, lxCount, mfCount),
                 _listHeader(list.length),
                 if (list.isEmpty)
-                  _emptyHint()
+                  _emptyHint(all.isEmpty)
                 else
                   ...list.map((s) => _tile(context, store, s)),
               ],
@@ -100,110 +120,220 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     );
   }
 
-  // ── 顶部说明（对齐参考图两行说明）────────────────────────────
+  // ── 顶部说明：一句话讲清"有两个入口、为什么分两张卡" ──────────
   Widget _intro() => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '支持本地文件、远程URL和粘贴文本。',
+              '两种音乐源，各用各的卡片。',
               style: TextStyle(
-                  color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead),
+                  color: MusicTheme.label,
+                  fontSize: AppTheme.fontSubhead,
+                  fontWeight: FontWeight.w600),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 3),
             Text(
-              '支持LX User API的JSON、JS、本地文件与在线URL；在线导入后会保存本地副本。',
+              '导入后，内置接口拿不到播放地址时会自动逐个尝试。在线导入会保存本地副本。',
               style: TextStyle(
-                  color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
+                  color: MusicTheme.secondary,
+                  fontSize: AppTheme.fontFootnote,
+                  height: 1.5),
             ),
           ],
         ),
       );
 
-  // ── 导入区（内嵌卡片：文本 / 链接 / 文件 + 识别并导入）────────
-  Widget _importCard(BuildContext context) {
+  // ============================================================
+  // 两种音乐源的展示元数据
+  // ============================================================
+
+  /// 卡片身份：洛雪音乐源 / MusicFree 源
+  ///
+  /// 为什么要显式区分而不是靠自动识别：
+  /// 用户的心智是"我要加一个洛雪源"或"我要加一个 MusicFree 源"，
+  /// 把两种格式混在一个导入框里，粘错了会被静默接受，很难解释。
+  /// 分成两张卡后，粘错会得到明确提示。
+
+  Widget _sourceCard(BuildContext context, _CardKind kind) {
+    final color = kind.accent;
+    final isLx = kind == _CardKind.lx;
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       decoration: BoxDecoration(
         color: MusicTheme.card,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
             color: MusicTheme.label.withValues(alpha: 0.06), width: 0.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('导入音源',
-              style: TextStyle(
-                  color: MusicTheme.label,
-                  fontSize: AppTheme.fontHeadline,
-                  fontWeight: FontWeight.w600)),
-          const SizedBox(height: 10),
-          _segmented(),
-          const SizedBox(height: 12),
-          if (_tab == 0)
-            TextField(
-              controller: _textCtrl,
-              maxLines: 6,
-              minLines: 3,
-              style:
-                  TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
-              cursorColor: MusicTheme.tint,
-              decoration: InputDecoration(
-                hintText: '粘贴JSON/配置/脚本内容',
-                hintStyle:
-                    TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead),
-                filled: false,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: MusicTheme.divider, width: 0.5),
+          // ── 卡头：图标徽章 + 名称 + 说明 ──────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(kind.icon, size: 19, color: color),
                 ),
-              ),
-            )
-          else if (_tab == 1)
-            TextField(
-              controller: _urlCtrl,
-              keyboardType: TextInputType.url,
-              style:
-                  TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
-              cursorColor: MusicTheme.tint,
-              decoration: InputDecoration(
-                hintText: 'https://…',
-                hintStyle:
-                    TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead),
-                filled: false,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: MusicTheme.divider, width: 0.5),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(kind.title,
+                          style: TextStyle(
+                              color: MusicTheme.label,
+                              fontSize: AppTheme.fontHeadline,
+                              fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 2),
+                      Text(kind.subtitle,
+                          style: TextStyle(
+                              color: MusicTheme.secondary,
+                              fontSize: AppTheme.fontFootnote,
+                              height: 1.45)),
+                    ],
+                  ),
                 ),
-              ),
-            )
-          else
-            _fileRow(context),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: MusicTheme.tint,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              ),
-              onPressed: _busy ? null : () => _import(context),
-              child: Text(_busy ? '导入中…' : '识别并导入'),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            '支持JSON数组、LX User API导出JSON、JS脚本、`SERVER_SCRIPT_CONFIG`片段，以及`@name`/`@template`头部格式。',
-            style: TextStyle(
-                color: MusicTheme.secondary,
-                fontSize: AppTheme.fontCaption,
-                height: 1.5),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _segmented(),
+                const SizedBox(height: 12),
+                if (_tab == 0)
+                  _inputBox(
+                    controller: _textCtrl,
+                    hint: isLx
+                        ? '粘贴洛雪源的 JSON 配置 或 JS 脚本'
+                        : '粘贴 MusicFree 插件内容（module.exports = { platform, getMediaSource }）',
+                    maxLines: 6,
+                  )
+                else if (_tab == 1)
+                  _inputBox(
+                    controller: _urlCtrl,
+                    hint: isLx
+                        ? 'https://…/音源.js'
+                        : 'https://…/plugin.js（会自动下载并保存本地副本）',
+                    maxLines: 1,
+                    keyboardType: TextInputType.url,
+                  )
+                else
+                  _fileRow(context, kind: kind),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: color,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(11)),
+                    ),
+                    onPressed: _busy ? null : () => _import(context, kind),
+                    icon: Icon(
+                        _busy ? Icons.hourglass_top : Icons.add_rounded,
+                        size: 18),
+                    label: Text(_busy ? '导入中…' : kind.buttonText),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(kind.hint,
+                    style: TextStyle(
+                        color: MusicTheme.secondary,
+                        fontSize: AppTheme.fontCaption,
+                        height: 1.5)),
+              ],
+            ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 统一样式的输入框（文本 / 链接共用）
+  Widget _inputBox({
+    required TextEditingController controller,
+    required String hint,
+    int maxLines = 1,
+    TextInputType? keyboardType,
+  }) =>
+      TextField(
+        controller: controller,
+        maxLines: maxLines,
+        minLines: maxLines > 1 ? 3 : 1,
+        keyboardType: keyboardType,
+        style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
+        cursorColor: MusicTheme.tint,
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: TextStyle(
+              color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead),
+          hintMaxLines: maxLines > 1 ? 3 : 2,
+          filled: false,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: MusicTheme.divider, width: 0.5),
+          ),
+        ),
+      );
+
+  /// 列表类型筛选（全部 / 洛雪 / MusicFree）
+  Widget _filterRow(int all, int lx, int mf) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        child: Row(
+          children: [
+            _filterChip('全部', '', all, MusicTheme.tint),
+            const SizedBox(width: 8),
+            _filterChip('洛雪音乐源', 'lx', lx, _CardKind.lx.accent),
+            const SizedBox(width: 8),
+            _filterChip('MusicFree', 'musicfree', mf, _CardKind.musicFree.accent),
+          ],
+        ),
+      );
+
+  Widget _filterChip(String label, String value, int count, Color color) {
+    final selected = _kindFilter == value;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() => _kindFilter = value),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? color.withValues(alpha: 0.16)
+              : MusicTheme.fill,
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(
+            color: selected ? color.withValues(alpha: 0.45) : Colors.transparent,
+            width: 0.8,
+          ),
+        ),
+        child: Text(
+          '$label $count',
+          style: TextStyle(
+            color: selected ? color : MusicTheme.secondary,
+            fontSize: AppTheme.fontCaption,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+          ),
+        ),
       ),
     );
   }
@@ -247,7 +377,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     );
   }
 
-  Widget _fileRow(BuildContext context) {
+  Widget _fileRow(BuildContext context, {required _CardKind kind}) {
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: _pickFile,
@@ -302,35 +432,48 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     }
   }
 
-  Future<void> _import(BuildContext context) async {
+  Future<void> _import(BuildContext context, _CardKind kind) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      var n = 0;
+      // ── 取输入内容（三 tab 各自来源）──────────────────────────
+      String content;
+      String? fallback;
       if (_tab == 0) {
-        final text = _textCtrl.text.trim();
-        if (text.isEmpty) {
+        content = _textCtrl.text.trim();
+        if (content.isEmpty) {
           _toast(context, '请先粘贴音源内容');
           return;
         }
-        n = await SourceImportParser.importIntoStore(text);
       } else if (_tab == 1) {
-        final url = _urlCtrl.text.trim();
-        if (url.isEmpty) {
+        content = _urlCtrl.text.trim();
+        if (content.isEmpty) {
           _toast(context, '请输入音源链接');
           return;
         }
-        // importIntoStore 内部会识别 URL 并自动下载解析（保存本地副本）
-        n = await SourceImportParser.importIntoStore(url, fallbackName: url);
+        // 传 fallbackName 让"URL 里没有平台名"时也能有个名字
+        fallback = content;
       } else {
         if (_pickedContent == null) {
           _toast(context, '请先选择文件');
           return;
         }
-        n = await SourceImportParser.importIntoStore(_pickedContent!);
+        content = _pickedContent!;
+        fallback = _pickedName;
       }
+
+      // ── 按**卡片类型**导入：粘错格式会明确拒绝而不是静默接受 ──
+      final r = await SourceImportParser.importIntoStoreTyped(
+        content,
+        expectMusicFree: kind == _CardKind.musicFree,
+        fallbackName: fallback,
+      );
       if (!mounted) return;
-      _toast(context, n > 0 ? '已导入 $n 个音源' : '这些音源已存在，未重复导入');
+      if (r.mismatch != null) {
+        _toast(context, r.mismatch!);
+        return;
+      }
+      _toast(context, r.count > 0 ? '已导入 ${r.count} 个${kind.title}' : '这些音源已存在，未重复导入');
     } on SourceImportException catch (e) {
       if (!mounted) return;
       _toast(context, '无法识别：${e.message}');
@@ -368,26 +511,42 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         ),
       );
 
-  Widget _emptyHint() => Padding(
+  Widget _emptyHint(bool storeEmpty) => Padding(
         padding: const EdgeInsets.fromLTRB(40, 30, 40, 10),
-        child: Text(
-          '还没有导入音源。\n在上方粘贴 / 链接 / 文件导入后，播放时内置接口拿不到地址会自动尝试这里。',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-              color: MusicTheme.secondary,
-              fontSize: AppTheme.fontFootnote,
-              height: 1.6),
+        child: Column(
+          children: [
+            Icon(
+              storeEmpty ? Icons.queue_music_outlined : Icons.filter_alt_off_outlined,
+              size: 30,
+              color: MusicTheme.secondary.withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              storeEmpty
+                  ? '还没有音乐源。\n用上面两张卡片导入后，播放时内置接口拿不到地址会自动尝试这里。'
+                  : '这个分类下还没有音乐源。\n点上面的「全部」看所有源。',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: MusicTheme.secondary,
+                  fontSize: AppTheme.fontFootnote,
+                  height: 1.6),
+            ),
+          ],
         ),
       );
 
   // ── 音源条目（对齐参考图：名称 / 标签 / 描述 + 编辑·排序·删除）──
   Widget _tile(BuildContext context, ThirdPartySourceStore store,
       ThirdPartySource s) {
-    final tagText =
-        '${s.isScript ? "脚本" : "KEYWORD"}·${s.quality}${s.isScript ? "" : "·${s.urlPath}"}';
-    final desc = s.isScript
-        ? 'LX 脚本 · ${(s.script ?? '').length} 字符'
-        : (s.template.isEmpty ? '（无模板）' : s.template);
+    // ⚠️ 用 `usesScript` / `kindLabel`，不要用 `isScript` ——
+    // MusicFree 插件也是"脚本型"，用 isScript 会显示成 KEYWORD
+    final tagText = '${s.kindLabel}·${s.quality}'
+        '${s.usesScript ? "" : "·${s.urlPath}"}';
+    final desc = s.isMusicFree
+        ? 'MusicFree 插件 · ${(s.script ?? '').length} 字符'
+        : (s.isScript
+            ? 'LX 脚本 · ${(s.script ?? '').length} 字符'
+            : (s.template.isEmpty ? '（无模板）' : s.template));
     final descExtra = s.headers.isEmpty ? '' : ' · ${s.headers.length} 个请求头';
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
@@ -541,82 +700,205 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     if (ok == true) await store.remove(s.id);
   }
 
-  void _showDetail(BuildContext context, ThirdPartySource s) {
-    showModalBottomSheet<void>(
+  /// 点击「编辑」：弹窗里可直接修改名称与内容（模板/脚本），保存后写回存储
+  Future<void> _showDetail(BuildContext context, ThirdPartySource s) async {
+    final nameCtrl = TextEditingController(text: s.name);
+    final scriptCtrl = TextEditingController(text: s.script ?? '');
+    final templateCtrl = TextEditingController(text: s.template);
+    final urlPathCtrl = TextEditingController(text: s.urlPath);
+    final qualityCtrl = TextEditingController(text: s.quality);
+    final headersCtrl = TextEditingController(
+        text: s.headers.entries.map((e) => '${e.key}=${e.value}').join('\n'));
+    final saved = await showModalBottomSheet<bool>(
       context: context,
       backgroundColor: MusicTheme.card,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 16,
+          bottom: MediaQuery.viewInsetsOf(ctx).bottom + 16,
+        ),
+        child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(s.name,
+              Row(
+                children: [
+                  Expanded(
+                    child: Text('编辑音源',
+                        style: TextStyle(
+                            color: MusicTheme.label,
+                            fontSize: AppTheme.fontHeadline,
+                            fontWeight: FontWeight.w600)),
+                  ),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      foregroundColor: MusicTheme.secondary,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(
+                        text: const JsonEncoderShim().encode(s.toJson()),
+                      ));
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(content: Text('已复制音源配置')),
+                      );
+                    },
+                    icon: const Icon(Icons.copy_rounded, size: 15),
+                    label: Text('复制配置',
+                        style: TextStyle(
+                            color: MusicTheme.secondary,
+                            fontSize: AppTheme.fontFootnote)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _fieldLabel('名称'),
+              TextField(
+                controller: nameCtrl,
+                style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
+                decoration: _fieldDeco('音源名称'),
+              ),
+              const SizedBox(height: 12),
+              if (s.usesScript) ...[
+                _fieldLabel('脚本内容（LX 脚本）'),
+                TextField(
+                  controller: scriptCtrl,
+                  maxLines: 12,
+                  minLines: 6,
                   style: TextStyle(
                       color: MusicTheme.label,
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.w600)),
-              const SizedBox(height: 10),
-              _kv('类型', s.isScript ? 'LX 脚本' : '模板法'),
-              _kv('音质', s.quality),
-              if (!s.isScript) ...[
-                _kv('模板', s.template),
-                _kv('取值路径', s.urlPath),
-              ],
-              if (s.isScript)
-                _kv('脚本长度', '${(s.script ?? '').length} 字符'),
-              if (s.headers.isNotEmpty)
-                _kv('请求头',
-                    s.headers.entries.map((e) => '${e.key}: ${e.value}').join('\n')),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    Clipboard.setData(ClipboardData(
-                      text: const JsonEncoderShim().encode(s.toJson()),
-                    ));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('已复制音源配置')),
-                    );
-                  },
-                  child: const Text('复制配置'),
+                      fontSize: AppTheme.fontFootnote,
+                      fontFamily: 'monospace',
+                      height: 1.4),
+                  decoration: _fieldDeco('整份脚本源码，保存后生效'),
                 ),
+              ] else ...[
+                _fieldLabel('模板 URL'),
+                TextField(
+                  controller: templateCtrl,
+                  style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
+                  decoration: _fieldDeco('如 https://api.xxx.com/url?id={id}'),
+                ),
+                const SizedBox(height: 12),
+                _fieldLabel('取值路径'),
+                TextField(
+                  controller: urlPathCtrl,
+                  style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
+                  decoration: _fieldDeco('播放地址在响应里的字段路径，如 data.url'),
+                ),
+                const SizedBox(height: 12),
+                _fieldLabel('音质'),
+                TextField(
+                  controller: qualityCtrl,
+                  style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead),
+                  decoration: _fieldDeco('128k / 320k / flac / flac24bit / hires'),
+                ),
+                const SizedBox(height: 12),
+                _fieldLabel('请求头（每行 键=值）'),
+                TextField(
+                  controller: headersCtrl,
+                  maxLines: 5,
+                  style: TextStyle(
+                      color: MusicTheme.label,
+                      fontSize: AppTheme.fontFootnote,
+                      fontFamily: 'monospace',
+                      height: 1.4),
+                  decoration: _fieldDeco('User-Agent=Mozilla/5.0 …'),
+                ),
+              ],
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('取消'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: MusicTheme.tint,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () {
+                        final name = nameCtrl.text.trim();
+                        if (name.isEmpty) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            const SnackBar(content: Text('名称不能为空')),
+                          );
+                          return;
+                        }
+                        Navigator.pop(ctx, true);
+                      },
+                      child: const Text('保存'),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
         ),
       ),
     );
+    if (saved != true || !mounted) return;
+    final name = nameCtrl.text.trim();
+    final updated = s.copyWith(
+      name: name,
+      template: s.usesScript ? s.template : templateCtrl.text.trim(),
+      urlPath: s.usesScript ? s.urlPath : urlPathCtrl.text.trim().isEmpty
+          ? 'url'
+          : urlPathCtrl.text.trim(),
+      quality: qualityCtrl.text.trim().isEmpty ? '320k' : qualityCtrl.text.trim(),
+      headers: s.usesScript ? s.headers : _parseHeaders(headersCtrl.text),
+      // 🔴 **关键**：必须是 `usesScript` —— 用 `isScript` 时
+      // MusicFree 插件会走 else 分支把 `script` 写回**旧值**，
+      // 用户在编辑器里对该插件的任何编辑都会丢 ✗
+      script: s.usesScript ? scriptCtrl.text : s.script,
+    );
+    await ThirdPartySourceStore.instance.upsert(updated);
+    _toast(context, '已保存「$name」');
   }
 
-  Widget _kv(String k, String v) => Padding(
+  /// 请求头文本 → Map（每行 键=值，容忍冒号分隔）
+  static Map<String, String> _parseHeaders(String text) {
+    final out = <String, String>{};
+    for (final line in text.split('\n')) {
+      final t = line.trim();
+      if (t.isEmpty) continue;
+      final sep = t.indexOf(RegExp(r'[=:]'));
+      if (sep <= 0) continue;
+      final k = t.substring(0, sep).trim();
+      final v = t.substring(sep + 1).trim();
+      if (k.isNotEmpty && v.isNotEmpty) out[k] = v;
+    }
+    return out;
+  }
+
+  Widget _fieldLabel(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 66,
-              child: Text(k,
-                  style: TextStyle(
-                      color: MusicTheme.secondary,
-                      fontSize: AppTheme.fontFootnote)),
-            ),
-            Expanded(
-              child: Text(v,
-                  style: TextStyle(
-                      color: MusicTheme.label,
-                      fontSize: AppTheme.fontFootnote,
-                      height: 1.5)),
-            ),
-          ],
+        child: Text(text,
+            style: TextStyle(
+                color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
+      );
+
+  InputDecoration _fieldDeco(String hint) => InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead),
+        filled: true,
+        fillColor: MusicTheme.fill,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide.none,
         ),
       );
 }
@@ -699,7 +981,7 @@ Future<void> testSource(BuildContext context, ThirdPartySource s) async {
                 style: TextStyle(
                     color: MusicTheme.secondary,
                     fontSize: AppTheme.fontFootnote)),
-            Text('方式：${s.isScript ? "LX 脚本" : "模板"}',
+            Text('方式：${s.isMusicFree ? "MusicFree 插件" : (s.isScript ? "LX 脚本" : "模板")}',
                 style: TextStyle(
                     color: MusicTheme.secondary,
                     fontSize: AppTheme.fontFootnote)),
@@ -840,4 +1122,68 @@ Future<void> runLxSelfTest(BuildContext context) async {
       ],
     ),
   );
+}
+
+// ============================================================
+// 两种音乐源的展示元数据
+// ============================================================
+
+/// 导入卡的身份：洛雪音乐源 / MusicFree 源
+///
+/// 拆成两个**独立入口**而不是一个自动识别的框：
+/// 用户的心智是"我要加一个洛雪源"或"我要加一个 MusicFree 源"；
+/// 混在一起的话，粘错格式会被静默接受（解析是成功的），
+/// 用户只会困惑"我明明加在洛雪里，怎么跑 MusicFree 去了"。
+enum _CardKind {
+  /// 洛雪音乐源（LX）：JSON 配置 / JS 脚本 / 模板法
+  lx,
+
+  /// MusicFree 插件：`module.exports = { platform, getMediaSource }`
+  musicFree,
+}
+
+extension on _CardKind {
+  /// 卡片标题
+  String get title => switch (this) {
+        _CardKind.lx => '洛雪音乐源',
+        _CardKind.musicFree => 'MusicFree 源',
+      };
+
+  /// 卡片副标题（一句话讲清是什么）
+  String get subtitle => switch (this) {
+        _CardKind.lx => '洛雪音乐的 LX 音源：JSON 配置、JS 脚本、模板 URL。',
+        _CardKind.musicFree => 'MusicFree 插件：带 platform 的 getMediaSource 插件。',
+      };
+
+  /// 卡头图标
+  IconData get icon => switch (this) {
+        _CardKind.lx => Icons.library_music_outlined,
+        _CardKind.musicFree => Icons.extension_outlined,
+      };
+
+  /// 主题色（两卡一眼区分）
+  ///
+  /// ⚠️ 用 MusicTheme 的语义色，不要在深/浅色模式下手写死颜色 ——
+  /// 手写色在浅色模式下会糊掉。
+  Color get accent => switch (this) {
+        _CardKind.lx => MusicTheme.sage,
+        _CardKind.musicFree => MusicTheme.tint,
+      };
+
+  /// 导入按钮文案
+  String get buttonText => switch (this) {
+        _CardKind.lx => '导入洛雪音乐源',
+        _CardKind.musicFree => '导入 MusicFree 源',
+      };
+
+  /// 卡内灰色小字（说明支持哪些格式）
+  String get hint => switch (this) {
+        _CardKind.lx =>
+          '支持：JSON 数组 / 洛雪 User API 导出 JSON / JS 脚本 / '
+              '`SERVER_SCRIPT_CONFIG` 片段 / `@name`+`@template` 头部格式。',
+        _CardKind.musicFree =>
+          '支持：MusicFree 插件（`module.exports` 里有 `platform` 与 '
+              '`getMediaSource`）。插件里的 require("axios")/require("he") '
+              '会自动注入，无需自己打包。',
+      };
 }

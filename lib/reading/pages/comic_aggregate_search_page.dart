@@ -1,10 +1,9 @@
-import 'dart:convert';
-
+// 删掉两个"从未被使用"的 import ✓（analyze 一直报 unused_import ✗）：
+// `dart:convert`（:1）· `../models/search_result.dart`（:7）
 import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
 import '../models/comic.dart';
-import '../models/search_result.dart';
 import '../source/adapter.dart';
 import '../source/source_manager.dart';
 import '../theme/jelly_theme.dart';

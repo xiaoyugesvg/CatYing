@@ -133,6 +133,38 @@ class ConfigMangaSource extends MangaSource {
     return r;
   }
 
+  /// ✅ **搜索支持 POST**（本轮新增 ✓ —— 兼容用 POST 搜索的 Legado 漫画源 ✓）。
+  ///
+  /// 为什么要有它 ✗：`_fetchHtml` 是**纯 GET** ✓，而部分 Legado 源把搜索写成
+  /// **POST + 请求体** ✓（编辑器里那两行也如实写着"**搜索仅支持 GET**"✓，不是谎话 ✓）。
+  /// 本方法**逐条照抄 `_fetchHtml` 的结构** ✓（同一套 headers/Referer ✓、同一套 gbk/utf8 解码 ✓），
+  /// 只把 `get` 换成 `post` 并带上请求体 ✓ —— **不发明新机制** ✗。
+  /// ⚠️ WebView 抓取那条路**只支持 GET** ✗（它按 URL 打开页面 ✓）→ POST 时**如实走 Dio** ✓
+  ///   并记一条日志 ✓，**不静默把 POST 变成 GET** ✗（那会骗人 ✓）。
+  Future<String> _fetchHtmlByPost(String url, String body) async {
+    if (site.useWebViewFetch) {
+      _log('该源配置了 WebView 抓取（仅 GET）；本次搜索按 Dio POST 发出');
+    }
+    final resp = await _dio.post<List<int>>(
+      url,
+      data: utf8.encode(body),
+      options: Options(
+        headers: {
+          ...imageHeaders,
+          'Referer': site.url,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        responseType: ResponseType.bytes,
+      ),
+    );
+    final bytes = resp.data ?? const <int>[];
+    final enc = (site.pageEncoding ?? 'utf-8').toLowerCase();
+    if (enc == 'gb2312' || enc == 'gbk') {
+      return gbk_bytes.decode(bytes);
+    }
+    return utf8.decode(bytes, allowMalformed: true);
+  }
+
   Future<String> _fetchHtml(String url) async {
     // Cloudflare 防护站（Dio 被拦）：走 WebView 抓渲染后 HTML，搜索/分类/详情/章节统一经此。
     if (site.useWebViewFetch) {
@@ -329,7 +361,21 @@ class ConfigMangaSource extends MangaSource {
         .replaceAll('{q}', q)
         .replaceAll('{page}', (page + 1).toString());
     if (!url.startsWith('http')) url = _resolveUrl(url);
-    final html = await _fetchHtml(url);
+    // ✅ **按源配置决定 GET / POST**（本轮接上 ✓，兼容 POST 搜索的 Legado 源 ✓）：
+    //   分派方式**照本文件章节接口的现成写法** ✓（`_fetchJsonText` 的三元 ✓）。
+    //   · `site.searchMethod == 'POST'` → 请求体取 `searchPostBody` ✓，并把 `{q}` / `{page}`
+    //     **用同一套替换**再走一遍 ✓（与上面 URL 的替换规则一致 ✓）；WebView 只支持 GET ✓，
+    //     那种情况下 `_fetchHtmlByPost` 会如实走 Dio 并记日志 ✓（不静默降级 ✗）。
+    //   · 否则 → **原样 GET** ✓（向后兼容 ✓ 已有源行为一字不改 ✓）。
+    final String html;
+    if (site.searchMethod.toUpperCase() == 'POST') {
+      final body = site.searchPostBody
+          .replaceAll('{q}', q)
+          .replaceAll('{page}', (page + 1).toString());
+      html = await _fetchHtmlByPost(url, body);
+    } else {
+      html = await _fetchHtml(url);
+    }
     final doc = parse(html);
     final items = <CManga>[];
     final resultDom = site.searchResultDom;
@@ -600,6 +646,58 @@ class ConfigMangaSource extends MangaSource {
       }
     }
 
+    // 🔴 **批次 3 补**：状态 / 标签 / 热度 —— 这 3 个选择器**内置源 JSON 里本来就有** ✓
+    //   （`comic_status_dom` 12 个源 / `comic_tags_dom` 12 个 / `comic_hot_dom` 3 个 ✓），
+    //   但引擎**从来没解析过** ✗ → 详情页的**状态、标签、热度恒为空** ✗
+    //   （而编辑页却能填它们 ✓ = 假开关 ✓）。
+    //   ℹ️ 管道其实早就通了 ✓：`CManga` 有这三个字段 ✓（`models.dart:18-21` ✓）、
+    //      `comicToCManga` / `cmangaToComic` 都已映射 ✓（`adapter.dart:19-22 / 40-43` ✓）、
+    //      连 `manhuaren_source` / `zaimanhua_source` 都早就在填 ✓ → 只差这里 ✓。
+    String? status;
+    if (site.comicStatusDom.isNotEmpty) {
+      final el = doc.querySelector(site.comicStatusDom);
+      final t = el?.text.trim() ?? '';
+      if (t.isNotEmpty) status = t;
+    }
+    // ✅ **`status_label` 兜底**（本轮实现 ✓）—— 上面抓不到状态时用它 ✓：
+    //   · 抓到 → **以站点文本为准** ✓（不改 ✓）
+    //   · 抓不到 **且** 源填了 `status_label` → 用该标签 ✓（如「连载中」✓，详情页不留空白 ✓）
+    //   · 都没填 → `status` 仍为 null ✓ → `:803` 处 `status ?? manga.status` ✓ **行为不变** ✓
+    //   ⇒ **留空即零影响** ✓✓（现有源全部不受影响 ✓）
+    if (status == null && site.statusLabel.trim().isNotEmpty) {
+      status = site.statusLabel.trim();
+    }
+    // tags 的类型是 `List<String>?` ✓ → 选择器匹配到**多个**元素就收集成列表 ✓
+    //（这也是 `tags_split` 那个键的用途分界 ✓：它服务"单元素里塞了一串"的源 ✗，
+    //  而内置 config 源用的是**多元素选择器** ✓，不需要拆分 ✓）
+    // ✅ **`tags_split` 已实现**（本轮 ✓）—— 原来这里只做"**多元素 → 列表**" ✓，
+    //   而有的源把一串标签塞在**一个元素**里（如 `热血,冒险,战斗` ✓）→ 选择器只命中 1 个 ✗
+    //   → 列表就**只有 1 项** ✗（本该 3 项 ✓）。现在**收集之后**再按 `tagsSplit` 拆一次 ✓✓。
+    //   · `tagsSplit` 留空 ✓ → **行为与从前完全一致** ✓（向后兼容 ✓ 内置那 30+ 个 config 源
+    //     用的都是**多元素选择器** ✓，不受任何影响 ✓）。
+    final tags = site.comicTagsDom.isEmpty
+        ? null
+        : doc
+              .querySelectorAll(site.comicTagsDom)
+              .map((e) => e.text.trim())
+              .where((e) => e.isNotEmpty)
+              .expand((t) {
+                final sep = site.tagsSplit.trim();
+                if (sep.isEmpty) return [t];
+                return t
+                    .split(sep)
+                    .map((s) => s.trim())
+                    .where((s) => s.isNotEmpty);
+              })
+              .toList();
+    int? popular;
+    if (site.comicHotDom.isNotEmpty) {
+      // 热度只取其中的数字 ✓（站点文案常是"1234 人气"之类 ✓）；取不到就不设 ✓
+      final el = doc.querySelector(site.comicHotDom);
+      final m = RegExp(r'\d+').firstMatch(el?.text ?? '');
+      if (m != null) popular = int.tryParse(m.group(0)!);
+    }
+
     // 章节列表
     final chapters = <CChapter>[];
     final seen = <String>{};
@@ -611,6 +709,9 @@ class ConfigMangaSource extends MangaSource {
         detailUrl,
         site.chapterScript,
         site.chapterJsonScript,
+        // ✅ **`chapter_click_dom` 真正生效**（本轮接上 ✓）—— 该源填了就"先点开目录再取" ✓；
+        //   没填则传空串 ✓ → WebView 侧**整段跳过** ✓（与从前完全一致 ✓ 零影响 ✓）
+        site.chapterClickDom,
       );
       var order = 0;
       for (final c in list) {
@@ -707,7 +808,12 @@ class ConfigMangaSource extends MangaSource {
     }
     _log('详情+章节: $detailUrl, 章节数 ${chapters.length}');
     return (
+      // ✅ 把上面解析出的状态/标签/热度**带进去** ✓ —— `CManga.copyWith` 本来就支持
+      //    这三个字段 ✓（`models.dart:53-73` ✓）；传 null 时保持原值 ✓ = 安全 ✓
       manga: manga.copyWith(
+        status: status ?? manga.status,
+        tags: tags ?? manga.tags,
+        popular: popular ?? manga.popular,
         title: title,
         cover: await _finalizeCover(cover, detailUrl),
         author: author,

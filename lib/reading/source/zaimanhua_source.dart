@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'models.dart';
 import 'manga_source.dart';
 import 'zaimanhua_config.dart';
+import 'global_proxy.dart';
 import '../utils/safe_num.dart';
 
 void _log(String message) {
@@ -20,13 +21,25 @@ class ZaimanhuaSource extends MangaSource {
   final ZaimanhuaConfig config;
   ZaimanhuaSource(this.config);
 
-  final Dio _dio = Dio(
-    BaseOptions(
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 30),
-      followRedirects: true,
-    ),
-  );
+  /// 构造请求用的 Dio，并**挂上「网络代理」**（本轮接上 ✓）。
+  /// 与 `manhuaren_source._createDio()` ✓、`book_download_service._createDio()` ✓ **同一手法** ✓
+  /// （先构造 ✓ 再 `applyGlobalProxy` ✓）—— 不发明新机制 ✗。
+  /// ⚠️ 本类**无自定义适配器/UA** ✓（只有这四个基参 ✓）→ 直接挂**安全** ✓✓
+  ///   （将来若加 UA ✓ 必须传 `createHttpClient:` ✓，否则会被整替换掉 ✗ —— 今天已规避两次 ✓）。
+  /// · 代理**关闭** ✓ → 返回 false ✓ **一字不改** ✓（与从前完全一致 ✓✓）
+  static Dio _createDio() {
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 30),
+        followRedirects: true,
+      ),
+    );
+    applyGlobalProxy(dio);
+    return dio;
+  }
+
+  final Dio _dio = _createDio();
 
   @override
   String get id => config.id;

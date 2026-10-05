@@ -62,7 +62,9 @@ class ProfilePage extends StatelessWidget {
           _groupCard([
           _qualityTile(store),
           _switchTile(
-            label: '使用第三方音源',
+            // 不叫"第三方音源" —— 用户导入的就是"洛雪音乐源"和"MusicFree 源"，
+            // 统称"导入的音乐源"更贴近他的心智模型
+            label: '使用导入的音乐源',
             subtitle: '关闭后只用内置的公开接口',
             value: store.useThirdPartySources.value,
             onChanged: (v) => store.setUseThirdPartySources(v),
@@ -75,14 +77,23 @@ class ProfilePage extends StatelessWidget {
           ValueListenableBuilder<int>(
             valueListenable: ThirdPartySourceStore.instance.revision,
             builder: (context, _, __) {
-              final n = ThirdPartySourceStore.instance.all.length;
+              final all = ThirdPartySourceStore.instance.all;
+              // 分类计数：让用户一眼看出两类各有几个
+              final lx = all.where((s) => !s.isMusicFree).length;
+              final mf = all.where((s) => s.isMusicFree).length;
+              final sub = all.isEmpty
+                  ? '还没有导入音乐源'
+                  : [
+                      if (lx > 0) '洛雪 $lx',
+                      if (mf > 0) 'MusicFree $mf',
+                    ].join(' · ');
               return ListTile(
                 leading: _iconBox(Icons.extension_rounded),
-                title: Text('音源管理',
+                title: Text('音乐源管理',
                     style:
                         TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
                 subtitle: Text(
-                  n == 0 ? '还没有导入音源' : '已导入 $n 个音源',
+                  sub,
                   style:
                       TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
                 ),

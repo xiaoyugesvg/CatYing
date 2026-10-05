@@ -410,24 +410,31 @@ class _RoundBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 52,
-        height: 52,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.14),
-          shape: BoxShape.circle,
+    // 🔴 `tooltip` 原来是**死字段** ✗：它是 `required` ✓、也存进了字段 ✓，
+    // 但 `build` 里**从没用过** ✗ → 4 个调用点（`:216/222/254/260` ✓）都传了
+    // 提示文案 ✓，用户却**永远看不到** ✓（长按也没提示 ✗）。
+    // ✓ 用 `Tooltip` 包一层让它真的出现 ✓ —— **调用点无需改动** ✓
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.14),
+            shape: BoxShape.circle,
+          ),
+          child: text != null
+              ? Center(
+                  child: Text(text!,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: AppTheme.fontSubhead,
+                          fontWeight: FontWeight.w700)),
+                )
+              : Icon(icon, color: Colors.white, size: 28),
         ),
-        child: text != null
-            ? Center(
-                child: Text(text!,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: AppTheme.fontSubhead,
-                        fontWeight: FontWeight.w700)),
-              )
-            : Icon(icon, color: Colors.white, size: 28),
       ),
     );
   }

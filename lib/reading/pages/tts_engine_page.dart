@@ -451,6 +451,11 @@ class _TtsEnginePageState extends State<TtsEnginePage> {
                               .importJson(ctrl.text.trim());
                           setSheet(() {
                             msg = r.error != null
+                                // ✅ **文案复核结论（本会话 ✓）：此处有意不接入统一失败表** ✗。
+                                //   原因 ✓：`importJson` 的 error 是**本地粘贴文本的 JSON 解析失败** ✓
+                                //   （**没有网络请求** ✓），与 `utils/source_fail_text.dart` 服务的
+                                //   "**源 / 网络**失败分级"**不同域** ✗ —— 硬套统一表反而把话说糊 ✓。
+                                //   用户看到「解析失败：<具体原因>」✓ 直接指向"你粘的内容有问题"✓ 最有用 ✓。
                                 ? '解析失败：${r.error}'
                                 : '新增 ${r.added} 个，更新 ${r.updated} 个';
                           });

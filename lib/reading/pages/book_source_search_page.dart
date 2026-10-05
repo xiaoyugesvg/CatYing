@@ -14,6 +14,7 @@ import 'book_source_repo_page.dart';
 import 'browse_history_page.dart';
 import 'favorites_page.dart';
 import '../../common/theme.dart';
+import '../utils/source_fail_text.dart';
 
 /// 书源搜索页 —— 用已导入的 Legado 书源跨站搜小说。
 ///
@@ -148,6 +149,11 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       _keyword = kw;
       _grouped.clear();
       _states.clear();
+      // 🔴 原来这里**漏了 `_perSource`** ✗ —— 它是"按源分组的结果" ✓，
+      // 上一轮搜索留下的内容**一直没被清** ✓ → 新搜索开始后（甚至新搜索还没回来时）
+      // 列表里会混进**上一次关键词**的书 ✓（"搜索结果串了 / 多了不相干的书" ✓）。
+      // 这里与其它状态一起复位 ✓
+      _perSource.clear();
       _doneCount = 0;
       _totalCount = enabled.length;
       // 新搜索复位复搜模式
@@ -197,7 +203,11 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
     if (m != null) {
       return '该源分类接口返回 HTTP ${m.group(1)} 错误：接口失效或源站拒绝，请换源或更新书源';
     }
-    return raw.length > 60 ? '${raw.substring(0, 60)}…' : raw;
+    // ✅ 兜底交给**统一文案表** ✓（"同一原因同一类" ✓）——
+    //   本页前几条已覆盖 500 / 404 / 403 / 超时 ✓（措辞比通用句更贴合"分类接口"场景 ✓，
+    //   所以**有意保留** ✗✓）；剩下的与"未知原因"统一由 `describeSourceFail` 分级 ✓
+    //   ⇒ 与体检页共用**同一套判据** ✓，解掉那边注释里"两处必须同步"✗ 的隐患 ✓。
+    return describeSourceFail(raw, what: '该源分类接口').text;
   }
 
   /// 切到某个源后：未搜索时加载该源的分类浏览（exploreUrl）。
@@ -629,7 +639,14 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                               backgroundColor: JellyTheme.primary
                                   .withValues(alpha: 0.12),
                               child: Text(
-                                s.name.characters.first,
+                                // 原来为什么坏 ✗：书源 name 可能是空串（有的书源返回
+                                // 空书名），characters.first 对空串会抛 StateError，
+                                // 打开搜索源弹窗直接崩。
+                                // 现在为什么安全 ✓：先判空，空时用 '?' 占位兜底，
+                                // 非空才取首字符，不会再越界。
+                                s.name.isEmpty
+                                    ? '?'
+                                    : s.name.characters.first,
                                 style: TextStyle(
                                   fontSize: AppTheme.fontSubhead,
                                   color: JellyTheme.primary,
@@ -1017,14 +1034,22 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
             ),
           ),
           const SizedBox(height: 6),
-          Text(
-            r.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: AppTheme.fontFootnote,
-              fontWeight: FontWeight.w600,
-              color: _titleColor,
+          // ✅ ① **书名居中** ✓（原来走默认左对齐 ✗）
+          //   包一层 `SizedBox(width: double.infinity)` 才能让 `textAlign` 生效 ✓；
+          //   ⚠️ 外层 Column 的 `crossAxisAlignment` **保持 start** ✗ →
+          //     下面**作者行仍左对齐** ✓（与截图 IMG_8595 一致 ✓）
+          SizedBox(
+            width: double.infinity,
+            child: Text(
+              r.name,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                fontWeight: FontWeight.w600,
+                color: _titleColor,
+              ),
             ),
           ),
           if (r.author.isNotEmpty)
@@ -1037,6 +1062,32 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                 style: TextStyle(
                     fontSize: AppTheme.fontCaption,
                     color: JellyTheme.textSecondary),
+              ),
+            ),
+          // ✅ ② **右下角：更新到哪 / 字数** ✓ —— 数据**搜索结果里本来就有** ✓✓
+          //   （`BookSourceResult.lastChapter` ✓ / `wordCount` ✓，见
+          //     `book_source_service.dart:29-30` ✓）→ **零额外网络请求** ✓✓
+          //   优先"最新章节" ✓（正是你要的"更新多少"✓）；为空退回字数 ✓；
+          //   两者都空则**不渲染** ✓（不编造"完本"✗ —— 模型里没有该字段 ✓）
+          if (r.lastChapter.isNotEmpty || r.wordCount.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Flexible(
+                    child: Text(
+                      r.lastChapter.isNotEmpty ? r.lastChapter : r.wordCount,
+                      textAlign: TextAlign.right,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: AppTheme.fontCaption,
+                        color: JellyTheme.textSecondary,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
         ],

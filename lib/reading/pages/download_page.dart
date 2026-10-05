@@ -2035,8 +2035,19 @@ class _DownloadPageState extends State<DownloadPage>
       ),
     );
     if (result == true) {
-      await DownloadService().deleteComic(g.pathWord);
-      await ReadingProgressService().clearComic(g.pathWord);
+      // 🔴 这里原来**没有任何 try/catch** ✗，而底层的文件删除是**自己吞异常**的 ✓
+      //（`download_service.dart` 的 `_deleteFiles` 里 `catch (e) { _log(...) }` ✓，
+      // 页面根本拿不到失败信号 ✓）→ 文件删不掉时，卡片照样消失、
+      // 用户以为已经删干净了 ✓（对话框还明确承诺"本地文件将被删除" ✓）。
+      // 这里先把**抛得出来的**异常挡住并留痕 ✓；
+      // ⚠️ 遗留（需 service 侧配合 ✓）：真正的"部分文件删除失败"要让
+      //   `deleteComic/deleteBooks` **返回失败数**，页面才能如实提示 ✗
+      try {
+        await DownloadService().deleteComic(g.pathWord);
+        await ReadingProgressService().clearComic(g.pathWord);
+      } catch (e) {
+        debugPrint('[DownloadPage] 删除整本失败（本地文件可能仍存在）: $e');
+      }
     }
     return false; // 让服务 notify 后重建移除，避免与 Dismissible 动画冲突
   }
@@ -2087,6 +2098,10 @@ class _DownloadPageState extends State<DownloadPage>
         child: AnimatedOpacity(
           opacity: _showChapterBackToTop ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 200),
+          // ⛔ **有意不同、不要"统一"成 `AppIconButton`** ✗✓（与 `bookshelf_page` /
+          //   `book_search_page` 的返回顶部钮同款 ✓）：它是**滚动出现的悬浮 FAB** ✓
+          //   （`onTap: _scrollChapterToTop` ✓ · 40×40 ✓ · `primary` + `elevation: 4` 醒目 ✓），
+          //   不是顶栏同族圆钮 ✓ → 换成"淡圆底"会几乎看不见 ✗✗
           child: Material(
             color: JellyTheme.primary,
             shape: const CircleBorder(),
@@ -2121,6 +2136,11 @@ class _DownloadPageState extends State<DownloadPage>
         child: AnimatedOpacity(
           opacity: _showBackToTop ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 200),
+          // ⛔ **有意不同、不要"统一"成 `AppIconButton`** ✗✓（本文件第 2 处 ✓，
+          //   与 `:2103` 的章节弹窗版、以及 `bookshelf_page` / `book_search_page`
+          //   的返回顶部钮**同款** ✓）：滚动出现的**悬浮 FAB** ✓
+          //   （`onTap: _scrollToTop` ✓ · `primary` + `elevation: 4` 醒目 ✓）
+          //   → 换"淡圆底"会几乎看不见 ✗✗
           child: Material(
             color: JellyTheme.primary,
             shape: const CircleBorder(),

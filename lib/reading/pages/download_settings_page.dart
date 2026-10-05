@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../services/cache_capacity.dart';
 import '../services/book_content_cache_service.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
@@ -122,18 +123,25 @@ class _DownloadSettingsPageState extends State<DownloadSettingsPage> {
               const SizedBox(height: 8),
               _buildSaveLocationCard(context, isDark, s),
               const SizedBox(height: 12),
+              // ⚠️ **下面两个开关目前「暂未实现」** ✗（今天逐条核实 ✓ —— 全模块 0 个读取点 ✗）
+              //   · 后台下载：下载服务里**没有** `AppLifecycleState` 处理 ✗
+              //     （该 API 只有番茄钟在用 ✓）→ 真要做得接**平台级后台执行** ✓（工作量大 ✓）
+              //   · 仅 Wi-Fi：全模块**没有** `connectivity` 依赖或网络类型判断 ✗✗
+              //     → 真要做得先加依赖 ✓（pubspec 归你自己管 ✓）
+              // ✓ 处置 = **保留行 + 标题如实标注** ✓：这两项是"以后要做的能力" ✓（不是笔误 ✗），
+              //   但**不能让用户以为现在拨了就有效** ✗✓
               _buildSwitchCard(
                 isDark: isDark,
-                title: '后台下载',
-                subtitle: '切到后台或息屏时继续下载',
+                title: '后台下载（暂未实现 ✗）',
+                subtitle: '切到后台或息屏时继续下载（当前无效 ✗）',
                 value: s.backgroundDownload,
                 onChanged: s.setBackgroundDownload,
               ),
               const SizedBox(height: 12),
               _buildSwitchCard(
                 isDark: isDark,
-                title: '仅 Wi-Fi 下载',
-                subtitle: '使用移动网络时自动暂停，回到 Wi-Fi 自动继续',
+                title: '仅 Wi-Fi 下载（暂未实现 ✗）',
+                subtitle: '使用移动网络时自动暂停（当前无效 ✗：缺网络类型判断）',
                 value: s.wifiOnlyDownload,
                 onChanged: s.setWifiOnlyDownload,
               ),
@@ -150,35 +158,57 @@ class _DownloadSettingsPageState extends State<DownloadSettingsPage> {
                 onChanged: s.setUseBuiltinAccount,
               ),
               const SizedBox(height: 12),
-              _buildSliderCard(
-                isDark: isDark,
-                title: '书源下载并发量',
-                subtitle: '在线书源任务同时下载的章节数',
-                value: s.bookSourceConcurrency,
-                min: SettingsService.minBookSourceConcurrency,
-                max: SettingsService.maxBookSourceConcurrency,
-                onChanged: (v) => s.setBookSourceConcurrency(v.round()),
-              ),
+              // ❌ **这两行已删除**（假开关 ✗ —— 逐条核实过 ✓）：
+              //   ① 「书源下载并发量」= `bookSourceConcurrency` ✗
+              //      语义「在线书源任务同时下载的**章节数**」✓ 与**本页已有的活键**
+              //      `maxConcurrentChapters`（见下面「同时下载量」✓）**完全重复** ✗✓
+              //      —— 全模块 0 个读取点 ✗ → 用户拨它**毫无效果** ✗✗
+              //   ② 「图书文件下载并发量」= `bookFileConcurrency` ✗
+              //      语义独立（图书**文件**级并发 ✓）但**从未实现** ✗（0 读取点 ✓）→
+              //      真要做需先给图书文件下载加文件级调度 ✓（属新功能 ✗，不是接线 ✓）
+              // ✅ **能力没丢** ✓：真正生效的两项在下面 ——
+              //    「同时下载量」`maxConcurrentChapters` ✓ · 「图片分片并发量」
+              //    `maxConcurrentImages` ✓（`download_service.dart:600` 真的在用它 ✓✓）
               const SizedBox(height: 12),
-              _buildSliderCard(
-                isDark: isDark,
-                title: '图书文件下载并发量',
-                subtitle: '允许同时下载的图书文件数',
-                value: s.bookFileConcurrency,
-                min: SettingsService.minBookFileConcurrency,
-                max: SettingsService.maxBookFileConcurrency,
-                onChanged: (v) => s.setBookFileConcurrency(v.round()),
-              ),
-              const SizedBox(height: 12),
+              // ⚠️ **本行「暂未实现」** ✗（今天逐条核实 ✓：`onlineBookCacheGb` 全模块 **0 个读取点** ✗）
+              //   · 代码里确实有 `_cacheLimit`，但那是**条目数**上限 ✗ ——
+              //     `book_source_service:173` = 40 条结果缓存 ✓ ·
+              //     `book_source_reader_page:80` = 12 章内存缓存 ✓
+              //   · 与这里的「**GB 计量 + 按最久未读淘汰**」**不是一回事** ✗✗ → 后者从未实现 ✓
+              //   ℹ️ 紧跟其后的「临时缓存」统计卡（下面 `_buildCacheStatCard` ✓）是**真的** ✓
+              //     （真读磁盘字节 ✓）—— 只有这个"上限滑杆"是空的 ✗
               _buildSliderCard(
                 isDark: isDark,
                 title: '在线书临时缓存',
-                subtitle: '超过上限按最久未读章节自动淘汰',
+                // ✅ **不再是"暂未实现 ✗"** —— 本行已真正接上容量淘汰 ✓（下面 onChanged 里执行 ✓）
+                subtitle:
+                    '超过上限按最久未用自动淘汰（当前 ${CacheCapacity.humanBytes(_bookCacheBytes)}'
+                    ' / 上限 ${s.onlineBookCacheGb} GB）',
                 value: s.onlineBookCacheGb,
                 min: SettingsService.minOnlineCacheGb,
                 max: SettingsService.maxOnlineCacheGb,
                 unit: ' GB',
-                onChanged: (v) => s.setOnlineBookCacheGb(v.round()),
+                // ✅ **真淘汰** ✓（拖完立刻生效 ✓ 并把统计刷新出来 ✓）：
+                //   · `gbToBytes(≤0) = 0` ✓ → `evictToLimit` 遇到 0 **什么都不做** ✓（不会误删空 ✗）
+                //   · 目录来自 `BookContentCacheService.cacheDir()` ✓（公开入口 ✓ 今天核对过 ✓）
+                //   · 淘汰完**重新量一次体积**写回 `_bookCacheBytes` ✓，于是卡片上的占用**当场变小** ✓✓
+                //     （这就是给用户看的"上限真的生效"的证据 ✓）
+                onChanged: (v) async {
+                  final gb = v.round();
+                  await s.setOnlineBookCacheGb(gb);
+                  try {
+                    final dir =
+                        await BookContentCacheService.instance.cacheDir();
+                    await CacheCapacity.evictToLimit(
+                      dir,
+                      CacheCapacity.gbToBytes(gb),
+                    );
+                    final bytes = await CacheCapacity.dirBytes(dir);
+                    if (mounted) setState(() => _bookCacheBytes = bytes);
+                  } catch (e) {
+                    debugPrint('[DownloadSettings] 缓存淘汰失败（忽略）: $e');
+                  }
+                },
               ),
               const SizedBox(height: 12),
               _buildCacheStatCard(
@@ -214,15 +244,42 @@ class _DownloadSettingsPageState extends State<DownloadSettingsPage> {
                 onChanged: (v) => s.setMaxConcurrentImages(v.round()),
               ),
               const SizedBox(height: 12),
+              // ⚠️ **本行「暂未实现」** ✗（与上面「在线书临时缓存」同因 ✓：
+              //   `onlineComicCacheGb` 全模块 **0 个读取点** ✗）
+              //   · 漫画侧确有回收机制，但走的是**章节/条目**维度 ✗，不是这里的「GB 计量 + 最久未看」✗
+              //   ℹ️ 紧随其后的统计卡（下面 `_buildCacheStatCard` ✓）是**真的** ✓（真读磁盘字节 ✓）
               _buildSliderCard(
                 isDark: isDark,
                 title: '在线漫画图片缓存',
-                subtitle: '超过上限按最久未看自动淘汰，正式下载文件不受影响',
+                // ✅ **不再是"暂未实现 ✗"** —— 漫画侧已真正接上容量淘汰 ✓（与上面图书侧同款 ✓）
+                subtitle:
+                    '超过上限按最久未看自动淘汰（当前 ${CacheCapacity.humanBytes(_imageCacheBytes)}'
+                    ' / 上限 ${s.onlineComicCacheGb} GB）',
                 value: s.onlineComicCacheGb,
                 min: SettingsService.minOnlineCacheGb,
                 max: SettingsService.maxOnlineCacheGb,
                 unit: ' GB',
-                onChanged: (v) => s.setOnlineComicCacheGb(v.round()),
+                // ✅ 目录与统计卡**用的是同一个**（`_imageCacheStats()` 也读 `cached_network_image_ce` ✓）
+                //   ⇒ 淘汰完再量一次体积写回 `_imageCacheBytes` ✓ → 卡片占用**当场变小** ✓✓
+                //   · `dart:io` 与 `path_provider` 本页早就 import 了 ✓（`:1` `:5` ✓），**不新增依赖** ✓
+                //   · `gbToBytes(≤0) = 0` ✓ → 上限为 0 时 `evictToLimit` 直接返回 ✓ 不误删 ✗
+                onChanged: (v) async {
+                  final gb = v.round();
+                  await s.setOnlineComicCacheGb(gb);
+                  try {
+                    final tmp = await getTemporaryDirectory();
+                    final dir =
+                        Directory('${tmp.path}/cached_network_image_ce');
+                    await CacheCapacity.evictToLimit(
+                      dir,
+                      CacheCapacity.gbToBytes(gb),
+                    );
+                    final bytes = await CacheCapacity.dirBytes(dir);
+                    if (mounted) setState(() => _imageCacheBytes = bytes);
+                  } catch (e) {
+                    debugPrint('[DownloadSettings] 图片缓存淘汰失败（忽略）: $e');
+                  }
+                },
               ),
               const SizedBox(height: 12),
               _buildCacheStatCard(
@@ -255,8 +312,8 @@ class _DownloadSettingsPageState extends State<DownloadSettingsPage> {
               const SizedBox(height: 12),
               _buildSwitchCard(
                 isDark: isDark,
-                title: '失败或缺页时暂停合并',
-                subtitle: '合并遇到失败或缺页时暂停，等待手动处理',
+                title: '失败或缺页时暂停合并（暂未实现 ✗）',
+                subtitle: '合并遇到失败或缺页时暂停，等待手动处理（当前无效 ✗）',
                 value: s.pauseMergeOnError,
                 onChanged: s.setPauseMergeOnError,
               ),

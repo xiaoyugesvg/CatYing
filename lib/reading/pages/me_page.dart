@@ -20,6 +20,7 @@ import 'download_page.dart';
 import 'download_settings_page.dart';
 import 'favorites_page.dart';
 import 'notes_and_journey_page.dart';
+import 'reading_plan_page.dart';
 import 'reading_settings_page.dart';
 import 'search_page.dart';
 import 'book_source_repo_page.dart';
@@ -175,7 +176,12 @@ class _MePageState extends State<MePage> {
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const NotesAndJourneyPage(),
+                        // ✅ **修掉一个真接线错误** ✗✓：这里原来指向
+                        //   `NotesAndJourneyPage()` ✓ —— 与上面「我的笔记」(`:155`) **同一个页面** ✗✗，
+                        //   于是"阅读计划"点开看到的其实是笔记/经历页 ✓。
+                        //   本仓库此前**根本没有阅读计划页** ✗（`阅读计划` 只作入口标签存在 ✓），
+                        //   现已新建 `ReadingPlanPage` ✓（照截图 IMG_8634/8635 ✓）。
+                        builder: (_) => const ReadingPlanPage(),
                       ),
                     ),
                   ),
@@ -953,6 +959,18 @@ class _MePageState extends State<MePage> {
                                                   setSheetState(
                                                     () => _switchingTo = p.id,
                                                   );
+                                                  // ✗ 原来在 await 之后写 `if (mounted) Navigator.pop(context)`：
+                                                  //   `context` 是 MePage 的，`mounted` 也只保证 MePage 还
+                                                  //   活着（它常驻 IndexedStack，恒为 true）—— 弹层被用户点
+                                                  //   暗区 / 返回键提前关掉后，这一 pop 弹掉的是它底下的
+                                                  //   **根路由 ContentView** ✗ → 空栈黑屏 ✗。
+                                                  // ✓ 现在在 await **之前**同步抓住弹层自己的
+                                                  //   NavigatorState + ModalRoute（顺带避开
+                                                  //   use_build_context_synchronously ✗），
+                                                  //   500ms 后只有弹层仍是栈顶（isCurrent）才收面板 ✓。
+                                                  final sheetNav = Navigator.of(sheetCtx);
+                                                  final sheetRoute =
+                                                      ModalRoute.of(sheetCtx);
                                                   await SettingsService()
                                                       .setThemePreset(p.id);
                                                   // 等圆形揭示动画（截图+重建+扩散）完成，再收面板避免抢帧卡顿
@@ -961,8 +979,11 @@ class _MePageState extends State<MePage> {
                                                       milliseconds: 500,
                                                     ),
                                                   );
-                                                  if (mounted) {
-                                                    Navigator.pop(context);
+                                                  // 弹层已被用户关掉 → isCurrent=false → 什么都不做 ✓
+                                                  if (sheetRoute != null &&
+                                                      sheetRoute.isCurrent &&
+                                                      sheetNav.mounted) {
+                                                    sheetNav.pop();
                                                   }
                                                 },
                                         ),
@@ -1002,6 +1023,16 @@ class _MePageState extends State<MePage> {
                                                     setSheetState(
                                                       () => _switchingTo = t.id,
                                                     );
+                                                    // ✗ 同上：`Navigator.pop(context)` 用的是 MePage 的
+                                                    //   context，弹层被用户提前关掉时这里弹的是底下的
+                                                    //   根路由 ContentView ✗ → 空栈黑屏 ✗。
+                                                    // ✓ 同样在 await 前同步抓弹层自己的
+                                                    //   NavigatorState + ModalRoute，确认它仍是栈顶
+                                                    //   （isCurrent）才 pop ✓。
+                                                    final sheetNav =
+                                                        Navigator.of(sheetCtx);
+                                                    final sheetRoute =
+                                                        ModalRoute.of(sheetCtx);
                                                     await SettingsService()
                                                         .setThemePreset(t.id);
                                                     await Future.delayed(
@@ -1009,8 +1040,11 @@ class _MePageState extends State<MePage> {
                                                         milliseconds: 500,
                                                       ),
                                                     );
-                                                    if (mounted) {
-                                                      Navigator.pop(context);
+                                                    // 弹层已被用户关掉 → isCurrent=false → 什么都不做 ✓
+                                                    if (sheetRoute != null &&
+                                                        sheetRoute.isCurrent &&
+                                                        sheetNav.mounted) {
+                                                      sheetNav.pop();
                                                     }
                                                   },
                                             deletable: true,

@@ -228,6 +228,11 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
   void dispose() {
     _tab.dispose();
     _varCtrl.dispose();
+    // 表单字段的持久 controller 也要释放 ✓（不放就是换个地方泄漏 ✗）
+    for (final c in _fieldCtrls.values) {
+      c.dispose();
+    }
+    _fieldCtrls.clear();
     super.dispose();
   }
 
@@ -294,6 +299,18 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
   /// 源变量 tab 的"单值 / 键值对"模式
   bool _varKvMode = false;
   final _varCtrl = TextEditingController();
+  // 🔴 表单各字段的 controller：原来是在 `build` 里**每次重建都 new 一个** ✗
+  //（见下面 `TextField(controller: TextEditingController(text: …))` ✓）
+  // → 每帧泄漏一个 ✓（而且那个 `..selection = …末尾` 的写法正是为了掩盖
+  //   "新 controller 光标总跳到开头/末尾" ✗）。
+  // ✓ 改成**按字段名缓存**的持久 controller ✓。
+  // ⚠️ **不能共用一个** ✗：这些字段是**同屏同时显示**的 ✓，
+  //   共用一个会让所有输入框显示同一段文字 ✗✗（比泄漏更糟 ✓）
+  final _fieldCtrls = <String, TextEditingController>{};
+  TextEditingController _ctrlFor(String key) => _fieldCtrls.putIfAbsent(
+        key,
+        () => TextEditingController(text: (_draft[key] ?? '').toString()),
+      );
 
   Widget _buildVariableTab(bool isDark) {
     final label = isDark ? Colors.white : JellyTheme.textPrimaryLight;
@@ -443,9 +460,11 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
               borderRadius: BorderRadius.circular(12),
             ),
             child: TextField(
-              controller: TextEditingController(text: _draft[f.key] ?? '')
-                ..selection = TextSelection.collapsed(
-                    offset: (_draft[f.key] ?? '').length),
+              // ✓ 按字段名取**持久** controller（见 `_fieldCtrls` 的说明 ✓）——
+              // 顺带修掉一个观感问题 ✓：原来每次重建都新建 controller +
+              // 强行把光标塞到末尾 ✗ → 输入时**光标会乱跳** ✓；
+              // 现在光标停在用户实际输入的位置 ✓
+              controller: _ctrlFor(f.key),
               onChanged: (v) => _draft[f.key] = v,
               maxLines: f.multiline ? 6 : 1,
               minLines: f.multiline ? 3 : 1,

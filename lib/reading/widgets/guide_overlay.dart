@@ -253,18 +253,49 @@ class GuideOverlayDialog extends StatefulWidget {
 class _GuideOverlayDialogState extends State<GuideOverlayDialog> {
   int _current = 0; // 0-based，展示第 _current+1 步
 
+  // ✗ 原来没有"已关闭"闩锁：`_skip` / 最后一步的 `_next` 里 pop 之前做了
+  //   `await GuideStore...`，快速双击时两次点击**都会**通过 `mounted` 检查
+  //   （pop 只是开始退场动画，State 还没 dispose）→ 连 pop 两次，
+  //   把引导层**底下的页面**也一起弹掉 ✗。
+  // ✓ 现在用 `_closing` 闩锁：第一次进入关闭流程就同步置 true，
+  //   后续点击（无论点"跳过引导"还是"我知道了"）直接 return ✓，
+  //   保证整个弹窗生命周期只 pop 一次 ✓。
+  bool _closing = false;
+
   GuideStep get _step => widget.group.steps[_current];
   int get _total => widget.group.steps.length;
 
   Future<void> _skip() async {
-    await GuideStore.instance.markGroupDone(widget.group.id, _total);
+    if (_closing) return; // 已在关闭中，重复点击忽略，避免多 pop 一层 ✓
+    _closing = true;
+    // 🔴 原实现的隐患 ✗：闩锁在 `await` **之前**就上了 ✓，而这一步一旦抛异常 ✗，
+    // 下面的 pop 就**永远不会执行** ✓ → 弹窗**再也关不掉** ✓（只能杀进程 ✗）。
+    // ✓ 现在把落盘失败**兜住并继续往下走** ✓：闩锁**保持上着**（继续杜绝双 pop ✓），
+    // 但关闭流程照常完成 ✓ —— 用户点的是"跳过引导"，关闭正是他期望的结果 ✓
+    try {
+      await GuideStore.instance.markGroupDone(widget.group.id, _total);
+    } catch (e) {
+      debugPrint('[GuideOverlay] 跳过引导的落盘失败（不影响本次关闭）: $e');
+    }
     if (mounted) Navigator.of(context).pop();
     widget.onAllDone();
   }
 
   Future<void> _next() async {
-    await GuideStore.instance.markStepDone(widget.group.id, _current + 1);
-    if (_current + 1 >= _total) {
+    if (_closing) return; // 已在关闭中，重复点击忽略，避免多 pop 一层 ✓
+    // 先同步判定是否"最后一步"：只有真要关窗时才上闩，
+    // 普通"下一步"连点仍按点击次数推进（不改变原有翻页语义）✓
+    final isLast = _current + 1 >= _total;
+    if (isLast) _closing = true;
+    // 🔴 与 `_skip()` 同款隐患 ✗：闩锁已经上着 ✓，而这一步一旦抛异常 ✗ →
+    // 下面"最后一步"的 pop 就**永远不会执行** ✓ → 弹窗再也关不掉 ✗。
+    // ✓ 兜住失败并继续往下走；闩锁**保持上着**，不放松双 pop 的防护 ✓
+    try {
+      await GuideStore.instance.markStepDone(widget.group.id, _current + 1);
+    } catch (e) {
+      debugPrint('[GuideOverlay] 记录引导步骤失败（不影响本次关闭）: $e');
+    }
+    if (isLast) {
       // 最后一步 → 整组完成
       if (mounted) Navigator.of(context).pop();
       widget.onAllDone();

@@ -144,9 +144,28 @@ class _BookPageCurlState extends State<BookPageCurl>
       _direction = dir;
       _phase = _Phase.rasterizing;
     });
-    final image = await _rasterizePage();
+    // 原来为什么坏 ✗：栅格化失败时没有复位 _phase，它永远停在 rasterizing；
+    // 而本方法开头 `_phase != _Phase.idle` 直接 return，于是之后每一次翻页
+    // 都被静默吞掉（画面看着正常，就是翻不动）。注意 _rasterizePage 里
+    // toImage 虽被 try 包住，但同函数中 try 之外的 MediaQuery.maybeDevicePixelRatioOf
+    // 等在组件失活时会直接抛异常，异常沿 await 冒泡出本方法，下面的守卫与
+    // 复位代码根本没机会执行 —— 这正是"永久卡在 rasterizing"的来源。
+    // 现在为什么安全 ✓：异常在本地兜住当失败处理；失败回来先按代次
+    // (mounted / _phase / _direction) 校验是否还是本次翻页，确认后才动状态。
+    ui.Image? image;
+    try {
+      image = await _rasterizePage();
+    } catch (_) {
+      image = null; // 栅格化异常 == 失败，不让它逃出本方法卡死 _phase
+    }
     if (!mounted || _phase != _Phase.rasterizing || _direction != dir) {
       image?.dispose();
+      return;
+    }
+    if (image == null) {
+      // 栅格化失败：本次退化为无卷曲的瞬时翻页，由 _finishTurn -> _reset
+      // 把 _phase 复位成 idle 并 setState，界面立刻恢复、下次点击仍会重试动画。
+      _finishTurn();
       return;
     }
     _pageImage = image;

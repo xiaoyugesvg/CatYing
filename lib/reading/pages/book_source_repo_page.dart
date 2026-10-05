@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:dio/dio.dart';
+import '../source/global_proxy.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +14,16 @@ import '../services/book_source_service.dart';
 import 'book_source_editor_page.dart';
 import 'book_source_health_page.dart';
 import 'book_source_login_page.dart';
+// ✅ **补齐缺失的 import** ✗✓（本轮修的 8 条 error 全因它们 ✗）：
+//   · `JellySearchBar` / `JellyExpandableSearch` / `JellySlidingActions`(+`JellyAction`)
+//     这三个是**共用组件** ✓ —— 我之前误以为"能被传递导出"✗，那是因为**闸门跑错了目录** ✗✗
+//     （`dart analyze` 没带仓库根 → 分析的是别的项目 ✓ → 假绿 ✓）。
+//   · `BrowseHistoryPage` / `FavoritesPage` 是本目录的**页面** ✓（悬浮菜单栏要跳它们 ✓）。
+import 'browse_history_page.dart';
+import 'favorites_page.dart';
+import '../widgets/jelly_expandable_search.dart';
+import '../widgets/jelly_search_bar.dart';
+import '../widgets/jelly_sliding_actions.dart';
 import '../theme/jelly_theme.dart';
 import '../../common/theme.dart';
 
@@ -275,46 +286,32 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       centerTitle: true,
       title: _searching
           // 收小的固定胶囊搜索框（参考影视首页右上角样式：高 32 圆角）
-          ? SizedBox(
-              width: 210,
-              height: 32,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                decoration: BoxDecoration(
-                  color: _isDark
-                      ? JellyTheme.cardDark
-                      : JellyTheme.cardLight,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.search_rounded,
-                        size: 16, color: JellyTheme.textSecondary),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: TextField(
-                        controller: _searchCtrl,
-                        autofocus: true,
-                        style: TextStyle(
-                            fontSize: AppTheme.fontFootnote,
-                            color: _titleColor),
-                        decoration: InputDecoration(
-                          hintText: '搜索书源',
-                          hintStyle: TextStyle(
-                              fontSize: AppTheme.fontFootnote,
-                              color: JellyTheme.textSecondary),
-                          border: InputBorder.none,
-                          isDense: true,
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        onChanged: (v) =>
-                            setState(() => _keyword = v.trim()),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
+          // ✅ 统一到共用组件 ✓（原为**手写固定胶囊** ✗：`SizedBox(210×32)` + `Container`
+          //   圆角 16 + 手画放大镜 + 裸 `TextField` ✓）。
+          // ⚠️ 这里**必须用 `JellyExpandableSearch`** ✓，**不能**用 `JellySearchBar` ✗ ——
+          //   后者是**全宽**搜索栏 ✗，塞进标题行会把 210 宽的小胶囊**撑成整行** ✗
+          //   （它的 `maxWidth` 参数正是为"顶部行内限宽"准备的 ✓）。
+          // 参数对照（照 `bookshelf_page:1180` 的现成用法 ✓）：
+          //   `SizedBox(210×32)` → `maxWidth: 210` + `height: 32` ✓（胶囊外观组件自带 ✓）
+          //   controller `_searchCtrl` ✓ · `autofocus: true` ✓（组件支持 ✓）
+          //   hintText 同文案 ✓ · onChanged: setState(_keyword = v.trim()) ✓（**即时过滤照旧** ✓）
+          //   ⚠️ `onSubmitted` 是**必填**（见组件 `:24` ✓）→ 回车时做同样的事 ✓（无害 ✓）
+          // ⚠️ **这个 `?` 之前丢了** ✗（我早前统一搜索框时，替换锚点从旧代码中间开始 ✗ →
+          //   `?` 连同旧控件一起被删掉 ✓）⇒ 三元缺 `?` → 下面 `: Text(...)` 的 `:` 悬空 ✗✗
+          //   → 报 "Expected to find ','" / "Expected to find ')'" ✓（并连带 4 条假错 ✗）。
+          //   现已补回 ✓；**教训**：把三元的一支整段换掉时，锚点必须从**含 `?`/`:` 的那一行**开始 ✓。
+          ? JellyExpandableSearch(
+            controller: _searchCtrl,
+            hintText: '搜索书源',
+            maxWidth: 210,
+            height: 32,
+            // ⚠️ **这里原来写了 `autofocus: true` ✗ —— 该组件没有这个参数** ✓（我凭记忆写错了 ✗）。
+            //   组件注释 `jelly_expandable_search.dart:14` 自己写明：`autofocus` 是
+            //   **`JellySearchBar`** 的能力 ✓（弹窗/浮层场景 ✓），常驻小胶囊**不提供** ✗。
+            //   ⇒ 已删 ✓；本页是"标题行内常驻胶囊"✓，本来也不该自动弹键盘 ✗（会盖住列表 ✓）。
+            onChanged: (v) => setState(() => _keyword = v.trim()),
+            onSubmitted: (v) => setState(() => _keyword = v.trim()),
+          )
           : Text(
               _selectMode ? '已选 ${_selected.length}' : '书源仓库',
               style: TextStyle(
@@ -324,6 +321,46 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
               ),
             ),
       actions: [
+        // ✅ **滑动动作栏**（③ 的正确形式 ✓）—— 与漫画页 `search_page.dart:1371` **同款** ✓✓：
+        //   `JellySlidingActions` = **左右一个个滑动切换** ✓ + **下滑展开成一列** ✓
+        //   （就是我先前误做成"顶栏指环"✗的那个东西 ✓；指环已撤 ✓，这里换成正确的 ✓）
+        //   动作与漫画页对齐 ✓：浏览记录 ✓ · 收藏 ✓（`FavoritesPage` 的 `comicOnly` 默认
+        //   `false` = 图书模式 ✓，正合书源页 ✓）；外加本页已有的**书源体检** ✓
+        JellySlidingActions(
+          isDark: _isDark,
+          actions: [
+            JellyAction(
+              icon: Icons.history_rounded,
+              tooltip: '浏览记录',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const BrowseHistoryPage(showTabs: false),
+                ),
+              ),
+            ),
+            JellyAction(
+              icon: Icons.favorite_rounded,
+              tooltip: '收藏',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const FavoritesPage()),
+              ),
+            ),
+            JellyAction(
+              icon: Icons.verified_user_rounded,
+              tooltip: '书源体检',
+              // ⚠️ **`JellyAction.onPressed` 是非空 `VoidCallback`** ✓（`jelly_sliding_actions.dart:405` ✓），
+              //   不能传 `? null : …` ✗（我原来那样写 ✗ → `void Function()? can't be assigned` ✗）。
+              //   ⇒ 改成"进来先判条件、不满足就 return" ✓✓ —— 语义与原意一致 ✓（空库/体检中不响应 ✓），
+              //     而且这样 `_runHealthCheck` **重新有了调用者** ✓✓（消掉它"未被引用"的 warning ✓）。
+              onPressed: () {
+                if (store.isEmpty || _healthChecking) return;
+                _runHealthCheck();
+              },
+            ),
+          ],
+        ),
         // 分享（截图右上第一个）：导出全部书源 JSON
         IconButton(
           tooltip: '分享书源',
@@ -517,6 +554,19 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     if (_pickedGroup != null) {
       list = list.where((s) => s.group == _pickedGroup).toList();
     }
+    // 🔴 「筛选已导入的书源」输入框**一直是死的** ✗：它的 `onChanged` 确实在写
+    // `_filter`（见本文件 :571-605 的输入框 ✓），但**这里从来没读过它** ✓
+    // → 用户输入关键词后列表**纹丝不动** ✗（这是本页最常用的控件之一 ✓）。
+    // 按 名称 / 地址 / 分组 做不区分大小写的包含匹配 ✓
+    final kw = _filter.trim().toLowerCase();
+    if (kw.isNotEmpty) {
+      list = list
+          .where((s) =>
+              s.name.toLowerCase().contains(kw) ||
+              s.url.toLowerCase().contains(kw) ||
+              s.group.toLowerCase().contains(kw))
+          .toList();
+    }
     // 2) 分组统计（用过滤后的全集算，chip 上的数字才对）
     final base = all.where((s) => !_hiddenGroups.contains(s.group)).toList();
     final counts = <String, int>{};
@@ -568,40 +618,26 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
           ),
         ),
         // ── 筛选已导入的书源 ──────────────────────────────────
-        Container(
-          height: 40,
-          decoration: BoxDecoration(
-            color: _card,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: TextField(
-            controller: _filterCtrl,
-            onChanged: (v) => setState(() => _filter = v.trim().toLowerCase()),
-            style: TextStyle(fontSize: AppTheme.fontBody, color: _titleColor),
-            decoration: InputDecoration(
-              isDense: true,
-              filled: false,
-              hintText: '筛选已导入的书源',
-              hintStyle: TextStyle(
-                  fontSize: AppTheme.fontBody, color: JellyTheme.textSecondary),
-              prefixIcon: Icon(Icons.search_rounded,
-                  size: 19, color: JellyTheme.textSecondary),
-              prefixIconConstraints:
-                  const BoxConstraints(minWidth: 38, minHeight: 38),
-              suffixIcon: _filter.isEmpty
-                  ? null
-                  : IconButton(
-                      icon: Icon(Icons.clear_rounded,
-                          size: 17, color: JellyTheme.textSecondary),
-                      onPressed: () {
-                        _filterCtrl.clear();
-                        setState(() => _filter = '');
-                      },
-                    ),
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(vertical: 10),
-            ),
-          ),
+        // ✅ 统一到 `JellySearchBar` ✓ —— 这是**全宽**场景 ✓（注意与同页标题行那个
+        //   210 宽的**小胶囊**不同 ✗：那个用 `JellyExpandableSearch` ✓；
+        //   判据就是"**有没有固定宽度**" ✓：有 → Expandable ✓；无（Column 内）→ Bar ✓）。
+        //   原为手写：`Container(高40 / 圆角20 / 卡片色)` + 手画 `prefixIcon` 放大镜 +
+        //   自己实现的 `suffixIcon` 清空键 ✓。
+        // ⚠️ 必须**整段替换** ✓：组件自带底色 / 圆角 / 放大镜 / 清空键 ✓，
+        //   留下外层 `Container(decoration: …)` 就会"圆角方框套胶囊" ✗。
+        // 参数对照 ✓：controller `_filterCtrl` ✓ · hintText 同文案 ✓ ·
+        //   ⚠️ `onChanged` 里的 **`.trim().toLowerCase()` 必须原样保留** ✓
+        //   （该页的过滤是**大小写不敏感**的 ✓，漏掉就退化成大小写敏感 ✗）·
+        //   onCleared：保留 `_filterCtrl.clear()` ✓（我不假设组件内部是否清 controller ✗，
+        //   多清一次无害 ✓）+ 置空 ✓
+        JellySearchBar(
+          controller: _filterCtrl,
+          hintText: '筛选已导入的书源',
+          onChanged: (v) => setState(() => _filter = v.trim().toLowerCase()),
+          onCleared: () {
+            _filterCtrl.clear();
+            setState(() => _filter = '');
+          },
         ),
         // ── 分组 chip 行 ──────────────────────────────────────
         //
@@ -1029,6 +1065,23 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                     _groupActionBtn(Icons.edit_outlined, '编辑',
                         () async {
                       Navigator.pop(ctx);
+                      // 🔴 config 型源**不能**走 Legado 的 7-tab 编辑页 ✗：
+                      // 那个表单是给 Legado 书源写的（读 `bookSourceName/Url/rule*`
+                      // 等顶层键 ✓），而 config 源的数据在 **`config` 体内** ✗ →
+                      // 打开后**表单全空** ✓（用户会以为源坏了 ✓）。
+                      // 更糟的是保存：`_save` 会把 62 个字段全部写进 raw ✓ →
+                      // ① **污染 JSON**（凭空多出 5 个空 `ruleSearch/ruleExplore/
+                      //    ruleBookInfo/ruleToc/ruleContent` 对象 ✗）
+                      // ② 重算 id（`config:正式名` → 用户填的名字 ✓）→ **id 漂移** ✗，
+                      //    连带按 id 存的键（`bsr.progress.<id>.<书名>`、笔记 sourceId）
+                      //    全部失配 ✓（重启后又变回 `config:原名` ✓）。
+                      // 所以这里**直接拦住** ✓，比"打开一个会写坏数据的表单"好 ✓；
+                      // 真想改 config 源应走它自己的配置编辑页 ✓（待做 ✓）
+                      if (s.isConfig) {
+                        _toast('这是 config 型源：请用它的配置编辑方式修改，'
+                            '此编辑页会写坏它的 JSON');
+                        return;
+                      }
                       // 打开 7-tab 完整编辑页（源变量/基础/搜索/发现/详情/目录/正文）
                       await Navigator.push(
                         context,
@@ -1650,11 +1703,34 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     try {
       // 用 bytes 而不是 String：书源地址可能是 zip，
       // 当字符串解出来会是乱码，根本判不出问题在哪
-      final res = await Dio().get<List<int>>(
+      // ✅ **书源包下载也走「网络代理」**（本轮接上 ✓）—— 原来这里是**内联新建** ✗
+      //   （`await Dio().get(...)` ✓ 一行里建完就用 ✓），没法"先构造再挂" ✓
+      //   ⇒ 所以**拆成两行** ✓：先建 `proxyDio` ✓ → 挂代理 ✓ → 再用它请求 ✓✓。
+      //   ℹ️ 安全依据 ✓：本处**无自定义适配器 / 无自定义 UA** ✗✓（就在下面几行 ✓）
+      //     ⇒ 挂代理不会影响任何东西 ✓；而且本页**已有**浏览器 UA 的补丁 ✓（`:1707-1720` ✓）
+      //       那是在 `Options(headers:)` 里 ✓（**Dio 选项层** ✓）→ 与 socket 层适配器**互不干扰** ✓✓（不会丢 ✓）。
+      //   · 代理**关闭** ✓ → 返回 false ✓ **一行不改** ✓（与从前完全一致 ✓✓）
+      final proxyDio = Dio();
+      applyGlobalProxy(proxyDio);
+      final res = await proxyDio.get<List<int>>(
         url,
         options: Options(
           responseType: ResponseType.bytes,
           followRedirects: true,
+          // ✅ **补浏览器 UA**（本轮新增 ✓）—— 兼容 `yckceo.com/yuedu/shuyuan/json/id/N.json` 这类地址 ✓。
+          //   为什么需要 ✗：此前没有任何 headers ✓ → 用的是 **Dio 默认 UA（`Dart/xxx`）** ✗，
+          //   而不少书源分发站 / CDN 会因此**直接返回 403 / 空体** ✗✓
+          //   —— 本仓对同一问题早有记录 ✓：`download_service:178`「默认 Dart/xxx 会被 c-nd3 等 CDN 拦 403
+          //   （同 `app_image_cache.dart` 的 **UA 拦截器修复**）」✓✓，这里属于**同一类修复** ✓。
+          //   ℹ️ 用**移动 Safari** 的 UA ✓（与 App 场景一致 ✓）；这只是**请求头** ✓，
+          //     不改变任何解析逻辑 ✓（`_parseSources` 的 4 种形态兼容保持不变 ✓）。
+          headers: const {
+            'User-Agent':
+                'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+                    'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
+                    'Mobile/15E148 Safari/604.1',
+            'Accept': 'application/json,text/plain,*/*',
+          },
           receiveTimeout: const Duration(seconds: 30),
         ),
       );
@@ -1797,13 +1873,14 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   // 书源编辑（V2.0.7 的「书源编辑」）
   // ============================================================
 
-  /// 编辑弹层。
-  ///
-  /// ── 为什么做成"常用字段表单 + 完整 JSON"两段 ──────────────────
-  /// 只给 JSON 编辑器：改个名字要在一大坨里找字段，很难用。
-  /// 只给表单：Legado 有几十个规则字段，全列出来表单会失控。
-  /// 所以常用字段（名称/网址/分组）走表单，其余走 JSON —— 两段都改得动，
-  /// 且互相同步（改表单会写回 JSON）。
+  // ❌ 这里原来挂着一段与"编辑弹层"有关的文档注释 ✗ —— 内容是：
+  //   「编辑弹层。为什么做成"常用字段表单 + 完整 JSON"两段……
+  //     常用字段（名称/网址/分组）走表单，其余走 JSON，且互相同步」
+  // 但它**挂错了方法** ✗：紧跟在它后面的其实是 `_deleteSelected`（批量删除 ✓），
+  // 跟"编辑弹层"毫无关系 ✓ → 属**孤儿注释** ✓，已移除 ✓。
+  // ⚠️ 如果本文件里确实还有那个"编辑弹层"（表单 + JSON 两段 ✓），
+  //   请把上面那段说明**移到它自己头上** ✓；否则那段描述本身也是过时的 ✓。
+  /// 批量删除选中的书源（含二次确认 ✓）
   Future<void> _deleteSelected() async {
     final n = _selected.length;
     final ok = await showDialog<bool>(

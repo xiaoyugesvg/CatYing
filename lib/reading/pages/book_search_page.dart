@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
-import 'package:dio/dio.dart';
+// 删掉从未使用的 `package:dio/dio.dart` ✓（analyze 一直报 unused_import ✗，
+// 本文件只用 `ZlibraryService` 发出的请求 ✓，没有直接用 Dio ✓）
 import '../../widgets/common_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
@@ -387,7 +388,15 @@ class _BookSearchPageState extends State<BookSearchPage>
       _filterExtensions.isNotEmpty;
 
   Widget _buildCategoryButton(bool isDark) {
-    if (ZlibraryService().isUnavailable) return const SizedBox.shrink();
+    // 🔴 原来这里是 `if (ZlibraryService().isUnavailable) return SizedBox.shrink();`
+    // ✗ —— 也就是"节点不可用"时**整个分类入口被删掉** ✓。
+    // 而那个标记非常容易被误置（"拿到了 HTML 但解析出 0 条"也算不可用 ✗，
+    // 见 zlibrary_service 的首页推荐路径），一旦置上：
+    //   · 分类按钮**永久消失** ✗
+    //   · 且**不会自愈**（只有某次搜索/推荐成功才会复位 ✗）
+    //   → 用户既没有入口、也不知道为什么、更没法重试 ✗
+    // 现在**始终保留按钮** ✓：点它照样会去取分类表（失败时由弹层自己提示 ✓），
+    // 用户至少还有入口、不必重启或等自愈 ✓。
     final active = _categoryMode;
     final hasFilter = _hasActiveFilters;
     return GestureDetector(
@@ -1057,6 +1066,11 @@ class _BookSearchPageState extends State<BookSearchPage>
         child: AnimatedOpacity(
           opacity: _showBackToTop ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 200),
+          // ⛔ **有意不同、不要"统一"成 `AppIconButton`** ✗✓（与 `bookshelf_page` 那处同款 ✓）
+          //   它是**返回顶部悬浮钮** ✓（`onTap: _scrollToTop` ✓），不是顶栏同族圆钮 ✓：
+          //     · 44×44（悬浮 ✓）vs 顶栏 36×36 ✓
+          //     · `primary` + `elevation: 4` = **醒目 FAB** ✓ —— 换"淡圆底"会几乎看不见 ✗
+          //     · 随滚动 `AnimatedOpacity/IgnorePointer` 出现消失 ✓（顶栏钮不会 ✓）
           child: Material(
             color: JellyTheme.primary,
             shape: const CircleBorder(),
@@ -1463,50 +1477,13 @@ class _BookSearchPageState extends State<BookSearchPage>
   }
 }
 
-/// 退出登录按钮：危险色实心 + 按压缩放反馈
-class _LogoutButton extends StatefulWidget {
-  final VoidCallback onTap;
-  const _LogoutButton({required this.onTap});
-
-  @override
-  State<_LogoutButton> createState() => _LogoutButtonState();
-}
-
-class _LogoutButtonState extends State<_LogoutButton> {
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) => setState(() => _pressed = false),
-      onTapCancel: () => setState(() => _pressed = false),
-      onTap: widget.onTap,
-      child: AnimatedScale(
-        scale: _pressed ? 0.97 : 1.0,
-        duration: const Duration(milliseconds: 120),
-        curve: Curves.easeOut,
-        child: Container(
-          height: 44,
-          decoration: BoxDecoration(
-            color: JellyTheme.error,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: const Center(
-            child: Text(
-              '退出登录',
-              style: TextStyle(
-                fontSize: AppTheme.fontHeadline,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
+// 🔴 这里原来有一个 **44 行的 `_LogoutButton`**（危险色实心 + 按压缩放反馈 ✓）✗
+// —— 已删除 ✓，依据是两重证据 ✓：
+//   · `grep _LogoutButton` 全模块**只命中它自己的声明** ✓
+//     （`class` / 构造器 / `createState` / `State` ✓，没有任何地方构造或引用它 ✓）
+//   · 删除后跑**全仓** analyze 仍 `error=0` ✓✓（这才是独立证明 ✓；
+//     光跑本文件的单文件闸门**证明不了** ✗ —— 今天 `unawaited` 那次就是教训 ✓）
+// ⚠️ 另外 ✓：本页的登录入口在**设置页**（`:852` 附近 ✓），从来不经过这个按钮 ✓
 
 /// 分类筛选弹窗返回结果。
 /// 分类筛选弹窗内容（独立 StatefulWidget，管理 TextEditingController 生命周期）。

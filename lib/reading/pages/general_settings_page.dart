@@ -456,12 +456,18 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
                     ],
                   ),
                   const SizedBox(height: 12),
+                  // ⚠️ **本开关「暂未实现」** ✗（今天**全 `lib` 取证** ✓：
+                  //   `autoSyncBackup` 只出现在「本页 UI + settings_service 的键/字段/getter/setter」✗，
+                  //   **0 处业务读取** ✗ → 没有任何"启动时/到点自动备份"的触发点 ✓）
+                  //   ⇒ 拨它**什么都不会发生** ✗（与下载设置那 5 项同型 ✓，处置方式一致 ✓）
+                  //   ✓ 保留行 + 如实标注 ✓："自动同步"是以后要做的能力 ✓（不是笔误 ✗）；
+                  //     而上面/下面的「**立即备份**」「**从云端恢复**」是**真的能用** ✓✓（真 WebDAV ✓）
                   SwitchListTile(
                     value: SettingsService().autoSyncBackup,
                     onChanged: (v) => SettingsService().setAutoSyncBackup(v),
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('自动同步'),
-                    subtitle: const Text('开启后启动时自动备份书架到 WebDAV'),
+                    title: const Text('自动同步（暂未实现 ✗）'),
+                    subtitle: const Text('开启后启动时自动备份书架到 WebDAV（当前无效 ✗：无自动触发点）'),
                   ),
                   const SizedBox(height: 6),
                   Row(

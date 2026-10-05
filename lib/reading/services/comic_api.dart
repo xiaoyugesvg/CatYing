@@ -6,6 +6,7 @@ import '../models/comic.dart';
 import '../models/search_result.dart';
 import 'crypto.dart';
 import 'remote_config_service.dart';
+import '../source/global_proxy.dart';
 
 /// 日志工具
 void _log(String message) {
@@ -55,6 +56,12 @@ class ComicApi {
         ),
       ) {
     _log('初始化 API 客户端，baseUrl: $baseUrl');
+    // ✅ **走「网络代理」**（本轮接上 ✓）—— 本 Dio 建在**构造函数里** ✓，所以就在 body 开头挂 ✓；
+    //   与 `zlibrary_service._createDio()` / `download_service._createImageDio()` **同一手法** ✓。
+    //   · 代理**关闭** ✓ → 直接返回 false ✓ **不动适配器** ✓（与从前一字不差 ✓✓）
+    //   · 代理**开启** ✓ → 本服务**没有自定义适配器/UA** ✓（下面只加 interceptor ✓，
+    //     那是 Dio 层的东西 ✗ 与 `httpClientAdapter` 不冲突 ✓✓）→ 直接挂**安全** ✓
+    applyGlobalProxy(dio);
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (o, h) {
@@ -266,6 +273,12 @@ class ComicApi {
           receiveTimeout: const Duration(seconds: 15),
         ),
       );
+      // ✅ **Web 抓取用的 Dio 也走「网络代理」**（本轮接上 ✓）——
+      //   它上面写着"独立 Dio：不复用主 dio 的 interceptor"✓（因为 www 网页域不能带 `webp:0` ✓），
+      //   所以**必须单独挂一次** ✓（否则主 Dio 走了代理、这个却直连 ✗ —— 分类就还是拉不到 ✓）。
+      //   它**没有自定义适配器** ✓（只调了 `webDio.get` ✓）→ 直接挂**安全** ✓✓
+      //   （若将来加 UA ✓ 记得传 `createHttpClient:` ✓ —— 否则会被整替换掉 ✗）。
+      applyGlobalProxy(webDio);
       final qp = <String, dynamic>{
         'ordering': ordering,
         'limit': limit,

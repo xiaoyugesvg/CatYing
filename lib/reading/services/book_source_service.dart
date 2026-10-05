@@ -11,6 +11,7 @@ import '../models/book_source.dart';
 import '../source/book_site_config.dart';
 import '../source/config_book_source.dart';
 import '../source/global_proxy.dart';
+import '../utils/source_fail_text.dart';
 
 /// 书源搜索到的一本书。
 ///
@@ -133,12 +134,26 @@ class BookSourceService {
   BookSourceService._();
   static final BookSourceService instance = BookSourceService._();
 
-  final _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 10),
-    receiveTimeout: const Duration(seconds: 30),
-    // 书源抓的是任意站点的 HTML，可能很大
-    maxRedirects: 5,
-  ));
+  /// 构造书源服务用的 Dio，并**挂上「网络代理」**（本轮接上 ✓）。
+  ///
+  /// ⚠️ 本文件**早就 import 了 `global_proxy`** ✓✓（`:13` ✓，因为它自己就有
+  /// `_isNetError` 的判据说明 ✓）—— 所以这里**只差"挂上去"这一步** ✓。
+  /// 手法 ✓：原来是**字段初始化** ✗（没法先构造再调用 ✓）→ 改成**具名构造** ✓，
+  /// 与 `zlibrary_service._createDio()` / `download_service._createImageDio()` 同款 ✓ 不发明机制 ✗。
+  /// ℹ️ 安全依据 ✓（已读源码确认 ✓）：本处**无自定义适配器** ✗✓（只有超时 + 重定向上限 ✓）
+  /// · 代理**关闭** ✓ → 返回 false ✓ **一字不改** ✓（与从前完全一致 ✓✓）
+  static Dio _createDio() {
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 30),
+      // 书源抓的是任意站点的 HTML，可能很大
+      maxRedirects: 5,
+    ));
+    applyGlobalProxy(dio);
+    return dio;
+  }
+
+  final _dio = _createDio();
 
   bool _portWarned = false;
 
@@ -262,8 +277,22 @@ class BookSourceService {
   /// config 源（type=config）不走 Node/Legado，直接按 CSS 选择器抓取。
   ConfigBookSource _configSource(BookSource source) {
     final c = (source.raw['config'] as Map).cast<String, dynamic>();
+    // 🔴 **请求头必须合并两层** ✓：config 源的引擎只读 `config.header`
+    //（book_site_config.dart:123 ✓），而**书源登录**（`applyCookie`，:958-981）
+    // 把 Cookie 写进**顶层** `raw['header']` ✗ → 于是 config 源登录「成功」了
+    // 却**完全没带上 Cookie** ✓（`sources.json` 的 config 体里 header 出现 0 次 ✓，
+    // 也没有人从另一侧补救 ✓）。
+    // 合并规则：顶层在前、`config` 体内同名键覆盖 ✓（与同族的 group 修复一致 ✓）
+    final rawHeader = source.raw['header'];
+    final bodyHeader = c['header'];
+    final merged = <String, dynamic>{
+      if (rawHeader is Map) ...rawHeader.cast<String, dynamic>(),
+      if (bodyHeader is Map) ...bodyHeader.cast<String, dynamic>(),
+    };
+    final body =
+        merged.isEmpty ? c : <String, dynamic>{...c, 'header': merged};
     return ConfigBookSource(
-      BookSiteConfig.fromJson(c),
+      BookSiteConfig.fromJson(body),
       proxy: source.raw['proxy']?.toString() ?? '',
     );
   }
@@ -655,29 +684,25 @@ class BookSourceService {
   // 书源体检（V2.0.7 的「书源体检」功能）
   // ============================================================
 
-  /// 判断异常是否为「网络不通」（超时/拒连/DNS/连接失败）。
+  /// 判断异常是否为「网络不通」（超时/拒连/DNS/连接失败/服务器返回错误码）。
   ///
   /// 体检按阶段细分「网络不通 / 解析失败」用：网络类 → 可代理复检；
   /// 解析/规则类 → 复检无意义，直接判失败。
+  ///
+  /// ✅ **判据已统一到 `utils/source_fail_text.dart`** ✓✓ —— 本函数与体检页的
+  /// `_isNetworkError` 原来是**两份手写判据** ✗（体检页那段注释里写着「两处必须同步」✗）。
+  /// 现在两处都只从 `describeSourceFail` 的**同一套分类**推导 ✓。
+  ///
+  /// ⚠️ **映射有意"三合一"** ✗✓：`DioException.badResponse`（403/500/502 ✓）在统一表里
+  /// 会按码归到 `denied` / `apiBroken` ✓，而本函数的语义是"**网络/服务类**"✓ →
+  /// 所以这三类**一并算网络** ✓✓，与改造前**完全等价** ✓（旧实现里 `badResponse` 也返回 true ✓）。
+  /// 若这里只认 `network` ✗，403 会掉进"解析失败" ✗✗ —— 正是注释里记录过的老 bug（223 源误判 ✗）。
   static bool _isNetError(Object? e) {
     if (e == null) return false;
-    if (e is DioException) {
-      return e.type == DioExceptionType.connectionTimeout ||
-          e.type == DioExceptionType.receiveTimeout ||
-          e.type == DioExceptionType.sendTimeout ||
-          e.type == DioExceptionType.connectionError ||
-          e.type == DioExceptionType.badCertificate;
-    }
-    final s = e.toString().toLowerCase();
-    return s.contains('dioexception') ||
-        s.contains('connection') ||
-        s.contains('refused') ||
-        s.contains('host lookup') ||
-        s.contains('timeout') ||
-        s.contains('超时') ||
-        s.contains('连接') ||
-        s.contains('network') ||
-        s.contains('网络');
+    final kind = describeSourceFail(e, what: '该源').kind;
+    return kind == SourceFailKind.network ||
+        kind == SourceFailKind.denied ||
+        kind == SourceFailKind.apiBroken;
   }
 
   /// 对一个书源做体检：搜索 → 详情 → 目录 → 正文，逐级验证。

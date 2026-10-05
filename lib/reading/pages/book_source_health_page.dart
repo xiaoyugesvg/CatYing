@@ -12,6 +12,8 @@ import '../../common/theme.dart';
 import '../models/book_source.dart';
 import '../services/book_source_service.dart';
 import '../theme/jelly_theme.dart';
+import '../utils/source_fail_text.dart';
+import '../widgets/jelly_search_bar.dart';
 
 /// 体检进行状态
 enum _Phase { idle, running, done }
@@ -72,14 +74,18 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
   // ============================================================
 
   static bool _isNetworkError(String detail) {
-    final d = detail.toLowerCase();
-    return d.contains('dioexception') ||
-        d.contains('connection') ||
-        d.contains('refused') ||
-        d.contains('host lookup') ||
-        d.contains('timeout') ||
-        d.contains('超时') ||
-        d.contains('连接');
+    // ✅ **判据已统一到 `utils/source_fail_text.dart`** ✓✓ ——
+    //   原来本函数与 `services/book_source_service.dart` 的 `_isNetError` **各写一份** ✗
+    //   （上面那段注释自己也写着「**两处必须同步**」✗，就是这次要解掉的隐患 ✓）。
+    //   ⚠️ **映射有意"三合一"** ✗✓：本页只有两档（网络不通 / 解析失败 ✓），没有「拒绝」档 ✗，
+    //     所以 `network` ✓ `denied`（403/401 ✓）`apiBroken`（404/5xx ✓）**都算"网络/服务类"** ✓✓
+    //     —— 与改造前的行为**等价** ✓（旧判据里 `status code` 一律算网络 ✓）。
+    //     若这里只认 `network` ✗，403 会掉进"解析失败" ✗✗ —— 那正是这段注释上面记录的老 bug ✓
+    //     （"223 个源全被标解析失败"✗），所以**绝不能收窄** ✗✓。
+    final kind = describeSourceFail(detail, what: '该源').kind;
+    return kind == SourceFailKind.network ||
+        kind == SourceFailKind.denied ||
+        kind == SourceFailKind.apiBroken;
   }
 
   _ItemState _itemState(BookSource s) {
@@ -499,34 +505,21 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
   }
 
   Widget _searchBar() {
-    return Container(
-      height: 32,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        color: _isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.search_rounded, size: 16, color: _subColor),
-          const SizedBox(width: 6),
-          Expanded(
-            child: TextField(
-              controller: _searchCtrl,
-              style: TextStyle(fontSize: AppTheme.fontFootnote, color: _titleColor),
-              decoration: InputDecoration(
-                hintText: '搜索书源',
-                hintStyle:
-                    TextStyle(fontSize: AppTheme.fontFootnote, color: _subColor),
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: EdgeInsets.zero,
-              ),
-              onChanged: (v) => setState(() => _kw = v.trim()),
-            ),
-          ),
-        ],
-      ),
+    // ✅ **统一到共用组件** ✓（原实现是**手写一套皮** ✗：外层
+    //   `Container(height:32, decoration: 圆角16 卡片色)` ✓ + 自己画的
+    //   `Icon(Icons.search_rounded, size:16)` ✓ + 裸 `TextField` ✓ ——
+    //   而「书架搜索页」等处用的是 `JellySearchBar` ✓ = 同一种控件**两套皮** ✗）。
+    // ⚠️ 注意必须是**整段替换** ✓：`JellySearchBar` **自带**底色 / 圆角 / 左侧图标 ✓，
+    //   若只换里面那层、把外层 `Container(decoration: …)` 留下 ✗，
+    //   就会变成"**圆角方框里再套一个胶囊**" ✗（两层底 ✗）。
+    // 参数对照 ✓：height:32 → 组件自带 ✓ · hintText '搜索书源' → 同名参数 ✓ ·
+    //   onChanged: setState(_kw = v.trim()) → 同名参数，语义不变 ✓
+    // 🆕 顺带补上 `onCleared` ✓ —— 原手写版**没有清空键** ✗，组件版自带 ✓（体验改善 ✓）
+    return JellySearchBar(
+      controller: _searchCtrl,
+      hintText: '搜索书源',
+      onChanged: (v) => setState(() => _kw = v.trim()),
+      onCleared: () => setState(() => _kw = ''),
     );
   }
 
@@ -653,7 +646,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
                 children: [
                   Text(
                     s.name,
-                    maxLines: 1,
+                    maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: AppTheme.fontSubhead,
@@ -669,7 +662,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
                       Expanded(
                         child: Text(
                           sub,
-                          maxLines: 1,
+                          maxLines: 3,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontSize: AppTheme.fontCaption, color: color),
                         ),

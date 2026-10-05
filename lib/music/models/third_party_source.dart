@@ -15,7 +15,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 ///
 ///   · `kind: 'script'`  —— **脚本法**：用 [script] 里的 LX 脚本
 ///     （JavaScript）自己完成请求与解析，能力更强（可加密、可多步）。
-///     执行见 `lx_script_runner.dart`。
+///
+///   · `kind: 'musicfree'` —— **MusicFree 插件**：也用 [script] 存，
+///     但导出形状是 `{ platform, getMediaSource }` 且常 `require('axios')`。
+///     跑法走独立适配层（见 `assets/nodejs-project/src/musicfree_adapter.js`）。
 ///
 /// 原版字段全部保留（含 [script]），因为用户明确要求"源添加功能不变"。
 class ThirdPartySource {
@@ -54,7 +57,32 @@ class ThirdPartySource {
     this.enabled = true,
   });
 
+  /// 是不是 **LX 脚本**（`lx.on(...)` / `module.exports.musicUrl`）
   bool get isScript => kind == 'script';
+
+  /// 是不是 **MusicFree 插件**（`module.exports = { platform, getMediaSource }`）
+  ///
+  /// ⚠️ 这类源**也是**用 [script] 存脚本的，只是**跑法不同**：
+  /// LX 走纯沙箱，MusicFree 走适配层（注入 axios/he 白名单）。
+  bool get isMusicFree => kind == 'musicfree';
+
+  /// **要不要用脚本字段**（LX 脚本 + MusicFree 插件都算）。
+  ///
+  /// 🔴 为什么要单独一个 getter，而不是到处写 `isScript`：
+  /// 音源管理页与编辑器原来全部按 `s.isScript` 分支，于是
+  /// MusicFree 插件会被当成**模板法**：
+  ///   · 列表标签显示成 "KEYWORD"（错的）
+  ///   · 编辑器不显示脚本框，改显示模板输入框
+  ///   · **保存时 `script: s.isScript ? scriptCtrl.text : s.script`**
+  ///     → 脚本字段被写回旧值 → 插件内容丢失 → 播放必然失败 ✗
+  bool get usesScript => isScript || isMusicFree;
+
+  /// UI 上显示的类型名
+  String get kindLabel {
+    if (isMusicFree) return 'MusicFree';
+    if (isScript) return '脚本';
+    return 'KEYWORD';
+  }
 
   ThirdPartySource copyWith({
     String? name,

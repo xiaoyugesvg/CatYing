@@ -1,5 +1,6 @@
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:dio/dio.dart';
+import '../source/global_proxy.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/jelly_theme.dart';
@@ -96,6 +97,13 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
       connectTimeout: const Duration(seconds: 12),
       receiveTimeout: const Duration(seconds: 12),
     ));
+    // ✅ **豆瓣图书排行也走「网络代理」**（本轮接上 ✓）—— 本处 Dio 建在 `initState` 里 ✓，
+    //   所以就在**构造完成后**挂 ✓（与 `comic_api` 的 webDio、`ai_service` 同款 ✓）。
+    //   ℹ️ 安全依据 ✓（已读源码确认 ✓）：本处**无自定义适配器** ✗✓；
+    //     注意它的 **UA / Referer 写在 `headers`** ✓（`:88-95` 注释明写"缺这两行豆瓣直接 400"✗）
+    //     —— headers 属于 **Dio 选项层** ✓，与 socket 层适配器**互不干扰** ✓✓（**不会丢** ✓）。
+    //   · 代理**关闭** ✓ → 返回 false ✓ **一行不改** ✓（与从前完全一致 ✓✓）
+    applyGlobalProxy(_dio);
     for (final b in _boards) {
       _start[b.tag] = 0;
       _loading[b.tag] = false;
@@ -181,6 +189,12 @@ class _DoubanRankingPageState extends State<DoubanRankingPage>
   ///
   /// 直接 `$e` 会打出一大段 `DioException [connection error]: ...`，
   /// 用户看不懂也不知道该做什么。
+  ///
+  /// ✅ **文案复核结论（本会话 ✓）：此处有意保留"豆瓣专属"说法** ✓，不接入统一失败表 ✗。
+  ///   原因 ✓：`utils/source_fail_text.dart` 服务的是「**书源/漫画源**」这类**第三方源** ✓，
+  ///   而豆瓣是本 App 的**首个方站点接口** ✓ —— 这里点名"豆瓣"✓、
+  ///   并直接提示"**可能需要代理或网络受限**"✓（与「网络代理」功能呼应 ✓），信息量更高 ✓。
+  ///   ℹ️ 用词精神仍与统一表**一致** ✓（超时 ✓ 拒绝 ✓ 网络 ✓ 都没有互相打架的说法 ✓）。
   String _friendlyError(Object e) {
     if (e is DioException) {
       switch (e.type) {

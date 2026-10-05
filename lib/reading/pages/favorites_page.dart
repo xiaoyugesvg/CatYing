@@ -91,13 +91,26 @@ class _FavoritesPageState extends State<FavoritesPage>
     );
   }
 
+  /// 上一次的 tab 下标（用于识别**滑动**切 tab，见 [_onTabChanged]）
+  int _lastTabIndex = 0;
+
   void _onTabChanged() {
     // 切换 tab 时退出多选，避免不同类型 id 混乱
-    if (_isSelecting && _tabController.indexIsChanging) {
-      setState(() {
-        _isSelecting = false;
-        _selectedIds.clear();
-      });
+    // 🔴 原来只看 `_tabController.indexIsChanging` ✗ —— 那个标记**只在"点击"切换时为
+    // true** ✓（SDK 里是先减计数再 notifyListeners ✓，**滑动只走 index setter** ✓）
+    // → **手指滑动切 tab 时多选态不退出** ✓ → 漫画与图书的 id 混在同一个
+    // `_selectedIds` 里 ✓，而删除只按**当前 tab 的类型**执行 ✓
+    // → **静默少删，还提示"删除成功"** ✗（用户以为都删了 ✓）。
+    // 这里改为按"**下标真的变了**"判定 ✓：点击和滑动都会命中 ✓
+    final idx = _tabController.index;
+    if (idx != _lastTabIndex) {
+      _lastTabIndex = idx;
+      if (_selectedIds.isNotEmpty) {
+        setState(() {
+          _isSelecting = false;
+          _selectedIds.clear();
+        });
+      }
     }
   }
 

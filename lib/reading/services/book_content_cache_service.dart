@@ -24,7 +24,19 @@ class BookContentCacheService {
     final dir = await getApplicationSupportDirectory();
     final cacheDir = Directory('${dir.path}/book_content_cache');
     if (!await cacheDir.exists()) await cacheDir.create(recursive: true);
-    return File('${cacheDir.path}/$bookId.json');
+    // 🔴 原来直接拼 `'${cacheDir.path}/$bookId.json'` ✗ —— `bookId` **未净化** ✓：
+    //   本项目图书 id 的约定是 **`book-<url>`** ✓（见 book_source_detail_page ✓），
+    //   而 URL 里**必然含 `/`** ✓ → 路径会变成
+    //   `…/book_content_cache/book-https://host/x.json` ✗；又因为上面
+    //   `create(recursive: true)` ✓，这些子目录**真会被建出来** ✓ → 于是
+    //   恶意/被篡改的书源只要给一个含 `../../` 的 bookUrl ✓✓，
+    //   就能把 JSON **写到缓存目录之外** ✗✗（路径穿越 ✓）。
+    // ✓ 净化：只保留 `[A-Za-z0-9_-]` ✓，其余一律替换为 `_` ✓，并限长 120 ✓
+    // ⚠️ 副作用（已确认无害 ✓）：净化后文件名与旧缓存不同 ✓ → 老缓存读不到 ✓，
+    //   等于**一次缓存失效** ✓，会重新抓一次 ✓，不影响正确性 ✓
+    final safe = bookId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    final name = safe.length <= 120 ? safe : safe.substring(0, 120);
+    return File('${cacheDir.path}/$name.json');
   }
 
   /// 缓存目录（供「缓存管理」页算大小 / 清空用）

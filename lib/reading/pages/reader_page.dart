@@ -346,6 +346,10 @@ class _ReaderPageState extends State<ReaderPage> {
         _currentChapter.id,
       );
       if (local.isNotEmpty) {
+        // 🔴 本方法上面有 `await ...getLocalImages(...)` ✓ —— 这个 `setState`
+        // 却**没有 `mounted` 检查** ✗（页面被销毁后抛
+        // `setState() called after dispose()` ✓，release 同样抛 ✗）
+        if (!mounted) return;
         setState(() {
           _images = local;
           _useLocal = true;
@@ -370,11 +374,15 @@ class _ReaderPageState extends State<ReaderPage> {
       final headers = <String, String>{...source.imageHeaders};
       final ref = source.refererForChapter(cchapter);
       if (ref != null) headers['Referer'] = ref;
+      // 🔴 上面 `await source.getChapterImages(...)`（网络请求 ✓）之后同样漏了检查 ✗
+      if (!mounted) return;
       setState(() {
         _images = images;
         _imageHeaders = headers;
       });
     } catch (e) {
+      // 🔴 catch 分支也一样 ✗（异常同样可能发生在 await 之后 ✓）
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
       });
@@ -1254,7 +1262,19 @@ class _ReaderPageState extends State<ReaderPage> {
                     children: [
                       const Expanded(
                         child: Text(
-                          '端侧 AI 漫画超分',
+                          // 🔴 原标题是「**端侧 AI** 漫画超分」✗ —— 但本面板里
+                          // **没有模型、没有推理**：`:1395` 的"下载模型"按钮只把
+                          // `upscaleModelDownloaded` 这个 **bool** 翻成 true ✓
+                          //（`settings_service.dart:1794` 三行：比较→赋值→落盘 ✓）。
+                          // ✓ 先改成**它真正做的事**（图片放大 + 降噪，本地处理 ✓），
+                          // 不再冒充"端侧 AI" ✗。
+                          // ✅ **那处遗留已清零** ✓（原注释写"仍然假装下载 / 留给下一轮" ✗ ——
+                          //    已经过期了 ✓）：按钮已由「下载 6.8MB / 已下载」✗ 改成
+                          //    **「开启 / 已开启」** ✓ —— 见 `:1416` 的修复说明与
+                          //    `:1421` 的 `modelReady ? '已开启' : '开启'` ✓；
+                          //    全模块 grep `6.8MB` 现在**只命中注释** ✓ →
+                          //    **UI 里已无"假装下载模型"的字样** ✓✓
+                          '图片放大 / 降噪',
                           style: TextStyle(
                             fontSize: AppTheme.fontTitle3,
                             fontWeight: FontWeight.bold,
@@ -1370,7 +1390,7 @@ class _ReaderPageState extends State<ReaderPage> {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                '二次元 / 动漫推荐 · 6.8MB',
+                                '二次元 / 动漫推荐 · 本地放大与降噪',
                                 style: TextStyle(
                                   fontSize: AppTheme.fontCaption,
                                   color: Colors.white54,
@@ -1395,7 +1415,12 @@ class _ReaderPageState extends State<ReaderPage> {
                             ),
                           ),
                           child: Text(
-                            modelReady ? '已下载' : '下载 6.8MB',
+                            // 🔴 原来写「下载 6.8MB / 已下载」✗ —— 它**什么也没下载**：
+                            // 只是把 `upscaleModelDownloaded` 这个 bool 落盘 ✓
+                            //（`:1405` 的那一行 ✓，服务层实现就三行：比较→赋值→落盘 ✓）。
+                            // ✓ 改成如实的「开启 / 已开启」✓ —— 本面板真正能做的只有
+                            //   放大与降噪两个开关 ✓，**没有模型可下** ✗
+                            modelReady ? '已开启' : '开启',
                             style: TextStyle(
                               fontSize: AppTheme.fontSubhead,
                               color: modelReady ? Colors.white70 : Colors.white,

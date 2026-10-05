@@ -22,7 +22,8 @@
  * `handleMusicApi(body)` 现在按 `body.source` 分派：
  *   · 不传 / `'netease'` / `'wy'` → 本文件里的网易云实现（**默认，行为不变**）
  *   · `'kugou'` / `'kg'`        → `kugou_source.js`（第三方库 KuGouMusicApi，MIT）
- * 两个平台的返回结构完全一致（见各函数注释与 `kugou_source.js` 文件头）。
+ *   · `'qq'` / `'tx'`           → `qq_source.js`（协议参考 Beans-Music / wp_MusicApi）
+ * 三个平台的返回结构完全一致（见各函数注释与对应 source 文件头）。
  */
 
 import axios from 'axios';
@@ -37,6 +38,10 @@ import * as kugou from './kugou_source.js';
 // ── 多平台：喜马拉雅（有声书/播客）──────────────────────────────
 // 映射：专辑 → Album，单集 → Song。**播放必须带 UA**（见 ximalaya_source.js）。
 import * as ximalaya from './ximalaya_source.js';
+// ── 多平台：QQ 音乐（协议参考 Beans-Music / wp_MusicApi 逆向结论）────
+// 搜索 client_search_cp（免登录，家庭/移动/数据中心网络均可）；
+// 播放 vkey 经 musicu.fcg（VIP 歌返回空，上层按 no_free_source 提示）。
+import * as qq from './qq_source.js';
 
 /** 网易云公开接口要求的请求头（缺 Referer 会被拒） */
 const NETEASE_HEADERS = {
@@ -293,6 +298,7 @@ function normalizeSource(raw) {
     const s = String(raw == null ? '' : raw).trim().toLowerCase();
     if (s === 'kugou' || s === 'kg') return 'kugou';
     if (s === 'ximalaya' || s === 'xmly') return 'ximalaya';
+    if (s === 'qq' || s === 'tx') return 'qq';
     return 'netease';
 }
 
@@ -363,21 +369,25 @@ async function handleMusicApi(body) {
     // 默认 netease：不传 source 时下面每条分支都与改动前完全一样
     const source = normalizeSource(body && body.source);
     const isKg = source === 'kugou';
+    const isQq = source === 'qq';
     // 喜马拉雅：整条链路独立（语义与"单曲平台"不同），提前返回
     if (source === 'ximalaya') return handleXimalayaAction(action, body);
 
-    // ── 三个"双平台"接口 ────────────────────────────────────
+    // ── 三个"多平台"接口 ────────────────────────────────────
     if (action === 'search') {
+        if (isQq) return qq.searchSongs(body.keyword, body.limit, body.offset);
         return isKg
             ? kugou.searchSongs(body.keyword, body.limit, body.offset)
             : search(body.keyword, body.limit, body.offset);
     }
     if (action === 'url') {
+        if (isQq) return qq.songUrl(body.id, body.quality);
         return isKg
             ? kugou.songUrl(body.id, body.quality)
             : songUrl(body.id, body.quality);
     }
     if (action === 'lyric') {
+        if (isQq) return qq.lyric(body.id);
         return isKg
             ? kugou.lyric(body.id)
             : lyric(body.id);
@@ -409,6 +419,33 @@ async function handleMusicApi(body) {
             case 'albumSongs':
             case 'resolveBySource':
                 return kugouUnsupported(action);
+            default:
+                return { ok: false, error: '未知 action: ' + action };
+        }
+    }
+
+    // ── QQ：热搜走自己实现，其余发现页接口明确不支持（无登录态）──
+    if (isQq) {
+        switch (action) {
+            case 'hotSearch':
+                return qq.hotSearch();
+            case 'qqSelfTest':
+                return qq.selfTest();
+            case 'personalized':
+            case 'playlistSquare':
+            case 'playlistCatlist':
+            case 'comments':
+            case 'simiSongs':
+            case 'searchArtists':
+            case 'searchAlbums':
+            case 'artistSongs':
+            case 'artistAlbums':
+            case 'albumSongs':
+            case 'resolveBySource':
+            case 'topLists':
+            case 'playlistDetail':
+            case 'newSongs':
+                return { ok: false, error: 'QQ 暂不支持该接口（需要登录态）', action, source: 'qq' };
             default:
                 return { ok: false, error: '未知 action: ' + action };
         }

@@ -364,7 +364,16 @@ async function lxRequest(url, options, callback) {
  *
  * @returns {Promise<{ok:boolean, handlers?:Object, actions?:string[], error?:string}>}
  */
-export async function loadScript(script) {
+/**
+ * 加载并执行一个脚本。
+ *
+ * @param script 脚本源码
+ * @param opts.modules  **按需注入的白名单模块**（默认空 = 纯 LX 沙箱）。
+ *   只有 MusicFree 适配层会传 `{ axios, he }`；LX 路径不传，
+ *   行为与以前完全一致（require 依然只允许 lx）。
+ */
+export async function loadScript(script, opts) {
+    const extraModules = (opts && opts.modules) || null;
     const src = String(script || '');
     if (!src.trim()) return { ok: false, error: '脚本为空' };
     if (src.length > MAX_SCRIPT_CHARS) {
@@ -575,6 +584,19 @@ export async function loadScript(script) {
         require: (name) => {
             // 只允许脚本"引入"lx 本身；其它一律拒绝（避免拿到 fs 等）
             if (name === 'lx' || name === './lx') return lx;
+            // ── MusicFree 适配层：按需注入的**白名单模块** ──────────
+            //
+            // ⚠️ 默认**空对象** —— 也就是说 LX 脚本的行为**一点没变**
+            //（`loadScript(script)` 不传 modules 时，这里和以前完全一样）。
+            //
+            // 只有 MusicFree 适配层调 `loadScript(script, { modules })`
+            // 时才会注入，而且**只注入 axios / he 这两个**：
+            //   · axios —— MusicFree 插件几乎都 `require('axios')`
+            //   · he    —— 用来解码 HTML 实体（`he.decode()`）
+            // fs / child_process / process **依然拒绝**。
+            if (extraModules && Object.prototype.hasOwnProperty.call(extraModules, name)) {
+                return extraModules[name];
+            }
             throw new Error(`脚本不允许 require('${name}')——沙箱只提供 lx API`);
         },
     };
@@ -638,14 +660,29 @@ export async function loadScript(script) {
  * 这里不重复跑脚本本体（那是 loadScript 的事），只调 handler。
  * handler 可能是 async，所以要 await；同样有超时保护。
  */
-export async function runAction(handlers, action, payload) {
+export async function runAction(handlers, action, payload, opts) {
     const fn = handlers && handlers[action];
     if (typeof fn !== 'function') {
         return { ok: false, error: `脚本未实现 action: ${action}` };
     }
     try {
+        // ── ⚠️ 参数传递方式（两种约定）──────────────────────────────
+        // 默认：`fn(payload)` —— **一个**对象参数。
+        //   LX 源就是这套：`lx.on('request', async (payload) => …)`，
+        //   富对象里有 action/source/info。
+        //
+        // `opts.spread === true`：把 payload 当**位置参数数组**展开。
+        //   MusicFree 插件是这套：`getMediaSource(musicItem, quality)` ——
+        //   两个独立的位置参数。不展开的话它收到整个数组
+        //   （`musicItem` 变成 `[musicItem, quality]`）→ 必然取不到地址。
+        //
+        // ⚠️ 默认 false，所以**所有现有 LX 调用的行为一点不变**。
+        const invoke = () =>
+            (opts && opts.spread === true && Array.isArray(payload))
+                ? fn(...payload)
+                : fn(payload);
         const result = await Promise.race([
-            Promise.resolve(fn(payload)),
+            Promise.resolve(invoke()),
             new Promise((_, rej) =>
                 setTimeout(() => rej(new Error('处理超时')), SCRIPT_TIMEOUT_MS),
             ),

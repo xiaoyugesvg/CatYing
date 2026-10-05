@@ -36,7 +36,14 @@ class _OnlineReaderPageState extends State<OnlineReaderPage> {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onProgress: (p) => setState(() => _progress = p),
+          // 🔴 下面四个回调里**只有这个漏了** `mounted` 检查 ✗ ——
+          // `onPageStarted` / `onPageFinished` / `onWebResourceError`
+          //（`:41 / :44 / :47` ✓）全都写了 `if (mounted)` ✓，属**漏写** ✗。
+          // webview 的进度回调可能**在页面已销毁之后**才到达 ✓ →
+          // 抛 `setState() called after dispose()` ✓
+          onProgress: (p) {
+            if (mounted) setState(() => _progress = p);
+          },
           onPageStarted: (_) {
             if (mounted) setState(() => _loading = true);
           },

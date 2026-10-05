@@ -8,6 +8,7 @@ import '../theme/jelly_theme.dart';
 import '../widgets/staggered_entrance.dart';
 import '../../common/theme.dart';
 import '../../widgets/app_page_header.dart';
+import 'zlibrary_nodes_sheet.dart';
 
 /// z-library 登录/注册页面（扁平风、内容丰富、灵动）。
 /// 一个全屏页面内用分段切换在「登录 / 注册」间过渡。
@@ -970,6 +971,23 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
                   : JellyTheme.warning,
               fontSize: AppTheme.fontCaption,
               height: 1.4,
+            ),
+          ),
+          // ✅ **节点管理入口**（本轮新增 ✓）——底层能力**早就齐全** ✗✓，此前只是**没有界面** ✗：
+          //   内置节点 ✓ 切换/并入候选/落盘 ✓ 单点测试 ✓ **延迟测量** ✓（`zlibrary_service` ✓）。
+          //   现在点开就能：**一键测试全部节点（显示每个的可用性与延迟 ms ✓）** · 切换 ✓ · 添加 ✓。
+          //   ⚠️ 「添加」走的仍是原来的 `setDomain` ✓（归一化 → 并入候选表 → 落盘 ✓），
+          //     所以**原有的"填地址 + 测试"能力一点没丢** ✓✓，只是多了一个看得见全局的入口 ✓。
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                builder: (_) => const ZlibraryNodesSheet(),
+              ),
+              icon: const Icon(Icons.dns_rounded, size: 18),
+              label: const Text('节点管理（一键测试 / 切换 / 添加）'),
             ),
           ),
         ],

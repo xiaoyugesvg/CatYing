@@ -9,6 +9,7 @@ import '../models/book.dart';
 import '../models/book_category.dart';
 import '../models/search_result.dart';
 import '../source/webview_image_fetcher.dart';
+import '../source/global_proxy.dart';
 import 'builtin_accounts.dart';
 import 'remote_config_service.dart';
 import 'settings_service.dart';
@@ -106,15 +107,30 @@ class ZlibraryService extends ChangeNotifier {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36';
 
-  final Dio _dio = Dio(
-    BaseOptions(
-      connectTimeout: const Duration(seconds: 20),
-      receiveTimeout: const Duration(seconds: 30),
-      followRedirects: false, // 手动处理 301/302 以更新并持久化域名
-      responseType: ResponseType.plain, // 自行 jsonDecode，规避 Cloudflare HTML 页抛异常
-      validateStatus: (_) => true, // 不按状态码抛异常，自行判断
-    ),
-  );
+  /// ✅ **创建 z-library 请求用的 Dio，并挂上「全局网络代理」**（本轮接上 ✓）。
+  ///
+  /// 为什么要有它 ✗：本项目原来**只有** `config_book_source` ✓ 与 `config_manga_source` ✓
+  /// 两处挂了代理 ✗，而 **z-library（图书）这一整条链路都是直连** ✗✓ ——
+  /// 于是用户开了「网络代理」却发现**图书照样连不上** ✓（"代理没用"的典型体感 ✓）。
+  /// 写法**逐字照搬 `config_book_source.dart:86-101`** ✓✓ —— 不发明新机制 ✗。
+  /// `applyGlobalProxy` 内部**先看开关** ✓：关着直接返回 false ✓ **连适配器都不换** ✓✓
+  /// （也就是"**不影响其他功能及网络**"✓：它是**逐实例**换适配器 ✓，
+  ///   不设系统代理 ✗、不用 `HttpOverrides` ✗、影视/音乐完全不受影响 ✓✓）。
+  Dio _createDio() {
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 20),
+        receiveTimeout: const Duration(seconds: 30),
+        followRedirects: false, // 手动处理 301/302 以更新并持久化域名
+        responseType: ResponseType.plain, // 自行 jsonDecode，规避 Cloudflare HTML 页抛异常
+        validateStatus: (_) => true, // 不按状态码抛异常，自行判断
+      ),
+    );
+    applyGlobalProxy(dio);
+    return dio;
+  }
+
+  late final Dio _dio = _createDio();
 
   String _domain = ''; // 不含 scheme，如 zh.zlibrary.by
 
@@ -258,6 +274,41 @@ class ZlibraryService extends ChangeNotifier {
 
   /// 候选节点列表（只读视图）
   List<String> get candidates => List.unmodifiable(_candidates);
+
+  /// ✅ **一键测试全部节点** ✓（供"节点管理"界面用 ✓）——
+  /// 返回每个候选节点的**可用性 + 延迟（秒）+ 最终落地域名** ✓。
+  ///
+  /// ⚠️ **本方法只读** ✓：**不改 `_domain`** ✗、**不写盘** ✗ —— 切换当前节点仍由
+  /// [setDomain] 负责 ✓（测试归测试 ✓，避免"点一下测试就把用户选好的节点换掉" ✗✗）。
+  /// · 内部复用现成的 [_probeUrl] ✓（跟随重定向 ✓ 与自动选优用的是同一套逻辑 ✓，**不重写** ✗）
+  /// · 候选为空时回退到内置列表 ✓（与 `_probeLocalCandidatesIfNeeded` 的兜底一致 ✓）
+  /// · 排序 ✓：**可用的在前 ✓，同组按延迟升序** ✓ → 界面直接按返回顺序展示即可 ✓
+  /// · 探测本身有并发与超时保护 ✓（`_probeUrl` 内 ✓），不会长时间卡住界面 ✓
+  Future<List<({String domain, bool ok, double? latency, String host})>>
+      probeAll() async {
+    final list = _candidates.isEmpty
+        ? List<String>.from(CmbokConstants.zLibraryDefaultDomains)
+        : List<String>.from(_candidates);
+    if (list.isEmpty) return const [];
+    final results = await Future.wait(list.map((d) => _probeUrl(d)));
+    final out = <({String domain, bool ok, double? latency, String host})>[];
+    for (var i = 0; i < list.length; i++) {
+      final r = results[i];
+      out.add((
+        domain: list[i],
+        ok: r != null,
+        latency: r?.latency,
+        host: r?.domain ?? '',
+      ));
+    }
+    out.sort((a, b) {
+      if (a.ok != b.ok) return a.ok ? -1 : 1;
+      return (a.latency ?? 999).compareTo(b.latency ?? 999);
+    });
+    _log('一键测试节点：${out.where((e) => e.ok).length}/${out.length} 可用');
+    return out;
+  }
+
 
   /// 初始化：加载登录态、域名、每日计数
   ///
@@ -1176,9 +1227,19 @@ class ZlibraryService extends ChangeNotifier {
         totalPages: 1,
       );
     }
-    _setUnavailable(true);
-    _log('所有镜像首页推荐均失败: $lastError');
-    throw ZlibraryException('fail', '推荐加载失败，请稍后重试');
+    // 🔴 这里原来无条件 `_setUnavailable(true)` ✗ —— 但本函数的失败其实有两种：
+    //   · **拿不到页面** → 节点真的不可达 ✓
+    //   · **拿到了页面但解析出 0 条**（DOM 改版 / 选择器失效，见 :1160-1163 ✗）
+    // 两者被判成同一件事 ✗ → 界面弹「所有 z-library 节点不可用，图书功能暂不可用」
+    // 并**永久隐藏分类入口**（book_search_page.dart:390 ✗），而搜索其实仍然可用 ✓
+    // —— 误导用户 + 不会自愈（只有某次搜索成功才会复位 ✗）。
+    //
+    // 现在本函数**不再擅自判定"节点不可用"** ✓：可达性交给真正能验证的路径
+    //（搜索成功会 `_setUnavailable(false)`；失败才置 true ✓）。
+    // 这里只如实说明"推荐解析不出来"，不再谎报节点全挂 ✓。
+    _log('首页推荐全部失败（节点可达性未知，可能是解析失效）: $lastError');
+    throw ZlibraryException(
+        'fail', '推荐解析为空：页面结构可能已变更（可稍后重试，或检查节点）');
   }
 
   /// 解析 z-library 首页 HTML（推荐区块，卡片结构与分类页相同）。
@@ -1359,6 +1420,9 @@ class ZlibraryService extends ChangeNotifier {
         headers: {'User-Agent': _browserUa},
       ),
     );
+    // ✅ **走全局代理**（本轮接上 ✓，与本文件 `_createDio()` 同款 ✓）——
+    //   关着时 `applyGlobalProxy` **直接返回、连适配器都不换** ✓✓（零副作用 ✓）。
+    applyGlobalProxy(dio);
     try {
       // 带 z-library 登录 cookie（内置/自登均可，提高成功率）
       final cookies = isLoggedIn ? _cookies(_remixUserid, _remixUserkey) : null;
@@ -1881,6 +1945,10 @@ class ZlibraryService extends ChangeNotifier {
         },
       ),
     );
+    // ✅ **走全局代理**（本轮接上 ✓ —— 本文件第 3 个、也是最后一个 Dio ✓）：
+    //   至此 **z-library 的每一个请求都受「网络代理」开关控制** ✓✓；
+    //   开关关着时 `applyGlobalProxy` **连适配器都不换** ✓（零副作用 ✓ 不影响其它模块 ✓）。
+    applyGlobalProxy(dio);
     // 连接异常重试 1 次（对抗跨境网络瞬时抖动，避免单次超时误判不可用）
     for (var attempt = 0; attempt < 2; attempt++) {
       try {

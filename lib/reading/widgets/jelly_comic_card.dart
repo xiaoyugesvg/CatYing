@@ -229,17 +229,47 @@ class _JellyComicCardState extends State<JellyComicCard>
               // 信息区
               if (widget.compact)
                 // 紧凑模式：仅名称（参考图样式，无收藏/热度/作者胶囊）
+                // ✅ 本次两处按你要的改 ✓（① 标题居中 ✓ ② 右下角显示章节数 ✓）：
+                //   · ① 原来 `Text` 走默认**左对齐** ✗ → 加 `textAlign: center` ✓
+                //   · ② 右下角补「共 N 章」✓ —— 数据**现成** ✓（`comic.totalChapters`
+                //     正是列表组件 `JellyComicListTile:328` 用的同一个字段 ✓✓）
+                //     → **零额外网络请求** ✓（A 方案 ✓）；`totalChapters <= 0` 时**不显示** ✓
+                //     （不猜、不编"完本"✗ —— 拿不到就不写 ✓）
                 Padding(
                   padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-                  child: Text(
-                    widget.comic.title,
-                    style: TextStyle(
-                      fontSize: AppTheme.fontFootnote,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        widget.comic.title,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: AppTheme.fontFootnote,
+                          fontWeight: FontWeight.w600,
+                          color:
+                              isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if ((widget.comic.totalChapters ?? 0) > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            '共 ${widget.comic.totalChapters} 章',
+                            // **右下角** ✓（`stretch` + 右对齐 ✓）
+                            textAlign: TextAlign.right,
+                            style: TextStyle(
+                              fontSize: AppTheme.fontFootnote - 1,
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.55)
+                                  : JellyTheme.textSecondary,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
                   ),
                 )
               else
@@ -257,17 +287,25 @@ class _JellyComicCardState extends State<JellyComicCard>
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             // 标题
-                            Text(
-                              widget.comic.title,
-                              style: TextStyle(
-                                fontSize: AppTheme.fontSubhead,
-                                fontWeight: FontWeight.w600,
-                                color: isDark
-                                    ? Colors.white
-                                    : JellyTheme.textPrimaryLight,
+                            // ✅ ① **标题居中** ✓（非紧凑分支 ✓ —— 与 `compact` 那处同款改法 ✓）
+                            //   包一层 `SizedBox(width: double.infinity)` 才能让 `textAlign` 生效 ✓；
+                            //   ⚠️ 外层 Column 的 `crossAxisAlignment` **保持 start** ✗ →
+                            //     下面的**作者 / 热度**仍左对齐 ✓（与截图一致 ✓）
+                            SizedBox(
+                              width: double.infinity,
+                              child: Text(
+                                widget.comic.title,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: AppTheme.fontSubhead,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark
+                                      ? Colors.white
+                                      : JellyTheme.textPrimaryLight,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 6),
                             // 作者

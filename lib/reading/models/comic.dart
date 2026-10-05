@@ -151,10 +151,20 @@ class Comic {
           safeInt(json['total_chapters']) ??
           safeInt(json['chapterCount']) ??
           safeInt(json['totalChapters']),
-      updateTime: (json['update_time'] ?? json['datetime_updated']) != null
-          ? DateTime.tryParse(
-              (json['update_time'] ?? json['datetime_updated']).toString(),
-            )
+      // 🔴 必须**先读自己写的 `updateTime`** ✓：`toJson`（:177）写的是驼峰
+      // `updateTime`，而这里原来只读下划线 `update_time` / `datetime_updated` ✗
+      // → **落盘再读回就丢** ✗ → 收藏 / 浏览足迹 / 书架 meta 里那行
+      // 「更新于 X」在**重启后整行消失** ✓（消费方：jelly_comic_list_tile）
+      // 远端(copymanga)仍用下划线键，所以两个都留着、驼峰优先 ✓
+      //（与 music/models.dart 里 Song/Playlist 的同类兜底是同一手法 ✓）
+      updateTime: (json['updateTime'] ??
+                  json['update_time'] ??
+                  json['datetime_updated']) !=
+              null
+          ? DateTime.tryParse((json['updateTime'] ??
+                  json['update_time'] ??
+                  json['datetime_updated'])
+              .toString())
           : null,
     );
   }
@@ -240,6 +250,17 @@ class ComicChapter {
     this.imageUrls,
   });
 
+    // ⚠️ **埋雷警告**（今天核实 ✓，**有意不改结构** ✗）：
+  //   本类 `toJson`（下面 `:284` 附近 ✓）与 `fromJson` 的**键名不对称** ✗ ——
+  //   落盘再读回会**丢** `order` / `groupId` / `groupName` / `createTime`
+  //   （`fromJson` 读的是 Legado 侧键名 `ordered` / `group_path_word` /
+  //    `group_name` / `datetime_created` ✓）；
+  //   而 `ChapterGroup.fromJson`（`:312` 附近 ✓）**硬编码** `chapters: []` ✗
+  //   → 整组章节列表丢失 ✓。
+  //   ✅ **当前无调用方** ✓（全模块里只有 `comic_api.dart` 用它读**远端** JSON ✓，
+  //      不是本地落盘 ✓）→ 所以**现在没有实际数据丢失** ✓。
+  //   🔴 但**绝不要**拿它做本地缓存 / 导出 / 批量序列化 ✗✗（那会**静默丢字段** ✓）。
+  //      真要这么用，请先把两边的键名**对齐** ✓（改结构，属单独一轮 ✓）。
   factory ComicChapter.fromJson(Map<String, dynamic> json) {
     String? safeString(dynamic value) {
       if (value == null) return null;

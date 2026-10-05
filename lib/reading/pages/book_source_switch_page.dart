@@ -238,14 +238,17 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
         child: SizedBox(
           width: 40,
           height: 54,
-          child: (r.coverUrl ?? '').isEmpty
+          // `coverUrl` 本身是**非空** String ✓ —— analyze 的三条 warning 都在说这件事：
+          // `?? ''` 是 dead code ✗、`.isEmpty` 的"左操作数不可能是 null" ✓、
+          // `:248` 的 `!` 不起作用 ✗ → 去掉多余的 `?? ''` 与 `!` ✓
+          child: r.coverUrl.isEmpty
               ? Container(
                   color: JellyTheme.primary.withValues(alpha: 0.1),
                   child: Icon(Icons.menu_book_rounded,
                       size: 20, color: JellyTheme.primary),
                 )
               : CachedNetworkImage(
-                  imageUrl: r.coverUrl!,
+                  imageUrl: r.coverUrl,
                   fit: BoxFit.cover,
                   errorWidget: (_, __, ___) => Container(
                     color: JellyTheme.primary.withValues(alpha: 0.1),

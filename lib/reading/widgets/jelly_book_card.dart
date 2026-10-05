@@ -111,6 +111,11 @@ class _JellyBookCardState extends State<JellyBookCard>
     final hasSize = size != null && size.isNotEmpty;
     return Row(
       mainAxisSize: MainAxisSize.min,
+      // ✅ ② **靠右下** ✓ —— 原来是默认左对齐 ✗（截图里信息行贴在左边 ✓），
+      //   按你要的改成**右下角** ✓。这里只改对齐 ✓，**内容一字未动** ✓
+      //   （仍是"文件大小（主色加粗）+ 年份/语言"✓，顺序与样式都保持 ✓）。
+      // ℹ️ 两处卡片布局都调它 ✓ → 一起生效，保持同族观感一致 ✓✓
+      mainAxisAlignment: MainAxisAlignment.end,
       children: [
         if (hasSize)
           Text(
@@ -332,17 +337,27 @@ class _JellyBookCardState extends State<JellyBookCard>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        widget.book.title,
-                        style: TextStyle(
-                          fontSize: AppTheme.fontSubhead,
-                          fontWeight: FontWeight.w600,
-                          color: isDark
-                              ? Colors.white
-                              : JellyTheme.textPrimaryLight,
+                      // ✅ ① **书名居中** ✓ —— 原来走默认左对齐 ✗（截图 IMG_8595/8606 那种）
+                      // 做法 ✓：只给**标题**包一层 `SizedBox(width: double.infinity)`
+                      //   → 它就有了确定宽度 ✓ → `textAlign: center` 才真正生效 ✓✓
+                      // ⚠️ **不要**改下面 Column 的 `crossAxisAlignment` ✗ ——
+                      //   那会连 `_buildMetaRow`（作者等 ✓）一起居中 ✗，
+                      //   而截图里作者行是**左对齐**的 ✓，要保持 ✓
+                      SizedBox(
+                        width: double.infinity,
+                        child: Text(
+                          widget.book.title,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: AppTheme.fontSubhead,
+                            fontWeight: FontWeight.w600,
+                            color: isDark
+                                ? Colors.white
+                                : JellyTheme.textPrimaryLight,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
                       _buildMetaRow(isDark, fontSize: AppTheme.fontCaption),
@@ -378,15 +393,24 @@ class _JellyBookCardState extends State<JellyBookCard>
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  widget.book.title,
-                  style: TextStyle(
-                    fontSize: AppTheme.fontHeadline,
-                    fontWeight: FontWeight.w700,
-                    color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                // ✅ ① **书名居中**（第二处 ✓ —— 与上面那处同款改法 ✓）
+                //   这里标题更大（fontHeadline + w700 ✓ = 详情/推荐位样式 ✓），
+                //   同样包一层 `SizedBox(width: double.infinity)` 才能让 `textAlign` 生效 ✓
+                //   ⚠️ 下面 Column 的 `crossAxisAlignment` **保持 start** ✗ ——
+                //     让紧随其后的**作者行仍左对齐** ✓（与截图一致 ✓）
+                SizedBox(
+                  width: double.infinity,
+                  child: Text(
+                    widget.book.title,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: AppTheme.fontHeadline,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 6),
                 if (widget.book.author != null &&

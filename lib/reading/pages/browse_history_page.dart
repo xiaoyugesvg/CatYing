@@ -5,13 +5,13 @@ import '../models/book.dart';
 import '../models/comic.dart';
 import '../services/browse_history_service.dart';
 import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
 import '../utils/list_pagination.dart';
 import '../widgets/jelly_book_card.dart';
 import '../widgets/jelly_comic_list_tile.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import 'book_detail_page.dart';
 import 'comic_detail_page.dart';
+import '../widgets/jelly_search_bar.dart';
 
 /// 浏览记录页。
 /// - 从「我的」进入：showTabs=true，顶部漫画/图书切换 + 右侧清理按钮。
@@ -258,7 +258,11 @@ class _ComicHistoryTabState extends State<_ComicHistoryTab> {
     final kw = _keyword.trim().toLowerCase();
     return comics
         .where((c) =>
-            (c.title ?? '').toLowerCase().contains(kw) ||
+            // `Comic.title` 是**非空** String ✓（analyze 报：`?? ''` 是 dead code ✗、
+            // `.toLowerCase()` 的左操作数不可能是 null ✓）→ 去掉多余的 `?? ''` ✓。
+            // 注意下面 `author` / `alias` 的 `?? ''` **要保留** ✓ —— 那两个字段确实是
+            // 可空的 ✓（analyze 对它们没有报警 ✓）
+            c.title.toLowerCase().contains(kw) ||
             (c.author ?? '').toLowerCase().contains(kw) ||
             (c.alias ?? '').toLowerCase().contains(kw))
         .toList();
@@ -330,65 +334,38 @@ class _ComicHistoryTabState extends State<_ComicHistoryTab> {
 
   /// 足迹版顶部搜索栏（与阅读既有页面内筛选框一致：40 胶囊、图标在左）
   Widget _buildSearchBar(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // （原 `final isDark = …` 已删 ✗✓：统一到 `JellySearchBar` 后本处不再需要它 ✓，
+    //   分析器报 "value of the local variable 'isDark' isn't used" ✗ → 已清除 ✓）
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-      child: Container(
-        height: 40,
-        decoration: BoxDecoration(
-          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: TextField(
-          controller: _searchController,
-          onChanged: (v) {
-            setState(() {
-              _keyword = v;
-              _displayCount = _pageSize;
-              if (_scrollController.hasClients) {
-                _scrollController.jumpTo(0);
-              }
-            });
-          },
-          style: TextStyle(
-            fontSize: AppTheme.fontBody,
-            color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-          ),
-          decoration: InputDecoration(
-            isDense: true,
-            filled: false,
-            hintText: widget.footprintMode ? '搜索漫画' : '搜索足迹记录',
-            hintStyle: TextStyle(
-              fontSize: AppTheme.fontBody,
-              color: JellyTheme.textSecondary,
-            ),
-            prefixIcon: Icon(
-              Icons.search_rounded,
-              size: 19,
-              color: JellyTheme.textSecondary,
-            ),
-            prefixIconConstraints:
-                const BoxConstraints(minWidth: 38, minHeight: 38),
-            suffixIcon: _keyword.isEmpty
-                ? null
-                : IconButton(
-                    icon: Icon(
-                      Icons.clear_rounded,
-                      size: 17,
-                      color: JellyTheme.textSecondary,
-                    ),
-                    onPressed: () {
-                      _searchController.clear();
-                      setState(() {
-                        _keyword = '';
-                        _displayCount = _pageSize;
-                      });
-                    },
-                  ),
-            border: InputBorder.none,
-            contentPadding: const EdgeInsets.symmetric(vertical: 10),
-          ),
-        ),
+      child: JellySearchBar(
+        controller: _searchController,
+        // ⚠️ ① **三元文案必须照抄** ✓ —— 两种模式提示不同 ✗
+        //   （足迹模式「搜索漫画」/ 记录模式「搜索足迹记录」✓）
+        hintText: widget.footprintMode ? '搜索漫画' : '搜索足迹记录',
+        // ⚠️ ② **三个动作一个都不能丢** ✓ —— 这是本处最容易被盲换弄坏的地方 ✗：
+        //   ① 过滤 `_keyword = v` ✓
+        //   ② **重置分页** `_displayCount = _pageSize` ✓
+        //   ③ **跳回顶部** `_scrollController.jumpTo(0)` ✓（带 `hasClients` 守卫 ✓）
+        //   只搬 ① 的话：搜索后**不回到顶部**、分页计数也不重置 ✗（很难在验收时发现 ✗）
+        onChanged: (v) {
+          setState(() {
+            _keyword = v;
+            _displayCount = _pageSize;
+            if (_scrollController.hasClients) {
+              _scrollController.jumpTo(0);
+            }
+          });
+        },
+        // ⚠️ ③ 原清空键的判据是 **`_keyword.isEmpty`** ✗（不是 controller ✓）→
+        //   这里照抄原来那三件事 ✓：清 controller + 置空 `_keyword` + **重置分页** ✓
+        onCleared: () {
+          _searchController.clear();
+          setState(() {
+            _keyword = '';
+            _displayCount = _pageSize;
+          });
+        },
       ),
     );
   }

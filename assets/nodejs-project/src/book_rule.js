@@ -634,7 +634,7 @@ function runJs(expr, ctx) {
   try {
     const context = vm.createContext(sandbox);
     execJsLib(context);
-    const script = new vm.Script(`(function(){ return (${expr}); })()`, {
+    const script = new vm.Script(`(function(){ return (${normalizeRhinoArrow(expr)}); })()`, {
       filename: 'book-rule.js',
     });
     return script.runInContext(context, { timeout: 5000 });
@@ -643,7 +643,7 @@ function runJs(expr, ctx) {
     try {
       const context = vm.createContext(sandbox);
       execJsLib(context);
-      const body = String(expr);
+      const body = normalizeRhinoArrow(String(expr));
       // ⚠️ Legado/Rhino 语义：@js 规则返回**最后一条表达式语句**的值。
       // 语句式脚本（`var t=…;var m=…;m?m[1]:'';`）没有 return 关键字，
       // 原实现直接执行 → 返回 undefined → 详情字段（author/kind…）全空。
@@ -666,14 +666,127 @@ function runJs(expr, ctx) {
 /**
  * 在语句式脚本里找"最后一条顶层语句"（跳过字符串/括号内的 ; 与 }）。
  */
+/**
+ * 在语句式脚本里找"最后一条顶层语句"（跳过字符串/括号内的 ; 与 }）。
+ */
+
+/**
+ * ⚠️ Rhino（Legado 执行环境）语法兼容：源脚本常写裸解构箭头参数
+ * `.map([title,id]=>{...})`——Rhino 容忍，V8 严格报
+ * "Malformed arrow function parameter list"。统一补成括号形式
+ * `([title,id])=>`（V8 合法、语义不变）。
+ */
+function normalizeRhinoArrow(code) {
+  return String(code).replace(/(\[[A-Za-z_$][\w$]*(?:\s*,\s*[A-Za-z_$][\w$]*)*\])\s*=>/g, '($1)=>');
+}
+
+/**
+ * ⚠️ 踩坑记录：`.map([title,id]=>{...})` / `.map(function(x){...})` 这类
+ * 「括号内函数体」的 `}`（depth 由 2→1）会被旧判据 `depth===1` 误当
+ * 顶层块结束切分 → 最后一条语句提取成 `})` 畸形 → runJs 报
+ * "Malformed arrow function parameter list"。解法：先剥离所有表达式
+ * 上下文里的函数体（箭头参数 + `=>` + 体 / function(...){...}），
+ * 在剥离后的骨架上找分隔符，再回原文按位置取最后语句。
+ */
+function stripInlineFnBodies(body) {
+  const chars = body.split('');
+  const n = chars.length;
+  const ranges = [];
+  const isWs = (c) => c === ' ' || c === '\t' || c === '\r' || c === '\n';
+  const isOpen = (c) => c === '{' || c === '(' || c === '[';
+  const isClose = (c) => c === '}' || c === ')' || c === ']';
+  for (let i = 0; i < n; i++) {
+    const c = chars[i];
+    if (c === '=' && chars[i + 1] === '>') {
+      // 向前找参数列表起点（(...) 或 [a,b] 解构）
+      let k = i - 1;
+      while (k >= 0 && isWs(chars[k])) k--;
+      let paramStart = -1;
+      if (chars[k] === ')' || chars[k] === ']') {
+        const pair = chars[k] === ')' ? '(' : '[';
+        const close = chars[k];
+        let d = 0;
+        for (let j = k; j >= 0; j--) {
+          if (chars[j] === close) d++;
+          else if (chars[j] === pair) { d--; if (d === 0) { paramStart = j; break; } }
+        }
+      }
+      // 向后找函数体：{...} 平衡 或 表达式体到顶层边界
+      let j = i + 2;
+      while (j < n && isWs(chars[j])) j++;
+      let bodyEnd = -1;
+      if (chars[j] === '{') {
+        let d = 0, q = null;
+        for (let m = j; m < n; m++) {
+          const cc = chars[m];
+          if (q) { if (cc === q && chars[m - 1] !== '\\') q = null; continue; }
+          if (cc === "'" || cc === '"' || cc === '`') { q = cc; continue; }
+          if (cc === '{') d++;
+          else if (cc === '}') { d--; if (d === 0) { bodyEnd = m; break; } }
+        }
+      } else {
+        let d = 0;
+        for (let m = j; m < n; m++) {
+          const cc = chars[m];
+          if (isOpen(cc)) d++;
+          else if (isClose(cc)) { if (d > 0) d--; else { bodyEnd = m - 1; break; } }
+          else if ((cc === ';' || cc === '\n') && d === 0) { bodyEnd = m - 1; break; }
+        }
+      }
+      const a = paramStart >= 0 ? paramStart : i;
+      const b = bodyEnd >= 0 ? bodyEnd : Math.min(i + 1, n - 1);
+      if (b > a) ranges.push([a, b]);
+      i = Math.max(i, b);
+    } else if (c === 'f' && body.slice(i, i + 8) === 'function') {
+      // 仅表达式上下文里的 function(...){...}（前一个非空字符是 . ( [ , = 等）
+      let p = i - 1;
+      while (p >= 0 && isWs(chars[p])) p--;
+      if (p >= 0 && '.([,='.includes(chars[p])) {
+        let j = i + 8;
+        while (j < n && isWs(chars[j])) j++;
+        if (chars[j] === '(') {
+          let d = 0, k = j;
+          for (; k < n; k++) {
+            if (chars[k] === '(') d++;
+            else if (chars[k] === ')') { d--; if (d === 0) break; }
+          }
+          let m = k + 1;
+          while (m < n && isWs(chars[m])) m++;
+          if (chars[m] === '{') {
+            let d2 = 0, e = m, q = null;
+            for (; e < n; e++) {
+              const cc = chars[e];
+              if (q) { if (cc === q && chars[e - 1] !== '\\') q = null; continue; }
+              if (cc === "'" || cc === '"' || cc === '`') { q = cc; continue; }
+              if (cc === '{') d2++;
+              else if (cc === '}') { d2--; if (d2 === 0) break; }
+            }
+            if (e < n) ranges.push([j, e]);
+            i = Math.max(i, e);
+          }
+        }
+      }
+    }
+  }
+  for (const [a, b] of ranges) {
+    for (let i = a; i <= b; i++) {
+      // 只保留换行与分号（语句边界）；`}` 等一律占位，
+      // 避免剥离后的骨架出现孤立 `}` 干扰顶层块判定。
+      if (chars[i] !== '\n' && chars[i] !== ';') chars[i] = ' ';
+    }
+  }
+  return chars.join('');
+}
+
 function splitLastStatement(body) {
+  const skeleton = stripInlineFnBodies(body);
   let depth = 0;
   let inStr = null;
   const seps = [-1];
-  for (let i = 0; i < body.length; i++) {
-    const ch = body[i];
+  for (let i = 0; i < skeleton.length; i++) {
+    const ch = skeleton[i];
     if (inStr) {
-      if (ch === inStr && body[i - 1] !== '\\') inStr = null;
+      if (ch === inStr && skeleton[i - 1] !== '\\') inStr = null;
       continue;
     }
     if (ch === "'" || ch === '"' || ch === '`') { inStr = ch; continue; }
@@ -687,10 +800,19 @@ function splitLastStatement(body) {
     }
     else if (depth === 0 && (ch === ';')) seps.push(i);
   }
-  // 从后往前找最后一段**非空**的顶层语句（结尾 `;` 后为空时回溯）
+  // ⚠️ 取"最后一条顶层语句"，语义要点：
+  //  · 脚本常以无分号尾表达式收尾（如 `JSON.stringify(sort)`），它在
+  //    最后一个分隔符之后 → 必须优先取 tail = (seps[-1], body 结尾)。
+  //    原实现只遍历 (seps[k-1], seps[k])，把尾表达式漏掉、误取成前一条
+  //    .map(...) 语句 → runJs 返回 [null,null]。
+  //  · tail 为空（脚本以 ; 收尾）时再回退取最后一段非空语句。
+  //  · 纯闭合符段（`}`/`})`）不能当语句返回，跳过。
+  const lastSep = seps[seps.length - 1];
+  const tailRaw = body.slice(lastSep + 1).trim();
+  if (tailRaw && !/^[}\])\]]+$/.test(tailRaw)) return { last: tailRaw };
   for (let k = seps.length - 1; k > 0; k--) {
     const seg = body.slice(seps[k - 1] + 1, seps[k]).trim();
-    if (seg) return { last: seg };
+    if (seg && !/^[}\])\]]+$/.test(seg)) return { last: seg };
   }
   return { last: body.slice(seps[0] + 1).trim() };
 }

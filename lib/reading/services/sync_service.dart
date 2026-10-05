@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import '../source/global_proxy.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -131,16 +132,28 @@ class SyncService {
 
   // ── WebDAV ──────────────────────────────────────────────────
 
-  Dio _dio() => Dio(
-        BaseOptions(
-          connectTimeout: const Duration(seconds: 15),
-          receiveTimeout: const Duration(seconds: 30),
-          headers: {
-            'Authorization':
-                'Basic ${base64Encode(utf8.encode('${config.webdavUser}:${config.webdavPass}'))}',
-          },
-        ),
-      );
+  /// ✅ **WebDAV 同步也走「网络代理」**（本轮接上 ✓）—— 这处**一改覆盖两条路** ✓✓：
+  ///   下面的 `put`（**立即备份** ✓）与 `get`（**从云端恢复** ✓）**都用这个 getter** ✓
+  ///   ⇒ 所以只改这里，备份与恢复**同时**受代理开关控制 ✓✓（性价比最高的一处 ✓）。
+  /// 手法 ✓：原来是**表达式体** `=> Dio(...)` ✗（没法"先构造再调用"✓）→ 改成**块体** ✓，
+  ///   与 `zlibrary_service._createDio()` / `download_service._createImageDio()` 同款 ✓ 不发明机制 ✗。
+  /// ℹ️ 安全依据 ✓（**已读源码确认** ✓）：本处**无自定义适配器** ✗✓，只有超时 + 鉴权头 ✓
+  ///   （`Authorization` 在 **Dio 选项层** ✓，与 socket 层适配器互不干扰 ✓ 不会丢 ✓）。
+  /// · 代理**关闭** ✓ → 返回 false ✓ **一字不改** ✓（与从前完全一致 ✓✓）
+  Dio _dio() {
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 30),
+        headers: {
+          'Authorization':
+              'Basic ${base64Encode(utf8.encode('${config.webdavUser}:${config.webdavPass}'))}',
+        },
+      ),
+    );
+    applyGlobalProxy(dio);
+    return dio;
+  }
 
   String get _webdavFullUrl {
     var base = config.webdavUrl.trim();

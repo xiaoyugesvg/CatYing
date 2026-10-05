@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../source/global_proxy.dart';
 
 /// AI 对话服务（OpenAI 兼容 chat/completions）。
 ///
@@ -90,6 +91,13 @@ class AiService extends ChangeNotifier {
         'Authorization': 'Bearer ${apiKey.trim()}',
       },
     ));
+    // ✅ **AI 总结 / 问答也走「网络代理」**（本轮接上 ✓）—— 本服务是**每次调用临时建 Dio** ✓
+    //   （见上面 `final dio = Dio(...)` ✓），所以就在**建好之后**挂 ✓（与 `comic_api` 的 webDio 同款 ✓）。
+    //   ℹ️ 安全依据 ✓：本处**没有自定义适配器** ✗✓（只有超时 + headers ✓，都在 Dio 选项层 ✓）
+    //     → 不存在"挂代理把 UA/鉴权头丢掉"的风险 ✓✓
+    //   ⚠️ 鉴权头 `Authorization` 属于 **Dio 选项层** ✓，与 socket 层适配器互不干扰 ✓（不会丢 ✓）。
+    //   · 代理**关闭** ✓ → 返回 false ✓ **一字不改** ✓（与从前完全一致 ✓✓）
+    applyGlobalProxy(dio);
     try {
       final resp = await dio.post<Map<String, dynamic>>(
         _endpoint,

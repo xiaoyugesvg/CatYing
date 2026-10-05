@@ -17,12 +17,17 @@ class SourceResolveResult {
   /// 命中它的那个音源（用于提示"由 XX 音源提供"）
   final ThirdPartySource? source;
 
+  /// 播放该地址**必须带的请求头**（MusicFree 插件/部分 LX 源会返回）。
+  /// 🔴 不透传到播放器的话，要求 headers 的源会"地址拿到了但播不了"。
+  final Map<String, String> headers;
+
   const SourceResolveResult({
     required this.ok,
     this.url = '',
     this.error = '',
     this.kind = '',
     this.source,
+    this.headers = const {},
   });
 }
 
@@ -79,6 +84,7 @@ class UnblockService {
             url: r.url,
             kind: r.kind,
             source: s,
+            headers: r.headers, // ← 必须透传（见字段注释）
           );
         }
         // 记下每个源的失败原因 —— 全失败时一起展示，
@@ -100,7 +106,13 @@ class UnblockService {
     try {
       final r = await MusicApi.instance.resolveBySource(s, song);
       if (r.ok && r.url.isNotEmpty) {
-        return SourceResolveResult(ok: true, url: r.url, kind: r.kind, source: s);
+        return SourceResolveResult(
+          ok: true,
+          url: r.url,
+          kind: r.kind,
+          source: s,
+          headers: r.headers,
+        );
       }
       return SourceResolveResult(
         ok: false,

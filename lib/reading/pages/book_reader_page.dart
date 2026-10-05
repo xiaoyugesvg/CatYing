@@ -19,6 +19,7 @@ import '../services/book_download_service.dart';
 import '../services/book_font_service.dart';
 import '../services/book_paginator.dart';
 import '../services/book_page_cache_service.dart';
+import '../services/reader_notes_service.dart';
 import '../services/book_parser.dart';
 import '../utils/file_browser.dart';
 import '../services/gbk_txt_parser.dart';
@@ -28,19 +29,24 @@ import '../services/bookshelf_service.dart';
 import '../services/platform_service.dart';
 import '../services/settings_service.dart';
 import '../services/tts_service.dart';
+import '../services/reading_time_service.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/book_page_cover.dart';
 import '../widgets/book_page_curl.dart';
 import '../widgets/pomodoro_button.dart';
 import 'book_prefetch_page.dart';
+import 'notes_and_journey_page.dart';
 import '../../common/theme.dart';
 import '../../common/system_ui.dart';
 
-/// 顶栏「日夜切换」的本地覆盖：0=跟随全局，1=强制浅色，2=强制夜间。
-/// 用静态类存，文件级 getter 可直接读（调用点零改动）。
-class _ReaderDarkOverride {
-  static int value = 0;
-}
+// ── 顶栏「日夜切换」的本地覆盖（0=跟随全局，1=强制浅色，2=强制夜间）──
+// ✗ 原来放在静态类 `_ReaderDarkOverride.value` 里：static 属于整个进程而非
+//   某一本书，于是「在 A 书点夜间 → 打开 B 书也是夜间」**跨书污染** ✗；
+//   而且它初始 0、点过之后就再也回不到 0 → 「跟随全局暗色」被永久绕过 ✗。
+// ✓ 现在改成 `_BookReaderPageState._darkOverride` **实例字段**：随页面
+//   createState / dispose 走完生命周期，换一本书自然重新从 0（跟随全局）开始 ✓。
+//   对应的 `_readerIsDark` 也从文件级 getter 改为 State 的实例 getter，
+//   0 档真的去读全局唯一明暗真源 `AppBrightness.isLight`，不再硬写 1/0 ✓。
 
 /// 顶栏全书搜索的命中条目
 class _SearchHit {
@@ -54,22 +60,6 @@ class _SearchHit {
     required this.preview,
     required this.blockIndex,
   });
-}
-
-/// 图书阅读器明暗：**跟随全局外观**，顶栏日夜按钮可临时覆盖。
-///
-/// ── 原来写死 `false`（永远浅色），后果是"暗色模式对图书阅读完全无效" ──
-///
-/// 当初写死浅色的理由是"仿真翻页为固定纸张图背景，全局暗色下文字翻白配浅纸
-/// 看不清"。但实际 `widgets/book_page_curl.dart` 的**翻页背纸本来就按
-/// `Theme.of(context).brightness` 分了深浅两套**
-///（`:367-368` 的 `0xFF1E1E22` / `0xFFFBF6EC`）——
-/// 也就是说写死浅色反而制造了"深色背纸 + 浅色正文"的错配。
-/// 跟随全局之后，正文底色与翻页背纸同向，才是自洽的。
-bool get _readerIsDark {
-  if (_ReaderDarkOverride.value == 1) return false;
-  if (_ReaderDarkOverride.value == 2) return true;
-  return !AppBrightness.isLight.value;
 }
 
 /// 图书阅读页：EPUB / MOBI / TXT / PDF app 内排版阅读；
@@ -175,6 +165,31 @@ class BookPrefetchedData {
 }
 
 class _BookReaderPageState extends State<BookReaderPage> {
+  /// 顶栏「日夜切换」的本地覆盖：0=跟随全局，1=强制浅色，2=强制夜间。
+  /// 必须是**实例**字段：原来的 static 会跨书残留（见文件顶部说明 ✗）。
+  int _darkOverride = 0;
+
+  /// 图书阅读器明暗：**跟随全局外观**，顶栏日夜按钮可临时覆盖。
+  ///
+  /// ── 原来写死 `false`（永远浅色），后果是"暗色模式对图书阅读完全无效" ──
+  ///
+  /// 当初写死浅色的理由是"仿真翻页为固定纸张图背景，全局暗色下文字翻白配浅纸
+  /// 看不清"。但实际 `widgets/book_page_curl.dart` 的**翻页背纸本来就按
+  /// `Theme.of(context).brightness` 分了深浅两套**
+  ///（`:367-368` 的 `0xFF1E1E22` / `0xFFFBF6EC`）——
+  /// 也就是说写死浅色反而制造了"深色背纸 + 浅色正文"的错配。
+  /// 跟随全局之后，正文底色与翻页背纸同向，才是自洽的。
+  ///
+  /// ✗ 原来它还是文件级 getter、读 `_ReaderDarkOverride` 的 static 值：
+  ///   那个 static 一旦被点过就再也回不到 0，「跟随全局」形同虚设 ✗。
+  /// ✓ 现在是 State 的**实例** getter：0 档真的落到全局唯一明暗真源
+  ///   `!AppBrightness.isLight.value` 上，不硬写 1/0 ✓。
+  bool get _readerIsDark {
+    if (_darkOverride == 1) return false;
+    if (_darkOverride == 2) return true;
+    return !AppBrightness.isLight.value;
+  }
+
   BookContent? _content;
   bool _loading = true;
   String? _error;
@@ -270,7 +285,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
       // 后台分页覆盖后续读块后自动跳转（仅一次，且仅当用户未手动翻页）。
       final flat = _content!.flatBlocks;
       final p = BookReadingProgressService().getProgress(widget.task.bookId);
-      final startBlock = p == null ? 0 : p.blockIndex.clamp(0, flat.length - 1);
+      // 🔴 `clamp(0, -1)` 会**真抛 `ArgumentError`** ✗ —— Dart 的 `num.clamp` 在
+      // `lowerLimit > upperLimit` 时**抛异常**（release 同样抛 ✓，不是 assert ✓，
+      // 已在 SDK 的 `_internal/vm/lib/integers.dart` 核实过 ✓）。
+      // 当 `flat.length == 0`（空书 / 正文为空 / 解析出 0 段落 ✓）时
+      // `upperLimit = -1` ✗ → **阅读器一打开就崩** ✓。
+      // 空的时候直接取 0 ✓（此时 `_pages` 也必为空 ✓，下面不会越界 ✓）
+      final startBlock = (p == null || flat.isEmpty)
+          ? 0
+          : p.blockIndex.clamp(0, flat.length - 1);
       final target = BookPaginator.pageIndexOf(_pages, startBlock);
       if (_pages.isNotEmpty && startBlock > _pages.last.firstBlockIndex) {
         _pendingResumeBlock = startBlock;
@@ -323,11 +346,21 @@ class _BookReaderPageState extends State<BookReaderPage> {
     );
   }
 
+  /// ✅ **阅读时长：本次会话开始的时刻** ✓（`ReadingTimeService` 接线 ✓ —— 为「阅读计划 /
+  ///   阅读热力图」提供真实数据 ✓；此前这两处**完全没有时长数据** ✗）。
+  ///   图书阅读器**没有**漫画那边的防抖保存汇聚点 ✗，所以这里就取"**进入 → 销毁**"整段 ✓，
+  ///   在 [dispose] 里一次性交上去 ✓（`addSession` 内部有 1 秒下限 ✓ 与单次 2 小时上限 ✓，
+  ///   后者正好兜住"忘记退出阅读器"把一天刷爆 ✗✓）。
+  ///   ℹ️ 放在 `dispose()` 正上方是为了**同一个文件里相邻声明与使用** ✓，便于审阅 ✓。
+  DateTime _sessionStamp = DateTime.now();
+
   @override
   void dispose() {
     // 退出阅读器必须停掉朗读，否则会在别的页面继续念
     _tts.stop();
     _tts.onFinished = null;
+    // ✅ 记录本次阅读时长 ✓（按天累计 → 供「阅读计划 / 阅读热力图」✓）
+    ReadingTimeService.instance.addSession(DateTime.now().difference(_sessionStamp));
     PlatformService.onVolumeKey = null;
     PlatformService.setVolumeKeyNav(false);
     // 后台续分页未完：捕获 partial 状态 fire-and-forget 写缓存，下次断点续分页，
@@ -736,7 +769,16 @@ class _BookReaderPageState extends State<BookReaderPage> {
       _paginateTotal = totalChapters;
     });
     final pages = <BookPage>[];
-    final preserve = preserveBlockIndex.clamp(0, allBlocks.length - 1);
+    // 🔴 `clamp(0, -1)` 会**真抛 `ArgumentError`** ✗ —— `num.clamp` 在
+    // `lowerLimit > upperLimit` 时抛异常（release 同样抛 ✓，不是 assert ✓，
+    // 已在 SDK 的 `_internal/vm/lib/integers.dart` 核实 ✓）。
+    // 当 `allBlocks` 为空（空书 / 正文解析出 0 段落 ✓）时上界 = -1 ✗ →
+    // **一进入分页就崩** ✓（与今天修的另一处 `flat.length` 同源同因 ✓）。
+    // 空时取 0 ✓；此时 `paginator` 也没有可分的内容 ✓，
+    // 下面 while 由 `!paginator.finished` 兜住 ✓
+    final preserve = allBlocks.isEmpty
+        ? 0
+        : preserveBlockIndex.clamp(0, allBlocks.length - 1);
     var chapterDone = 0;
     // 首批：增量分到覆盖当前阅读位置（preserve），每批让出 UI
     while (!paginator.finished && paginator.currentBlockIndex <= preserve) {
@@ -1833,6 +1875,53 @@ class _BookReaderPageState extends State<BookReaderPage> {
         style: _typo.paragraphStyle().copyWith(color: textColor),
         strutStyle: _typo.paragraphStrut,
         textHeightBehavior: _typo.textHeightBehavior,
+        // ✅ **本地图书：选中文字即可「划线」**（本会话第 3 轮 ✓ —— 此前顶栏「笔记」只能看 ✓）
+        //   为什么用 `contextMenuBuilder` 而不是长按 ✗：长按已被**选字**占用 ✓（内层优先 ✓），
+        //   硬套要么不触发 ✗、要么把选字弄坏 ✗✗ —— 走**系统选中菜单**才是正路 ✓。
+        //   · 段号 = `entry.blockIndex` ✓✓（第 2 轮已保证**可信**：长段落分块也带同一段号 ✓）
+        //   · 章号/章名 = 由 `chapterStarts` **反查** ✓（`BookContent` 现成提供 ✓）
+        //   · 存储复用 `ReaderNotesService` ✓ ⇒ 与**书源阅读器**同一份笔记 ✓（笔记页能看到 ✓）
+        //   ⚠️ 如实边界 ✓：· 标题块走 `Text` ✗ 不可选 ⇒ 标题划不了 ✓
+        //              · 模型只有段号+文字 ✗（无段内起止偏移 ✓）⇒ 回显是"本段含该文字"级 ✓
+        contextMenuBuilder: (ctx, editable) {
+          final sel = editable.textEditingValue.selection;
+          final picked = sel.isValid && !sel.isCollapsed
+              ? sel.textInside(editable.textEditingValue.text)
+              : '';
+          return AdaptiveTextSelectionToolbar.buttonItems(
+            anchors: editable.contextMenuAnchors,
+            buttonItems: [
+              ...editable.contextMenuButtonItems,
+              if (picked.trim().isNotEmpty)
+                ContextMenuButtonItem(
+                  label: '划线',
+                  onPressed: () {
+                    final cs = _content?.chapterStarts;
+                    var ci = 0;
+                    if (cs != null && entry.blockIndex >= 0) {
+                      for (var i = 0; i < cs.length; i++) {
+                        if (cs[i] <= entry.blockIndex) ci = i;
+                      }
+                    }
+                    final cname =
+                        (_content != null && ci < _content!.chapters.length)
+                            ? _content!.chapters[ci].title
+                            : '';
+                    ReaderNotesService.instance.toggleHighlight(
+                      sourceId: 'local',
+                      sourceName: '本地图书',
+                      bookName: widget.task.title,
+                      chapterIndex: ci,
+                      chapterName: cname,
+                      paragraphIndex: entry.blockIndex,
+                      text: picked.trim(),
+                    );
+                    editable.hideToolbar();
+                  },
+                ),
+            ],
+          );
+        },
       );
     }
     if (block is HeadingBlock) {
@@ -1857,6 +1946,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
             child: _PdfPageImage(
               imageKey: block.imageKey,
               contentWidth: contentWidth,
+              // 日夜覆盖现在是页面实例状态，子 widget 读不到，必须显式传下去 ✓
+              isDark: _readerIsDark,
               loader: loader,
               onLoaded: (k, b) => _content?.images[k] = b,
             ),
@@ -2070,7 +2161,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       tooltip: '书签',
                       visualDensity: VisualDensity.compact,
                       icon: Icon(Icons.bookmark_border_rounded, size: 20, color: iconColor),
-                      onPressed: _showBookmarks,
+                      // 🔴 原来接的是 `_showBookmarks`（**只开面板、不添加**）✗，
+                      // 而真正"加书签"的 `_toggleBookmark`（:2674 附近）**全仓库无任何
+                      // 调用点** ✓ → 于是：点书签图标 → 空态面板 → 面板文案让你
+                      // "点击顶部书签图标收藏当前页" → 又回到空态面板 ✗✗
+                      // **用户永远无法添加书签** ✓（analyze 也一直报
+                      // "The declaration '_toggleBookmark' isn't referenced" ✓）。
+                      // `_toggleBookmark` 内部已自带"有书签则开面板"的分支 ✓，
+                      // 所以直接接它即可，与空态文案的行为一致 ✓
+                      onPressed: _toggleBookmark,
                     ),
                     IconButton(
                       tooltip: '朗读',
@@ -2085,10 +2184,12 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       onPressed: _showBrightnessSheet,
                     ),
                     IconButton(
-                      tooltip: _ReaderDarkOverride.value == 2 ? '切换白天' : '切换夜间',
+                      // ✗ 原来读 static `_ReaderDarkOverride.value`（跨书残留）；
+                      // ✓ 现在读本阅读页实例的 `_darkOverride` ✓
+                      tooltip: _darkOverride == 2 ? '切换白天' : '切换夜间',
                       visualDensity: VisualDensity.compact,
                       icon: Icon(
-                        _ReaderDarkOverride.value == 2
+                        _darkOverride == 2
                             ? Icons.light_mode_outlined
                             : Icons.dark_mode_outlined,
                         size: 20,
@@ -2283,13 +2384,20 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   /// 点听书按钮：正在念就暂停/继续，没在念就从当前章开头念
   Future<void> _toggleTts() async {
+    // 🔴 下面两处 `await`（暂停 / 继续朗读 ✓）之后的 `setState` 都**没有**
+    // `mounted` 检查 ✗ → 页面在这段窗口里被销毁就抛
+    // `setState() called after dispose()` ✓。
+    // 这个场景**真会被触发** ✓：暂停/继续之间用户按返回键离开阅读器 ✓
+    //（不是理论情况 ✗）。两处一起补 ✓
     if (_tts.isSpeaking.value) {
       await _tts.pause();
+      if (!mounted) return;
       setState(() {});
       return;
     }
     if (_tts.isPaused.value) {
       await _tts.resume();
+      if (!mounted) return;
       setState(() {});
       return;
     }
@@ -2638,7 +2746,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
                           title: Text(
                             (b['chapterTitle'] as String?)?.isNotEmpty == true
                                 ? b['chapterTitle'] as String
-                                : '第 ${(b['chapterIndex'] as num?)?.toInt() ?? 0 + 1} 章',
+                                // 🔴 Dart 里 `??` 的优先级**低于** `+` ✓，所以原来写的
+                            // `?.toInt() ?? 0 + 1` 实际等价于 `?.toInt() ?? (0 + 1)`
+                            // → 只有"字段缺失"才得 1 ✗，而**真正的章号 0**（第一项 ✓，
+                            // 0-based ✓）会原样显示 → **"第 0 章"** ✓
+                            //（缺字段时又变成"第 1 章" ✓，两种都错 ✗）。
+                            // 加括号才是本意：**(章号 或 0) + 1** → 1-based 显示 ✓
+                            : '第 ${((b['chapterIndex'] as num?)?.toInt() ?? 0) + 1} 章',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(fontSize: 14, color: fg),
@@ -2699,9 +2813,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
   }
 
   /// 顶栏日夜切换：夜间 ↔ 白天（首次点击进入夜间，再点切回白天）
+  /// ✗ 原来写的是 static `_ReaderDarkOverride.value`：一旦点过就永久留在
+  ///   1/2，换书也带着走，「跟随全局暗色」再也不会生效 ✗。
+  /// ✓ 现在改的是本页实例字段 `_darkOverride`：页面销毁即归零，
+  ///   下次进阅读器/换一本书重新回到 0=跟随全局 ✓。
   void _toggleDayNight() {
     setState(() {
-      _ReaderDarkOverride.value = _ReaderDarkOverride.value == 2 ? 1 : 2;
+      _darkOverride = _darkOverride == 2 ? 1 : 2;
     });
   }
 
@@ -2774,9 +2892,19 @@ class _BookReaderPageState extends State<BookReaderPage> {
     );
   }
 
-  /// 顶栏编辑（划线与笔记）：本地图书暂无划线能力，先占位提示
+  /// 顶栏编辑（划线与笔记）—— **本轮接上真页面** ✓✓（不再是一句占位 toast ✗）
+  ///
+  /// ✅ 原来这里只弹「划线编辑待接入（本地图书）」✗；而**笔记页面本来就有** ✓
+  ///   （`BookNotesPage` ✓ —— 本轮把它从私有 `_BookNotesPage` 改成公开 ✓，
+  ///    5 处引用一次改全 ✓，所以这里能直接复用 ✓）。
+  /// ⚠️ **如实说明** ✓（不夸大 ✗）：本地图书**正文里长按选中 → 划线/批注**仍**需要单独开发** ✗
+  ///   （本页正文是分页渲染的文本块 / PDF 图片 ✓，要另做一套"文字选择 + 块内偏移映射" ✓）。
+  ///   但**查看与管理已有笔记**现在是真的 ✓✓ —— 包括在**书源阅读器**里划的线 ✓（同一个
+  ///   `ReaderNotesService` ✓ 同一份存储 ✓）。
   void _showEditPlaceholder() {
-    BookReaderPage._toast(context, '划线编辑待接入（本地图书）');
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const BookNotesPage()),
+    );
   }
 
   // ---------------- 目录 ----------------
@@ -3550,12 +3678,18 @@ class _BookReaderPageState extends State<BookReaderPage> {
 class _PdfPageImage extends StatefulWidget {
   final String imageKey;
   final double contentWidth;
+
+  /// 是否按夜间反相显示。日夜覆盖已是阅读页的**实例**状态
+  /// （见 `_BookReaderPageState._darkOverride`），这个子 widget 拿不到，
+  /// 只能由父级把 `_readerIsDark` 显式传下来 ✓（传 null 会退回全局或写死 ✗）。
+  final bool isDark;
   final Future<Uint8List> Function(String, double) loader;
   final void Function(String imageKey, Uint8List bytes) onLoaded;
 
   const _PdfPageImage({
     required this.imageKey,
     required this.contentWidth,
+    required this.isDark,
     required this.loader,
     required this.onLoaded,
   });
@@ -3597,7 +3731,9 @@ class _PdfPageImageState extends State<_PdfPageImage> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = _readerIsDark;
+    // ✗ 原来读文件级 `_readerIsDark`（背后是 static 覆盖值）；
+    // ✓ 现在用父级传下来的本次阅读页实例值 ✓
+    final isDark = widget.isDark;
     if (_bytes != null) {
       return Image.memory(
         _bytes!,

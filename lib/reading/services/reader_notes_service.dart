@@ -142,7 +142,15 @@ class ReaderNotesService {
     }
   }
 
+  /// 是否已从磁盘加载过（幂等闩锁，见 [init]）
+  bool _loaded = false;
+
   Future<void> init() async {
+    // 🔴 **必须幂等** ✓：页面在 `initState` 里会反复调它 ✗，而它用磁盘内容
+    // **整体替换** `_items` ✓ → 会把"本次会话中刚建、还没落盘的划线/批注"
+    // **静默回滚** ✗（`_persist` 是异步的，中间窗口就在这儿 ✓）。
+    if (_loaded) return;
+    _loaded = true;
     try {
       final p = await SharedPreferences.getInstance();
       final raw = p.getString(_key);
@@ -158,6 +166,13 @@ class ReaderNotesService {
     } catch (e) {
       _log('加载失败: $e');
     }
+    // ⚠️ "加载完立刻刷新笔记页首帧"这件事**这次没做** ✗：
+    // 本类**不是** `ChangeNotifier`（analyze 当场报 `notifyListeners` 未定义 ✓），
+    // 要让它能通知，得先 `extends ChangeNotifier` 并让
+    // `notes_and_journey_page.dart` 改成监听它 ✓ —— 那是跨文件改动，
+    // 我**宁可只做已验证的这一半**（幂等闩锁 ✓，它修的是"回滚"✗），
+    // 也不留一个编译不过的仓库 ✗。
+    // 遗留：笔记页首帧仍可能为空（下一次 setState 后正常 ✓），已记入待办 ✓
   }
 
   /// 划线/取消划线。返回操作后该位置是否还有笔记。

@@ -457,7 +457,14 @@ class MusicPlayerManager extends ChangeNotifier {
           // 🔴 **关键**：把"这个源自己配的 headers"带上。
           // 很多第三方源必须带 UA/Referer/Cookie 才给流 ——
           // 不透传的表现就是"地址拿到了但播不了"（这条一直缺 ✗）。
-          sourceHeaders = sr.source?.headers ?? const {};
+          //
+          // 优先级：**解析时源现返回的 headers**（`sr.headers`）优先于
+          // 源配置里静态填的（`source.headers`）——
+          // MusicFree 插件的 `getMediaSource` 会**按歌**返回不同 headers
+          //（签名/token 之类），静态配置不可能预先知道。
+          sourceHeaders = sr.headers.isNotEmpty
+              ? sr.headers
+              : (sr.source?.headers ?? const {});
         } else {
           // 都失败：把「内置为什么失败」+「每个源为什么失败」一起说清楚
           final detail = UnblockService.instance.describeFailure();
@@ -479,7 +486,7 @@ class MusicPlayerManager extends ChangeNotifier {
         // 没有可用音源时，明确告知 —— 这是正常业务结果（VIP/独家），不是异常
         final msg = r.noFreeSource ? '这首没有免费音源（可能需要会员）' : builtinMsg;
         AppLog.instance.log('[Music] 取播放地址失败（${song.name}）: $msg'
-            '（第三方音源开关=${SettingsStore.instance.useThirdPartySources.value}，'
+            '（导入的音乐源开关=${SettingsStore.instance.useThirdPartySources.value}，'
             '已启用 ${ThirdPartySourceStore.instance.enabled.length} 个）');
         // 同一条失败连续出现时也要能弹（见上面那段注释）
         lastError.value = msg == lastError.value ? '$msg ' : msg;

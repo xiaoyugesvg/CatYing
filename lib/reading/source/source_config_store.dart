@@ -1,8 +1,17 @@
 // 漫画源配置存储（独立通道，单例）。
 //
-// 负责 SourceDefinition 的本地加载与持久化、远端拉取。软件不自带任何漫画源，
-// 源定义完全云端驱动：仅从文档目录 sources.json（fetchRemote 写入的云端缓存）加载，
-// 无缓存时返回空列表，由上层 UI（搜索页空状态）提示用户填云端地址并更新。
+// 负责 SourceDefinition 的本地加载与持久化、远端拉取。
+//
+// ⚠️ **本段原来写的是**「软件**不自带**任何漫画源，源定义**完全云端驱动**，**仅**从文档目录
+//    sources.json 加载，**无缓存时返回空列表**」✗✗ —— **与代码不符，已改正** ✓：
+//    · 本文件**确有内置兜底** ✓：`_kBundledSourcesPath = 'assets/config/sources.json'` ✓
+//      （`pubspec.yaml:89-90` 已声明 `assets/config/` ✓，那里写着"**出厂内置漫画源（15 个官方源
+//       明文，装上即有源）**"✓）；`loadLocal()` 在文档目录无配置时会**读资产兜底** ✓✓
+//    · 正确优先级 ✓：**文档目录 sources.json（云端更新覆盖层）优先 → 出厂内置源兜底** ✓
+//    · ⚠️ 唯一会"没源"的情形 ✗：用户**主动点过「清空」**✓ 且内置包指纹未变 ✓
+//      （`_kSourcesCleared` + `_kBundledFp` ✓，见 `loadLocal` 里那条 `return []` ✓）
+//      ⇒ 该状态**界面上看不出来** ✗✓ → 需要一个「**恢复内置源**」入口 ✓
+//        （`clearClearedFlag()` 里 `setBool(_kSourcesCleared,false)` ✓ 能力已存在 ✓，只差接 UI ✓）
 //
 // fetchRemote 读用户配置的云端 URL（SettingsService.sourceRepoUrl）：为空返回 null（不拉取，
 // 沿用本地）；非空则 Dio 拉取 sources.json -> 校验 -> saveLocal -> 返回新 defs。
@@ -19,6 +28,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/settings_service.dart';
 import 'source_definition.dart';
+import 'global_proxy.dart';
 
 void _log(String message) {
   if (kDebugMode) {
@@ -49,8 +59,15 @@ class SourceConfigStore {
 
   /// 升级到本版本的一次性迁移：清除文档目录 sources.json 覆盖层。
   ///
-  /// 旧版本可能在本地下沉了过时/自定义的源配置；本版本起源定义完全云端驱动，
-  /// 升级首跑清掉本地覆盖层（无自带源兜底），之后仅靠 fetchRemote 更新。
+  /// 旧版本可能在本地下沉了过时/自定义的源配置；升级首跑清掉本地覆盖层。
+  ///
+  /// ⚠️ 本段原来写「本版本起源定义**完全云端驱动**…（**无自带源兜底**）」✗✗ —— **与代码不符，已改正** ✓：
+  ///   本版本**有出厂内置源兜底** ✓（`_kBundledSourcesPath = 'assets/config/sources.json'` ✓，
+  ///   `pubspec.yaml:89-90` 已声明「出厂内置漫画源（15 个官方源明文，装上即有源）」✓）
+  ///   ⇒ 所以清掉覆盖层之后是「**回到内置源**」✓，**不是**"从此无源"✗（除非用户点过「清空」✓，
+  ///     那种情况用漫画源仓库的「**恢复内置源**」按钮一键回来 ✓✓）。
+  ///   迁移本身仍然**是对的** ✓：旧版本下沉的过时/自定义配置确实该清 ✓
+  ///   （它已备份为 `sources.json.bak` ✓，可人工找回 ✓ 不会不可恢复地丢 ✓）。
   /// 用 SharedPreferences 标记保证仅执行一次（失败不置位，下次重试）。
   Future<void> _migrateOnceIfNeeded() async {
     try {
@@ -217,14 +234,35 @@ class SourceConfigStore {
     }
   }
 
-  /// 删除文档目录覆盖层（清空云端缓存，回到无源状态）。
+  /// 删除文档目录覆盖层（清空**云端缓存/用户导入的覆盖层**，回到"只有内置源"的状态）。
   ///
-  /// 供 [_migrateOnceIfNeeded] 升级迁移调用；软件不自带源，清空后无源直至下次云端更新。
+  /// ⚠️ 本段原来写「**软件不自带源**，清空后无源直至下次云端更新」✗✗ —— **与代码不符，已改正** ✓：
+  ///   本文件在文档目录无配置时**会回退出厂内置源** ✓（`_kBundledSourcesPath` ✓ 见 `loadLocal` ✓）。
+  /// ⇒ 所以清掉覆盖层之后是「**回到内置源**」✓，而不是"无源"✗ —— 除非用户**点过「清空」**✓
+  ///   （那时 `_kSourcesCleared=true` ✓ 才会真的无源 ✓；用 `clearClearedFlag()` ✓ 即可恢复 ✓✓）。
+  ///   ⚠️ 本函数**不是**"恢复内置源"该调用的方法 ✗ —— 它会清掉**用户导入/编辑过的源** ✗✓；
+  ///     要恢复内置源请用 [clearClearedFlag] ✓（只清标记 ✓，不动任何文件 ✓）。
+  /// 供 [_migrateOnceIfNeeded] 升级迁移调用。
   Future<void> resetToLocal() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
       final file = File('${dir.path}/$_kDocFileName');
-      if (await file.exists()) await file.delete();
+      if (await file.exists()) {
+        // 🔴 原来是**直接 delete** ✗ —— 而这份文件正是"用户导入/编辑过的源覆盖层"
+        // （:52 注释也自认"可能下沉了过时/**自定义**的源配置"），删掉后**无从恢复** ✗。
+        // 更糟的是升级迁移会在首跑自动调用它（:55-65），且失败还会下次重试 ✗。
+        // → 先**改名成 .bak 备份**再清空（可人工恢复）✓；
+        //   备份失败就**不删**——宁可留旧覆盖层，也不能不可恢复地删用户数据 ✓
+        try {
+          final bak = File('${dir.path}/$_kDocFileName.bak');
+          if (await bak.exists()) await bak.delete();
+          await file.rename(bak.path);
+          _log('覆盖层已备份为 $_kDocFileName.bak，随后才清除');
+        } catch (e) {
+          _log('备份覆盖层失败 → 跳过本次清除（不删用户数据）: $e');
+          return;
+        }
+      }
       _log('已清除文档目录覆盖层（无源直至云端更新）');
     } catch (e) {
       _log('清除文档目录覆盖层失败: $e');
@@ -250,6 +288,12 @@ class SourceConfigStore {
           responseType: ResponseType.json,
         ),
       );
+      // ✅ **云端源拉取也走「网络代理」**（本轮接上 ✓）—— 这处很关键 ✓：
+      //   `fetchRemote` 就是**从云端仓库拉 sources.json** ✓（决定"漫画源能不能更新"✓）。
+      //   以前它**直连** ✗ → 用户开了代理、源却依然更新不了 ✓（"代理没用"的又一来源 ✓）。
+      //   ℹ️ 安全依据 ✓：本处**无自定义适配器** ✗✓（只有三个基参 ✓）→ 直接挂**安全** ✓✓
+      //   · 代理**关闭** ✓ → 返回 false ✓ **一行不改** ✓（与从前完全一致 ✓✓）
+      applyGlobalProxy(dio);
       final res = await dio.get<dynamic>(url);
       final cfg = _asMap(res.data);
       if (cfg == null) {

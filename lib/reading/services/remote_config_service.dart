@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/constants.dart';
+import '../source/global_proxy.dart';
 
 void _log(String message) {
   if (kDebugMode) debugPrint('[RemoteConfig] $message');
@@ -78,6 +79,11 @@ class RemoteConfigService extends ChangeNotifier {
         receiveTimeout: const Duration(seconds: 5),
       ),
     );
+    // ✅ **云端配置刷新也走「网络代理」**（本轮接上 ✓）—— 与 `source_config_store.fetchRemote` 同款 ✓。
+    //   ℹ️ 安全依据 ✓（**已读源码确认** ✓）：本处**无自定义适配器** ✗✓（只有两个 5s 超时 ✓）
+    //     → 直接挂**安全** ✓✓
+    //   · 代理**关闭** ✓ → 返回 false ✓ **一行不改** ✓（与从前完全一致 ✓✓）
+    applyGlobalProxy(dio);
     final SharedPreferences prefs;
     try {
       prefs = await SharedPreferences.getInstance();
@@ -122,6 +128,24 @@ class RemoteConfigService extends ChangeNotifier {
         _cloudZlibraryUrl = zl;
         changed = true;
         _log('zlibrary_url 云端候选已更新: $zl');
+        // 🔴 原来这里**只写内存 `_cloudZlibraryUrl`、从不落盘** ✗ ——
+        // 而 `init()` 读的是 prefs 键 `_kZlibraryDomain` ✓，那个键
+        // **全仓库没有任何写入方** ✗ → "跨重启记住云端下发的默认域名"
+        // 这件事**完全无效且不报错** ✓（每次启动都退回硬编码 `zh.zlibrary.by` ✓）。
+        // 现在把归一化后的**单个域名**落盘 ✓：数组/单串都取第一个非空项 ✓，
+        // 归一化交给 `Uri.host`（裸域名时 host 为空 → 回退原串 ✓），
+        // 多候选的探测选优仍由 ZlibraryService 负责 ✓，这里只负责"记住" ✓
+        final first = zl is List
+            ? zl
+                .map((e) => e.toString().trim())
+                .firstWhere((e) => e.isNotEmpty, orElse: () => '')
+            : zl.toString().trim();
+        if (first.isNotEmpty) {
+          final host = Uri.tryParse(first)?.host ?? '';
+          final domain = host.isNotEmpty ? host : first;
+          await prefs.setString(_kZlibraryDomain, domain);
+          _log('zlibrary 默认域名已持久化: $domain');
+        }
       }
       return changed;
     } catch (e) {

@@ -1551,7 +1551,22 @@ class InkWashPainter extends CustomPainter {
     // 墨色：浅色模式下是深墨（压淡），深色模式下是浅墨
     final inkBase = isDark ? Colors.white : const Color(0xFF2B2B2B);
 
+    // ⚡ 性能：**整个 paint() 只建一次 shader** ✓（原来每个墨晕各 `createShader` 一次 ✗，
+    //   墨晕越多越慢 ✓）。做法：建一个「**单位圆 + 全不透明**」的 shader ✓，
+    //   靠 canvas 平移/缩放把它放到每个墨晕处 ✓；每个墨晕的**透明度交给 `Paint.color`** ✓。
+    // ✅ **视觉严格等价** ✓：Skia 里 paint 的 alpha 会**乘到 shader 上** ✓ →
+    //   stops `[1, 0.35, 0] × alpha` 恰好等于原来的 `[alpha, 0.35*alpha, 0]` ✓ 逐像素一致 ✓
+    final unitInkShader = RadialGradient(
+      colors: [
+        inkBase,
+        inkBase.withValues(alpha: 0.35),
+        inkBase.withValues(alpha: 0),
+      ],
+      stops: const [0.0, 0.55, 1.0],
+    ).createShader(Rect.fromCircle(center: Offset.zero, radius: 1));
+
     // ── 墨晕：径向渐变，中心略深、边缘全透明 ──
+    final blotchPaint = Paint();
     for (var i = 0; i < _blotchCount; i++) {
       final r1 = _rand(i * 7 + 1);
       final r2 = _rand(i * 7 + 2);
@@ -1570,17 +1585,18 @@ class InkWashPainter extends CustomPainter {
       // 透明度：深色模式稍高（白墨在深底上更不明显）
       final alpha = (isDark ? 0.075 : 0.055) * (0.6 + 0.4 * r4);
 
-      final rect = Rect.fromCircle(center: Offset(cx, cy), radius: radius);
-      final shader = RadialGradient(
-        colors: [
-          inkBase.withValues(alpha: alpha),
-          inkBase.withValues(alpha: alpha * 0.35),
-          inkBase.withValues(alpha: 0),
-        ],
-        stops: const [0.0, 0.55, 1.0],
-      ).createShader(rect);
-
-      canvas.drawCircle(Offset(cx, cy), radius, Paint()..shader = shader);
+      // 复用同一个 shader ✓（平移+缩放到该墨晕；透明度走 paint.color ✓）
+      canvas.save();
+      canvas.translate(cx, cy);
+      canvas.scale(radius);
+      canvas.drawCircle(
+        Offset.zero,
+        1,
+        blotchPaint
+          ..shader = unitInkShader
+          ..color = Colors.white.withValues(alpha: alpha),
+      );
+      canvas.restore();
     }
 
     // ── 墨点：小、慢、极淡 ──

@@ -26,6 +26,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import 'site_config.dart';
 import 'image_restore.dart';
+import 'global_proxy.dart';
 
 void _log(String message) {
   debugPrint('[WebViewImageFetcher] $message');
@@ -202,11 +203,14 @@ class WebViewImageFetcher {
   Future<List<Map<String, String>>> fetchChapters(
     String url,
     String chapterScript,
-    String chapterJsonScript,
-  ) async {
+    String chapterJsonScript, [
+    // ✅ **可选**（本轮新增 ✓）—— 不传 = 与从前**完全一致** ✓（调用点无需改动 ✓ 零破坏 ✓）
+    //   传 `site.chapterClickDom` 时：先点开目录再取章节 ✓（见 `_doFetchChapters` ✓）
+    String clickDom = '',
+  ]) async {
     init();
     final f = _last.then(
-      (_) => _doFetchChapters(url, chapterScript, chapterJsonScript),
+      (_) => _doFetchChapters(url, chapterScript, chapterJsonScript, clickDom),
     );
     _last = f.then((_) {}, onError: (_) {});
     return f;
@@ -215,11 +219,29 @@ class WebViewImageFetcher {
   Future<List<Map<String, String>>> _doFetchChapters(
     String url,
     String chapterScript,
-    String chapterJsonScript,
-  ) async {
+    String chapterJsonScript, [
+    String clickDom = '',
+  ]) async {
     _log('取章节开始: $url');
     // 阶段1：详情页拿 apiUrl + linkBase
     await _loadPage(url);
+    // ✅ **`chapter_click_dom`：先点开目录再取**（本轮实现 ✓）——
+    //   有些站在详情页**不直接渲染**章节列表 ✗，必须先点一下「展开目录」之类的元素 ✓ 列表才出现 ✓。
+    //   · `clickDom` 为空 ✓ → **整段跳过** ✓（与从前完全一致 ✓ 零影响 ✓）
+    //   · 命中 → 记日志 ✓；**未命中也记日志** ✓（不静默 ✗ —— 上机看日志就知道选择器对不对 ✓）
+    //   ⚠️ 点击后给 **1.5s 渲染宽限** ✓：站点各异，我**不假装能判定"目录已出现"** ✗ ——
+    //     只如实记"点击了什么元素"✓；若目录仍未出，下面阶段会照常报
+    //     「chapterScript 未返回 {apiUrl,linkBase}」✓ → 日志里能一眼分清是哪一步的问题 ✓
+    if (clickDom.isNotEmpty) {
+      final ok = await _runAsyncScript('''
+        var el = document.querySelector(${jsonEncode(clickDom)});
+        if (!el) return false;
+        el.click();
+        return true;
+      ''');
+      _log('chapter_click_dom 点击 ${ok == true ? "成功" : "未命中"} : $clickDom');
+      await Future.delayed(const Duration(milliseconds: 1500));
+    }
     // 等 SPA 渲染稳定（chapterDrawerConfig data 属性 SSR 即有，给 JS 就绪余量）
     await Future.delayed(const Duration(milliseconds: 1000));
     final cfg = await _runAsyncScript(chapterScript);
@@ -666,11 +688,24 @@ $scriptBody
             : ResponseType.bytes,
         connectTimeout: const Duration(seconds: 15),
         receiveTimeout: const Duration(seconds: 30),
-        // 404 = 章节结尾，正常返回不抛异常
-        validateStatus: (s) => s != null && s < 500,
+        // 原来为什么坏 ✗：`s < 500` 把 403 这类失败码也算成"成功"，于是代码把
+        // HTML 错误页当图片落盘（拿到响应 ≠ 拿到图片），而且 worker 永远等不到
+        // 那个用来结束循环的 404，只会无限翻下标继续发请求 → 无限发请求、永不返回。
+        // ⚠️ 更正一句容易被误读的说法 ✓：**并发数本来就是 8**（下面 `Future.wait`
+        //   固定起 8 个 worker ✓，并不是"一次放出几百个请求" ✗）；
+        //   真正的病是**循环永不终止** ✗ —— 在飞的确实是 8 个 ✓，但会一直发下去 ✗。
+        // 现在为什么安全 ✓：只有 2xx 才算成功；404 变成 DioException 交由下面
+        // worker 当"章节结尾"处理，403/5xx/超时一律算失败并计入失败阈值。
+        validateStatus: (s) => s != null && s >= 200 && s < 300,
         headers: {..._browserHeaders, 'Referer': site.url},
       ),
     );
+    // ✅ **直下取图也走「网络代理」**（本轮接上 ✓）—— 与漫画下载/漫画 API 同款 ✓。
+    //   ℹ️ 安全依据 ✓：本文件**没有** `httpClientAdapter` / `createHttpClient` ✗✓
+    //     （UA/Referer 都在 `headers` ✓，属于 Dio 选项层 ✓，与 socket 层适配器**互不干扰** ✓✓）
+    //     → 不存在"挂代理把 UA 丢掉"的风险 ✓（那种情况今天已在 `download_service` 识别并规避 ✓）。
+    //   · 代理**关闭** ✓ → 返回 false ✓ **一行不改** ✓（与从前完全一致 ✓✓）
+    applyGlobalProxy(dio);
     enc.Key? aesKey;
     if (site.imgAesKey.isNotEmpty) {
       final kb = utf8.encode(site.imgAesKey);
@@ -707,29 +742,66 @@ $scriptBody
       }
 
       await save(1, first.data);
-      // 8 并发推进到 404 为止
+      // 8 并发推进到 404 为止：Future.wait 起固定 8 个 worker 组成信号量池，
+      // 同一时刻在飞的请求数上限就是 8，不会一次放出几百个请求。
+      // ✅ **`concurrent_rate` 生效**（本轮实现 ✓）—— 原来这里**写死 8** ✗；
+      //   现在：源填了 `> 0` 就用它（并有 **`clamp(1, 8)` 安全上限** ✓ —— 防止某个源
+      //   把并发拉到几十、把站点打死或把自己打死 ✓）；**没填 / 填 0 → 仍是 8** ✓（零影响 ✓）。
+      //   ⚠️ 语义如实说明 ✓：我实现的是「**同时并发数上限**」这一种 ✓（不是"每秒请求数" ✗）。
+      final int kConcurrency = site.concurrentRate > 0
+          ? math.min(8, math.max(1, site.concurrentRate))
+          : 8; // 并发上限（默认 4~8 之间）
+      const int kMaxPatternIndex = 500; // 下标硬上限
+      const int kMaxFailStreak = 8; // 连续失败阈值：判定被拦，停止继续发请求
       var next = 2;
       var end = -1;
       var failed = 0;
+      var failStreak = 0;
+      var aborted = false;
+      // 原来为什么坏 ✗：只有 404 能结束循环（`end > 0 && i > end`），而被拦站点
+      // （403/错误页当 200）永远不返回 404，next 无限自增 → 无限发请求、永不返回。
+      // 现在为什么安全 ✓：三重终止条件 —— 下标硬上限、连续失败阈值、404 结尾；
+      // 且非 2xx 一律判失败，绝不当图片落盘。
       Future<void> worker() async {
         while (true) {
+          if (aborted) break;
           final i = next++;
-          if (end > 0 && i > end) break;
+          if (i > kMaxPatternIndex) break; // 终止条件 1：硬上限
+          if (end > 0 && i > end) break; // 终止条件 3：已探到章节结尾
           try {
             final resp = await dio.get<Object>(urlOf(i));
-            if (resp.statusCode == 404) {
-              if (end < 0 || i < end) end = i;
+            final code = resp.statusCode ?? 0;
+            if (code < 200 || code >= 300) {
+              // 拿到响应 ≠ 拿到图片：非 2xx 不算成功
+              if (code == 404) {
+                if (end < 0 || i < end) end = i; // 404 = 章节结尾（正常终止）
+                continue;
+              }
+              failed++;
+              if (++failStreak >= kMaxFailStreak) aborted = true; // 终止条件 2
+              _log('URL 规律直下第 $i 张 HTTP $code，判失败');
               continue;
             }
+            failStreak = 0;
             await save(i, resp.data);
+          } on DioException catch (e) {
+            final code = e.response?.statusCode;
+            if (code == 404) {
+              if (end < 0 || i < end) end = i; // 404 = 章节结尾（正常终止）
+              continue;
+            }
+            failed++;
+            if (++failStreak >= kMaxFailStreak) aborted = true; // 终止条件 2
+            _log('URL 规律直下第 $i 张失败($code): $e');
           } catch (e) {
             failed++;
+            if (++failStreak >= kMaxFailStreak) aborted = true; // 终止条件 2
             _log('URL 规律直下第 $i 张失败: $e');
           }
         }
       }
 
-      await Future.wait(List.generate(8, (_) => worker()));
+      await Future.wait(List.generate(kConcurrency, (_) => worker()));
       final paths = (byIndex.keys.toList()..sort())
           .map((k) => byIndex[k]!)
           .toList();
@@ -775,6 +847,10 @@ $scriptBody
           },
         ),
       );
+      // ✅ **本地解密取图的那个 Dio 也走「网络代理」**（本轮接上 ✓ —— 本文件第 2 处、也是最后一处 ✓）。
+      //   至此 **WebView 取图链路（直下 + 本地解密）两个 Dio 都受代理开关控制** ✓✓。
+      //   ℹ️ UA/Referer 都在 `headers` ✓（Dio 选项层 ✓）→ 与 socket 层适配器**互不干扰** ✓（不丢 ✓）
+      applyGlobalProxy(dio);
       final keyBytes = utf8.encode(site.imgAesKey);
       if (keyBytes.length < 32) {
         _log('imgAesKey 长度不足 32 字节，放弃本地解密');
@@ -818,7 +894,13 @@ $scriptBody
         }
       }
 
-      final workers = List.generate(math.min(8, urls.length), (_) => worker());
+      // ✅ **AES 站同样受 `concurrent_rate` 控制**（本轮实现 ✓）—— 原来写死 8 ✗；
+      //   没填 → **仍是 8** ✓（与从前完全一致 ✓ 零影响 ✓）；填了 → `clamp(1, 8)` 内取值 ✓
+      final int kAesConc = site.concurrentRate > 0
+          ? math.min(8, math.max(1, site.concurrentRate))
+          : 8;
+      final workers =
+          List.generate(math.min(kAesConc, urls.length), (_) => worker());
       await Future.wait(workers);
       _log(
         '直下解密统计: 明文 $plain, 解密 $decrypted, 失败 $failed / 共 ${urls.length}，'

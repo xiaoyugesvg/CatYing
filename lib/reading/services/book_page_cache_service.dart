@@ -97,7 +97,19 @@ class BookPageCacheService {
     final dir = await getApplicationSupportDirectory();
     final cacheDir = Directory('${dir.path}/book_pagination_cache');
     if (!await cacheDir.exists()) await cacheDir.create(recursive: true);
-    return File('${cacheDir.path}/$bookId.json');
+    // 🔴 **同一类路径穿越** ✗ —— 今天在 `book_content_cache_service` 首次发现 ✓，
+    //   全模块扫出 **3 处** ✓，这是第 3 处 ✓：`bookId` **未净化**直接拼路径 ✓。
+    //   图书 id 是 `book-<url>` ✓ → URL 含 `/` ✓；又因为上面
+    //   `create(recursive: true)` ✓ → 带 `../` 的 bookUrl 能把 JSON 写到
+    //   `book_pagination_cache` **之外** ✗✗。
+    // ✓ 净化：只保留 `[A-Za-z0-9_-]` ✓，其余换 `_` ✓，限长 120 ✓
+    //   （与 `book_content_cache_service._file` / `book_download_service._saveCoverBytes`
+    //     **同一套写法** ✓ —— 三处一起看，避免以后改一处漏两处 ✗）
+    // ⚠️ 副作用（无害 ✓）：文件名变化 → 旧分页缓存读不到 → 重新分页一次 ✓；
+    //   本类的调用方本来就设计了"读不到就回退重排" ✓（见下面 `:103` 的注释 ✓）
+    final safe = bookId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    final name = safe.length <= 120 ? safe : safe.substring(0, 120);
+    return File('${cacheDir.path}/$name.json');
   }
 
   /// 读缓存。返回 null 表示无此 key 或解析失败（调用方回退重排）。

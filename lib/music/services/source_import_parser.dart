@@ -56,6 +56,21 @@ class SourceImportParser {
     final jsonSources = _parseJson(trimmed, fallbackName);
     if (jsonSources != null && jsonSources.isNotEmpty) return _unique(jsonSources);
 
+    // 1.5) **MusicFree 插件**（必须在 LX 之前判，否则会被当普通 JS 脚本）
+    //
+    // MusicFree 插件与 LX 源是两种形态：
+    //   LX 源：`lx.on('request')` / `module.exports = { musicUrl }`
+    //   MusicFree：`module.exports = { platform, getMediaSource, ... }`
+    //             且几乎都 `require('axios')`
+    //
+    // ⚠️ 必须显式标 `kind: 'musicfree'` —— Node 侧虽然也能自动判定，
+    // 但显式标记能避免"看起来像 LX 但其实是 MusicFree"时走错路径
+    //（Node 侧 `kind === 'script'` 是**强制**走 LX 的，不会自动纠正）。
+    if (_looksLikeMusicFree(trimmed)) {
+      final s = _parseMusicFreePlugin(trimmed, fallbackName);
+      if (s.isNotEmpty) return _unique(s);
+    }
+
     // 2) 完整 LX 脚本（优先于"抠 JSON"，否则会丢掉脚本能力）
     if (_isLxScript(trimmed)) {
       final s = _parseLooseScript(trimmed, fallbackName);
@@ -89,6 +104,95 @@ class SourceImportParser {
     var last = seg.last;
     if (last.contains('.')) last = last.substring(0, last.lastIndexOf('.'));
     return last.isEmpty ? '未命名音源' : last;
+  }
+
+  // ============================================================
+  // 1.5) MusicFree 插件
+  // ============================================================
+
+  /// 是不是 MusicFree 插件。
+  ///
+  /// ── 判据（与 Node 侧 `musicfree_adapter.looksLikeMusicFree` 对齐）──
+  /// MusicFree 插件的 `module.exports` 形状是：
+  ///   `{ platform: '名称', author, version, getMediaSource(musicItem, quality), … }`
+  ///
+  /// 所以三个特征：
+  ///   ① 有 `platform:`（MusicFree 的身份标识，LX 源没有这个概念）
+  ///   ② 有取播放地址的方法（`getMediaSource` / `getMusicUrl` / `getMusicInfo`）
+  ///   ③ **不是 LX 源**（`lx.on` / `EVENT_NAMES` 出现就归 LX）
+  ///
+  /// ⚠️ 第 ③ 条很关键：有些 LX 源也会 `require('axios')`，
+  /// 只看 require 会把它们误判成 MusicFree（那边没有 `lx` 对象 → 报错）。
+  static bool _looksLikeMusicFree(String text) {
+    // LX 标志：出现就绝不按 MusicFree 处理
+    final isLx = text.contains('EVENT_NAMES') ||
+        RegExp(r'\blx\s*\.\s*on\b').hasMatch(text) ||
+        text.contains('globalThis.lx');
+    if (isLx) return false;
+
+    final hasPlatform = RegExp(r'platform\s*:').hasMatch(text);
+    final hasGetter =
+        RegExp(r'getMediaSource|getMusicUrl|getMusicInfo').hasMatch(text);
+    final needsAxios = RegExp(r'''require\s*\(\s*['"]axios['"]\s*\)''')
+        .hasMatch(text);
+    final hasModuleExports = text.contains('module.exports') ||
+        RegExp(r'exports\s*\.\s*default').hasMatch(text);
+
+    // ① + ②：标准形态
+    if (hasPlatform && hasGetter) return true;
+    // 有 module.exports + require('axios')：压缩后导出名可能变了，
+    // 但这种组合也几乎一定是 MusicFree 插件（LX 源不需要 axios）
+    if (hasModuleExports && needsAxios) return true;
+    return false;
+  }
+
+  /// 解析 MusicFree 插件 → 存成 `kind: 'musicfree'`
+  ///
+  /// 与 LX 脚本的区别只有两点：
+  ///   · `kind` 标成 `'musicfree'`（Node 侧据此走适配层 + 注入 axios/he）
+  ///   · 名字从 `platform:` 取（LX 脚本一般从注释头 `@name` 取）
+  static List<ThirdPartySource> _parseMusicFreePlugin(
+      String text, String? fallbackName) {
+    var name = _musicFreeName(text) ??
+        (fallbackName?.trim().isNotEmpty == true
+            ? fallbackName!.trim()
+            : 'MusicFree 音源');
+
+    // 音质：MusicFree 插件常在 platform 附近声明，这里给个稳妥默认
+    final quality = _musicFreeQuality(text);
+
+    return [
+      ThirdPartySource(
+        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        name: name,
+        kind: 'musicfree',
+        template: '',
+        script: text,
+        quality: quality,
+      ),
+    ];
+  }
+
+  static String? _musicFreeName(String text) {
+    // module.exports = { platform: "👖裤佬SVIP音源", ... }
+    for (final re in [
+      RegExp(r'''platform\s*:\s*["']([^"']{1,60})["']'''),
+      RegExp(r'''["']platform["']\s*:\s*["']([^"']{1,60})["']'''),
+      RegExp(r'''name\s*:\s*["']([^"']{1,60})["']'''),
+    ]) {
+      final m = re.firstMatch(text);
+      final v = m?.group(1)?.trim();
+      if (v != null && v.isNotEmpty) return v;
+    }
+    return null;
+  }
+
+  static String _musicFreeQuality(String text) {
+    // 插件里偶有 `qualitys: ['128k','320k','flac']` / `quality: '320k'`
+    final m = RegExp(r'''qualitys?\s*:\s*\[?\s*["']([^"']{2,10})["']''')
+        .firstMatch(text);
+    final q = m?.group(1);
+    return (q != null && q.isNotEmpty) ? q : '320k';
   }
 
   // ============================================================
@@ -207,10 +311,22 @@ class SourceImportParser {
   // ============================================================
 
   /// 是不是一份完整 LX 脚本
+  ///
+  /// ⚠️ **`lx.on(...)` 是必须认的**（这是 LX 源最常见的写法）。
+  /// 早期只认 `module.exports` / `SERVER_SCRIPT_CONFIG` / `EVENT_NAMES`，
+  /// 结果「直接用 `lx.on('musicUrl', …)` 注册」的脚本会被判成"无法识别"
+  /// ——而 `星海音乐源` 那种解构写法（`const { on } = globalThis.lx`）
+  /// 连 `lx.on` 字样都没有，只能靠后面 [hasJsBody] 的兜底。
   static bool _isLxScript(String text) =>
       text.contains('module.exports') ||
       text.contains('SERVER_SCRIPT_CONFIG') ||
-      text.contains('EVENT_NAMES');
+      text.contains('EVENT_NAMES') ||
+      text.contains('globalThis.lx') ||
+      _lxMarkerRe.hasMatch(text);
+
+  /// LX 调用标志：`lx.on(` / `lx.send(` / `lx.request(`
+  ///（容忍空格：`lx . on (`）
+  static final RegExp _lxMarkerRe = RegExp(r'\blx\s*\.\s*(?:on|send|request)\s*\(');
 
   /// 脚本法：整份当 script 存起来（保留脚本能力）
   static List<ThirdPartySource> _parseLooseScript(String text, String? fallbackName) {
@@ -221,19 +337,59 @@ class SourceImportParser {
     // 结果连「JS 里嵌了一份 JSON 配置」的文件也被整份当脚本导入，
     // kind 从 keyword 变 script（用户配的模板就失效了）。
     // 现在要求必须有**真正的 LX 脚本特征**才走这条兜底。
+    // ⚠️ 要和 `_isLxScript` 保持一致：漏了 `lx.on(...)` 的话，
+    // 上面 `_isLxScript` 判成"是 LX 脚本"，这里却因为 hasLxMarker=false
+    // 而走 hasJsBody 分支 —— 两条判据不一致时"星海"那类解构脚本
+    //（`const { on } = globalThis.lx` + `on(EVENT_NAMES.request, …)`）
+    // 会掉到最后的 `unsupported`。
     final hasLxMarker = text.contains('module.exports') ||
         text.contains('SERVER_SCRIPT_CONFIG') ||
         text.contains('EVENT_NAMES') ||
-        text.contains('globalThis.lx');
+        text.contains('globalThis.lx') ||
+        _lxMarkerRe.hasMatch(text);
     final hasJsBody = (text.contains('function ') || text.contains('=>')) &&
         (text.contains('return') || text.contains('request'));
     if (!hasLxMarker && !hasJsBody) return const [];
 
-    // 从脚本里找名字
+    // ── 从脚本里找名字（**有严格优先级**）────────────────────────
+    //
+    // ⚠️ 不能随便抓第一个 `name:` —— 实测「星海音乐源」的脚本里有
+    //     const KW_CHANNELS_PREMIUM = [{ name: 'car_conv2', url: … }, …]
+    //   这是**渠道配置的字段**，结果音源在 UI 里显示成了 "car_conv2"
+    //   （真实名字在注释头 `@name 星海音乐源`）✗。
+    //
+    // 优先级：
+    //   ① 注释头 `@name xxx`        —— 作者写给人看的，最可信
+    //   ② `SCRIPT_NAME = 'xxx'`     —— 脚本自己的标识变量
+    //   ③ 顶层 `name:` 只有一个时才用（多个 = 多半是内部配置，放弃）
+    //   ④ fallbackName（文件名/URL）—— 兜底
     var name = fallbackName ?? '未命名音源';
-    final m = RegExp(r'''["']?name["']?\s*[:=]\s*["']([^"']{1,60})["']''')
-        .firstMatch(text);
-    if (m != null) name = m.group(1)!;
+
+    // ① 注释头
+    final header = _extractCommentBlock(text);
+    if (header != null) {
+      final hm = RegExp(r'^\s*[*\s]*@name\s+(.+)$', multiLine: true)
+          .firstMatch(header);
+      final hv = hm?.group(1)?.trim();
+      if (hv != null && hv.isNotEmpty) name = hv;
+    }
+
+    // ② SCRIPT_NAME / SOURCE_NAME
+    if (name == (fallbackName ?? '未命名音源')) {
+      final sm = RegExp(
+              r'''(?:SCRIPT_NAME|SOURCE_NAME|SCRIPT_TITLE)\s*=\s*["']([^"']{1,60})["']''')
+          .firstMatch(text);
+      final sv = sm?.group(1)?.trim();
+      if (sv != null && sv.isNotEmpty) name = sv;
+    }
+
+    // ③ 顶层 name: —— **只有唯一一个**才敢用（多个就是内部配置）
+    if (name == (fallbackName ?? '未命名音源')) {
+      final all = RegExp(r'''["']?name["']?\s*[:=]\s*["']([^"']{1,60})["']''')
+          .allMatches(text)
+          .toList();
+      if (all.length == 1) name = all.first.group(1)!;
+    }
 
     return [
       ThirdPartySource(
@@ -432,6 +588,78 @@ class SourceImportParser {
     return s.length < 2000;
   }
 
+  // ============================================================
+  // 按类型导入（给「洛雪音乐源」「MusicFree 源」两个独立入口用）
+  // ============================================================
+
+  /// 导入并**要求音源类型匹配**。
+  ///
+  /// ── 为什么需要"强制类型"而不是靠自动识别 ────────────────────────
+  /// 界面上有**两个独立入口**（洛雪音乐源 / MusicFree 源）。如果用户在
+  /// "洛雪音乐源"卡里粘了一个 MusicFree 插件，自动识别会**照收**
+  /// （因为解析成功），但用户的意图是"加一个洛雪源" ——
+  /// 结果他会困惑"我明明加在洛雪里，怎么跑 MusicFree 去了"。
+  ///
+  /// 所以这里：
+  ///   · 类型**匹配** → 正常入库，返回 (count, null)
+  ///   · 类型**不匹配** → 不入库，返回 (0, 提示语)，由 UI 提示用户换卡
+  ///
+  /// [expectMusicFree]：true = 期待 MusicFree 插件；false = 期待洛雪(LX)源。
+  static Future<({int count, String? mismatch})> importIntoStoreTyped(
+    String text, {
+    required bool expectMusicFree,
+    String? fallbackName,
+  }) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) {
+      throw const SourceImportException(SourceImportError.empty);
+    }
+
+    // 网址 → 先拉下来（和 importIntoStore 同一套镜像/重试逻辑）
+    final String body;
+    if (_looksLikeUrl(trimmed)) {
+      body = await _fetchUrl(trimmed);
+      fallbackName ??= _nameFromUrl(trimmed);
+    } else {
+      body = trimmed;
+    }
+
+    final list = fallbackName != null
+        ? parseFetched(body, fallbackName)
+        : parse(body);
+    if (list.isEmpty) {
+      throw const SourceImportException(SourceImportError.unsupported);
+    }
+
+    // 类型校验：**只要有一个不匹配就整体拒绝**（避免半对半错更难解释）
+    final mismatchNames = list
+        .where((s) => _kindMatches(s.kind, expectMusicFree) == false)
+        .map((s) => s.name)
+        .toList();
+    if (mismatchNames.isNotEmpty) {
+      final actual = list.first.isMusicFree ? 'MusicFree 插件' : '洛雪音乐源';
+      final want = expectMusicFree ? 'MusicFree 源' : '洛雪音乐源';
+      return (
+        count: 0,
+        mismatch: '这是「$actual」，不是「$want」。请到对应的卡片里导入。'
+      );
+    }
+
+    final n = await ThirdPartySourceStore.instance.addAll(list);
+    debugPrint('[MusicSource] 按类型导入(${expectMusicFree ? "musicfree" : "lx"}) '
+        '${list.length} 条，新增 $n 条');
+    return (count: n, mismatch: null);
+  }
+
+  /// 音源类型是否符合预期
+  ///
+  /// ⚠️ 洛雪一侧接受 `script` **和** `keyword`（模板法也是洛雪生态的合法源），
+  /// MusicFree 一侧**只**接受 `musicfree`。
+  static bool _kindMatches(String kind, bool expectMusicFree) {
+    if (expectMusicFree) return kind == 'musicfree';
+    return kind == 'script' || kind == 'keyword';
+  }
+
   /// 拉取网址内容。
   ///
   /// ⚠️ **不要对 path 再做 `Uri.encodeFull`** ——
@@ -443,15 +671,52 @@ class SourceImportParser {
     if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) {
       throw const SourceImportException(SourceImportError.invalidUrl);
     }
+    // 直连优先；GitHub 系域名在国内被墙，失败后自动走镜像前缀轮询
+    final attempts = _fetchAttempts(uri.toString());
+    Object? lastErr;
+    for (final target in attempts) {
+      try {
+        return await _fetchOnce(target);
+      } catch (e) {
+        lastErr = e; // 继续试下一个镜像，全部失败才抛
+      }
+    }
+    if (lastErr is SourceImportException) throw lastErr;
+    throw SourceImportException(
+        SourceImportError.network, _shortError(lastErr ?? ''));
+  }
+
+  /// 尝试列表：直连 → GitHub 加速镜像（只对 GitHub 系域名生效）
+  static List<String> _fetchAttempts(String url) {
+    final host = Uri.parse(url).host.toLowerCase();
+    final isGithubHost = host.endsWith('raw.githubusercontent.com') ||
+        host == 'github.com' ||
+        host.endsWith('githubusercontent.com') ||
+        host.endsWith('github.io');
+    if (!isGithubHost) return [url];
+    const mirrors = [
+      '', // 直连
+      'https://ghfast.top/',
+      'https://ghproxy.net/',
+      'https://mirror.ghproxy.com/',
+      'https://gh-proxy.com/',
+      'https://ghproxy.cc/',
+    ];
+    return [
+      for (final m in mirrors) m.isEmpty ? url : '$m$url',
+    ];
+  }
+
+  static Future<String> _fetchOnce(String target) async {
     try {
       final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 15),
+        connectTimeout: const Duration(seconds: 12),
         receiveTimeout: const Duration(seconds: 20),
         // 音源站点五花八门，有的返回非 200 但内容是脚本；仍然按内容判断
         validateStatus: (c) => c != null && c >= 200 && c < 400,
         responseType: ResponseType.plain,
       ));
-      final res = await dio.get<String>(uri.toString());
+      final res = await dio.get<String>(target);
       final body = res.data ?? '';
       if (body.trim().isEmpty) {
         throw const SourceImportException(
@@ -461,7 +726,6 @@ class SourceImportParser {
     } on SourceImportException {
       rethrow;
     } catch (e) {
-      // 把网络层的异常翻译成用户能看懂的提示（不要把堆栈甩给用户）
       throw SourceImportException(SourceImportError.network, _shortError(e));
     }
   }

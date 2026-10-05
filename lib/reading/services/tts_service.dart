@@ -8,6 +8,7 @@ import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
 
 import '../models/tts_source.dart';
+import '../source/global_proxy.dart';
 import 'tts_source_store.dart';
 
 /// 语音朗读（听书）。
@@ -74,10 +75,27 @@ class TtsService extends GetxService {
   bool _stopRequested = false;
 
   // ── 网络朗读源（EasyVoice）──────────────
-  final Dio _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 8),
-    receiveTimeout: const Duration(seconds: 25),
-  ));
+  /// 构造 EasyVoice 合成/请求用的 Dio，并**挂上「网络代理」**（本轮接上 ✓）。
+  ///
+  /// 为什么 ✗：**easyVoice 是网络朗读源** ✓（它要 POST `/api/v1/tts/generateJson` 拿 mp3 ✓）——
+  /// 用户开了「网络代理」后**朗读却照样直连** ✗，于是"能搜到书但念不出来"✓。
+  /// 手法与 `zlibrary_service._createDio()` ✓、`comic_api` 构造函数里那处 ✓ **完全一致** ✓
+  /// （先构造 ✓ 再 `applyGlobalProxy` ✓）—— 不发明新机制 ✗。
+  /// ⚠️ 本服务**无自定义适配器/UA** ✓（只有两个超时 ✓）→ 直接挂**安全** ✓✓
+  /// · 代理**关闭** ✓ → 返回 false ✓ **一字不改** ✓（与从前完全一致 ✓✓）
+  static Dio _createDio() {
+    // ⚠️ 不能写 `Dio(const BaseOptions(...))` ✗ —— **`BaseOptions` 不是 const 构造** ✓，
+    //   会报 "The constructor being called isn't a const constructor" ✗（本轮闸门**再次当场抓到** ✓✓）。
+    //   注意里面两个 `const Duration` 是**可以** const 的 ✓（那才是常量 ✓）。
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 8),
+      receiveTimeout: const Duration(seconds: 25),
+    ));
+    applyGlobalProxy(dio);
+    return dio;
+  }
+
+  final Dio _dio = _createDio();
   /// 当前激活的 easyvoice 源（null = 走系统原生朗读）
   TtsSource? _netSource;
   Player? _netPlayer;

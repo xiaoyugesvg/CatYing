@@ -148,7 +148,20 @@ class BookSource {
     final m = Map<String, dynamic>.of(raw);
     if (enabled != null) m['enabled'] = enabled;
     if (order != null) m['customOrder'] = order;
-    if (group != null) m['bookSourceGroup'] = group;
+    if (group != null) {
+      // 🔴 config 型源的 group **读的是 `config.group`** ✗（见 getter :56-62 ✓），
+      // 而这里不看源型、一律写**顶层** `bookSourceGroup` ✗ →
+      // 对 config 源点「设置分组」：toast 说"已归入 X"、界面纹丝不动 ✓、
+      // 下次启动比较 `_items[i].group == group` 恒不成立 ✓（Legado 源读写都是顶层键 ✓
+      // 所以只有 config 源有这个病 ✓）。
+      // 按源型分流：config 源写进 `config` 体内 ✓，其余源维持原样 ✓
+      final c = _configBody;
+      if (c != null) {
+        m['config'] = <String, dynamic>{...c, 'group': group};
+      } else {
+        m['bookSourceGroup'] = group;
+      }
+    }
     return BookSource(raw: m, id: id);
   }
 
@@ -198,6 +211,10 @@ class BookSourceStore {
   BookSourceStore._();
   static final BookSourceStore instance = BookSourceStore._();
 
+  // 注：曾经还有个 `_kBundledInitDone = 'book_sources_bundled_init_done'` 常量，
+  // 声明后**从未被读写** ✗（analyze 长期报 unused ✗）→ 已删除 ✓。
+  // 它只是个 **prefs 键名常量** ✓，删掉**不影响**用户已有的数据 ✓
+  //（那个键仍留在 prefs 里，只是没人再用它了 ✓）
   static const _key = 'book_sources_v1';
   // 出厂内置明文 config 书源（装上即有源，与漫画源同款兜底体验）
   static const _kBundledSourcesPath = 'assets/config/book_sources.json';
@@ -206,7 +223,6 @@ class BookSourceStore {
   // 内置源一次性初始化标记：首次启动补入内置源后置位，
   // 之后用户增删/改名/改规则均以用户状态为准，不再被内置重置。
   // （新版本已由 _kBundledFp 指纹机制接管；保留常量兼容旧数据。）
-  static const _kBundledInitDone = 'book_sources_bundled_init_done';
   // 内置源资产指纹：assets 内置文件内容变化（内置包更新/首次安装）时
   // 重新补入（同 id 跳过、不清已有）；指纹不变则永不重复补入，
   // 用户增删改不受影响。与漫画源 SourceConfigStore 同一套语义。
@@ -245,7 +261,7 @@ class BookSourceStore {
 
   /// 加载 assets 内置书源：明文 config 源（book_sources.json）
   /// + Legado 精选源包（legado_sources.json）。
-  /// 仅在**首次**启动补入（_kBundledInitDone 标记）；之后用户增删/
+  /// 仅在**首次**启动补入（内置补入标记）；之后用户增删/
   /// 改名/改规则均以用户状态为准，内置源不再重复补入或重置。
   ///
   /// V2 指纹机制：以 assets 内容指纹为准 —— 指纹变化（内置包更新/
@@ -306,6 +322,29 @@ class BookSourceStore {
         }
       }
       final before = _items.length;
+      // 🔴 原实现直接 `removeWhere(!builtin.contains(id))`：而 `builtin` 只收
+      // `bookSourceUrl`（见上面 :289）→ **config 型源**（id = `config:<名字>`）
+      // 和**用户自己导入的源**都不在其中 ✗ → 一旦这个"一次性"清理**重试**
+      // （:277 注释明说"失败不置位，下次重试"），用户导入的源会被一并删掉，
+      // 而且**没有任何恢复途径** ✗✗（注释 :278 承诺的"之后导入的新源不受影响"
+      // 只在它成功跑过之后才成立 ✗）。
+      //
+      // 修法：删除前把**将被删除的条目整体备份**进 prefs（可人工恢复）✓；
+      // 备份写不进去就**不删**——宁可留下旧内置残留，也不能不可恢复地删用户数据 ✓
+      final doomed = _items.where((s) => !builtin.contains(s.id)).toList();
+      if (doomed.isNotEmpty) {
+        try {
+          await prefs.setString(
+            'book_sources_pruned_backup_v1',
+            jsonEncode(doomed.map((s) => s.raw).toList()),
+          );
+          debugPrint('[BookSource] 已备份待清理的 ${doomed.length} 个源'
+              '（键 book_sources_pruned_backup_v1），随后才执行清理');
+        } catch (e) {
+          debugPrint('[BookSource] 备份失败 → 跳过本次清理（不删任何源）: $e');
+          return;
+        }
+      }
       _items.removeWhere((s) => !builtin.contains(s.id));
       if (_items.length != before) {
         debugPrint('[BookSource] 清理旧内置书源: $before -> ${_items.length}');

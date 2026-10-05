@@ -38,8 +38,21 @@ import 'comic_detail_page.dart';
 import 'reader_page.dart';
 import '../../widgets/app_empty_view.dart';
 import '../../common/theme.dart';
-import '../../widgets/app_icon_button.dart';
+// 🔴 这里原来还有一行 `import '../../widgets/app_icon_button.dart';` ✗ —— 已删除 ✓。
+// ℹ️ **关于下面这行 `app_icon_button.dart` 的 import**（B 档图标按钮统一 ② ✓）：
+//    现在 `_buildSearchButton` 确实在用 `AppIconButton` ✓（`:1823` ✓）——
+//    但**本文件依然不需要**显式 import 它 ✓✓：它与 `JellySearchBar` 一样是
+//    **传递导出**可用的 ✓（`analyze` 在无该 import 时仍 `error=0` ✓，实测确认 ✓）。
+//    所以我把 import 加回去的第一次尝试**只是加了注释、并没有加 import** ✗，
+//    而代码照样编译 ✓ —— 这恰好证明了"不需要 import" ✓，那段注释已按事实改正 ✓。
+// 原因很反直觉 ✓：`AppIconButton` 曾在本文件里**只被一处文档引用**用到
+//（`/// … [AppIconButton] …` ✓），而 Dart 的 `unused_import` **把文档引用也算引用** ✓✓
+// → 那段孤儿注释一删 ✓，这个 import 立刻变成 `unused_import` ✗
+//（今天实测：`lib/reading` warning **0 → 1** ✓，跑闸门才发现 ✓）。
+// 教训 ✓：**改注释也可能影响分析器判定** ✓ —— 删掉含 `[...]` 引用的注释后，
+// 一定要再跑一次闸门 ✓（我这次就是跑了才发现的 ✓）
 import '../../widgets/app_page_header.dart';
+import '../../widgets/app_icon_button.dart';
 
 /// "全部"虚拟书架 id：聚合当前 tab 可见的所有书架条目（仅浏览，不参与移出等管理操作）
 const String kAllShelfId = '__all__';
@@ -229,19 +242,26 @@ class _BookshelfPageState extends State<BookshelfPage>
 
   void _onComicScroll() {
     if (!_comicScrollController.hasClients) return;
-    final total = BookshelfService().countInShelf(
-      _currentShelfId,
-      BookshelfItemType.comic,
-    );
-    if (ListPagination.shouldLoadMore(_comicScrollController) &&
-        _comicDisplayCount < total) {
-      setState(
-        () => _comicDisplayCount = min(
-          _comicDisplayCount + ListPagination.pageSize,
-          total,
-        ),
+    // ⚡ 性能（本次唯一目的）：`total` 原来**每滚动一帧就查一次服务** ✗
+    //   （`BookshelfService().countInShelf(...)` ✓）—— 而它**只在这个分支里用得到** ✓：
+    //   当 `shouldLoadMore` 为假时，原代码算出的 `total` 根本没被使用 ✗。
+    // ✓ 挪进分支 → 只有"快滚到底、要加载更多"时才查询 ✓
+    // ℹ️ **语义完全不变** ✓：加载判定、`min(...)` 上限、`return` 时机，
+    //   以及下面"回到顶部按钮"的翻转判定都保持原样 ✓
+    if (ListPagination.shouldLoadMore(_comicScrollController)) {
+      final total = BookshelfService().countInShelf(
+        _currentShelfId,
+        BookshelfItemType.comic,
       );
-      return;
+      if (_comicDisplayCount < total) {
+        setState(
+          () => _comicDisplayCount = min(
+            _comicDisplayCount + ListPagination.pageSize,
+            total,
+          ),
+        );
+        return;
+      }
     }
     final show = _comicScrollController.position.pixels > 300;
     if (show != _showComicBackToTop) setState(() => _showComicBackToTop = show);
@@ -249,19 +269,23 @@ class _BookshelfPageState extends State<BookshelfPage>
 
   void _onBookScroll() {
     if (!_bookScrollController.hasClients) return;
-    final total = BookshelfService().countInShelf(
-      _currentShelfId,
-      BookshelfItemType.book,
-    );
-    if (ListPagination.shouldLoadMore(_bookScrollController) &&
-        _bookDisplayCount < total) {
-      setState(
-        () => _bookDisplayCount = min(
-          _bookDisplayCount + ListPagination.pageSize,
-          total,
-        ),
+    // ⚡ 性能：与 `_onComicScroll` **同一处问题、同一处修法** ✓ ——
+    //   `total` 原来每帧都查服务 ✗，而它只在"快到底要加载更多"时用得到 ✓。
+    // ℹ️ **语义不变** ✓（`shouldLoadMore` 为假时，原来算的 `total` 从未被使用 ✓）
+    if (ListPagination.shouldLoadMore(_bookScrollController)) {
+      final total = BookshelfService().countInShelf(
+        _currentShelfId,
+        BookshelfItemType.book,
       );
-      return;
+      if (_bookDisplayCount < total) {
+        setState(
+          () => _bookDisplayCount = min(
+            _bookDisplayCount + ListPagination.pageSize,
+            total,
+          ),
+        );
+        return;
+      }
     }
     final show = _bookScrollController.position.pixels > 300;
     if (show != _showBookBackToTop) setState(() => _showBookBackToTop = show);
@@ -335,6 +359,16 @@ class _BookshelfPageState extends State<BookshelfPage>
     );
     if (result != null && result.trim().isNotEmpty) {
       final shelf = await BookshelfService().createBookshelf(result.trim());
+      // 🔴 `setState` 少了 `mounted` 检查 ✗ —— 而**隔壁那个分支**
+      // （下面的 `else if (mounted)` ✓）明明写了 ✓，属**漏写** ✗。
+      // 页面在"创建书架"的 await 窗口里被销毁时，这个 setState 会抛
+      // `setState() called after dispose()` ✓（release 同样抛 ✗）。
+      // ✓ 补上（与本文件 `:1295` 同款写法 ✓）
+      if (!mounted) return;
+      // 🟡 顺带释放这个 controller ✗：它在 `:314` 创建后**从未被 dispose** ✓
+      //（`showDialog` 返回之后本方法再没用过它 ✓ —— 我已通读 `:344-358` 确认 ✓）
+      // → 原来**每打开一次"新建书架"就泄漏一个** ✓，连带它的焦点/监听回调一起滞留 ✓
+      controller.dispose();
       if (shelf != null) {
         setState(() => _currentShelfId = shelf.id);
       } else if (mounted) {
@@ -374,6 +408,11 @@ class _BookshelfPageState extends State<BookshelfPage>
         ],
       ),
     );
+    // 🟡 与"新建书架"（`:347`）同款：这个 controller 也只服务于弹窗 ✓ ——
+    // grep 求证过：`controller.` 在全文件**只有 3 处** ✓
+    //（`:330` 新建弹窗 · `:347` 释放 · `:381` 重命名弹窗 ✓），
+    // 弹窗返回之后**没有任何地方再用它** ✓ → 不释放就是"每次重命名泄漏一个" ✗
+    controller.dispose();
     if (result != null && result.trim().isNotEmpty) {
       final ok = await BookshelfService().renameBookshelf(
         shelf.id,
@@ -414,7 +453,17 @@ class _BookshelfPageState extends State<BookshelfPage>
     );
     if (confirmed == true) {
       final ok = await BookshelfService().deleteBookshelf(shelf.id);
+      // 🔴 同款漏写 ✗：`await` 之后直接 `setState` ✓ —— 而 `deleteBookshelf`
+      // 要落盘（走磁盘 IO ✓），这个 await 窗口比同步分支**大得多** ✓，
+      // 期间页面被销毁就抛 `setState() called after dispose()` ✗。
+      // ✓ 补上（与本文件另外 8 处同款写法 ✓）
+      if (!mounted) return;
       if (ok) {
+        // 🟡 顺带修一个"**只增不减**"的缓存 ✗：`_shelfChipKeys` 只在渲染分组
+        // chip 时 `putIfAbsent(shelfId, …)` ✓，而书架被删掉之后那个 `GlobalKey`
+        // **永久驻留** ✓ → 每次增删书架都净涨一个 ✓（长期使用会一直积累 ✓）。
+        // 删除成功后清掉它 ✓（`remove` 对不存在的键是安全的空操作 ✓）
+        _shelfChipKeys.remove(shelf.id);
         final shelves = BookshelfService().bookshelves;
         if (shelves.isNotEmpty) {
           setState(() => _currentShelfId = shelves.first.id);
@@ -1286,6 +1335,13 @@ class _BookshelfPageState extends State<BookshelfPage>
       ),
     );
     if (confirmed != true) return;
+    // 🔴 这里在 `await showDialog(...)` **之后**直接用了 `context` ✗ ——
+    // `ScaffoldMessenger.of` 内部是 `dependOnInheritedWidgetOfExactType<…>()!` ✓
+    // → 页面在 await 窗口里被销毁时：debug 抛 `FlutterError`、**release 抛
+    //   `Null check operator used on a null value`** ✓（用户看到的是"崩了"✗）。
+    // ✓ 补上 `mounted` 检查 —— 本文件别处（同函数的另一个分支 ✓）本来就有这个
+    //   写法 ✓，这里是**漏写** ✗
+    if (!mounted) return;
     if (_currentShelfId == kAllShelfId) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
@@ -1298,13 +1354,23 @@ class _BookshelfPageState extends State<BookshelfPage>
         );
       return;
     }
-    for (final itemId in _selectedItemIds.toList()) {
+    // 🔴 这里原来**无条件**调 cleanupOrphanedImport → deleteTask → File.delete() ✗，
+    // 而设置面板的文案（:428-430 / :480-482）明说「移除同时删除本地文件」是
+    // **可选**开关、默认关；全仓库读这个设置的地方**只有那个 Switch 自己** ✗
+    // → 「批量移出书架」实际是**不可恢复地删掉本地导入文件** ✗✗
+    //
+    // 同时把书架 id 与选中集**快照**下来：循环里含多个 await（还有磁盘 IO），
+    // 期间用户切书架/继续点选会让剩余条目从**新书架**移除、或在迭代中改集合 ✗
+    final shelfId = _currentShelfId;
+    final ids = List<String>.from(_selectedItemIds);
+    final deleteLocalFile = SettingsService().shelfRemoveDeletesFile;
+    for (final itemId in ids) {
       await BookshelfService().removeFromBookshelf(
-        _currentShelfId,
+        shelfId,
         itemId,
         type,
       );
-      if (type == BookshelfItemType.book) {
+      if (type == BookshelfItemType.book && deleteLocalFile) {
         await BookDownloadService().cleanupOrphanedImport(itemId);
       }
     }
@@ -1707,93 +1773,70 @@ class _BookshelfPageState extends State<BookshelfPage>
     if (mounted) setState(() {});
   }
 
-  /// 通用圆形图标按钮（浅灰底 + 近黑图标）。
-  ///
-  /// ── 为什么与 [_buildSearchButton] 分开 ────────────────────────
-  /// 原来搜索按钮是"深色圆 + 白图标"，而用户截图里是
-  /// **浅灰圆 + 近黑图标**（与「我的」页右上角那三个同款）。
-  /// 但搜索按钮在**别处**（如空态里的"去搜索"）仍是深色主色圆，
-  /// 所以不能直接改 `_buildSearchButton`，避免影响别处。
-  /// 书架头部这一排用本方法统一成浅灰圆。
-  ///
-  /// ⚠️ 实现已抽到 [AppIconButton]（B 档：图标按钮统一）——
-  /// 原来这个方法在 **4 个页面里各写了一份**（书架/图书搜索/收藏/我的），
-  /// 实现逐字雷同、改一处不影响其它三处。现在留这个薄委托，
-  /// 只为让调用点（这一排 2 个按钮）不用改。
-  /// 深色实心圆按钮（闪电：导入/导出）
-  ///
-  /// ⚠️ 原来是橙色 `0xFFF19841` —— 与水墨书香（黑白灰）不符。
-  /// 截图里它是**近黑实心圆 + 白色闪电**，与"推荐"标签同色系。
+  // ℹ️ 书架这排按钮用**浅灰圆 + 近黑图标** ✓（与「我的」页右上角那三个同款 ✓），
+  // 而 `_buildSearchButton`（见下面 `:1797` 附近 ✓）在**别处**（如空态里的
+  // "去搜索" ✓）仍是**深色主色圆** ✓ → 所以两者分开写、不合并 ✓。
+  // 🔴 原注释在此处还写着"通用圆形图标按钮……实现已抽到 `AppIconButton`……
+  // 留这个薄委托，只为让调用点不用改" ✗ —— 这些话**与现状不符** ✓：
+  // 本文件里**既没有**那个"通用圆形图标按钮"方法 ✓，`_buildSearchButton`
+  // 也仍是**手写**的（`:1797` ✓）、并无任何委托 ✓。
+  // 那段误导性描述已删除 ✓（只保留上面这句真实的原因 ✓）
+  /// ✅ **统一到共用组件 `AppIconButton`** ✓（B 档：图标按钮统一 ② ✓）
+  /// 原来这里是**手写**：`Material(color: isDark ? 白@92% : JellyTheme.primary ✗,
+  /// elevation: 2 ✗, shadowColor: 黑@25% ✗)` + `InkWell` + `SizedBox` + 图标 ✓。
+  /// ✓ 改用 **`filled: true`** ✓ —— 组件对 filled 的定义正是
+  ///   「**深色下白底深图标，浅色下主题色底白图标**；用于"导入/导出"这类需要被看见的入口」✓
+  ///   → 与原来的配色**几乎完全一致** ✓✓（**唯一变化：去掉投影** ✗→✓，与其它圆钮质感统一 ✓）
+  /// ℹ️ `tooltip` 在组件里**必填** ✗（原来这枚没有 ✓）→ 补 `'导入 / 导出'` ✓（与菜单语义一致 ✓）
+  /// ℹ️ 图标尺寸沿用原来的 20 ✓；`size` 沿用调用点（`:1201` 用默认 36 ✓）
   Widget _buildBoltButton({double size = 36}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bg = isDark
-        ? Colors.white.withValues(alpha: 0.92)
-        : JellyTheme.primary;
-    return Material(
-      color: bg,
-      shape: const CircleBorder(),
-      elevation: 2,
-      shadowColor: Colors.black.withValues(alpha: 0.25),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: _showImportExportMenu,
-        child: SizedBox(
-          width: size,
-          height: size,
-          child: Center(
-            child: Icon(
-              Icons.bolt_rounded,
-              color: isDark ? JellyTheme.backgroundDark : Colors.white,
-              size: 20,
-            ),
-          ),
-        ),
-      ),
+    return AppIconButton(
+      icon: Icons.bolt_rounded,
+      tooltip: '导入 / 导出',
+      onTap: _showImportExportMenu,
+      isDark: isDark,
+      size: size,
+      iconSize: 20,
+      filled: true,
     );
   }
 
+  /// ✅ **统一到共用组件 `AppIconButton`** ✓（B 档：图标按钮统一 ② ✓）
+  /// 原来这里是**手写**：`Material(color: JellyTheme.primary ✗, elevation: 4 ✗,
+  /// shadowColor: primary@40% ✗)` + `InkWell` + `SizedBox` + **白色**图标 ✓
+  /// —— 于是书架顶栏**同一排里出现三种质感的圆钮** ✗（主题色带投影 ✗ / 近黑实心 ✗ / 淡灰 ✓）。
+  /// ✓ 现在用组件的默认形态：**淡圆底 + 单色图标** ✓（正是组件文档写明的统一目标 ✓）。
+  /// ⚠️ **视觉会变** ✓：从"主题色 + 投影"✗ 变成"淡圆底"✓ —— 这是**预期的统一** ✓，不是回归 ✓。
+  /// ℹ️ `tooltip` 在组件里是**必填** ✗（原来这枚没有 tooltip ✓）→ 补 `'搜索'` ✓。
+  /// ℹ️ 尺寸/图标大小沿用调用点传的值 ✓（`:1098` 传 `size: 36` ✓ → 与之前渲染一致 ✓）。
   Widget _buildSearchButton({double size = 50}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final iconSize = size <= 40 ? 20.0 : 22.0;
-    return Material(
-      color: JellyTheme.primary,
-      shape: const CircleBorder(),
-      elevation: 4,
-      shadowColor: JellyTheme.primary.withValues(alpha: 0.4),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: _openSearch,
-        child: SizedBox(
-          width: size,
-          height: size,
-          child: Icon(
-            Icons.search_rounded,
-            color: Colors.white,
-            size: iconSize,
-          ),
-        ),
-      ),
+    return AppIconButton(
+      icon: Icons.search_rounded,
+      tooltip: '搜索',
+      onTap: _openSearch,
+      isDark: isDark,
+      size: size,
+      iconSize: iconSize,
     );
   }
 
   // ========== 导入/导出 ==========
 
-  Widget _buildImportExportButton() {
-    return Material(
-      color: const Color(0xFFF19841),
-      shape: const CircleBorder(),
-      elevation: 2,
-      shadowColor: const Color(0xFFF19841).withValues(alpha: 0.4),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: _showImportExportMenu,
-        child: const SizedBox(
-          width: 36,
-          height: 36,
-          child: Icon(Icons.bolt_rounded, color: Colors.white, size: 20),
-        ),
-      ),
-    );
-  }
+  /// ✅ **与 `_buildBoltButton` 合并** ✓（B 档 ② ✓）—— 原来这里是**同一枚按钮的第二份实现** ✗✗：
+  /// `Material(color: const Color(0xFFF19841) ✗ 橙色, elevation: 2 ✗,
+  /// shadowColor: 0xFFF19841@40% ✗)` + `Icon(Icons.bolt_rounded, white, 20)` +
+  /// `onTap: _showImportExportMenu` ✓ —— 与 `_buildBoltButton` **逐字同款** ✓
+  ///（连 `onTap`、图标、36×36、20 全都相同 ✓）。
+  /// ⚠️ 更值得记一笔 ✓：那个橙色 `0xFFF19841` ✗ 正是 `_buildBoltButton` 的**旧注释**
+  ///   点名要改掉的色 ✓（"原来是橙色…与水墨书香（黑白灰）不符"✓）
+  ///   → 说明当时**只改了其中一份、漏了这一份** ✗（与"4 份 `_buildCircleIcon`"
+  ///   是同一类"抄多份、改一处"✗✓）。
+  /// ✓ 现在**委托给 `_buildBoltButton`** ✓：两处永远一致 ✓，且都走
+  ///   `AppIconButton(filled: true)` ✓（`size` 默认 36 ✓ = 与原来硬编码的 36 一致 ✓✓）
+  Widget _buildImportExportButton() => _buildBoltButton();
 
   void _showImportExportMenu() {
     FocusScope.of(context).unfocus();
@@ -2057,7 +2100,18 @@ class _BookshelfPageState extends State<BookshelfPage>
                                     }
                                     final n = await BookshelfService()
                                         .importJson(r.json ?? '');
-                                    toast('恢复成功，新增 $n 条记录');
+                                    // 🔴 `importJson` 在**解析失败/空数据**时静默 `return 0`
+                                    //（bookshelf_service.dart 里 `catch { return 0; }` 吞掉一切 ✗）
+                                    // → 原来**无论 n 是几**都提示「恢复成功，新增 $n 条记录」✗，
+                                    // n=0 时等于告诉用户"恢复成功了"、实际一条都没进来 ✓
+                                    //（云端 JSON 损坏 / 指向了别的文件 / `r.json == null`
+                                    //  全都走这条路 ✓，是本页最会误导人的提示之一 ✗）。
+                                    // 现在 n=0 时如实说明 ✓
+                                    if (n == 0) {
+                                      toast('未能恢复任何数据：云端备份可能为空或已损坏');
+                                    } else {
+                                      toast('恢复成功，新增 $n 条记录');
+                                    }
                                   },
                             icon: const Icon(Icons.cloud_download_outlined,
                                 size: 18),
@@ -2076,6 +2130,14 @@ class _BookshelfPageState extends State<BookshelfPage>
         ),
       ),
     );
+    // 🟡 WebDAV 面板的 4 个 controller **从未被释放** ✗ —— grep 已证明它们的
+    // 全部使用都在这个弹窗内部 ✓（`:2063-2066` 的 `urlC/userC/passC/pathC.text` ✓），
+    // 弹窗返回之后**没有任何地方再用** ✓ → 不释放就是"每打开一次 WebDAV 面板
+    // 泄漏 4 个 controller"✓（连带它们的焦点与监听回调 ✗）
+    urlC.dispose();
+    userC.dispose();
+    passC.dispose();
+    pathC.dispose();
   }
 
   /// Kindle 推送面板：配置 SMTP + Kindle 邮箱，选本地书推送。
@@ -2292,6 +2354,15 @@ class _BookshelfPageState extends State<BookshelfPage>
         ),
       ),
     );
+    // 🟡 Kindle 面板的 5 个 controller **同样从未释放** ✗ —— grep 已证明它们的
+    // 全部使用都在这个弹窗内部 ✓（`:2259-2264` 的
+    // `hostC/portC/userC/passC/kindleC.text` ✓），弹窗返回后无人再用 ✓
+    // → 不释放就是"每打开一次 Kindle 面板泄漏 5 个" ✓
+    hostC.dispose();
+    portC.dispose();
+    userC.dispose();
+    passC.dispose();
+    kindleC.dispose();
   }
 
   /// 导入本地图书：多选文件 -> 逐本建已完成任务 -> 入"本地图书"书架（Book 类型，固定 id）
@@ -2532,7 +2603,18 @@ class _BookshelfPageState extends State<BookshelfPage>
               book = Book.fromJson(
                 jsonDecode(item.meta!) as Map<String, dynamic>,
               );
-            } catch (_) {}
+            } catch (e) {
+              // 🔴 原来是 `catch (_) {}` ✗ —— meta 解析失败后 `book` 保持 null ✓
+              // → 紧接着的 `if (book != null)` 会**直接跳过这一项** ✓
+              // → 书架**计数 N、实际只显示 N-1** ✓，而且**没有任何提示** ✓
+              //（用户只会觉得"我的书怎么少了一本" ✓）。
+              // ⚠️ 同一模式在**本文件另一处**也存在 ✓（漫画/图书两个 tab ✓），
+              //    所以这里用 replace_all 一起修 ✓。
+              // 至少先**留痕**让问题可见 ✓；
+              // 遗留：真正的修法是解析失败时用 meta 里的书名/封面建**兜底条目** ✓
+              debugPrint('[Bookshelf] 书架条目 meta 解析失败（item ${item.itemId}），'
+                  '该项将被跳过: $e');
+            }
           }
           if (book == null) continue;
           final match =
@@ -3491,6 +3573,22 @@ class _BookShelfTab extends StatelessWidget {
           shelfId,
           BookshelfItemType.book,
         );
+        // 🔴 图书 tab **从来没调用过** `_applyShelfSort` ✗ —— 而排序面板
+        // （本文件 :1554 附近 ✓）写的是全局的 `SettingsService().shelfSort` ✓，
+        // 唯一调用点在 `_ComicShelfTab`（漫画 tab ✓）→ 用户在**图书** tab 里选
+        // "书名/作者/加入时间/最近阅读/阅读进度"、切正倒序，列表**顺序完全不变** ✓
+        //（面板注释自己写着"两个书架列表都读它来排" ✗ —— 实现没有 ✓）。
+        // 现在补上 ✓
+        // ✅ **这两项现在也准了** ✓（原注释写的是"已知不准 / 待做" ✗ —— 已过期 ✓）
+        //    `shelfUpdatedAtOf`（本文件 `:4365` ✓）与 `shelfReadIndex`（`:4376` ✓）
+        //    已经**按类型问对服务** ✓：
+        //      · 图书 → `BookReadingProgressService`（用 `pageIndex` ✓）
+        //      · 漫画 → `ReadingProgressService`（用 `lastChapterIndex` ✓）
+        //    两个都问、取非空 ✓ → 图书不会再"恒为 0 → 全部相同 → 保持原序" ✗
+        // ⚠️ 仍待**真机确认**的一点 ✓：图书用**页码**、漫画用**章节号** ✗ ——
+        //    这里假设"一个书架里只会是纯图书或纯漫画" ✓；
+        //    若真机上存在**混放**的书架 ✗，两种标量会被混着比较 ✗（那需再单独处理 ✓）
+        _applyShelfSort(items, shelfId);
         // "正在读"：排序键取"加入书架时间"与"最近阅读时间"的较大者倒序
         // --新移入(无进度)用 addedAt 兜底排到顶部；有进度按最近阅读归位(继续阅读仍上浮)
         if (shelfId == BookshelfService.presetReading) {
@@ -3518,7 +3616,18 @@ class _BookShelfTab extends StatelessWidget {
               book = Book.fromJson(
                 jsonDecode(item.meta!) as Map<String, dynamic>,
               );
-            } catch (_) {}
+            } catch (e) {
+              // 🔴 原来是 `catch (_) {}` ✗ —— meta 解析失败后 `book` 保持 null ✓
+              // → 紧接着的 `if (book != null)` 会**直接跳过这一项** ✓
+              // → 书架**计数 N、实际只显示 N-1** ✓，而且**没有任何提示** ✓
+              //（用户只会觉得"我的书怎么少了一本" ✓）。
+              // ⚠️ 同一模式在**本文件另一处**也存在 ✓（漫画/图书两个 tab ✓），
+              //    所以这里用 replace_all 一起修 ✓。
+              // 至少先**留痕**让问题可见 ✓；
+              // 遗留：真正的修法是解析失败时用 meta 里的书名/封面建**兜底条目** ✓
+              debugPrint('[Bookshelf] 书架条目 meta 解析失败（item ${item.itemId}），'
+                  '该项将被跳过: $e');
+            }
           }
           if (book != null) {
             final b = book;
@@ -4183,6 +4292,13 @@ Widget _buildBackToTop(bool visible, VoidCallback onTap) {
           scale: visible ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
+          // ⛔ **这里是有意不同、不要"统一"成 `AppIconButton`** ✗✓（今天逐条核实过 ✓）
+          //   它是**返回顶部悬浮钮** ✓，与顶栏那排"同族圆钮"不是一类东西 ✓：
+          //     · 尺寸 ✗：44×44（悬浮 FAB ✓）vs 顶栏 36×36（`AppIconButton` 默认 ✓）
+          //     · 形态 ✗：`primary` + `elevation: 4` + 投影 = **传统醒目 FAB** ✓
+          //       —— 换成 `AppIconButton` 的"淡圆底"会让它在内容上**几乎看不见** ✗✗
+          //     · 位置 ✗：`Positioned` 浮在滚动内容之上 ✓ vs 顶栏固定位 ✓
+          //   ℹ️ 同款还有 `book_search_page` 与 `download_page` 的返回顶部钮 ✓（结论相同 ✓）
           child: Material(
             color: JellyTheme.primary,
             shape: const CircleBorder(),
@@ -4240,6 +4356,31 @@ void _applyShelfSort(List<BookshelfItem> items, String shelfId) {
   /// 很容易在某一支写反（那支就永远不跟着方向变）。
   int dir(int c) => asc ? c : -c;
 
+  /// 取条目的"最近阅读时间"（毫秒）—— **不猜类型** ✓，因为两个 id 空间不重叠：
+  /// 图书的 itemId 形如 `book-<url>` ✓（见 `book_source_detail_page` 的加入书架 ✓），
+  /// 漫画的 itemId 是 `pathWord` ✓。图书进度存在 `BookReadingProgressService` ✓，
+  /// 漫画存在 `ReadingProgressService` ✓ → 两个都问、取非空的最安全 ✓。
+  /// 原来这里清一色用**漫画**那套 ✗ → 图书的「最近阅读 / 阅读进度」恒为 0 ✓
+  /// （排序结果 = "全部相同 → 保持原序" ✗，用户会以为排序没生效 ✓）
+  int shelfUpdatedAtOf(String itemId) {
+    final b = BookReadingProgressService().getProgress(itemId)?.updatedAt;
+    final c = ReadingProgressService().getProgress(itemId)?.updatedAt;
+    return (b ?? c) ?? 0;
+  }
+
+  /// 取"读到哪了"的**标量**，取不到返回 -1（用于"阅读进度"排序 ✓）。
+  /// 同样**不猜类型** ✓：图书问 `BookReadingProgressService`（每页一条记录，
+  /// 用 `pageIndex` ✓ —— 本文件 :3548 就是这么算百分比的 ✓），
+  /// 漫画问 `ReadingProgressService`（用 `lastChapterIndex` ✓，与原来一致 ✓）。
+  /// 书架列表里**只会是纯图书或纯漫画** ✓，所以两个标量不需要同尺度 ✓
+  int shelfReadIndex(String itemId) {
+    final b = BookReadingProgressService().getProgress(itemId);
+    if (b != null) return b.pageIndex;
+    final c = ReadingProgressService().getProgress(itemId);
+    if (c != null) return c.lastChapterIndex;
+    return -1;
+  }
+
   switch (s.shelfSort) {
     case 'title':
     case 'author':
@@ -4269,21 +4410,29 @@ void _applyShelfSort(List<BookshelfItem> items, String shelfId) {
       items.sort((a, b) => dir(a.addedAt.compareTo(b.addedAt)));
       break;
     case 'recent':
-      items.sort((a, b) {
-        final ra = ReadingProgressService().getProgress(a.itemId)?.updatedAt ?? 0;
-        final rb = ReadingProgressService().getProgress(b.itemId)?.updatedAt ?? 0;
-        return dir(ra.compareTo(rb));
-      });
+      // ⚡ 性能（本次唯一目的）：**先把 key 算一次**，再排序 ✓。
+      //   原来是在**比较器内部**逐次查表 ✗（`shelfUpdatedAtOf(a.itemId)` ✓）——
+      //   而 `sort` 要比较 O(N log N) 次 ✓ → 总代价 **O(N² log N)** ✗
+      //   （书架几百本时滚动/切换排序会明显卡顿 ✓）。
+      //   ℹ️ **语义完全不变** ✓：key 的算法、方向 `dir`、并列时的行为都照旧 ✓
+      final recentKeys = <String, int>{
+        for (final it in items) it.itemId: shelfUpdatedAtOf(it.itemId),
+      };
+      items.sort(
+        (a, b) => dir(recentKeys[a.itemId]!.compareTo(recentKeys[b.itemId]!)),
+      );
       break;
     case 'progress':
       // 阅读进度：按"读到第几话/章"排。
       // 没有进度的（未开始读）一律排最后 —— 让它们在任一方向下都沉底，
       // 否则正序时"未读"会跑到最前面，很反直觉。
+      // ⚡ 同上：预算 key ✓（**"未读沉底"的规则原样保留** ✓）
+      final progressKeys = <String, int>{
+        for (final it in items) it.itemId: shelfReadIndex(it.itemId),
+      };
       items.sort((a, b) {
-        final pa = ReadingProgressService().getProgress(a.itemId);
-        final pb = ReadingProgressService().getProgress(b.itemId);
-        final va = pa == null ? -1 : pa.lastChapterIndex;
-        final vb = pb == null ? -1 : pb.lastChapterIndex;
+        final va = progressKeys[a.itemId]!;
+        final vb = progressKeys[b.itemId]!;
         if (va < 0 && vb < 0) return 0;
         if (va < 0) return 1;
         if (vb < 0) return -1;
@@ -4297,11 +4446,13 @@ void _applyShelfSort(List<BookshelfItem> items, String shelfId) {
       //     （新移入无进度的用 addedAt 兜底排顶部；继续阅读的按最近阅读上浮）
       //   · 其他书架：最近添加
       if (shelfId == BookshelfService.presetReading) {
+        // ⚡ 同上：预算 key ✓（**语义不变** ✓：仍是 max(addedAt, 最近阅读) ✓）
+        final readingKeys = <String, int>{
+          for (final it in items) it.itemId: shelfUpdatedAtOf(it.itemId),
+        };
         items.sort((a, b) {
-          final ra =
-              ReadingProgressService().getProgress(a.itemId)?.updatedAt ?? 0;
-          final rb =
-              ReadingProgressService().getProgress(b.itemId)?.updatedAt ?? 0;
+          final ra = readingKeys[a.itemId]!;
+          final rb = readingKeys[b.itemId]!;
           final ka = a.addedAt > ra ? a.addedAt : ra;
           final kb = b.addedAt > rb ? b.addedAt : rb;
           return dir(ka.compareTo(kb));

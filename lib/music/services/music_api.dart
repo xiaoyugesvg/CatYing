@@ -90,15 +90,26 @@ class MusicResolveResult {
   final bool ok;
   final String url;
 
-  /// 'keyword' | 'script'
+  /// 'keyword'（模板法）| 'script'（LX 脚本）| 'musicfree'（MusicFree 插件）
   final String kind;
   final String message;
+
+  /// 播放该地址**必须带的请求头**。
+  ///
+  /// 🔴 很多第三方源（尤其 MusicFree 插件）返回
+  ///   `{ url, headers: { 'User-Agent': …, 'Referer': … } }`
+  /// 而**不带这些头就拿不到流**（表现为"地址拿到了但播不了 / 403"）。
+  ///
+  /// 这个字段原来缺失 → Node 侧 `normalizeMedia` 解析出来的 headers
+  /// 在这里被**丢掉**，插件要求 headers 的源等于白解析。
+  final Map<String, String> headers;
 
   const MusicResolveResult({
     required this.ok,
     this.url = '',
     this.kind = '',
     this.message = '',
+    this.headers = const {},
   });
 }
 
@@ -356,8 +367,10 @@ class MusicApi {
   /// 「音乐数据加载失败 · 点击重试」提示条是**死 UI** ✗
   ///（`_doCall` 把一切异常吞成 `{ok:false}`，不抛异常，所以 try/catch 永远 catch 不到 ✓）。
   /// 现在把 `ok` 单独带出来 ✓；`hotSearch()` 保持原样，既有调用方不受影响 ✓。
-  Future<({bool ok, List<String> list, String error})> hotSearchResult() async {
-    final r = await _call({'action': 'hotSearch'});
+  Future<({bool ok, List<String> list, String error})> hotSearchResult({
+    SongSource source = SongSource.netease,
+  }) async {
+    final r = await _call({'action': 'hotSearch', 'source': source.key});
     final m = _asMap(r);
     final ok = m['ok'] != false; // Node 侧失败会带 ok:false
     final l = m['list'];
@@ -372,8 +385,8 @@ class MusicApi {
   }
 
   /// 热门搜索词
-  Future<List<String>> hotSearch() async {
-    final r = await _call({'action': 'hotSearch'});
+  Future<List<String>> hotSearch({SongSource source = SongSource.netease}) async {
+    final r = await _call({'action': 'hotSearch', 'source': source.key});
     final m = _asMap(r);
     final l = m['list'];
     if (l is! List) return const [];
@@ -543,6 +556,21 @@ class MusicApi {
         'name': song.name,
         'artists': song.artists,
         'album': song.album,
+        // ── 🔴 必须带 `source`（这是修的一个真 bug）────────────────
+        //
+        // Node 侧 `source_resolver.js` 用
+        //   `providerCodeOf(song && song.source)`
+        // 推导 LX 平台码（wy/tx/kg/kw/mg），**脚本靠它分派**：
+        //   · 星海音乐源：`if (!MUSIC_QUALITIES[source]) throw`
+        //   · 很多脚本：`payload.source === 'tx' ? QQ接口 : 网易接口`
+        //
+        // 而这里原来**没有这个字段** → `providerCodeOf(undefined)` 走
+        // `return s || 'wy'` → **永远返回 'wy'**。
+        //
+        // 后果：**QQ / 酷狗 / 喜马拉雅的歌走第三方源时，脚本以为自己在处理
+        // 网易云的歌**，于是拿"QQ 的 id"去查"网易云的接口" —— 必然查不到。
+        // 只有网易云的歌（本来就该是 wy）刚好不受影响，所以问题被掩盖了。
+        'source': song.source.key,
       },
     });
     final m = _asMap(r);
@@ -551,6 +579,13 @@ class MusicApi {
       url: (m['url'] ?? '').toString(),
       kind: (m['kind'] ?? '').toString(),
       message: (m['error'] ?? '').toString(),
+      // ⚠️ **必须带上 headers**：MusicFree 插件（以及部分 LX 源）会返回
+      // `{ url, headers }`，不给播放器带上就播不了（403 / 空流）。
+      // Node 侧 `normalizeMedia` 已经归一化过，这里只做类型收口。
+      headers: m['headers'] is Map
+          ? (m['headers'] as Map)
+              .map((k, v) => MapEntry(k.toString(), v.toString()))
+          : const {},
     );
   }
 

@@ -21,6 +21,8 @@
 
 import axios from 'axios';
 import { loadScript, runAction } from './lx_engine.js';
+// MusicFree 插件适配层（独立一套入口，不影响上面的 LX 路径）
+import { looksLikeMusicFree, loadMusicFreePlugin, pickMediaGetter, normalizeMedia } from './musicfree_adapter.js';
 
 /** 模板法请求超时 */
 const TEMPLATE_TIMEOUT_MS = 12000;
@@ -208,6 +210,81 @@ export function looksAudio(v) {
     if (/\.(mp3|m4a|aac|flac|wav|ogg|opus|m3u8|mp4|ts)$/.test(path)) return true;
     // 路径里带音频语义（如 `/getPlayUrl`、`/audio/xxx`）→ 收
     return /(audio|play|song|music|stream)/.test(path);
+}
+
+/**
+ * **MusicFree 插件**法解析播放地址。
+ *
+ * ── 与 LX 脚本法的区别（为什么单独一个函数）──────────────────────
+ * | | LX 源 | MusicFree 插件 |
+ * |---|---|---|
+ * | 注册 | `lx.on('request')` / `module.exports.musicUrl` | `module.exports.getMediaSource` |
+ * | 参数 | `(payload)` 富对象 | **`(musicItem, quality)` 两个位置参数** |
+ * | 依赖 | 纯脚本 | 几乎都 `require('axios')` |
+ * | 返回 | `{url}` | `string` / `{url}` / `{url,headers}` / 数组 |
+ *
+ * ⚠️ **调用约定必须用位置参数**：MusicFree 的签名是
+ * `getMediaSource(musicItem, quality)`，传一个富对象进去它是读不到的。
+ *
+ * @returns {Promise<{ok, url?, headers?, error?}>}
+ */
+async function resolveMusicFree(source, song) {
+    const script = String(source.script || '');
+    if (!script.trim()) {
+        return { ok: false, error: '插件没有内容' };
+    }
+
+    const loaded = await loadMusicFreePlugin(script, loadScript);
+    if (!loaded.ok) {
+        return { ok: false, error: loaded.error };
+    }
+    const getter = pickMediaGetter(loaded.handlers);
+    if (!getter) {
+        return {
+            ok: false,
+            error:
+                '不是可用的 MusicFree 插件：没找到 getMediaSource / getMusicUrl ' +
+                `（它提供：${(loaded.actions || []).join(', ') || '无'}）`,
+        };
+    }
+
+    // MusicFree 的 musicItem 形状（照它的插件生态）
+    const musicItem = {
+        id: song && song.id != null ? String(song.id) : '',
+        songmid: song && song.id != null ? String(song.id) : '',
+        name: song && song.name ? String(song.name) : '',
+        singer: song && song.artists ? String(song.artists) : '',
+        artist: song && song.artists ? String(song.artists) : '',
+        album: song && song.album ? String(song.album) : '',
+        source: 'kw',
+    };
+    const quality = (source && source.quality) || '320k';
+
+    const r = await runAction(
+        { [getter.name]: getter.fn },
+        getter.name,
+        [musicItem, quality],
+        // ⚠️ **必须 spread**：MusicFree 签名是 `(musicItem, quality)`
+        // 两个位置参数，不是 LX 那样的单个富对象。
+        { spread: true },
+    );
+    if (!r.ok) {
+        return { ok: false, error: r.error };
+    }
+
+    const media = normalizeMedia(r.result);
+    if (!media) {
+        return {
+            ok: false,
+            error: '插件没返回可用的播放地址（支持 string / {url} / {url,headers} / 数组）',
+        };
+    }
+    return { ok: true, url: media.url, headers: media.headers };
+}
+
+/** 判断一份脚本是否该走 MusicFree 适配层 */
+export function isMusicFreeScript(script) {
+    return looksLikeMusicFree(script);
 }
 
 /**
@@ -410,11 +487,23 @@ async function resolveSource(source, song) {
     if (source.enabled === false) {
         return { ok: false, error: '该音源已停用' };
     }
-    const kind = source.kind === 'script' || source.script ? 'script' : 'keyword';
+    // ── 三种 kind 分派 ────────────────────────────────────────────
+    //   'musicfree' —— MusicFree 插件（走独立适配层，注入 axios/he）
+    //   'script'    —— LX 脚本（纯沙箱，**不注入任何模块**）
+    //   'keyword'   —— 模板法
+    //
+    // ⚠️ 显式 kind 优先；没写 kind 时按"像不像 MusicFree 插件"自动判定，
+    // 但**只有看起来像才走适配层** —— LX 源的行为一点不变。
+    const isScript = source.kind === 'script' || (!source.kind && source.script && !looksLikeMusicFree(source.script));
+    const isMusicFree = source.kind === 'musicfree' ||
+        (!source.kind && source.script && looksLikeMusicFree(source.script));
+    const kind = isMusicFree ? 'musicfree' : (isScript ? 'script' : 'keyword');
     const r =
-        kind === 'script'
-            ? await resolveByScript(source, song)
-            : await resolveByTemplate(source, song);
+        kind === 'musicfree'
+            ? await resolveMusicFree(source, song)
+            : (kind === 'script'
+                ? await resolveByScript(source, song)
+                : await resolveByTemplate(source, song));
     return Object.assign({ kind }, r);
 }
 

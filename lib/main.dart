@@ -59,6 +59,18 @@ void main() async {
   // 关键事件写不进 <Documents>/nodejs-project/runtime/app.log
   await AppLog.instance.init();
 
+  // ✅ **把 `debugPrint` 重定向进「软件日志」**（我的 → 通用设置 → 软件日志 ✓）——
+  //   为什么需要这一行 ✓：全项目（含阅读模块 **34 个文件的 `_log()`**）此前只用
+  //   `if (kDebugMode) debugPrint(...)` ✗ → **发布版一个字都不落盘** ✗，
+  //   于是日志页永远显示"（暂无日志）"✗ —— 用户遇到"下载/换源/书源失败"时**看不到原因** ✗✗。
+  //   这一行之后：所有既有 `_log()` **自动入日志** ✓✓（无需改动任何业务文件 ✓）。
+  //   ⚠️ 不会递归 ✓：`AppLog` 内部用的是 `print`（`app_log.dart:195` ✓），不是 `debugPrint` ✓。
+  //   ⚠️ 重复风险 ✓：已手工桥接过 `AppLog` 的文件（download_service / book_download_service）
+  //      会各多写一行 ✓ —— 无害 ✓（日志里同一事件两行 ✓）。
+  debugPrint = (String? message, {int? wrapWidth}) {
+    if (message != null) AppLog.instance.log(message);
+  };
+
   // 初始化 media_kit（备用 MPV 内核；AVPlayer 为主时也需 init，设置里可切换）
   MediaKit.ensureInitialized();
 
@@ -99,7 +111,19 @@ void main() async {
   await SettingsService().init();
   await ReaderOverrideService().init();
   await BookFontService().init();
-  await SourceManager().init();
+  // 🔴 这里原来是**裸调用** `await SourceManager().init()` ✗ —— 它的内部
+  // （加载 sources.json / 逐条实例化源 / 恢复当前源）任何一处抛异常都会
+  // 一路冒到 main()，**启动即崩** ✗（用户看到的是"打开就闪退"，
+  // 而根因只是某一条源数据坏了）。
+  // → 现在 try/catch 兜住：初始化失败**只记日志**（debugPrint + AppLog 落盘）✓，
+  //   然后**继续往下启动** ✓ —— 影视/直播/音乐等其它模块不受影响，
+  //   漫画源退化为零源（SourceManager.current 有 _NoSource 哨兵兜底，UI 不崩 ✓）。
+  try {
+    await SourceManager().init();
+  } catch (e) {
+    debugPrint('[SourceManager] 初始化失败（已隔离，继续启动）: $e');
+    AppLog.instance.log('[SourceManager] 初始化失败（已隔离，继续启动）: $e');
+  }
   await ViewMode().init();
   await BookViewMode().init();
   await FavoritesService().init();

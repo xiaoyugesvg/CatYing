@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/reader_notes_service.dart';
+import '../services/reading_time_service.dart';
 import '../theme/jelly_theme.dart';
 import 'browse_history_page.dart';
 
@@ -159,6 +160,24 @@ class _NotesAndJourneyPageState extends State<NotesAndJourneyPage> {
                                   style: TextStyle(
                                       fontSize: 12, color: subColor),
                                 ),
+                                const SizedBox(height: 2),
+                                // ✅ **今日阅读时长**（本轮新接 ✓）——由两个阅读器在
+                                //   离开/保存时写入 `ReadingTimeService`（按天累计秒数 ✓），
+                                //   这里只读不写 ✓；用 `FutureBuilder` 是为了**不新增字段** ✗✓
+                                //   （一次 prefs 读取，代价可忽略 ✓）。打完卡 setState 后会自动刷新 ✓。
+                                //   ℹ️ 样式与上一行「累计打卡」**逐字同款** ✓（局部一致优先 ✓）
+                                FutureBuilder<int>(
+                                  future:
+                                      ReadingTimeService.instance.todayMinutes(),
+                                  builder: (context, snap) {
+                                    final mins = snap.data ?? 0;
+                                    return Text(
+                                      '今日已读 $mins 分钟',
+                                      style: TextStyle(
+                                          fontSize: 12, color: subColor),
+                                    );
+                                  },
+                                ),
                               ],
                             ),
                           ),
@@ -242,7 +261,7 @@ class _NotesAndJourneyPageState extends State<NotesAndJourneyPage> {
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => const _BookNotesPage(),
+                      builder: (_) => const BookNotesPage(),
                     ),
                   ),
                 ),
@@ -333,14 +352,14 @@ class _NotesAndJourneyPageState extends State<NotesAndJourneyPage> {
 }
 
 /// 全书库划线笔记：按书分组 → 每本书的划线/批注列表。
-class _BookNotesPage extends StatefulWidget {
-  const _BookNotesPage();
+class BookNotesPage extends StatefulWidget {
+  const BookNotesPage();
 
   @override
-  State<_BookNotesPage> createState() => _BookNotesPageState();
+  State<BookNotesPage> createState() => BookNotesPageState();
 }
 
-class _BookNotesPageState extends State<_BookNotesPage> {
+class BookNotesPageState extends State<BookNotesPage> {
   @override
   void initState() {
     super.initState();

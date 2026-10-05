@@ -32,7 +32,12 @@ Map<String, String> coverHeaders([String? sourceId]) {
 /// 漫画源管理器（单例 ChangeNotifier）。
 ///
 /// 注册各源（配置源 + api 源），维护「当前源」，供 UI/下载/阅读统一调用。
-/// 软件不自带任何漫画源，源定义完全云端驱动（仅文档目录 sources.json 云端缓存）；
+/// ⚠️ 这里原来写「**软件不自带任何漫画源，源定义完全云端驱动**」✗✗ —— **与代码不符，已改正** ✓：
+///   真实优先级是「**文档目录 sources.json（云端更新覆盖层）优先 → 出厂内置源兜底**」✓
+///   （内置源在 `assets/config/sources.json` ✓，`pubspec.yaml:89-90` 已声明 ✓，
+///    由 `SourceConfigStore.loadLocal()` 兜底加载 ✓ ——「**装上有源**」✓）。
+///   只有用户**主动点过「清空」**✓ 且内置包指纹未变时才会真的零源 ✓
+///   （`_kSourcesCleared` ✓，可用 `clearClearedFlag()` ✓ 恢复 ✓）。
 /// 无源时 [current] 返回 [_NoSource] 哨兵不崩，由搜索页空状态引导用户填云端地址。
 /// init 末尾非阻塞后台拉取云端 sources.json（用户已填云端地址时），有变化才 reload。
 class SourceManager extends ChangeNotifier {
@@ -53,10 +58,11 @@ class SourceManager extends ChangeNotifier {
   /// 所有已注册源
   List<MangaSource> get sources => _sources.values.toList();
 
-  /// 初始化：从 SourceConfigStore 加载云端缓存的源（配置源 + api 源），恢复当前源选择。
+  /// 初始化：从 SourceConfigStore 加载源（**云端覆盖层优先 → 内置源兜底** ✓），恢复当前源选择。
   ///
-  /// 软件不自带源，仅从文档目录 sources.json（云端缓存）加载；无缓存则零源，
-  /// current 返回 [_NoSource] 哨兵，由搜索页空状态引导用户填云端地址并更新。
+  /// ⚠️ 本段原来写「**软件不自带源**…**无缓存则零源**」✗ —— **与代码不符，已改正** ✓（同上）：
+  /// 首次安装/清缓存后**会回退到出厂内置源** ✓；只有"用户主动清空 + 内置包未更新"才零源 ✓。
+  /// current 在真零源时返回 [_NoSource] 哨兵 ✓，由搜索页空状态引导 ✓。
   /// [fetchCloud]=true 时（仅首次 init），末尾非阻塞后台拉取云端 sources.json，有变化才 reload；
   /// reload 触发的 init 传 false，避免循环拉取。
   Future<void> init({bool fetchCloud = true}) async {
@@ -64,12 +70,26 @@ class SourceManager extends ChangeNotifier {
     // 配置源 + api 源（copymanga/zaimanhua/manhuaren）：从 SourceConfigStore 加载
     // （文档目录 sources.json 云端缓存 > 空列表）
     final defs = await SourceConfigStore().loadLocal();
+    // 🔴 原来这里**没有 per-item 的 try/catch** ✗ —— `_instantiate(def)` 会按
+    // type/engine 去解析该源的配置体（SiteConfig.fromJson 等），而配置体字段
+    // 类型是不受控的：只要**任意一条**源写成 `"name": 123`、`"name"` 缺失，
+    // 或某个 engine 的 config 结构异常，这一行就抛异常，直接冲出 for 循环、
+    // 冲出 init()、再冒到 main() —— 症状就是「书源全没了」「搜索没源可用」
+    // 甚至启动即崩 ✗（一条坏数据连坐整份列表）。
+    // → 现在把**单条源的实例化与注册**整个包进 try：坏源只自己失败 ✓，
+    //   打日志留证并 continue ✓，**其余源照常加载** ✓（配 site_config 的宽容解析，
+    //   常见字段缺失已不再走到异常分支）。
     for (final def in defs) {
-      final src = _instantiate(def);
-      if (src != null) {
-        // 注入源级元数据（needsMagic）
-        src.needsMagic = def.needsMagic;
-        _register(src);
+      try {
+        final src = _instantiate(def);
+        if (src != null) {
+          // 注入源级元数据（needsMagic）
+          src.needsMagic = def.needsMagic;
+          _register(src);
+        }
+      } catch (e) {
+        // 单条坏源隔离：跳过它自己，不影响后续源注册
+        _log('源解析失败，已跳过: id=${def.id} type=${def.type} err=$e');
       }
     }
 

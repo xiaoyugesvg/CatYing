@@ -6,7 +6,13 @@
 // 两者格式、存储、入口都分开（SourceConfigStore vs BookSourceStore）。
 //
 // 顶部输入云端 sources.json URL（持久化），点「从云端更新」Dio 拉取覆盖本地源；
-// 源定义完全云端驱动，无「恢复默认」——本地覆盖层仅由升级迁移清空或云端更新覆盖。
+// ⚠️ 本行原来写「源定义**完全云端驱动**，**无「恢复默认」**」✗✗ —— **与代码不符，已改正** ✓：
+//   真实优先级 = **文档目录 sources.json（云端更新覆盖层）优先 → 出厂内置源兜底** ✓
+//   （内置源 `assets/config/sources.json` ✓，`pubspec.yaml:89-90` 已声明「**出厂内置漫画源
+//    （15 个官方源明文，装上即有源）**」✓；由 `SourceConfigStore.loadLocal()` 兜底 ✓）。
+//   ⇒ 所以**是存在"恢复默认/内置源"这件事的** ✓ —— 能力在 `SourceConfigStore.clearClearedFlag()`
+//     （`source_config_store.dart:221` ✓，只清标记、不动文件 ✓）与 `resetToLocal()`（`:232` ✗ 会清用户导入 ✓ 别用 ✗）。
+//   ℹ️ 唯一零源情形 ✗：用户点过「清空」✓ 且内置包指纹未变 ✓ → 用「恢复内置源」一键回来 ✓。
 // 下方列出所有已注册源，可单独启用/禁用，需要魔法的源标魔法图标。
 // 搜索页只展示启用源（见 search_page._buildSourceChips 用 enabledSources）。
 
@@ -27,6 +33,8 @@ import '../source/source_manager.dart';
 import '../theme/jelly_theme.dart';
 import 'comic_source_edit_page.dart';
 import '../../common/theme.dart';
+import '../utils/source_fail_text.dart';
+import '../widgets/jelly_search_bar.dart';
 
 class SourceRepoPage extends StatefulWidget {
   const SourceRepoPage({super.key});
@@ -91,7 +99,14 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
       // fetchRemote 读用户填的云端 URL：为空返回 null；非空 Dio 拉取 -> saveLocal。
       final remote = await SourceConfigStore().fetchRemote();
       if (remote == null) {
-        _toast('云端更新失败或为空，当前使用本地配置');
+        // 🔴 `null` 在这里**同时表示两件事** ✗：① 拉取失败（网络不通 / 404 /
+        // JSON 解析错 ✓）② 云端文件本身就**是空的**（合法返回 ✓）——
+        // 服务层 `fetchRemote` 把两者都归成 `null` ✓（见它自己的注释 ✓）。
+        // 原来一句「失败或为空」✗ 让用户完全无法判断：该改地址？还是查网络？✓
+        // 这里至少把**判断依据**和"地址已保存"说清楚 ✓，用户可据此自查 ✓
+        //（要真正区分，需要服务层返回带原因的结果 ✓ —— 已记入待办 ✓）
+        _toast('云端更新未生效：地址已保存，请检查该地址能否访问、'
+            '或它的 sources.json 是否为空');
         return;
       }
       await SourceManager().reload();
@@ -150,48 +165,57 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                         child: const Text('清空',
                             style: TextStyle(fontSize: AppTheme.fontSubhead)),
                       ),
+                    // ✅ **恢复内置源**（本轮新增 ✓）—— 与「清空」**互斥显示** ✓：
+                    //   有源时显示「清空」✓；**无源时才显示「恢复内置源」** ✓✓
+                    //   —— 用户清空之后一眼就知道"怎么回去" ✓（原来这里什么都没有 ✗，
+                    //      `_kSourcesCleared` 一旦置位就**永远无源且看不出原因** ✗✗）。
+                    // 动作 ✓：`clearClearedFlag()` ✓ —— **只清标记 ✓ 不动任何文件** ✓；
+                    //   清掉后 `loadLocal()` 会**自动回退出厂内置源** ✓
+                    //   （`assets/config/sources.json` ✓，`pubspec.yaml:89-90` 已声明 ✓）。
+                    // ⚠️ **有意不用** `resetToLocal()` ✗ —— 那是「清空」用的（见 `_clearAll` ✓），
+                    //   它会删掉用户**导入/编辑过的覆盖层** ✗✓；"恢复内置源"不该动用户数据 ✓。
+                    // ℹ️ **如实说明语义** ✓：恢复的是**出厂内置源** ✓；被「清空」删掉的那层
+                    //   用户导入**不会**因此回来 ✓（它已备份为 `sources.json.bak` ✓，需人工处理 ✓）。
+                    if (SourceManager().sources.isEmpty)
+                      TextButton(
+                        onPressed: () async {
+                          await SourceConfigStore().clearClearedFlag();
+                          await SourceManager().reload();
+                          if (!mounted) return;
+                          setState(() {});
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('已恢复出厂内置源（装上即有源的那批）'),
+                            ),
+                          );
+                        },
+                        child: const Text('恢复内置源',
+                            style: TextStyle(fontSize: AppTheme.fontSubhead)),
+                      ),
                   ],
                 ),
               ),
               const SizedBox(height: 6),
               // 筛选已注册的漫画源
-              Container(
-                height: 40,
-                decoration: BoxDecoration(
-                  color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: TextField(
-                  controller: _filterCtrl,
-                  onChanged: (v) => setState(() => _filter = v),
-                  style: TextStyle(
-                      fontSize: AppTheme.fontBody,
-                      color:
-                          isDark ? Colors.white : JellyTheme.textPrimaryLight),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    filled: false,
-                    hintText: '筛选已注册的漫画源',
-                    hintStyle: TextStyle(
-                        fontSize: AppTheme.fontBody, color: JellyTheme.textSecondary),
-                    prefixIcon: Icon(Icons.search_rounded,
-                        size: 19, color: JellyTheme.textSecondary),
-                    prefixIconConstraints:
-                        const BoxConstraints(minWidth: 38, minHeight: 38),
-                    suffixIcon: _filter.isEmpty
-                        ? null
-                        : IconButton(
-                            icon: Icon(Icons.clear_rounded,
-                                size: 17, color: JellyTheme.textSecondary),
-                            onPressed: () {
-                              _filterCtrl.clear();
-                              setState(() => _filter = '');
-                            },
-                          ),
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                  ),
-                ),
+              // ✅ 统一到共用组件 ✓（原为**手写一整套皮** ✗：40 高 / 圆角 20 / 卡片色
+              //   容器 + 手画 `prefixIcon` 放大镜 + 自己实现的 `suffixIcon` 清空键 ✓）。
+              //   ⚠️ 它原本是 **40 高 / 圆角 20** ✗，而书源体检那处是 **32 / 16** ✗
+              //   —— 同模块**两种尺寸** ✓ 正是"排版不统一"的证据 ✓；
+              //   统一成组件后**两页同款** ✓（这就是本次的目的 ✓）。
+              // ⚠️ 必须**整段替换** ✓：`JellySearchBar` 自带底色/圆角/放大镜/清空键 ✓，
+              //   若留下外层 `Container(decoration: …)` 就成"圆角方框套胶囊" ✗。
+              // 参数对照 ✓：controller `_filterCtrl` ✓ · hintText 同文案 ✓ ·
+              //   onChanged: setState(_filter = v) ✓（语义不变 ✓）·
+              //   onCleared: 原为 `_filterCtrl.clear() + setState(_filter = '')` ✓
+              //   → 这里**两者都保留** ✓（组件内部是否清 controller 我不假设 ✗，多清一次无害 ✓）
+              JellySearchBar(
+                controller: _filterCtrl,
+                hintText: '筛选已注册的漫画源',
+                onChanged: (v) => setState(() => _filter = v),
+                onCleared: () {
+                  _filterCtrl.clear();
+                  setState(() => _filter = '');
+                },
               ),
               const SizedBox(height: 10),
                   ],
@@ -566,7 +590,15 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
             : (added > 0 ? '已导入 $added 个漫画源' : '已更新 $updated 个漫画源'),
       );
     } catch (e) {
-      return (ok: false, message: 'JSON 解析失败：${e.toString().split('\n').first}');
+      // ✅ **统一到 `utils/source_fail_text.dart`** ✓（"同一原因同一类" ✓）——
+      //   原来这里直接甩「JSON 解析失败：…」✗，与搜索页/体检页/下载侧的**说法不一致** ✗✓
+      //   （用户在不同页面看到同一个原因，却是三套话 ✓）。现在按**统一分类**给话 ✓，
+      //   并把原始异常附在括号里 ✓ —— 既统一 ✓ 又不丢排查信息 ✓✓。
+      final info = describeSourceFail(e, what: '云端源配置');
+      return (
+        ok: false,
+        message: '${info.text}（${e.toString().split('\n').first}）',
+      );
     }
   }
 
