@@ -85,6 +85,24 @@ function coverURL(albumMid, size = '300x300') {
 }
 
 /**
+ * 歌手头像：歌手 mid → y.gtimg.cn 图床。
+ *
+ * ── 🔴 实测结论（2026，免登录）─────────────────────────────────
+ * 这个模板**可用**（HTTP 200 / image/jpeg，150/300/500 三种尺寸都通）：
+ *     `https://y.gtimg.cn/music/photo_new/T001R{size}M000{singerMid}.jpg`
+ *
+ * 而其它"拿歌手列表"的路子**都不可用**（实测）：
+ *   · `music.web_singer_list.SingerListServer` → `code=500003` 无数据
+ *   · `fcg_v8_singer_track_cp` / `fcg_get_singer_info` → HTTP 404
+ * 所以真头像**只能靠"从歌曲里取 singerMid + 这个模板"**。
+ */
+function artistAvatarURL(singerMid, size = '300x300') {
+    return singerMid
+        ? `https://y.gtimg.cn/music/photo_new/T001R${size}M000${singerMid}.jpg`
+        : '';
+}
+
+/**
  * 把 QQ 各接口的歌曲条目映射成统一结构。
  *
  * ── 🔴 为什么要容忍**两套完全不同的字段名**（实测，不是猜）─────────
@@ -142,6 +160,19 @@ function mapSong(item) {
             : (pay.pay_play != null ? pay.pay_play : (pay.payplay || 0)),
     );
 
+    // ⑤ 歌手 mid（**给"热门歌手"行取真头像用**）
+    //
+    // 三个接口的写法都不同：
+    //   · 搜索/歌单：`singer:[{mid, name}]`
+    //   · 榜单：`singerMid`（字符串，可能是**多个**用 `/` 分隔）
+    // 取**第一个**歌手的 mid —— 多歌手的合唱曲，头像只能显示一个。
+    let firstSingerMid = '';
+    if (Array.isArray(item.singer) && item.singer.length) {
+        firstSingerMid = String(item.singer[0] && item.singer[0].mid || '');
+    } else if (typeof item.singerMid === 'string') {
+        firstSingerMid = item.singerMid.split('/')[0].trim();
+    }
+
     return {
         // 对外 id 用数字 id（Dart Song.id 是 int）
         id: songid,
@@ -154,6 +185,8 @@ function mapSong(item) {
         fee,
         songmid: mid,
         mediaMid,
+        // ⚠️ 这个名字是给"热门歌手"行用的（`topArtistsList` 会读它取头像）
+        artistMid: firstSingerMid,
     };
 }
 
@@ -473,8 +506,103 @@ async function topLists() {
     }
 }
 
+const _midCache = new Map();   // songId(number) -> songmid(string)
+
+/**
+ * **补 songmid**：榜单/歌单接口只给数字 `songId`，而**所有取址接口都要 songmid**。
+ *
+ * ── 🔴 为什么必须有这一步（用户报的"QQ 播不了"的最后一环）──────────
+ * `musicToplist…GetDetail` 返回的歌曲字段**只有这些**（实测全字段枚举）：
+ *     rank, rankType, rankValue, recType, **songId**, vid, albumMid,
+ *     title, singerName, singerMid, songType, uuidCnt, cover, mvid
+ * —— **没有 songmid、没有 mid**，只有数字 `songId`。
+ *
+ * 而两个取址路径都**不认数字 id**（实测）：
+ *   · 元力音源 `qq_kw.php?id=<songId>` → 歌名空、`url: null` ✗
+ *   · QQ 官方 `musicu` 取 vkey 也要 **media_mid**
+ * 所以榜单歌曲点播放必然失败 —— 除非把 songmid 补出来。
+ *
+ * ── 怎么补（实测可行）──────────────────────────────────────────
+ * QQ 有个"按数字 id 查详情"的免登录接口：
+ *     `music.trackInfo.UniformRuleCtrl / CgiGetTrackInfo`
+ *     `param: { ids: [102326316], types: [0] }`
+ * 它返回 `mid`。实测 `songId=102326316` → `mid=002a5OfG1VpukL`，
+ * 拿这个 mid 去 `qq_kw.php` 查出来正是 **"Sold Out" / "Hawk Nelson" / "Diamonds"**
+ *（与榜单里的歌完全吻合）✓
+ *
+ * ⚠️ 逐个查很慢，所以只对**缺 songmid** 的条目做，并且**缓存**；
+ *    失败不影响列表（补不上就留空，播放时自会给出明确原因）。
+ */
+async function fillSongMids(list) {
+    const need = list.filter((s) => !s.songmid && s.id);
+    if (!need.length) return list;
+
+    const ids = [];
+    for (const s of need) {
+        const cached = _midCache.get(s.id);
+        if (cached) {
+            s.songmid = cached;
+        } else if (!ids.includes(s.id)) {
+            ids.push(s.id);
+        }
+    }
+    if (!ids.length) return list;
+
+    // ── 用 `pf_song_detail_svr / get_song_detail`（**逐个查**）──────
+    //
+    // 🔴 接口选择是实测出来的，别再换回去：
+    //   · `music.trackInfo.UniformRuleCtrl / CgiGetTrackInfo`
+    //     → **code=103901，tracks 为空** ✗（我第一版用了它，白忙）
+    //   · `music.pf_song_detail_svr / get_song_detail`
+    //     → **code=0，mid 在 `req_1.data.track_info.mid`** ✓
+    //
+    // ⚠️ 这个接口**只吃单个 `song_id`**（传数组不行），所以只能逐个查。
+    //    为了不把列表拖垮，这里：
+    //      · 限制一次最多补 [MAX_FILL] 首（其余的播放时再想办法）
+    //      · 并发 [FILL_CONCURRENCY] 个请求
+    //      · 结果进 [_midCache]
+    const MAX_FILL = 30;
+    const FILL_CONCURRENCY = 4;
+    const todo = ids.slice(0, MAX_FILL);
+
+    let cursor = 0;
+    const worker = async () => {
+        while (cursor < todo.length) {
+            const sid = todo[cursor++];
+            try {
+                const data = await musicu({
+                    comm: { ct: 24, cv: 0 },
+                    req_1: {
+                        module: 'music.pf_song_detail_svr',
+                        method: 'get_song_detail',
+                        param: { song_id: sid },
+                    },
+                });
+                // mid 的位置：req_1.data.track_info.mid
+                const ti = at(data, 'req_1', 'data', 'track_info');
+                const mid = String((ti && (ti.mid || ti.songmid)) || '');
+                if (mid) _midCache.set(sid, mid);
+            } catch (e) {
+                // 单首失败就算了，继续下一首
+            }
+        }
+    };
+    await Promise.all(
+        Array.from({ length: Math.min(FILL_CONCURRENCY, todo.length) }, worker),
+    );
+
+    for (const s of need) {
+        const cached = _midCache.get(s.id);
+        if (cached) s.songmid = cached;
+    }
+    return list;
+}
+
 /**
  * 榜单里的歌曲（Beans 的 `topListSongs`）。
+ *
+ * ⚠️ 榜单接口**不给 songmid**（只有数字 songId），所以这里会调
+ * [fillSongMids] 补上 —— 否则所有第三方源都拿不到播放地址。
  *
  * @returns `{ ok, list:[Song…], total }`
  */
@@ -495,6 +623,8 @@ async function topListSongs(topId, limit = 30) {
         });
         const raw = at(data, 'req_1', 'data', 'data', 'song') || [];
         const list = raw.map(mapSong).filter(Boolean);
+        // 🔴 榜单不给 songmid，这里补上（否则第三方源取不到地址）
+        await fillSongMids(list);
         rememberTracks(list);
         return { ok: true, list, total: Number(at(data, 'req_1', 'data', 'data', 'total') || list.length) };
     } catch (e) {
@@ -618,6 +748,50 @@ async function recommendPlaylists(limit = 12) {
     }
 }
 
+/**
+ * **热门歌手**（带真头像）—— 从榜单歌曲里提取去重的歌手。
+ *
+ * ── 🔴 为什么是"派生"而不是调歌手列表接口 ──────────────────────
+ * QQ 没有免登录的歌手列表接口（实测）：
+ *   · `music.web_singer_list.SingerListServer` → `code=500003`
+ *   · `fcg_v8_singer_track_cp` → HTTP 404
+ * 但**歌手头像模板是通的**（`T001R300x300M000{mid}.jpg`），
+ * 而歌曲里**带着 singerMid** → 于是"从榜单歌里收集歌手"就能拿到真头像。
+ *
+ * ⚠️ 头像 URL **不写死尺寸**：Dart 侧显示 64 的圆圈，用 150 就够
+ *（省流量），所以这里给 150。
+ *
+ * @param topId  榜单 id（用榜首的歌手，质量最高）
+ * @param limit  取多少个歌手
+ * @returns `{ ok, list: [{ name, avatar, mid }] }`
+ */
+async function topArtistsList(topId, limit = 14) {
+    try {
+        const n = Math.min(Math.max(limit, 1), 40);
+        // 榜单歌曲要多取一些 —— 前 N 首里往往有重复歌手
+        const r = await topListSongs(topId || 26, 60);
+        if (!r.ok || !r.list.length) {
+            return { ok: false, error: r.error || '榜单歌曲为空' };
+        }
+        const seen = new Set();
+        const out = [];
+        for (const s of r.list) {
+            const mid = String(s.artistMid || '');
+            const name = String(s.artist || '').trim();
+            if (!mid || !name) continue;
+            // 多歌手用顿号拼的，只取第一个（头像只能一张）
+            const first = name.split('、')[0].trim();
+            if (!first || seen.has(mid)) continue;
+            seen.add(mid);
+            out.push({ name: first, avatar: artistAvatarURL(mid, '150x150'), mid });
+            if (out.length >= n) break;
+        }
+        return { ok: true, list: out };
+    } catch (e) {
+        return { ok: false, error: humanize(e) };
+    }
+}
+
 /** 歌单里的歌曲（fcg_ucc_getcdinfo_byids_cp，免登录可拿普通歌单） */
 async function playlistSongs(dissId, limit = 100) {
     try {
@@ -641,6 +815,8 @@ async function playlistSongs(dissId, limit = 100) {
             const song = mapSong(it.track_info || it);
             if (song) list.push(song);
         }
+        // 歌单一般自带 `mid`，但个别条目可能缺 → 同样补齐
+        await fillSongMids(list);
         rememberTracks(list);
         return { ok: true, list, total: raw.length };
     } catch (e) {
@@ -687,4 +863,5 @@ export {
     playlistCategories,
     recommendPlaylists,
     playlistSongs,
+    topArtistsList,
 };

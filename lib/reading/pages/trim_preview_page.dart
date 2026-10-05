@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
-import '../source/global_proxy.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -15,7 +14,6 @@ import '../source/source_manager.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/device_frame_preview.dart';
 import '../widgets/trim_preset_dialog.dart';
-import '../../common/theme.dart';
 
 /// 去白边预览页面
 ///
@@ -99,10 +97,6 @@ class _TrimPreviewPageState extends State<TrimPreviewPage> {
 
       // 获取图片 URL 列表
       final urls = await source.getChapterImages(cmanga, cchapter);
-      // 🔴 `await`（网络请求 ✓）之后直接 `setState` ✗ → 页面被销毁时抛
-      // `setState() called after dispose()` ✓（release 同样抛 ✗）。
-      // 本文件下面 catch 分支里**已经有** `if (!mounted) return;` ✓，这里属**漏写** ✗
-      if (!mounted) return;
       if (urls.isEmpty) {
         setState(() {
           _loadError = true;
@@ -120,10 +114,6 @@ class _TrimPreviewPageState extends State<TrimPreviewPage> {
       if (ref != null) headers['Referer'] = ref;
 
       final dio = Dio();
-      // ✅ **去白边预览取图也走「网络代理」**（本轮接上 ✓）—— 它是 `Dio()` **无参构造** ✓
-      //   ⇒ 本处**最干净** ✓（没有任何适配器 / 自定义 UA 会被影响 ✓✓）。
-      //   · 代理**关闭** ✓ → 返回 false ✓ **一行不改** ✓（与从前完全一致 ✓✓）
-      applyGlobalProxy(dio);
       final List<Uint8List> loaded = [];
       for (final url in previewUrls) {
         if (_cancelToken?.isCancelled == true) break;
@@ -170,13 +160,7 @@ class _TrimPreviewPageState extends State<TrimPreviewPage> {
       if (!mounted) return;
       setState(() {
         _loadError = true;
-        // 🔴 `substring(0, 60)` 会**在 catch 里再抛一次** ✗：`e.toString()` 短于
-        // 60 字时抛 `RangeError` ✓（Dart 的 `substring` 不会自动截断 ✓）→
-        // 这个异常从 `setState` 里冒出去 ✓ → 紧跟的 `_isLoading = false`
-        // **永远执行不到** ✗ → 界面**永久转圈** ✓（`_loadError` 也没真正生效 ✓）。
-        // 改成"最多 60 字" ✓
-        final msg = e.toString();
-        _errorMsg = '加载失败: ${msg.length > 60 ? msg.substring(0, 60) : msg}';
+        _errorMsg = '加载失败: ${e.toString().substring(0, 60)}';
         _isLoading = false;
       });
     }
@@ -301,7 +285,7 @@ class _TrimPreviewPageState extends State<TrimPreviewPage> {
             const SizedBox(height: 8),
             Text(
               '用于限制放大上限，图片放大后不会超过该尺寸',
-              style: TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary),
+              style: TextStyle(fontSize: 12, color: JellyTheme.textSecondary),
             ),
           ],
         ),
@@ -503,7 +487,7 @@ class _TrimPreviewPageState extends State<TrimPreviewPage> {
             child: Text(
               title,
               style: TextStyle(
-                fontSize: AppTheme.fontSubhead,
+                fontSize: 13,
                 fontWeight: FontWeight.bold,
                 color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
               ),
@@ -530,7 +514,7 @@ class _TrimPreviewPageState extends State<TrimPreviewPage> {
             child: Text(
               unit.isEmpty ? '$value' : '$value$unit',
               style: TextStyle(
-                fontSize: AppTheme.fontSubhead,
+                fontSize: 13,
                 fontWeight: FontWeight.bold,
                 color: JellyTheme.primary,
               ),
@@ -557,7 +541,7 @@ class _TrimPreviewPageState extends State<TrimPreviewPage> {
                 Text(
                   '设备分辨率',
                   style: TextStyle(
-                    fontSize: AppTheme.fontBody,
+                    fontSize: 14,
                     fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
@@ -565,7 +549,7 @@ class _TrimPreviewPageState extends State<TrimPreviewPage> {
                 const SizedBox(height: 1),
                 Text(
                   '${_params.deviceWidth} × ${_params.deviceHeight}',
-                  style: TextStyle(fontSize: AppTheme.fontCaption, color: JellyTheme.textSecondary),
+                  style: TextStyle(fontSize: 11, color: JellyTheme.textSecondary),
                 ),
               ],
             ),
@@ -573,7 +557,7 @@ class _TrimPreviewPageState extends State<TrimPreviewPage> {
           TextButton.icon(
             onPressed: _editResolution,
             icon: const Icon(Icons.edit, size: 15),
-            label: const Text('修改', style: TextStyle(fontSize: AppTheme.fontSubhead)),
+            label: const Text('修改', style: TextStyle(fontSize: 13)),
           ),
         ],
       ),

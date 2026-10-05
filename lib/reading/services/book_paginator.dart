@@ -86,18 +86,7 @@ class PageEntry {
 
   /// null = 整块原样；非 null = 段落/标题切分后的部分文本
   final String? partialText;
-
-  /// ✅ **全书块下标**（本会话新增 ✓）—— 供"**本地图书按段划线 / 批注**"等按段定位的功能使用 ✓。
-  ///
-  /// 为什么必须**显式带下来** ✗（重要 ✓，别以后又想去"算"出来 ✗）：
-  ///   · `BookPage.firstBlockIndex` ✓ 只是**页级**的 ✓；
-  ///   · 而**长段落会被切成多个 `PageEntry`** ✗（`:283-310` 按行边界分块 ✓）
-  ///   ⇒ 于是 `firstBlockIndex + entryIdx` **会算错** ✗✗（把笔记存到**别的段**上 ✓ 比不做更糟 ✗）。
-  /// · **默认 `-1`** ✓ ⇒ 所有既有构造点 `PageEntry(block)` **照常编译** ✓、
-  ///   行为**一字不变** ✓（**纯加法** ✓ 零风险 ✓）；分页侧按需传 `blockIndex: _i` ✓ 即可 ✓。
-  final int blockIndex;
-
-  const PageEntry(this.block, {this.partialText, this.blockIndex = -1});
+  const PageEntry(this.block, {this.partialText});
 }
 
 /// 分页后的一页
@@ -254,7 +243,7 @@ class BookPaginator {
         _commitPage();
         _curFirst = i;
       }
-      _cur.add(PageEntry(block, blockIndex: _i));
+      _cur.add(PageEntry(block));
       _remaining -= imgH + typo.blockSpacing;
       return;
     }
@@ -281,7 +270,7 @@ class BookPaginator {
 
     if (totalH + _kEps <= _remaining) {
       // 整块放得下
-      _cur.add(PageEntry(block, blockIndex: _i));
+      _cur.add(PageEntry(block));
       _remaining -= totalH + typo.blockSpacing;
       return;
     }
@@ -302,8 +291,7 @@ class BookPaginator {
       final avail = _cur.isNotEmpty ? _remaining : _pageHeight;
       if (tp2.height + _kEps <= avail) {
         // 剩余全部放得下当前页
-        _cur.add(PageEntry(block,
-            partialText: firstChunk ? null : rest, blockIndex: _i));
+        _cur.add(PageEntry(block, partialText: firstChunk ? null : rest));
         _remaining = avail - tp2.height - typo.blockSpacing;
         rest = '';
       } else {
@@ -320,8 +308,7 @@ class BookPaginator {
           final range = tp2.getLineBoundary(const TextPosition(offset: 0));
           fitEnd = range.end > range.start ? range.end : 1;
         }
-        _cur.add(PageEntry(block,
-            partialText: rest.substring(0, fitEnd), blockIndex: _i));
+        _cur.add(PageEntry(block, partialText: rest.substring(0, fitEnd)));
         _remaining = 0;
         rest = rest.substring(fitEnd).trimLeft();
         _commitPage();

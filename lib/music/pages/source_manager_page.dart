@@ -564,8 +564,14 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       ThirdPartySource s) {
     // ⚠️ 用 `usesScript` / `kindLabel`，不要用 `isScript` ——
     // MusicFree 插件也是"脚本型"，用 isScript 会显示成 KEYWORD
-    final tagText = '${s.kindLabel}·${s.quality}'
-        '${s.usesScript ? "" : "·${s.urlPath}"}';
+    // 内置源加「内置」标记，让用户一眼认出"这是 App 自带的"
+    final builtinTag = s.isBuiltin ? '内置' : null;
+    final tagText = [builtinTag, s.kindLabel, s.quality]
+        .where((t) => t != null && t.isNotEmpty)
+        .join('·');
+    // 有脚本的再把脚本类型也拼上（保留原来的 urlPath 信息）
+    // final tagText = '${s.kindLabel}·${s.quality}'
+    //     '${s.usesScript ? "" : "·${s.urlPath}"}';
     final desc = s.isMusicFree
         ? 'MusicFree 插件 · ${(s.script ?? '').length} 字符'
         : (s.isScript
@@ -708,9 +714,12 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         title: Text('删除音源',
             style:
                 TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
-        content: Text('确定删除「${s.name}」？',
-            style: TextStyle(
-                color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
+        content: Text(
+          s.isBuiltin
+              ? '确定删除内置音源「${s.name}」？\n\n（内置源删除后，App 下次启动会自动重新出现。）'
+              : '确定删除「${s.name}」？',
+          style: TextStyle(
+              color: MusicTheme.secondary, fontSize: AppTheme.fontSubhead)),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),

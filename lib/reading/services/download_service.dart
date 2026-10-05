@@ -13,17 +13,10 @@ import 'bookshelf_service.dart';
 import 'settings_service.dart';
 import 'trim_service.dart';
 import '../source/models.dart';
-import '../source/global_proxy.dart';
 import '../source/source_manager.dart';
 import '../utils/app_toast.dart';
 
 /// 日志工具
-///
-/// ✅ **本文件的日志已自动进入「软件日志」**（我的 → 通用设置 → 软件日志 ✓）——
-///   实现方式 ✓：`lib/main.dart:70` 把 `debugPrint` 重定向到了 `AppLog.instance.log` ✓✓，
-///   所以这里的 `debugPrint` **无需再手工调 AppLog** ✓（手工调会让同一条失败写两遍 ✗）。
-///   ℹ️ 本文件 20+ 处失败原因（章节下载失败 ✓ 合并 EPUB 失败 ✓ 删除文件失败 ✓
-///     worker isolate 合并失败 ✓ …）现在**都能在日志页看到** ✓✓
 void _log(String message) {
   if (kDebugMode) {
     debugPrint('[Download] $message');
@@ -114,12 +107,7 @@ class DownloadTask {
       chapterOrder: j['chapterOrder'] as int? ?? 0,
       status: DownloadStatus.values.firstWhere(
         (s) => s.name == j['status'],
-        // 🔴 与 `book_download_service.dart` 的同款 bug ✓（那个已修 ✓）：
-        // 落盘状态名**认不出来**时（坏数据/枚举改名 ✓）被当成 "completed" ✗
-        // → **章节/整本显示"已下载"、点开却找不到文件** ✓（离线打开直接失败 ✓），
-        // 而用户看到的是"已下载" ✓ → 坏数据伪装成正常 ✗。
-        // 改成 `failed`：宁可显示失败让用户重下 ✓，也不谎报已下载 ✓
-        orElse: () => DownloadStatus.failed,
+        orElse: () => DownloadStatus.completed,
       ),
       totalImages: j['totalImages'] as int? ?? 0,
       missingImages: j['missingImages'] as int? ?? 0,
@@ -167,36 +155,24 @@ class DownloadService extends ChangeNotifier {
 
   static const _recordsKey = 'downloaded_records';
 
-  /// ✅ **图片下载专用的 HttpClient 工厂**（本轮把内联改成具名 ✓，**一处定义两处用** ✓）：
-  ///   · 给 `_imageDio` 的适配器用 ✓ —— 设**浏览器 UA** ✓（原注释写明：dio 跨域重定向用
-  ///     `client.userAgent` ✗ 而非 `req.headers` ✓，默认 `Dart/xxx` 会被 c-nd3 等 CDN **拦 403** ✗）；
-  ///   · 也传给 `applyGlobalProxy` ✓✓ —— 它**只叠加 `findProxy`** ✓，**不会把 UA 丢掉** ✓。
-  ///   ⇒ 于是"**开了代理也不丢 UA 修复**"✓✓（这正是本轮**先**给 `global_proxy` 加透传参数 ✓
-  ///     才敢动这里的原因 ✓ —— 否则直接套用会把 UA 整个替换掉 ✗，制造静默 403 回归 ✗✗）。
-  static HttpClient _uaClient() {
-    final client = HttpClient();
-    client.userAgent =
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-        '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-    return client;
-  }
-
-  /// 构造图片下载用的 Dio ✓（**UA 工厂 + 全局代理**，两者兼得 ✓✓）。
-  /// · 代理**关闭** ✓ → `applyGlobalProxy` 直接返回 false ✓ **连适配器都不换** ✓（与从前一字不差 ✓）
-  /// · 代理**开启** ✓ → 用**同一个** `_uaClient` + `findProxy` ✓✓（UA 与代理同时在 ✓）
-  static Dio _createImageDio() {
-    final dio = Dio(
-      BaseOptions(
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 30),
-      ),
-    );
-    dio.httpClientAdapter = IOHttpClientAdapter(createHttpClient: _uaClient);
-    applyGlobalProxy(dio, createHttpClient: _uaClient);
-    return dio;
-  }
-
-  final Dio _imageDio = _createImageDio();
+  final Dio _imageDio =
+      Dio(
+          BaseOptions(
+            connectTimeout: const Duration(seconds: 15),
+            receiveTimeout: const Duration(seconds: 30),
+          ),
+        )
+        ..httpClientAdapter = IOHttpClientAdapter(
+          // 设浏览器 UA：dio 跨域重定向用 client.userAgent（非 req.headers UA），
+          // 默认 Dart/xxx 会被 c-nd3 等 CDN 拦 403（同 reader comicImageCacheManager 修复）
+          createHttpClient: () {
+            final client = HttpClient();
+            client.userAgent =
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+            return client;
+          },
+        );
 
   /// 全部任务（queued/downloading/completed/failed），key = '$pathWord/$chapterId'
   final Map<String, DownloadTask> _tasks = {};

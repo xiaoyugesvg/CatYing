@@ -1,6 +1,5 @@
 import 'dart:math' show min;
 import 'dart:convert';
-import '../../widgets/common_widgets.dart';
 import 'dart:io';
 import 'dart:ui';
 
@@ -12,7 +11,6 @@ import '../models/book.dart';
 import '../models/bookshelf.dart';
 import '../models/comic.dart';
 import '../services/book_download_service.dart';
-import '../services/sync_service.dart';
 import '../services/book_favorites_service.dart';
 import '../services/book_reading_progress_service.dart';
 import '../services/bookshelf_service.dart';
@@ -24,10 +22,8 @@ import '../services/settings_service.dart';
 import '../utils/list_pagination.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/source_cover_image.dart';
-import '../widgets/guide_overlay.dart';
 import '../widgets/jelly_bookshelf_dialog.dart';
 import '../widgets/jelly_nav_bar.dart';
-import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/jelly_select_badge.dart';
@@ -36,46 +32,6 @@ import 'book_detail_page.dart';
 import 'book_reader_page.dart';
 import 'comic_detail_page.dart';
 import 'reader_page.dart';
-import '../../widgets/app_empty_view.dart';
-import '../../common/theme.dart';
-// 🔴 这里原来还有一行 `import '../../widgets/app_icon_button.dart';` ✗ —— 已删除 ✓。
-// ℹ️ **关于下面这行 `app_icon_button.dart` 的 import**（B 档图标按钮统一 ② ✓）：
-//    现在 `_buildSearchButton` 确实在用 `AppIconButton` ✓（`:1823` ✓）——
-//    但**本文件依然不需要**显式 import 它 ✓✓：它与 `JellySearchBar` 一样是
-//    **传递导出**可用的 ✓（`analyze` 在无该 import 时仍 `error=0` ✓，实测确认 ✓）。
-//    所以我把 import 加回去的第一次尝试**只是加了注释、并没有加 import** ✗，
-//    而代码照样编译 ✓ —— 这恰好证明了"不需要 import" ✓，那段注释已按事实改正 ✓。
-// 原因很反直觉 ✓：`AppIconButton` 曾在本文件里**只被一处文档引用**用到
-//（`/// … [AppIconButton] …` ✓），而 Dart 的 `unused_import` **把文档引用也算引用** ✓✓
-// → 那段孤儿注释一删 ✓，这个 import 立刻变成 `unused_import` ✗
-//（今天实测：`lib/reading` warning **0 → 1** ✓，跑闸门才发现 ✓）。
-// 教训 ✓：**改注释也可能影响分析器判定** ✓ —— 删掉含 `[...]` 引用的注释后，
-// 一定要再跑一次闸门 ✓（我这次就是跑了才发现的 ✓）
-import '../../widgets/app_page_header.dart';
-import '../../widgets/app_icon_button.dart';
-
-/// "全部"虚拟书架 id：聚合当前 tab 可见的所有书架条目（仅浏览，不参与移出等管理操作）
-const String kAllShelfId = '__all__';
-
-/// 解析书架条目：普通书架直接取；"全部"聚合所有书架（漫画 tab 排除本地图书）。
-/// 供书架页正文两个子组件与选择/移除逻辑共用。
-List<BookshelfItem> resolveShelfItems(
-  String shelfId,
-  BookshelfItemType type, {
-  bool excludeLocal = false,
-}) {
-  final svc = BookshelfService();
-  if (shelfId != kAllShelfId) return svc.getItemsInShelf(shelfId, type);
-  final seen = <String>{};
-  final result = <BookshelfItem>[];
-  for (final shelf in svc.bookshelves) {
-    if (excludeLocal && shelf.id == BookshelfService.presetLocal) continue;
-    for (final item in svc.getItemsInShelf(shelf.id, type)) {
-      if (seen.add(item.itemId)) result.add(item);
-    }
-  }
-  return result;
-}
 
 /// 书架页面
 class BookshelfPage extends StatefulWidget {
@@ -84,14 +40,10 @@ class BookshelfPage extends StatefulWidget {
   /// 是否显示返回按钮（从"我的"页面入口进入时为 true）
   final bool showBackButton;
 
-  /// 外部触发进入多选模式（底部导航「书架」上滑时自增，见 home_page）
-  final ValueNotifier<int>? selectTrigger;
-
   const BookshelfPage({
     super.key,
     this.isActive = false,
     this.showBackButton = false,
-    this.selectTrigger,
   });
 
   @override
@@ -115,7 +67,6 @@ class _BookshelfPageState extends State<BookshelfPage>
   // 多选模式
   bool _isSelecting = false;
   final Set<String> _selectedItemIds = {};
-  bool _guideShown = false; // 新手引导已展示标记
 
   // 搜索浮层
   late final AnimationController _searchAnim;
@@ -148,40 +99,6 @@ class _BookshelfPageState extends State<BookshelfPage>
         setState(() => _currentShelfId = shelves.first.id);
       }
     });
-    _maybeTriggerGuide();
-    // 监听外部多选触发（底部导航「书架」上滑）
-    widget.selectTrigger?.addListener(_onExternalSelectTrigger);
-  }
-
-  /// 外部触发进入多选模式：切换 tab 到书架并进入多选
-  void _onExternalSelectTrigger() {
-    if (!mounted) return;
-    setState(() {
-      _isSelecting = true;
-      _selectedItemIds.clear();
-    });
-    _toast('已进入批量多选：点击条目选择，底部可批量操作');
-  }
-
-  void _toast(String msg) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(msg),
-          duration: const Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-  }
-
-  /// 首次激活时展示书架页新手引导（仅一次）
-  void _maybeTriggerGuide() {
-    if (_guideShown || !widget.isActive) return;
-    _guideShown = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) maybeShowGuide(context, GuideGroups.bookshelf);
-    });
   }
 
   @override
@@ -191,12 +108,10 @@ class _BookshelfPageState extends State<BookshelfPage>
       _hasShownEntrance = true;
       setState(() => _session++);
     }
-    if (widget.isActive && !oldWidget.isActive) _maybeTriggerGuide();
   }
 
   @override
   void dispose() {
-    widget.selectTrigger?.removeListener(_onExternalSelectTrigger);
     SettingsService().removeListener(_onContentTabsChanged);
     _tabController.dispose();
     _comicScrollController.dispose();
@@ -242,26 +157,19 @@ class _BookshelfPageState extends State<BookshelfPage>
 
   void _onComicScroll() {
     if (!_comicScrollController.hasClients) return;
-    // ⚡ 性能（本次唯一目的）：`total` 原来**每滚动一帧就查一次服务** ✗
-    //   （`BookshelfService().countInShelf(...)` ✓）—— 而它**只在这个分支里用得到** ✓：
-    //   当 `shouldLoadMore` 为假时，原代码算出的 `total` 根本没被使用 ✗。
-    // ✓ 挪进分支 → 只有"快滚到底、要加载更多"时才查询 ✓
-    // ℹ️ **语义完全不变** ✓：加载判定、`min(...)` 上限、`return` 时机，
-    //   以及下面"回到顶部按钮"的翻转判定都保持原样 ✓
-    if (ListPagination.shouldLoadMore(_comicScrollController)) {
-      final total = BookshelfService().countInShelf(
-        _currentShelfId,
-        BookshelfItemType.comic,
+    final total = BookshelfService().countInShelf(
+      _currentShelfId,
+      BookshelfItemType.comic,
+    );
+    if (ListPagination.shouldLoadMore(_comicScrollController) &&
+        _comicDisplayCount < total) {
+      setState(
+        () => _comicDisplayCount = min(
+          _comicDisplayCount + ListPagination.pageSize,
+          total,
+        ),
       );
-      if (_comicDisplayCount < total) {
-        setState(
-          () => _comicDisplayCount = min(
-            _comicDisplayCount + ListPagination.pageSize,
-            total,
-          ),
-        );
-        return;
-      }
+      return;
     }
     final show = _comicScrollController.position.pixels > 300;
     if (show != _showComicBackToTop) setState(() => _showComicBackToTop = show);
@@ -269,23 +177,19 @@ class _BookshelfPageState extends State<BookshelfPage>
 
   void _onBookScroll() {
     if (!_bookScrollController.hasClients) return;
-    // ⚡ 性能：与 `_onComicScroll` **同一处问题、同一处修法** ✓ ——
-    //   `total` 原来每帧都查服务 ✗，而它只在"快到底要加载更多"时用得到 ✓。
-    // ℹ️ **语义不变** ✓（`shouldLoadMore` 为假时，原来算的 `total` 从未被使用 ✓）
-    if (ListPagination.shouldLoadMore(_bookScrollController)) {
-      final total = BookshelfService().countInShelf(
-        _currentShelfId,
-        BookshelfItemType.book,
+    final total = BookshelfService().countInShelf(
+      _currentShelfId,
+      BookshelfItemType.book,
+    );
+    if (ListPagination.shouldLoadMore(_bookScrollController) &&
+        _bookDisplayCount < total) {
+      setState(
+        () => _bookDisplayCount = min(
+          _bookDisplayCount + ListPagination.pageSize,
+          total,
+        ),
       );
-      if (_bookDisplayCount < total) {
-        setState(
-          () => _bookDisplayCount = min(
-            _bookDisplayCount + ListPagination.pageSize,
-            total,
-          ),
-        );
-        return;
-      }
+      return;
     }
     final show = _bookScrollController.position.pixels > 300;
     if (show != _showBookBackToTop) setState(() => _showBookBackToTop = show);
@@ -313,13 +217,8 @@ class _BookshelfPageState extends State<BookshelfPage>
 
   // ========== 搜索浮层 ==========
 
-  void _openSearch([String? initial]) {
+  void _openSearch() {
     FocusScope.of(context).unfocus();
-    // 顶栏胶囊提交时带入关键词，直接出结果
-    if (initial != null && initial.trim().isNotEmpty) {
-      _searchController.text = initial;
-      _searchQuery = initial;
-    }
     _searchAnim.forward();
   }
 
@@ -359,16 +258,6 @@ class _BookshelfPageState extends State<BookshelfPage>
     );
     if (result != null && result.trim().isNotEmpty) {
       final shelf = await BookshelfService().createBookshelf(result.trim());
-      // 🔴 `setState` 少了 `mounted` 检查 ✗ —— 而**隔壁那个分支**
-      // （下面的 `else if (mounted)` ✓）明明写了 ✓，属**漏写** ✗。
-      // 页面在"创建书架"的 await 窗口里被销毁时，这个 setState 会抛
-      // `setState() called after dispose()` ✓（release 同样抛 ✗）。
-      // ✓ 补上（与本文件 `:1295` 同款写法 ✓）
-      if (!mounted) return;
-      // 🟡 顺带释放这个 controller ✗：它在 `:314` 创建后**从未被 dispose** ✓
-      //（`showDialog` 返回之后本方法再没用过它 ✓ —— 我已通读 `:344-358` 确认 ✓）
-      // → 原来**每打开一次"新建书架"就泄漏一个** ✓，连带它的焦点/监听回调一起滞留 ✓
-      controller.dispose();
       if (shelf != null) {
         setState(() => _currentShelfId = shelf.id);
       } else if (mounted) {
@@ -408,11 +297,6 @@ class _BookshelfPageState extends State<BookshelfPage>
         ],
       ),
     );
-    // 🟡 与"新建书架"（`:347`）同款：这个 controller 也只服务于弹窗 ✓ ——
-    // grep 求证过：`controller.` 在全文件**只有 3 处** ✓
-    //（`:330` 新建弹窗 · `:347` 释放 · `:381` 重命名弹窗 ✓），
-    // 弹窗返回之后**没有任何地方再用它** ✓ → 不释放就是"每次重命名泄漏一个" ✗
-    controller.dispose();
     if (result != null && result.trim().isNotEmpty) {
       final ok = await BookshelfService().renameBookshelf(
         shelf.id,
@@ -453,448 +337,13 @@ class _BookshelfPageState extends State<BookshelfPage>
     );
     if (confirmed == true) {
       final ok = await BookshelfService().deleteBookshelf(shelf.id);
-      // 🔴 同款漏写 ✗：`await` 之后直接 `setState` ✓ —— 而 `deleteBookshelf`
-      // 要落盘（走磁盘 IO ✓），这个 await 窗口比同步分支**大得多** ✓，
-      // 期间页面被销毁就抛 `setState() called after dispose()` ✗。
-      // ✓ 补上（与本文件另外 8 处同款写法 ✓）
-      if (!mounted) return;
       if (ok) {
-        // 🟡 顺带修一个"**只增不减**"的缓存 ✗：`_shelfChipKeys` 只在渲染分组
-        // chip 时 `putIfAbsent(shelfId, …)` ✓，而书架被删掉之后那个 `GlobalKey`
-        // **永久驻留** ✓ → 每次增删书架都净涨一个 ✓（长期使用会一直积累 ✓）。
-        // 删除成功后清掉它 ✓（`remove` 对不存在的键是安全的空操作 ✓）
-        _shelfChipKeys.remove(shelf.id);
         final shelves = BookshelfService().bookshelves;
         if (shelves.isNotEmpty) {
           setState(() => _currentShelfId = shelves.first.id);
         }
       }
     }
-  }
-
-  /// 「书架设置」弹层（按截图）。
-  ///
-  /// 截图内容：标题「书架设置」+ 一项「移除同时删除本地文件」开关，
-  /// 说明"从书架移除后，若该书不在其他书架，删除其本地文件（含导入的
-  /// 原文件），不可恢复"。
-  Future<void> _showShelfSettings() async {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final label = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => Container(
-          decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: SafeArea(
-            top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  margin: const EdgeInsets.only(top: 8, bottom: 10),
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: JellyTheme.textSecondary.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('书架设置',
-                          style: TextStyle(
-                            fontSize: AppTheme.fontTitle3,
-                            fontWeight: FontWeight.w700,
-                            color: label,
-                          )),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('移除同时删除本地文件',
-                                    style: TextStyle(
-                                        fontSize: AppTheme.fontHeadline, color: label)),
-                                const SizedBox(height: 5),
-                                Text(
-                                  '从书架移除后，若该书不在其他书架，'
-                                  '删除其本地文件（含导入的原文件），不可恢复',
-                                  style: TextStyle(
-                                    fontSize: AppTheme.fontSubhead,
-                                    height: 1.5,
-                                    color: JellyTheme.textSecondary,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Switch(
-                            value: SettingsService().shelfRemoveDeletesFile,
-                            onChanged: (v) async {
-                              await SettingsService()
-                                  .setShelfRemoveDeletesFile(v);
-                              setSheet(() {});
-                            },
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 批量删除模式（截图里点「批量删除」后的形态）。
-  ///
-  /// 复用了页面已有的选择态（`_isSelecting` / `_selectedItemIds`）——
-  /// 那套本来用于选中书架里的**条目**。这里用于选中**可删除的书架**
-  /// （自建书架），预设书架不可删所以不进选择。
-  Future<void> _showBatchDeleteShelves() async {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final label = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-    final picked = <String>{};
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          // 只有**自建**书架可删（预设是流程的一环，删了会出问题）
-          final shelves =
-              BookshelfService().bookshelves.where((s) => !s.isPreset).toList();
-          return Container(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(ctx).size.height * 0.75,
-            ),
-            decoration: BoxDecoration(
-              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    margin: const EdgeInsets.only(top: 8, bottom: 4),
-                    width: 36,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: JellyTheme.textSecondary.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 10, 8, 6),
-                    child: Row(
-                      children: [
-                        Text('管理书架',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontTitle3,
-                              fontWeight: FontWeight.w700,
-                              color: label,
-                            )),
-                        const Spacer(),
-                        // 截图里这一态是红色「✕ 取消」
-                        TextButton.icon(
-                          onPressed: () => Navigator.pop(ctx),
-                          icon: const Icon(Icons.close_rounded,
-                              size: 20, color: Colors.redAccent),
-                          label: const Text('取消',
-                              style: TextStyle(
-                                  fontSize: AppTheme.fontBody, color: Colors.redAccent)),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Divider(height: 1),
-                  Flexible(
-                    child: shelves.isEmpty
-                        ? Padding(
-                            padding: const EdgeInsets.all(40),
-                            child: Text('没有可删除的书架（预设书架不可删）',
-                                style: TextStyle(
-                                    fontSize: AppTheme.fontSubhead,
-                                    color: JellyTheme.textSecondary)),
-                          )
-                        : ListView(
-                            shrinkWrap: true,
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 6),
-                            children: [
-                              for (final s in shelves)
-                                CheckboxListTile(
-                                  value: picked.contains(s.id),
-                                  onChanged: (v) => setSheet(() {
-                                    if (v == true) {
-                                      picked.add(s.id);
-                                    } else {
-                                      picked.remove(s.id);
-                                    }
-                                  }),
-                                  title: Text(
-                                    _shelfDisplayName(s, _currentTypeFor()),
-                                    style: TextStyle(
-                                        fontSize: AppTheme.fontHeadline, color: label),
-                                  ),
-                                  controlAffinity:
-                                      ListTileControlAffinity.leading,
-                                ),
-                            ],
-                          ),
-                  ),
-                  const Divider(height: 1),
-                  // 底部：已选 N 个可删除书架 + 删除所选(N)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 10, 16, 12),
-                    child: Row(
-                      children: [
-                        Text(
-                          '已选 ${picked.length} 个可删除书架',
-                          style: TextStyle(
-                              fontSize: AppTheme.fontSubhead,
-                              color: JellyTheme.textSecondary),
-                        ),
-                        const Spacer(),
-                        FilledButton(
-                          onPressed: picked.isEmpty
-                              ? null
-                              : () async {
-                                  for (final id in picked) {
-                                    await BookshelfService()
-                                        .deleteBookshelf(id);
-                                  }
-                                  if (ctx.mounted) Navigator.pop(ctx);
-                                },
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 22, vertical: 14),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14)),
-                          ),
-                          child: Text('删除所选 (${picked.length})'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-    if (mounted) setState(() {});
-  }
-
-  /// 当前 tab 对应的条目类型（漫画 / 图书）
-  BookshelfItemType _currentTypeFor() => _isComicTab
-      ? BookshelfItemType.comic
-      : BookshelfItemType.book;
-
-  /// 「管理书架」弹层（按用户截图）。
-  ///
-  /// 截图内容：
-  ///   · 标题「管理书架」+ 右侧三个动作：⚙设置 / ＋新建 / 🗑批量删除
-  ///   · 列表每行：≡拖动把手 / 书架名 / N本 / 👁显隐
-  ///
-  /// 与已有的长按菜单 [_showShelfMenu]（重命名/删除单个书架）是**互补**关系：
-  /// 那个管单个书架，这个管整组（排序 + 显隐 + 批量）。
-  Future<void> _showManageShelves() async {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final label = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          // 每次都从服务取，拖动/删除后立刻反映
-          final shelves = BookshelfService().bookshelves;
-          return Container(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(ctx).size.height * 0.75,
-            ),
-            decoration: BoxDecoration(
-              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    margin: const EdgeInsets.only(top: 8, bottom: 4),
-                    width: 36,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: JellyTheme.textSecondary.withValues(alpha: 0.3),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  // ── 标题行 + 右侧动作 ────────────────────────────
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 10, 8, 6),
-                    child: Row(
-                      children: [
-                        Text('管理书架',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontTitle3,
-                              fontWeight: FontWeight.w700,
-                              color: label,
-                            )),
-                        const Spacer(),
-                        // 设置 -> 「书架设置」弹层（按截图）
-                        IconButton(
-                          tooltip: '书架设置',
-                          onPressed: () {
-                            Navigator.pop(ctx);
-                            _showShelfSettings();
-                          },
-                          icon: Icon(Icons.settings_outlined,
-                              size: 21, color: label),
-                        ),
-                        // 新建
-                        IconButton(
-                          tooltip: '新建书架',
-                          onPressed: () async {
-                            Navigator.pop(ctx);
-                            await _createShelf();
-                            if (mounted) setState(() {});
-                          },
-                          icon: Icon(Icons.create_new_folder_outlined,
-                              size: 21, color: label),
-                        ),
-                        // 批量删除
-                        TextButton.icon(
-                          onPressed: () {
-                            Navigator.pop(ctx);
-                            _showBatchDeleteShelves();
-                          },
-                          icon: Icon(Icons.delete_sweep_outlined,
-                              size: 20, color: label),
-                          label: Text('批量删除',
-                              style: TextStyle(fontSize: AppTheme.fontBody, color: label)),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Divider(height: 1),
-                  // ── 可拖动排序的书架列表 ─────────────────────────
-                  Flexible(
-                    child: ReorderableListView.builder(
-                      shrinkWrap: true,
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      itemCount: shelves.length,
-                      // 拖动结束：把新顺序交给服务持久化
-                      onReorder: (oldIndex, newIndex) async {
-                        // Flutter 的约定：newIndex 是"插入到该位置之前"，
-                        // 向下拖时要减 1 —— 不减会导致拖到相邻位就弹回去。
-                        if (newIndex > oldIndex) newIndex -= 1;
-                        final ids =
-                            shelves.map((s) => s.id).toList(growable: true);
-                        final moved = ids.removeAt(oldIndex);
-                        ids.insert(newIndex, moved);
-                        await BookshelfService().reorderShelves(ids);
-                        setSheet(() {});
-                      },
-                      itemBuilder: (ctx2, i) {
-                        final s = shelves[i];
-                        // 与 _buildShelfBar 同一取法（_currentType 不存在，
-                        // 类型由当前 tab 推出来）
-                        final type = _isComicTab
-                            ? BookshelfItemType.comic
-                            : BookshelfItemType.book;
-                        final count =
-                            BookshelfService().countInShelf(s.id, type);
-                        final hidden = SettingsService().isShelfHidden(s.id);
-                        return Container(
-                          key: ValueKey('shelf-manage-${s.id}'),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 4),
-                          child: Row(
-                            children: [
-                              // 拖动把手（截图里是三条横线）
-                              ReorderableDragStartListener(
-                                index: i,
-                                child: Icon(Icons.drag_handle_rounded,
-                                    size: 20,
-                                    color: JellyTheme.textSecondary),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  _shelfDisplayName(s, type),
-                                  style: TextStyle(
-                                      fontSize: AppTheme.fontHeadline, color: label),
-                                ),
-                              ),
-                              Text(
-                                '$count 本',
-                                style: TextStyle(
-                                    fontSize: AppTheme.fontSubhead,
-                                    color: JellyTheme.textSecondary),
-                              ),
-                              const SizedBox(width: 10),
-                              // 显隐：眼睛开关。
-                              //
-                              // ⚠️ 预设书架**也能**隐藏 —— 用户截图里
-                              // 「正在读」的眼睛就是划线（已隐藏）态。
-                              // 我第一版做成"预设不可隐藏 + 自建即删除"，
-                              // 与截图不符且语义错误（隐藏 ≠ 删除）。
-                              IconButton(
-                                tooltip: hidden ? '当前隐藏，点击显示' : '当前显示，点击隐藏',
-                                onPressed: () async {
-                                  await SettingsService()
-                                      .toggleShelfHidden(s.id);
-                                  setSheet(() {});
-                                  if (mounted) setState(() {});
-                                },
-                                icon: Icon(
-                                  hidden
-                                      ? Icons.visibility_off_outlined
-                                      : Icons.visibility_outlined,
-                                  size: 20,
-                                  color: hidden
-                                      ? JellyTheme.textSecondary
-                                          .withValues(alpha: 0.45)
-                                      : JellyTheme.textSecondary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-    if (mounted) setState(() {});
   }
 
   void _showShelfMenu(Bookshelf shelf) {
@@ -905,7 +354,7 @@ class _BookshelfPageState extends State<BookshelfPage>
         final isDark = Theme.of(context).brightness == Brightness.dark;
         return Container(
           decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+            color: isDark ? JellyTheme.cardDark : Colors.white,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: SafeArea(
@@ -921,7 +370,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                     color: isDark
                         ? Colors.white.withValues(alpha: 0.2)
                         : Colors.black.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -1031,23 +480,17 @@ class _BookshelfPageState extends State<BookshelfPage>
     final newType = tab == NavTab.manga
         ? BookshelfItemType.comic
         : BookshelfItemType.book;
-    if (_currentShelfId != kAllShelfId &&
-        BookshelfService().countInShelf(_currentShelfId, newType) == 0) {
+    if (BookshelfService().countInShelf(_currentShelfId, newType) == 0) {
       _switchShelf(shelves.first.id);
     }
   }
 
   /// 当前 tab 可见的书架列表：漫画 tab 隐藏"本地图书"书架（其内仅 Book 类型）
   List<Bookshelf> _visibleShelves(NavTab tab) {
-    final s = SettingsService();
-    final shelves = BookshelfService()
-        .bookshelves
-        // 被「管理书架」隐藏的书架不显示（预设书架也能隐藏 —— 见截图）
-        .where((x) => !s.isShelfHidden(x.id))
-        .toList();
+    final shelves = BookshelfService().bookshelves;
     if (tab == NavTab.manga) {
       return shelves
-          .where((x) => x.id != BookshelfService.presetLocal)
+          .where((s) => s.id != BookshelfService.presetLocal)
           .toList();
     }
     return shelves;
@@ -1085,9 +528,7 @@ class _BookshelfPageState extends State<BookshelfPage>
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final contentTabs = SettingsService().effectiveContentTabs();
-    // 胶囊切换改小：原按"半屏宽均分"太占地方（用户嫌左上角图标太大），
-    // 固定段宽 40（两段共 90），配合 height 40 整体小一号
-    final tabSegWidth = 40.0;
+    final tabSegWidth = (MediaQuery.of(context).size.width * 0.5 - 10) / 2;
     return PopScope(
       canPop: !_isSelecting,
       onPopInvokedWithResult: (didPop, _) {
@@ -1120,95 +561,88 @@ class _BookshelfPageState extends State<BookshelfPage>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // 顶部标题区
-                  //
-                  // ⚠️ 高度常量要跟着布局走。
-                  // 原来是"标题一行 + 胶囊一行"共两行，所以两 tab 时是 105。
-                  // 已按截图重排成**一行**（标题 / 胶囊 / 排序 / 搜索 …… 闪电），
-                  // 搜索换成了可展开胶囊（高 50），行高 = headerTop(8) + 50 = 58。
                   SizedBox(
-                    // ⚠️ 这里曾有一个高度 bug：
-                    //   原式 = `contentTabs.length < 2 ? 0
-                    //           : (widget.showBackButton ? 0 : 48)`
-                    // 也就是 **showBackButton == true 时高度给 0**，
-                    // 但下面 Stack 里的标题行只在 `!showBackButton` 时渲染、
-                    // 胶囊是**无条件**渲染的 —— 高度 0 + 内容还在
-                    // → 胶囊**溢出容器**，压到下面的分类栏上
-                    //（用户截图里"书架上方的胶囊和下面的标签叠在一起"）。
-                    //
-                    // 只有**两个 tab 都没有**时这一行才真该消失
-                    //（那种情况下标题行和胶囊都不渲染）。
-                    height: contentTabs.length < 2 ? 0.0 : 58.0,
+                    height: contentTabs.length < 2
+                        ? (widget.showBackButton ? 0.0 : 50.0)
+                        : (widget.showBackButton ? 70.0 : 105.0),
                     child: Stack(
                       children: [
-                        // ── 标题行（一行内全部左对齐，右侧只放闪电）──────
-                        //
-                        // 按用户截图重排：原来标题在第 1 行、切换胶囊在第 2 行
-                        // 且居中，搜索按钮跟着胶囊。截图里它们是**同一行、左对齐**：
-                        //   书架  [漫画|图书]  (排序)  (搜索) ······  (闪电)
                         if (!widget.showBackButton)
                           Positioned(
-                            top: AppTheme.headerTop,
-                            left: AppTheme.headerSide,
-                            right: AppTheme.headerSide,
+                            top: 6,
+                            left: 12,
+                            right: 12,
                             child: Row(
                               children: [
-                                AppPageTitle('书架', isDark: isDark),
-                                const SizedBox(width: AppTheme.headerTitleGap),
-                                Builder(
-                                  builder: (context) {
-                                    final tabs = SettingsService()
-                                        .effectiveContentTabs();
-                                    if (tabs.length < 2) {
-                                      return const SizedBox.shrink();
-                                    }
-                                    return AnimatedBuilder(
-                                      animation: _tabController.animation!,
-                                      builder: (context, _) =>
-                                          JellySegmentedToggle(
-                                            index: _tabController
-                                                .animation!.value,
-                                            onChanged: (i) {
-                                              if (i >= 0 &&
-                                                  i < tabs.length) {
-                                                _switchTab(tabs[i]);
-                                              }
-                                            },
-                                            // 改小：高度 40、段宽 40
-                                            height: 40,
-                                            segmentWidth: tabSegWidth,
-                                            segments: tabs
-                                                .map(
-                                                  (t) => JellySegmentData(
-                                                    icon: t == NavTab.manga
-                                                        ? Icons
-                                                            .palette_rounded
-                                                        : Icons.book_rounded,
-                                                  ),
-                                                )
-                                                .toList(),
-                                          ),
-                                    );
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                                // 搜索：与首页右上角同款小胶囊（收起=圆钮，
-                                // 点击展开、图标在左、提示「搜索书架」），
-                                // 提交直接进搜索浮层出结果
-                                Expanded(
-                                  child: JellyExpandableSearch(
-                                    controller: _searchController,
-                                    hintText: '搜索书架',
-                                    maxWidth: 200,
-                                    onSubmitted: (v) => _openSearch(v),
-                                    onChanged: (v) => setState(() {}),
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 4),
+                                  child: Text(
+                                    '书架',
+                                    style: TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold,
+                                      color: isDark
+                                          ? Colors.white
+                                          : JellyTheme.textPrimaryLight,
+                                    ),
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                // 闪电：导入/导出（近黑实心圆）
-                                _buildBoltButton(),
+                                const Spacer(),
+                                if (contentTabs.length < 2) ...[
+                                  _buildSearchButton(size: 36),
+                                  const SizedBox(width: 8),
+                                ],
+                                _buildImportExportButton(),
                               ],
                             ),
                           ),
+                        Positioned(
+                          top: widget.showBackButton ? 6 : 45,
+                          left: 12,
+                          right: 12,
+                          child: Row(
+                            children: [
+                              const Spacer(),
+                              Builder(
+                                builder: (context) {
+                                  final tabs = SettingsService()
+                                      .effectiveContentTabs();
+                                  if (tabs.length < 2) {
+                                    return const SizedBox.shrink();
+                                  }
+                                  return AnimatedBuilder(
+                                    animation: _tabController.animation!,
+                                    builder: (context, _) =>
+                                        JellySegmentedToggle(
+                                          index:
+                                              _tabController.animation!.value,
+                                          onChanged: (i) {
+                                            if (i >= 0 && i < tabs.length) {
+                                              _switchTab(tabs[i]);
+                                            }
+                                          },
+                                          segmentWidth: tabSegWidth,
+                                          segments: tabs
+                                              .map(
+                                                (t) => JellySegmentData(
+                                                  icon: t == NavTab.manga
+                                                      ? Icons.palette_rounded
+                                                      : Icons.book_rounded,
+                                                ),
+                                              )
+                                              .toList(),
+                                        ),
+                                  );
+                                },
+                              ),
+                              if (contentTabs.length >= 2) ...[
+                                const SizedBox(width: 8),
+                                _buildSearchButton(),
+                              ],
+                              const Spacer(),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -1304,11 +738,9 @@ class _BookshelfPageState extends State<BookshelfPage>
       _selectedItemIds
         ..clear()
         ..addAll(
-          resolveShelfItems(
-            _currentShelfId,
-            type,
-            excludeLocal: _isComicTab,
-          ).map((i) => i.itemId),
+          BookshelfService()
+              .getItemsInShelf(_currentShelfId, type)
+              .map((i) => i.itemId),
         );
     });
   }
@@ -1335,42 +767,13 @@ class _BookshelfPageState extends State<BookshelfPage>
       ),
     );
     if (confirmed != true) return;
-    // 🔴 这里在 `await showDialog(...)` **之后**直接用了 `context` ✗ ——
-    // `ScaffoldMessenger.of` 内部是 `dependOnInheritedWidgetOfExactType<…>()!` ✓
-    // → 页面在 await 窗口里被销毁时：debug 抛 `FlutterError`、**release 抛
-    //   `Null check operator used on a null value`** ✓（用户看到的是"崩了"✗）。
-    // ✓ 补上 `mounted` 检查 —— 本文件别处（同函数的另一个分支 ✓）本来就有这个
-    //   写法 ✓，这里是**漏写** ✗
-    if (!mounted) return;
-    if (_currentShelfId == kAllShelfId) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text('「全部」为汇总视图，请进入具体书架后管理'),
-            duration: Duration(seconds: 2),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      return;
-    }
-    // 🔴 这里原来**无条件**调 cleanupOrphanedImport → deleteTask → File.delete() ✗，
-    // 而设置面板的文案（:428-430 / :480-482）明说「移除同时删除本地文件」是
-    // **可选**开关、默认关；全仓库读这个设置的地方**只有那个 Switch 自己** ✗
-    // → 「批量移出书架」实际是**不可恢复地删掉本地导入文件** ✗✗
-    //
-    // 同时把书架 id 与选中集**快照**下来：循环里含多个 await（还有磁盘 IO），
-    // 期间用户切书架/继续点选会让剩余条目从**新书架**移除、或在迭代中改集合 ✗
-    final shelfId = _currentShelfId;
-    final ids = List<String>.from(_selectedItemIds);
-    final deleteLocalFile = SettingsService().shelfRemoveDeletesFile;
-    for (final itemId in ids) {
+    for (final itemId in _selectedItemIds.toList()) {
       await BookshelfService().removeFromBookshelf(
-        shelfId,
+        _currentShelfId,
         itemId,
         type,
       );
-      if (type == BookshelfItemType.book && deleteLocalFile) {
+      if (type == BookshelfItemType.book) {
         await BookDownloadService().cleanupOrphanedImport(itemId);
       }
     }
@@ -1409,7 +812,7 @@ class _BookshelfPageState extends State<BookshelfPage>
             final shelves = BookshelfService().bookshelves;
             return Container(
               decoration: BoxDecoration(
-                color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                color: isDark ? JellyTheme.cardDark : Colors.white,
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(24),
                 ),
@@ -1427,17 +830,15 @@ class _BookshelfPageState extends State<BookshelfPage>
                         height: 4,
                         margin: const EdgeInsets.only(bottom: 12),
                         decoration: BoxDecoration(
-                          color: JellyTheme.textSecondary.withValues(
-                            alpha: 0.3,
-                          ),
-                          borderRadius: BorderRadius.circular(10),
+                          color: Colors.grey.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(2),
                         ),
                       ),
                     ),
                     Text(
                       '移到其他书架',
                       style: TextStyle(
-                        fontSize: AppTheme.fontTitle3,
+                        fontSize: 18,
                         fontWeight: FontWeight.bold,
                         color: textColor,
                       ),
@@ -1470,7 +871,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                                     color: selected
                                         ? JellyTheme.primary
                                         : (disabled
-                                              ? JellyTheme.textSecondary
+                                              ? Colors.grey
                                               : (isDark
                                                     ? Colors.white38
                                                     : Colors.black38)),
@@ -1491,9 +892,9 @@ class _BookshelfPageState extends State<BookshelfPage>
                                     child: Text(
                                       s.name,
                                       style: TextStyle(
-                                        fontSize: AppTheme.fontBody,
+                                        fontSize: 14,
                                         color: disabled
-                                            ? JellyTheme.textSecondary
+                                            ? Colors.grey
                                             : textColor,
                                       ),
                                     ),
@@ -1501,7 +902,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                                   Text(
                                     '${BookshelfService().countInShelf(s.id)}',
                                     style: TextStyle(
-                                      fontSize: AppTheme.fontFootnote,
+                                      fontSize: 12,
                                       color: isDark
                                           ? Colors.white38
                                           : Colors.black38,
@@ -1533,7 +934,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                         child: const Text(
                           '确定',
                           style: TextStyle(
-                            fontSize: AppTheme.fontHeadline,
+                            fontSize: 15,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -1572,7 +973,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: AppTheme.fontBody,
+                fontSize: 14,
                 fontWeight: FontWeight.w600,
                 color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
               ),
@@ -1617,226 +1018,48 @@ class _BookshelfPageState extends State<BookshelfPage>
 
   // ========== 顶部搜索按钮 ==========
 
-  /// 排序方式选择面板。
-  ///
-  /// ── 为什么必须"真排序" ────────────────────────────────────────
-  /// 用户截图里标题行有个排序按钮。如果只弹个面板不生效，
-  /// 就是个假按钮 —— 比不放更糟（用户点了以为坏了）。
-  /// 所以这里把选择**持久化到 SettingsService.shelfSort**，
-  /// 两个书架列表（_ComicShelfTab / _BookShelfTab）读它来排。
-  Future<void> _showSortSheet() async {
-    final s = SettingsService();
-    // 6 个选项 —— 与用户截图的排序面板一一对应（顺序也照截图）
-    const options = <String, String>{
-      'default': '默认',
-      'title': '书名',
-      'author': '作者',
-      'added': '加入时间',
-      'recent': '最近阅读',
-      'progress': '阅读进度',
-    };
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final label = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-    final picked = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => Container(
-          decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: SafeArea(
-            top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // 抓手
-                Container(
-                  margin: const EdgeInsets.only(top: 8, bottom: 4),
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: JellyTheme.textSecondary.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                // ── 标题行：排序方式 / 全局开关 / 方向 / 关闭 ──────────
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 12, 4),
-                  child: Row(
-                    children: [
-                      Text('排序方式',
-                          style: TextStyle(
-                            fontSize: AppTheme.fontTitle3,
-                            fontWeight: FontWeight.w700,
-                            color: label,
-                          )),
-                      const Spacer(),
-                      // 「全局」开关：所有书架共用这套排序
-                      Text('全局',
-                          style: TextStyle(
-                              fontSize: AppTheme.fontSubhead,
-                              color: JellyTheme.textSecondary)),
-                      const SizedBox(width: 4),
-                      Transform.scale(
-                        scale: 0.8,
-                        child: Switch(
-                          value: s.shelfSortGlobal,
-                          onChanged: (v) async {
-                            await s.setShelfSortGlobal(v);
-                            setSheet(() {});
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 2),
-                      // 方向：点击在"正序 / 倒序"之间切
-                      IconButton(
-                        tooltip: s.shelfSortAsc
-                            ? '当前正序，点击切倒序'
-                            : '当前倒序，点击切正序',
-                        onPressed: () async {
-                          await s.setShelfSortAsc(!s.shelfSortAsc);
-                          setSheet(() {});
-                        },
-                        icon: Icon(
-                          s.shelfSortAsc
-                              ? Icons.sort_by_alpha_rounded
-                              : Icons.sort_rounded,
-                          size: 22,
-                          color: JellyTheme.textSecondary,
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        icon: Icon(Icons.close_rounded,
-                            size: 22, color: JellyTheme.textSecondary),
-                      ),
-                    ],
-                  ),
-                ),
-                // ── 选项：一组圆角卡片 ────────────────────────────────
-                //
-                // 截图里每项是**独立的浅灰圆角条**（不是 ListTile + 图标），
-                // 当前选中项底色更深一点。
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                  child: Column(
-                    children: [
-                      for (final e in options.entries)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: GestureDetector(
-                            onTap: () => Navigator.pop(ctx, e.key),
-                            child: Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 15),
-                              decoration: BoxDecoration(
-                                color: s.shelfSort == e.key
-                                    ? (isDark
-                                        ? Colors.white.withValues(alpha: 0.14)
-                                        : Colors.black
-                                            .withValues(alpha: 0.09))
-                                    : (isDark
-                                        ? Colors.white.withValues(alpha: 0.06)
-                                        : Colors.black
-                                            .withValues(alpha: 0.035)),
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: Text(
-                                e.value,
-                                style: TextStyle(
-                                  fontSize: AppTheme.fontHeadline,
-                                  fontWeight: s.shelfSort == e.key
-                                      ? FontWeight.w600
-                                      : FontWeight.normal,
-                                  color: label,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+  Widget _buildSearchButton({double size = 50}) {
+    final iconSize = size <= 40 ? 20.0 : 22.0;
+    return Material(
+      color: JellyTheme.primary,
+      shape: const CircleBorder(),
+      elevation: 4,
+      shadowColor: JellyTheme.primary.withValues(alpha: 0.4),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _openSearch,
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: Icon(
+            Icons.search_rounded,
+            color: Colors.white,
+            size: iconSize,
           ),
         ),
       ),
-    );
-    if (picked == null) return;
-    await s.setShelfSort(picked);
-    if (mounted) setState(() {});
-  }
-
-  // ℹ️ 书架这排按钮用**浅灰圆 + 近黑图标** ✓（与「我的」页右上角那三个同款 ✓），
-  // 而 `_buildSearchButton`（见下面 `:1797` 附近 ✓）在**别处**（如空态里的
-  // "去搜索" ✓）仍是**深色主色圆** ✓ → 所以两者分开写、不合并 ✓。
-  // 🔴 原注释在此处还写着"通用圆形图标按钮……实现已抽到 `AppIconButton`……
-  // 留这个薄委托，只为让调用点不用改" ✗ —— 这些话**与现状不符** ✓：
-  // 本文件里**既没有**那个"通用圆形图标按钮"方法 ✓，`_buildSearchButton`
-  // 也仍是**手写**的（`:1797` ✓）、并无任何委托 ✓。
-  // 那段误导性描述已删除 ✓（只保留上面这句真实的原因 ✓）
-  /// ✅ **统一到共用组件 `AppIconButton`** ✓（B 档：图标按钮统一 ② ✓）
-  /// 原来这里是**手写**：`Material(color: isDark ? 白@92% : JellyTheme.primary ✗,
-  /// elevation: 2 ✗, shadowColor: 黑@25% ✗)` + `InkWell` + `SizedBox` + 图标 ✓。
-  /// ✓ 改用 **`filled: true`** ✓ —— 组件对 filled 的定义正是
-  ///   「**深色下白底深图标，浅色下主题色底白图标**；用于"导入/导出"这类需要被看见的入口」✓
-  ///   → 与原来的配色**几乎完全一致** ✓✓（**唯一变化：去掉投影** ✗→✓，与其它圆钮质感统一 ✓）
-  /// ℹ️ `tooltip` 在组件里**必填** ✗（原来这枚没有 ✓）→ 补 `'导入 / 导出'` ✓（与菜单语义一致 ✓）
-  /// ℹ️ 图标尺寸沿用原来的 20 ✓；`size` 沿用调用点（`:1201` 用默认 36 ✓）
-  Widget _buildBoltButton({double size = 36}) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return AppIconButton(
-      icon: Icons.bolt_rounded,
-      tooltip: '导入 / 导出',
-      onTap: _showImportExportMenu,
-      isDark: isDark,
-      size: size,
-      iconSize: 20,
-      filled: true,
-    );
-  }
-
-  /// ✅ **统一到共用组件 `AppIconButton`** ✓（B 档：图标按钮统一 ② ✓）
-  /// 原来这里是**手写**：`Material(color: JellyTheme.primary ✗, elevation: 4 ✗,
-  /// shadowColor: primary@40% ✗)` + `InkWell` + `SizedBox` + **白色**图标 ✓
-  /// —— 于是书架顶栏**同一排里出现三种质感的圆钮** ✗（主题色带投影 ✗ / 近黑实心 ✗ / 淡灰 ✓）。
-  /// ✓ 现在用组件的默认形态：**淡圆底 + 单色图标** ✓（正是组件文档写明的统一目标 ✓）。
-  /// ⚠️ **视觉会变** ✓：从"主题色 + 投影"✗ 变成"淡圆底"✓ —— 这是**预期的统一** ✓，不是回归 ✓。
-  /// ℹ️ `tooltip` 在组件里是**必填** ✗（原来这枚没有 tooltip ✓）→ 补 `'搜索'` ✓。
-  /// ℹ️ 尺寸/图标大小沿用调用点传的值 ✓（`:1098` 传 `size: 36` ✓ → 与之前渲染一致 ✓）。
-  Widget _buildSearchButton({double size = 50}) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final iconSize = size <= 40 ? 20.0 : 22.0;
-    return AppIconButton(
-      icon: Icons.search_rounded,
-      tooltip: '搜索',
-      onTap: _openSearch,
-      isDark: isDark,
-      size: size,
-      iconSize: iconSize,
     );
   }
 
   // ========== 导入/导出 ==========
 
-  /// ✅ **与 `_buildBoltButton` 合并** ✓（B 档 ② ✓）—— 原来这里是**同一枚按钮的第二份实现** ✗✗：
-  /// `Material(color: const Color(0xFFF19841) ✗ 橙色, elevation: 2 ✗,
-  /// shadowColor: 0xFFF19841@40% ✗)` + `Icon(Icons.bolt_rounded, white, 20)` +
-  /// `onTap: _showImportExportMenu` ✓ —— 与 `_buildBoltButton` **逐字同款** ✓
-  ///（连 `onTap`、图标、36×36、20 全都相同 ✓）。
-  /// ⚠️ 更值得记一笔 ✓：那个橙色 `0xFFF19841` ✗ 正是 `_buildBoltButton` 的**旧注释**
-  ///   点名要改掉的色 ✓（"原来是橙色…与水墨书香（黑白灰）不符"✓）
-  ///   → 说明当时**只改了其中一份、漏了这一份** ✗（与"4 份 `_buildCircleIcon`"
-  ///   是同一类"抄多份、改一处"✗✓）。
-  /// ✓ 现在**委托给 `_buildBoltButton`** ✓：两处永远一致 ✓，且都走
-  ///   `AppIconButton(filled: true)` ✓（`size` 默认 36 ✓ = 与原来硬编码的 36 一致 ✓✓）
-  Widget _buildImportExportButton() => _buildBoltButton();
+  Widget _buildImportExportButton() {
+    return Material(
+      color: const Color(0xFFF19841),
+      shape: const CircleBorder(),
+      elevation: 2,
+      shadowColor: const Color(0xFFF19841).withValues(alpha: 0.4),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _showImportExportMenu,
+        child: const SizedBox(
+          width: 36,
+          height: 36,
+          child: Icon(Icons.bolt_rounded, color: Colors.white, size: 20),
+        ),
+      ),
+    );
+  }
 
   void _showImportExportMenu() {
     FocusScope.of(context).unfocus();
@@ -1847,7 +1070,7 @@ class _BookshelfPageState extends State<BookshelfPage>
         final isDark = Theme.of(context).brightness == Brightness.dark;
         return Container(
           decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+            color: isDark ? JellyTheme.cardDark : Colors.white,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: SafeArea(
@@ -1863,7 +1086,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                     color: isDark
                         ? Colors.white.withValues(alpha: 0.2)
                         : Colors.black.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -1886,7 +1109,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                     child: Text(
                       '导入的图书会加入「本地图书」书架，仅在图书标签下显示，离线可读',
                       style: TextStyle(
-                        fontSize: AppTheme.fontFootnote,
+                        fontSize: 12,
                         color: isDark ? Colors.white38 : Colors.black38,
                       ),
                     ),
@@ -1905,7 +1128,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                       context,
                       MaterialPageRoute(
                         builder: (_) =>
-                            kbSheet(const PeerTransferPage(mode: PeerTransferMode.send)),
+                            const PeerTransferPage(mode: PeerTransferMode.send),
                       ),
                     );
                   },
@@ -1929,32 +1152,6 @@ class _BookshelfPageState extends State<BookshelfPage>
                     );
                   },
                 ),
-                // ── WebDAV 备份同步 ──────────────────────────
-                ListTile(
-                  leading: Icon(
-                    Icons.cloud_sync_outlined,
-                    color: JellyTheme.primary,
-                  ),
-                  title: const Text('WebDAV 备份同步'),
-                  subtitle: const Text('把书架/设置备份到 WebDAV 网盘，换机恢复'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _showWebdavPanel();
-                  },
-                ),
-                // ── Kindle 推送 ───────────────────────────────
-                ListTile(
-                  leading: Icon(
-                    Icons.menu_book_outlined,
-                    color: JellyTheme.primary,
-                  ),
-                  title: const Text('Kindle 推送'),
-                  subtitle: const Text('通过邮件把图书推送到 Kindle 设备'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _showKindlePanel();
-                  },
-                ),
                 ListTile(
                   leading: Icon(
                     Icons.close_rounded,
@@ -1971,404 +1168,8 @@ class _BookshelfPageState extends State<BookshelfPage>
     );
   }
 
-  /// WebDAV 备份同步面板：配置 + 立即备份 / 从云端恢复。
-  Future<void> _showWebdavPanel() async {
-    await SyncService.instance.load();
-    final c = SyncService.instance.config;
-    final urlC = TextEditingController(text: c.webdavUrl);
-    final userC = TextEditingController(text: c.webdavUser);
-    final passC = TextEditingController(text: c.webdavPass);
-    final pathC = TextEditingController(text: c.webdavPath);
-    var busy = false;
-
-    void toast(String msg) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(
-          content: Text(msg),
-          duration: const Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ));
-    }
-
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => Container(
-          padding: EdgeInsets.only(
-              bottom: MediaQuery.of(ctx).viewInsets.bottom),
-          decoration: BoxDecoration(
-            color: Theme.of(ctx).scaffoldBackgroundColor,
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(22)),
-          ),
-          child: SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('WebDAV 备份同步',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 4),
-                    Text(
-                      '服务器示例：https://dav.example.com/dav/',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(ctx).colorScheme.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: urlC,
-                      decoration: const InputDecoration(
-                          labelText: 'WebDAV 服务器地址',
-                          border: OutlineInputBorder()),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: userC,
-                      decoration: const InputDecoration(
-                          labelText: '用户名', border: OutlineInputBorder()),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: passC,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                          labelText: '密码', border: OutlineInputBorder()),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: pathC,
-                      decoration: const InputDecoration(
-                          labelText: '备份路径（默认 NewTv/bookshelf_backup.json）',
-                          border: OutlineInputBorder()),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: FilledButton.icon(
-                            onPressed: busy
-                                ? null
-                                : () async {
-                                    setSheet(() => busy = true);
-                                    await SyncService.instance.save(SyncConfig(
-                                      webdavUrl: urlC.text.trim(),
-                                      webdavUser: userC.text.trim(),
-                                      webdavPass: passC.text,
-                                      webdavPath: pathC.text.trim(),
-                                    ));
-                                    final json =
-                                        BookshelfService().exportJson();
-                                    final r = await SyncService.instance
-                                        .backupBookshelf(json);
-                                    if (ctx.mounted) {
-                                      Navigator.pop(ctx);
-                                    }
-                                    toast(r.ok
-                                        ? '备份成功（${json.length ~/ 1024} KB）'
-                                        : '备份失败：${r.error}');
-                                  },
-                            icon: const Icon(Icons.cloud_upload_outlined,
-                                size: 18),
-                            label: busy
-                                ? const Text('备份中…')
-                                : const Text('立即备份'),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: busy
-                                ? null
-                                : () async {
-                                    setSheet(() => busy = true);
-                                    final r = await SyncService.instance
-                                        .restoreBookshelf();
-                                    if (ctx.mounted) Navigator.pop(ctx);
-                                    if (!r.ok) {
-                                      toast('恢复失败：${r.error}');
-                                      return;
-                                    }
-                                    final n = await BookshelfService()
-                                        .importJson(r.json ?? '');
-                                    // 🔴 `importJson` 在**解析失败/空数据**时静默 `return 0`
-                                    //（bookshelf_service.dart 里 `catch { return 0; }` 吞掉一切 ✗）
-                                    // → 原来**无论 n 是几**都提示「恢复成功，新增 $n 条记录」✗，
-                                    // n=0 时等于告诉用户"恢复成功了"、实际一条都没进来 ✓
-                                    //（云端 JSON 损坏 / 指向了别的文件 / `r.json == null`
-                                    //  全都走这条路 ✓，是本页最会误导人的提示之一 ✗）。
-                                    // 现在 n=0 时如实说明 ✓
-                                    if (n == 0) {
-                                      toast('未能恢复任何数据：云端备份可能为空或已损坏');
-                                    } else {
-                                      toast('恢复成功，新增 $n 条记录');
-                                    }
-                                  },
-                            icon: const Icon(Icons.cloud_download_outlined,
-                                size: 18),
-                            label: busy
-                                ? const Text('恢复中…')
-                                : const Text('从云端恢复'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    // 🟡 WebDAV 面板的 4 个 controller **从未被释放** ✗ —— grep 已证明它们的
-    // 全部使用都在这个弹窗内部 ✓（`:2063-2066` 的 `urlC/userC/passC/pathC.text` ✓），
-    // 弹窗返回之后**没有任何地方再用** ✓ → 不释放就是"每打开一次 WebDAV 面板
-    // 泄漏 4 个 controller"✓（连带它们的焦点与监听回调 ✗）
-    urlC.dispose();
-    userC.dispose();
-    passC.dispose();
-    pathC.dispose();
-  }
-
-  /// Kindle 推送面板：配置 SMTP + Kindle 邮箱，选本地书推送。
-  Future<void> _showKindlePanel() async {
-    await SyncService.instance.load();
-    final c = SyncService.instance.config;
-    final hostC = TextEditingController(text: c.smtpHost);
-    final portC = TextEditingController(text: c.smtpPort.toString());
-    final userC = TextEditingController(text: c.smtpUser);
-    final passC = TextEditingController(text: c.smtpPass);
-    final kindleC = TextEditingController(text: c.kindleEmail);
-    var useTls = c.useStartTls;
-    var busy = false;
-
-    void toast(String msg) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(
-          content: Text(msg),
-          duration: const Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ));
-    }
-
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => Container(
-          padding: EdgeInsets.only(
-              bottom: MediaQuery.of(ctx).viewInsets.bottom),
-          decoration: BoxDecoration(
-            color: Theme.of(ctx).scaffoldBackgroundColor,
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(22)),
-          ),
-          child: SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Kindle 推送',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 4),
-                    Text(
-                      '用发件邮箱把图书附件发送到你的 Kindle 邮箱',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(ctx).colorScheme.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: hostC,
-                      decoration: const InputDecoration(
-                          labelText: 'SMTP 服务器（如 smtp.qq.com）',
-                          border: OutlineInputBorder()),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          flex: 2,
-                          child: TextField(
-                            controller: portC,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                                labelText: '端口（465 / 587）',
-                                border: OutlineInputBorder()),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          flex: 3,
-                          child: Row(
-                            children: [
-                              Text('587 用 STARTTLS',
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: Theme.of(ctx)
-                                          .colorScheme
-                                          .onSurfaceVariant)),
-                              Switch(
-                                value: useTls,
-                                onChanged: (v) =>
-                                    setSheet(() => useTls = v),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: userC,
-                      decoration: const InputDecoration(
-                          labelText: '发件邮箱账号',
-                          border: OutlineInputBorder()),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: passC,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                          labelText: '邮箱授权码/密码',
-                          border: OutlineInputBorder()),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: kindleC,
-                      decoration: const InputDecoration(
-                          labelText: 'Kindle 收件邮箱',
-                          border: OutlineInputBorder()),
-                    ),
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      onPressed: busy
-                          ? null
-                          : () async {
-                              setSheet(() => busy = true);
-                              await SyncService.instance.save(SyncConfig(
-                                smtpHost: hostC.text.trim(),
-                                smtpPort:
-                                    int.tryParse(portC.text.trim()) ?? 465,
-                                smtpUser: userC.text.trim(),
-                                smtpPass: passC.text,
-                                kindleEmail: kindleC.text.trim(),
-                                useStartTls: useTls,
-                              ));
-                              // 从书架/下载任务里挑一本有本地文件的图书
-                              final tasks = BookDownloadService()
-                                  .tasks.values
-                                  .where((t) =>
-                                      t.localPath != null &&
-                                      t.localPath!.isNotEmpty)
-                                  .toList();
-                              if (tasks.isEmpty) {
-                                if (ctx.mounted) Navigator.pop(ctx);
-                                setSheet(() => busy = false);
-                                toast('书架里没有已下载的本地图书，请先下载一本书');
-                                return;
-                              }
-                              if (ctx.mounted) Navigator.pop(ctx);
-                              final picked = await showModalBottomSheet<String>(
-                                context: context,
-                                backgroundColor: Colors.transparent,
-                                builder: (c2) => SafeArea(
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      color: Theme.of(c2).scaffoldBackgroundColor,
-                                      borderRadius: const BorderRadius.vertical(
-                                          top: Radius.circular(22)),
-                                    ),
-                                    child: ListView(
-                                      shrinkWrap: true,
-                                      children: [
-                                        const Padding(
-                                          padding: EdgeInsets.all(16),
-                                          child: Text('选择要推送到 Kindle 的书',
-                                              style: TextStyle(
-                                                  fontSize: 16,
-                                                  fontWeight:
-                                                      FontWeight.w700)),
-                                        ),
-                                        for (final t in tasks)
-                                          ListTile(
-                                            leading: const Icon(
-                                                Icons.menu_book_outlined),
-                                            title: Text(t.title,
-                                                overflow:
-                                                    TextOverflow.ellipsis),
-                                            subtitle: Text(t.localPath ?? ''),
-                                            onTap: () =>
-                                                Navigator.pop(c2, t.localPath),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              );
-                              if (picked == null) {
-                                toast('已取消推送');
-                                return;
-                              }
-                              final task = tasks.firstWhere(
-                                  (t) => t.localPath == picked);
-                              final bytes = await File(picked).readAsBytes();
-                              final r = await SyncService.instance.pushToKindle(
-                                fileName:
-                                    '${task.title}.${task.extension ?? 'epub'}',
-                                fileBytes: bytes,
-                                title: task.title,
-                              );
-                              toast(r.ok
-                                  ? '已推送到 Kindle 邮箱'
-                                  : '推送失败：${r.error}');
-                            },
-                      icon: const Icon(Icons.send_rounded, size: 18),
-                      label: busy
-                          ? const Text('发送中…')
-                          : const Text('选择图书推送'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    // 🟡 Kindle 面板的 5 个 controller **同样从未释放** ✗ —— grep 已证明它们的
-    // 全部使用都在这个弹窗内部 ✓（`:2259-2264` 的
-    // `hostC/portC/userC/passC/kindleC.text` ✓），弹窗返回后无人再用 ✓
-    // → 不释放就是"每打开一次 Kindle 面板泄漏 5 个" ✓
-    hostC.dispose();
-    portC.dispose();
-    userC.dispose();
-    passC.dispose();
-    kindleC.dispose();
-  }
-
   /// 导入本地图书：多选文件 -> 逐本建已完成任务 -> 入"本地图书"书架（Book 类型，固定 id）
   Future<void> _importLocalBook() async {
-    // file_picker 13：pickFiles 是静态方法，直接返回 List<PlatformFile>
-    // （旧版是 FilePicker.platform.pickFiles() 返回 FilePickerResult?）
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const [
@@ -2383,7 +1184,7 @@ class _BookshelfPageState extends State<BookshelfPage>
         'rtf',
       ],
     );
-    if (result.isEmpty) return;
+    if (result == null || result.isEmpty) return;
     if (!mounted) return;
 
     // 预取 root navigator：loading 挂在它上面，pop 不依赖页面 context
@@ -2603,18 +1404,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               book = Book.fromJson(
                 jsonDecode(item.meta!) as Map<String, dynamic>,
               );
-            } catch (e) {
-              // 🔴 原来是 `catch (_) {}` ✗ —— meta 解析失败后 `book` 保持 null ✓
-              // → 紧接着的 `if (book != null)` 会**直接跳过这一项** ✓
-              // → 书架**计数 N、实际只显示 N-1** ✓，而且**没有任何提示** ✓
-              //（用户只会觉得"我的书怎么少了一本" ✓）。
-              // ⚠️ 同一模式在**本文件另一处**也存在 ✓（漫画/图书两个 tab ✓），
-              //    所以这里用 replace_all 一起修 ✓。
-              // 至少先**留痕**让问题可见 ✓；
-              // 遗留：真正的修法是解析失败时用 meta 里的书名/封面建**兜底条目** ✓
-              debugPrint('[Bookshelf] 书架条目 meta 解析失败（item ${item.itemId}），'
-                  '该项将被跳过: $e');
-            }
+            } catch (_) {}
           }
           if (book == null) continue;
           final match =
@@ -2660,7 +1450,7 @@ class _BookshelfPageState extends State<BookshelfPage>
             SizedBox(
               height: MediaQuery.of(context).size.height * 0.4,
               child: Material(
-                color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                color: isDark ? JellyTheme.cardDark : Colors.white,
                 borderRadius: BorderRadius.circular(20),
                 clipBehavior: Clip.antiAlias,
                 child: ListView.builder(
@@ -2676,7 +1466,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                         child: Text(
                           '仅显示前 10 条，继续输入缩小范围',
                           style: TextStyle(
-                            fontSize: AppTheme.fontFootnote,
+                            fontSize: 12,
                             color: isDark ? Colors.white38 : Colors.black38,
                           ),
                           textAlign: TextAlign.center,
@@ -2718,7 +1508,7 @@ class _BookshelfPageState extends State<BookshelfPage>
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 32),
       decoration: BoxDecoration(
-        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+        color: isDark ? JellyTheme.cardDark : Colors.white,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
@@ -2733,7 +1523,7 @@ class _BookshelfPageState extends State<BookshelfPage>
             '没有找到相关书籍',
             style: TextStyle(
               color: isDark ? Colors.white54 : Colors.black45,
-              fontSize: AppTheme.fontBody,
+              fontSize: 14,
             ),
           ),
         ],
@@ -2762,7 +1552,6 @@ class _BookshelfPageState extends State<BookshelfPage>
 
         // 先构建所有 chip 子元素
         final chips = <Widget>[
-          _buildAllShelfChip(currentType, isDark),
           for (int i = 0; i < shelves.length; i++)
             _buildShelfChip(shelves[i], currentType, isDark),
           _buildAddChip(isDark),
@@ -2770,7 +1559,7 @@ class _BookshelfPageState extends State<BookshelfPage>
 
         // 用 IntrinsicWidth 测出内容总宽度，判断是否需要滚动
         return Container(
-          height: 40,
+          height: 34,
           margin: const EdgeInsets.only(bottom: 8),
           child: LayoutBuilder(
             builder: (context, constraints) {
@@ -2780,32 +1569,15 @@ class _BookshelfPageState extends State<BookshelfPage>
               const addChipPadding = 20.0; // horizontal 10*2
               const spacing = 8.0;
               const textStyle = TextStyle(
-                fontSize: AppTheme.fontFootnote,
+                fontSize: 12,
                 fontWeight: FontWeight.w600,
               );
               const addTextStyle = TextStyle(
-                fontSize: AppTheme.fontFootnote,
+                fontSize: 12,
                 fontWeight: FontWeight.w600,
               );
 
               double totalWidth = 0;
-              {
-                final allCount = _visibleShelves(_currentTab).fold<int>(
-                  0,
-                  (sum, sh) => sum +
-                      BookshelfService().countInShelf(sh.id, currentType),
-                );
-                final allPainter = TextPainter(
-                  text: const TextSpan(text: '全部', style: textStyle),
-                  textDirection: TextDirection.ltr,
-                )..layout();
-                final numPainter = TextPainter(
-                  text: TextSpan(text: '$allCount', style: textStyle),
-                  textDirection: TextDirection.ltr,
-                )..layout();
-                totalWidth +=
-                    chipPadding + allPainter.width + 4 + numPainter.width + spacing;
-              }
               for (int i = 0; i < shelves.length; i++) {
                 final shelf = shelves[i];
                 final displayName = _shelfDisplayName(shelf, currentType);
@@ -2832,121 +1604,22 @@ class _BookshelfPageState extends State<BookshelfPage>
               )..layout();
               totalWidth += addChipPadding + 14 + 2 + addTextPainter.width + 16;
 
-              // 标签行：正在读/想读/已读完/全部…… 可横向滑动
               final scrollView = SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.only(left: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(mainAxisSize: MainAxisSize.min, children: chips),
               );
 
-              // 固定按钮（管理书架 / 排序方式）：图标固定，不随标签滑动
-              // 对齐参考样式：左侧**列表图标 + 上下箭头**两个小图标（无圆底）
-              final iconColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-              final fixedButtons = Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: '管理书架',
-                    icon: Icon(Icons.view_list_rounded, size: 20, color: iconColor),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                    onPressed: _showManageShelves,
-                  ),
-                  IconButton(
-                    tooltip: '排序方式',
-                    icon: Icon(Icons.swap_vert_rounded, size: 20, color: iconColor),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                    onPressed: _showSortSheet,
-                  ),
-                ],
-              );
-
-              // 固定按钮在**左侧**（用户多次点名"管理/排序移到左边"，
-              // 对齐参考样式：标签行左侧列表图标+排序箭头，右侧下拉箭头），
-              // 标签行占满剩余宽度；内容不足时居中，超出则横向滚动
-              //（固定按钮宽度 68 = 32+4+32，加 16 左侧留白与 4 间距）
-              const fixedWidth = 68.0;
-              return Row(
-                children: [
-                  fixedButtons,
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: totalWidth + 16 + fixedWidth + 4 <=
-                            constraints.maxWidth
-                        ? Center(child: scrollView)
-                        : scrollView,
-                  ),
-                ],
-              );
+              if (totalWidth <= constraints.maxWidth - 32) {
+                // 内容小于宽度 → 居中
+                return Center(child: scrollView);
+              }
+              // 内容超出 → 正常横向滚动
+              return scrollView;
             },
           ),
         );
       },
-    );
-  }
-
-  /// 「全部」书架 chip：聚合所有可见书架条目（仅浏览，样式同普通书架 chip）
-  Widget _buildAllShelfChip(BookshelfItemType currentType, bool isDark) {
-    final selected = _currentShelfId == kAllShelfId;
-    final count = _visibleShelves(_currentTab).fold<int>(
-      0,
-      (sum, sh) =>
-          sum + BookshelfService().countInShelf(sh.id, currentType),
-    );
-    return Padding(
-      key: _shelfChipKey(kAllShelfId),
-      padding: const EdgeInsets.only(right: 8),
-      child: GestureDetector(
-        onTap: () => _switchShelf(kAllShelfId),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: selected
-                ? JellyTheme.primary
-                : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                blurRadius: 6,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          alignment: Alignment.center,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '全部',
-                style: TextStyle(
-                  fontSize: AppTheme.fontFootnote,
-                  fontWeight: FontWeight.w600,
-                  color: selected
-                      ? Colors.white
-                      : (isDark ? Colors.white70 : JellyTheme.textSecondary),
-                ),
-              ),
-              const SizedBox(width: 4),
-              Text(
-                '$count',
-                style: TextStyle(
-                  fontSize: AppTheme.fontCaption,
-                  color: selected
-                      ? Colors.white.withValues(alpha: 0.7)
-                      : (isDark
-                            ? Colors.white38
-                            : JellyTheme.textSecondary.withValues(alpha: 0.7)),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
@@ -2970,7 +1643,7 @@ class _BookshelfPageState extends State<BookshelfPage>
           decoration: BoxDecoration(
             color: selected
                 ? JellyTheme.primary
-                : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
+                : (isDark ? JellyTheme.cardDark : Colors.white),
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
@@ -2987,7 +1660,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               Text(
                 _shelfDisplayName(shelf, currentType),
                 style: TextStyle(
-                  fontSize: AppTheme.fontFootnote,
+                  fontSize: 12,
                   fontWeight: FontWeight.w600,
                   color: selected
                       ? Colors.white
@@ -2998,7 +1671,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               Text(
                 '$count',
                 style: TextStyle(
-                  fontSize: AppTheme.fontCaption,
+                  fontSize: 10,
                   color: selected
                       ? Colors.white.withValues(alpha: 0.7)
                       : (isDark
@@ -3022,7 +1695,7 @@ class _BookshelfPageState extends State<BookshelfPage>
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+            color: isDark ? JellyTheme.cardDark : Colors.white,
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
@@ -3044,7 +1717,7 @@ class _BookshelfPageState extends State<BookshelfPage>
               Text(
                 '新建',
                 style: TextStyle(
-                  fontSize: AppTheme.fontFootnote,
+                  fontSize: 12,
                   fontWeight: FontWeight.w600,
                   color: isDark ? Colors.white70 : JellyTheme.textSecondary,
                 ),
@@ -3075,7 +1748,7 @@ class _SearchComicTile extends StatelessWidget {
         width: 36,
         height: 48,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(6),
           color: isDark ? Colors.white10 : Colors.black12,
         ),
         clipBehavior: Clip.antiAlias,
@@ -3085,11 +1758,7 @@ class _SearchComicTile extends StatelessWidget {
           fit: BoxFit.cover,
           placeholder: (_, __) => const SizedBox.shrink(),
           errorWidget: (_, __, ___) =>
-              Icon(
-                Icons.palette_rounded,
-                size: 20,
-                color: JellyTheme.textSecondary,
-              ),
+              const Icon(Icons.palette_rounded, size: 20, color: Colors.grey),
         ),
       ),
       title: Text(
@@ -3097,7 +1766,7 @@ class _SearchComicTile extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          fontSize: AppTheme.fontBody,
+          fontSize: 14,
           fontWeight: FontWeight.w600,
           color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
         ),
@@ -3107,7 +1776,7 @@ class _SearchComicTile extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          fontSize: AppTheme.fontFootnote,
+          fontSize: 12,
           color: isDark ? Colors.white54 : JellyTheme.textSecondary,
         ),
       ),
@@ -3135,7 +1804,7 @@ class _SearchBookTile extends StatelessWidget {
         width: 36,
         height: 48,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(6),
           color: isDark ? Colors.white10 : Colors.black12,
         ),
         clipBehavior: Clip.antiAlias,
@@ -3143,11 +1812,7 @@ class _SearchBookTile extends StatelessWidget {
           book.cover ?? '',
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) =>
-              Icon(
-                Icons.book_rounded,
-                size: 20,
-                color: JellyTheme.textSecondary,
-              ),
+              const Icon(Icons.book_rounded, size: 20, color: Colors.grey),
         ),
       ),
       title: Text(
@@ -3155,7 +1820,7 @@ class _SearchBookTile extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          fontSize: AppTheme.fontBody,
+          fontSize: 14,
           fontWeight: FontWeight.w600,
           color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
         ),
@@ -3165,7 +1830,7 @@ class _SearchBookTile extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          fontSize: AppTheme.fontFootnote,
+          fontSize: 12,
           color: isDark ? Colors.white54 : JellyTheme.textSecondary,
         ),
       ),
@@ -3215,14 +1880,23 @@ class _ComicShelfTab extends StatelessWidget {
         ReadingProgressService(),
       ]),
       builder: (context, _) {
-        final items = resolveShelfItems(
+        final items = BookshelfService().getItemsInShelf(
           shelfId,
           BookshelfItemType.comic,
-          excludeLocal: true,
         );
-        // 排序由「标题行的排序按钮」决定（SettingsService.shelfSort）。
-        // 若只弹面板不生效，那按钮就是假的 —— 比不放更糟。
-        _applyShelfSort(items, shelfId);
+        // "正在读"：排序键取"加入书架时间"与"最近阅读时间"的较大者倒序
+        // --新移入(无进度)用 addedAt 兜底排到顶部；有进度按最近阅读归位(继续阅读仍上浮)
+        if (shelfId == BookshelfService.presetReading) {
+          items.sort((a, b) {
+            final ra =
+                ReadingProgressService().getProgress(a.itemId)?.updatedAt ?? 0;
+            final rb =
+                ReadingProgressService().getProgress(b.itemId)?.updatedAt ?? 0;
+            final ka = a.addedAt > ra ? a.addedAt : ra;
+            final kb = b.addedAt > rb ? b.addedAt : rb;
+            return kb.compareTo(ka);
+          });
+        }
         final entries = <_ShelfEntry>[];
         var i = 0;
         for (final item in items.take(displayCount)) {
@@ -3569,26 +2243,10 @@ class _BookShelfTab extends StatelessWidget {
         BookReadingProgressService(),
       ]),
       builder: (context, _) {
-        final items = resolveShelfItems(
+        final items = BookshelfService().getItemsInShelf(
           shelfId,
           BookshelfItemType.book,
         );
-        // 🔴 图书 tab **从来没调用过** `_applyShelfSort` ✗ —— 而排序面板
-        // （本文件 :1554 附近 ✓）写的是全局的 `SettingsService().shelfSort` ✓，
-        // 唯一调用点在 `_ComicShelfTab`（漫画 tab ✓）→ 用户在**图书** tab 里选
-        // "书名/作者/加入时间/最近阅读/阅读进度"、切正倒序，列表**顺序完全不变** ✓
-        //（面板注释自己写着"两个书架列表都读它来排" ✗ —— 实现没有 ✓）。
-        // 现在补上 ✓
-        // ✅ **这两项现在也准了** ✓（原注释写的是"已知不准 / 待做" ✗ —— 已过期 ✓）
-        //    `shelfUpdatedAtOf`（本文件 `:4365` ✓）与 `shelfReadIndex`（`:4376` ✓）
-        //    已经**按类型问对服务** ✓：
-        //      · 图书 → `BookReadingProgressService`（用 `pageIndex` ✓）
-        //      · 漫画 → `ReadingProgressService`（用 `lastChapterIndex` ✓）
-        //    两个都问、取非空 ✓ → 图书不会再"恒为 0 → 全部相同 → 保持原序" ✗
-        // ⚠️ 仍待**真机确认**的一点 ✓：图书用**页码**、漫画用**章节号** ✗ ——
-        //    这里假设"一个书架里只会是纯图书或纯漫画" ✓；
-        //    若真机上存在**混放**的书架 ✗，两种标量会被混着比较 ✗（那需再单独处理 ✓）
-        _applyShelfSort(items, shelfId);
         // "正在读"：排序键取"加入书架时间"与"最近阅读时间"的较大者倒序
         // --新移入(无进度)用 addedAt 兜底排到顶部；有进度按最近阅读归位(继续阅读仍上浮)
         if (shelfId == BookshelfService.presetReading) {
@@ -3616,18 +2274,7 @@ class _BookShelfTab extends StatelessWidget {
               book = Book.fromJson(
                 jsonDecode(item.meta!) as Map<String, dynamic>,
               );
-            } catch (e) {
-              // 🔴 原来是 `catch (_) {}` ✗ —— meta 解析失败后 `book` 保持 null ✓
-              // → 紧接着的 `if (book != null)` 会**直接跳过这一项** ✓
-              // → 书架**计数 N、实际只显示 N-1** ✓，而且**没有任何提示** ✓
-              //（用户只会觉得"我的书怎么少了一本" ✓）。
-              // ⚠️ 同一模式在**本文件另一处**也存在 ✓（漫画/图书两个 tab ✓），
-              //    所以这里用 replace_all 一起修 ✓。
-              // 至少先**留痕**让问题可见 ✓；
-              // 遗留：真正的修法是解析失败时用 meta 里的书名/封面建**兜底条目** ✓
-              debugPrint('[Bookshelf] 书架条目 meta 解析失败（item ${item.itemId}），'
-                  '该项将被跳过: $e');
-            }
+            } catch (_) {}
           }
           if (book != null) {
             final b = book;
@@ -3943,7 +2590,7 @@ class _ShelfCoverState extends State<_ShelfCover> {
           color: (isDark ? Colors.black : JellyTheme.primary).withValues(
             alpha: 0.75,
           ),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(4),
         ),
         child: child,
       ),
@@ -3965,10 +2612,10 @@ class _ShelfCoverState extends State<_ShelfCover> {
             children: [
               Container(
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(6),
                   color: isDark
                       ? Colors.white.withValues(alpha: 0.05)
-                      : JellyTheme.cardLight,
+                      : Colors.grey[200],
                   boxShadow: [
                     BoxShadow(
                       color: isDark
@@ -3980,7 +2627,7 @@ class _ShelfCoverState extends State<_ShelfCover> {
                   ],
                 ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(6),
                   child: _buildCoverImage(isDark),
                 ),
               ),
@@ -4003,12 +2650,12 @@ class _ShelfCoverState extends State<_ShelfCover> {
                     decoration: BoxDecoration(
                       color: (isDark ? Colors.black : JellyTheme.primary)
                           .withValues(alpha: 0.75),
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
                       widget.formatLabel ?? widget.sourceLabel!,
                       style: const TextStyle(
-                        fontSize: AppTheme.fontCaption,
+                        fontSize: 9,
                         color: Colors.white,
                         fontWeight: FontWeight.w700,
                       ),
@@ -4020,7 +2667,7 @@ class _ShelfCoverState extends State<_ShelfCover> {
                   Text(
                     '${(widget.progress! * 100).round()}%',
                     style: const TextStyle(
-                      fontSize: AppTheme.fontCaption,
+                      fontSize: 9,
                       color: Colors.white,
                       fontWeight: FontWeight.w700,
                     ),
@@ -4031,7 +2678,7 @@ class _ShelfCoverState extends State<_ShelfCover> {
                   Text(
                     widget.progressLabel!,
                     style: const TextStyle(
-                      fontSize: AppTheme.fontCaption,
+                      fontSize: 9,
                       color: Colors.white,
                       fontWeight: FontWeight.w700,
                     ),
@@ -4112,7 +2759,7 @@ class _ShelfCaption extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: AppTheme.fontFootnote,
+              fontSize: 12,
               fontWeight: FontWeight.w600,
               height: 1.3,
               color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
@@ -4125,12 +2772,12 @@ class _ShelfCaption extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             strutStyle: const StrutStyle(
-              fontSize: AppTheme.fontCaption,
+              fontSize: 10,
               height: 1.3,
               forceStrutHeight: true,
             ),
             style: TextStyle(
-              fontSize: AppTheme.fontCaption,
+              fontSize: 10,
               color: isDark ? Colors.white54 : JellyTheme.textSecondary,
             ),
           ),
@@ -4199,9 +2846,9 @@ void _showShelfItemMenu(BuildContext context, String shelfId, _ShelfEntry e) {
   showModalBottomSheet(
     context: context,
     backgroundColor: Colors.transparent,
-    builder: (ctx) => kbSheet(Container(
+    builder: (ctx) => Container(
       decoration: BoxDecoration(
-        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+        color: isDark ? JellyTheme.cardDark : Colors.white,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: SafeArea(
@@ -4215,7 +2862,7 @@ void _showShelfItemMenu(BuildContext context, String shelfId, _ShelfEntry e) {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: AppTheme.fontHeadline,
+                  fontSize: 16,
                   fontWeight: FontWeight.w600,
                   color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                 ),
@@ -4261,7 +2908,7 @@ void _showShelfItemMenu(BuildContext context, String shelfId, _ShelfEntry e) {
           ],
         ),
       ),
-    )),
+    ),
   );
 }
 
@@ -4269,11 +2916,20 @@ void _showShelfItemMenu(BuildContext context, String shelfId, _ShelfEntry e) {
 // 公用组件
 // ============================================================
 Widget _buildEmpty(BuildContext context, String text, IconData icon) {
-  return AppEmptyView(
-    title: text,
-    subtitle: '去详情页加入书架吧',
-    icon: icon,
-    iconColor: JellyTheme.primary.withValues(alpha: 0.5),
+  return Center(
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(icon, size: 64, color: Colors.grey),
+        const SizedBox(height: 16),
+        Text(text, style: const TextStyle(color: Colors.grey)),
+        const SizedBox(height: 8),
+        const Text(
+          '去详情页加入书架吧',
+          style: TextStyle(color: Colors.grey, fontSize: 12),
+        ),
+      ],
+    ),
   );
 }
 
@@ -4292,13 +2948,6 @@ Widget _buildBackToTop(bool visible, VoidCallback onTap) {
           scale: visible ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
-          // ⛔ **这里是有意不同、不要"统一"成 `AppIconButton`** ✗✓（今天逐条核实过 ✓）
-          //   它是**返回顶部悬浮钮** ✓，与顶栏那排"同族圆钮"不是一类东西 ✓：
-          //     · 尺寸 ✗：44×44（悬浮 FAB ✓）vs 顶栏 36×36（`AppIconButton` 默认 ✓）
-          //     · 形态 ✗：`primary` + `elevation: 4` + 投影 = **传统醒目 FAB** ✓
-          //       —— 换成 `AppIconButton` 的"淡圆底"会让它在内容上**几乎看不见** ✗✗
-          //     · 位置 ✗：`Positioned` 浮在滚动内容之上 ✓ vs 顶栏固定位 ✓
-          //   ℹ️ 同款还有 `book_search_page` 与 `download_page` 的返回顶部钮 ✓（结论相同 ✓）
           child: Material(
             color: JellyTheme.primary,
             shape: const CircleBorder(),
@@ -4333,133 +2982,4 @@ int _adaptiveCols(double width) {
   if (cols < min) cols = min;
   if (cols > max) cols = max;
   return cols;
-}
-
-/// 按 `SettingsService().shelfSort` 给书架条目排序。
-///
-/// 抽成顶层函数是因为**漫画与图书两个列表都要用**：
-/// 各写一份必然分叉（改了一处忘了另一处）。
-///
-/// 各模式语义：
-///   · `recent`（默认）—— "正在读"书架用"加入时间 / 最近阅读时间"的较大者倒序
-///     （新移入无进度的用 addedAt 兜底排到顶部，继续阅读的按最近阅读上浮）；
-///     其他书架等同于"最近添加"
-///   · `added`  —— 最近添加
-///   · `title`  —— 按书名（不区分大小写）
-///   · `author` —— 按作者（不区分大小写）
-void _applyShelfSort(List<BookshelfItem> items, String shelfId) {
-  final s = SettingsService();
-  final asc = s.shelfSortAsc;
-
-  /// 按正/倒序取比较结果。
-  /// 抽出来是因为每个分支都要用，写六遍 `asc ? x.compareTo(y) : y.compareTo(x)`
-  /// 很容易在某一支写反（那支就永远不跟着方向变）。
-  int dir(int c) => asc ? c : -c;
-
-  /// 取条目的"最近阅读时间"（毫秒）—— **不猜类型** ✓，因为两个 id 空间不重叠：
-  /// 图书的 itemId 形如 `book-<url>` ✓（见 `book_source_detail_page` 的加入书架 ✓），
-  /// 漫画的 itemId 是 `pathWord` ✓。图书进度存在 `BookReadingProgressService` ✓，
-  /// 漫画存在 `ReadingProgressService` ✓ → 两个都问、取非空的最安全 ✓。
-  /// 原来这里清一色用**漫画**那套 ✗ → 图书的「最近阅读 / 阅读进度」恒为 0 ✓
-  /// （排序结果 = "全部相同 → 保持原序" ✗，用户会以为排序没生效 ✓）
-  int shelfUpdatedAtOf(String itemId) {
-    final b = BookReadingProgressService().getProgress(itemId)?.updatedAt;
-    final c = ReadingProgressService().getProgress(itemId)?.updatedAt;
-    return (b ?? c) ?? 0;
-  }
-
-  /// 取"读到哪了"的**标量**，取不到返回 -1（用于"阅读进度"排序 ✓）。
-  /// 同样**不猜类型** ✓：图书问 `BookReadingProgressService`（每页一条记录，
-  /// 用 `pageIndex` ✓ —— 本文件 :3548 就是这么算百分比的 ✓），
-  /// 漫画问 `ReadingProgressService`（用 `lastChapterIndex` ✓，与原来一致 ✓）。
-  /// 书架列表里**只会是纯图书或纯漫画** ✓，所以两个标量不需要同尺度 ✓
-  int shelfReadIndex(String itemId) {
-    final b = BookReadingProgressService().getProgress(itemId);
-    if (b != null) return b.pageIndex;
-    final c = ReadingProgressService().getProgress(itemId);
-    if (c != null) return c.lastChapterIndex;
-    return -1;
-  }
-
-  switch (s.shelfSort) {
-    case 'title':
-    case 'author':
-      // title / author 不在 BookshelfItem 上，而在 meta JSON 快照里。
-      // ⚠️ 必须先**预计算**再排序：直接在比较器里 jsonDecode
-      // 会解析 O(n log n) 次，几百本书的书架会明显卡顿。
-      final keys = <String, String>{};
-      for (final it in items) {
-        var title = '';
-        var author = '';
-        if (it.meta != null) {
-          try {
-            final m = jsonDecode(it.meta!) as Map<String, dynamic>;
-            title = (m['title'] ?? '').toString();
-            author = (m['author'] ?? '').toString();
-          } catch (_) {
-            // meta 损坏就当空串，不因此崩掉整个书架
-          }
-        }
-        keys[it.itemId] =
-            (s.shelfSort == 'title' ? title : author).toLowerCase();
-      }
-      items.sort((a, b) =>
-          dir((keys[a.itemId] ?? '').compareTo(keys[b.itemId] ?? '')));
-      break;
-    case 'added':
-      items.sort((a, b) => dir(a.addedAt.compareTo(b.addedAt)));
-      break;
-    case 'recent':
-      // ⚡ 性能（本次唯一目的）：**先把 key 算一次**，再排序 ✓。
-      //   原来是在**比较器内部**逐次查表 ✗（`shelfUpdatedAtOf(a.itemId)` ✓）——
-      //   而 `sort` 要比较 O(N log N) 次 ✓ → 总代价 **O(N² log N)** ✗
-      //   （书架几百本时滚动/切换排序会明显卡顿 ✓）。
-      //   ℹ️ **语义完全不变** ✓：key 的算法、方向 `dir`、并列时的行为都照旧 ✓
-      final recentKeys = <String, int>{
-        for (final it in items) it.itemId: shelfUpdatedAtOf(it.itemId),
-      };
-      items.sort(
-        (a, b) => dir(recentKeys[a.itemId]!.compareTo(recentKeys[b.itemId]!)),
-      );
-      break;
-    case 'progress':
-      // 阅读进度：按"读到第几话/章"排。
-      // 没有进度的（未开始读）一律排最后 —— 让它们在任一方向下都沉底，
-      // 否则正序时"未读"会跑到最前面，很反直觉。
-      // ⚡ 同上：预算 key ✓（**"未读沉底"的规则原样保留** ✓）
-      final progressKeys = <String, int>{
-        for (final it in items) it.itemId: shelfReadIndex(it.itemId),
-      };
-      items.sort((a, b) {
-        final va = progressKeys[a.itemId]!;
-        final vb = progressKeys[b.itemId]!;
-        if (va < 0 && vb < 0) return 0;
-        if (va < 0) return 1;
-        if (vb < 0) return -1;
-        return dir(va.compareTo(vb));
-      });
-      break;
-    case 'default':
-    default:
-      // 「默认」= 各书架自己的语义顺序：
-      //   · "正在读"：加入时间 / 最近阅读时间取大者倒序
-      //     （新移入无进度的用 addedAt 兜底排顶部；继续阅读的按最近阅读上浮）
-      //   · 其他书架：最近添加
-      if (shelfId == BookshelfService.presetReading) {
-        // ⚡ 同上：预算 key ✓（**语义不变** ✓：仍是 max(addedAt, 最近阅读) ✓）
-        final readingKeys = <String, int>{
-          for (final it in items) it.itemId: shelfUpdatedAtOf(it.itemId),
-        };
-        items.sort((a, b) {
-          final ra = readingKeys[a.itemId]!;
-          final rb = readingKeys[b.itemId]!;
-          final ka = a.addedAt > ra ? a.addedAt : ra;
-          final kb = b.addedAt > rb ? b.addedAt : rb;
-          return dir(ka.compareTo(kb));
-        });
-      } else {
-        items.sort((a, b) => dir(a.addedAt.compareTo(b.addedAt)));
-      }
-      break;
-  }
 }

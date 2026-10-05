@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/remote_config_service.dart';
 import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
 
 /// 公告弹窗：首页居中弹出远程公告（同步 Windows 端）。
 /// - 显示条件：notification 非空、未被用户关闭、且当前无新版本提示。
@@ -48,11 +47,11 @@ class _NotificationPopupState extends State<NotificationPopup> {
 
   void _onConfigChanged() => _maybeShow();
 
-  /// 满足条件则弹窗：已加载 dismiss 状态、未在弹、公告非空且未关闭。
-  ///
-  /// （原来还有一条"有新版本时不弹公告"的互斥，随检查更新功能一并移除了。）
+  /// 满足条件则弹窗：已加载 dismiss 状态、未在弹、公告非空且未关闭、且无新版本。
   void _maybeShow() {
     if (!_loaded || _showing) return;
+    // 互斥：有新版本时不弹公告（同步 Windows 端）
+    if (RemoteConfigService().hasNewVersion) return;
     final text = RemoteConfigService().notification;
     if (text.isEmpty || text == _dismissed) return;
     setState(() => _showing = true); // 立即占位，防止重复触发
@@ -71,7 +70,7 @@ class _NotificationPopupState extends State<NotificationPopup> {
             const Text('公告'),
           ],
         ),
-        content: Text(text, style: const TextStyle(fontSize: AppTheme.fontBody, height: 1.6)),
+        content: Text(text, style: const TextStyle(fontSize: 14, height: 1.6)),
         actionsAlignment: MainAxisAlignment.center,
         actions: [
           TextButton(

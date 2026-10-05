@@ -70,12 +70,18 @@ class _DiscoverPageState extends State<DiscoverPage>
   /// 宁可不给切换，也不要给一个点了没用的按钮。
   List<String> _qqCats = const [];
 
-  /// QQ「热门歌手」—— **从热搜词搜出的歌里派生的真实歌手名**。
+  /// QQ「热门歌手」—— **带真头像**（头像模板实测可用）。
   ///
-  /// 为什么是派生的：QQ 没有免登录的歌手列表接口
-  /// （`searchArtists` 在 Node 里对 QQ 直接返回 ok:false）。
-  /// 详见 [_loadQQ]。
-  List<String> _qqArtists = const [];
+  /// ── 数据来源（为什么不是调歌手列表接口）──────────────────────
+  /// QQ 免登录**没有**歌手列表接口（实测 `GetSingerList` → `code=500003`，
+  /// `fcg_v8_singer_track_cp` → 404）。但：
+  ///   · 歌手**头像模板是通的** → `T001R150x150M000{mid}.jpg`
+  ///   · 歌曲里**带着 singerMid**
+  /// 所以 Node 侧 `topArtistsList` 从榜单歌曲里收集去重歌手 + 拼头像 URL。
+  ///
+  /// ⚠️ 原来这里只是 `List<String>`（歌名），界面只能画**首字圆圈**
+  ///（"王"/"G"/"K"）—— 用户对比参考图后指出"差远了"。
+  List<({String name, String avatar, String mid})> _qqArtists = const [];
 
   // 喜马拉雅数据
   List<({String id, String name})> _xmCategories = const [];
@@ -166,38 +172,13 @@ class _DiscoverPageState extends State<DiscoverPage>
       AppLog.instance.log('[Discover] QQ 发现页数据加载失败: $e');
     }
 
-    // ── 派生"热门歌手"行 ────────────────────────────────────────
+    // ── 热门歌手（**带真头像**）──────────────────────────────────
     //
-    // ⚠️ **为什么不用 `searchArtists`**：QQ 侧的 `searchArtists` 在 Node 里
-    // 明确返回 `{ok:false, error:'QQ 暂不支持该接口（需要登录态）'}`
-    // —— QQ 没有免登录的歌手列表接口。
-    //
-    // 但**搜索是免登录的**，所以从热搜词搜出来的歌里收集歌手并去重，
-    // 得到的就是**真实的 QQ 歌手**（不是造假入口）。
-    // 点一下按歌手名搜索，能直接拿到他的歌。
-    if (_hotKeywords.isNotEmpty) {
-      final picked = _hotKeywords.take(4).toList();
-      final results = await Future.wait(
-        picked.map((k) => api.search(k, limit: 10, source: SongSource.qq)),
-      );
-      if (!mounted) return;
-      final seen = <String>{};
-      final artists = <String>[];
-      for (final r in results) {
-        if (!r.ok) continue;
-        for (final s in r.list) {
-          // 一首歌可能有多个歌手（"周杰伦、方文山"），拆开各自成项
-          for (final a in s.artists.split(RegExp(r'[、/,&]'))) {
-            final name = a.trim();
-            if (name.isEmpty || name.length > 12) continue;
-            if (seen.add(name)) artists.add(name);
-          }
-        }
-      }
-      _qqArtists = artists.take(14).toList();
-    } else {
-      _qqArtists = const [];
-    }
+    // Node 侧从榜单歌曲里收集去重歌手 + 拼头像 URL（见字段注释）。
+    // 用热歌榜(26)当来源 —— 榜单 id 是 QQ 的固定值，不需要先拉榜单列表。
+    final artists = await api.topArtists(topId: 26, limit: 14);
+    if (!mounted) return;
+    _qqArtists = artists;
   }
 
   // ── 音乐平台（网易云 / 酷狗）──────────────────────────────────────
@@ -763,42 +744,36 @@ class _DiscoverPageState extends State<DiscoverPage>
             itemCount: _qqArtists.length,
             separatorBuilder: (_, __) => const SizedBox(width: 16),
             itemBuilder: (c, i) {
-              final name = _qqArtists[i];
+              final a = _qqArtists[i];
               return GestureDetector(
                 onTap: () => showSearch<void>(
                   context: context,
                   delegate: _QuickSearchDelegate(
-                      source: SongSource.qq, initialQuery: name),
+                      source: SongSource.qq, initialQuery: a.name),
                 ),
                 child: SizedBox(
-                  width: 64,
+                  width: 68,
                   child: Column(
                     children: [
-                      // ⚠️ QQ 搜索**不返回歌手头像**，所以这里用"首字圆形块"
-                      // 而不是空头像 —— 空白圆圈比首字更难看，也更容易被
-                      // 误认为加载失败。
-                      Container(
-                        width: 64,
-                        height: 64,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: MusicTheme.fill,
-                          border: Border.all(
-                              color: MusicTheme.tint.withValues(alpha: 0.25),
-                              width: 1),
-                        ),
-                        child: Text(
-                          name.characters.first,
-                          style: TextStyle(
-                              color: MusicTheme.tint,
-                              fontSize: AppTheme.fontTitle2,
-                              fontWeight: FontWeight.w600),
-                        ),
+                      // ── 真头像（用户 2026 对比参考图后要求）─────────
+                      //
+                      // 原来是"首字圆形块"（王/G/K/盛…），理由写在旧注释里：
+                      // "QQ 搜索不返回歌手头像"。**那个理由只对了一半** ——
+                      // 搜索确实不接头像，但**头像模板本身是通的**：
+                      //   `y.gtimg.cn/music/photo_new/T001R150x150M000{mid}.jpg`
+                      // 而歌曲里带着 `singerMid` → 从榜单歌里收集歌手
+                      // 就能拿到真头像（Node 侧 `topArtistsList` 已实测可用）。
+                      //
+                      // 所以现在画真头像；`CoverImage` 自带占位与错误兜底，
+                      // 万一某张图挂了也不会是空白圆。
+                      CoverImage(
+                        url: a.avatar,
+                        size: 64,
+                        circle: true,
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        name,
+                        a.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
@@ -874,19 +849,36 @@ class _DiscoverPageState extends State<DiscoverPage>
     //
     // ⚠️ 点进去必须用 `isTopList: true` —— QQ 的 topId 不是歌单 id，
     //    用歌单接口查会得到空列表（实测 topListSongs 5 条 / playlistDetail 0 条）。
+    //
+    // ── 为什么是**横滑大卡片**而不是竖排列（用户 2026 反馈）────────
+    // 原来用的是 `RankListCard`（单卡片内竖排行）。用户对比参考图后指出
+    //「这种卡片式的差远了」——参考图的榜单是**横滑大封面卡**，
+    // 视觉冲击力和"想点"的欲望都强得多，而竖排小行看起来像设置列表。
+    //
+    // 现在与"每日推荐"同一套横滑卡：封面 152 + 名称 + 副标题。
     if (_qqTopLists.isNotEmpty) {
       out.add(const SliverToBoxAdapter(child: SectionTitle(title: '排行榜')));
       out.add(SliverToBoxAdapter(
-        child: RankListCard(
-          style: _presetStyle(),
-          items: _qqTopLists,
-          onTap: (t) => openPlaylist(
-            context,
-            t.id,
-            t.name,
-            source: SongSource.qq,
-            isTopList: true,
-          ),
+        child: HorizontalCards(
+          itemCount: _qqTopLists.length,
+          height: 212,
+          itemWidth: 152,
+          itemBuilder: (c, i) {
+            final t = _qqTopLists[i];
+            return CoverCard(
+              coverUrl: t.coverUrl,
+              title: t.name,
+              subtitle: t.updateFrequency,
+              width: 152,
+              onTap: () => openPlaylist(
+                context,
+                t.id,
+                t.name,
+                source: SongSource.qq,
+                isTopList: true,
+              ),
+            );
+          },
         ),
       ));
     }
@@ -945,11 +937,23 @@ class _DiscoverPageState extends State<DiscoverPage>
         ));
       }
 
+      // ── 同一套横滑卡（与排行榜/每日推荐一致，用户要求卡片式）────
       out.add(SliverToBoxAdapter(
-        child: PlaylistGrid(
-          style: _presetStyle(),
-          items: _qqSquare,
-          onTap: (p) => openPlaylist(context, p.id, p.name, source: SongSource.qq),
+        child: HorizontalCards(
+          itemCount: _qqSquare.length,
+          height: 212,
+          itemWidth: 152,
+          itemBuilder: (c, i) {
+            final p = _qqSquare[i];
+            return CoverCard(
+              coverUrl: p.coverUrl,
+              title: p.name,
+              subtitle: p.trackCount > 0 ? '${p.trackCount} 首' : null,
+              width: 152,
+              onTap: () =>
+                  openPlaylist(context, p.id, p.name, source: SongSource.qq),
+            );
+          },
         ),
       ));
     }
@@ -1006,9 +1010,6 @@ class _DiscoverPageState extends State<DiscoverPage>
 
     return out;
   }
-
-  /// 当前预设的样式（`_buildQQSections` 也需要，单独抽一个 getter）
-  DiscoverStyle _presetStyle() => DiscoverStyle.of(_preset);
 
   List<Widget> _buildMusicSections(DiscoverStyle style) {
     final out = <Widget>[];

@@ -13,15 +13,7 @@ import 'book_parser.dart';
 import 'bookshelf_service.dart';
 import 'settings_service.dart';
 import 'zlibrary_service.dart';
-import '../source/global_proxy.dart';
 
-/// 日志工具
-///
-/// ✅ **本文件的日志已自动进入「软件日志」**（我的 → 通用设置 → 软件日志 ✓）——
-///   由 `lib/main.dart:70` 的 `debugPrint` 重定向统一覆盖 ✓✓，此处**不再手工调 AppLog** ✓
-///   （手工调会让同一条失败写两遍 ✗）。
-///   ℹ️ 本文件是**图书下载失败原因**的主要产地 ✓（"登录已失效，请重新登录"✓ "请先登录账号"✓
-///     限额 ✓ 合并失败 ✓ DioException 摘要 ✓ …）—— 现在都能在日志页看到 ✓✓
 void _log(String message) {
   if (kDebugMode) debugPrint('[BookDownload] $message');
 }
@@ -91,13 +83,7 @@ class BookDownloadTask {
   factory BookDownloadTask.fromJson(Map<String, dynamic> j) {
     final status = BookDownloadStatus.values.firstWhere(
       (s) => s.name == j['status'],
-      // 🔴 原来是 `orElse: () => completed` ✗ —— 落盘的状态名**认不出来**时
-      // （坏数据 / 枚举改名 / 手改 prefs ✓）会被**当成"已下载"** ✓
-      // → 卡片显示"已下载"、点开却找不到文件 ✓（离线打开直接失败 ✓），
-      // 而用户看到的是"已下载"三个字 ✓，属于"坏数据伪装成正常" ✗。
-      // 改成 `failed`：**宁可显示失败让用户重下** ✓，也不谎报已下载 ✓
-      //（同族问题在 `download_service.dart` 的 `DownloadTask.fromJson` 也有一份 ✗）
-      orElse: () => BookDownloadStatus.failed,
+      orElse: () => BookDownloadStatus.completed,
     );
     return BookDownloadTask(
       bookId: j['bookId'] as String? ?? '',
@@ -110,15 +96,8 @@ class BookDownloadTask {
       localPath: j['localPath'] as String?,
       downloadedAt: j['downloadedAt'] as int?,
       startIndex: j['startIndex'] as int? ?? 0,
-      // 🔴 名额占用必须**按落盘值读回** ✓：原实现从状态反推（`status != failed` ✗）
-      // → 重启后**连 queued 任务也被算成"已占当日名额"** ✗（它们从未 reserve 过 ✓），
-      // 于是记账与实际不符、每日上限被静默放宽 ✓；而 failed 在失败时已释放过 ✓，
-      // 反推成 false 只是**碰巧**对 ✓。
-      // 老数据没有该键 → 仍按状态兜底，但只承认**真正会持有名额**的状态 ✓
-      reserved: j['reserved'] as bool? ??
-          (status == BookDownloadStatus.completed ||
-              status == BookDownloadStatus.paused ||
-              status == BookDownloadStatus.downloading),
+      // 失败任务的名额已在失败时释放；completed/paused 仍占用名额
+      reserved: status != BookDownloadStatus.failed,
       isLocalImport: j['isLocalImport'] as bool? ?? false,
     );
   }
@@ -134,8 +113,6 @@ class BookDownloadTask {
     'localPath': localPath,
     'downloadedAt': downloadedAt,
     'startIndex': startIndex,
-    // ⚠️ **名额占用要落盘** ✓（原来不写 ✗ → 只能靠状态反推 → 重启即漂移 ✓）
-    'reserved': reserved,
     'isLocalImport': isLocalImport,
   };
 }
@@ -150,28 +127,12 @@ class BookDownloadService extends ChangeNotifier {
 
   static const _kRecords = 'book_download_records';
 
-  /// 构造图书下载用的 Dio，并**挂上「全局网络代理」**（本轮接上 ✓）。
-  ///
-  /// 为什么 ✗：本服务原来是**纯直连** ✓ —— 用户开了「网络代理」后，
-  /// **图书文件下载照样不走代理** ✗（同 z-library 那批问题 ✓）。
-  /// 手法与 `download_service._createImageDio()` ✓、`zlibrary_service._createDio()` ✓ **完全一致** ✓
-  /// （都是"先构造 ✓ 再 `applyGlobalProxy`"✓），**不发明新机制** ✗。
-  /// ⚠️ 本服务**没有**自定义 UA 工厂 ✓ → 不必传 `createHttpClient` ✓；
-  ///   若将来加了 UA ✓，务必**同样传进来** ✓（否则 `applyProxy` 会整替换适配器 ✓、
-  ///   把 UA 丢掉 ✗ —— 那个坑今天已经在 `download_service` 那边识别并规避过 ✓✓）。
-  /// · 代理**关闭** ✓ → `applyGlobalProxy` 直接返回 false ✓ **连适配器都不换** ✓（一字不差 ✓）
-  static Dio _createDio() {
-    final dio = Dio(
-      BaseOptions(
-        connectTimeout: const Duration(seconds: 20),
-        receiveTimeout: const Duration(seconds: 120),
-      ),
-    );
-    applyGlobalProxy(dio);
-    return dio;
-  }
-
-  final Dio _dio = _createDio();
+  final Dio _dio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 20),
+      receiveTimeout: const Duration(seconds: 120),
+    ),
+  );
 
   final Map<String, BookDownloadTask> _tasks = {};
   Map<String, BookDownloadTask> get tasks => Map.unmodifiable(_tasks);
@@ -327,7 +288,7 @@ class BookDownloadService extends ChangeNotifier {
 
   Future<Directory> _booksDir() async {
     final base = await SettingsService.downloadBaseDir();
-    final dir = Directory('${base.path}/${CmbokConstants.bookDir}');
+    final dir = Directory('${base.path}/${AppConstants.bookDir}');
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;
   }
@@ -459,7 +420,7 @@ class BookDownloadService extends ChangeNotifier {
   /// 封面图存放目录：下载目录下 `bookDir/covers` 子目录。
   Future<Directory> _coversDir() async {
     final base = await SettingsService.downloadBaseDir();
-    final dir = Directory('${base.path}/${CmbokConstants.bookDir}/covers');
+    final dir = Directory('${base.path}/${AppConstants.bookDir}/covers');
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;
   }
@@ -469,17 +430,7 @@ class BookDownloadService extends ChangeNotifier {
     if (bytes == null || bytes.isEmpty) return null;
     try {
       final dir = await _coversDir();
-      // 🔴 与 `book_content_cache_service._file` **同一类问题** ✗（今天一起发现的 ✓）：
-      //   `bookId` **未净化**就拼进路径 ✓ —— 本项目图书 id 是 `book-<url>` ✓，
-      //   URL 必然含 `/` ✓ → 封面会被写到 `covers/book-https://host/x.png` ✗；
-      //   若 bookUrl 里带 `../` ✓✓ 则会**逃出 covers 目录** ✗✗（路径穿越 ✓）。
-      // ✓ 净化：只保留 `[A-Za-z0-9_-]` ✓，其余换 `_` ✓，并限长 120 ✓
-      //   （与 `book_content_cache_service` 保持**同一套写法** ✓，便于以后一起改 ✓）
-      // ⚠️ 副作用（无害 ✓）：净化后文件名与旧封面不同 → 旧文件读不到 →
-      //   会重新提取一次封面 ✓，不影响正确性 ✓
-      final safe = bookId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
-      final name = safe.length <= 120 ? safe : safe.substring(0, 120);
-      final file = File('${dir.path}/$name.png');
+      final file = File('${dir.path}/$bookId.png');
       await file.writeAsBytes(bytes);
       return file.path;
     } catch (e) {
@@ -794,12 +745,6 @@ class BookDownloadService extends ChangeNotifier {
   }
 
   /// DioException -> 用户可读文案（替代裸 'DioException [unknown]: null'）。
-  ///
-  /// ✅ **用词与分类对齐 `utils/source_fail_text.dart`** ✓（网络不通 / 被拒绝 / 接口失效 / 转换超时 ✓），
-  ///   并且**每句都给出下一步动作** ✓（检查网络 ✓ 换源 ✓ 更新书源 ✓ 重试 ✓）——
-  ///   这正是"能看操作失败的原因"要的效果 ✓。
-  /// ⚠️ 本函数按 `DioException.type` 判 ✓，比字符串匹配**更准** ✓，所以**有意不改成调统一表** ✗✓；
-  ///   与统一表保持一致的是**分类口径与用词** ✓，不是实现方式 ✓。
   String _dioErrorMsg(DioException e) {
     final msg = e.message;
     final detail = (msg != null && msg.isNotEmpty)
@@ -808,30 +753,22 @@ class BookDownloadService extends ChangeNotifier {
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.connectionError:
-        return '网络不通：连接失败，请检查网络/代理后重试';
+        return '网络连接失败，请检查网络后重试';
       case DioExceptionType.sendTimeout:
-        return '网络不通：发送请求超时，请重试';
+        return '发送请求超时，请重试';
       case DioExceptionType.receiveTimeout:
-        return '网络不通：接收数据超时，请重试';
+        return '接收数据超时，请重试';
       case DioExceptionType.badResponse:
         final s = e.response?.statusCode;
-        if (s == 401 || s == 403) {
-          return '该源拒绝了访问（HTTP $s）：可能需要登录或补请求头，请换源';
-        }
-        if (s == 404) return '该源地址已失效（HTTP 404）：请更新书源';
-        return s != null
-            ? '该源服务器出错（HTTP $s）：请稍后重试或换源'
-            : '该源返回异常响应：请稍后重试或换源';
+        return s != null ? '服务器错误（$s），请稍后重试' : '服务器返回异常，请稍后重试';
       case DioExceptionType.badCertificate:
-        return '证书校验失败：请检查代理设置后重试';
+        return '证书校验失败，请稍后重试';
       case DioExceptionType.transformTimeout:
-        // ⚠️ 原来这里写「**数据解析失败**」✗ —— 但 `transformTimeout` 是**转换超时** ✓，
-        //   与"书源规则解析不出来"是**两回事** ✗✓（那样写会把人引去改规则 ✗，方向错 ✓）。已改准 ✓。
-        return '数据转换超时（网络较慢或文件较大）：请重试，或换源';
+        return '数据解析失败，请重试';
       case DioExceptionType.cancel:
         return '已取消';
       case DioExceptionType.unknown:
-        return detail.isNotEmpty ? '网络不通：$detail' : '网络连接中断，请重试';
+        return detail.isNotEmpty ? '网络连接中断：$detail' : '网络连接中断，请重试';
     }
   }
 

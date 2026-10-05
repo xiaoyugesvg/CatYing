@@ -12,7 +12,6 @@ import '../services/favorites_service.dart';
 import '../services/view_mode.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/jelly_book_card.dart';
-import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_select_badge.dart';
 import '../services/settings_service.dart';
 import '../utils/list_pagination.dart';
@@ -25,8 +24,6 @@ import '../widgets/staggered_entrance.dart';
 import '../widgets/source_cover_image.dart';
 import 'book_detail_page.dart';
 import 'comic_detail_page.dart';
-import '../../common/theme.dart';
-import '../../widgets/app_page_header.dart';
 
 /// 收藏页面（顶部 Tab：漫画收藏 / 图书收藏）
 class FavoritesPage extends StatefulWidget {
@@ -36,20 +33,10 @@ class FavoritesPage extends StatefulWidget {
   /// 是否显示返回按钮（从"我的"页面入口进入时为 true）
   final bool showBackButton;
 
-  /// 图书收藏独立页模式（从图书页聚合菜单进入）：
-  /// 标题「图书收藏」+ 顶部搜索框，只显示图书收藏，无漫画/图书切换。
-  final bool bookOnly;
-
-  /// 漫画收藏独立页模式（从漫画页聚合菜单进入，参考图 IMG_8402）：
-  /// 标题「漫画收藏」+ 顶部搜索框「搜索漫画」+ 漫画收藏列表。
-  final bool comicOnly;
-
   const FavoritesPage({
     super.key,
     this.isActive = false,
     this.showBackButton = false,
-    this.bookOnly = false,
-    this.comicOnly = false,
   });
 
   @override
@@ -91,26 +78,13 @@ class _FavoritesPageState extends State<FavoritesPage>
     );
   }
 
-  /// 上一次的 tab 下标（用于识别**滑动**切 tab，见 [_onTabChanged]）
-  int _lastTabIndex = 0;
-
   void _onTabChanged() {
     // 切换 tab 时退出多选，避免不同类型 id 混乱
-    // 🔴 原来只看 `_tabController.indexIsChanging` ✗ —— 那个标记**只在"点击"切换时为
-    // true** ✓（SDK 里是先减计数再 notifyListeners ✓，**滑动只走 index setter** ✓）
-    // → **手指滑动切 tab 时多选态不退出** ✓ → 漫画与图书的 id 混在同一个
-    // `_selectedIds` 里 ✓，而删除只按**当前 tab 的类型**执行 ✓
-    // → **静默少删，还提示"删除成功"** ✗（用户以为都删了 ✓）。
-    // 这里改为按"**下标真的变了**"判定 ✓：点击和滑动都会命中 ✓
-    final idx = _tabController.index;
-    if (idx != _lastTabIndex) {
-      _lastTabIndex = idx;
-      if (_selectedIds.isNotEmpty) {
-        setState(() {
-          _isSelecting = false;
-          _selectedIds.clear();
-        });
-      }
+    if (_isSelecting && _tabController.indexIsChanging) {
+      setState(() {
+        _isSelecting = false;
+        _selectedIds.clear();
+      });
     }
   }
 
@@ -149,8 +123,6 @@ class _FavoritesPageState extends State<FavoritesPage>
     super.dispose();
   }
 
-  /// 通用圆形图标按钮（浅灰底 + 近黑图标）—— 与书架页同款。
-  ///
   Widget _buildSearchButton({double size = 50}) {
     final iconSize = size <= 40 ? 20.0 : 22.0;
     return Material(
@@ -172,12 +144,7 @@ class _FavoritesPageState extends State<FavoritesPage>
     );
   }
 
-  void _openSearch([String? initial]) {
-    // 顶栏胶囊提交时带入关键词，直接出结果
-    if (initial != null && initial.trim().isNotEmpty) {
-      _favSearchController.text = initial;
-      _favQuery = initial;
-    }
+  void _openSearch() {
     setState(() => _searchVisible = true);
     _searchAnim.forward();
   }
@@ -210,68 +177,28 @@ class _FavoritesPageState extends State<FavoritesPage>
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final contentTabs = SettingsService().effectiveContentTabs();
-    // 胶囊切换改小：原按"半屏宽均分"太占地方（用户嫌标题边图标太大），
-    // 固定段宽 40（两段共 90），配合 height 40 整体小一号
-    final tabSegWidth = 40.0;
+    // tab 总宽 = 屏幕一半：段宽*2 + 左右各5内边距 = 屏幕宽/2
+    final tabSegWidth = (MediaQuery.of(context).size.width * 0.5 - 10) / 2;
     return PopScope(
       canPop: !_isSelecting,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _isSelecting) _exitSelection();
       },
       child: Scaffold(
-        backgroundColor: (widget.showBackButton ||
-                widget.bookOnly ||
-                widget.comicOnly)
-            ? null
-            : Colors.transparent,
-        appBar: (widget.showBackButton ||
-                widget.bookOnly ||
-                widget.comicOnly)
+        backgroundColor: widget.showBackButton ? null : Colors.transparent,
+        appBar: widget.showBackButton
             ? AppBar(
-                title: Text(widget.bookOnly
-                    ? '图书收藏'
-                    : (widget.comicOnly ? '漫画收藏' : '收藏')),
-                // 独立收藏页标题居中（参考图 IMG_8470）
-                centerTitle: true,
+                title: const Text('收藏'),
                 actions: [
-                  // 聚合模式（从漫画/图书/书源页 push 进来，showBackButton=true）：
-                  // 标题行在 AppBar 下方会隐藏，所以把漫画/图书切换胶囊 + 搜索按钮放进 AppBar
-                  if (!widget.bookOnly && !widget.comicOnly) ...[
-                    if (contentTabs.length >= 2)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: AnimatedBuilder(
-                          animation: _tabController.animation!,
-                          builder: (context, _) => JellySegmentedToggle(
-                            index: _tabController.animation!.value,
-                            onChanged: (i) => _tabController.animateTo(i),
-                            height: 36,
-                            segmentWidth: 40,
-                            segments: contentTabs
-                                .map(
-                                  (t) => JellySegmentData(
-                                    icon: t == NavTab.manga
-                                        ? Icons.palette_rounded
-                                        : Icons.book_rounded,
-                                  ),
-                                )
-                                .toList(),
-                          ),
-                        ),
-                      ),
+                  if (contentTabs.length < 2)
                     Padding(
                       padding: const EdgeInsets.only(right: 12),
                       child: _buildSearchButton(size: 36),
                     ),
-                  ],
                 ],
               )
             : null,
-        body: widget.bookOnly
-            ? _buildBookOnlyBody(isDark)
-            : widget.comicOnly
-                ? _buildComicOnlyBody(isDark)
-                : Stack(
+        body: Stack(
           children: [
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -280,84 +207,70 @@ class _FavoritesPageState extends State<FavoritesPage>
                   top: !widget.showBackButton,
                   bottom: false,
                   child: SizedBox(
-                    // 高度跟着布局走：原来是"标题行 + 控件行"两行(105)，
-                    // 现在只有一行。搜索换成了可展开胶囊（高 50），
-                    // 行高 = headerTop(8) + 50 = 58。
                     height: contentTabs.length < 2
-                        ? 0.0
-                        : (widget.showBackButton ? 0.0 : 58.0),
+                        ? (widget.showBackButton ? 0.0 : 50.0)
+                        : (widget.showBackButton ? 70.0 : 105.0),
                     child: Stack(
                       children: [
-                        // ── 标题行（按截图：收藏 [漫画|图书] ······ (搜索)）──
-                        //
-                        // 原来这里是「标题 + JellySlidingActions（搜索/历史/下载/源仓库）」
-                        // 的滑动图标组，而胶囊切换在**第二行居中**。
-                        // 用户截图里是**一行**：标题 / 胶囊在左，右侧只有 1 个搜索圆按钮。
-                        //
-                        // ⚠️ 顺带修了一个真 bug：原来滑动组里的搜索动作写成
-                        //   `onPressed: () => _buildSearchButton(size: 36)`
-                        // —— 调用的是"构建按钮"而非"打开搜索"，
-                        // 点了什么都不会发生（只 new 了一个不挂载的 Widget）。
+                        // 标题：左上角，间距小（AppBar 模式下由 AppBar 承担）
                         if (!widget.showBackButton)
                           Positioned(
-                            top: AppTheme.headerTop,
-                            left: AppTheme.headerSide,
-                            right: AppTheme.headerSide,
+                            top: 6,
+                            left: 16,
+                            right: 16,
                             child: Row(
                               children: [
-                                AppPageTitle('收藏', isDark: isDark),
-                                const SizedBox(width: AppTheme.headerTitleGap),
-                                // 胶囊切换挪进标题行（与书架页同一位置）
-                                if (contentTabs.length >= 2)
-                                  AnimatedBuilder(
-                                    animation: _tabController.animation!,
-                                    builder: (context, _) =>
-                                        JellySegmentedToggle(
-                                          index:
-                                              _tabController.animation!.value,
-                                          // 收藏页没有 _switchTab，
-                                          // 原来第二行控件组也是直接 animateTo
-                                          onChanged: (i) =>
-                                              _tabController.animateTo(i),
-                                          // 改小：高度 40、段宽 40
-                                          height: 40,
-                                          segmentWidth: tabSegWidth,
-                                          segments: contentTabs
-                                              .map(
-                                                (t) => JellySegmentData(
-                                                  icon: t == NavTab.manga
-                                                      ? Icons.palette_rounded
-                                                      : Icons.book_rounded,
-                                                ),
-                                              )
-                                              .toList(),
-                                        ),
-                                  ),
-                                // 搜索：与首页右上角同款小胶囊（收起=圆钮，
-                                // 点击展开、图标在左、提示「搜索收藏」），
-                                // 提交直接进搜索浮层出结果；
-                                // 长度 = 标题行剩余空间的 3/5，右对齐
-                                Expanded(
-                                  child: Align(
-                                    alignment: Alignment.centerRight,
-                                    child: FractionallySizedBox(
-                                      widthFactor: 0.6,
-                                      alignment: Alignment.centerRight,
-                                      child: JellyExpandableSearch(
-                                        controller: _favSearchController,
-                                        hintText: '搜索收藏',
-                                        onSubmitted: (v) => _openSearch(v),
-                                        onChanged: (v) => setState(() {}),
-                                      ),
-                                    ),
+                                Text(
+                                  '收藏',
+                                  style: TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.bold,
+                                    color: isDark
+                                        ? Colors.white
+                                        : JellyTheme.textPrimaryLight,
                                   ),
                                 ),
+                                const Spacer(),
+                                if (contentTabs.length < 2)
+                                  _buildSearchButton(size: 36),
                               ],
                             ),
                           ),
-                        // 第二行已删除：胶囊与搜索都挪进标题行（按用户截图）。
-                        // 保留这个注释是为了说明"这里曾经有一行"，
-                        // 避免以后有人以为漏写了控件组。
+                        // 控件组：水平居中，间距大（往下错开，层次感）
+                        Positioned(
+                          top: widget.showBackButton ? 6 : 45,
+                          left: 12,
+                          right: 12,
+                          child: Row(
+                            children: [
+                              const Spacer(),
+                              if (contentTabs.length >= 2)
+                                AnimatedBuilder(
+                                  animation: _tabController.animation!,
+                                  builder: (context, _) => JellySegmentedToggle(
+                                    index: _tabController.animation!.value,
+                                    onChanged: (i) =>
+                                        _tabController.animateTo(i),
+                                    segmentWidth: tabSegWidth,
+                                    segments: contentTabs
+                                        .map(
+                                          (t) => JellySegmentData(
+                                            icon: t == NavTab.manga
+                                                ? Icons.palette_rounded
+                                                : Icons.book_rounded,
+                                          ),
+                                        )
+                                        .toList(),
+                                  ),
+                                ),
+                              if (contentTabs.length >= 2) ...[
+                                const SizedBox(width: 8),
+                                _buildSearchButton(),
+                              ],
+                              const Spacer(),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -398,61 +311,6 @@ class _FavoritesPageState extends State<FavoritesPage>
           ],
         ),
       ),
-    );
-  }
-
-  // ===== 图书收藏独立页（bookOnly）=====
-
-  /// 参考目标界面 IMG_8395：标题「图书收藏」+ 顶部全宽搜索框 + 图书收藏列表
-  Widget _buildBookOnlyBody(bool isDark) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-          child: JellySearchBar(
-            controller: _favSearchController,
-            hintText: '搜索图书',
-            onChanged: (v) => setState(() {}),
-            onCleared: () => setState(() {}),
-          ),
-        ),
-        Expanded(
-          child: _BookFavoritesTab(
-            isSelecting: _isSelecting,
-            selectedIds: _selectedIds,
-            onSelect: _onSelect,
-            keyword: _favSearchController.text.trim(),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ===== 漫画收藏独立页（comicOnly）=====
-
-  /// 参考目标界面 IMG_8402：标题「漫画收藏」+ 顶部搜索框「搜索漫画」+ 漫画收藏列表
-  Widget _buildComicOnlyBody(bool isDark) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-          child: JellySearchBar(
-            controller: _favSearchController,
-            hintText: '搜索漫画',
-            onChanged: (v) => setState(() {}),
-            onCleared: () => setState(() {}),
-          ),
-        ),
-        Expanded(
-          child: _ComicFavoritesTab(
-            isActive: widget.isActive,
-            isSelecting: _isSelecting,
-            selectedIds: _selectedIds,
-            onSelect: _onSelect,
-            keyword: _favSearchController.text.trim(),
-          ),
-        ),
-      ],
     );
   }
 
@@ -546,7 +404,7 @@ class _FavoritesPageState extends State<FavoritesPage>
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: AppTheme.fontBody,
+                fontSize: 14,
                 fontWeight: FontWeight.w600,
                 color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
               ),
@@ -671,16 +529,16 @@ class _FavoritesPageState extends State<FavoritesPage>
           SizedBox(
             height: MediaQuery.of(context).size.height * 0.4,
             child: Material(
-              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+              color: isDark ? JellyTheme.cardDark : Colors.white,
               borderRadius: BorderRadius.circular(20),
               clipBehavior: Clip.antiAlias,
               child: all.isEmpty
-                  ? Center(
+                  ? const Center(
                       child: Padding(
-                        padding: const EdgeInsets.all(24),
+                        padding: EdgeInsets.all(24),
                         child: Text(
                           '无匹配结果',
-                          style: TextStyle(color: JellyTheme.textSecondary),
+                          style: TextStyle(color: Colors.grey),
                         ),
                       ),
                     )
@@ -694,9 +552,9 @@ class _FavoritesPageState extends State<FavoritesPage>
                             child: Center(
                               child: Text(
                                 '仅显示前 $maxResults 条，共 ${all.length} 条',
-                                style: TextStyle(
-                                  color: JellyTheme.textSecondary,
-                                  fontSize: AppTheme.fontFootnote,
+                                style: const TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 12,
                                 ),
                               ),
                             ),
@@ -718,22 +576,19 @@ class _FavoritesPageState extends State<FavoritesPage>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return ListTile(
       leading: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(6),
         child: SourceCoverImage(
           url: comic.cover,
           width: 40,
           height: 56,
           fit: BoxFit.cover,
-          placeholder: (c, u) => Container(
-              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-              width: 40,
-              height: 56),
+          placeholder: (c, u) =>
+              Container(color: Colors.grey[300], width: 40, height: 56),
           errorWidget: (c, u, e) => Container(
-            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+            color: Colors.grey[300],
             width: 40,
             height: 56,
-            child: Icon(Icons.broken_image,
-                size: 20, color: JellyTheme.textSecondary),
+            child: const Icon(Icons.broken_image, size: 20, color: Colors.grey),
           ),
         ),
       ),
@@ -747,7 +602,7 @@ class _FavoritesPageState extends State<FavoritesPage>
         ].whereType<String>().where((s) => s.isNotEmpty).join(' · '),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: AppTheme.fontFootnote),
+        style: const TextStyle(fontSize: 12),
       ),
       trailing: Icon(
         Icons.palette_rounded,
@@ -765,16 +620,16 @@ class _FavoritesPageState extends State<FavoritesPage>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return ListTile(
       leading: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(6),
         child: (book.cover ?? '').isEmpty
             ? Container(
-                color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                color: Colors.grey[300],
                 width: 40,
                 height: 56,
-                child: Icon(
+                child: const Icon(
                   Icons.menu_book_rounded,
                   size: 20,
-                  color: JellyTheme.textSecondary,
+                  color: Colors.grey,
                 ),
               )
             : CachedNetworkImage(
@@ -782,18 +637,16 @@ class _FavoritesPageState extends State<FavoritesPage>
                 width: 40,
                 height: 56,
                 fit: BoxFit.cover,
-                placeholder: (c, u) => Container(
-                    color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-                    width: 40,
-                    height: 56),
+                placeholder: (c, u) =>
+                    Container(color: Colors.grey[300], width: 40, height: 56),
                 errorWidget: (c, u, e) => Container(
-                  color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                  color: Colors.grey[300],
                   width: 40,
                   height: 56,
-                  child: Icon(
+                  child: const Icon(
                     Icons.broken_image,
                     size: 20,
-                    color: JellyTheme.textSecondary,
+                    color: Colors.grey,
                   ),
                 ),
               ),
@@ -806,7 +659,7 @@ class _FavoritesPageState extends State<FavoritesPage>
         ].whereType<String>().where((s) => s.isNotEmpty).join(' · '),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: AppTheme.fontFootnote),
+        style: const TextStyle(fontSize: 12),
       ),
       trailing: Icon(
         Icons.book_rounded,
@@ -836,14 +689,10 @@ class _ComicFavoritesTab extends StatefulWidget {
   final Set<String> selectedIds;
   final ValueChanged<String> onSelect;
 
-  /// 搜索关键词（漫画收藏独立页传入；主页 tab 不传 = 显示全部）
-  final String keyword;
-
   const _ComicFavoritesTab({
     this.isActive = false,
     this.isSelecting = false,
     this.selectedIds = const {},
-    this.keyword = '',
     required this.onSelect,
   });
 
@@ -910,27 +759,20 @@ class _ComicFavoritesTabState extends State<_ComicFavoritesTab> {
     return ListenableBuilder(
       listenable: Listenable.merge([FavoritesService(), ViewMode()]),
       builder: (context, _) {
-        final all = FavoritesService().comics;
-        final kw = widget.keyword.trim().toLowerCase();
-        final comics = kw.isEmpty
-            ? all
-            : all
-                .where((c) => c.title.toLowerCase().contains(kw))
-                .toList();
+        final comics = FavoritesService().comics;
         final isGrid = ViewMode().isGrid;
         if (comics.isEmpty) {
-          return Center(
+          return const Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
                   Icons.favorite_border_rounded,
-                  size: 48,
-                  color: JellyTheme.textSecondary,
+                  size: 64,
+                  color: Colors.grey,
                 ),
-                const SizedBox(height: 16),
-                Text('还没有收藏的漫画',
-                    style: TextStyle(color: JellyTheme.textSecondary)),
+                SizedBox(height: 16),
+                Text('还没有收藏的漫画', style: TextStyle(color: Colors.grey)),
               ],
             ),
           );
@@ -1082,14 +924,10 @@ class _BookFavoritesTab extends StatefulWidget {
   final Set<String> selectedIds;
   final ValueChanged<String> onSelect;
 
-  /// 搜索过滤关键词（图书收藏独立页顶部搜索框联动）
-  final String keyword;
-
   const _BookFavoritesTab({
     this.isSelecting = false,
     this.selectedIds = const {},
     required this.onSelect,
-    this.keyword = '',
   });
 
   @override
@@ -1113,21 +951,9 @@ class _BookFavoritesTabState extends State<_BookFavoritesTab> {
     super.dispose();
   }
 
-  /// 关键词过滤后的收藏图书列表（空关键词 = 全部）
-  List<Book> _filteredBooks() {
-    final all = BookFavoritesService().books;
-    final kw = widget.keyword.trim().toLowerCase();
-    if (kw.isEmpty) return all;
-    return all
-        .where((b) =>
-            b.title.toLowerCase().contains(kw) ||
-            (b.author?.toLowerCase().contains(kw) ?? false))
-        .toList();
-  }
-
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    final total = _filteredBooks().length;
+    final total = BookFavoritesService().books.length;
     if (ListPagination.shouldLoadMore(_scrollController) &&
         _displayCount < total) {
       setState(
@@ -1165,26 +991,20 @@ class _BookFavoritesTabState extends State<_BookFavoritesTab> {
     return ListenableBuilder(
       listenable: Listenable.merge([BookFavoritesService(), BookViewMode()]),
       builder: (context, _) {
-        final books = _filteredBooks();
+        final books = BookFavoritesService().books;
         final isGrid = BookViewMode().isGrid;
-        final kw = widget.keyword.trim();
         if (books.isEmpty) {
-          return Center(
+          return const Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
-                  kw.isEmpty
-                      ? Icons.favorite_border_rounded
-                      : Icons.search_off_rounded,
-                  size: 48,
-                  color: JellyTheme.textSecondary,
+                  Icons.favorite_border_rounded,
+                  size: 64,
+                  color: Colors.grey,
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  kw.isEmpty ? '还没有收藏的图书' : '未找到匹配的图书',
-                  style: TextStyle(color: JellyTheme.textSecondary),
-                ),
+                SizedBox(height: 16),
+                Text('还没有收藏的图书', style: TextStyle(color: Colors.grey)),
               ],
             ),
           );

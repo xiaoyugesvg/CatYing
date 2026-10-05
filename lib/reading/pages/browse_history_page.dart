@@ -11,7 +11,6 @@ import '../widgets/jelly_comic_list_tile.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import 'book_detail_page.dart';
 import 'comic_detail_page.dart';
-import '../widgets/jelly_search_bar.dart';
 
 /// 浏览记录页。
 /// - 从「我的」进入：showTabs=true，顶部漫画/图书切换 + 右侧清理按钮。
@@ -20,11 +19,7 @@ import '../widgets/jelly_search_bar.dart';
 class BrowseHistoryPage extends StatefulWidget {
   final bool showTabs;
 
-  /// 图书足迹模式（从图书页聚合菜单进入，参考图 IMG_8398）：
-  /// 标题「足迹」+ 图书浏览记录 + 右上角清空。
-  final bool bookOnly;
-
-  const BrowseHistoryPage({super.key, this.showTabs = true, this.bookOnly = false});
+  const BrowseHistoryPage({super.key, this.showTabs = true});
 
   @override
   State<BrowseHistoryPage> createState() => _BrowseHistoryPageState();
@@ -64,14 +59,14 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage>
     final tabSegWidth = (MediaQuery.of(context).size.width * 0.5 - 10) / 2;
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.showTabs ? '浏览记录' : '足迹'),
+        title: const Text('浏览记录'),
         actions: [
-          // 仅漫画/图书单一模式：清理按钮放 AppBar 右上角（参考下载记录）
+          // 仅漫画模式：清理按钮放 AppBar 右上角（参考下载记录）
           if (!widget.showTabs)
             IconButton(
               icon: const Icon(Icons.delete_sweep_rounded),
               tooltip: '清理',
-              onPressed: () => _showCleanSheet(isComic: !widget.bookOnly),
+              onPressed: () => _showCleanSheet(isComic: true),
             ),
         ],
       ),
@@ -105,17 +100,12 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage>
                 Expanded(
                   child: TabBarView(
                     controller: _tabController,
-                    children: [
-                      _ComicHistoryTab(footprintMode: true),
-                      const _BookHistoryTab(),
-                    ],
+                    children: const [_ComicHistoryTab(), _BookHistoryTab()],
                   ),
                 ),
               ],
             )
-          : widget.bookOnly
-              ? const _BookHistoryTab()
-              : const _ComicHistoryTab(footprintMode: true),
+          : const _ComicHistoryTab(),
     );
   }
 
@@ -159,7 +149,6 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage>
               },
             );
         final now = DateTime.now().millisecondsSinceEpoch;
-        // bottom: true（默认）→ 键盘弹起时按 viewInsets 避让输入框
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -208,13 +197,8 @@ class _BrowseHistoryPageState extends State<BrowseHistoryPage>
 }
 
 /// 漫画浏览记录列表（懒加载分页，默认 20 条，滑到底加载更多）
-///
-/// [footprintMode]：足迹版（完整条目：简介/章节 + 源角标，参考 IMG_8463）；
-/// 浏览记录版（精简条目：仅标题/作者/别名/热度/收藏，参考 IMG_8462）。
 class _ComicHistoryTab extends StatefulWidget {
-  const _ComicHistoryTab({this.footprintMode = false});
-
-  final bool footprintMode;
+  const _ComicHistoryTab();
 
   @override
   State<_ComicHistoryTab> createState() => _ComicHistoryTabState();
@@ -224,8 +208,6 @@ class _ComicHistoryTabState extends State<_ComicHistoryTab> {
   static const _pageSize = 20;
 
   final ScrollController _scrollController = ScrollController();
-  final TextEditingController _searchController = TextEditingController();
-  String _keyword = '';
   int _displayCount = _pageSize;
 
   @override
@@ -238,34 +220,16 @@ class _ComicHistoryTabState extends State<_ComicHistoryTab> {
   void dispose() {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
-    _searchController.dispose();
     super.dispose();
   }
 
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    final total = _filtered().length;
+    final total = BrowseHistoryService().comics.length;
     if (ListPagination.shouldLoadMore(_scrollController) &&
         _displayCount < total) {
       setState(() => _displayCount += _pageSize);
     }
-  }
-
-  /// 足迹版支持按名称/作者/别名过滤
-  List<Comic> _filtered() {
-    final comics = BrowseHistoryService().comics;
-    if (_keyword.trim().isEmpty) return comics;
-    final kw = _keyword.trim().toLowerCase();
-    return comics
-        .where((c) =>
-            // `Comic.title` 是**非空** String ✓（analyze 报：`?? ''` 是 dead code ✗、
-            // `.toLowerCase()` 的左操作数不可能是 null ✓）→ 去掉多余的 `?? ''` ✓。
-            // 注意下面 `author` / `alias` 的 `?? ''` **要保留** ✓ —— 那两个字段确实是
-            // 可空的 ✓（analyze 对它们没有报警 ✓）
-            c.title.toLowerCase().contains(kw) ||
-            (c.author ?? '').toLowerCase().contains(kw) ||
-            (c.alias ?? '').toLowerCase().contains(kw))
-        .toList();
   }
 
   void _openDetail(Comic comic) {
@@ -285,22 +249,10 @@ class _ComicHistoryTabState extends State<_ComicHistoryTab> {
     return ListenableBuilder(
       listenable: BrowseHistoryService(),
       builder: (context, _) {
-        final comics = _filtered();
-        if (comics.isEmpty) {
-          return Column(
-            children: [
-              if (widget.footprintMode) _buildSearchBar(context),
-              Expanded(
-                child: _keyword.trim().isEmpty
-                    ? _buildEmpty()
-                    : _buildEmpty(text: '没有找到相关记录'),
-              ),
-            ],
-          );
-        }
+        final comics = BrowseHistoryService().comics;
+        if (comics.isEmpty) return _buildEmpty();
         return Column(
           children: [
-            if (widget.footprintMode) _buildSearchBar(context),
             ListPaginationCountBar(total: comics.length, unit: '条'),
             Expanded(
               child: ListView.builder(
@@ -314,12 +266,7 @@ class _ComicHistoryTabState extends State<_ComicHistoryTab> {
                     child: JellyComicListTile(
                       comic: comic,
                       heroTag: comicCoverHeroTag('history', comic),
-                      // 右侧列布局：热度+收藏移到卡片最右（参考图）
-                      trailingColumn: true,
-                      // 足迹版显示简介/章节；浏览记录版精简（仅标题/作者/别名）
-                      showDescription: widget.footprintMode,
-                      showMeta: widget.footprintMode,
-                      showSourceBadge: widget.footprintMode,
+                      showSourceBadge: true,
                       onTap: () => _openDetail(comic),
                     ),
                   );
@@ -329,44 +276,6 @@ class _ComicHistoryTabState extends State<_ComicHistoryTab> {
           ],
         );
       },
-    );
-  }
-
-  /// 足迹版顶部搜索栏（与阅读既有页面内筛选框一致：40 胶囊、图标在左）
-  Widget _buildSearchBar(BuildContext context) {
-    // （原 `final isDark = …` 已删 ✗✓：统一到 `JellySearchBar` 后本处不再需要它 ✓，
-    //   分析器报 "value of the local variable 'isDark' isn't used" ✗ → 已清除 ✓）
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-      child: JellySearchBar(
-        controller: _searchController,
-        // ⚠️ ① **三元文案必须照抄** ✓ —— 两种模式提示不同 ✗
-        //   （足迹模式「搜索漫画」/ 记录模式「搜索足迹记录」✓）
-        hintText: widget.footprintMode ? '搜索漫画' : '搜索足迹记录',
-        // ⚠️ ② **三个动作一个都不能丢** ✓ —— 这是本处最容易被盲换弄坏的地方 ✗：
-        //   ① 过滤 `_keyword = v` ✓
-        //   ② **重置分页** `_displayCount = _pageSize` ✓
-        //   ③ **跳回顶部** `_scrollController.jumpTo(0)` ✓（带 `hasClients` 守卫 ✓）
-        //   只搬 ① 的话：搜索后**不回到顶部**、分页计数也不重置 ✗（很难在验收时发现 ✗）
-        onChanged: (v) {
-          setState(() {
-            _keyword = v;
-            _displayCount = _pageSize;
-            if (_scrollController.hasClients) {
-              _scrollController.jumpTo(0);
-            }
-          });
-        },
-        // ⚠️ ③ 原清空键的判据是 **`_keyword.isEmpty`** ✗（不是 controller ✓）→
-        //   这里照抄原来那三件事 ✓：清 controller + 置空 `_keyword` + **重置分页** ✓
-        onCleared: () {
-          _searchController.clear();
-          setState(() {
-            _keyword = '';
-            _displayCount = _pageSize;
-          });
-        },
-      ),
     );
   }
 }
@@ -455,17 +364,14 @@ class _BookHistoryTabState extends State<_BookHistoryTab> {
   }
 }
 
-Widget _buildEmpty({String text = '暂无浏览记录'}) {
+Widget _buildEmpty() {
   return Center(
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.history_rounded, size: 48, color: JellyTheme.textSecondary),
+        Icon(Icons.history_rounded, size: 56, color: Colors.grey[400]),
         const SizedBox(height: 12),
-        Text(
-          text,
-          style: TextStyle(color: JellyTheme.textSecondary),
-        ),
+        Text('暂无浏览记录', style: TextStyle(color: Colors.grey[500])),
       ],
     ),
   );

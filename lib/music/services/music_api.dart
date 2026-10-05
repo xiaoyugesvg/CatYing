@@ -612,6 +612,18 @@ class MusicApi {
         // 网易云的歌**，于是拿"QQ 的 id"去查"网易云的接口" —— 必然查不到。
         // 只有网易云的歌（本来就该是 wy）刚好不受影响，所以问题被掩盖了。
         'source': song.source.key,
+        // ── 🔴 必须带 `songmid`（这是修的一个真 bug）────────────────
+        //
+        // 很多平台的**真实标识是字符串**，数字 id 换不到地址：
+        //   · QQ：`songmid` 形如 `0039MnYb0qxYhV`
+        //   · 酷狗：`hash`
+        //
+        // 实测（元力音源 v1.2.1 的 `getMediaSource`）：
+        //     `GET …/qq_kw.php?id=${musicItem.songmid}&type=json&level=…`
+        // 插件读的是 **`songmid`**。我们原来只给数字 id →
+        // 那个换源后端查不到 → 返回空 → **"QQ 的歌播不了"** ✗
+        // 补上之后同一后端正常返回真实音频地址 ✓
+        'songmid': song.songmid,
       },
     });
     final m = _asMap(r);
@@ -743,6 +755,41 @@ class MusicApi {
               coverUrl: e['cover']?.toString(),
               updateFrequency: e['updateFrequency']?.toString(),
             ))
+        .toList();
+  }
+
+  /// **热门歌手（带真头像）** —— 只有 QQ 支持（其它平台没这个接口）。
+  ///
+  /// ── 为什么是"从榜单派生"而不是歌手列表接口 ────────────────────
+  /// QQ 免登录**没有**歌手列表接口（实测 `GetSingerList` 返回
+  /// `code=500003`、`fcg_v8_singer_track_cp` 404）；
+  /// 但**歌手头像模板是通的**，而歌曲里带着 `singerMid` ——
+  /// 所以 Node 侧从榜单歌曲里收集去重歌手并拼出头像 URL。
+  ///
+  /// ⚠️ 头像 URL 是 **150x150**（不是 300）—— 界面只显示 64 的圆圈，
+  ///    用 150 省流量。
+  ///
+  /// [topId] 用来决定"从哪个榜取歌手"（不传用热歌榜 26）。
+  Future<List<({String name, String avatar, String mid})>> topArtists({
+    int topId = 26,
+    int limit = 14,
+    SongSource source = SongSource.qq,
+  }) async {
+    final r = await _call({
+      'action': 'topArtists',
+      'id': topId,
+      'limit': limit,
+      'source': source.key,
+    });
+    final m = _asMap(r);
+    if (m['ok'] != true) return const [];
+    return _listOf(r, 'list')
+        .map((e) => (
+              name: (e['name'] ?? '').toString(),
+              avatar: (e['avatar'] ?? '').toString(),
+              mid: (e['mid'] ?? '').toString(),
+            ))
+        .where((a) => a.name.isNotEmpty && a.avatar.isNotEmpty)
         .toList();
   }
 

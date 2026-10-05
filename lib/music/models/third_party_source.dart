@@ -45,6 +45,16 @@ class ThirdPartySource {
 
   final bool enabled;
 
+  /// 是不是**内置音源**（随 App 打包的洛雪/MusicFree 源）。
+  ///
+  /// 内置源可以**编辑**（改配置），可以**删除**（删除 = 从列表移除，App 重建
+  /// 时会自动重新注册并启用——见 `BuiltinSourcesService`）。用户自己导入的源
+  /// 这一字段为 false（与旧数据兼容：老 JSON 没有该字段 → 默认为 false）。
+  final bool isBuiltin;
+
+  /// 内置源的更新源 URL（用于「检查更新」/ 自动更新；用户源为空）
+  final String updateUrl;
+
   const ThirdPartySource({
     required this.id,
     required this.name,
@@ -55,6 +65,8 @@ class ThirdPartySource {
     this.quality = '320k',
     this.script,
     this.enabled = true,
+    this.isBuiltin = false,
+    this.updateUrl = '',
   });
 
   /// 是不是 **LX 脚本**（`lx.on(...)` / `module.exports.musicUrl`）
@@ -105,6 +117,8 @@ class ThirdPartySource {
       quality: quality ?? this.quality,
       script: clearScript ? null : (script ?? this.script),
       enabled: enabled ?? this.enabled,
+      isBuiltin: isBuiltin,
+      updateUrl: updateUrl,
     );
   }
 
@@ -118,6 +132,8 @@ class ThirdPartySource {
         'quality': quality,
         if (script != null) 'script': script,
         'enabled': enabled,
+        if (isBuiltin) 'isBuiltin': true,
+        if (updateUrl.isNotEmpty) 'updateUrl': updateUrl,
       };
 
   /// 宽松解析：原版对每个字段都有默认值，缺字段不报错
@@ -139,6 +155,8 @@ class ThirdPartySource {
       quality: quality,
       script: j['script']?.toString(),
       enabled: _asBool(j['enabled']),
+      isBuiltin: _asBool(j['isBuiltin'], fallback: false),
+      updateUrl: (j['updateUrl'] ?? '').toString(),
     );
   }
 
@@ -317,6 +335,14 @@ class ThirdPartySourceStore {
 
   Future<void> removeAll() async {
     _items.clear();
+    await _persist();
+  }
+
+  /// 整体替换为 [list]（内置源\"恢复默认\"用：删除旧内置源后重新注入）。
+  Future<void> replaceAll(List<ThirdPartySource> list) async {
+    _items
+      ..clear()
+      ..addAll(list);
     await _persist();
   }
 

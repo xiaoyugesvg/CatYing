@@ -163,7 +163,14 @@ export function normalizeSearchResult(raw) {
         if (!id) continue;
         out.push({
             id,
+            // ⚠️ `songmid` 也要带出来 —— 很多插件取址读的是它，**不是** `id`。
+            // 实测元力音源 v1.2.1：`getMediaSource` 里用的是
+            // `musicItem.songmid`。少了它，**自搜回退拿到的候选也没法播**。
+            songmid: str(it.songmid || it.mid || id),
             name: str(it.title || it.name || it.songName),
+            // ⚠️ 两套字段名都给：Dart 的 `Song.fromJson` 优先读**单数** `artist`
+            //（Node 其它接口发的就是单数），这里保持一致的语义。
+            artist: str(it.artist || it.artists || it.singer),
             artists: str(it.artist || it.artists || it.singer),
             album: str(it.album || it.albumName),
             cover: str(it.artwork || it.coverUrl || it.cover || it.picUrl),

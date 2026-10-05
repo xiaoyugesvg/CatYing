@@ -126,6 +126,22 @@ class Song {
   /// 付费标记：网易云 0 免费 / 1 VIP / 4 付费单曲 / 8 免费资源（翻唱）
   final int fee;
 
+  /// 平台**原生字符串 id**（可空，默认空串）。
+  ///
+  /// ── 🔴 为什么必须有这个字段（用户报的"QQ 播不了"的根因）────────
+  /// `id` 是 `int`，但很多平台的**真实标识是字符串**，而且**数字 id 换不到地址**：
+  ///   · QQ：`songmid` 形如 `0039MnYb0qxYhV`（**数字 songid 没用**）
+  ///   · 酷狗：`hash`
+  ///
+  /// 实测（元力音源 v1.2.1）它的取址逻辑是：
+  ///     `GET …/qq_kw.php?id=${musicItem.songmid}&type=json&level=…`
+  /// 我们原来只传数字 id → 那个后端查不到 → 返回空 → **播放失败**。
+  /// 补上 songmid 之后同一个后端正常返回真实音频地址。
+  ///
+  /// ⚠️ 不要试图把它塞进 `id`：那个字段是 int，且被大量界面/持久化依赖。
+  ///    字符串原生 id 单独一列，缺省空串（等于"这个平台不需要"）。
+  final String songmid;
+
   const Song({
     required this.id,
     required this.name,
@@ -135,6 +151,7 @@ class Song {
     this.duration = 0,
     this.source = SongSource.netease,
     this.fee = 0,
+    this.songmid = '',
   });
 
   String get formattedDuration {
@@ -164,6 +181,7 @@ class Song {
         'duration': duration,
         'source': source.key,
         'fee': fee,
+        'songmid': songmid,
       };
 
   factory Song.fromJson(Map<String, dynamic> j) => Song(
@@ -191,6 +209,19 @@ class Song {
         duration: asDouble(j['duration']),
         source: SongSource.fromKey(j['source']?.toString()),
         fee: asInt(j['fee']),
+        // 平台**原生标识**，各家名字不同，这里**统一收进 songmid**：
+        //   · QQ   → `songmid`（如 `0039MnYb0qxYhV`）
+        //   · 酷狗 → `hash`（如 `b3a52a7a958bf0aed0ebfba2e9a818b7`）
+        //   · 网易 → 无（它的数字 id 本身就是原生标识）
+        //
+        // 🔴 Node 侧 `kugou_source.js` 早就把 hash 输出成 `hash` 字段，
+        //    而这里原来**只读 songmid/mid** → 酷狗歌走第三方源时同样
+        //    "没有可用 id"，和 QQ 犯的是**同一个错**（只是平台不同）。
+        songmid: _firstNonEmpty(
+              j,
+              const ['songmid', 'mid', 'hash', 'fileHash', 'FileHash'],
+            ) ??
+            '',
       );
 
   /// 按顺序取第一个非空字符串字段（兼容不同接口的字段命名）。

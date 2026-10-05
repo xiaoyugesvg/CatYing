@@ -15,14 +15,12 @@ void _log(String message) {
 ///
 /// 内部 wrap ComicApi，最小改动不重写 copymanga 逻辑（解密/双路径/请求头均复用 ComicApi）。
 /// 可变元数据（id/显示名/Referer/UA）由 [CopymangaConfig] 承载，站点换域名或防盗链策略时
-/// 更新 sources.json 即可；baseUrl 由 [CopymangaConfig.base]（每源独立，如热辣漫画镜像站）
-/// 或 RemoteConfigService 动态给（全局 copyApiUrl，base 为 null 时）。
+/// 更新 sources.json 即可；baseUrl 仍由 RemoteConfigService 动态给（不进配置）。
 class CopyMangaSource extends MangaSource {
   final CopymangaConfig config;
   final ComicApi _api;
 
-  CopyMangaSource(this.config, {ComicApi? api})
-    : _api = api ?? ComicApi(baseUrl: config.base);
+  CopyMangaSource(this.config, {ComicApi? api}) : _api = api ?? ComicApi();
 
   @override
   String get id => config.id;
@@ -57,24 +55,14 @@ class CopyMangaSource extends MangaSource {
 
   @override
   Future<MangasPage> getPopular({int page = 0}) async {
-    final result =
-        await _api.getComicList(ordering: '-popular', page: page);
-    return MangasPage(
-      items: result.items.map((c) => comicToCManga(c, id)).toList(),
-      hasNextPage: result.hasMore,
-      total: result.total,
-    );
+    // TODO(阶段2): copymanga 搜索接口支持 ordering 按热门排序
+    return const MangasPage(items: [], hasNextPage: false);
   }
 
   @override
   Future<MangasPage> getLatestUpdates({int page = 0}) async {
-    final result = await _api.getComicList(
-        ordering: '-datetime_updated', page: page);
-    return MangasPage(
-      items: result.items.map((c) => comicToCManga(c, id)).toList(),
-      hasNextPage: result.hasMore,
-      total: result.total,
-    );
+    // TODO(阶段2): copymanga 搜索接口支持 ordering 按更新排序
+    return const MangasPage(items: [], hasNextPage: false);
   }
 
   @override

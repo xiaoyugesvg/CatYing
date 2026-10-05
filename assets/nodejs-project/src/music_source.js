@@ -418,6 +418,24 @@ async function handleMusicApi(body) {
     // 喜马拉雅：整条链路独立（语义与"单曲平台"不同），提前返回
     if (source === 'ximalaya') return handleXimalayaAction(action, body);
 
+    // ── 第三方音源 action（与歌曲平台无关，任何平台都能用）────────
+    // 🔴 必须放在平台分派**之前**：这些 action 是「用用户导入的洛雪/MusicFree
+    //    源解析地址」，跟当前歌曲属于网易/酷狗/QQ 没关系。
+    //    原来它们落在 isKg / isQq 分支里被当成"该平台不支持" → **腾讯/酷狗的
+    //    歌走第三方源回退时必然失败**（返回"不支持"而不是去解析）✗
+    if (action === 'resolveBySource') {
+        return resolveBySourceAction(body.source, body.song);
+    }
+    if (action === 'searchByMusicFree') {
+        return searchByMusicFreeAction(body.source, body.keyword, body.page, body.type);
+    }
+    if (action === 'lyricByMusicFree') {
+        return lyricByMusicFreeAction(body.source, body.song);
+    }
+    if (action === 'lxSelfTest') {
+        return lxSelfTest();
+    }
+
     // ── 三个"多平台"接口 ────────────────────────────────────
     if (action === 'search') {
         if (isQq) return qq.searchSongs(body.keyword, body.limit, body.offset);
@@ -447,6 +465,22 @@ async function handleMusicApi(body) {
                 return kugou.topLists();
             case 'playlistDetail':
                 return kugou.playlistDetail(body.id);
+            // ── 榜单歌曲：酷狗的 `playlistDetail` **本身就同时吃榜单和歌单**
+            //    （纯数字 id 走 `rankAudio`/`rankInfo`，`collection_…` 走歌单）。
+            //    所以这里只是把它的结果**拆成 `topListSongs` 的形状**
+            //    （上层要的是 `{ok, list}`，不是 `{ok, playlist, list}`）。
+            //
+            // 🔴 不接这个的后果（用户实测反馈："榜单不只 QQ 有"）：
+            //    网易/酷狗的榜单点进去**一首歌都没有**，而 QQ 有 ——
+            //    因为 `topListSongs` 原来**只在 QQ 分支实现**，
+            //    其它平台落到 `未知 action: topListSongs`。
+            case 'topListSongs': {
+                const d = await kugou.playlistDetail(body.id);
+                if (!d.ok) return d;
+                const songs = Array.isArray(d.list) ? d.list : [];
+                if (body.limit) return { ok: true, list: songs.slice(0, body.limit), total: songs.length };
+                return { ok: true, list: songs, total: songs.length };
+            }
             case 'hotSearch':
                 return kugou.hotSearch();
             case 'newSongs':
@@ -462,7 +496,6 @@ async function handleMusicApi(body) {
             case 'artistSongs':
             case 'artistAlbums':
             case 'albumSongs':
-            case 'resolveBySource':
                 return kugouUnsupported(action);
             default:
                 return { ok: false, error: '未知 action: ' + action };
@@ -496,6 +529,8 @@ async function handleMusicApi(body) {
                 return qq.playlistCategories();
             case 'personalized':
                 return qq.recommendPlaylists(body.limit);
+            case 'topArtists':
+                return qq.topArtistsList(body.id, body.limit);
             case 'playlistDetail':
                 return qq.playlistSongs(body.id, body.limit);
             // ── 需要登录态：给**明确原因** ──
@@ -506,7 +541,6 @@ async function handleMusicApi(body) {
             case 'artistSongs':
             case 'artistAlbums':
             case 'albumSongs':
-            case 'resolveBySource':
             case 'newSongs':
                 return {
                     ok: false,
@@ -529,6 +563,25 @@ async function handleMusicApi(body) {
         // ── 发现页（全部公开接口，无需登录）──────────────
         case 'topLists':
             return topLists();
+        // ── 榜单歌曲（网易云）──────────────────────────────
+        //
+        // 🔴 `topListSongs` 原来**只在 QQ 分支实现** → 网易/酷狗的榜单
+        //    点进去"一首歌都没有"（用户实测反馈："榜单不只 QQ 有"）。
+        //
+        // 网易云的榜单 id 与歌单 id 走**同一个接口**
+        //（`/api/v6/playlist/detail`，实测榜单 id 19723756 能返回歌曲），
+        // 所以这里只是把结果拆成 `topListSongs` 要的形状
+        //（上层要 `{ok, list}`，不是 `{ok, playlist, list}`）。
+        case 'topListSongs': {
+            const d = await playlistDetail(body.id);
+            if (!d.ok) return d;
+            const songs = Array.isArray(d.list) ? d.list : [];
+            return {
+                ok: true,
+                list: body.limit ? songs.slice(0, body.limit) : songs,
+                total: songs.length,
+            };
+        }
         case 'playlistDetail':
             return playlistDetail(body.id);
         case 'personalized':

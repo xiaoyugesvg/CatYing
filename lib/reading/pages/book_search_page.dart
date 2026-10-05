@@ -1,7 +1,4 @@
 import 'package:flutter/foundation.dart';
-// 删掉从未使用的 `package:dio/dio.dart` ✓（analyze 一直报 unused_import ✗，
-// 本文件只用 `ZlibraryService` 发出的请求 ✓，没有直接用 Dio ✓）
-import '../../widgets/common_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../models/book.dart';
@@ -16,22 +13,11 @@ import '../theme/jelly_theme.dart';
 import '../services/settings_service.dart';
 import '../widgets/jelly_book_card.dart';
 import '../widgets/jelly_nav_bar.dart';
-import '../widgets/jelly_icon_menu_button.dart';
-import '../widgets/jelly_ring_button.dart';
-import '../widgets/jelly_expandable_search.dart';
-import '../widgets/jelly_pull_cord.dart';
-import '../widgets/guide_overlay.dart';
+import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/staggered_entrance.dart';
 import 'book_detail_page.dart';
-import 'book_source_search_page.dart';
-import 'shell_embedded_page.dart';
-import 'douban_ranking_page.dart';
-import 'browse_history_page.dart';
-import 'book_download_records_page.dart';
-import 'favorites_page.dart';
-import '../../common/theme.dart';
-import '../../widgets/app_page_header.dart';
+import 'zlibrary_auth_page.dart';
 
 /// 日志工具
 void _log(String message) {
@@ -48,14 +34,10 @@ class BookSearchPage extends StatefulWidget {
   /// 是否显示返回按钮（从"我的"页面入口进入时为 true）
   final bool showBackButton;
 
-  /// 进入后预填并自动搜索的关键词（豆瓣排行「去找书」跳转用）
-  final String? initialKeyword;
-
   const BookSearchPage({
     super.key,
     this.isActive = false,
     this.showBackButton = false,
-    this.initialKeyword,
   });
 
   @override
@@ -77,7 +59,6 @@ class _BookSearchPageState extends State<BookSearchPage>
   bool _isLoading = false;
   bool _isSearching = false;
   String _keyword = '';
-  bool _guideShown = false; // 新手引导已展示标记
 
   // 分类额外过滤条件：年份/语言仅分类模式用；格式 _filterExtensions 与搜索页小标签
   // 同源联动，关键词/分类模式都用，跨模式保留。
@@ -96,14 +77,6 @@ class _BookSearchPageState extends State<BookSearchPage>
   String? _errorMsg; // 搜索异常信息
   /// z-library 可用性上一状态（仅状态变化才弹通知；null=尚未初始化）
   bool? _wasUnavailable;
-
-  /// 首页推荐流（z-library 首页热门，走用户配置的节点域名）——进页即拉，
-  /// 供未搜索/无结果时直接展示推荐书籍网格。
-  List<Book> _recBooks = [];
-  bool _recLoading = false;
-  bool _recFailed = false;
-  /// 推荐流来源：false = z-library 首页热门；true = zlib 失败后的豆瓣热门榜兜底
-  bool _recIsDouban = false;
 
   ScrollController get _activeScrollController =>
       _tabController.index == 0 ? _gridScrollController : _listScrollController;
@@ -128,32 +101,6 @@ class _BookSearchPageState extends State<BookSearchPage>
     _wasUnavailable = ZlibraryService().isUnavailable;
     _loadHistory();
     _ensureCategories();
-    _maybeTriggerGuide();
-    _loadRecommendations();
-    // 豆瓣排行「去找书」跳转：预填关键词并立即执行搜索
-    // （首帧后触发，避免 initState 阶段 FocusScope 查询）
-    final kw = widget.initialKeyword?.trim() ?? '';
-    if (kw.isNotEmpty) {
-      _searchController.text = kw;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _runSearch(kw);
-      });
-    }
-  }
-
-  /// 首次激活时展示图书页新手引导（仅一次）
-  void _maybeTriggerGuide() {
-    if (_guideShown || !widget.isActive) return;
-    _guideShown = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) maybeShowGuide(context, GuideGroups.book);
-    });
-  }
-
-  @override
-  void didUpdateWidget(covariant BookSearchPage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.isActive && !oldWidget.isActive) _maybeTriggerGuide();
   }
 
   @override
@@ -215,44 +162,6 @@ class _BookSearchPageState extends State<BookSearchPage>
     } catch (e) {
       _log('后台拉取分类失败: $e');
     }
-  }
-
-  /// 拉取 z-library「最受欢迎」直抓（走当前节点域名）作图书主页推荐流。
-  ///
-  /// 不再使用豆瓣兜底：推荐流数据源只有 z-library 最受欢迎分类页
-  /// （zlibrary_service.fetchHomeRecommendations 直抓 /s/?dsource=mostpopular，
-  /// SSR HTML + 结构容错）。失败且当前无内容才置 _recFailed。
-  Future<void> _loadRecommendations() async {
-    if (_recLoading) return;
-    _recLoading = true;
-    _recFailed = false;
-    if (mounted) setState(() {});
-    try {
-      final r = await ZlibraryService().fetchHomeRecommendations();
-      if (!mounted) return;
-      setState(() {
-        if (r.items.isNotEmpty) {
-          _recBooks = r.items;
-          _recIsDouban = false;
-          _recFailed = false;
-        } else {
-          // ✅ **补上"抓到但解析出 0 条"的日志**（本轮 ✓）—— 原来这条分支**一个字都不记** ✗
-          //   ⇒ 用户只看到"推荐书籍加载失败"✗，我们**无法判断**是"没抓到"还是"抓到了没解析出" ✗✓
-          //   （"没抓到"会走下面的 catch ✓ 那条**本来就有**日志 ✓）
-          //   ⇒ 现在这条也留痕 ✓：**能一眼分清**是"网络/被拒"✗ 还是"**HTML 结构变了**"✗✓
-          _log('首页推荐拉取成功但**解析出 0 条**（可能是首页 HTML 结构变了 / 区块选择器失效）');
-          _recFailed = true;
-        }
-      });
-    } catch (e) {
-      _log('首页推荐拉取失败: $e');
-      if (!mounted) return;
-      setState(() {
-        if (_recBooks.isEmpty) _recFailed = true;
-      });
-    }
-    _recLoading = false;
-    if (mounted) setState(() {});
   }
 
   Future<void> _addHistory(String keyword) async {
@@ -394,15 +303,7 @@ class _BookSearchPageState extends State<BookSearchPage>
       _filterExtensions.isNotEmpty;
 
   Widget _buildCategoryButton(bool isDark) {
-    // 🔴 原来这里是 `if (ZlibraryService().isUnavailable) return SizedBox.shrink();`
-    // ✗ —— 也就是"节点不可用"时**整个分类入口被删掉** ✓。
-    // 而那个标记非常容易被误置（"拿到了 HTML 但解析出 0 条"也算不可用 ✗，
-    // 见 zlibrary_service 的首页推荐路径），一旦置上：
-    //   · 分类按钮**永久消失** ✗
-    //   · 且**不会自愈**（只有某次搜索/推荐成功才会复位 ✗）
-    //   → 用户既没有入口、也不知道为什么、更没法重试 ✗
-    // 现在**始终保留按钮** ✓：点它照样会去取分类表（失败时由弹层自己提示 ✓），
-    // 用户至少还有入口、不必重启或等自愈 ✓。
+    if (ZlibraryService().isUnavailable) return const SizedBox.shrink();
     final active = _categoryMode;
     final hasFilter = _hasActiveFilters;
     return GestureDetector(
@@ -415,7 +316,7 @@ class _BookSearchPageState extends State<BookSearchPage>
             decoration: BoxDecoration(
               color: active
                   ? JellyTheme.primary
-                  : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
+                  : (isDark ? JellyTheme.cardDark : Colors.white),
               borderRadius: BorderRadius.circular(10),
               boxShadow: [
                 BoxShadow(
@@ -476,19 +377,18 @@ class _BookSearchPageState extends State<BookSearchPage>
       final result = await showModalBottomSheet<_BookCategorySheetResult?>(
         context: context,
         isScrollControlled: true,
-        backgroundColor:
-            isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+        backgroundColor: isDark ? JellyTheme.cardDark : Colors.white,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
-        builder: (ctx) => kbSheet(_BookCategorySheet(
+        builder: (ctx) => _BookCategorySheet(
           isDark: isDark,
           initialCategory: _selectedCategory,
           initialYearFrom: _filterYearFrom,
           initialYearTo: _filterYearTo,
           initialLanguages: _filterLanguages,
           initialExtensions: _filterExtensions,
-        )),
+        ),
       );
       if (result is _BookCategorySheetResult && mounted) {
         _applyCategory(result);
@@ -625,18 +525,12 @@ class _BookSearchPageState extends State<BookSearchPage>
   void _onViewModeChangedExternal() {
     if (!mounted) return;
     final target = BookViewMode().isGrid ? 0 : 1;
-    // ⚠️ 必须同时判 `indexIsChanging`：动画进行中 index 仍是旧值，
-    // 若此时用户又点了另一侧，index==target 会误判"已就位"不触发 animateTo，
-    // 动画继续飞向旧目标 → 视图"切不回来"。动画中一律强制重定向。
-    if (_tabController.index != target || _tabController.indexIsChanging) {
+    if (_tabController.index != target) {
       _tabController.animateTo(target);
     }
   }
 
-  /// 推荐区点击：zlib 推荐直接进详情。
-  void _onRecTap(Book book) {
-    _openDetail(book);
-  }
+  // -------------------- 详情 --------------------
 
   void _openDetail(Book book) async {
     FocusScope.of(context).unfocus(); // 进详情前先收起键盘与历史弹层
@@ -750,6 +644,189 @@ class _BookSearchPageState extends State<BookSearchPage>
       );
   }
 
+  // -------------------- 头像 / 登录 --------------------
+
+  Future<void> _onAvatarTap() async {
+    final z = ZlibraryService();
+    if (z.isLoggedIn) {
+      // 已登录：弹出账号信息 + 退出登录
+      await _showLogoutDialog(z);
+      return;
+    }
+    // 未登录：弹登录框
+    final ok = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const ZlibraryAuthPage()),
+    );
+    if (ok == true && mounted) {
+      _showTip('登录成功');
+    }
+  }
+
+  /// 已登录账号弹窗：展示账号信息 + 今日下载配额 + 退出登录（果冻风）
+  Future<void> _showLogoutDialog(ZlibraryService z) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final limit = z.serverDownloadsLimit ?? ZlibraryService.loggedDailyLimit;
+    final used = z.loggedCountToday;
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+          decoration: BoxDecoration(
+            color: isDark ? JellyTheme.cardDark : Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: JellyTheme.jellyShadows(
+              color: JellyTheme.primary,
+              blurRadius: 30,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 头像（与顶栏一致：主色圆底 + user.png）
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: JellyTheme.primary,
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Image.asset(
+                    'assets/icons/user.png',
+                    width: 44,
+                    height: 44,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => const Icon(
+                      Icons.person_rounded,
+                      color: Colors.white,
+                      size: 32,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                z.username.isEmpty ? z.email : z.username,
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                ),
+              ),
+              if (z.username.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(
+                  z.email,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: JellyTheme.textSecondary,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              // 今日下载配额
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: JellyTheme.primary.withValues(
+                    alpha: isDark ? 0.18 : 0.08,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.menu_book_rounded,
+                      size: 18,
+                      color: JellyTheme.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '今日下载  $used / $limit 本',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: isDark
+                            ? Colors.white70
+                            : JellyTheme.textPrimaryLight,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              // 退出后回退提示
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.info_outline_rounded,
+                    size: 15,
+                    color: JellyTheme.accent,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '退出后将回退内置账号（${ZlibraryService.builtinDailyLimit} 本/天）',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: JellyTheme.textSecondary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              // 按钮区
+              Row(
+                children: [
+                  Expanded(
+                    child: SizedBox(
+                      height: 44,
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        style: TextButton.styleFrom(
+                          foregroundColor: JellyTheme.primary,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: const Text(
+                          '取消',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _LogoutButton(
+                      onTap: () => Navigator.pop(ctx, 'logout'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (action == 'logout' && mounted) {
+      await z.logout();
+      _showTip('已退出登录');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -758,6 +835,15 @@ class _BookSearchPageState extends State<BookSearchPage>
       appBar: widget.showBackButton
           ? AppBar(
               title: const Text('图书'),
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: Transform.translate(
+                    offset: const Offset(0, 4),
+                    child: _buildAvatar(isDark),
+                  ),
+                ),
+              ],
             )
           : null,
       floatingActionButton: ListenableBuilder(
@@ -781,127 +867,67 @@ class _BookSearchPageState extends State<BookSearchPage>
               padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
               child: Column(
                 children: [
-                  // ── 标题行（按截图：一行放下全部控件）──────────────
-                  //   图书 ⋮拉绳  [搜索图书]  (视图切换)  (下载) ··· 其他
-                  //
-                  // 原来是**两行**：第一行「标题 + 拉绳 + 滑动图标组 + 头像」，
-                  // 第二行「搜索框 + 视图切换」。截图里是一行，
-                  // 所以把搜索框、视图切换、下载都并进来。
-                  //
-                  // 拉绳紧跟标题（截图位置），不再被 Spacer 推到右侧。
+                  // 标题 + 头像（AppBar 模式下由 AppBar 承担，头像移入 AppBar.actions）
                   if (!widget.showBackButton)
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        AppPageTitle('图书', isDark: isDark),
-                        const SizedBox(width: 4),
-                        // 「拉绳」：标题右边那根挂着的小绳。
-                        // 点它**直接进入书源界面（书源搜索页）**——
-                        // 原来是弹出「切换书源」两层弹层，按用户要求改成直进书源页；
-                        // 书源仓库（导入/管理）在书源页的聚合菜单里。
-                        JellyPullCord(
-                          // ⚠️ 必须限高：绳子的 CustomPaint 自然高 50，
-                          // 不限的话这一行会被撑到 50px，同排的搜索框/圆图标
-                          // 垂直错位、圆环还会探出压到搜索框上。
-                          height: 40,
-                          tooltip: '书源',
-                          // 拉窗帘进入书源页：页面从顶部往下覆盖出现（窗帘放下），
-                          // 返回时反向往上收起（窗帘拉回）
-                          // ✅ **改成"外壳内嵌"**（本轮重构 ✓）—— 用户要的"**悬浮菜单栏**"
-                          //   就是**底部那条 5 项胶囊导航栏** ✓（`home_page.dart` 的 `JellyNavBar` ✓）。
-                          //   原来这里是 `Navigator.push` + `PageRouteBuilder`（380ms 下滑转场 ✓）
-                          //   ⇒ **全屏推出** ✗ ⇒ 底栏被盖掉 ✗✓（用户截图："书源页没有底栏"✓）
-                          //   ⇒ 现在把页面交给外壳渲染 ✓ ⇒ **底栏照常显示** ✓✓
-                          //   ℹ️ 转场交给外壳的统一过渡（不再自定义 380ms 下滑 ✓ 与其它子页一致 ✓）
-                          onTap: () =>
-                              openEmbeddedPage(const BookSourceSearchPage()),
-                        ),
-                        const SizedBox(width: 10),
-                        // 搜索框占据剩余宽度（Expanded 让右侧图标始终贴边）
-                        Expanded(child: _buildSearchBar(isDark)),
-                        const SizedBox(width: 8),
-                        // 指环切换菜单：**只保留视图 + 分类筛选**
-                        // （已下载/历史/收藏/下载/豆瓣排行收敛到右侧聚合按钮）
-                        JellyRingButton(
-                          isDark: isDark,
-                          tooltip: '视图与分类',
-                          menuBuilder: (ctx) => JellyRingMenuPanel(
-                            isDark: isDark,
-                            title: '视图与分类',
-                            children: [
-                              // 视图切换（网格/列表）
-                              JellyRingMenuRow(
-                                isDark: isDark,
-                                label: '视图',
-                                child: _buildViewToggle(isDark),
-                              ),
-                              // 分类筛选（年份/语言/格式）
-                              JellyRingMenuRow(
-                                isDark: isDark,
-                                label: '分类筛选',
-                                child: _buildCategoryButton(isDark),
-                              ),
-                            ],
+                        Padding(
+                          padding: const EdgeInsets.only(left: 4),
+                          child: Text(
+                            '图书',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: isDark
+                                  ? Colors.white
+                                  : JellyTheme.textPrimaryLight,
+                            ),
                           ),
                         ),
-                        const SizedBox(width: 6),
-                        // 聚合菜单：浏览历史 / 收藏 / 下载 / 豆瓣排行
-                        // （纯图标下拉菜单栏；登录入口在设置界面里）
-                        JellyIconMenuButton(
-                          isDark: isDark,
-                          tooltip: '历史 · 收藏 · 下载 · 排行',
-                          actions: [
-                            (
-                              icon: Icons.history_rounded,
-                              tooltip: '浏览记录',
-                              onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  // 历史统一界面：漫画/图书聚合（showTabs 默认 true）
-                                  builder: (_) => const BrowseHistoryPage(),
-                                ),
-                              ),
-                            ),
-                            (
-                              icon: Icons.favorite_rounded,
-                              tooltip: '收藏',
-                              onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  // 收藏统一界面：漫画/图书聚合 + 返回按钮
-                                  builder: (_) =>
-                                      const FavoritesPage(showBackButton: true),
-                                ),
-                              ),
-                            ),
-                            (
-                              icon: Icons.file_download_rounded,
-                              tooltip: '下载',
-                              onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  // 下载记录页（参考图 IMG_8397：5 状态 tab）
-                                  builder: (_) =>
-                                      const BookDownloadRecordsPage(),
-                                ),
-                              ),
-                            ),
-                            (
-                              icon: Icons.leaderboard_rounded,
-                              tooltip: '豆瓣排行',
-                              onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const DoubanRankingPage(),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                        const Spacer(),
+                        _buildAvatar(isDark),
                       ],
                     ),
-                  // 第二行（搜索框 + 视图切换 + 分类按钮）已删除 ——
-                  // 它们都并进了上面那一个标题行（按用户截图的一行布局）。
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
+                  // 搜索框 + 视图切换
+                  Row(
+                    children: [
+                      const Spacer(),
+                      SizedBox(
+                        width: MediaQuery.of(context).size.width * 0.5,
+                        child: JellySearchBar(
+                          controller: _searchController,
+                          hintText: '搜索图书',
+                          onFocusChange: (f) => setState(() {
+                            if (f && _searchController.text.isEmpty) {
+                              _historyVisible = true;
+                            }
+                          }),
+                          onCleared: () =>
+                              setState(() => _historyVisible = false),
+                          onSubmitted: (value) => _runSearch(value),
+                          onChanged: (value) => setState(() {}),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      AnimatedBuilder(
+                        animation: _tabController.animation!,
+                        builder: (context, _) => JellySegmentedToggle(
+                          index: _tabController.animation!.value,
+                          onChanged: (i) => _tabController.animateTo(i),
+                          segments: const [
+                            JellySegmentData(icon: Icons.grid_view_rounded),
+                            JellySegmentData(icon: Icons.view_list_rounded),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _buildCategoryButton(isDark),
+                      const Spacer(),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
                   // 格式小标签（常见类型）
                   _buildFormatChips(isDark),
                 ],
@@ -915,48 +941,58 @@ class _BookSearchPageState extends State<BookSearchPage>
   }
 
   /// 右上角头像（登录态显示用户图标，未登录显示登录图标）
-  /// 搜索框（标题行内用 Expanded 撑开）
-  ///
-  /// ── 圆形图标 → 点击展开的小胶囊 ──────────────────────────────
-  /// 原来是**常驻长条** `JellySearchBar`，占掉一整行宽度。
-  /// 用户给的参考图是：收起只留一个圆形搜索图标，点一下才伸长成输入框。
-  /// 统一用阅读自己的 [JellyExpandableSearch]（Jelly 配色，图标在左，
-  /// 提示「搜索图书」），与漫画/书架/收藏页同款交互。
-  Widget _buildSearchBar(bool isDark) {
-    return JellyExpandableSearch(
-      controller: _searchController,
-      hintText: '搜索图书',
-      maxWidth: 200,
-      onFocusChange: (f) => setState(() {
-        if (f && _searchController.text.isEmpty) {
-          _historyVisible = true;
-        }
-      }),
-      onSubmitted: (value) => _runSearch(value),
-      onChanged: (value) => setState(() {}),
-    );
-  }
-
-  /// 网格 / 列表 视图切换。
-  ///
-  /// ⚠️ 这里原来接的是 `_tabController` —— **那是分类标签的控制器**
-  /// （推荐/全部/EPUB…，length 2）。点视图切换只会让分类标签换一个，
-  /// 网格/列表**根本没变**（真 bug）。
-  ///
-  /// 视图模式有独立的状态与持久化：`BookViewMode().isGrid`
-  /// （services/book_view_mode.dart）。这里改接它，并且用
-  /// ListenableBuilder 监听 —— 否则别处改了模式本按钮不会跟着动。
-  Widget _buildViewToggle(bool isDark) {
-    return ListenableBuilder(
-      listenable: BookViewMode(),
-      builder: (context, _) => JellySegmentedToggle(
-        index: BookViewMode().isGrid ? 0 : 1,
-        onChanged: (i) => BookViewMode().set(i == 0),
-        segments: const [
-          JellySegmentData(icon: Icons.grid_view_rounded),
-          JellySegmentData(icon: Icons.view_list_rounded),
-        ],
-      ),
+  Widget _buildAvatar(bool isDark) {
+    final z = ZlibraryService();
+    final logged = z.isLoggedIn;
+    // 登录态：限额优先用服务端实际值（/eapi/user/profile），未取到回退硬编码
+    final limit = z.isLoggedIn
+        ? (z.serverDownloadsLimit ?? ZlibraryService.loggedDailyLimit)
+        : ZlibraryService.builtinDailyLimit;
+    final used = z.isLoggedIn ? z.loggedCountToday : z.builtinCountToday;
+    return Column(
+      children: [
+        Material(
+          color: logged
+              ? JellyTheme.primary
+              : (isDark ? JellyTheme.cardDark : Colors.white),
+          shape: const CircleBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: _onAvatarTap,
+            child: SizedBox(
+              width: 36,
+              height: 36,
+              child: Center(
+                child: logged
+                    ? Image.asset(
+                        'assets/icons/user.png',
+                        width: 30,
+                        height: 30,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => Icon(
+                          Icons.person_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      )
+                    : Icon(
+                        Icons.person_rounded,
+                        color: isDark ? Colors.white70 : JellyTheme.primary,
+                        size: 20,
+                      ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          logged ? '$used/$limit' : '未登录',
+          style: TextStyle(
+            fontSize: 9,
+            color: isDark ? Colors.white54 : JellyTheme.textSecondary,
+          ),
+        ),
+      ],
     );
   }
 
@@ -1017,7 +1053,7 @@ class _BookSearchPageState extends State<BookSearchPage>
         decoration: BoxDecoration(
           color: selected
               ? JellyTheme.primary
-              : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
+              : (isDark ? JellyTheme.cardDark : Colors.white),
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
@@ -1031,7 +1067,7 @@ class _BookSearchPageState extends State<BookSearchPage>
         child: Text(
           f.label,
           style: TextStyle(
-            fontSize: AppTheme.fontFootnote,
+            fontSize: 12,
             fontWeight: FontWeight.w600,
             color: selected
                 ? Colors.white
@@ -1053,11 +1089,6 @@ class _BookSearchPageState extends State<BookSearchPage>
         child: AnimatedOpacity(
           opacity: _showBackToTop ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 200),
-          // ⛔ **有意不同、不要"统一"成 `AppIconButton`** ✗✓（与 `bookshelf_page` 那处同款 ✓）
-          //   它是**返回顶部悬浮钮** ✓（`onTap: _scrollToTop` ✓），不是顶栏同族圆钮 ✓：
-          //     · 44×44（悬浮 ✓）vs 顶栏 36×36 ✓
-          //     · `primary` + `elevation: 4` = **醒目 FAB** ✓ —— 换"淡圆底"会几乎看不见 ✗
-          //     · 随滚动 `AnimatedOpacity/IgnorePointer` 出现消失 ✓（顶栏钮不会 ✓）
           child: Material(
             color: JellyTheme.primary,
             shape: const CircleBorder(),
@@ -1092,8 +1123,7 @@ class _BookSearchPageState extends State<BookSearchPage>
           children: [
             CircularProgressIndicator(color: JellyTheme.primary),
             const SizedBox(height: 16),
-            Text('正在筛选...',
-                style: TextStyle(color: JellyTheme.textSecondary)),
+            const Text('正在筛选...', style: TextStyle(color: Colors.grey)),
           ],
         ),
       );
@@ -1105,14 +1135,14 @@ class _BookSearchPageState extends State<BookSearchPage>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.cloud_off_rounded, size: 48, color: JellyTheme.textSecondary),
+            const Icon(Icons.cloud_off_rounded, size: 64, color: Colors.grey),
             const SizedBox(height: 16),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 32),
               child: Text(
                 _errorMsg!,
                 textAlign: TextAlign.center,
-                style: TextStyle(color: JellyTheme.textSecondary),
+                style: const TextStyle(color: Colors.grey),
               ),
             ),
             const SizedBox(height: 16),
@@ -1131,71 +1161,27 @@ class _BookSearchPageState extends State<BookSearchPage>
     if (_result.items.isEmpty &&
         (_keyword.isNotEmpty || _categoryMode) &&
         !_isSearching) {
-      return Center(
+      return const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_off_rounded,
-                size: 48, color: JellyTheme.textSecondary),
-            const SizedBox(height: 16),
-            Text('没有找到相关图书',
-                style: TextStyle(color: JellyTheme.textSecondary)),
+            Icon(Icons.search_off_rounded, size: 64, color: Colors.grey),
+            SizedBox(height: 16),
+            Text('没有找到相关图书', style: TextStyle(color: Colors.grey)),
           ],
         ),
       );
     }
 
-    // 未搜索 = 初始界面（分类模式除外）。
-    //
-    // ⚠️ 文案按 cmbok V2.0.8 截图对齐：进页面时是在**拉推荐**，
-    // 所以显示「正在获取推荐...」+ 转圈，而不是"请输入关键词"。
-    // 拉取结束（_isSearching 结束）仍无数据时，退回可操作的提示 ——
-    // 否则用户会以为一直卡在加载中。
+    // 未搜索 = 初始界面（分类模式除外）
     if (_result.items.isEmpty && _keyword.isEmpty && !_categoryMode) {
-      if (_isSearching) {
-        return Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(color: JellyTheme.primary),
-              const SizedBox(height: 16),
-              Text(
-                '正在获取推荐...',
-                style: TextStyle(color: JellyTheme.textSecondary),
-              ),
-            ],
-          ),
-        );
-      }
-      // 首页推荐流（z-library 首页热门，走用户配置的节点域名）
-      if (_recBooks.isNotEmpty) return _buildRecGrid();
-      if (_recLoading) {
-        return Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(color: JellyTheme.primary),
-              const SizedBox(height: 16),
-              Text('正在加载推荐书籍...',
-                  style: TextStyle(color: JellyTheme.textSecondary)),
-            ],
-          ),
-        );
-      }
-      return Center(
+      return const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.book_rounded, size: 48, color: JellyTheme.textSecondary),
-            const SizedBox(height: 16),
-            Text(_recFailed ? '推荐书籍加载失败' : '暂无推荐内容',
-                style: TextStyle(color: JellyTheme.textSecondary)),
-            const SizedBox(height: 16),
-            TextButton.icon(
-              onPressed: _loadRecommendations,
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('重新获取'),
-            ),
+            Icon(Icons.book_rounded, size: 64, color: Colors.grey),
+            SizedBox(height: 16),
+            Text('输入关键词开始搜索图书', style: TextStyle(color: Colors.grey)),
           ],
         ),
       );
@@ -1224,7 +1210,7 @@ class _BookSearchPageState extends State<BookSearchPage>
                 Text(
                   '搜索历史',
                   style: TextStyle(
-                    fontSize: AppTheme.fontBody,
+                    fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: labelColor,
                   ),
@@ -1233,29 +1219,27 @@ class _BookSearchPageState extends State<BookSearchPage>
                 if (_history.isNotEmpty)
                   TextButton(
                     onPressed: _clearHistory,
-                    child: const Text('清空', style: TextStyle(fontSize: AppTheme.fontSubhead)),
+                    child: const Text('清空', style: TextStyle(fontSize: 13)),
                   ),
               ],
             ),
           ),
           if (_history.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(40),
+            const Padding(
+              padding: EdgeInsets.all(40),
               child: Center(
-                child: Text('暂无搜索历史',
-                    style: TextStyle(color: JellyTheme.textSecondary)),
+                child: Text('暂无搜索历史', style: TextStyle(color: Colors.grey)),
               ),
             )
           else
             ..._history.map(
               (kw) => ListTile(
-                leading:
-                    Icon(Icons.history_rounded, color: JellyTheme.textSecondary),
+                leading: const Icon(Icons.history_rounded, color: Colors.grey),
                 title: Text(kw),
                 trailing: IconButton(
-                  icon: Icon(
+                  icon: const Icon(
                     Icons.close_rounded,
-                    color: JellyTheme.textSecondary,
+                    color: Colors.grey,
                     size: 18,
                   ),
                   onPressed: () => _removeHistory(kw),
@@ -1289,8 +1273,8 @@ class _BookSearchPageState extends State<BookSearchPage>
       builder: (context, constraints) {
         final cols = _adaptiveColumns(
           constraints.maxWidth,
-          min: 3,
-          target: 118,
+          min: 2,
+          target: 170,
         );
         return MasonryGridView.count(
           controller: _gridScrollController,
@@ -1322,94 +1306,9 @@ class _BookSearchPageState extends State<BookSearchPage>
                 isGrid: true,
                 heroTag: bookCoverHeroTag('search', book),
                 onTap: () => _openDetail(book),
-                showFavorite: false,
               ),
             );
           },
-        );
-      },
-    );
-  }
-
-  /// 首页推荐网格（z-library 首页热门）：封面 + 书名，点击进图书详情。
-  Widget _buildRecGrid() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final cols = _adaptiveColumns(
-          constraints.maxWidth,
-          min: 3,
-          target: 118,
-        );
-        return CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
-                child: Row(
-                  children: [
-                    Text(
-                      '推荐',
-                      style: TextStyle(
-                        fontSize: AppTheme.fontTitle3,
-                        fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? Colors.white
-                            : JellyTheme.textPrimaryLight,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _recIsDouban
-                          ? '豆瓣热门榜（z-library 暂不可用）'
-                          : 'Z-Library 最受欢迎',
-                      style: TextStyle(
-                          fontSize: AppTheme.fontFootnote,
-                          color: JellyTheme.textSecondary),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      tooltip: '刷新推荐',
-                      onPressed: _recLoading ? null : _loadRecommendations,
-                      icon: Icon(
-                        Icons.refresh_rounded,
-                        size: 20,
-                        color: JellyTheme.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            SliverPadding(
-              padding: EdgeInsets.only(
-                left: 12,
-                right: 12,
-                bottom: 12 + JellyNavBar.contentBottomAvoid,
-              ),
-              sliver: SliverGrid(
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: cols,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 3 / 4.55,
-                ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final book = _recBooks[index];
-                    return JellyBookCard(
-                      book: book,
-                      isGrid: true,
-                      heroTag: bookCoverHeroTag('rec', book),
-                      onTap: () => _onRecTap(book),
-                      showFavorite: false,
-                    );
-                  },
-                  childCount: _recBooks.length,
-                ),
-              ),
-            ),
-          ],
         );
       },
     );
@@ -1454,7 +1353,6 @@ class _BookSearchPageState extends State<BookSearchPage>
                 isGrid: false,
                 heroTag: bookCoverHeroTag('search', book),
                 onTap: () => _openDetail(book),
-                showFavorite: false,
               ),
             );
           },
@@ -1464,13 +1362,50 @@ class _BookSearchPageState extends State<BookSearchPage>
   }
 }
 
-// 🔴 这里原来有一个 **44 行的 `_LogoutButton`**（危险色实心 + 按压缩放反馈 ✓）✗
-// —— 已删除 ✓，依据是两重证据 ✓：
-//   · `grep _LogoutButton` 全模块**只命中它自己的声明** ✓
-//     （`class` / 构造器 / `createState` / `State` ✓，没有任何地方构造或引用它 ✓）
-//   · 删除后跑**全仓** analyze 仍 `error=0` ✓✓（这才是独立证明 ✓；
-//     光跑本文件的单文件闸门**证明不了** ✗ —— 今天 `unawaited` 那次就是教训 ✓）
-// ⚠️ 另外 ✓：本页的登录入口在**设置页**（`:852` 附近 ✓），从来不经过这个按钮 ✓
+/// 退出登录按钮：危险色实心 + 按压缩放反馈
+class _LogoutButton extends StatefulWidget {
+  final VoidCallback onTap;
+  const _LogoutButton({required this.onTap});
+
+  @override
+  State<_LogoutButton> createState() => _LogoutButtonState();
+}
+
+class _LogoutButtonState extends State<_LogoutButton> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) => setState(() => _pressed = false),
+      onTapCancel: () => setState(() => _pressed = false),
+      onTap: widget.onTap,
+      child: AnimatedScale(
+        scale: _pressed ? 0.97 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        child: Container(
+          height: 44,
+          decoration: BoxDecoration(
+            color: JellyTheme.error,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: const Center(
+            child: Text(
+              '退出登录',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 /// 分类筛选弹窗返回结果。
 /// 分类筛选弹窗内容（独立 StatefulWidget，管理 TextEditingController 生命周期）。
@@ -1627,8 +1562,8 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
           value: value,
           isExpanded: true,
           isDense: true,
-          hint: Text(hint, style: const TextStyle(fontSize: AppTheme.fontFootnote)),
-          style: TextStyle(fontSize: AppTheme.fontFootnote, color: labelColor),
+          hint: Text(hint, style: const TextStyle(fontSize: 12)),
+          style: TextStyle(fontSize: 12, color: labelColor),
           items: _yearOptions
               .map(
                 (y) => DropdownMenuItem<int?>(
@@ -1647,9 +1582,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
   Widget build(BuildContext context) {
     final isDark = widget.isDark;
     final labelColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-    final chipColor = isDark
-        ? JellyTheme.cardDark
-        : JellyTheme.primary.withValues(alpha: 0.08);
+    final chipColor = isDark ? JellyTheme.cardDark : const Color(0xFFF0F0F5);
     final chipTextColor = isDark ? Colors.white70 : JellyTheme.textSecondary;
     // 通用 chip（子分类/语言/格式复用）
     Widget chip(String label, bool selected, VoidCallback onTap) =>
@@ -1664,7 +1597,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
             child: Text(
               label,
               style: TextStyle(
-                fontSize: AppTheme.fontFootnote,
+                fontSize: 12,
                 fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
                 color: selected ? Colors.white : chipTextColor,
               ),
@@ -1687,7 +1620,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                   Text(
                     '分类筛选',
                     style: TextStyle(
-                      fontSize: AppTheme.fontHeadline,
+                      fontSize: 16,
                       fontWeight: FontWeight.bold,
                       color: labelColor,
                     ),
@@ -1751,7 +1684,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                         child: Text(
                           g.title,
                           style: TextStyle(
-                            fontSize: AppTheme.fontSubhead,
+                            fontSize: 13,
                             fontWeight: selected
                                 ? FontWeight.w600
                                 : FontWeight.normal,
@@ -1779,7 +1712,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                     Text(
                       '子分类',
                       style: TextStyle(
-                        fontSize: AppTheme.fontSubhead,
+                        fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: labelColor,
                       ),
@@ -1791,7 +1724,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                             child: Text(
                               '请选择主分类',
                               style: TextStyle(
-                                fontSize: AppTheme.fontFootnote,
+                                fontSize: 12,
                                 color: chipTextColor,
                               ),
                             ),
@@ -1816,7 +1749,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                     Text(
                       '年份',
                       style: TextStyle(
-                        fontSize: AppTheme.fontSubhead,
+                        fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: labelColor,
                       ),
@@ -1848,7 +1781,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                     Text(
                       '语言',
                       style: TextStyle(
-                        fontSize: AppTheme.fontSubhead,
+                        fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: labelColor,
                       ),
@@ -1876,7 +1809,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                     Text(
                       '格式',
                       style: TextStyle(
-                        fontSize: AppTheme.fontSubhead,
+                        fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: labelColor,
                       ),
@@ -1905,49 +1838,21 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
               ),
             ),
             const Divider(height: 1),
-            // ── 底部按钮：重置 / 确认（按截图：两个等宽并排的圆角按钮）──
-            //
-            // 原来是「TextButton(重置) + Spacer + FilledButton(确定)」——
-            // 左文字按钮、右实心按钮、大小不一。
-            // 截图里是两个**等宽**的圆角按钮并排：
-            //   左=重置（描边/浅底），右=确认（实心；未选子分类时禁用并
-            //   把文案换成「请选择子分类」）
+            // 底部按钮：重置 / 确定
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+              padding: const EdgeInsets.fromLTRB(8, 6, 12, 6),
               child: Row(
                 children: [
-                  // 重置
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _reset,
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: BorderSide(
-                          color: isDark
-                              ? Colors.white.withValues(alpha: 0.22)
-                              : Colors.black.withValues(alpha: 0.16),
-                        ),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                        foregroundColor: labelColor,
+                  TextButton(onPressed: _reset, child: const Text('重置')),
+                  const Spacer(),
+                  FilledButton(
+                    onPressed: _selectedChild != null ? _confirm : null,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 4,
                       ),
-                      child: const Text('重置'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  // 确认
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: _selectedChild != null ? _confirm : null,
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                      ),
-                      child: Text(
-                        // 没选子分类时说清"缺什么"，而不是让按钮灰着不解释
-                        _selectedChild != null ? '确定' : '请选择子分类',
-                      ),
+                      child: Text('确定'),
                     ),
                   ),
                 ],

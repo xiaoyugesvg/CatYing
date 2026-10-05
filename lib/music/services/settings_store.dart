@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/models.dart';
 import '../models/third_party_source.dart';
 import '../theme/discover_preset.dart';
+import 'builtin_sources_service.dart';
 
 /// 音乐模块的设置存储 —— 对应 Beans 的 `@AppStorage` / `PlatformPreferenceStore`。
 ///
@@ -94,6 +97,10 @@ class SettingsStore {
     musicSource.value = SongSource.fromKey(prefs.getString(_kMusicSource));
     // 音源列表也在这里一起初始化，保证进音乐 tab 前就绪
     await ThirdPartySourceStore.instance.init();
+    // 内置源注册 + 自动更新（静默：失败不影响启动）
+    // 先注册出厂内置源，再异步拉远端看有没有新版本
+    await BuiltinSourcesService.instance.init();
+    unawaited(BuiltinSourcesService.instance.checkForUpdates());
   }
 
   Future<void> setAudioQuality(AudioQuality q) async {

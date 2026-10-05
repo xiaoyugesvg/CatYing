@@ -249,26 +249,165 @@ async function resolveMusicFree(source, song) {
         };
     }
 
-    // MusicFree 的 musicItem 形状（照它的插件生态）
-    const musicItem = {
-        id: song && song.id != null ? String(song.id) : '',
-        songmid: song && song.id != null ? String(song.id) : '',
-        name: song && song.name ? String(song.name) : '',
-        singer: song && song.artists ? String(song.artists) : '',
-        artist: song && song.artists ? String(song.artists) : '',
-        album: song && song.album ? String(song.album) : '',
-        source: 'kw',
+    // ── musicItem 构造 ────────────────────────────────────────────
+    //
+    // 🔴 `source` **不能写死**（原来写死 'kw'，是"播放出错 Failed to open
+    //    …/kw.php?id=…" 的根因，详见 detectMusicFreePlatform 的注释）。
+    //    优先用**插件的真实平台**（从它源码里认），认不出来才退回
+    //    歌曲自己的平台。
+    const pluginPlatform = detectMusicFreePlatform(script);
+    const songPlatform = providerCodeOf(song && song.source);
+    const platform = pluginPlatform || songPlatform || 'kw';
+
+    // ── 🔴 `songmid` 用**平台原生字符串 id**，不要拿数字 id 顶替 ──────
+    //
+    // 这是"QQ 的歌播不了"的第二个根因。实测元力音源 v1.2.1 的取址逻辑：
+    //     `GET …/qq_kw.php?id=${musicItem.songmid}&type=json&level=…`
+    // 它读的是 **`songmid`**（QQ 的字符串 mid，形如 `0039MnYb0qxYhV`）。
+    // 我们原来把数字 songid 塞进 `songmid` → 那个后端查不到 → 返回空
+    // → `normalizeMedia` 拿不到 url → **播放失败**。
+    //
+    // 补上真实 songmid 后，同一后端正常返回真实音频地址。
+    //
+    // ⚠️ 兜底顺序：songmid → id。前者是平台原生标识（优先），
+    //    后者留给"模板法那种只认数字 id"的源。
+    const nativeMid = (song && song.songmid ? String(song.songmid) : '').trim();
+    const numericId = song && song.id != null ? String(song.id) : '';
+    const midForPlugin = nativeMid || numericId;
+
+    // ── 空 id 直接失败，别拿去查 ────────────────────────────────
+    //
+    // ⚠️ 原来没有这个检查：`songmid` 为空串时会请求
+    //    `…/qq_kw.php?id=&type=json` → 后端可能**返回一首随机的歌**
+    //    （或空）→ 用户听到**别人的歌**（最糟的失败方式：不报错但是错的）。
+    // 宁可明确失败，也不要播错。
+    if (!midForPlugin) {
+        return {
+            ok: false,
+            error: '这首歌没有可用的 id（缺 songmid，换源接口无法识别）',
+        };
+    }
+
+    const buildItem = (id, extra) => {
+        const v = id != null ? String(id) : '';
+        return {
+            id: v,
+            // ── 🔴 同一个原生 id 要塞进**所有**常见字段名 ──────────────
+            //
+            // 各家插件读的字段名不一样（实测）：
+            //   · 元力音源   → `musicItem.songmid`
+            //   · 星海音乐源 → 报错文案就是"**缺少 songmid 或 hash**"
+            //                 → 它**两个都认**，但必须有一个有值
+            //   · 酷狗系插件 → `hash`
+            // 所以这里把同一个值同时写进 songmid / hash / mid，
+            // **不要**只写一个 —— 那会让"换个插件就播不了"。
+            //（代价只是几个重复字段，换来跨插件兼容。）
+            songmid: v,
+            hash: v,
+            mid: v,
+            name: song && song.name ? String(song.name) : '',
+            singer: song && song.artists ? String(song.artists) : '',
+            artist: song && song.artists ? String(song.artists) : '',
+            album: song && song.album ? String(song.album) : '',
+            source: platform,
+            ...(extra || {}),
+        };
     };
+
+    // 首选 item：**原生 mid 给 songmid**，数字 id 也给 id（两派都满足）
+    const musicItem = buildItem(midForPlugin);
     const quality = (source && source.quality) || '320k';
 
-    const r = await runAction(
+    const invoke = (item) => runAction(
         { [getter.name]: getter.fn },
         getter.name,
-        [musicItem, quality],
+        [item, quality],
         // ⚠️ **必须 spread**：MusicFree 签名是 `(musicItem, quality)`
         // 两个位置参数，不是 LX 那样的单个富对象。
         { spread: true },
     );
+
+    let r = await invoke(musicItem);
+    let usedSelfSearch = false;
+
+    // ── 自搜回退（🔴 让"跨平台的源"能真的用起来）──────────────────
+    //
+    // 场景：用户播 **QQ** 的歌，而他的源是**酷我专源**插件。
+    // 直接把 QQ 的 id 交给酷我后端 → 查不到（id 不通用）。
+    // 但插件**自己有 search** → 用它搜出**酷我自己的 id** → 再解析。
+    //
+    // ⚠️ 这与"跨平台匹配用户明确关掉"不冲突：
+    //    那条指的是"**App 自己去别的平台找歌**"（CrossPlatformMatcher）；
+    //    这里是"**这一个源自己决定怎么服务这首歌**"，仍然只在这个源内部，
+    //    不引入任何别的源，也不弹额外界面。
+    //
+    // 只在第一轮失败时做，且要求插件确实有 search（没有就保持原错误）。
+    // ── 判断"这个结果可信吗"────────────────────────────────────────
+    //
+    // ⚠️ **不能只看 `r.ok`**：惰性插件（只拼 URL）无论 id 对不对都返回
+    //    `ok:true`。所以跨平台时**真的探一次地址**，看它是否返回音频。
+    //
+    // 只在**平台不匹配**时探测（= 很可能拿到坏 URL 的唯一情形）：
+    //   · 插件是酷我，歌来自酷我 → id 通用，不必多一次请求
+    //   · 插件是酷我，歌来自 QQ  → id 不通用 → 必须探
+    const crossPlatform = !!pluginPlatform && !!songPlatform &&
+        pluginPlatform !== songPlatform;
+
+    let needFallback = !r.ok;
+    if (!needFallback && crossPlatform) {
+        const media0 = normalizeMedia(r.result);
+        if (media0 && media0.url) {
+            const alive = await probePlayable(media0.url, media0.headers);
+            if (!alive) {
+                needFallback = true;
+            }
+        }
+    }
+
+    if (needFallback && (song && song.name)) {
+        const sp = pickAction(loaded.handlers, 'search');
+        if (sp) {
+            try {
+                // ── 先试"歌名 + 歌手"，不行再试"只要歌名" ──────────
+                // 加了歌手反而搜不到的情况很常见（歌手名写法不一致）
+                const tries = [
+                    [song.name, song.artists].filter(Boolean).join(' ').trim(),
+                    String(song.name).trim(),
+                ];
+                for (const keyword of tries) {
+                    if (!keyword) continue;
+                    const sr = await runAction(
+                        { [sp.name]: sp.fn }, sp.name,
+                        [keyword, 1, 'music'], { spread: true },
+                    );
+                    if (!sr.ok) continue;
+                    const cand = normalizeSearchResult(sr.result).list || [];
+                    // 逐个候选试（第一首未必对，但通常前几个里就有）
+                    for (const c of cand.slice(0, 3)) {
+                        const alt = buildItem(c.id, {
+                            name: c.name || (song && song.name) || '',
+                            singer: c.artist || (song && song.artists) || '',
+                            artist: c.artist || (song && song.artists) || '',
+                            album: c.album || (song && song.album) || '',
+                        });
+                        const r2 = await invoke(alt);
+                        if (!r2.ok) continue;
+                        const m2 = normalizeMedia(r2.result);
+                        if (!m2 || !m2.url) continue;
+                        // 自搜出来的地址**也要探**（同一个后端，同样会 404）
+                        if (!(await probePlayable(m2.url, m2.headers))) continue;
+                        r = r2;
+                        usedSelfSearch = true;
+                        break;
+                    }
+                    if (usedSelfSearch) break;
+                }
+            } catch (e) {
+                // 自搜失败不该盖掉原始错误 —— 原始错误更有诊断价值
+            }
+        }
+    }
+
     if (!r.ok) {
         return { ok: false, error: r.error };
     }
@@ -359,6 +498,114 @@ export function isMusicFreeScript(script) {
 }
 
 /**
+ * 快速判断一个播放地址**真的能取到音频**吗。
+ *
+ * ── 🔴 为什么必须有这一步（关键）────────────────────────────────
+ * 很多插件（如裤佬SVIP）的 `getMediaSource` 是**惰性的**：
+ * 它**只拼 URL 字符串**，不做任何请求 —— 所以无论 id 对不对，
+ * 它都**返回成功**（`ok:true` + 一个 URL）。
+ *
+ * 实测：
+ *   QQ 歌 id 102326316 交给酷我插件
+ *   → 返回 `https://music.nxinxz.com/kw.php?id=102326316&…`
+ *   → **那个地址 GET 回来是 HTTP 404**
+ *
+ * 于是"用 `r.ok` 判断成功"是**看不出来的**，自搜回退也永远不会触发。
+ * 所以跨平台时**必须真的探一下**这个地址。
+ *
+ * 用 `Range: bytes=0-1` 只取 2 字节：既能确认服务端有音频，
+ * 又不会把整首歌拉下来（几 MB 变几千字节）。
+ */
+async function probePlayable(url, headers) {
+    try {
+        const r = await axios.get(url, {
+            headers: { ...(headers || {}), Range: 'bytes=0-1' },
+            timeout: 8000,
+            responseType: 'arraybuffer',
+            // 404/403 交给下面判断，不抛到外面（这是"探测"，不是"取数据"）
+            validateStatus: null,
+            maxRedirects: 5,
+        });
+        const status = r.status || 0;
+        // 206 = 服务端接受了 Range（说明是真实文件流）；200 = 也接受
+        if (status < 200 || status >= 300) return false;
+
+        const ct = String((r.headers && r.headers['content-type']) || '').toLowerCase();
+
+        // ── 🔴 实测：同一个后端对不同歌返回**不同 content-type** ────────
+        //   id=6353348 → `application/octet-stream`（**能播**，2590774 字节）
+        //   id=228908 → `audio/mpeg`            （能播，4317292 字节）
+        // 所以 `octet-stream` **必须算通过** —— 它正是"这是二进制流"的
+        // 显式声明。原来只认 audio/* 或魔数，把 octet-stream 判成了失败
+        //（结果：明明能播的歌走了自搜回退，白白多花几秒）。
+        if (/audio|octet-stream|mpeg|mp3|flac|m4a|aac|ogg/.test(ct)) return true;
+
+        // ── 明确是网页/错误页 → 失败 ──────────────────────────────
+        // 这个后端查不到歌时就是回 404，有的还会回 html 错误页
+        if (/text\/html|application\/json|text\/plain/.test(ct)) return false;
+
+        // ── content-type 缺失或没见过的：看字节特征 ────────────────
+        const buf = Buffer.from(r.data || []);
+        if (buf.length >= 2) {
+            const isMp3 = buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0;
+            const isId3 = buf.slice(0, 3).toString() === 'ID3';
+            const isFlac = buf.slice(0, 4).toString() === 'fLaC';
+            const isOgg = buf.slice(0, 4).toString() === 'OggS';
+            if (isMp3 || isId3 || isFlac || isOgg) return true;
+        }
+        // 2xx + Range 生效（有 Content-Range）= 服务端当文件在服务
+        if (r.headers && r.headers['content-range']) return true;
+        return false;
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * 从 MusicFree 插件**源码**里认它属于哪个平台。
+ *
+ * ── 🔴 为什么必须认（这是一个真实的播放失败原因）───────────────
+ * 插件拿到的是 `musicItem`，而 `musicItem.source` 决定它去**哪个平台**
+ * 查这首歌。原来这里**写死 `'kw'`（酷我）**，于是：
+ *   · 用户播一首 **QQ 的**《Sold Out》(id 102326316)
+ *   · 插件被当成酷我请求：`music.nxinxz.com/kw.php?id=102326316`
+ *   · **酷我里没有这个 id** → 后端 HTTP 404
+ *   · 表现：`播放出错：Failed to open https://…/kw.php?id=…` ✗
+ * 用户看到的是"播放失败"，但根因是**平台给错了**。
+ *
+ * ── 怎么认（实测的插件写法）──────────────────────────────────
+ * 酷我专源插件（裤佬SVIP）里长这样：
+ *     `const API_PATHS = { kw: '/kw.php', … }`
+ *     `const url = \`https://music.ninxz.com${API_PATHS.kw}?id=…\``
+ * 即**平台码出现在 API 路径里**。所以按"出现次数最多"投票，
+ * 而不是只看第一个命中（插件里往往同时出现多个平台码）。
+ *
+ * @returns 'kw' | 'wy' | 'tx' | 'kg' | 'mg'，认不出来时返回 ''
+ */
+function detectMusicFreePlatform(script) {
+    const s = String(script || '');
+    if (!s) return '';
+    // 平台码 → 该码在源码里出现的次数
+    const score = {};
+    // ① API 路径形式：'/kw.php' / '/wy.php' / 'API_PATHS.kg'
+    for (const m of s.matchAll(/[/.]\s*(kw|wy|tx|kg|mg)\s*(?:\.php|\.json)?/gi)) {
+        const k = m[1].toLowerCase();
+        score[k] = (score[k] || 0) + 1;
+    }
+    // ② 显式平台名：'kuwo' / 'netease' / 'qq' / 'kugou'
+    const named = { kuwo: 'kw', netease: 'wy', qq: 'tx', kugou: 'kg', migu: 'mg' };
+    for (const [word, code] of Object.entries(named)) {
+        const n = (s.match(new RegExp(word, 'gi')) || []).length;
+        if (n > 0) score[code] = (score[code] || 0) + n;
+    }
+    let best = '', bestN = 0;
+    for (const [code, n] of Object.entries(score)) {
+        if (n > bestN) { best = code; bestN = n; }
+    }
+    return best;
+}
+
+/**
  * 脚本法解析播放地址。
  *
  * ── 🔴 解析入口链（移植自 Beans 的 `LXScriptSourceRunner.invokeRequest`）──
@@ -436,13 +683,36 @@ async function resolveByScript(source, song, action = 'musicUrl') {
         id,
         songId: id,
         musicId: id,
+        // ── 🔴 原生标识必须进 musicInfo（这是"星海报缺少 songmid 或 hash"
+        //    的根因）────────────────────────────────────────────────
+        //
+        // LX 脚本读的是 **`musicInfo.hash` / `musicInfo.songmid`**：
+        //   星海音乐源 v2.3.14 的原话就是「缺少 songmid 或 hash」，
+        //   酷狗的歌必须给 `hash`（它的原生标识不是数字 id）。
+        //
+        // 这个对象原来**只有 `id`** —— 于是：
+        //   · QQ 歌：脚本拿不到 songmid（数字 id 没用）
+        //   · 酷狗歌：脚本拿不到 hash → 直接抛「缺少 songmid 或 hash」
+        // 而 MusicFree 那条路早就带上了，**只有 LX 这条路漏了**。
+        //
+        // 同一个值写三个名字（songmid / hash / mid），因为各家脚本读法不同；
+        // 有 `song.songmid`（Dart 已把各平台原生 id 统一进这个字段）就用它，
+        // 否则退回数字 id。
+        songmid: (song && song.songmid) ? String(song.songmid) : id,
+        hash: (song && song.songmid) ? String(song.songmid) : id,
+        mid: (song && song.songmid) ? String(song.songmid) : id,
         name,
         songName: name,
+        // 有的脚本读 `title`
+        title: name,
         singer: singers,
         artist: singers,
         artists: singers ? singers.split(/[、/,&]/).map((s) => s.trim()).filter(Boolean) : [],
         album,
         albumName: album,
+        // 时长（秒）—— 部分脚本用它做匹配/校验
+        duration: (song && song.duration) || 0,
+        interval: (song && song.duration) || 0,
         source: provider,
     };
 

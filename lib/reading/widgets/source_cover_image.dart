@@ -8,8 +8,6 @@ import 'dart:io' show File;
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
-import '../theme/jelly_theme.dart';
-
 class SourceCoverImage extends StatelessWidget {
   final String url;
   final BoxFit fit;
@@ -58,7 +56,7 @@ class SourceCoverImage extends StatelessWidget {
         },
         errorBuilder: (context, error, stackTrace) =>
             errorWidget?.call(context, url, error) ??
-            Icon(Icons.broken_image, size: 40, color: JellyTheme.textSecondary),
+            const Icon(Icons.broken_image, size: 40, color: Colors.grey),
       );
     }
     if (url.startsWith('data:')) {
@@ -72,7 +70,7 @@ class SourceCoverImage extends StatelessWidget {
         cacheWidth: memCacheWidth,
         errorBuilder: (context, error, stackTrace) =>
             errorWidget?.call(context, url, error) ??
-            Icon(Icons.broken_image, size: 40, color: JellyTheme.textSecondary),
+            const Icon(Icons.broken_image, size: 40, color: Colors.grey),
       );
     }
     return CachedNetworkImage(
@@ -85,7 +83,7 @@ class SourceCoverImage extends StatelessWidget {
       placeholder: placeholder,
       errorWidget: (context, url, error) =>
           errorWidget?.call(context, url, error) ??
-          Icon(Icons.broken_image, size: 40, color: JellyTheme.textSecondary),
+          const Icon(Icons.broken_image, size: 40, color: Colors.grey),
     );
   }
 }

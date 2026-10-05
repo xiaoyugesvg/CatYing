@@ -1,5 +1,4 @@
 import 'package:file_picker/file_picker.dart';
-import '../../widgets/common_widgets.dart';
 import 'package:flutter/material.dart';
 
 import '../models/peer_device.dart';
@@ -9,7 +8,6 @@ import '../services/peer_transfer_service.dart';
 import '../services/download_service.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
 
 /// 跨设备传书页面。send=把书发到电脑；receive=接收电脑传来的书。
 enum PeerTransferMode { send, receive }
@@ -122,7 +120,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => kbSheet(const _ShelfPickSheet()),
+      builder: (_) => const _ShelfPickSheet(),
     );
     if (picked == null || picked.isEmpty) {
       _backToReviewIfAny();
@@ -137,7 +135,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
       type: FileType.custom,
       allowedExtensions: const ['epub', 'txt', 'pdf', 'mobi', 'azw', 'azw3'],
     );
-    if (result.isEmpty) {
+    if (result == null || result.isEmpty) {
       _backToReviewIfAny();
       return;
     }
@@ -283,7 +281,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
             final isDark = Theme.of(ctx).brightness == Brightness.dark;
             return Container(
               decoration: BoxDecoration(
-                color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                color: isDark ? JellyTheme.cardDark : Colors.white,
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(24),
                 ),
@@ -301,7 +299,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                       Text(
                         '${offer.peerName} 正在传书给你',
                         style: const TextStyle(
-                          fontSize: AppTheme.fontTitle3,
+                          fontSize: 17,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -309,7 +307,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                       Text(
                         '${offer.fileCount} 个文件 · ${_fmtSize(offer.totalSize)}',
                         style: TextStyle(
-                          fontSize: AppTheme.fontSubhead,
+                          fontSize: 13,
                           color: isDark
                               ? Colors.white60
                               : JellyTheme.textSecondary,
@@ -322,7 +320,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                           child: Text(
                             '书将自动入库到「本地图书」书架；非书文件存到接收目录',
                             style: TextStyle(
-                              fontSize: AppTheme.fontFootnote,
+                              fontSize: 12,
                               color: isDark ? Colors.white38 : Colors.black45,
                             ),
                           ),
@@ -331,7 +329,8 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                       InkWell(
                         borderRadius: BorderRadius.circular(12),
                         onTap: () async {
-                          final d = await FilePicker.getDirectoryPath();
+                          final d = await FilePicker
+                              .getDirectoryPath();
                           if (d != null) setSt(() => dir = d);
                         },
                         child: Container(
@@ -356,7 +355,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                               Expanded(
                                 child: Text(
                                   dir ?? defaultDir,
-                                  style: const TextStyle(fontSize: AppTheme.fontSubhead),
+                                  style: const TextStyle(fontSize: 13),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -479,7 +478,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
           Text(
             '选择发送方式',
             style: TextStyle(
-              fontSize: AppTheme.fontHeadline,
+              fontSize: 15,
               fontWeight: FontWeight.w600,
               color: JellyTheme.primary,
             ),
@@ -488,7 +487,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
           Text(
             '请确保手机与电脑在同一局域网（Wi-Fi）',
             style: TextStyle(
-              fontSize: AppTheme.fontFootnote,
+              fontSize: 12,
               color: isDark ? Colors.white54 : JellyTheme.textSecondary,
             ),
           ),
@@ -547,7 +546,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                     Text(
                       title,
                       style: const TextStyle(
-                        fontSize: AppTheme.fontHeadline,
+                        fontSize: 16,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -555,7 +554,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                     Text(
                       subtitle,
                       style: TextStyle(
-                        fontSize: AppTheme.fontFootnote,
+                        fontSize: 12,
                         color: isDark
                             ? Colors.white54
                             : JellyTheme.textSecondary,
@@ -564,10 +563,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                   ],
                 ),
               ),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: JellyTheme.textSecondary,
-              ),
+              const Icon(Icons.chevron_right_rounded, color: Colors.grey),
             ],
           ),
         ),
@@ -591,7 +587,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
           child: Text(
             '已选 ${_picked.length} 本，确认无误后选择接收设备',
             style: TextStyle(
-              fontSize: AppTheme.fontSubhead,
+              fontSize: 13,
               color: JellyTheme.primary,
               fontWeight: FontWeight.w600,
             ),
@@ -641,7 +637,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                             ? null
                             : Text(
                                 f.subtitle!,
-                                style: const TextStyle(fontSize: AppTheme.fontFootnote),
+                                style: const TextStyle(fontSize: 12),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -703,7 +699,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
           child: Text(
             '已选 ${_picked.length} 本书 · 点击要发送到的电脑',
             style: TextStyle(
-              fontSize: AppTheme.fontSubhead,
+              fontSize: 13,
               color: JellyTheme.primary,
               fontWeight: FontWeight.w600,
             ),
@@ -726,7 +722,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                       Text(
                         '请确认电脑端已开启「从手机接收」',
                         style: TextStyle(
-                          fontSize: AppTheme.fontFootnote,
+                          fontSize: 12,
                           color: isDark
                               ? Colors.white38
                               : JellyTheme.textSecondary,
@@ -736,7 +732,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                       Text(
                         '请确保手机与电脑在同一局域网',
                         style: TextStyle(
-                          fontSize: AppTheme.fontFootnote,
+                          fontSize: 12,
                           color: isDark
                               ? Colors.white38
                               : JellyTheme.textSecondary,
@@ -779,7 +775,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                       title: Text(p.name),
                       subtitle: Text(
                         p.platform,
-                        style: const TextStyle(fontSize: AppTheme.fontFootnote),
+                        style: const TextStyle(fontSize: 12),
                       ),
                       trailing: Icon(
                         Icons.send_rounded,
@@ -809,7 +805,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                 _sendOk
                     ? Icons.check_circle_rounded
                     : Icons.error_outline_rounded,
-                size: 48,
+                size: 64,
                 color: _sendOk
                     ? Colors.green
                     : (isDark ? Colors.redAccent : Colors.red),
@@ -818,7 +814,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
               Text(
                 _sendOk ? '发送成功' : '发送失败',
                 style: const TextStyle(
-                  fontSize: AppTheme.fontTitle3,
+                  fontSize: 18,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -859,7 +855,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
               _fileCount > 1
                   ? '正在发送第 ${_fileIdx + 1}/$_fileCount 个文件'
                   : '正在发送…',
-              style: const TextStyle(fontSize: AppTheme.fontHeadline),
+              style: const TextStyle(fontSize: 15),
             ),
             const SizedBox(height: 12),
             LinearProgressIndicator(value: pct),
@@ -867,7 +863,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
             Text(
               _total > 0 ? '${_fmtSize(_sent)} / ${_fmtSize(_total)}' : '',
               style: TextStyle(
-                fontSize: AppTheme.fontFootnote,
+                fontSize: 12,
                 color: isDark ? Colors.white54 : JellyTheme.textSecondary,
               ),
             ),
@@ -915,7 +911,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                   Text(
                     receiving ? '等待电脑传书' : '接收未开启',
                     style: const TextStyle(
-                      fontSize: AppTheme.fontHeadline,
+                      fontSize: 16,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -923,7 +919,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                   Text(
                     receiving ? '保持开启即可接收，息屏也可收' : '点击下方按钮开启接收',
                     style: TextStyle(
-                      fontSize: AppTheme.fontFootnote,
+                      fontSize: 12,
                       color: isDark ? Colors.white54 : JellyTheme.textSecondary,
                     ),
                   ),
@@ -931,7 +927,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                   Text(
                     '请确保手机与电脑在同一局域网',
                     style: TextStyle(
-                      fontSize: AppTheme.fontFootnote,
+                      fontSize: 12,
                       color: isDark ? Colors.white38 : JellyTheme.textSecondary,
                     ),
                   ),
@@ -975,14 +971,14 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
                   itemCount: _events.length,
                   itemBuilder: (ctx, i) {
                     return ListTile(
-                      leading: Icon(
+                      leading: const Icon(
                         Icons.history_rounded,
                         size: 20,
-                        color: JellyTheme.textSecondary,
+                        color: Colors.grey,
                       ),
                       title: Text(
                         _events[i],
-                        style: const TextStyle(fontSize: AppTheme.fontSubhead),
+                        style: const TextStyle(fontSize: 13),
                       ),
                     );
                   },
@@ -1001,7 +997,7 @@ class _PeerTransferPageState extends State<PeerTransferPage> {
       color: isDark
           ? Colors.white.withValues(alpha: 0.2)
           : Colors.black.withValues(alpha: 0.15),
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(2),
     ),
   );
 
@@ -1131,7 +1127,7 @@ class _ShelfPickSheetState extends State<_ShelfPickSheet> {
       child: Container(
         height: height,
         decoration: BoxDecoration(
-          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+          color: isDark ? JellyTheme.cardDark : Colors.white,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: SafeArea(
@@ -1146,13 +1142,13 @@ class _ShelfPickSheetState extends State<_ShelfPickSheet> {
                   color: isDark
                       ? Colors.white.withValues(alpha: 0.2)
                       : Colors.black.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
               const SizedBox(height: 10),
               const Text(
                 '选择要发送的书',
-                style: TextStyle(fontSize: AppTheme.fontHeadline, fontWeight: FontWeight.w600),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 8),
               TabBar(
@@ -1235,7 +1231,7 @@ class _ShelfPickSheetState extends State<_ShelfPickSheet> {
                       (t.extension ?? '').toUpperCase(),
                       if (t.isLocalImport) '本地导入',
                     ].join(' · '),
-                    style: const TextStyle(fontSize: AppTheme.fontFootnote),
+                    style: const TextStyle(fontSize: 12),
                   ),
                 );
               },
@@ -1262,7 +1258,7 @@ class _ShelfPickSheetState extends State<_ShelfPickSheet> {
             child: Text(
               '共 ${all.length} 部 · $epubTotal 个 EPUB',
               style: TextStyle(
-                fontSize: AppTheme.fontFootnote,
+                fontSize: 12,
                 color: isDark ? Colors.white54 : JellyTheme.textSecondary,
               ),
             ),
@@ -1300,7 +1296,7 @@ class _ShelfPickSheetState extends State<_ShelfPickSheet> {
                       if (g.author != null && g.author!.isNotEmpty) g.author,
                       '${g.tasks.length} 章 EPUB',
                     ].join(' · '),
-                    style: const TextStyle(fontSize: AppTheme.fontFootnote),
+                    style: const TextStyle(fontSize: 12),
                   ),
                 );
               },

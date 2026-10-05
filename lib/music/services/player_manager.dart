@@ -507,6 +507,15 @@ class MusicPlayerManager extends ChangeNotifier {
           //
           // ⚠️ 只有一条时**照样弹** —— 让用户知道"这首歌是靠哪个源播的"，
           // 而不是莫名其妙开始播放（源出问题时这个信息很关键）。
+          //
+          // 🔴 **弹窗内部已经负责播放了**（点任意一行就立刻用那个源播，
+          //    而且弹窗**不关**，可以接着换源试 —— 见 source_picker_sheet）。
+          //    所以这里**拿到结果后不能再播一次**，否则会：
+          //      · 白重开一次音频（听感上会闪一下/重头开始）
+          //      · 用户"换源试听"时最后一首被覆盖成第一次选的
+          //
+          //    这里只负责**记录最终选定的源**（用于 qualityText 展示与日志），
+          //    然后正常收尾（歌词已经在 `_startPlayback` 里取过了）。
           final picked = await SourcePickerSheet.show(
             _pickerCtx,
             song: song,
@@ -516,25 +525,28 @@ class MusicPlayerManager extends ChangeNotifier {
           if (epoch != _loadEpoch) return;
 
           if (picked != null) {
-            url = picked.url;
             fromSource = picked.source?.name ?? '';
             quality = picked.source?.quality ?? '';
-            // 🔴 必须把源自己配的 headers 带上：很多源不带 UA/Referer/Cookie
-            // 就只给空流（表现是"地址拿到了但播不了"）。
-            // 优先用**解析时现返回的** headers（MusicFree 插件会按歌给签名）。
-            sourceHeaders = picked.headers.isNotEmpty
-                ? picked.headers
-                : (picked.source?.headers ?? const {});
-            AppLog.instance.log('[Music] 用户选择音源：${picked.source?.name}'
+            AppLog.instance.log('[Music] 用户选定音源：${picked.source?.name}'
                 '（${results.length} 个可用）');
-          } else {
-            // 用户主动取消 —— 这是**正常操作**，不该报错
-            AppLog.instance.log('[Music] 用户取消了音源选择（${song.name}，'
-                '${results.length} 个可用）');
+            // 展示用文案跟上（音频已由弹窗播好）
+            qualityText.value = fromSource.isNotEmpty
+                ? (quality.isEmpty ? fromSource : '$quality · $fromSource')
+                : quality;
             switching.value = false;
             notifyListeners();
             return;
           }
+
+          // 用户**一个源都没选**就关掉了弹窗 —— 这是正常操作，不该报错。
+          // ⚠️ 但也可能是"**已经换源播过、最后点了取消**"（`_picked` 为 null
+          //    只表示"最后一次点击没选中"，不代表没播过）——
+          //    所以这里**不能停掉音频**，只安静收场。
+          AppLog.instance.log('[Music] 用户关闭了音源选择（${song.name}，'
+              '${results.length} 个可用）');
+          switching.value = false;
+          notifyListeners();
+          return;
         } else {
           // 所有源都失败：把「内置为什么失败」+「每个源为什么失败」说清楚
           final detail = UnblockService.instance.describeFailure();
@@ -563,6 +575,78 @@ class MusicPlayerManager extends ChangeNotifier {
       }
     }
 
+    // 上面两种失败分支都 `return` 了 → 到这里一定拿得到 url
+    await _startPlayback(
+      song: song,
+      url: url,
+      headers: r.headers.isNotEmpty ? r.headers : sourceHeaders,
+      fromSource: fromSource,
+      quality: quality,
+      autoplay: autoplay,
+      epoch: epoch,
+    );
+  }
+
+  /// 用**选源弹窗里已经解析好的那个源**播放当前歌。
+  ///
+  /// ── 为什么需要这个公开方法 ────────────────────────────────────
+  /// 选源弹窗现在是"点了就播、弹窗**不关**、可以接着换源试"。
+  /// 每次换源都必须**立刻出声**，而且**不能再解析一遍**
+  ///（地址已经在手上，重跑 `resolveAll` 要几秒）。
+  ///
+  /// 所以弹窗直接调这里 —— 它只做"把音频换成这个地址"。
+  /// 注意：**不校验代次**（换源是用户当前意图，不是过期的旧请求）。
+  Future<void> playResolved(Song song, SourceResolveResult r) async {
+    await init();
+    // 让 UI 的"当前歌"立刻跟上（万一用户是从别处点进来的）
+    if (_queue.isEmpty ||
+        _index >= _queue.length ||
+        _queue[_index].identityKey != song.identityKey) {
+      _queue
+        ..clear()
+        ..add(song);
+      _index = 0;
+      _currentSong = song;
+      notifyListeners();
+    }
+    await _startPlayback(
+      song: song,
+      url: r.url,
+      // 🔴 必须把源自己配的 headers 带上：很多源不带 UA/Referer/Cookie
+      // 就只给空流（表现是"地址拿到了但播不了"）。
+      headers:
+          r.headers.isNotEmpty ? r.headers : (r.source?.headers ?? const {}),
+      fromSource: r.source?.name ?? '',
+      quality: r.source?.quality ?? '',
+      autoplay: true,
+      epoch: null,
+    );
+  }
+
+  /// 用**已经解析好的地址**开播（开播放器 → 取歌词 → 记最近播放）。
+  ///
+  /// ── 为什么抽出来单独一个方法（用户 2026 要求）──────────────────
+  /// 选音源弹窗改成了"**点了就播、弹窗不关**、可以接着换源试"。
+  /// 换源时若走 `_load()`，会把**整条解析链再跑一遍**
+  ///（内置接口 + `resolveAll` 试全部源，要几秒），而我们**已经有地址了** ——
+  /// 纯粹浪费，而且会让"换着试"很卡。
+  ///
+  /// 所以这里只做"把音频换成这个地址" + 配套收尾，**不做任何解析**。
+  ///
+  /// [epoch] 传 null = "不是某次 `_load` 的一部分"（弹窗换源就是这种），
+  /// 此时不做代次校验 —— 换源本身就是用户当前的意图。
+  Future<void> _startPlayback({
+    required Song song,
+    required String url,
+    required Map<String, String> headers,
+    required String fromSource,
+    required String quality,
+    required bool autoplay,
+    required int? epoch,
+  }) async {
+    // 代次校验的封装：`epoch == null`（换源路径）时永远通过
+    bool stale() => epoch != null && epoch != _loadEpoch;
+
     qualityText.value = fromSource.isNotEmpty
         ? (quality.isEmpty ? fromSource : '$quality · $fromSource')
         : quality;
@@ -571,26 +655,16 @@ class MusicPlayerManager extends ChangeNotifier {
     // 2) 播放
     try {
       // 音乐要出声了 → 让影视/直播先闭嘴（互斥的核心：
-    // 看视频时音乐还在响 / 听音乐时点视频两边一起响，都是缺这一步）
-    if (autoplay) await AudioFocus.request('music');
+      // 看视频时音乐还在响 / 听音乐时点视频两边一起响，都是缺这一步）
+      if (autoplay) await AudioFocus.request('music');
       // ⚠️ **必须把 headers 透传给播放器**：喜马拉雅的直链没有 User-Agent
       // 会被服务端拒（表现是"地址拿到了但播不了"）。
-      // 这里用 `r.headers`：第三方音源路径下 `r` 是内置接口的失败结果
-      //（headers 为空），不会误传别人的头。
-      await _player.open(
-        // headers：内置接口带的（`r.headers`）优先；而第三方音源路径下 `r`
-        // 是**失败的内置结果**（headers 为空）→ 这时用那个源自己配的 headers ✓
-        Media(
-          url,
-          httpHeaders: r.headers.isNotEmpty ? r.headers : sourceHeaders,
-        ),
-        play: autoplay,
-      );
+      await _player.open(Media(url, httpHeaders: headers), play: autoplay);
     } catch (e, st) {
       // #15：**不要把异常 toString 直接给用户看** ——
       // 它可能包含堆栈、完整 URL、内部实现细节（用户看不懂，也不该看到）。
       // 技术细节只写日志（方便排查），界面给可读的提示。
-      if (epoch != _loadEpoch) return;
+      if (stale()) return;
       AppLog.instance.log('[Music] 播放失败 url=$url err=$e\n$st');
       lastError.value = _friendlyPlayError(e);
       await _silenceForFailure(song);
@@ -599,7 +673,7 @@ class MusicPlayerManager extends ChangeNotifier {
 
     // 到这里音频已经换成这首歌了；若期间用户又点了别的歌，本次的收尾
     //（歌词 / 最近播放 / 队列落盘）就不该再执行
-    if (epoch != _loadEpoch) return;
+    if (stale()) return;
 
     // 3) 取歌词（失败不影响播放）。歌词也要按**这首歌自己的平台**取。
     unawaited(_loadLyric(song.id, song.source));

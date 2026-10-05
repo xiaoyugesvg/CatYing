@@ -54,6 +54,12 @@ dependencies:
   bonsoir: ^7.1.5
   flutter_foreground_task: ^11.0.3
   url_launcher: ^6.3.2
+  http: ^1.2.0
+  image: ^4.2.0
+  share_plus: ^13.0.0
+  kindle_unpack: ^0.1.0
+  flutter_js: ^0.8.1
+  fast_gbk: ^1.0.0
   encrypt: ^5.0.3
   flutter_cache_manager: ^3.4.5
   flutter_staggered_grid_view: ^0.7.0
@@ -88,6 +94,9 @@ flutter:
     - assets/images/
     # 出厂内置漫画源（15 个官方源明文，装上即有源；文档目录 sources.json 云端覆盖层优先）
     - assets/config/
+    # 音乐模块：出厂内置第三方音源（洛雪源 + MusicFree 插件，含索引）
+    - assets/music/lx/
+    - assets/music/musicfree/
 
 dependency_overrides:
   media_kit_libs_windows_video:

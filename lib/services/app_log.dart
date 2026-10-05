@@ -207,6 +207,26 @@ class AppLog {
     ));
   }
 
+  /// Nexhub 书源引擎迁移：debug 级日志（语义同 log，级别标 debug）。
+  void d(String message) {
+    entry(LogEntry(
+      category: 'SHUYUAN',
+      action: 'msg',
+      level: LogLevel.debug,
+      message: message,
+    ));
+  }
+
+  /// Nexhub 书源引擎迁移：warn 级日志（语义同 log，级别标 warn）。
+  void w(String message) {
+    entry(LogEntry(
+      category: 'SHUYUAN',
+      action: 'msg',
+      level: LogLevel.warn,
+      message: message,
+    ));
+  }
+
   // ============================================================
   // 便捷方法 — 按 category 分
   // ============================================================

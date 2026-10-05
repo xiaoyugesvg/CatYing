@@ -24,52 +24,7 @@ class BookContentCacheService {
     final dir = await getApplicationSupportDirectory();
     final cacheDir = Directory('${dir.path}/book_content_cache');
     if (!await cacheDir.exists()) await cacheDir.create(recursive: true);
-    // 🔴 原来直接拼 `'${cacheDir.path}/$bookId.json'` ✗ —— `bookId` **未净化** ✓：
-    //   本项目图书 id 的约定是 **`book-<url>`** ✓（见 book_source_detail_page ✓），
-    //   而 URL 里**必然含 `/`** ✓ → 路径会变成
-    //   `…/book_content_cache/book-https://host/x.json` ✗；又因为上面
-    //   `create(recursive: true)` ✓，这些子目录**真会被建出来** ✓ → 于是
-    //   恶意/被篡改的书源只要给一个含 `../../` 的 bookUrl ✓✓，
-    //   就能把 JSON **写到缓存目录之外** ✗✗（路径穿越 ✓）。
-    // ✓ 净化：只保留 `[A-Za-z0-9_-]` ✓，其余一律替换为 `_` ✓，并限长 120 ✓
-    // ⚠️ 副作用（已确认无害 ✓）：净化后文件名与旧缓存不同 ✓ → 老缓存读不到 ✓，
-    //   等于**一次缓存失效** ✓，会重新抓一次 ✓，不影响正确性 ✓
-    final safe = bookId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
-    final name = safe.length <= 120 ? safe : safe.substring(0, 120);
-    return File('${cacheDir.path}/$name.json');
-  }
-
-  /// 缓存目录（供「缓存管理」页算大小 / 清空用）
-  Future<Directory> cacheDir() async {
-    final dir = await getApplicationSupportDirectory();
-    return Directory('${dir.path}/book_content_cache');
-  }
-
-  /// 当前占用字节数
-  Future<int> sizeBytes() async {
-    try {
-      final d = await cacheDir();
-      if (!await d.exists()) return 0;
-      var total = 0;
-      await for (final e in d.list(recursive: true, followLinks: false)) {
-        if (e is File) {
-          total += await e.length();
-        }
-      }
-      return total;
-    } catch (_) {
-      return 0;
-    }
-  }
-
-  /// 清空全部正文缓存
-  Future<void> clear() async {
-    try {
-      final d = await cacheDir();
-      if (await d.exists()) await d.delete(recursive: true);
-    } catch (_) {
-      /* 删不掉不抛，避免影响"清理"这一个动作 */
-    }
+    return File('${cacheDir.path}/$bookId.json');
   }
 
   /// 文件指纹：size + 修改时间(ms)。用于判断缓存是否仍有效，避免读文件算 hash。
@@ -114,6 +69,32 @@ class BookContentCacheService {
     } catch (_) {
       // 写缓存失败不影响阅读
     }
+  }
+
+  /// 整个缓存目录的字节数（外壳「清除缓存」页统计用）。
+  Future<int> sizeBytes() async {
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final cacheDir = Directory('${dir.path}/book_content_cache');
+      if (!await cacheDir.exists()) return 0;
+      var total = 0;
+      await for (final f
+          in cacheDir.list(recursive: true, followLinks: false)) {
+        if (f is File) total += await f.length();
+      }
+      return total;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// 清空整个缓存目录（外壳「清除缓存」页用）。
+  Future<void> clear() async {
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final cacheDir = Directory('${dir.path}/book_content_cache');
+      if (await cacheDir.exists()) await cacheDir.delete(recursive: true);
+    } catch (_) {}
   }
 }
 

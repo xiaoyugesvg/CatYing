@@ -22,7 +22,6 @@ import 'package:html/parser.dart';
 import 'manga_source.dart';
 import 'manhuaren_config.dart';
 import 'models.dart';
-import 'global_proxy.dart';
 
 void _log(String message) {
   if (kDebugMode) {
@@ -34,25 +33,13 @@ class ManhuarenSource extends MangaSource {
   final ManhuarenConfig config;
   ManhuarenSource(this.config);
 
-  /// 构造请求用的 Dio，并**挂上「网络代理」**（本轮接上 ✓）。
-  /// 手法与 `book_download_service._createDio()` ✓、`zlibrary_service._createDio()` ✓ **一致** ✓
-  /// （先构造 ✓ 再 `applyGlobalProxy` ✓），不发明新机制 ✗。
-  /// ⚠️ 本类**没有自定义适配器/UA** ✓（只有这四个基参 ✓）→ 直接挂**安全** ✓✓
-  ///   （若将来加 UA ✓ 必须传 `createHttpClient:` ✓ 否则会被整替换掉 ✗ —— 这个坑今天已规避两次 ✓）。
-  /// · 代理**关闭** ✓ → 直接返回 false ✓ **一字不改** ✓（与从前完全一致 ✓✓）
-  static Dio _createDio() {
-    final dio = Dio(
-      BaseOptions(
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 30),
-        followRedirects: true,
-      ),
-    );
-    applyGlobalProxy(dio);
-    return dio;
-  }
-
-  final Dio _dio = _createDio();
+  final Dio _dio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 30),
+      followRedirects: true,
+    ),
+  );
 
   @override
   String get id => config.id;

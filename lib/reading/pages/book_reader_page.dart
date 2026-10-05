@@ -1,5 +1,4 @@
 import 'dart:async';
-import '../../widgets/common_widgets.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -8,9 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
-import 'package:screen_brightness/screen_brightness.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/book.dart';
 import '../models/book_content.dart';
@@ -19,48 +16,23 @@ import '../services/book_download_service.dart';
 import '../services/book_font_service.dart';
 import '../services/book_paginator.dart';
 import '../services/book_page_cache_service.dart';
-import '../services/reader_notes_service.dart';
 import '../services/book_parser.dart';
-import '../utils/file_browser.dart';
 import '../services/gbk_txt_parser.dart';
 import '../services/book_reading_progress_service.dart';
 import '../services/reader_override_service.dart';
 import '../services/bookshelf_service.dart';
 import '../services/platform_service.dart';
 import '../services/settings_service.dart';
-import '../services/tts_service.dart';
-import '../services/reading_time_service.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/book_page_cover.dart';
 import '../widgets/book_page_curl.dart';
 import '../widgets/pomodoro_button.dart';
 import 'book_prefetch_page.dart';
-import 'notes_and_journey_page.dart';
-import '../../common/theme.dart';
-import '../../common/system_ui.dart';
 
-// ── 顶栏「日夜切换」的本地覆盖（0=跟随全局，1=强制浅色，2=强制夜间）──
-// ✗ 原来放在静态类 `_ReaderDarkOverride.value` 里：static 属于整个进程而非
-//   某一本书，于是「在 A 书点夜间 → 打开 B 书也是夜间」**跨书污染** ✗；
-//   而且它初始 0、点过之后就再也回不到 0 → 「跟随全局暗色」被永久绕过 ✗。
-// ✓ 现在改成 `_BookReaderPageState._darkOverride` **实例字段**：随页面
-//   createState / dispose 走完生命周期，换一本书自然重新从 0（跟随全局）开始 ✓。
-//   对应的 `_readerIsDark` 也从文件级 getter 改为 State 的实例 getter，
-//   0 档真的去读全局唯一明暗真源 `AppBrightness.isLight`，不再硬写 1/0 ✓。
-
-/// 顶栏全书搜索的命中条目
-class _SearchHit {
-  final int chapterIndex;
-  final String chapterTitle;
-  final String preview;
-  final int blockIndex;
-  const _SearchHit({
-    required this.chapterIndex,
-    required this.chapterTitle,
-    required this.preview,
-    required this.blockIndex,
-  });
-}
+/// 图书阅读器固定浅色阅读主题，不跟随全局暗色模式：
+/// 仿真翻页为固定纸张图背景，全局暗色下文字翻白配浅纸看不清。
+/// 改为 true 可启用夜间反色（未来若加阅读器独立夜间模式开关，改此处即可）。
+const bool _readerIsDark = false;
 
 /// 图书阅读页：EPUB / MOBI / TXT / PDF app 内排版阅读；
 /// 其余格式由 [open] 路由到外部应用。
@@ -165,31 +137,6 @@ class BookPrefetchedData {
 }
 
 class _BookReaderPageState extends State<BookReaderPage> {
-  /// 顶栏「日夜切换」的本地覆盖：0=跟随全局，1=强制浅色，2=强制夜间。
-  /// 必须是**实例**字段：原来的 static 会跨书残留（见文件顶部说明 ✗）。
-  int _darkOverride = 0;
-
-  /// 图书阅读器明暗：**跟随全局外观**，顶栏日夜按钮可临时覆盖。
-  ///
-  /// ── 原来写死 `false`（永远浅色），后果是"暗色模式对图书阅读完全无效" ──
-  ///
-  /// 当初写死浅色的理由是"仿真翻页为固定纸张图背景，全局暗色下文字翻白配浅纸
-  /// 看不清"。但实际 `widgets/book_page_curl.dart` 的**翻页背纸本来就按
-  /// `Theme.of(context).brightness` 分了深浅两套**
-  ///（`:367-368` 的 `0xFF1E1E22` / `0xFFFBF6EC`）——
-  /// 也就是说写死浅色反而制造了"深色背纸 + 浅色正文"的错配。
-  /// 跟随全局之后，正文底色与翻页背纸同向，才是自洽的。
-  ///
-  /// ✗ 原来它还是文件级 getter、读 `_ReaderDarkOverride` 的 static 值：
-  ///   那个 static 一旦被点过就再也回不到 0，「跟随全局」形同虚设 ✗。
-  /// ✓ 现在是 State 的**实例** getter：0 档真的落到全局唯一明暗真源
-  ///   `!AppBrightness.isLight.value` 上，不硬写 1/0 ✓。
-  bool get _readerIsDark {
-    if (_darkOverride == 1) return false;
-    if (_darkOverride == 2) return true;
-    return !AppBrightness.isLight.value;
-  }
-
   BookContent? _content;
   bool _loading = true;
   String? _error;
@@ -252,11 +199,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
   List<BookBlock> get _blocks => _content?.flatBlocks ?? [];
   List<int> get _chapterStarts => _content?.chapterStarts ?? [];
 
-  /// ✅ **本地图书的划线缓存**（本会话第 4 轮 ✓）—— key = **段号** ✓（`PageEntry.blockIndex` ✓
-  /// 已保证可信 ✓ 含长段落分块 ✓），value = 该段的笔记 ✓（颜色/批注都在里面 ✓）。
-  /// 用途 ✓：① 渲染时给该段加底色（**回显** ✓）② 划完线后立即刷新它 ✓（否则"刚划的不显示"✗）。
-  Map<int, ReaderNote> _notesByBlock = {};
-
   /// 懒分页下的显示总页数：已排完（_ongoingPaginator 已置空）用 _pages.length，
   /// 否则按 已排页数 × 总块数 / 已排块数 估算，随补排推进收敛到真实值。
   int get _displayTotalPages {
@@ -275,13 +217,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
     if (pf != null) {
       // 过渡页已解析 + 分页 + 缓存命中参数，直接复用，跳过 _load / _paginate
       _content = pf.content;
-      // ✅ **填充划线缓存（预取路径）**（本轮 ✓）—— `forBook` **同步** ✓ 无需 await ✓
-      //   ⚠️ 这条路径与"正常加载"那条**都要填** ✗（只填一处 = "有时显示有时不显示"✗ 最难受的 bug）
-      _notesByBlock = {
-        for (final n in ReaderNotesService.instance
-            .forBook('local', widget.task.title))
-          n.paragraphIndex: n,
-      };
       _pages = pf.pages;
       _imageRatios.addAll(pf.ratios);
       _imageNaturalWidths.addAll(pf.naturalWidths);
@@ -297,15 +232,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
       // 后台分页覆盖后续读块后自动跳转（仅一次，且仅当用户未手动翻页）。
       final flat = _content!.flatBlocks;
       final p = BookReadingProgressService().getProgress(widget.task.bookId);
-      // 🔴 `clamp(0, -1)` 会**真抛 `ArgumentError`** ✗ —— Dart 的 `num.clamp` 在
-      // `lowerLimit > upperLimit` 时**抛异常**（release 同样抛 ✓，不是 assert ✓，
-      // 已在 SDK 的 `_internal/vm/lib/integers.dart` 核实过 ✓）。
-      // 当 `flat.length == 0`（空书 / 正文为空 / 解析出 0 段落 ✓）时
-      // `upperLimit = -1` ✗ → **阅读器一打开就崩** ✓。
-      // 空的时候直接取 0 ✓（此时 `_pages` 也必为空 ✓，下面不会越界 ✓）
-      final startBlock = (p == null || flat.isEmpty)
-          ? 0
-          : p.blockIndex.clamp(0, flat.length - 1);
+      final startBlock = p == null ? 0 : p.blockIndex.clamp(0, flat.length - 1);
       final target = BookPaginator.pageIndexOf(_pages, startBlock);
       if (_pages.isNotEmpty && startBlock > _pages.last.firstBlockIndex) {
         _pendingResumeBlock = startBlock;
@@ -346,10 +273,9 @@ class _BookReaderPageState extends State<BookReaderPage> {
     // 避免系统栏切换与 MaterialPageRoute 转场叠加造成进入卡顿。
     Future.delayed(const Duration(milliseconds: 350), () {
       if (!mounted) return;
-      SystemUiController.enter(
-        'bookReader',
-        mode: SystemUiMode.manual,
-        overlays: const [SystemUiOverlay.bottom],
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.manual,
+        overlays: [SystemUiOverlay.bottom],
       );
     });
     PlatformService.onVolumeKey = _onVolumeKey;
@@ -358,21 +284,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
     );
   }
 
-  /// ✅ **阅读时长：本次会话开始的时刻** ✓（`ReadingTimeService` 接线 ✓ —— 为「阅读计划 /
-  ///   阅读热力图」提供真实数据 ✓；此前这两处**完全没有时长数据** ✗）。
-  ///   图书阅读器**没有**漫画那边的防抖保存汇聚点 ✗，所以这里就取"**进入 → 销毁**"整段 ✓，
-  ///   在 [dispose] 里一次性交上去 ✓（`addSession` 内部有 1 秒下限 ✓ 与单次 2 小时上限 ✓，
-  ///   后者正好兜住"忘记退出阅读器"把一天刷爆 ✗✓）。
-  ///   ℹ️ 放在 `dispose()` 正上方是为了**同一个文件里相邻声明与使用** ✓，便于审阅 ✓。
-  DateTime _sessionStamp = DateTime.now();
-
   @override
   void dispose() {
-    // 退出阅读器必须停掉朗读，否则会在别的页面继续念
-    _tts.stop();
-    _tts.onFinished = null;
-    // ✅ 记录本次阅读时长 ✓（按天累计 → 供「阅读计划 / 阅读热力图」✓）
-    ReadingTimeService.instance.addSession(DateTime.now().difference(_sessionStamp));
     PlatformService.onVolumeKey = null;
     PlatformService.setVolumeKeyNav(false);
     // 后台续分页未完：捕获 partial 状态 fire-and-forget 写缓存，下次断点续分页，
@@ -414,8 +327,8 @@ class _BookReaderPageState extends State<BookReaderPage> {
     _pageController.dispose();
     _imagePageController?.dispose();
     _currentPageNotifier.dispose();
-    // 离开阅读器：恢复**进入前**的系统栏状态（原来写死 edge-to-edge）
-    SystemUiController.exit('bookReader');
+    // 离开阅读器：恢复状态栏（App 默认 edge-to-edge）
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     // 进度在翻页时已按节流策略通知书架重排（后台静默），退出时不额外 notify，
     // 避免书架变可见时重建造成的"列表刷新"观感。
     super.dispose();
@@ -538,12 +451,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
       if (!mounted) return;
       setState(() {
         _content = content;
-        // ✅ **填充划线缓存（正常加载路径）**（本轮 ✓）—— 与预取路径**同一段逻辑** ✓
-        _notesByBlock = {
-          for (final n in ReaderNotesService.instance
-              .forBook('local', widget.task.title))
-            n.paragraphIndex: n,
-        };
         _loading = false;
       });
       _contentFingerprint = BookPageCacheService.contentFingerprint(content);
@@ -787,16 +694,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
       _paginateTotal = totalChapters;
     });
     final pages = <BookPage>[];
-    // 🔴 `clamp(0, -1)` 会**真抛 `ArgumentError`** ✗ —— `num.clamp` 在
-    // `lowerLimit > upperLimit` 时抛异常（release 同样抛 ✓，不是 assert ✓，
-    // 已在 SDK 的 `_internal/vm/lib/integers.dart` 核实 ✓）。
-    // 当 `allBlocks` 为空（空书 / 正文解析出 0 段落 ✓）时上界 = -1 ✗ →
-    // **一进入分页就崩** ✓（与今天修的另一处 `flat.length` 同源同因 ✓）。
-    // 空时取 0 ✓；此时 `paginator` 也没有可分的内容 ✓，
-    // 下面 while 由 `!paginator.finished` 兜住 ✓
-    final preserve = allBlocks.isEmpty
-        ? 0
-        : preserveBlockIndex.clamp(0, allBlocks.length - 1);
+    final preserve = preserveBlockIndex.clamp(0, allBlocks.length - 1);
     var chapterDone = 0;
     // 首批：增量分到覆盖当前阅读位置（preserve），每批让出 UI
     while (!paginator.finished && paginator.currentBlockIndex <= preserve) {
@@ -985,7 +883,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.error_outline, size: 40, color: JellyTheme.error),
+              Icon(Icons.error_outline, size: 48, color: JellyTheme.error),
               const SizedBox(height: 16),
               Text(
                 '打开失败：$_error',
@@ -1502,8 +1400,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           for (var i = 0; i < entries.length; i++) ...[
-            _noteWrap(entries[i].blockIndex,
-                _buildEntry(entries[i], textColor, contentWidth)),
+            _buildEntry(entries[i], textColor, contentWidth),
             if (i < entries.length - 1) SizedBox(height: _typo.blockSpacing),
           ],
         ],
@@ -1885,25 +1782,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
 
   // ---------------- 块渲染（两模式共用） ----------------
 
-  /// ✅ **划线回显：命中该段就加一层底色**（本会话第 4 轮 ✓）。
-  ///
-  /// 为什么包在**调用点** ✗ 而不是改 `_buildEntry` 内部：
-  ///   那里是一个 ~50 行的 `SelectableText(...)` 块 ✓，**整体复刻风险高** ✗；
-  ///   包在外层则**零侵入** ✓ 且对**所有块类型**都成立 ✓（段落 ✓ 标题 ✓ 图片 ✓）。
-  /// ℹ️ 颜色用**笔记自己的** `color` ✓（最忠实 ✓ 与划线时选的颜色一致 ✓）；半透明 ✓ 不挡字 ✓。
-  Widget _noteWrap(int blockIndex, Widget child) {
-    final n = _notesByBlock[blockIndex];
-    if (n == null) return child;
-    return Container(
-      decoration: BoxDecoration(
-        color: Color(n.color).withValues(alpha: 0.22),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: child,
-    );
-  }
-
   Widget _buildEntry(PageEntry entry, Color textColor, double contentWidth) {
     final block = entry.block;
     if (block is ParagraphBlock) {
@@ -1913,53 +1791,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
         style: _typo.paragraphStyle().copyWith(color: textColor),
         strutStyle: _typo.paragraphStrut,
         textHeightBehavior: _typo.textHeightBehavior,
-        // ✅ **本地图书：选中文字即可「划线」**（本会话第 3 轮 ✓ —— 此前顶栏「笔记」只能看 ✓）
-        //   为什么用 `contextMenuBuilder` 而不是长按 ✗：长按已被**选字**占用 ✓（内层优先 ✓），
-        //   硬套要么不触发 ✗、要么把选字弄坏 ✗✗ —— 走**系统选中菜单**才是正路 ✓。
-        //   · 段号 = `entry.blockIndex` ✓✓（第 2 轮已保证**可信**：长段落分块也带同一段号 ✓）
-        //   · 章号/章名 = 由 `chapterStarts` **反查** ✓（`BookContent` 现成提供 ✓）
-        //   · 存储复用 `ReaderNotesService` ✓ ⇒ 与**书源阅读器**同一份笔记 ✓（笔记页能看到 ✓）
-        //   ⚠️ 如实边界 ✓：· 标题块走 `Text` ✗ 不可选 ⇒ 标题划不了 ✓
-        //              · 模型只有段号+文字 ✗（无段内起止偏移 ✓）⇒ 回显是"本段含该文字"级 ✓
-        contextMenuBuilder: (ctx, editable) {
-          final sel = editable.textEditingValue.selection;
-          final picked = sel.isValid && !sel.isCollapsed
-              ? sel.textInside(editable.textEditingValue.text)
-              : '';
-          return AdaptiveTextSelectionToolbar.buttonItems(
-            anchors: editable.contextMenuAnchors,
-            buttonItems: [
-              ...editable.contextMenuButtonItems,
-              if (picked.trim().isNotEmpty)
-                ContextMenuButtonItem(
-                  label: '划线',
-                  onPressed: () {
-                    final cs = _content?.chapterStarts;
-                    var ci = 0;
-                    if (cs != null && entry.blockIndex >= 0) {
-                      for (var i = 0; i < cs.length; i++) {
-                        if (cs[i] <= entry.blockIndex) ci = i;
-                      }
-                    }
-                    final cname =
-                        (_content != null && ci < _content!.chapters.length)
-                            ? _content!.chapters[ci].title
-                            : '';
-                    ReaderNotesService.instance.toggleHighlight(
-                      sourceId: 'local',
-                      sourceName: '本地图书',
-                      bookName: widget.task.title,
-                      chapterIndex: ci,
-                      chapterName: cname,
-                      paragraphIndex: entry.blockIndex,
-                      text: picked.trim(),
-                    );
-                    editable.hideToolbar();
-                  },
-                ),
-            ],
-          );
-        },
       );
     }
     if (block is HeadingBlock) {
@@ -1984,8 +1815,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
             child: _PdfPageImage(
               imageKey: block.imageKey,
               contentWidth: contentWidth,
-              // 日夜覆盖现在是页面实例状态，子 widget 读不到，必须显式传下去 ✓
-              isDark: _readerIsDark,
               loader: loader,
               onLoaded: (k, b) => _content?.images[k] = b,
             ),
@@ -2060,7 +1889,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
     final color = (isDark ? Colors.white : Colors.black).withValues(
       alpha: 0.45,
     );
-    final style = TextStyle(fontSize: AppTheme.fontCaption, color: color);
+    final style = TextStyle(fontSize: 11, color: color);
     final hPad = _typo.padding; // 左右边距
     final vPad = _typo.verticalPadding; // 上下边距
     // HUD 上下跟随垂直边距，并比正文留 20px 间距，避免压到首行/末行。
@@ -2167,7 +1996,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: AppTheme.fontBody,
+                              fontSize: 14,
                               fontWeight: FontWeight.w600,
                               color: iconColor,
                             ),
@@ -2177,69 +2006,10 @@ class _BookReaderPageState extends State<BookReaderPage> {
                               _currentChapterTitle(),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: AppTheme.fontCaption, color: iconColor),
+                              style: TextStyle(fontSize: 11, color: iconColor),
                             ),
                         ],
                       ),
-                    ),
-                    // 功能图标：搜索 / 刷新 / 书签 / 朗读 / 亮度 / 日夜 / 编辑
-                    IconButton(
-                      tooltip: '搜索本书',
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(Icons.search_rounded, size: 20, color: iconColor),
-                      onPressed: _showBookSearch,
-                    ),
-                    IconButton(
-                      tooltip: '刷新本章',
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(Icons.refresh_rounded, size: 20, color: iconColor),
-                      onPressed: _refreshCurrentChapter,
-                    ),
-                    IconButton(
-                      tooltip: '书签',
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(Icons.bookmark_border_rounded, size: 20, color: iconColor),
-                      // 🔴 原来接的是 `_showBookmarks`（**只开面板、不添加**）✗，
-                      // 而真正"加书签"的 `_toggleBookmark`（:2674 附近）**全仓库无任何
-                      // 调用点** ✓ → 于是：点书签图标 → 空态面板 → 面板文案让你
-                      // "点击顶部书签图标收藏当前页" → 又回到空态面板 ✗✗
-                      // **用户永远无法添加书签** ✓（analyze 也一直报
-                      // "The declaration '_toggleBookmark' isn't referenced" ✓）。
-                      // `_toggleBookmark` 内部已自带"有书签则开面板"的分支 ✓，
-                      // 所以直接接它即可，与空态文案的行为一致 ✓
-                      onPressed: _toggleBookmark,
-                    ),
-                    IconButton(
-                      tooltip: '朗读',
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(Icons.record_voice_over_outlined, size: 20, color: iconColor),
-                      onPressed: _toggleTts,
-                    ),
-                    IconButton(
-                      tooltip: '亮度',
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(Icons.brightness_6_rounded, size: 20, color: iconColor),
-                      onPressed: _showBrightnessSheet,
-                    ),
-                    IconButton(
-                      // ✗ 原来读 static `_ReaderDarkOverride.value`（跨书残留）；
-                      // ✓ 现在读本阅读页实例的 `_darkOverride` ✓
-                      tooltip: _darkOverride == 2 ? '切换白天' : '切换夜间',
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(
-                        _darkOverride == 2
-                            ? Icons.light_mode_outlined
-                            : Icons.dark_mode_outlined,
-                        size: 20,
-                        color: iconColor,
-                      ),
-                      onPressed: _toggleDayNight,
-                    ),
-                    IconButton(
-                      tooltip: '编辑（划线与笔记）',
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(Icons.edit_outlined, size: 20, color: iconColor),
-                      onPressed: _showEditPlaceholder,
                     ),
                   ],
                 ),
@@ -2272,7 +2042,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         ),
                         Text(
                           _indicatorText(),
-                          style: TextStyle(fontSize: AppTheme.fontFootnote, color: iconColor),
+                          style: TextStyle(fontSize: 12, color: iconColor),
                         ),
                         TextButton(
                           onPressed: _chapterStarts.isNotEmpty
@@ -2308,22 +2078,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                 child: Icon(
                                   Icons.text_fields_rounded,
                                   color: iconColor,
-                                ),
-                              ),
-                            // 听书：cmbok 原版没有，按需求补的。
-                            // 走原生 tts_engine（系统 AVSpeechSynthesizer），零插件。
-                            if (!_isImageMode)
-                              TextButton(
-                                onPressed: _toggleTts,
-                                child: Icon(
-                                  _tts.isSpeaking.value
-                                      ? Icons.pause_circle_outline_rounded
-                                      : (_tts.isPaused.value
-                                          ? Icons.play_circle_outline_rounded
-                                          : Icons.headphones_rounded),
-                                  color: _tts.isSpeaking.value
-                                      ? JellyTheme.accent
-                                      : iconColor,
                                 ),
                               ),
                           ],
@@ -2394,77 +2148,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
     return '';
   }
 
-  // ============================================================
-  // 听书（TTS）
-  // ============================================================
-  //
-  // cmbok 本身没有朗读功能，这里是按需求补的。
-  // 引擎走 iOS 原生 `tts_engine` channel（系统 AVSpeechSynthesizer），
-  // **不引任何插件** —— 见 `reading/services/tts_service.dart` 的说明。
-
-  final _tts = TtsService.instance;
-
-  /// 把当前章的所有文本块拼成朗读文本
-  String _currentChapterText() {
-    final ci = _currentChapterIndex();
-    final chapters = _content?.chapters ?? const [];
-    if (ci < 0 || ci >= chapters.length) return '';
-    final buf = StringBuffer();
-    for (final b in chapters[ci].blocks) {
-      if (b is ParagraphBlock) {
-        buf.writeln(b.text);
-      } else if (b is HeadingBlock) {
-        buf.writeln(b.text);
-      }
-    }
-    return buf.toString();
-  }
-
-  /// 点听书按钮：正在念就暂停/继续，没在念就从当前章开头念
-  Future<void> _toggleTts() async {
-    // 🔴 下面两处 `await`（暂停 / 继续朗读 ✓）之后的 `setState` 都**没有**
-    // `mounted` 检查 ✗ → 页面在这段窗口里被销毁就抛
-    // `setState() called after dispose()` ✓。
-    // 这个场景**真会被触发** ✓：暂停/继续之间用户按返回键离开阅读器 ✓
-    //（不是理论情况 ✗）。两处一起补 ✓
-    if (_tts.isSpeaking.value) {
-      await _tts.pause();
-      if (!mounted) return;
-      setState(() {});
-      return;
-    }
-    if (_tts.isPaused.value) {
-      await _tts.resume();
-      if (!mounted) return;
-      setState(() {});
-      return;
-    }
-
-    final text = _currentChapterText();
-    if (text.trim().isEmpty) {
-      BookReaderPage._toast(context, '这一章没有可朗读的内容');
-      return;
-    }
-
-    // 念完本章 → 自动跳下一章接着念
-    _tts.onFinished = () {
-      if (!mounted) return;
-      final next = _currentChapterIndex() + 1;
-      if (next < _chapterStarts.length) {
-        _goChapter(next);
-        // 等切章完成再取文本
-        Future.delayed(const Duration(milliseconds: 400), () {
-          if (!mounted) return;
-          final t = _currentChapterText();
-          if (t.trim().isNotEmpty) _tts.speak(t);
-        });
-      }
-    };
-
-    await _tts.speak(text);
-    setState(() {});
-  }
-
   String _indicatorText() {
     if (_isImageMode) {
       if (_imageBlockIndices.isEmpty) return '';
@@ -2480,469 +2163,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
           : '$left/${_pages.length} 页';
     }
     return '${_currentPage + 1}/${_pages.length} 页';
-  }
-
-  // ---------------- 顶栏功能（搜索 / 刷新 / 书签 / 亮度 / 日夜 / 编辑） ----------------
-
-  /// 顶栏搜索：全书全文搜索（本地书已全部解析，直接遍历章节文本块）
-  Future<void> _showBookSearch() async {
-    final content = _content;
-    if (content == null || _pages.isEmpty) {
-      BookReaderPage._toast(context, '内容尚未加载完成');
-      return;
-    }
-    final dark = _readerIsDark;
-    final fg = dark ? Colors.white : JellyTheme.textPrimaryLight;
-    final bgTop = dark
-        ? Colors.black.withValues(alpha: 0.96)
-        : Colors.white.withValues(alpha: 0.98);
-    final controller = TextEditingController();
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheet) {
-          List<_SearchHit> hits = const [];
-          bool searched = false;
-          String keyword = '';
-          return Container(
-            height: MediaQuery.of(context).size.height * 0.72,
-            decoration: BoxDecoration(
-              color: bgTop,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
-            ),
-            padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom + 8),
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                  child: Row(
-                    children: [
-                      Icon(Icons.search_rounded, size: 20, color: fg),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: controller,
-                          autofocus: true,
-                          style: TextStyle(color: fg),
-                          decoration: InputDecoration(
-                            hintText: '输入关键词搜索全书',
-                            hintStyle: TextStyle(color: fg.withValues(alpha: 0.4)),
-                            isDense: true,
-                            border: InputBorder.none,
-                          ),
-                          textInputAction: TextInputAction.search,
-                          onSubmitted: (v) {
-                            keyword = v.trim();
-                            if (keyword.isEmpty) return;
-                            hits = _searchFullBook(keyword);
-                            searched = true;
-                            setSheet(() {});
-                          },
-                        ),
-                      ),
-                      IconButton(
-                        visualDensity: VisualDensity.compact,
-                        icon: Icon(Icons.close_rounded, size: 18, color: fg.withValues(alpha: 0.6)),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                ),
-                Divider(height: 1, color: fg.withValues(alpha: 0.1)),
-                if (!searched)
-                  Expanded(
-                    child: Center(
-                      child: Text(
-                        '输入关键词，回车搜索全书',
-                        style: TextStyle(fontSize: 13, color: fg.withValues(alpha: 0.5)),
-                      ),
-                    ),
-                  )
-                else if (hits.isEmpty)
-                  Expanded(
-                    child: Center(
-                      child: Text('没有找到「$keyword」相关内容',
-                          style: TextStyle(fontSize: 13, color: fg.withValues(alpha: 0.5))),
-                    ),
-                  )
-                else
-                  Expanded(
-                    child: ListView.builder(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      itemCount: hits.length,
-                      itemBuilder: (context, i) {
-                        final h = hits[i];
-                        return InkWell(
-                          onTap: () {
-                            Navigator.pop(context);
-                            _jumpToSearchHit(h.blockIndex);
-                          },
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  h.chapterTitle.isEmpty ? '第 ${h.chapterIndex + 1} 章' : h.chapterTitle,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: JellyTheme.primary,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  h.preview,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(fontSize: 13, color: fg.withValues(alpha: 0.85)),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  child: Text(
-                    hits.isEmpty ? '' : '共 ${hits.length} 处匹配',
-                    style: TextStyle(fontSize: 12, color: fg.withValues(alpha: 0.5)),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  /// 遍历全部章节文本块找关键词（忽略大小写，最多 300 条）。
-  /// 全局 blockIndex = 章节起始块索引 + 章内序号（章节标题块占 1）。
-  List<_SearchHit> _searchFullBook(String keyword) {
-    final content = _content;
-    if (content == null) return const [];
-    final lower = keyword.toLowerCase();
-    final starts = content.chapterStarts;
-    final out = <_SearchHit>[];
-    for (var ci = 0; ci < content.chapters.length; ci++) {
-      final ch = content.chapters[ci];
-      final base = starts[ci];
-      final headOffset = ch.title.isNotEmpty ? 1 : 0;
-      for (var j = 0; j < ch.blocks.length; j++) {
-        final b = ch.blocks[j];
-        final text = (b is ParagraphBlock)
-            ? b.text
-            : (b is HeadingBlock ? b.text : '');
-        if (text.isEmpty || !text.toLowerCase().contains(lower)) continue;
-        // 摘录关键词前后片段
-        final idx = text.toLowerCase().indexOf(lower);
-        final start = (idx - 12).clamp(0, text.length);
-        final end = (idx + keyword.length + 24).clamp(0, text.length);
-        var preview = text.substring(start, end).replaceAll('\n', ' ');
-        if (start > 0) preview = '…$preview';
-        if (end < text.length) preview = '$preview…';
-        out.add(_SearchHit(
-          chapterIndex: ci,
-          chapterTitle: ch.title,
-          preview: preview,
-          blockIndex: base + headOffset + j,
-        ));
-        if (out.length >= 300) return out;
-      }
-    }
-    return out;
-  }
-
-  /// 搜索命中跳转：窗口内直接定位，窗口外先补排（补排完成内部会定位）
-  void _jumpToSearchHit(int blockIndex) {
-    setState(() => _showControls = false);
-    if (_ongoingPaginator != null && blockIndex > _paginatedBlockCount) {
-      _extendToBlock(blockIndex);
-      return;
-    }
-    _goChapterJump(blockIndex);
-  }
-
-  /// 顶栏刷新：清掉分页缓存重排当前章
-  void _refreshCurrentChapter() {
-    final ci = _currentChapterIndex();
-    // 清掉全部分页缓存（缓存 key 由屏宽/屏高决定，参数没变会命中缓存，
-    // 必须清缓存才真正重排）
-    BookPageCacheService.instance.clear();
-    setState(() {});
-    _goChapter(ci);
-    BookReaderPage._toast(context, '已重新排版');
-  }
-
-  // ---- 本地书签（轻量 prefs：taskId -> [{chapterTitle, chapterIndex, blockIndex}]） ----
-  static const _bookmarkPrefsKey = 'book_reader_bookmarks_v1';
-
-  Future<Map<String, List<Map<String, dynamic>>>> _loadAllBookmarks() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_bookmarkPrefsKey);
-      if (raw == null || raw.isEmpty) return {};
-      final dec = jsonDecode(raw) as Map<String, dynamic>;
-      return dec.map((k, v) => MapEntry(
-            k,
-            (v as List).map((e) => Map<String, dynamic>.from(e as Map)).toList(),
-          ));
-    } catch (_) {
-      return {};
-    }
-  }
-
-  Future<void> _persistBookmarks(Map<String, List<Map<String, dynamic>>> all) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_bookmarkPrefsKey, jsonEncode(all));
-    } catch (_) {}
-  }
-
-  /// 书签面板：列出本书书签可跳转，长按删除，空态引导加书签
-  Future<void> _showBookmarks() async {
-    final dark = _readerIsDark;
-    final fg = dark ? Colors.white : JellyTheme.textPrimaryLight;
-    final bgTop = dark
-        ? Colors.black.withValues(alpha: 0.96)
-        : Colors.white.withValues(alpha: 0.98);
-    final all = await _loadAllBookmarks();
-    final bookId = widget.task.bookId;
-    final list = List<Map<String, dynamic>>.from(all[bookId] ?? const []);
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheet) {
-          return Container(
-            decoration: BoxDecoration(
-              color: bgTop,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
-            ),
-            padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom + 8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 8, 6),
-                  child: Row(
-                    children: [
-                      Icon(Icons.bookmark_rounded, size: 18, color: fg),
-                      const SizedBox(width: 8),
-                      Text('书签（${list.length}）',
-                          style: TextStyle(fontSize: AppTheme.fontSubhead, fontWeight: FontWeight.w700, color: fg)),
-                      const Spacer(),
-                      if (list.isNotEmpty)
-                        TextButton(
-                          onPressed: () async {
-                            all[bookId] = [];
-                            await _persistBookmarks(all);
-                            setSheet(() => list.clear());
-                            BookReaderPage._toast(context, '已清除全部书签');
-                          },
-                          child: Text('清除全部',
-                              style: TextStyle(fontSize: 13, color: JellyTheme.primary)),
-                        ),
-                      IconButton(
-                        visualDensity: VisualDensity.compact,
-                        icon: Icon(Icons.close_rounded, size: 18, color: fg.withValues(alpha: 0.6)),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                ),
-                Divider(height: 1, color: fg.withValues(alpha: 0.1)),
-                if (list.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(28),
-                    child: Column(
-                      children: [
-                        Icon(Icons.bookmark_border_rounded, size: 40, color: fg.withValues(alpha: 0.3)),
-                        const SizedBox(height: 10),
-                        Text('还没有书签，点击顶部书签图标收藏当前页',
-                            style: TextStyle(fontSize: 13, color: fg.withValues(alpha: 0.5))),
-                      ],
-                    ),
-                  )
-                else
-                  Flexible(
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: list.length,
-                      itemBuilder: (context, i) {
-                        final b = list[i];
-                        return ListTile(
-                          dense: true,
-                          leading: Icon(Icons.bookmark_rounded, size: 18, color: JellyTheme.primary),
-                          title: Text(
-                            (b['chapterTitle'] as String?)?.isNotEmpty == true
-                                ? b['chapterTitle'] as String
-                                // 🔴 Dart 里 `??` 的优先级**低于** `+` ✓，所以原来写的
-                            // `?.toInt() ?? 0 + 1` 实际等价于 `?.toInt() ?? (0 + 1)`
-                            // → 只有"字段缺失"才得 1 ✗，而**真正的章号 0**（第一项 ✓，
-                            // 0-based ✓）会原样显示 → **"第 0 章"** ✓
-                            //（缺字段时又变成"第 1 章" ✓，两种都错 ✗）。
-                            // 加括号才是本意：**(章号 或 0) + 1** → 1-based 显示 ✓
-                            : '第 ${((b['chapterIndex'] as num?)?.toInt() ?? 0) + 1} 章',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 14, color: fg),
-                          ),
-                          trailing: IconButton(
-                            visualDensity: VisualDensity.compact,
-                            icon: Icon(Icons.delete_outline_rounded, size: 18, color: fg.withValues(alpha: 0.5)),
-                            onPressed: () async {
-                              list.removeAt(i);
-                              all[bookId] = list;
-                              await _persistBookmarks(all);
-                              setSheet(() {});
-                            },
-                          ),
-                          onTap: () {
-                            Navigator.pop(context);
-                            final block = (b['blockIndex'] as num?)?.toInt();
-                            if (block != null) _jumpToSearchHit(block);
-                          },
-                        );
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  /// 顶栏书签图标：有书签面板可点；无书签时点击=收藏当前页并提示
-  Future<void> _toggleBookmark() async {
-    final all = await _loadAllBookmarks();
-    final bookId = widget.task.bookId;
-    final list = List<Map<String, dynamic>>.from(all[bookId] ?? const []);
-    if (list.isNotEmpty) {
-      _showBookmarks();
-      return;
-    }
-    final ci = _currentChapterIndex();
-    final chapters = _content?.chapters ?? const [];
-    final title = ci < chapters.length ? chapters[ci].title : '';
-    final blockIndex = _currentBlockIndexForPage(_currentPage);
-    all[bookId] = [
-      ...list,
-      {'chapterTitle': title, 'chapterIndex': ci, 'blockIndex': blockIndex},
-    ];
-    await _persistBookmarks(all);
-    setState(() {});
-    BookReaderPage._toast(context, '已添加书签：${title.isEmpty ? '第 ${ci + 1} 章' : title}');
-    _showBookmarks();
-  }
-
-  int _currentBlockIndexForPage(int page) {
-    if (page < 0 || page >= _pages.length) return 0;
-    return _pages[page].firstBlockIndex;
-  }
-
-  /// 顶栏日夜切换：夜间 ↔ 白天（首次点击进入夜间，再点切回白天）
-  /// ✗ 原来写的是 static `_ReaderDarkOverride.value`：一旦点过就永久留在
-  ///   1/2，换书也带着走，「跟随全局暗色」再也不会生效 ✗。
-  /// ✓ 现在改的是本页实例字段 `_darkOverride`：页面销毁即归零，
-  ///   下次进阅读器/换一本书重新回到 0=跟随全局 ✓。
-  void _toggleDayNight() {
-    setState(() {
-      _darkOverride = _darkOverride == 2 ? 1 : 2;
-    });
-  }
-
-  /// 顶栏亮度：底部滑杆调系统屏幕亮度（screen_brightness）
-  Future<void> _showBrightnessSheet() async {
-    final dark = _readerIsDark;
-    final fg = dark ? Colors.white : JellyTheme.textPrimaryLight;
-    final bgTop = dark
-        ? Colors.black.withValues(alpha: 0.96)
-        : Colors.white.withValues(alpha: 0.98);
-    double current = 1.0;
-    try {
-      current = await ScreenBrightness().current;
-    } catch (_) {}
-    if (current < 0.05) current = 1.0; // 系统"自动亮度"返回 0 时按 1 展示
-    final v = current.clamp(0.1, 1.0);
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheet) {
-          var value = v;
-          return Container(
-            decoration: BoxDecoration(
-              color: bgTop,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
-            ),
-            padding: EdgeInsets.only(top: 14, bottom: MediaQuery.of(context).padding.bottom + 14),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.brightness_6_rounded, size: 18, color: fg),
-                    const SizedBox(width: 8),
-                    Text('亮度',
-                        style: TextStyle(fontSize: AppTheme.fontSubhead, fontWeight: FontWeight.w700, color: fg)),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: Row(
-                    children: [
-                      Icon(Icons.brightness_low_rounded, size: 18, color: fg.withValues(alpha: 0.5)),
-                      Expanded(
-                        child: Slider(
-                          value: value,
-                          min: 0.1,
-                          max: 1.0,
-                          activeColor: fg,
-                          inactiveColor: fg.withValues(alpha: 0.2),
-                          onChanged: (nv) {
-                            setSheet(() => value = nv);
-                            ScreenBrightness().setScreenBrightness(nv);
-                          },
-                        ),
-                      ),
-                      Icon(Icons.brightness_high_rounded, size: 18, color: fg.withValues(alpha: 0.5)),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 4),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  /// 顶栏编辑（划线与笔记）—— **本轮接上真页面** ✓✓（不再是一句占位 toast ✗）
-  ///
-  /// ✅ 原来这里只弹「划线编辑待接入（本地图书）」✗；而**笔记页面本来就有** ✓
-  ///   （`BookNotesPage` ✓ —— 本轮把它从私有 `_BookNotesPage` 改成公开 ✓，
-  ///    5 处引用一次改全 ✓，所以这里能直接复用 ✓）。
-  /// ⚠️ **如实说明** ✓（不夸大 ✗）：本地图书**正文里长按选中 → 划线/批注**仍**需要单独开发** ✗
-  ///   （本页正文是分页渲染的文本块 / PDF 图片 ✓，要另做一套"文字选择 + 块内偏移映射" ✓）。
-  ///   但**查看与管理已有笔记**现在是真的 ✓✓ —— 包括在**书源阅读器**里划的线 ✓（同一个
-  ///   `ReaderNotesService` ✓ 同一份存储 ✓）。
-  void _showEditPlaceholder() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const BookNotesPage()),
-    );
   }
 
   // ---------------- 目录 ----------------
@@ -3002,7 +2222,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                           const Text(
                             '目录',
                             style: TextStyle(
-                              fontSize: AppTheme.fontTitle3,
+                              fontSize: 18,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -3019,7 +2239,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                             child: Text(
                               '${chapters.length} 章',
                               style: TextStyle(
-                                fontSize: AppTheme.fontCaption,
+                                fontSize: 11,
                                 color: JellyTheme.primary,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -3076,7 +2296,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontSize: AppTheme.fontBody,
+                                    fontSize: 14,
                                     color: cur ? JellyTheme.primary : textColor,
                                     fontWeight: cur
                                         ? FontWeight.w700
@@ -3124,7 +2344,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => kbSheet(StatefulBuilder(
+      builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) {
           final isDark = Theme.of(ctx).brightness == Brightness.dark;
           final textColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
@@ -3140,7 +2360,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         Text(
                           '阅读设置',
                           style: TextStyle(
-                            fontSize: AppTheme.fontHeadline,
+                            fontSize: 16,
                             fontWeight: FontWeight.bold,
                             color: textColor,
                           ),
@@ -3149,7 +2369,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         Text(
                           '独立设置',
                           style: TextStyle(
-                            fontSize: AppTheme.fontSubhead,
+                            fontSize: 13,
                             color: draftIndependent
                                 ? JellyTheme.primary
                                 : (isDark
@@ -3173,14 +2393,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       ),
                       decoration: BoxDecoration(
                         color: JellyTheme.primary.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         draftIndependent
                             ? '本书使用独立设置（阅读模式与排版）'
                             : '当前为全局设置，修改影响所有图书',
                         style: TextStyle(
-                          fontSize: AppTheme.fontCaption,
+                          fontSize: 11,
                           color: draftIndependent
                               ? JellyTheme.primary
                               : (isDark
@@ -3193,7 +2413,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       children: [
                         Text(
                           '阅读模式',
-                          style: TextStyle(fontSize: AppTheme.fontBody, color: textColor),
+                          style: TextStyle(fontSize: 14, color: textColor),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -3253,14 +2473,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       children: [
                         Text(
                           '翻页反转',
-                          style: TextStyle(fontSize: AppTheme.fontBody, color: textColor),
+                          style: TextStyle(fontSize: 14, color: textColor),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
                             '左点下一页、右点上一页',
                             style: TextStyle(
-                              fontSize: AppTheme.fontFootnote,
+                              fontSize: 12,
                               color: isDark
                                   ? Colors.white54
                                   : JellyTheme.textSecondary,
@@ -3278,14 +2498,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       children: [
                         Text(
                           '双页模式',
-                          style: TextStyle(fontSize: AppTheme.fontBody, color: textColor),
+                          style: TextStyle(fontSize: 14, color: textColor),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
                             '横屏左右并排（上下模式除外）',
                             style: TextStyle(
-                              fontSize: AppTheme.fontFootnote,
+                              fontSize: 12,
                               color: isDark
                                   ? Colors.white54
                                   : JellyTheme.textSecondary,
@@ -3303,14 +2523,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       children: [
                         Text(
                           '信息栏',
-                          style: TextStyle(fontSize: AppTheme.fontBody, color: textColor),
+                          style: TextStyle(fontSize: 14, color: textColor),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
                             '显示时间、页码、进度',
                             style: TextStyle(
-                              fontSize: AppTheme.fontFootnote,
+                              fontSize: 12,
                               color: isDark
                                   ? Colors.white54
                                   : JellyTheme.textSecondary,
@@ -3328,14 +2548,14 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       children: [
                         Text(
                           '音量键翻页',
-                          style: TextStyle(fontSize: AppTheme.fontBody, color: textColor),
+                          style: TextStyle(fontSize: 14, color: textColor),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
                             '按音量上/下键翻页（会接管音量键）',
                             style: TextStyle(
-                              fontSize: AppTheme.fontFootnote,
+                              fontSize: 12,
                               color: isDark
                                   ? Colors.white54
                                   : JellyTheme.textSecondary,
@@ -3380,7 +2600,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
             ),
           );
         },
-      )),
+      ),
     );
   }
 
@@ -3401,13 +2621,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 : (isDark
                       ? Colors.white.withValues(alpha: 0.12)
                       : Colors.black.withValues(alpha: 0.05)),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
           ),
           alignment: Alignment.center,
           child: Text(
             label,
             style: TextStyle(
-              fontSize: AppTheme.fontSubhead,
+              fontSize: 13,
               color: selected
                   ? Colors.white
                   : (isDark ? Colors.white70 : JellyTheme.textPrimaryLight),
@@ -3438,7 +2658,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => kbSheet(StatefulBuilder(
+      builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) {
           final isDark = _readerIsDark;
           return SafeArea(
@@ -3515,17 +2735,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       fontService: fontService,
                       onSelect: (v) => setSheet(() => draftFontFamily = v),
                       onImport: () async {
-                        // ⚠️ 原版 `importFont()` 内部弹 `file_picker`（原生插件）。
-                        // 本项目硬约束"不新增原生插件"，所以改成先用**纯 Dart
-                        // 文件浏览器**选文件，再把路径交给字体服务导入。
-                        final paths = await pickLocalFiles(
-                          ctx,
-                          allowedExtensions: const {'ttf', 'otf', 'ttc'},
-                          allowMultiple: false,
-                        );
-                        if (paths == null || paths.isEmpty) return;
-                        final family =
-                            await fontService.importFont(paths.first);
+                        final family = await fontService.importFont();
                         if (family != null) {
                           setSheet(() => draftFontFamily = family);
                         }
@@ -3564,7 +2774,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
             ),
           );
         },
-      )),
+      ),
     );
   }
 
@@ -3641,7 +2851,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
               : (isDark
                     ? Colors.white.withValues(alpha: 0.12)
                     : Colors.black.withValues(alpha: 0.05)),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(8),
           border: isAction && !selected
               ? Border.all(
                   color: isDark ? Colors.white24 : Colors.black12,
@@ -3652,7 +2862,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
         child: Text(
           label,
           style: TextStyle(
-            fontSize: AppTheme.fontFootnote,
+            fontSize: 12,
             color: selected
                 ? Colors.white
                 : (isDark ? Colors.white70 : JellyTheme.textPrimaryLight),
@@ -3716,18 +2926,12 @@ class _BookReaderPageState extends State<BookReaderPage> {
 class _PdfPageImage extends StatefulWidget {
   final String imageKey;
   final double contentWidth;
-
-  /// 是否按夜间反相显示。日夜覆盖已是阅读页的**实例**状态
-  /// （见 `_BookReaderPageState._darkOverride`），这个子 widget 拿不到，
-  /// 只能由父级把 `_readerIsDark` 显式传下来 ✓（传 null 会退回全局或写死 ✗）。
-  final bool isDark;
   final Future<Uint8List> Function(String, double) loader;
   final void Function(String imageKey, Uint8List bytes) onLoaded;
 
   const _PdfPageImage({
     required this.imageKey,
     required this.contentWidth,
-    required this.isDark,
     required this.loader,
     required this.onLoaded,
   });
@@ -3769,9 +2973,7 @@ class _PdfPageImageState extends State<_PdfPageImage> {
 
   @override
   Widget build(BuildContext context) {
-    // ✗ 原来读文件级 `_readerIsDark`（背后是 static 覆盖值）；
-    // ✓ 现在用父级传下来的本次阅读页实例值 ✓
-    final isDark = widget.isDark;
+    final isDark = _readerIsDark;
     if (_bytes != null) {
       return Image.memory(
         _bytes!,

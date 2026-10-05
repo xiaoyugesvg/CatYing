@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../models/trim_preset.dart';
 import '../services/trim_preset_service.dart';
 import '../theme/jelly_theme.dart';
-import '../../common/theme.dart';
 
 /// 预设管理弹窗
 ///
@@ -28,7 +27,7 @@ class _TrimPresetDialogState extends State<TrimPresetDialog> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return AlertDialog(
-      backgroundColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+      backgroundColor: isDark ? JellyTheme.cardDark : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: const Text('预设管理'),
       content: SizedBox(
@@ -45,7 +44,7 @@ class _TrimPresetDialogState extends State<TrimPresetDialog> {
                     '暂无预设，点击下方按钮保存当前设置',
                     style: TextStyle(
                       color: JellyTheme.textSecondary,
-                      fontSize: AppTheme.fontSubhead,
+                      fontSize: 13,
                     ),
                   ),
                 ),
@@ -96,7 +95,7 @@ class _TrimPresetDialogState extends State<TrimPresetDialog> {
                   preset.name,
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: AppTheme.fontBody,
+                    fontSize: 14,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
                 ),
@@ -105,7 +104,7 @@ class _TrimPresetDialogState extends State<TrimPresetDialog> {
                   '阈值 ${preset.threshold} · 边距 ${preset.padding} · '
                   '放大 ${preset.zoom}% · ${preset.deviceWidth}×${preset.deviceHeight}',
                   style: TextStyle(
-                    fontSize: AppTheme.fontCaption,
+                    fontSize: 11,
                     color: JellyTheme.textSecondary,
                   ),
                 ),

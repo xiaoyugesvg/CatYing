@@ -1,0 +1,63 @@
+/// 章节正文块：文本段或插图。
+///
+/// 解析层（[BookContent]）从章节 HTML 中提取 `<img>` 并转为 [NovelImageBlock]，
+/// 与其相邻的文本段一起保留在原有顺序，使阅读器能图文混排显示插图。
+///
+/// 此前正文被压成 `List<String>` 纯文本、`BookContent` 在清洗阶段直接删除了
+/// `<img>` 标签，导致插图永远无法显示。引入块模型后，文本与插图作为一等
+/// 公民共存于同一列表，渲染层按类型分别处理。
+library;
+
+
+/// 章节正文的一个块：要么是一段文本，要么是一张插图。
+abstract class NovelBlock {
+  const NovelBlock();
+}
+
+/// 文本段（对应原 `List<String>` 中的一个段落，首行已含 `　　` 缩进）。
+///
+/// [isHeading] 标记该段为「章节标题」，渲染层会用更大的字号/居中/加粗
+/// 区分于正文段落。本地 EPUB（`localEpubPath`）的章节标题就是用这个标志
+/// 插入正文的，否则 55 章的内容连成一片、滚动时看不到章节分界。
+class NovelTextBlock extends NovelBlock {
+  final String text;
+
+  /// 是否为章节标题块（用更大字号 + 居中 + 加粗渲染）。
+  final bool isHeading;
+
+  const NovelTextBlock(this.text, {this.isHeading = false});
+
+  @override
+  bool operator ==(Object other) =>
+      other is NovelTextBlock &&
+      other.text == text &&
+      other.isHeading == isHeading;
+
+  @override
+  int get hashCode => Object.hash(text, isHeading);
+}
+
+/// 插图块：章节正文中的一张图片。
+///
+/// [url] 已是解析层拼好的绝对地址（含 baseUrl 归一化）。
+/// [style] 透传书源 `ruleContent.imageStyle`（CSS 字符串，如 `max-width:100%`），
+/// 渲染层据此约束图片显示方式（未声明则为 null，走默认行为）。
+class NovelImageBlock extends NovelBlock {
+  final String url;
+  final String? style;
+
+  const NovelImageBlock(this.url, {this.style});
+
+  /// 是否为可显示的图片地址（http/https 或 data:image 内联）。
+  bool get isValid =>
+      url.startsWith('http://') ||
+      url.startsWith('https://') ||
+      url.startsWith('data:image');
+
+  @override
+  bool operator ==(Object other) =>
+      other is NovelImageBlock && other.url == url;
+
+  @override
+  int get hashCode => url.hashCode;
+}

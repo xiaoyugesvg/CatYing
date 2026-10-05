@@ -1,8 +1,8 @@
 import 'dart:async';
-import '../../widgets/common_widgets.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:cached_network_image_ce/cached_network_image.dart';
+import '../../widgets/app_image_cache.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:photo_view/photo_view.dart';
@@ -11,19 +11,16 @@ import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../models/comic.dart';
 import '../services/bookshelf_service.dart';
 import '../source/adapter.dart';
+import '../source/image_cache_manager.dart';
 import '../source/source_manager.dart';
 import '../source/webview_image_fetcher.dart';
 import '../services/download_service.dart';
 import '../services/platform_service.dart';
 import '../services/reading_progress_service.dart';
-import '../services/manga_bookmark_service.dart';
 import '../services/reader_override_service.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/pomodoro_button.dart';
-import '../../common/theme.dart';
-import '../../common/system_ui.dart';
-import '../../widgets/app_image_cache.dart';
 
 /// 漫画阅读页面
 class ReaderPage extends StatefulWidget {
@@ -132,53 +129,17 @@ class _ReaderPageState extends State<ReaderPage> {
     0,
   ];
 
-  /// 阅读背景五选色（参考 cmbok「显示」tab：纯白/纸白/米黄/暗夜/纯黑）
-  Color _bgColorOf(int style) {
-    switch (style) {
-      case 0:
-        return const Color(0xFFFFFFFF); // 纯白
-      case 1:
-        return const Color(0xFFF7F4EC); // 纸白
-      case 2:
-        return const Color(0xFFEFE6CE); // 米黄
-      case 4:
-        return const Color(0xFF000000); // 纯黑
-      default:
-        return const Color(0xFF141416); // 暗夜（默认）
-    }
-  }
+  /// 画廊背景：墨水屏用柔和暖灰（置于灰度罩外，暖色不受矩阵影响），否则黑。
+  Color get _galleryBg =>
+      SettingsService().inkScreenMode ? _inkBgColor : Colors.black;
 
-  /// 当前背景是否为浅色（纯白/纸白/米黄），决定文字用深色
-  bool get _bgIsLight =>
-      !SettingsService().inkScreenMode &&
-      SettingsService().readerBackgroundStyle <= 2;
+  /// 画廊内部底色（PhotoView/dissolve）：墨水屏透明，露出罩外浅灰；否则黑。
+  Color get _innerGalleryBg =>
+      SettingsService().inkScreenMode ? Colors.transparent : Colors.black;
 
-  /// 画廊背景：墨水屏用柔和暖灰（置于灰度罩外，暖色不受矩阵影响），否则背景五选。
-  Color get _galleryBg => SettingsService().inkScreenMode
-      ? _inkBgColor
-      : _bgColorOf(SettingsService().readerBackgroundStyle);
-
-  /// 画廊内部底色（PhotoView/dissolve）：墨水屏透明，露出罩外浅灰；否则背景五选。
-  Color get _innerGalleryBg => SettingsService().inkScreenMode
-      ? Colors.transparent
-      : _bgColorOf(SettingsService().readerBackgroundStyle);
-
-  /// 画廊上的文字色：墨水屏浅灰底 / 浅色背景用深灰，否则白。
+  /// 画廊上的文字色：墨水屏浅灰底用深灰，否则白。
   Color get _inkTextColor =>
-      (SettingsService().inkScreenMode || _bgIsLight)
-          ? Colors.black54
-          : Colors.white;
-
-  /// 漫画边距（页眉左右/上 + 页脚左右/下，参考 cmbok「边距」tab）
-  EdgeInsets get _comicMargins {
-    final s = SettingsService();
-    return EdgeInsets.fromLTRB(
-      s.comicHeaderLeft,
-      s.comicHeaderTop,
-      s.comicHeaderRight,
-      s.comicFooterBottom,
-    );
-  }
+      SettingsService().inkScreenMode ? Colors.black54 : Colors.white;
 
   /// 墨水屏灰度滤镜。
   ColorFilter get _inkColorFilter => ColorFilter.matrix(_inkGrayMatrix);
@@ -238,10 +199,9 @@ class _ReaderPageState extends State<ReaderPage> {
     // 避免系统栏切换与 MaterialPageRoute 转场叠加造成进入卡顿。
     Future.delayed(const Duration(milliseconds: 350), () {
       if (!mounted) return;
-      SystemUiController.enter(
-        'comicReader',
-        mode: SystemUiMode.manual,
-        overlays: const [SystemUiOverlay.bottom],
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.manual,
+        overlays: [SystemUiOverlay.bottom],
       );
     });
     _loadImages();
@@ -264,8 +224,8 @@ class _ReaderPageState extends State<ReaderPage> {
     ReaderOverrideService().removeListener(_onReaderSettingsChanged);
     _pageController.dispose();
     _continuousPageNotifier.dispose();
-    // 离开阅读器：恢复**进入前**的系统栏状态（原来写死 edge-to-edge）
-    SystemUiController.exit('comicReader');
+    // 离开阅读器：恢复状态栏（App 默认 edge-to-edge）
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     // 清理 blob 站临时文件（摸摸漫画等 useBlobBase64 站落盘的章节图）
     WebViewImageFetcher().clearBlobTempFiles();
     super.dispose();
@@ -346,10 +306,6 @@ class _ReaderPageState extends State<ReaderPage> {
         _currentChapter.id,
       );
       if (local.isNotEmpty) {
-        // 🔴 本方法上面有 `await ...getLocalImages(...)` ✓ —— 这个 `setState`
-        // 却**没有 `mounted` 检查** ✗（页面被销毁后抛
-        // `setState() called after dispose()` ✓，release 同样抛 ✗）
-        if (!mounted) return;
         setState(() {
           _images = local;
           _useLocal = true;
@@ -374,15 +330,11 @@ class _ReaderPageState extends State<ReaderPage> {
       final headers = <String, String>{...source.imageHeaders};
       final ref = source.refererForChapter(cchapter);
       if (ref != null) headers['Referer'] = ref;
-      // 🔴 上面 `await source.getChapterImages(...)`（网络请求 ✓）之后同样漏了检查 ✗
-      if (!mounted) return;
       setState(() {
         _images = images;
         _imageHeaders = headers;
       });
     } catch (e) {
-      // 🔴 catch 分支也一样 ✗（异常同样可能发生在 await 之后 ✓）
-      if (!mounted) return;
       setState(() {
         _error = e.toString();
       });
@@ -521,48 +473,15 @@ class _ReaderPageState extends State<ReaderPage> {
   }
 
   /// 切换到指定章节：重置页码与翻页控制器后重新加载
-  void _goToChapter(ComicChapter chapter, {int initialPage = 0}) {
+  void _goToChapter(ComicChapter chapter) {
     setState(() {
       _currentChapter = chapter;
-      _currentIndex = initialPage;
-      _continuousPageNotifier.value = initialPage; // 拼页模式：切章节页码归零
+      _currentIndex = 0;
+      _continuousPageNotifier.value = 0; // 拼页模式：切章节页码归零
     });
-    _pageController = PageController(initialPage: initialPage);
+    _pageController = PageController(initialPage: 0);
     _loadImages();
   }
-
-  // ---------------- 书签 ----------------
-
-  /// 切换当前页书签（顶部书签按钮）
-  Future<void> _toggleBookmark() async {
-    final added = await MangaBookmarkService().toggle(
-      pathWord: widget.comic.pathWord,
-      comicTitle: widget.comic.title,
-      chapterId: _currentChapter.id,
-      chapterTitle: _currentChapter.title,
-      pageIndex: _currentIndex,
-      pageCount: _images.length,
-    );
-    if (!mounted) return;
-    setState(() {});
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(added ? '已添加书签' : '已取消书签'),
-          duration: const Duration(seconds: 1),
-        ),
-      );
-  }
-
-  /// 当前页是否已加书签（顶部按钮高亮）
-  bool _currentPageBookmarked() =>
-      _images.isNotEmpty &&
-      MangaBookmarkService().exists(
-        widget.comic.pathWord,
-        _currentChapter.id,
-        _currentIndex,
-      );
 
   // ---------------- 阅读设置 ----------------
 
@@ -571,7 +490,6 @@ class _ReaderPageState extends State<ReaderPage> {
   void _showReaderSettingsSheet() {
     final pathWord = widget.comic.pathWord;
     final o = ReaderOverrideService();
-    final s = SettingsService();
     bool draftIndependent = o.isIndependentManga(pathWord);
     ReadingMode draftMode = o.effectiveMangaMode(pathWord);
     int draftPreload = o.effectivePreload(pathWord);
@@ -579,20 +497,7 @@ class _ReaderPageState extends State<ReaderPage> {
     bool draftDoublePage = o.effectiveDoublePageManga(pathWord);
     bool draftShowHud = o.effectiveShowHudManga(pathWord);
     bool draftVolumeKey = o.effectiveVolumeKeyTurnManga(pathWord);
-    bool draftInk = s.inkScreenMode; // 墨水屏仅全局，无 per-item 覆盖
-    // 全局项（参考图四 tab 补齐：操作/显示/边距）
-    bool draftSingleHand = s.singleHand;
-    bool draftPinchZoom = s.pinchZoom;
-    bool draftRememberZoom = s.rememberZoom;
-    String draftSleep = s.screenSleep;
-    int draftBg = s.readerBackgroundStyle;
-    double draftHl = s.comicHeaderLeft;
-    double draftHr = s.comicHeaderRight;
-    double draftHt = s.comicHeaderTop;
-    double draftFl = s.comicFooterLeft;
-    double draftFr = s.comicFooterRight;
-    double draftFb = s.comicFooterBottom;
-    int _tab = 0;
+    bool draftInk = SettingsService().inkScreenMode; // 墨水屏仅全局，无 per-item 覆盖
 
     showModalBottomSheet(
       context: context,
@@ -602,7 +507,7 @@ class _ReaderPageState extends State<ReaderPage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => kbSheet(StatefulBuilder(
+      builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) {
           return SafeArea(
             child: SingleChildScrollView(
@@ -616,7 +521,7 @@ class _ReaderPageState extends State<ReaderPage> {
                         const Text(
                           '阅读设置',
                           style: TextStyle(
-                            fontSize: AppTheme.fontHeadline,
+                            fontSize: 16,
                             fontWeight: FontWeight.bold,
                             color: Colors.white,
                           ),
@@ -625,7 +530,7 @@ class _ReaderPageState extends State<ReaderPage> {
                         Text(
                           '独立设置',
                           style: TextStyle(
-                            fontSize: AppTheme.fontSubhead,
+                            fontSize: 13,
                             color: draftIndependent
                                 ? JellyTheme.primary
                                 : Colors.white70,
@@ -647,365 +552,222 @@ class _ReaderPageState extends State<ReaderPage> {
                       ),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.06),
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         draftIndependent ? '当前修改仅对本书生效' : '当前为全局设置，修改影响所有漫画',
                         style: TextStyle(
-                          fontSize: AppTheme.fontCaption,
+                          fontSize: 11,
                           color: draftIndependent
                               ? JellyTheme.primary.withValues(alpha: 0.9)
                               : Colors.white54,
                         ),
                       ),
                     ),
-                    // ── 四 tab：阅读 / 操作 / 显示 / 边距 ──
                     Row(
                       children: [
-                        for (final (i, t) in const [
-                          (0, '阅读'),
-                          (1, '操作'),
-                          (2, '显示'),
-                          (3, '边距'),
-                        ])
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () => setSheet(() => _tab = i),
-                              child: Container(
-                                margin: const EdgeInsets.symmetric(
-                                  horizontal: 2,
-                                ),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: _tab == i
-                                      ? JellyTheme.primary.withValues(
-                                          alpha: 0.9,
-                                        )
-                                      : Colors.white.withValues(alpha: 0.08),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                alignment: Alignment.center,
-                                child: Text(
-                                  t,
-                                  style: TextStyle(
-                                    fontSize: AppTheme.fontSubhead,
-                                    color: _tab == i
-                                        ? Colors.white
-                                        : Colors.white70,
-                                    fontWeight: _tab == i
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    if (_tab == 0) ...[
-                      // ── 阅读 tab：阅读模式 / 预加载 / 双页模式 ──
-                      Row(
-                        children: [
-                          const Text(
-                            '阅读模式',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontBody,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Row(
-                              children: [
-                                _modeChip(
-                                  '右左',
-                                  draftMode == ReadingMode.pageTurn,
-                                  () => setSheet(
-                                    () => draftMode = ReadingMode.pageTurn,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                _modeChip(
-                                  '左右',
-                                  draftMode == ReadingMode.leftToRight,
-                                  () => setSheet(
-                                    () =>
-                                        draftMode = ReadingMode.leftToRight,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                _modeChip(
-                                  '消散',
-                                  draftMode == ReadingMode.dissolve,
-                                  () => setSheet(
-                                    () => draftMode = ReadingMode.dissolve,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                _modeChip(
-                                  '无动画',
-                                  draftMode == ReadingMode.none,
-                                  () => setSheet(
-                                    () => draftMode = ReadingMode.none,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                _modeChip(
-                                  '拼页',
-                                  draftMode == ReadingMode.continuous,
-                                  () => setSheet(
-                                    () => draftMode = ReadingMode.continuous,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          const Text(
-                            '预加载',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontBody,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Slider(
-                              value: draftPreload.toDouble(),
-                              min: SettingsService.minPreloadImages
-                                  .toDouble(),
-                              max: SettingsService.maxPreloadImages
-                                  .toDouble(),
-                              divisions:
-                                  SettingsService.maxPreloadImages -
-                                  SettingsService.minPreloadImages,
-                              activeColor: JellyTheme.primary,
-                              onChanged: (v) =>
-                                  setSheet(() => draftPreload = v.round()),
-                            ),
-                          ),
-                          SizedBox(
-                            width: 28,
-                            child: Text(
-                              '$draftPreload',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      _settingSwitchRow(
-                        title: '双页模式',
-                        subtitle: '横屏左右并排',
-                        value: draftDoublePage,
-                        onChanged: (v) =>
-                            setSheet(() => draftDoublePage = v),
-                      ),
-                    ],
-                    if (_tab == 1) ...[
-                      // ── 操作 tab：翻页反转 / 单手模式 / 点击区域 / 音量键 / 屏幕休眠 ──
-                      _settingSwitchRow(
-                        title: '翻页反转',
-                        subtitle: '左点下一页、右点上一页',
-                        value: draftReverseTap,
-                        onChanged: (v) => setSheet(() => draftReverseTap = v),
-                      ),
-                      _settingSwitchRow(
-                        title: '单手模式',
-                        subtitle: '屏幕左右点击都是下一页',
-                        value: draftSingleHand,
-                        onChanged: (v) =>
-                            setSheet(() => draftSingleHand = v),
-                      ),
-                      _settingInfoRow(
-                        title: '点击区域',
-                        subtitle: '自定义各区域触发上一页/菜单/下一页',
-                      ),
-                      _settingSwitchRow(
-                        title: '音量键翻页',
-                        subtitle: '按音量上/下键翻页（会接管音量键）',
-                        value: draftVolumeKey,
-                        onChanged: (v) => setSheet(() => draftVolumeKey = v),
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          const Text(
-                            '屏幕休眠',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontBody,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Row(
-                              children: [
-                                _segmentChip(
-                                  '默认',
-                                  draftSleep == 'default',
-                                  () =>
-                                      setSheet(() => draftSleep = 'default'),
-                                ),
-                                const SizedBox(width: 8),
-                                _segmentChip(
-                                  '10分钟',
-                                  draftSleep == '10min',
-                                  () => setSheet(() => draftSleep = '10min'),
-                                ),
-                                const SizedBox(width: 8),
-                                _segmentChip(
-                                  '永不息屏',
-                                  draftSleep == 'never',
-                                  () => setSheet(() => draftSleep = 'never'),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                    if (_tab == 2) ...[
-                      // ── 显示 tab：背景 / 信息栏 / 墨水屏 / 双指缩放 / 记住缩放 ──
-                      Row(
-                        children: [
-                          const Text(
-                            '背景',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontBody,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Row(
-                              children: [
-                                for (final (i, t) in const [
-                                  (0, '纯白'),
-                                  (1, '纸白'),
-                                  (2, '米黄'),
-                                  (3, '暗夜'),
-                                  (4, '纯黑'),
-                                ])
-                                  Expanded(
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 2,
-                                      ),
-                                      child: _segmentChip(
-                                        t,
-                                        draftBg == i,
-                                        () => setSheet(() => draftBg = i),
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      _settingSwitchRow(
-                        title: '信息栏',
-                        subtitle: '显示时间、页码、进度',
-                        value: draftShowHud,
-                        onChanged: (v) => setSheet(() => draftShowHud = v),
-                      ),
-                      _settingSwitchRow(
-                        title: '墨水屏',
-                        subtitle: '黑白柔和显示',
-                        value: draftInk,
-                        onChanged: (v) => setSheet(() => draftInk = v),
-                      ),
-                      _settingSwitchRow(
-                        title: '双指缩放',
-                        subtitle: '双指捏合放大（上下模式除外）',
-                        value: draftPinchZoom,
-                        onChanged: (v) =>
-                            setSheet(() => draftPinchZoom = v),
-                      ),
-                      _settingSwitchRow(
-                        title: '记住缩放大小',
-                        subtitle: '翻页时保留当前缩放（需开启双指缩放）',
-                        value: draftRememberZoom,
-                        onChanged: (v) =>
-                            setSheet(() => draftRememberZoom = v),
-                      ),
-                      InkWell(
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (mounted) _showUpscalePanel();
-                          });
-                        },
-                        borderRadius: BorderRadius.circular(10),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2),
+                        const Text(
+                          '阅读模式',
+                          style: TextStyle(fontSize: 14, color: Colors.white),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
                           child: Row(
                             children: [
-                              Text(
-                                '端侧 AI 超分',
-                                style: TextStyle(
-                                  fontSize: AppTheme.fontBody,
-                                  color: Colors.white,
+                              _modeChip(
+                                '右左',
+                                draftMode == ReadingMode.pageTurn,
+                                () => setSheet(
+                                  () => draftMode = ReadingMode.pageTurn,
                                 ),
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  '本地模型放大漫画图片，显示更清晰',
-                                  style: TextStyle(
-                                    fontSize: AppTheme.fontFootnote,
-                                    color: Colors.white54,
-                                  ),
+                              const SizedBox(width: 8),
+                              _modeChip(
+                                '左右',
+                                draftMode == ReadingMode.leftToRight,
+                                () => setSheet(
+                                  () => draftMode = ReadingMode.leftToRight,
                                 ),
                               ),
-                              const Icon(
-                                Icons.chevron_right_rounded,
-                                size: 18,
-                                color: Colors.white38,
+                              const SizedBox(width: 8),
+                              _modeChip(
+                                '消散',
+                                draftMode == ReadingMode.dissolve,
+                                () => setSheet(
+                                  () => draftMode = ReadingMode.dissolve,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              _modeChip(
+                                '拼页',
+                                draftMode == ReadingMode.continuous,
+                                () => setSheet(
+                                  () => draftMode = ReadingMode.continuous,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              _modeChip(
+                                '无动画',
+                                draftMode == ReadingMode.none,
+                                () => setSheet(
+                                  () => draftMode = ReadingMode.none,
+                                ),
                               ),
                             ],
                           ),
                         ),
-                      ),
-                    ],
-                    if (_tab == 3) ...[
-                      // ── 边距 tab：页眉 / 页脚 ──
-                      _marginSectionTitle('页眉（负位移进状态栏区域）'),
-                      _marginSliderRow(
-                        label: '左右边距',
-                        value: draftHl,
-                        onChanged: (v) => setSheet(() => draftHl = v),
-                      ),
-                      _marginSliderRow(
-                        label: '上边距',
-                        value: draftHt,
-                        onChanged: (v) => setSheet(() => draftHt = v),
-                      ),
-                      _marginSectionTitle('页脚'),
-                      _marginSliderRow(
-                        label: '左右边距',
-                        value: draftFl,
-                        onChanged: (v) => setSheet(() => draftFl = v),
-                      ),
-                      _marginSliderRow(
-                        label: '下边距',
-                        value: draftFb,
-                        onChanged: (v) => setSheet(() => draftFb = v),
-                      ),
-                    ],
-
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Text(
+                          '预加载',
+                          style: TextStyle(fontSize: 14, color: Colors.white),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Slider(
+                            value: draftPreload.toDouble(),
+                            min: SettingsService.minPreloadImages.toDouble(),
+                            max: SettingsService.maxPreloadImages.toDouble(),
+                            divisions:
+                                SettingsService.maxPreloadImages -
+                                SettingsService.minPreloadImages,
+                            activeColor: JellyTheme.primary,
+                            onChanged: (v) =>
+                                setSheet(() => draftPreload = v.round()),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 28,
+                          child: Text(
+                            '$draftPreload',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Text(
+                          '翻页反转',
+                          style: TextStyle(fontSize: 14, color: Colors.white),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            '左点下一页、右点上一页',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white54,
+                            ),
+                          ),
+                        ),
+                        Switch(
+                          value: draftReverseTap,
+                          activeColor: JellyTheme.primary,
+                          onChanged: (v) => setSheet(() => draftReverseTap = v),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        const Text(
+                          '双页模式',
+                          style: TextStyle(fontSize: 14, color: Colors.white),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            '横屏左右并排',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white54,
+                            ),
+                          ),
+                        ),
+                        Switch(
+                          value: draftDoublePage,
+                          activeColor: JellyTheme.primary,
+                          onChanged: (v) => setSheet(() => draftDoublePage = v),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        const Text(
+                          '信息栏',
+                          style: TextStyle(fontSize: 14, color: Colors.white),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            '显示时间、页码、进度',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white54,
+                            ),
+                          ),
+                        ),
+                        Switch(
+                          value: draftShowHud,
+                          activeColor: JellyTheme.primary,
+                          onChanged: (v) => setSheet(() => draftShowHud = v),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        const Text(
+                          '音量键翻页',
+                          style: TextStyle(fontSize: 14, color: Colors.white),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            '按音量上/下键翻页（会接管音量键）',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white54,
+                            ),
+                          ),
+                        ),
+                        Switch(
+                          value: draftVolumeKey,
+                          activeColor: JellyTheme.primary,
+                          onChanged: (v) => setSheet(() => draftVolumeKey = v),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        const Text(
+                          '墨水屏',
+                          style: TextStyle(fontSize: 14, color: Colors.white),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            '黑白柔和显示',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white54,
+                            ),
+                          ),
+                        ),
+                        Switch(
+                          value: draftInk,
+                          activeColor: JellyTheme.primary,
+                          onChanged: (v) => setSheet(() => draftInk = v),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 8),
                     Row(
                       children: [
@@ -1038,21 +800,7 @@ class _ReaderPageState extends State<ReaderPage> {
                               pathWord,
                               draftVolumeKey,
                             );
-                            final s = SettingsService();
-                            await s.setInkScreenMode(draftInk);
-                            await s.setSingleHand(draftSingleHand);
-                            await s.setPinchZoom(draftPinchZoom);
-                            await s.setRememberZoom(draftRememberZoom);
-                            await s.setScreenSleep(draftSleep);
-                            await s.setReaderBackgroundStyle(draftBg);
-                            await s.setComicMargins(
-                              headerLeft: draftHl,
-                              headerRight: draftHr,
-                              headerTop: draftHt,
-                              footerLeft: draftFl,
-                              footerRight: draftFr,
-                              footerBottom: draftFb,
-                            );
+                            await SettingsService().setInkScreenMode(draftInk);
                             if (ctx.mounted) Navigator.pop(ctx);
                           },
                           child: const Text('确认'),
@@ -1065,7 +813,7 @@ class _ReaderPageState extends State<ReaderPage> {
             ),
           );
         },
-      )),
+      ),
     );
   }
 
@@ -1079,13 +827,13 @@ class _ReaderPageState extends State<ReaderPage> {
             color: selected
                 ? JellyTheme.primary
                 : Colors.white.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
           ),
           alignment: Alignment.center,
           child: Text(
             label,
             style: TextStyle(
-              fontSize: AppTheme.fontSubhead,
+              fontSize: 13,
               color: selected ? Colors.white : Colors.white70,
               fontWeight: selected ? FontWeight.bold : FontWeight.normal,
             ),
@@ -1095,506 +843,15 @@ class _ReaderPageState extends State<ReaderPage> {
     );
   }
 
-  /// 段选小块（屏幕休眠 / 背景五选）：等宽，选中高亮
-  Widget _segmentChip(String label, bool selected, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          color: selected
-              ? JellyTheme.primary
-              : Colors.white.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: AppTheme.fontSubhead,
-            color: selected ? Colors.white : Colors.white70,
-            fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 开关行（标题 + 灰色说明 + 右侧 Switch）
-  Widget _settingSwitchRow({
-    required String title,
-    required String subtitle,
-    required bool value,
-    required ValueChanged<bool> onChanged,
-  }) {
-    return Row(
-      children: [
-        Text(
-          title,
-          style: TextStyle(fontSize: AppTheme.fontBody, color: Colors.white),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            subtitle,
-            style: TextStyle(
-              fontSize: AppTheme.fontFootnote,
-              color: Colors.white54,
-            ),
-          ),
-        ),
-        Switch(
-          value: value,
-          activeColor: JellyTheme.primary,
-          onChanged: onChanged,
-        ),
-      ],
-    );
-  }
-
-  /// 信息行（点击区域等仅展示说明，无开关）
-  Widget _settingInfoRow({
-    required String title,
-    required String subtitle,
-  }) {
-    return Row(
-      children: [
-        Text(
-          title,
-          style: TextStyle(fontSize: AppTheme.fontBody, color: Colors.white),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            subtitle,
-            style: TextStyle(
-              fontSize: AppTheme.fontFootnote,
-              color: Colors.white54,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// 边距分组标题（页眉/页脚）
-  Widget _marginSectionTitle(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8, bottom: 2),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: AppTheme.fontCaption,
-          color: Colors.white54,
-        ),
-      ),
-    );
-  }
-
-  /// 边距滑块行（标题 + 滑块 + 数值）
-  Widget _marginSliderRow({
-    required String label,
-    required double value,
-    required ValueChanged<double> onChanged,
-  }) {
-    return Row(
-      children: [
-        SizedBox(
-          width: 72,
-          child: Text(
-            label,
-            style: TextStyle(fontSize: AppTheme.fontBody, color: Colors.white),
-          ),
-        ),
-        Expanded(
-          child: Slider(
-            value: value,
-            min: 0,
-            max: 48,
-            divisions: 48,
-            activeColor: JellyTheme.primary,
-            onChanged: onChanged,
-          ),
-        ),
-        SizedBox(
-          width: 32,
-          child: Text(
-            value.round().toString(),
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ---------------- 端侧 AI 漫画超分（仅 UI 面板） ----------------
-
-  /// 端侧 AI 漫画超分设置面板（参考 cmbok IMG_8473）。
-  /// 只做设置面板 UI 与持久化，不做真实推理。
-  void _showUpscalePanel() {
-    final s = SettingsService();
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.black87,
-      barrierColor: Colors.black54,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => kbSheet(
-        StatefulBuilder(
-          builder: (ctx, setSheet) {
-            bool autoClean = s.upscaleAutoClean;
-            double limitGb = s.upscaleCleanLimitGb;
-            int denoise = s.upscaleDenoise;
-            bool modelReady = s.upscaleModelDownloaded;
-            return SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // 头部：标题 + 关闭
-                  Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          // 🔴 原标题是「**端侧 AI** 漫画超分」✗ —— 但本面板里
-                          // **没有模型、没有推理**：`:1395` 的"下载模型"按钮只把
-                          // `upscaleModelDownloaded` 这个 **bool** 翻成 true ✓
-                          //（`settings_service.dart:1794` 三行：比较→赋值→落盘 ✓）。
-                          // ✓ 先改成**它真正做的事**（图片放大 + 降噪，本地处理 ✓），
-                          // 不再冒充"端侧 AI" ✗。
-                          // ✅ **那处遗留已清零** ✓（原注释写"仍然假装下载 / 留给下一轮" ✗ ——
-                          //    已经过期了 ✓）：按钮已由「下载 6.8MB / 已下载」✗ 改成
-                          //    **「开启 / 已开启」** ✓ —— 见 `:1416` 的修复说明与
-                          //    `:1421` 的 `modelReady ? '已开启' : '开启'` ✓；
-                          //    全模块 grep `6.8MB` 现在**只命中注释** ✓ →
-                          //    **UI 里已无"假装下载模型"的字样** ✓✓
-                          '图片放大 / 降噪',
-                          style: TextStyle(
-                            fontSize: AppTheme.fontTitle3,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.close_rounded,
-                          size: 20,
-                          color: Colors.white54,
-                        ),
-                        onPressed: () => Navigator.pop(ctx),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  // 功能说明
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: JellyTheme.cardDark,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: const Text(
-                      '使用端侧 AI 模型把漫画图片放大到 2 倍，线条更锐利、文字更清晰。'
-                      '图片在本地处理，不上传网络。',
-                      style: TextStyle(
-                        fontSize: AppTheme.fontFootnote,
-                        color: Colors.white70,
-                        height: 1.5,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  // 模式限制提示
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: JellyTheme.primary.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '模式限制',
-                          style: TextStyle(
-                            fontSize: AppTheme.fontSubhead,
-                            color: JellyTheme.primary,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        const Text(
-                          '仅「左右翻页」「无动画」「消散」「双页模式」开启时生效；'
-                          '「上下连续滚动 Webtoon」「拼页」「双页拼页」将 Bypass（跳过超分）。',
-                          style: TextStyle(
-                            fontSize: AppTheme.fontFootnote,
-                            color: Colors.white70,
-                            height: 1.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  // 模型状态与管理
-                  Text(
-                    '模型状态与管理',
-                    style: TextStyle(
-                      fontSize: AppTheme.fontSubhead,
-                      color: Colors.white54,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: JellyTheme.cardDark,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: JellyTheme.primary.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(
-                            Icons.auto_fix_high_rounded,
-                            size: 22,
-                            color: JellyTheme.primary,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'AI 模型 1',
-                                style: TextStyle(
-                                  fontSize: AppTheme.fontBody,
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '二次元 / 动漫推荐 · 本地放大与降噪',
-                                style: TextStyle(
-                                  fontSize: AppTheme.fontCaption,
-                                  color: Colors.white54,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        FilledButton(
-                          onPressed: modelReady
-                              ? null
-                              : () {
-                                  setSheet(() => modelReady = true);
-                                  s.setUpscaleModelDownloaded(true);
-                                },
-                          style: FilledButton.styleFrom(
-                            backgroundColor: JellyTheme.primary,
-                            disabledBackgroundColor: Colors.white12,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 8,
-                            ),
-                          ),
-                          child: Text(
-                            // 🔴 原来写「下载 6.8MB / 已下载」✗ —— 它**什么也没下载**：
-                            // 只是把 `upscaleModelDownloaded` 这个 bool 落盘 ✓
-                            //（`:1405` 的那一行 ✓，服务层实现就三行：比较→赋值→落盘 ✓）。
-                            // ✓ 改成如实的「开启 / 已开启」✓ —— 本面板真正能做的只有
-                            //   放大与降噪两个开关 ✓，**没有模型可下** ✗
-                            modelReady ? '已开启' : '开启',
-                            style: TextStyle(
-                              fontSize: AppTheme.fontSubhead,
-                              color: modelReady ? Colors.white70 : Colors.white,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  // 降噪强度
-                  Text(
-                    '降噪强度',
-                    style: TextStyle(
-                      fontSize: AppTheme.fontSubhead,
-                      color: Colors.white54,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      for (final (i, t) in const [
-                        (0, '保守'),
-                        (1, '中等'),
-                        (2, '强力'),
-                      ]) ...[
-                        Expanded(
-                          child: _segmentChip(
-                            t,
-                            denoise == i,
-                            () {
-                              setSheet(() => denoise = i);
-                              s.setUpscaleDenoise(i);
-                            },
-                          ),
-                        ),
-                        if (i < 2) const SizedBox(width: 8),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    '保守保真推荐：保留更多原画细节',
-                    style: TextStyle(
-                      fontSize: AppTheme.fontCaption,
-                      color: Colors.white38,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  // 缓存
-                  Text(
-                    '缓存',
-                    style: TextStyle(
-                      fontSize: AppTheme.fontSubhead,
-                      color: Colors.white54,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: JellyTheme.cardDark,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Column(
-                      children: [
-                        const Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                '已缓存大图',
-                                style: TextStyle(
-                                  fontSize: AppTheme.fontBody,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                            Text(
-                              '0.0 MB',
-                              style: TextStyle(
-                                fontSize: AppTheme.fontBody,
-                                color: Colors.white70,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            const Expanded(
-                              child: Text(
-                                '超分缓存自动清理',
-                                style: TextStyle(
-                                  fontSize: AppTheme.fontBody,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                            Switch(
-                              value: autoClean,
-                              activeColor: JellyTheme.primary,
-                              onChanged: (v) {
-                                setSheet(() => autoClean = v);
-                                s.setUpscaleAutoClean(v);
-                              },
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            const SizedBox(
-                              width: 88,
-                              child: Text(
-                                '清理上限',
-                                style: TextStyle(
-                                  fontSize: AppTheme.fontBody,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: Slider(
-                                value: limitGb,
-                                min: 0.1,
-                                max: 10,
-                                divisions: 99,
-                                activeColor: JellyTheme.primary,
-                                onChanged: (v) {
-                                  setSheet(() => limitGb = v);
-                                  s.setUpscaleCleanLimitGb(v);
-                                },
-                              ),
-                            ),
-                            SizedBox(
-                              width: 56,
-                              child: Text(
-                                '${limitGb.toStringAsFixed(1)} GB',
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  fontSize: AppTheme.fontSubhead,
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-
   // ---------------- 目录 ----------------
 
-  /// 章节目录抽屉（同图书阅读器：右侧滑入，自动定位当前话）。
-  /// 双 tab：目录（搜索章节 + ↑↓ + 每行☁已缓存） / 书签（搜索书签 + 全部 + 空态）。
+  /// 章节目录抽屉（同图书阅读器：右侧滑入，自动定位当前话）
   void _showToc() {
     final chapters = _allChapters;
     if (chapters.isEmpty) return;
-    final drawerWidth = MediaQuery.sizeOf(context).width * 0.78;
-    final currentIndex =
-        chapters.indexWhere((c) => c.id == _currentChapter.id);
+    final drawerWidth = MediaQuery.sizeOf(context).width * 0.75;
+    final currentIndex = chapters.indexWhere((c) => c.id == _currentChapter.id);
     final itemScrollController = ItemScrollController();
-    final bookmarkService = MangaBookmarkService();
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
@@ -1608,222 +865,134 @@ class _ReaderPageState extends State<ReaderPage> {
         final subColor = isDark
             ? Colors.white.withValues(alpha: 0.5)
             : JellyTheme.textSecondary;
-        final searchBoxColor =
-            isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
-        int _tab = 0; // 0 目录 / 1 书签
-        String _query = '';
-        return StatefulBuilder(
-          builder: (ctx, setDialog) {
-            final bookmarks =
-                bookmarkService.bookmarksFor(widget.comic.pathWord);
-            final q = _query.trim();
-            final filteredChapters = q.isEmpty
-                ? chapters
-                : chapters
-                      .where((c) => c.title.contains(q))
-                      .toList();
-            final filteredBookmarks = q.isEmpty
-                ? bookmarks
-                : bookmarks
-                      .where((b) =>
-                          b.chapterTitle.contains(q) ||
-                          b.comicTitle.contains(q))
-                      .toList();
-            return Align(
-              alignment: Alignment.centerRight,
-              child: Material(
-                color: Colors.transparent,
-                child: Container(
-                  width: drawerWidth,
-                  height: double.infinity,
-                  decoration: BoxDecoration(
-                    color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(20),
-                      bottomLeft: Radius.circular(20),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.25),
-                        blurRadius: 30,
-                        offset: const Offset(-4, 0),
-                      ),
-                    ],
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (itemScrollController.isAttached) {
+            itemScrollController.jumpTo(index: currentIndex);
+          }
+        });
+        return Align(
+          alignment: Alignment.centerRight,
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: drawerWidth,
+              height: double.infinity,
+              decoration: BoxDecoration(
+                color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(20),
+                  bottomLeft: Radius.circular(20),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.25),
+                    blurRadius: 30,
+                    offset: const Offset(-4, 0),
                   ),
-                  child: SafeArea(
-                    child: Column(
-                      children: [
-                        // 头部：目录 N话 | 书签 M条 | ×
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 8, 10),
-                          child: Row(
-                            children: [
-                              _tocTabChip(
-                                label: '目录',
-                                count: '${chapters.length}话',
-                                selected: _tab == 0,
-                                onTap: () => setDialog(() => _tab = 0),
-                              ),
-                              const SizedBox(width: 10),
-                              _tocTabChip(
-                                label: '书签',
-                                count: '${bookmarks.length}条',
-                                selected: _tab == 1,
-                                onTap: () => setDialog(() => _tab = 1),
-                              ),
-                              const Spacer(),
-                              IconButton(
-                                icon: Icon(
-                                  Icons.close_rounded,
-                                  size: 20,
-                                  color: subColor,
-                                ),
-                                onPressed: () => Navigator.pop(ctx),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                            ],
+                ],
+              ),
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 14, 8, 12),
+                      child: Row(
+                        children: [
+                          const Text(
+                            '目录',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                        Divider(
-                          height: 1,
-                          color: subColor.withValues(alpha: 0.15),
-                        ),
-                        // 搜索行（目录 tab 右侧带 ↑↓）
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 10, 8, 6),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Container(
-                                  height: 38,
-                                  decoration: BoxDecoration(
-                                    color: searchBoxColor,
-                                    borderRadius: BorderRadius.circular(19),
-                                  ),
-                                  child: TextField(
-                                    onChanged: (v) =>
-                                        setDialog(() => _query = v),
-                                    style: TextStyle(
-                                      fontSize: AppTheme.fontBody,
-                                      color: textColor,
-                                    ),
-                                    decoration: InputDecoration(
-                                      isDense: true,
-                                      filled: false,
-                                      hintText:
-                                          _tab == 0 ? '搜索章节' : '搜索书签',
-                                      hintStyle: TextStyle(
-                                        fontSize: AppTheme.fontBody,
-                                        color: subColor,
-                                      ),
-                                      prefixIcon: Icon(
-                                        Icons.search_rounded,
-                                        size: 18,
-                                        color: subColor,
-                                      ),
-                                      prefixIconConstraints:
-                                          const BoxConstraints(
-                                        minWidth: 36,
-                                        minHeight: 36,
-                                      ),
-                                      border: InputBorder.none,
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                        vertical: 9,
-                                      ),
-                                    ),
-                                  ),
-                                ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: JellyTheme.primary.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '${chapters.length} 话',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: JellyTheme.primary,
+                                fontWeight: FontWeight.bold,
                               ),
-                              if (_tab == 0) ...[
-                                IconButton(
-                                  icon: Icon(
-                                    Icons.keyboard_arrow_up_rounded,
-                                    color: subColor,
-                                  ),
-                                  visualDensity: VisualDensity.compact,
-                                  onPressed: () {
-                                    if (filteredChapters.isNotEmpty &&
-                                        itemScrollController.isAttached) {
-                                      itemScrollController.jumpTo(index: 0);
-                                    }
-                                  },
-                                ),
-                                IconButton(
-                                  icon: Icon(
-                                    Icons.keyboard_arrow_down_rounded,
-                                    color: subColor,
-                                  ),
-                                  visualDensity: VisualDensity.compact,
-                                  onPressed: () {
-                                    if (filteredChapters.isNotEmpty &&
-                                        itemScrollController.isAttached) {
-                                      itemScrollController.jumpTo(
-                                        index: filteredChapters.length - 1,
-                                      );
-                                    }
-                                  },
-                                ),
-                              ],
-                            ],
+                            ),
                           ),
-                        ),
-                        if (_tab == 1)
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
+                          const Spacer(),
+                          IconButton(
+                            icon: Icon(
+                              Icons.close_rounded,
+                              size: 20,
+                              color: subColor,
+                            ),
+                            onPressed: () => Navigator.pop(ctx),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ],
+                      ),
+                    ),
+                    Divider(height: 1, color: subColor.withValues(alpha: 0.15)),
+                    Expanded(
+                      child: ScrollablePositionedList.builder(
+                        itemScrollController: itemScrollController,
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        itemCount: chapters.length,
+                        itemBuilder: (ctx, i) {
+                          final cur = i == currentIndex;
+                          return Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                Navigator.pop(ctx);
+                                _goToChapter(chapters[i]);
+                              },
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 5,
+                                  horizontal: 20,
+                                  vertical: 12,
                                 ),
-                                decoration: BoxDecoration(
-                                  color: JellyTheme.primary.withValues(
-                                    alpha: 0.15,
-                                  ),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
+                                decoration: cur
+                                    ? BoxDecoration(
+                                        color: JellyTheme.primary.withValues(
+                                          alpha: 0.1,
+                                        ),
+                                        border: Border(
+                                          left: BorderSide(
+                                            color: JellyTheme.primary,
+                                            width: 3,
+                                          ),
+                                        ),
+                                      )
+                                    : null,
                                 child: Text(
-                                  '全部',
+                                  chapters[i].title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontSize: AppTheme.fontCaption,
-                                    color: JellyTheme.primary,
-                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                    color: cur ? JellyTheme.primary : textColor,
+                                    fontWeight: cur
+                                        ? FontWeight.w700
+                                        : FontWeight.w400,
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                        Divider(
-                          height: 1,
-                          color: subColor.withValues(alpha: 0.15),
-                        ),
-                        Expanded(
-                          child: _tab == 0
-                              ? _buildTocChapterList(
-                                  ctx,
-                                  filteredChapters,
-                                  currentIndex,
-                                  itemScrollController,
-                                  textColor,
-                                  subColor,
-                                )
-                              : _buildTocBookmarkList(
-                                  ctx,
-                                  filteredBookmarks,
-                                  chapters,
-                                  textColor,
-                                  subColor,
-                                ),
-                        ),
-                      ],
+                          );
+                        },
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
-            );
-          },
+            ),
+          ),
         );
       },
       transitionBuilder: (ctx, anim, secondaryAnim, child) {
@@ -1834,223 +1003,6 @@ class _ReaderPageState extends State<ReaderPage> {
         return SlideTransition(position: offset, child: child);
       },
     );
-  }
-
-  /// 目录/书签 头部切换块（选中高亮 + 统计数）
-  Widget _tocTabChip({
-    required String label,
-    required String count,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected
-              ? JellyTheme.primary.withValues(alpha: 0.9)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: AppTheme.fontHeadline,
-                fontWeight: FontWeight.bold,
-                color: selected ? Colors.white : JellyTheme.textPrimaryLight,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              count,
-              style: TextStyle(
-                fontSize: AppTheme.fontCaption,
-                color: selected ? Colors.white70 : JellyTheme.textSecondary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 目录列表（行尾 ☁ 已缓存标记；打开时自动定位当前章）
-  Widget _buildTocChapterList(
-    BuildContext ctx,
-    List<ComicChapter> chapters,
-    int currentIndex,
-    ItemScrollController itemScrollController,
-    Color textColor,
-    Color subColor,
-  ) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (itemScrollController.isAttached) {
-        itemScrollController.jumpTo(index: currentIndex);
-      }
-    });
-    return ScrollablePositionedList.builder(
-      itemScrollController: itemScrollController,
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      itemCount: chapters.length,
-      itemBuilder: (ctx, i) {
-        final ch = chapters[i];
-        final cur = ch.id == _currentChapter.id;
-        final downloaded = DownloadService()
-            .isChapterDownloaded(widget.comic.pathWord, ch.id);
-        return Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () {
-              Navigator.pop(ctx);
-              _goToChapter(ch);
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 12,
-              ),
-              decoration: cur
-                  ? BoxDecoration(
-                      color: JellyTheme.primary.withValues(alpha: 0.1),
-                      border: Border(
-                        left: BorderSide(
-                          color: JellyTheme.primary,
-                          width: 3,
-                        ),
-                      ),
-                    )
-                  : null,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      ch.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: AppTheme.fontBody,
-                        color: cur ? JellyTheme.primary : textColor,
-                        fontWeight: cur ? FontWeight.w700 : FontWeight.w400,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(
-                    downloaded
-                        ? Icons.cloud_done_outlined
-                        : Icons.cloud_outlined,
-                    size: 16,
-                    color: downloaded
-                        ? JellyTheme.primary
-                        : subColor.withValues(alpha: 0.35),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  /// 书签列表（空态"还没有书签"；点击跳转对应章节页码）
-  Widget _buildTocBookmarkList(
-    BuildContext ctx,
-    List<MangaBookmark> bookmarks,
-    List<ComicChapter> chapters,
-    Color textColor,
-    Color subColor,
-  ) {
-    if (bookmarks.isEmpty) {
-      final hasAny = MangaBookmarkService()
-          .bookmarksFor(widget.comic.pathWord)
-          .isNotEmpty;
-      return Center(
-        child: Text(
-          hasAny ? '没有找到相关书签' : '还没有书签',
-          style: TextStyle(
-            fontSize: AppTheme.fontBody,
-            color: subColor,
-          ),
-        ),
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      itemCount: bookmarks.length,
-      itemBuilder: (ctx, i) {
-        final b = bookmarks[i];
-        ComicChapter? target;
-        for (final c in chapters) {
-          if (c.id == b.chapterId) {
-            target = c;
-            break;
-          }
-        }
-        return Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () {
-              Navigator.pop(ctx);
-              _goToChapter(target ?? chapters.first,
-                  initialPage: b.pageIndex);
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 12,
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.bookmark_rounded,
-                    size: 16,
-                    color: JellyTheme.primary,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          b.chapterTitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: AppTheme.fontBody,
-                            color: textColor,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '第 ${b.pageIndex + 1} / ${b.pageCount} 页 · ${_fmtDate(b.createdAt)}',
-                          style: TextStyle(
-                            fontSize: AppTheme.fontFootnote,
-                            color: subColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  String _fmtDate(DateTime t) {
-    final mm = t.month.toString().padLeft(2, '0');
-    final dd = t.day.toString().padLeft(2, '0');
-    return '${t.year}-$mm-$dd';
   }
 
   /// 按当前进度把漫画归位到"正在读"/"已读完"书架（幂等，带状态缓存避免频繁调用）。
@@ -2116,16 +1068,6 @@ class _ReaderPageState extends State<ReaderPage> {
   void _handleTap(TapUpDetails details) {
     final size = MediaQuery.sizeOf(context);
     final dx = details.globalPosition.dx;
-    // 单手模式：屏幕左右点击都是下一页
-    if (SettingsService().singleHand) {
-      final tapEdge = dx < size.width / 3 || dx > size.width * 2 / 3;
-      if (tapEdge) {
-        _onTapRight();
-      } else {
-        _toggleControls();
-      }
-      return;
-    }
     // 从左往右模式自带方向反转；「翻页按钮反转」开关与之异或叠加
     final tapReverse =
         _isReverseDirection !=
@@ -2385,7 +1327,7 @@ class _ReaderPageState extends State<ReaderPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, size: 40, color: Colors.red),
+            const Icon(Icons.error_outline, size: 48, color: Colors.red),
             const SizedBox(height: 16),
             Text('加载失败: $_error', style: TextStyle(color: _inkTextColor)),
             const SizedBox(height: 16),
@@ -2418,18 +1360,15 @@ class _ReaderPageState extends State<ReaderPage> {
     // 章节加载完成时淡入过渡
     // 外层 PageStorage 用每次加载重建的空桶，让 ScrollablePositionedList
     // initState 读 PageStorage 拿到 null，从第 0 页开始（不恢复历史偏移）
-    final Widget galleryWidget = Padding(
-      padding: _comicMargins,
-      child: PageStorage(
-        bucket: _galleryBucket,
-        child: TweenAnimationBuilder<double>(
-          key: PageStorageKey<String>('fade_${_currentChapter.id}_$_loadId'),
-          tween: Tween(begin: 0.0, end: 1.0),
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOut,
-          builder: (context, v, child) => Opacity(opacity: v, child: child),
-          child: gallery,
-        ),
+    final Widget galleryWidget = PageStorage(
+      bucket: _galleryBucket,
+      child: TweenAnimationBuilder<double>(
+        key: PageStorageKey<String>('fade_${_currentChapter.id}_$_loadId'),
+        tween: Tween(begin: 0.0, end: 1.0),
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+        builder: (context, v, child) => Opacity(opacity: v, child: child),
+        child: gallery,
       ),
     );
     // 墨水屏模式：纸张色背景置于灰度罩外（保留暖意），滤镜只作用于图片；
@@ -2463,15 +1402,11 @@ class _ReaderPageState extends State<ReaderPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
-                    Icons.broken_image,
-                    size: 40,
-                    color: JellyTheme.textSecondary,
-                  ),
+                  const Icon(Icons.broken_image, size: 48, color: Colors.grey),
                   const SizedBox(height: 8),
                   Text(
                     '第 ${index + 1} 页加载失败',
-                    style: TextStyle(color: JellyTheme.textSecondary),
+                    style: const TextStyle(color: Colors.grey),
                   ),
                 ],
               ),
@@ -2879,15 +1814,11 @@ class _ReaderPageState extends State<ReaderPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.broken_image,
-            size: 48,
-            color: JellyTheme.textSecondary,
-          ),
+          const Icon(Icons.broken_image, size: 48, color: Colors.grey),
           const SizedBox(height: 8),
           Text(
             '第 ${index + 1} 页加载失败',
-            style: TextStyle(color: JellyTheme.textSecondary),
+            style: const TextStyle(color: Colors.grey),
           ),
         ],
       ),
@@ -2933,7 +1864,7 @@ class _ReaderPageState extends State<ReaderPage> {
           return const SizedBox.shrink();
         }
         final style = TextStyle(
-          fontSize: AppTheme.fontCaption,
+          fontSize: 11,
           color: Colors.white.withValues(alpha: 0.5),
           shadows: const [
             Shadow(
@@ -3045,41 +1976,15 @@ class _ReaderPageState extends State<ReaderPage> {
                 children: [
                   Text(
                     widget.comic.title,
-                    style: const TextStyle(
-                      fontSize: AppTheme.fontBody,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: const TextStyle(fontSize: 14, color: Colors.grey),
                   ),
                   Text(
                     _currentChapter.title,
-                    style: TextStyle(
-                      fontSize: AppTheme.fontFootnote,
-                      color: Colors.white.withValues(alpha: 0.75),
-                    ),
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],
               ),
               iconTheme: const IconThemeData(color: Colors.white),
-              actions: [
-                ListenableBuilder(
-                  listenable: MangaBookmarkService(),
-                  builder: (context, _) {
-                    final marked = _currentPageBookmarked();
-                    return IconButton(
-                      tooltip: marked ? '取消书签' : '添加书签',
-                      icon: Icon(
-                        marked
-                            ? Icons.bookmark_rounded
-                            : Icons.bookmark_border_rounded,
-                        color: marked ? JellyTheme.primary : Colors.white,
-                        size: 24,
-                      ),
-                      onPressed: _toggleBookmark,
-                    );
-                  },
-                ),
-              ],
             ),
             const Spacer(),
             // 底部栏：颜色铺到底部边缘，SafeArea 抬高内容避开系统导航栏/手势条
@@ -3142,25 +2047,31 @@ class _ReaderPageState extends State<ReaderPage> {
                           ),
                         ],
                       ),
-                      // 底部按钮行：番茄钟 / 设置 / 目录 三按钮居中等距
-                      // （对齐参考图 IMG_8575：三个图标一行均匀分布）
+                      // 设置 + 目录按钮（纯图标，右对齐，同图书阅读器）
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
+                          // 左侧占位，宽度≈右侧两按钮，使番茄按钮居中
+                          const SizedBox(width: 96),
                           const PomodoroButton(),
-                          TextButton(
-                            onPressed: _showReaderSettingsSheet,
-                            child: const Icon(
-                              Icons.settings_rounded,
-                              color: Colors.white,
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: _showToc,
-                            child: const Icon(
-                              Icons.menu_book_rounded,
-                              color: Colors.white,
-                            ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              TextButton(
+                                onPressed: _showReaderSettingsSheet,
+                                child: const Icon(
+                                  Icons.settings_rounded,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: _showToc,
+                                child: const Icon(
+                                  Icons.menu_book_rounded,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
