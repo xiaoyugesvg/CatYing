@@ -1,17 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../services/music_api.dart';
-import '../services/player_manager.dart';
 import '../services/settings_store.dart';
-import '../../services/main_tab_controller.dart';
 import '../theme/music_theme.dart';
-import '../widgets/mini_player.dart';
 import 'discover_page.dart';
 import 'library_page.dart';
+import 'music_bottom_chrome.dart';
 import 'charts_page.dart';
 import 'profile_page.dart';
 import 'search_page.dart';
-import '../../reading/widgets/jelly_nav_bar.dart';
 import '../../common/theme.dart';
 
 /// 音乐模块的 App 骨架 —— 移植自 Beans 的 `RootView.swift`。
@@ -32,6 +29,26 @@ import '../../common/theme.dart';
 class MusicRootView extends StatefulWidget {
   const MusicRootView({super.key});
 
+  /// 音乐主页是否**正挂载在树上**（供全局迷你条判断要不要让位给导航栏）。
+  ///
+  /// ── 🔴 为什么需要它（用户 2026 要求）──────────────────────────
+  /// 用户要求「只要在播放，**每个页面**都要有迷你条」→ 迷你条移到了
+  /// `app.dart` 的全局 Stack（覆盖所有路由）。
+  ///
+  /// 但音乐主页**本来就有**一个迷你条（它是导航栏的 Column 兄弟）。
+  /// 如果不判断，主页会出现**两条**。
+  ///
+  /// 而且两者的纵向位置不同：
+  ///   · 主页里：迷你条在导航栏**上方**（导航栏占 86）
+  ///   · 子页面里：下面没有导航栏 → **贴底**
+  /// 所以全局那条要按这个标记决定 `bottomInset`（0 或导航栏高度）。
+  ///
+  /// 用"挂载状态"而不是路由栈判断，是因为主页**不是一条路由** ——
+  /// 它是 `MainTabController` 的一个 tab，压在 IndexedStack 里，
+  /// 从路由栈上看不出来"现在显示的是不是它"。
+  static bool isMounted = false;
+
+
   @override
   State<MusicRootView> createState() => _MusicRootViewState();
 }
@@ -44,38 +61,10 @@ class MusicRootView extends StatefulWidget {
 /// 以后改阅读的圆角，这里要跟着改。
 
 class _MusicRootViewState extends State<MusicRootView> {
-  int _tab = 0;
 
-  /// 底栏 5 项（主页 / 搜索 / 乐库 / 榜单 / 我的）。
-  ///
-  /// ── 用户 2026 的改动 ─────────────────────────────────────────
-  ///   · `音乐库` → **`乐库`**（名字短一点，5 项时底栏更不挤）
-  ///   · **新增 `榜单`**：榜单原来挤在乐库页**最底部**，
-  ///     那个页面已经有"我的内容/正在播放/最近播放/收藏"四块，
-  ///     榜单要滚很久才看得到；而且它是**发现**性质，不是"我的东西"。
-  ///     拆出来职责清楚（乐库=我的，榜单=去发现）。
-  ///
-  /// ⚠️ 5 项时每个格子变窄 → 长标签会换行/挤压，
-  ///    所以标签都控制在 **2~3 个汉字**。
-  static const _tabs = <({String label, IconData icon, IconData active})>[
-    (label: '主页', icon: Icons.home_outlined, active: Icons.home_rounded),
-    (label: '搜索', icon: Icons.search_rounded, active: Icons.search_rounded),
-    (
-      label: '乐库',
-      icon: Icons.library_music_outlined,
-      active: Icons.library_music_rounded,
-    ),
-    (
-      label: '榜单',
-      icon: Icons.leaderboard_outlined,
-      active: Icons.leaderboard_rounded,
-    ),
-    (
-      label: '我的',
-      icon: Icons.person_outline_rounded,
-      active: Icons.person_rounded,
-    ),
-  ];
+
+
+
   // 音乐底栏 = **5 项**（主页 / 搜索 / 乐库 / 榜单 / 我的）。
   //
   // 原先第 5 项是「影视」—— 它不是本模块的 tab，只是"跳出音乐"的入口：
@@ -91,8 +80,17 @@ class _MusicRootViewState extends State<MusicRootView> {
   @override
   void initState() {
     super.initState();
+    MusicRootView.isMounted = true;
     // 进音乐 tab 就把数据预热起来（不挡界面）
     _warmUp();
+  }
+
+  @override
+  void dispose() {
+    // ⚠️ 必须复位：否则离开音乐后全局迷你条会一直以为"要避开导航栏"，
+    //    在别的模块里露出一大截空白。
+    MusicRootView.isMounted = false;
+    super.dispose();
   }
 
   /// 预热；失败则显示重试条（原来失败是**完全静默**的，
@@ -154,7 +152,7 @@ class _MusicRootViewState extends State<MusicRootView> {
                     // tab 由下面的 `index:` 负责，key 只需跟"主题版本"（换肤要重建）。
                     key: ValueKey(
                         'music-tabs-${MusicThemeStore.instance.revision.value}'),
-                    index: _tab,
+                    index: MusicTabState.index.value,
                     // ⚠️ 顺序必须与 `_tabs` **严格一一对应**
                     //（主页 / 搜索 / 乐库 / 榜单 / 我的）
                     children: const [
@@ -211,29 +209,10 @@ class _MusicRootViewState extends State<MusicRootView> {
                       ),
                     ),
                   ),
-                // 底部：迷你播放器 + 悬浮导航栏
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AnimatedBuilder(
-                        animation: MusicPlayerManager.instance,
-                        builder: (context, _) {
-                          if (MusicPlayerManager.instance.currentSong == null) {
-                            return const SizedBox.shrink();
-                          }
-                          return MiniPlayer(
-                            onOpen: () => openMusicPlayer(context),
-                          );
-                        },
-                      ),
-                      _navBar(),
-                    ],
-                  ),
-                ),
+                // ⚠️ 底部两条（迷你条 + 导航栏）**已经移到全局层** ——
+                // 见 `music_bottom_chrome.dart` 的 `MusicBottomChrome`，
+                // 它挂在 `app.dart` 的 Stack 里，覆盖所有路由。
+                // 这里**不要再画一遍**，否则主页会出现两条。
               ],
             ),
           ),
@@ -241,63 +220,10 @@ class _MusicRootViewState extends State<MusicRootView> {
       },
     );
   }
-  /// 音乐底部栏 —— **直接复用阅读的 `JellyNavBar`**（用户要求以阅读为基准）。
-  ///
-  /// ── 为什么不再自己画一遍 ──────────────────────────────────────
-  /// 这里原来是手写的胶囊（Container + 阴影 + Row + AnimatedContainer），
-  /// 于是只有"背景色淡入"（180ms），而阅读那边有：
-  ///   · **果冻弹性滑动指示器**（850ms ElasticOutCurve）
-  ///   · **毛玻璃模糊**（背景动画关闭时的 BackdropFilter）
-  /// 现在直接复用组件：一次拿到指示器 + 毛玻璃 + 自适应宽度，
-  /// 而且以后改一处三条栏一起变。
-  ///
-  /// 保留音乐特有的：**长按「我的」回影视** ——
-  /// 音乐是独立模块，影视底栏在这里被隐藏，需要一个出口。
-  Widget _navBar() {
-    // 🔴 #22：**不要用 `Obx` 包它**（这里踩过坑，写清楚）
-    //
-    // `Obx` 只有在它的 builder 内**读到了至少一个 `.obs`（Rx）变量**时才成立。
-    // 而这个组件里：
-    //   · `JellyNavBar` 是普通 StatefulWidget（不是 GetX 的）
-    //   · `_tab` 是**普通 int**（本页用 `setState` 管理，不是 Rx）
-    //   · `_tabs` 是普通 List
-    // 于是 `Obx` 检测不到任何可观察变量，直接抛：
-    //   "[Get] the improper use of a GetX has been detected"
-    // 而 GetX 的这个异常会让**整棵 Obx 子树被换成 ErrorWidget**
-    //（ErrorWidget 的高度是 100000px，表现就是"底栏不见了 + 多出一块空白"）。
-    //
-    // 用户实测截图："底部没有悬浮胶囊导航栏" —— 就是这条异常造成的。
-    //
-    // 本页是 StatefulWidget + setState，切 tab 已经会重建，
-    // **不需要** Obx。直接返回即可。
-    return JellyNavBar(
-      // ⚠️ 显式传音乐的调色板（JellyNavBar 默认用阅读的 JellyTheme，
-      // 切音乐配色时那个不会变 → 音乐栏颜色错）。
-      palette: MusicTheme.palette,
-      currentIndex: _tab,
-      floating: true,
-      items: [
-        // 🔴 `_tabs` 里一直带着 `icon`（未选中态图标）却**从未被读取** ✗ ——
-        // 原来无论选中与否都传 `active` → 等于"没有未选中态"的视觉 ✓。
-        // 这里把它用起来：选中用 `active`、未选中用 `icon` ✓（原本的设计意图 ✓）
-        for (var i = 0; i < _tabs.length; i++)
-          JellyNavItem(
-            icon: i == _tab ? _tabs[i].active : _tabs[i].icon,
-            label: _tabs[i].label,
-          ),
-      ],
-      onTap: (i) {
-        if (i < 0 || i >= _tabs.length) return;
-        setState(() => _tab = i);
-      },
-      onLongPress: (i) {
-        if (i < 0 || i >= _tabs.length) return;
-        if (_tabs[i].label == '我的') {
-          MainTabController.instance.backToVideo();
-        }
-      },
-    );
-  }
+  // ⚠️ 原来的 `_navBar()` **已移出本文件** ——
+  // 底栏（迷你条 + 导航栏）现在由 `music_bottom_chrome.dart` 的
+  // `MusicBottomChrome` 提供，并挂在 `app.dart` 的全局 Stack 里，
+  // 这样**所有路由**（含 push 出去的子页面）都能看到它们。
 
 }
 

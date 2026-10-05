@@ -8,14 +8,12 @@ import 'package:url_launcher/url_launcher.dart';
 import '../services/platform_service.dart';
 import '../services/settings_service.dart';
 import '../services/theme_switch.dart';
-import '../services/update_service.dart';
 import '../theme/jelly_palette.dart';
 import '../theme/jelly_theme.dart';
 import '../utils/constants.dart';
 import '../widgets/bookshelf_icon.dart';
 import '../widgets/jelly_nav_bar.dart';
 import '../widgets/staggered_entrance.dart';
-import '../widgets/update_dialog.dart';
 import 'about_page.dart';
 import 'book_search_page.dart';
 import 'bookshelf_page.dart';
@@ -27,8 +25,6 @@ import 'download_settings_page.dart';
 import 'favorites_page.dart';
 import 'reading_settings_page.dart';
 import 'search_page.dart';
-import 'shuyuan_page.dart';
-import 'shuyuan_source_repo_page.dart';
 import 'source_repo_page.dart';
 
 /// "我的"页：菜单（下载设置等）+ 右上角暗色模式切换 + 版本信息
@@ -144,26 +140,6 @@ class _MePageState extends State<MePage> {
                           listenable: SettingsService(),
                           builder: (context, _) => _buildSwitchTile(
                             isDark,
-                            icon: Icons.system_update_rounded,
-                            iconBg: JellyTheme.primary,
-                            title: '启动检查更新',
-                            subtitle: '仅新版本才弹窗提示',
-                            value: SettingsService().checkUpdateOnStartup,
-                            onChanged:
-                                SettingsService().setCheckUpdateOnStartup,
-                          ),
-                        ),
-                      ),
-                    ),
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_theme_follow'),
-                      index: 2,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: ListenableBuilder(
-                          listenable: SettingsService(),
-                          builder: (context, _) => _buildSwitchTile(
-                            isDark,
                             icon: Icons.brightness_auto_rounded,
                             iconBg: JellyTheme.primary,
                             title: '主题跟随系统',
@@ -257,48 +233,8 @@ class _MePageState extends State<MePage> {
                       ),
                     ),
                     StaggeredEntrance(
-                      key: ValueKey('${_session}_shuyuan'),
-                      index: 7,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.menu_book_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '书源',
-                          subtitle: '聚搜 · 多书源阅读',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ShuyuanPage(),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_shuyuan_repo'),
-                      index: 8,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.library_books_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '书源仓库',
-                          subtitle: '导入 · 编辑 · 删除书源',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ShuyuanSourceRepoPage(),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    StaggeredEntrance(
                       key: ValueKey('${_session}_2'),
-                      index: 9,
+                      index: 7,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -318,7 +254,7 @@ class _MePageState extends State<MePage> {
                     ),
                     StaggeredEntrance(
                       key: ValueKey('${_session}_download_record'),
-                      index: 10,
+                      index: 8,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -341,7 +277,7 @@ class _MePageState extends State<MePage> {
                     ),
                     StaggeredEntrance(
                       key: ValueKey('${_session}_browse_history'),
-                      index: 11,
+                      index: 9,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -365,30 +301,15 @@ class _MePageState extends State<MePage> {
                         key: ValueKey(
                           '${_session}_hidden_${hiddenTabs[i].name}',
                         ),
-                        index: 9 + i,
+                        index: 7 + i,
                         child: SizedBox(
                           width: itemWidth,
                           child: _buildHiddenTabItem(isDark, hiddenTabs[i]),
                         ),
                       ),
                     StaggeredEntrance(
-                      key: ValueKey('${_session}_6'),
-                      index: 9 + hc,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.update_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '检查更新',
-                          subtitle: '获取 GitHub 最新版本',
-                          onTap: _checkUpdate,
-                        ),
-                      ),
-                    ),
-                    StaggeredEntrance(
                       key: ValueKey('${_session}_7'),
-                      index: 10 + hc,
+                      index: 8 + hc,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -418,7 +339,7 @@ class _MePageState extends State<MePage> {
                 children: [
                   StaggeredEntrance(
                     key: ValueKey('${_session}_8'),
-                    index: 10 + hc,
+                    index: 8 + hc,
                     child: _buildQuickAction(
                       isDark
                           ? 'assets/icons/github_dark.png'
@@ -430,7 +351,7 @@ class _MePageState extends State<MePage> {
                   ),
                   StaggeredEntrance(
                     key: ValueKey('${_session}_9'),
-                    index: 11 + hc,
+                    index: 9 + hc,
                     child: _buildQuickAction(
                       'assets/icons/qq.png',
                       Icons.group_rounded,
@@ -440,7 +361,7 @@ class _MePageState extends State<MePage> {
                   ),
                   StaggeredEntrance(
                     key: ValueKey('${_session}_10'),
-                    index: 12 + hc,
+                    index: 10 + hc,
                     child: _buildQuickAction(
                       'assets/icons/tt-station.png',
                       Icons.language_rounded,
@@ -450,7 +371,7 @@ class _MePageState extends State<MePage> {
                   ),
                   StaggeredEntrance(
                     key: ValueKey('${_session}_11'),
-                    index: 13 + hc,
+                    index: 11 + hc,
                     child: _buildQuickAction(
                       'assets/icons/share.png',
                       Icons.share_rounded,
@@ -528,30 +449,6 @@ class _MePageState extends State<MePage> {
         );
       },
     );
-  }
-
-  // -------------------- 检查更新 --------------------
-
-  Future<void> _checkUpdate() async {
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) =>
-          Center(child: CircularProgressIndicator(color: JellyTheme.primary)),
-    );
-    final result = await UpdateService.check();
-    if (!mounted) return;
-    Navigator.of(context).pop(); // 关闭 loading
-
-    if (result.error != null) {
-      _toast(result.error!);
-      return;
-    }
-    if (!result.hasUpdate) {
-      _toast('已是最新版本 V${AppConstants.version}');
-      return;
-    }
-    showUpdateAvailableDialog(context, result);
   }
 
   // -------------------- 分享软件 --------------------

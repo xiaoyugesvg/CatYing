@@ -66,7 +66,18 @@ class MusicMiniPlayerLayout {
 ///
 /// 点整条打开全屏播放器。没有正在播放的歌曲时**整条隐藏**（不占位）。
 class MiniPlayer extends StatefulWidget {
-  const MiniPlayer({super.key, required this.onOpen});
+  const MiniPlayer({
+    super.key,
+    required this.onOpen,
+    this.bottomInset = 0,
+  });
+
+  /// 除 [MusicMiniPlayerLayout.gapAboveNavBar] 之外，**再往下垫多少**。
+  ///
+  /// · `RootView` 里传 **0** —— 那时它是导航栏的 Column 兄弟，位置已排好。
+  /// · 全局悬浮用法传**导航栏高度**（在音乐主页面时）或 **0**（子页面贴底），
+  ///   见 `app.dart` 的 `_GlobalMiniPlayer`。
+  final double bottomInset;
 
   final VoidCallback onOpen;
 
@@ -126,11 +137,22 @@ class _MiniPlayerState extends State<MiniPlayer>
           // 用具名常量 + 只在"上方与左右"给外边距：
           // 底部**不给**外边距，否则会和导航栏自己的
           // `bottomMargin`（FloatingNavSpec.bottomMargin = 30）叠加。
-          padding: const EdgeInsets.fromLTRB(
+          //
+          // ── ⚠️ `bottomInset` 是给**全局悬浮用法**加的（用户 2026 要求）──
+          // 「只要在播放，每个页面都要有迷你条」→ 迷你条被挂到 `app.dart`
+          // 的全局 Stack 里（和悬浮播放球同一层，覆盖所有路由）。
+          //
+          // 但那种情况下它**不在** `RootView` 的 Column 里了，必须自己
+          // 定位到底部 —— 而且：
+          //   · 在音乐主页面：要把导航栏的 86 让出来
+          //   · 在 push 出去的子页：下面没有导航栏，贴底（+ 安全区）
+          // 所以这里用一个参数表达"还要再往下垫多少"，
+          // 由调用方决定（`RootView` 里传 0，因为 Column 已经排好了）。
+          padding: EdgeInsets.fromLTRB(
             MusicMiniPlayerLayout.sideMargin,
             0,
             MusicMiniPlayerLayout.sideMargin,
-            MusicMiniPlayerLayout.gapAboveNavBar,
+            MusicMiniPlayerLayout.gapAboveNavBar + widget.bottomInset,
           ),
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,

@@ -87,7 +87,6 @@ class SettingsService extends ChangeNotifier {
   static const _kProtectFullBookKey = 'download_protect_full_book_cache';
   static const _defaultHomeKey = 'default_home_page';
   static const _kBuiltinAccountKey = 'use_builtin_account';
-  static const _kCheckUpdateKey = 'check_update_on_startup';
   static const _kGlobalProxyEnabledKey = 'global_proxy_enabled';
   static const _kGlobalProxyKey = 'global_proxy'; // "host:port"（空串=直连）
   static const _kAutoSyncKey = 'auto_sync_backup'; // 同步与备份：自动同步开关
@@ -231,7 +230,6 @@ class SettingsService extends ChangeNotifier {
   static const int defaultOnlineCacheGb = 1;
   DefaultHomePage _defaultHomePage = DefaultHomePage.manga;
   bool _useBuiltinAccount = true; // 图书下载未登录时是否回退内置账号（搜索一律回退内置账号）
-  bool _checkUpdateOnStartup = true; // 启动时自动检查 app 新版本
   bool _globalProxyEnabled = false; // 全局网络代理开关（参考图 IMG_8465 网络代理）
   String _globalProxy = ''; // 全局代理 "host:port"
   bool _autoSyncBackup = false; // 同步与备份：自动同步开关
@@ -339,7 +337,6 @@ class SettingsService extends ChangeNotifier {
   bool get protectFullBookCache => _protectFullBookCache;
   DefaultHomePage get defaultHomePage => _defaultHomePage;
   bool get useBuiltinAccount => _useBuiltinAccount;
-  bool get checkUpdateOnStartup => _checkUpdateOnStartup;
   bool get globalProxyEnabled => _globalProxyEnabled;
   String get globalProxy => _globalProxy;
   bool get autoSyncBackup => _autoSyncBackup;
@@ -555,7 +552,6 @@ class SettingsService extends ChangeNotifier {
             : DefaultHomePage.manga;
       }
       _useBuiltinAccount = prefs.getBool(_kBuiltinAccountKey) ?? true;
-      _checkUpdateOnStartup = prefs.getBool(_kCheckUpdateKey) ?? true;
       _globalProxyEnabled =
           prefs.getBool(_kGlobalProxyEnabledKey) ?? false;
       _globalProxy = prefs.getString(_kGlobalProxyKey) ?? '';
@@ -1012,19 +1008,6 @@ class SettingsService extends ChangeNotifier {
       await prefs.setBool(_kBuiltinAccountKey, value);
     } catch (e) {
       _log('保存内置账号开关失败: $e');
-    }
-  }
-
-  /// 设置：启动时是否自动检查新版本
-  Future<void> setCheckUpdateOnStartup(bool value) async {
-    if (_checkUpdateOnStartup == value) return;
-    _checkUpdateOnStartup = value;
-    notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_kCheckUpdateKey, value);
-    } catch (e) {
-      _log('保存启动检查更新开关失败: $e');
     }
   }
 

@@ -20,8 +20,20 @@ class ShuyuanSourceStore extends ChangeNotifier {
   final List<ShuyuanSource> _sources = [];
   bool _initialized = false;
 
-  List<ShuyuanSource> get sources =>
-      List.unmodifiable(_sources.where((s) => s.enabled));
+  /// 启用源列表缓存。内置书源可达数千条，`sources` 会被 UI 在构建期反复读取，
+  /// 若每次都 `where().toList()` 过滤全表就是 O(n)——调用 n 次即 O(n²)（实测
+  /// 3907 个源时直接卡死闪退）。这里按需计算一次，任何写操作（[_save]）后失效。
+  List<ShuyuanSource>? _enabledCache;
+
+  List<ShuyuanSource> get sources {
+    final cached = _enabledCache;
+    if (cached != null) return cached;
+    final list = List<ShuyuanSource>.unmodifiable(
+      _sources.where((s) => s.enabled),
+    );
+    _enabledCache = list;
+    return list;
+  }
 
   /// 全部源（含停用），仓库页展示用。
   List<ShuyuanSource> get allSources => List.unmodifiable(_sources);
@@ -33,6 +45,7 @@ class ShuyuanSourceStore extends ChangeNotifier {
     _box = await Hive.openBox<dynamic>(_boxName);
     final raw = _box!.get('list', defaultValue: <dynamic>[]) as List;
     _sources.clear();
+    _enabledCache = null;
     for (final item in raw) {
       if (item is Map) {
         try {
@@ -44,6 +57,7 @@ class ShuyuanSourceStore extends ChangeNotifier {
   }
 
   Future<void> _save() async {
+    _enabledCache = null; // 启用集合可能变化，作废缓存
     await _box?.put(
       'list',
       [for (final s in _sources) s.toJson()],
@@ -57,16 +71,20 @@ class ShuyuanSourceStore extends ChangeNotifier {
     final parsed = ShuyuanSourceService().parseSources(text);
     var count = 0;
     var skipped = 0;
+    // 用 Set 做去重：内置书源可达数千条，逐条 `_sources.any(...)` 是 O(n²)，
+    // 首次导入 3907 条时约 760 万次比较，明显拖慢启动。
+    final existing = <String>{for (final s in _sources) s.bookSourceUrl};
     for (final src in parsed) {
       if (!src.isValid) {
         skipped++;
         continue;
       }
-      if (_sources.any((s) => s.bookSourceUrl == src.bookSourceUrl)) {
+      if (existing.contains(src.bookSourceUrl)) {
         skipped++;
         continue;
       }
       _sources.add(src);
+      existing.add(src.bookSourceUrl);
       count++;
     }
     await _save();
@@ -86,30 +104,50 @@ class ShuyuanSourceStore extends ChangeNotifier {
     await _save();
   }
 
+  /// 清空全部书源（仓库页「清空」用）。
+  Future<void> clearAll() async {
+    _sources.clear();
+    await _save();
+  }
+
+  /// 全部启用 / 全部停用（仓库页「全部启动 / 全部关闭」用）。
+  Future<void> setAllEnabled(bool enabled) async {
+    for (var i = 0; i < _sources.length; i++) {
+      final old = _sources[i];
+      if (old.enabled == enabled) continue;
+      _sources[i] = _rebuildWithEnabled(old, enabled);
+    }
+    await _save();
+  }
+
+  /// 按启用状态重建一个源（ShuyuanSource 不可变，逐字段复制）。
+  ShuyuanSource _rebuildWithEnabled(ShuyuanSource s, bool enabled) {
+    return ShuyuanSource(
+      bookSourceName: s.bookSourceName,
+      bookSourceUrl: s.bookSourceUrl,
+      bookSourceType: s.bookSourceType,
+      bookSourceGroup: s.bookSourceGroup,
+      bookSourceComment: s.bookSourceComment,
+      enabled: enabled,
+      searchUrl: s.searchUrl,
+      exploreUrl: s.exploreUrl,
+      header: s.header,
+      tocUrl: s.tocUrl,
+      ruleSearch: s.ruleSearch,
+      ruleBookInfo: s.ruleBookInfo,
+      ruleToc: s.ruleToc,
+      ruleContent: s.ruleContent,
+      ruleExplore: s.ruleExplore,
+      filters: s.filters,
+      homeSections: s.homeSections,
+    );
+  }
+
   /// 启用 / 停用。
   Future<void> setEnabled(String bookSourceUrl, bool enabled) async {
     final idx = _sources.indexWhere((s) => s.bookSourceUrl == bookSourceUrl);
     if (idx < 0) return;
-    final old = _sources[idx];
-    _sources[idx] = ShuyuanSource(
-      bookSourceName: old.bookSourceName,
-      bookSourceUrl: old.bookSourceUrl,
-      bookSourceType: old.bookSourceType,
-      bookSourceGroup: old.bookSourceGroup,
-      bookSourceComment: old.bookSourceComment,
-      enabled: enabled,
-      searchUrl: old.searchUrl,
-      exploreUrl: old.exploreUrl,
-      header: old.header,
-      tocUrl: old.tocUrl,
-      ruleSearch: old.ruleSearch,
-      ruleBookInfo: old.ruleBookInfo,
-      ruleToc: old.ruleToc,
-      ruleContent: old.ruleContent,
-      ruleExplore: old.ruleExplore,
-      filters: old.filters,
-      homeSections: old.homeSections,
-    );
+    _sources[idx] = _rebuildWithEnabled(_sources[idx], enabled);
     await _save();
   }
 

@@ -40,6 +40,17 @@ class _SourceSearchState {
   int searchSession = 0;
 }
 
+/// 板块流的一个板块（参考备份3.0：标题 + 3 列封面网格）
+class _ComicHomeSection {
+  _ComicHomeSection({required this.title, required this.groups});
+
+  final String title;
+  final List<FilterGroup> groups; // 该板块对应的分类组合（板块1=全默认）
+  List<Comic> items = [];
+  bool loading = false;
+  String? error;
+}
+
 /// 漫画搜索页面（果冻风悬浮搜索框）
 class SearchPage extends StatefulWidget {
   /// 是否为当前激活的 tab（用于触发结果瀑布入场动画）
@@ -83,6 +94,12 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   bool _categoriesLoaded = false; // 分类维度是否已拉取
   bool _categoryMode = false; // 分类浏览模式（与关键词搜索互斥）
 
+  /// 板块流模式（参考备份3.0 IMG_8579/8580）：进源默认展示「最近更新」+ 分类板块流，
+  /// 每板块 3 列封面网格，整页滚动懒加载
+  bool _homeMode = false;
+  List<_ComicHomeSection> _homeSections = [];
+  int _homeLoaded = 0; // 已加载完成的板块数（懒加载指针）
+
   bool _pendingSearch = false; // 搜索中途切源/换词积压，待当前搜索结束后补搜
   bool _categorySheetOpening = false; // 分类筛选弹窗防连点守卫
 
@@ -116,6 +133,17 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     // 启动恢复的选中源若靠右，首帧后滚到居中可见（复用切源逻辑）
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _ensureChipVisible(SourceManager().current);
+    });
+    // ✅ 进页面就自动加载"第一个源"的内容（对齐参考备份3.0：选中单源即展示内容，
+    //    而不是"输入关键词开始搜索"空态——根因是 initState 里只有 _loadHistory
+    //    （搜索历史）和 _ensureChipVisible（只滚 chip 位置），没有加载内容的调用。
+    //    条件与 _switchSource 一致：无关键词 + 该源支持分类）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final src = SourceManager().current;
+      if (_keyword.isEmpty && src.supportsCategories) {
+        _autoLoadCategoryContent();
+      }
     });
   }
 
@@ -190,6 +218,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     SourceManager().setCurrent(src);
     final needSearch = _loadState(src.id); // 恢复该源缓存，不触碰共享搜索框
     final willSearch = needSearch && autoSearch;
+    _homeMode = false; // 切源一律退出板块流（目标源内容由下方逻辑重建）
     if (mounted) setState(() => _isSearching = willSearch);
     // 切源后仅将当前源 chip 居中可见（不强制回顶，保留结果列表滚动位置）
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -201,7 +230,192 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       } else {
         _doSearch();
       }
+    } else if (_keyword.isEmpty && src.supportsCategories) {
+      // 无关键词且源支持分类：自动加载该源分类内容（对齐参考备份3.0——
+      // 选中单源即展示内容，而不是"输入关键词开始搜索"空态）
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _autoLoadCategoryContent();
+      });
     }
+  }
+
+  /// 切源后无关键词时自动加载该源的首页板块流（对齐参考备份3.0：
+  /// 「最近更新」+ 各分类板块，3 列封面网格整页滚动）。
+  /// 源不支持分类 / 拉取失败 / 无分类维度时静默保持现状（不影响搜索）。
+  Future<void> _autoLoadCategoryContent() async {
+    if (_categorySheetOpening) return;
+    final src = SourceManager().current;
+    if (!src.supportsCategories) return;
+    _categorySheetOpening = true;
+    try {
+      List<FilterGroup> groups;
+      if (_categoriesLoaded && _categoryGroups.isNotEmpty) {
+        groups = _categoryGroups;
+      } else {
+        groups = await src.fetchCategories();
+        _categoryGroups = groups;
+        _categoriesLoaded = true;
+      }
+      if (!mounted || groups.isEmpty) return;
+      _buildHomeSections(groups);
+    } catch (e) {
+      _log('自动首页板块流失败: $e');
+    } finally {
+      _categorySheetOpening = false;
+    }
+  }
+
+  /// 构建板块流：板块 1 = 默认列表（最近更新/全部），后续 = 第一个分类维度的
+  /// 各选项（跳过「全部」）逐个成板块。构建后立即加载前 2 个板块。
+  void _buildHomeSections(List<FilterGroup> groups) {
+    final sections = <_ComicHomeSection>[];
+    sections.add(_ComicHomeSection(title: '最近更新', groups: groups));
+    if (groups.isNotEmpty) {
+      final first = groups.first;
+      for (final opt in first.options) {
+        if (opt.isAll) continue;
+        sections.add(
+          _ComicHomeSection(
+            title: opt.name,
+            groups: [first.copyWith(selected: opt)],
+          ),
+        );
+      }
+    }
+    if (sections.isEmpty) return;
+    setState(() {
+      _homeSections = sections;
+      _homeLoaded = 0;
+      _homeMode = true;
+      _categoryMode = false;
+      _result = SearchResult.empty();
+      _resultKeyword = '';
+      _keyword = '';
+      _searchController.clear();
+      _historyVisible = false;
+    });
+    _loadHomeSection(0);
+    _loadHomeSection(1);
+  }
+
+  /// 加载单个板块（getCategoryList 第一页；已加载/加载中跳过）
+  Future<void> _loadHomeSection(int i) async {
+    if (i >= _homeSections.length) return;
+    final s = _homeSections[i];
+    if (s.loading || s.items.isNotEmpty) return;
+    s.loading = true;
+    if (mounted) setState(() {});
+    try {
+      final srcId = SourceManager().current.id;
+      final page = await SourceManager().current.getCategoryList(
+        s.groups,
+        page: 0,
+      );
+      if (!mounted || SourceManager().current.id != srcId) return;
+      s.items = page.items.map(cmangaToComic).toList();
+      s.error = null;
+    } catch (e) {
+      _log('板块「${s.title}」加载失败: $e');
+      s.error = '加载失败';
+    } finally {
+      s.loading = false;
+      // 🔴 只有**真的加载成功**才推进懒加载指针 ✓：某个板块一旦失败，
+      //    指针不动 → 下次滚到底会重新请求同一个板块（用户可自愈）。
+      if (s.error == null) {
+        _homeLoaded = i + 1 > _homeLoaded ? i + 1 : _homeLoaded;
+      }
+      if (mounted) setState(() {});
+    }
+  }
+
+  /// 板块流懒加载：滚动接近底部时加载下一板块
+  void _loadMoreHomeSections() {
+    if (_homeLoaded >= _homeSections.length) return;
+    _loadHomeSection(_homeLoaded);
+  }
+
+  /// 板块流渲染：整页滚动，板块标题 + 3 列封面网格
+  Widget _buildHomeSectionFlow() {
+    return NotificationListener<ScrollNotification>(
+      onNotification: (n) {
+        if (n.metrics.pixels > n.metrics.maxScrollExtent - 600) {
+          _loadMoreHomeSections();
+        }
+        return false;
+      },
+      child: ListView(
+        padding: EdgeInsets.only(bottom: 12 + JellyNavBar.contentBottomAvoid),
+        children: [
+          for (var i = 0; i < _homeSections.length; i++)
+            _homeSectionBlock(i),
+        ],
+      ),
+    );
+  }
+
+  Widget _homeSectionBlock(int i) {
+    final s = _homeSections[i];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+          child: Text(
+            s.title,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white
+                  : JellyTheme.textPrimaryLight,
+            ),
+          ),
+        ),
+        if (s.loading && s.items.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              ),
+            ),
+          )
+        else if (s.error != null && s.items.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Center(
+              child: Text(
+                s.error!,
+                style: TextStyle(
+                    fontSize: 13, color: JellyTheme.textSecondary),
+              ),
+            ),
+          )
+        else
+          GridView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              childAspectRatio: 0.56,
+            ),
+            itemCount: s.items.length,
+            itemBuilder: (c, j) {
+              final comic = s.items[j];
+              return JellyComicCard(
+                comic: comic,
+                heroTag: comicCoverHeroTag('home', comic),
+                onTap: () => _onComicTap(comic),
+              );
+            },
+          ),
+      ],
+    );
   }
 
   /// 切源后将对应 chip 滚动到可视区中部（源较多时防当前 chip 跑出屏幕）
@@ -306,7 +520,10 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
 
     setState(() {
       _isLoading = true;
-      if (!loadMore) _isSearching = true;
+      if (!loadMore) {
+        _isSearching = true;
+        _homeMode = false; // 新搜索退出板块流（参考备份3.0）
+      }
     });
 
     try {
@@ -919,6 +1136,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     FocusScope.of(context).unfocus(); // 分类模式不聚焦搜索框，避免弹键盘
     _categoryGroups = groups;
     _categoryMode = true;
+    _homeMode = false; // 分类弹窗确认 → 退出板块流进单分类浏览（参考备份3.0）
     _keyword = '';
     _resultKeyword = '';
     _searchController.clear();
@@ -936,7 +1154,10 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     final srcId = SourceManager().current.id;
     setState(() {
       _isLoading = true;
-      if (!loadMore) _isSearching = true;
+      if (!loadMore) {
+        _isSearching = true;
+        _homeMode = false; // 新搜索退出板块流（参考备份3.0）
+      }
     });
     try {
       final page = loadMore ? _result.currentPage : 0;
@@ -1265,6 +1486,11 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
           ],
         ),
       );
+    }
+
+    // 板块流模式（进源默认）：最近更新 + 分类板块整页滚动（参考备份3.0 8579/8580）
+    if (_homeMode && _homeSections.isNotEmpty) {
+      return _buildHomeSectionFlow();
     }
 
     // 未搜索 = 初始界面

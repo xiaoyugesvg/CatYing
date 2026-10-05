@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -311,9 +312,9 @@ class AppTheme {
       // MaterialPageRoute 全部套用，含 iOS 边缘返回手势）
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
-          TargetPlatform.iOS: _CupertinoLikeTransitionsBuilder(),
-          TargetPlatform.macOS: _CupertinoLikeTransitionsBuilder(),
-          TargetPlatform.android: _CupertinoLikeTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.android: CupertinoPageTransitionsBuilder(),
         },
       ),
       colorScheme: base.colorScheme.copyWith(
@@ -495,9 +496,9 @@ class AppTheme {
       // iOS 风格转场（与 lightTheme 一致）
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
-          TargetPlatform.iOS: _CupertinoLikeTransitionsBuilder(),
-          TargetPlatform.macOS: _CupertinoLikeTransitionsBuilder(),
-          TargetPlatform.android: _CupertinoLikeTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.android: CupertinoPageTransitionsBuilder(),
         },
       ),
       colorScheme: ColorScheme.dark(
@@ -675,28 +676,25 @@ class AppTheme {
 /// 新页面从右侧滑入 + 轻微淡入（easeOutCubic，丝滑不僵硬），
 /// 返回时反向滑出。给 `Navigator.push(MaterialPageRoute)` 的路由用
 /// （Get 路由的 iOS 转场由 `GetMaterialApp.defaultTransition` 提供）。
-class _CupertinoLikeTransitionsBuilder extends PageTransitionsBuilder {
-  const _CupertinoLikeTransitionsBuilder();
-
-  @override
-  Widget buildTransitions<T>(
-    PageRoute<T> route,
-    BuildContext context,
-    Animation<double> animation,
-    Animation<double> secondaryAnimation,
-    Widget child,
-  ) {
-    // 首页不转场（避免冷启动闪现）
-    if (route.settings.name == Navigator.defaultRouteName) return child;
-    final curved = CurvedAnimation(
-      parent: animation,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
-    );
-    return SlideTransition(
-      position:
-          Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero).animate(curved),
-      child: FadeTransition(opacity: curved, child: child),
-    );
-  }
-}
+// ── 🔴 为什么删掉了自写的 `_CupertinoLikeTransitionsBuilder` ──────────
+//
+// 它当时是为了"右滑进入 / 左滑返回"的动画，注释也写了
+// 「含 iOS 边缘返回手势」—— **但代码里只有 `SlideTransition`，
+// 一个手势都没实现** ✗。
+//
+// `PageTransitionsBuilder` 只管**动画**；**交互式边缘返回手势**
+//（手指从左边缘拖动、页面跟着走、松手回弹或完成）
+// 是 `CupertinoPageTransitionsBuilder` **内部**用
+// `CupertinoRouteTransitionMixin` + `_CupertinoBackGestureDetector` 做的。
+// 自己写一个 `SlideTransition` 是**拿不到**那个手势的。
+//
+// 后果（用户实测反馈：「每个页面加上右滑返回」）：
+//   **全 App 都滑不动** —— 影视、音乐、阅读的所有 push 页面都没有侧滑返回。
+//
+// 现在直接用官方 builder：动画（右滑进入 + 视差）与手势**一次到位**，
+// 而且以后 Flutter 改手势细节也自动跟上。
+//
+// ⚠️ 官方 builder 与自写版唯一的视觉差异：
+//    官方会让**下层页面**也做视差位移（更接近真 iOS），
+//    自写版下层是静止的。这是**变好**，不是回退。
+// 保留它的类名引用点已全部替换为 `CupertinoPageTransitionsBuilder`。

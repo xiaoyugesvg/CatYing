@@ -794,52 +794,76 @@ class _DiscoverPageState extends State<DiscoverPage>
     // ── 热搜关键词（两列，前三名用主题色）─────────────────────
     if (_hotKeywords.isNotEmpty) {
       out.add(const SliverToBoxAdapter(child: SectionTitle(title: 'QQ音乐热搜')));
-      out.add(SliverPadding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        sliver: SliverGrid(
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            mainAxisExtent: 48,
-          ),
-          delegate: SliverChildBuilderDelegate(
-            (c, i) {
+      // ── 横滑卡片（用户 2026 要求：「弄成卡片式的横向滑动」）────────
+      //
+      // 原来是一个**2 列网格**、每格只有 48 高的一条窄行（序号 + 关键词），
+      // 跟下面「排行榜」「歌单广场」的横滑大卡**不是一套观感**，
+      // 整页看起来像两种设计拼起来的。
+      //
+      // 热搜词**没有封面**（它就是个词），所以卡片的视觉主体用
+      // **大号名次数字** + 关键词 —— 参考网易云/QQ 的"热搜榜"卡，
+      // 前三名用主题色，一眼看出热度排序。
+      out.add(SliverToBoxAdapter(
+        child: SizedBox(
+          height: 116,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: _hotKeywords.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            itemBuilder: (c, i) {
               final kw = _hotKeywords[i];
+              final hot = i < 3;
               return GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: () => showSearch<void>(
                   context: context,
-                  delegate:
-                      _QuickSearchDelegate(source: SongSource.qq, initialQuery: kw),
+                  delegate: _QuickSearchDelegate(
+                      source: SongSource.qq, initialQuery: kw),
                 ),
                 child: Container(
-                  alignment: Alignment.centerLeft,
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  width: 132,
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                   decoration: BoxDecoration(
+                    // 与 `PresetCard` 一致的观感：填充 + 大圆角
                     color: MusicTheme.fill,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(18),
+                    border: hot
+                        ? Border.all(
+                            color: MusicTheme.tint.withValues(alpha: 0.45),
+                            width: 1)
+                        : null,
                   ),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('${i + 1}',
-                          style: TextStyle(
-                              color: i < 3 ? MusicTheme.tint : MusicTheme.secondary,
-                              fontSize: AppTheme.fontFootnote,
-                              fontWeight: FontWeight.w700)),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(kw,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                color: MusicTheme.label, fontSize: AppTheme.fontSubhead)),
+                      // 大号名次（前三名主题色 + 更重）
+                      Text(
+                        '${i + 1}',
+                        style: TextStyle(
+                          color: hot ? MusicTheme.tint : MusicTheme.secondary,
+                          fontSize: hot ? 30 : 24,
+                          fontWeight: FontWeight.w800,
+                          height: 1.0,
+                        ),
+                      ),
+                      Text(
+                        kw,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: MusicTheme.label,
+                          fontSize: AppTheme.fontSubhead,
+                          fontWeight: FontWeight.w500,
+                          height: 1.3,
+                        ),
                       ),
                     ],
                   ),
                 ),
               );
             },
-            childCount: _hotKeywords.length,
           ),
         ),
       ));

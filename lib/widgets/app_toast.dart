@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../common/theme.dart';
 
@@ -41,51 +40,54 @@ class AppToast {
   /// 在 App 顶层调用一次，注入 `MaterialApp` 的 navigatorKey。
   static void init(GlobalKey<NavigatorState> key) => _key = key;
 
-  /// **弹窗显示完整长文本** —— 用于"气泡装不下"的错误（音乐播放失败就是）。
+  /// **长文本提示** —— 给"正文很长、气泡一行装不下"的错误用（音乐播放失败就是）。
   ///
-  /// 为什么必须有它：`show()` 的气泡 [title] 是**截断**的（`maxLines: 1`），
-  /// 音乐的错误（例如「内置接口没有免费音源；car_conv2: GD接口失败: GD接…」）
-  /// 会被切掉，而**恰恰是后半段**才是可排查的信息。
+  /// ── 🔴 为什么从"弹窗"改成"自动消失的气泡"（用户 2026 反馈）────────
+  /// 原来这里是 `showDialog` + AlertDialog：**必须手点「关闭」才走** ✗
   ///
-  /// 正文用 `SelectableText`（可长按选中）+「复制全文」按钮，让用户能把**全文**
-  /// 复制出来；长文本可滚动、上限半屏高。
-  static void detail(String title, String body) {
-    final ctx = _key?.currentContext ?? _key?.currentState?.overlay?.context;
-    if (ctx == null) {
-      // App 还没挂载（拿不到 context）→ 退回气泡，至少不静默
+  /// 后果（用户原话："那么多失败的弹窗"）：
+  ///   · 一首歌失败 → 一个窗；连点几首 → **窗叠窗**，把界面全挡住
+  ///   · 用户只是想换首歌听，却被迫先关掉好几个错误窗
+  ///   · 而且 `showDialog` 是**模态**的 —— 挡住的那层点不动
+  ///
+  /// 现在：
+  ///   · 走 `Overlay`（和 [show] 同一条路），**不阻塞任何操作**
+  ///   · **约 4 秒自动消失**（长文本给久一点，但绝不赖着）
+  ///   · **同时只存在一条**，后到的直接覆盖前一条 → **不会叠窗**
+  ///   · 点一下可以立刻关掉（想快点清掉的人不用等）
+  ///
+  /// ⚠️ 代价：**长按选中 / 复制全文没了** —— 模态框才能提供那个交互。
+  ///    但"不挡路"比"能复制"重要得多（要看全文可以去「日志」）。
+  static void detail(
+    String title,
+    String body, {
+    Duration duration = const Duration(seconds: 4),
+  }) {
+    final overlay = _key?.currentState?.overlay;
+    if (overlay == null) {
+      // App 还没挂载（拿不到 overlay）→ 退回单行气泡，至少不静默
       show(title, body, isError: true);
       return;
     }
-    showDialog<void>(
-      context: ctx,
-      builder: (dctx) => AlertDialog(
-        title: Text(title, style: const TextStyle(fontSize: 17)),
-        content: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(dctx).size.height * 0.5,
-          ),
-          child: SingleChildScrollView(
-            child: SelectableText(
-              body,
-              style: const TextStyle(fontSize: 13, height: 1.45),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: body));
-              Navigator.pop(dctx);
-            },
-            child: const Text('复制全文'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dctx),
-            child: const Text('关闭'),
-          ),
-        ],
+    // 与 [show] 共用 `_current` → 两种提示天然互斥，永远不会叠
+    _current?.remove();
+    _current = null;
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => _ToastView(
+        title: title,
+        status: body,
+        isError: true,
+        multiLine: true,
+        duration: duration,
+        onDone: () {
+          if (identical(_current, entry)) _current = null;
+          entry.remove();
+        },
       ),
     );
+    _current = entry;
+    overlay.insert(entry);
   }
 
   /// 显示一条顶部气泡。
@@ -146,6 +148,7 @@ class _ToastView extends StatefulWidget {
     required this.isError,
     required this.duration,
     required this.onDone,
+    this.multiLine = false,
   });
 
   final String title;
@@ -153,6 +156,13 @@ class _ToastView extends StatefulWidget {
   final bool isError;
   final Duration duration;
   final VoidCallback onDone;
+
+  /// 长文本模式：正文允许换行（最多 4 行 + 省略号），而不是挤成一行截断。
+  ///
+  /// 给「播放失败」这种"正文本身就是一长串原因"的提示用 ——
+  /// 单行会把它切成「内置接口没有免费音源；car_conv2: GD接口失败…」，
+  /// 而**后半段才是可排查的信息**。
+  final bool multiLine;
 
   @override
   State<_ToastView> createState() => _ToastViewState();
@@ -200,7 +210,19 @@ class _ToastViewState extends State<_ToastView>
       top: mq.padding.top + 12,
       left: 0,
       right: 0,
-      child: IgnorePointer(
+      // ⚠️ 原来是 `IgnorePointer` —— 气泡**完全不接收点击**。
+      // 改成可点时：
+      //   · 单行气泡：点一下立刻收起（不等那 2 秒）
+      //   · 长文本错误：看完想快点清掉时不用干等 4 秒
+      // 用 `HitTestBehavior.translucent` 而不是 opaque：
+      // 只有点在气泡**自身范围**上才吃掉事件，气泡外面的点击照旧穿透，
+      // 不会因为"屏幕上有个气泡"就点不动下面的按钮。
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () {
+          _timer?.cancel();
+          if (mounted) _ctrl.reverse().then((_) => widget.onDone());
+        },
         child: FadeTransition(
           opacity: _ctrl,
           child: SlideTransition(
@@ -236,21 +258,49 @@ class _ToastViewState extends State<_ToastView>
                     ],
                   ),
                   // 标题可截断，状态固定——保证"下载成功/失败"在长标题下仍可见
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          widget.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: style,
+                  child: widget.multiLine
+                      // ── 长文本（播放失败等）──────────────────────────
+                      // 标题一行 + 正文最多 4 行。不再是一行截断：
+                      // 原因串的后半段（哪个源、什么错）才是关键信息。
+                      ? Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: style.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              widget.status,
+                              maxLines: 4,
+                              overflow: TextOverflow.ellipsis,
+                              style: style.copyWith(
+                                fontSize: AppTheme.fontFootnote,
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
+                        )
+                      : Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                widget.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: style,
+                              ),
+                            ),
+                            if (widget.status.isNotEmpty)
+                              Text(' ${widget.status}', style: style),
+                          ],
                         ),
-                      ),
-                      if (widget.status.isNotEmpty)
-                        Text(' ${widget.status}', style: style),
-                    ],
-                  ),
                 ),
               ),
             ),

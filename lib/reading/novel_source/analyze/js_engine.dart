@@ -7,6 +7,15 @@ import '../novel_chinese_converter.dart';
 import '../../../services/app_log.dart';
 
 class JsEngine {
+  /// 进程级共享引擎：书源解析（搜索/发现/详情/目录/正文）全程复用同一个
+  /// quickjs runtime，避免「每个 AnalyzeRule 各建一个引擎且从不释放」导致
+  /// 原生内存/句柄持续泄漏——3907 个书源并发解析时必然闪退。
+  ///
+  /// 安全性：flutter_js 的 evaluate 是**同步**调用，Dart 单线程内同一时刻
+  /// 只有一个 eval 在执行；每次 eval 前都会重新注入 `java/result/baseUrl`
+  /// 等绑定，顺序执行语义与独立实例一致。
+  static final JsEngine shared = JsEngine();
+
   JavascriptRuntime? _runtime;
 
   /// 是否已注入全局预置脚本（繁简转换 t2s()/s2t()）。

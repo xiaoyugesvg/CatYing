@@ -10,6 +10,7 @@ import 'music_api.dart';
 import 'download_service.dart';
 import 'settings_store.dart';
 import 'unblock_service.dart';
+import 'source_memory.dart';
 import '../../services/audio_focus.dart';
 import '../../services/app_log.dart';
 import 'library_store.dart';
@@ -475,7 +476,50 @@ class MusicPlayerManager extends ChangeNotifier {
           : (r.message.isNotEmpty ? r.message : '内置接口取地址失败');
 
       // ══════════════════════════════════════════════════════════
-      // 回退：**试全部第三方音源 → 弹窗让用户选**
+      // ① 先试**上次记住的那个源**（用户 2026 要求）
+      // ══════════════════════════════════════════════════════════
+      //
+      // ── 为什么要有这一步 ────────────────────────────────────────
+      // 用户场景：VIP 歌靠第三方源播成功后，退出去、重新点这首歌 ——
+      // 希望**直接用上次成功的那个源**，而不是"再并发试全部源（几秒）
+      // + 弹窗选一遍"。
+      //
+      // ── 为什么命中记忆也要**验证** ──────────────────────────────
+      // 第三方源给的地址**是签名限时的**（`…/<签名>/6ac3c102/resource/…`），
+      // 会过期成 403/404。所以只能记住"**源**"，每次重新向它要新地址 ——
+      // 而"这个源现在还能不能给地址"必须当场问一次。
+      //
+      // 失败就**静默回退**到下面的"试全部源"，绝不让记忆把歌卡死。
+      var remembered = false;
+      if (SettingsStore.instance.useThirdPartySources.value) {
+        final memorized = SourceMemory.instance.resolveSource(song);
+        if (memorized != null) {
+          lastError.value = '正在用「${memorized.name}」…';
+          final one = await UnblockService.instance.testOne(memorized, song);
+          switching.value = false;
+          if (epoch != _loadEpoch) return;
+          if (one.ok && one.url.isNotEmpty) {
+            // 命中！直接用，**不弹窗** —— 用户上次已经做过这个选择了
+            url = one.url;
+            fromSource = one.source?.name ?? memorized.name;
+            quality = one.source?.quality ?? '';
+            sourceHeaders =
+                one.headers.isNotEmpty ? one.headers : (one.source?.headers ?? const {});
+            remembered = true;
+            AppLog.instance.log(
+                '[Music] 命中音源记忆：《${song.name}》→「${memorized.name}」');
+          } else {
+            // 记住的源这次给不出地址（多半是它后端变了/歌下架了）→
+            // **顺手忘掉**，否则以后每次点这首都要白等这一次探测。
+            AppLog.instance.log('[Music] 音源记忆失效（${memorized.name}：'
+                '${one.error}），回退到试全部源');
+            unawaited(SourceMemory.instance.forget(song));
+          }
+        }
+      }
+
+      // ══════════════════════════════════════════════════════════
+      // ② 没命中 → 回退：**试全部第三方音源 → 弹窗让用户选**
       // ══════════════════════════════════════════════════════════
       //
       // ── 为什么是"用户选"而不是"程序挑第一个"（用户 2026 决定）────
@@ -488,7 +532,8 @@ class MusicPlayerManager extends ChangeNotifier {
       // ⚠️ 跨平台匹配（CrossPlatformMatcher）已**移除出回退链**：
       //    用户明确说"不要搜索其他平台"。实现代码保留在
       //    `cross_platform_matcher.dart`，但这里不再调用。
-      if (SettingsStore.instance.useThirdPartySources.value &&
+      if (!remembered &&
+          SettingsStore.instance.useThirdPartySources.value &&
           ThirdPartySourceStore.instance.enabled.isNotEmpty) {
         switching.value = true;
         notifyListeners();
@@ -527,6 +572,11 @@ class MusicPlayerManager extends ChangeNotifier {
           if (picked != null) {
             fromSource = picked.source?.name ?? '';
             quality = picked.source?.quality ?? '';
+            // 🔴 记住"这首歌用这个源成功了" —— 下次点这首直接用，不再试全部
+            final sid = picked.source?.id;
+            if (sid != null && sid.isNotEmpty) {
+              unawaited(SourceMemory.instance.remember(song, sid));
+            }
             AppLog.instance.log('[Music] 用户选定音源：${picked.source?.name}'
                 '（${results.length} 个可用）');
             // 展示用文案跟上（音频已由弹窗播好）
@@ -608,6 +658,11 @@ class MusicPlayerManager extends ChangeNotifier {
       _index = 0;
       _currentSong = song;
       notifyListeners();
+    }
+    // 记住这个源：下次点这首歌直接用它（见 SourceMemory 的说明）
+    final rid = r.source?.id;
+    if (rid != null && rid.isNotEmpty) {
+      unawaited(SourceMemory.instance.remember(song, rid));
     }
     await _startPlayback(
       song: song,

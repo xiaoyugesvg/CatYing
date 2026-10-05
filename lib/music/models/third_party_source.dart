@@ -236,6 +236,20 @@ class ThirdPartySourceStore {
   /// 变更通知（UI 用 ValueListenableBuilder 监听）
   final revision = ValueNotifier<int>(0);
 
+  /// **仅测试用**：把内存里的源列表清空（可给一份替身）。
+  ///
+  /// 为什么不直接改 `_items`：它是私有的，测试文件访问不到。
+  /// 为什么需要它：`ThirdPartySourceStore` 是**单例**，测试之间会互相污染
+  ///（前一个测试加的源会留在后一个测试里，导致"源被禁用 → 返回 null"
+  /// 这类断言时对时错）。
+  @visibleForTesting
+  void resetForTest([List<ThirdPartySource>? items]) {
+    _items
+      ..clear()
+      ..addAll(items ?? const []);
+    revision.value++;
+  }
+
   List<ThirdPartySource> get all => List.unmodifiable(_items);
 
   List<ThirdPartySource> get enabled =>

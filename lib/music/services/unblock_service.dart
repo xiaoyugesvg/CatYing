@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../models/third_party_source.dart';
 import '../../services/app_log.dart';
 import 'music_api.dart';
+import 'source_memory.dart';
 
 /// 音源解析结果
 class SourceResolveResult {
@@ -81,7 +82,23 @@ class UnblockService {
   }) async {
     lastAttempts.clear();
 
-    final sources = ThirdPartySourceStore.instance.enabled;
+    // ── 把**记住的那个源**排到最前（用户 2026 要求）──────────────
+    //
+    // `player_manager` 在没命中记忆时才会走到这里（它先单独试记住的源）。
+    // 但这里把记住的源排第一仍有意义：
+    //   · 弹窗列表里它就在第一行，用户一眼看到"上次就是这个"
+    //   · 并发试时它先回来，弹窗更早出现
+    //
+    // ⚠️ 只是**排序**，不删其它源 —— 记忆失效时用户还能选别的
+    //（那正是他重新走到这个弹窗的原因）。
+    final all = ThirdPartySourceStore.instance.enabled;
+    final memId = SourceMemory.instance.sourceIdFor(song);
+    final sources = memId == null
+        ? all
+        : ([
+            ...all.where((s) => s.id == memId),
+            ...all.where((s) => s.id != memId),
+          ]);
     if (sources.isEmpty) {
       return const SourceResolveResult(ok: false, error: '没有启用中的音源');
     }

@@ -7,6 +7,7 @@ import '../models/models.dart';
 import '../models/third_party_source.dart';
 import '../theme/discover_preset.dart';
 import 'builtin_sources_service.dart';
+import 'source_memory.dart';
 
 /// 音乐模块的设置存储 —— 对应 Beans 的 `@AppStorage` / `PlatformPreferenceStore`。
 ///
@@ -26,6 +27,37 @@ class SettingsStore {
   /// 只决定发现页的背景与卡片材质（见 `discover_preset.dart`）。
   static const String _kDiscoverPreset = 'music.discoverPreset';
   static const _kMusicSource = 'music.platform';
+  static const String _kBottomBarSubPages = 'music.bottomBarOnSubPages';
+  static const String _kMiniPlayerSubPages = 'music.miniPlayerOnSubPages';
+
+  /// **子页面是否显示音乐底部栏**（迷你条 + 导航栏）。
+  ///
+  /// ── 默认 **关**（用户 2026 要求做成开关）──────────────────────
+  /// 用户先前要求「每个界面都要有迷你条 + 导航栏」，所以底栏被挂到
+  /// 全局层（覆盖所有路由，含 push 出去的歌单详情/音源管理等）。
+  ///
+  /// 但那样会**盖住子页面最下方的内容** —— 除非每个子页都加底部留白。
+  /// 而"我不想要这层遮挡"也是很合理的偏好（尤其子页面本来就不长时）。
+  ///
+  /// 所以做成开关，**默认关**：
+  ///   · 关（默认）= 只有音乐主页有底栏，子页面干净、不被遮
+  ///   · 开         = 子页面也有底栏（覆盖式浮在上面）
+  ///
+  /// ⚠️ 默认关还有个原因：**"盖住内容"是可见的坏体验**，
+  ///    而"子页面没有底栏"只是少一个便利入口 —— 默认取不冒犯的那个。
+  final bottomBarOnSubPages = ValueNotifier<bool>(false);
+
+  /// **子页面的迷你条**是否显示（仅在 [bottomBarOnSubPages] 打开时有意义）。
+  ///
+  /// 与导航栏分开是因为两者的**好处/代价不一样**：
+  ///   · 导航栏：方便切 tab，但和子页面的返回操作语义重叠（子页面里
+  ///     用户往往只想"看完返回"，而不是"跳去另一个 tab"）
+  ///   · 迷你条：纯播放控制，**几乎不干扰**（用户就是想换个歌/暂停）
+  /// 所以允许只开迷你条、不要导航栏。
+  ///
+  /// 默认 **开**：迷你条遮挡小、价值高（不放它的话，在子页面里
+  /// 想暂停都得先返回，很别扭）。
+  final miniPlayerOnSubPages = ValueNotifier<bool>(true);
 
   /// 优先音质
   final audioQuality = ValueNotifier<AudioQuality>(AudioQuality.exhigh);
@@ -95,8 +127,13 @@ class SettingsStore {
     discoverPreset = DiscoverPreset.fromName(prefs.getString(_kDiscoverPreset));
     // 没存过 / 存的是未知值 → `fromKey` 会兜底成 netease（行为不变）
     musicSource.value = SongSource.fromKey(prefs.getString(_kMusicSource));
+    // 子页面底栏开关：**没存过就是 false**（默认关，见字段注释的理由）
+    bottomBarOnSubPages.value = prefs.getBool(_kBottomBarSubPages) ?? false;
+    miniPlayerOnSubPages.value = prefs.getBool(_kMiniPlayerSubPages) ?? true;
     // 音源列表也在这里一起初始化，保证进音乐 tab 前就绪
     await ThirdPartySourceStore.instance.init();
+    // 音源记忆（"这首歌上次用哪个源" —— 见 SourceMemory）
+    await SourceMemory.instance.init();
     // 内置源注册 + 自动更新（静默：失败不影响启动）
     // 先注册出厂内置源，再异步拉远端看有没有新版本
     await BuiltinSourcesService.instance.init();
@@ -121,6 +158,16 @@ class SettingsStore {
   Future<void> setCrossPlatformMatch(bool v) async {
     crossPlatformMatch.value = v;
     (await SharedPreferences.getInstance()).setBool(_kCrossPlatform, v);
+  }
+
+  Future<void> setBottomBarOnSubPages(bool v) async {
+    bottomBarOnSubPages.value = v;
+    (await SharedPreferences.getInstance()).setBool(_kBottomBarSubPages, v);
+  }
+
+  Future<void> setMiniPlayerOnSubPages(bool v) async {
+    miniPlayerOnSubPages.value = v;
+    (await SharedPreferences.getInstance()).setBool(_kMiniPlayerSubPages, v);
   }
 
   /// 切换音乐平台（搜索/发现用哪个内置数据源）。

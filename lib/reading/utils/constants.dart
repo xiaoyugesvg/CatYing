@@ -122,15 +122,11 @@ class CmbokConstants {
   static const String shareUrl =
       'https://1812475725.share.123pan.cn/123pan/GSy8Vv-DupEv';
 
-  /// GitHub 仓库地址（关于页 + 检查更新）
+  /// GitHub 仓库地址（关于页）
   static const String githubUrl = 'https://github.com/hlning/cmbok_app';
 
-  /// 「甜甜的小站」博客地址（我的页 + 更新弹窗）
+  /// 「甜甜的小站」博客地址（我的页）
   static const String blogUrl = 'https://bluemood.xiaomy.net/';
-
-  /// GitHub Releases 最新版本接口（检查更新）
-  static const String latestReleaseApiUrl =
-      'https://api.github.com/repos/hlning/cmbok_app/releases/latest';
 }
 
 /// cmbok 原版页面引用的是 `AppConstants`；别名到 [CmbokConstants]，

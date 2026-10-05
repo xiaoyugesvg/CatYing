@@ -140,6 +140,50 @@ class _ShuyuanSourceRepoPageState extends State<ShuyuanSourceRepoPage> {
     }
   }
 
+  /// 全部启用 / 全部停用。
+  Future<void> _setAllEnabled(bool enabled) async {
+    setState(() => _busy = true);
+    await ShuyuanSourceStore.instance.setAllEnabled(enabled);
+    if (mounted) {
+      setState(() => _busy = false);
+      _toast(enabled ? '已全部启用' : '已全部停用');
+    }
+  }
+
+  /// 清空全部书源（确认后执行）。
+  Future<void> _clearAll() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清空书源'),
+        content: Text(
+          '确定清空全部 ${ShuyuanSourceStore.instance.allSources.length} 个书源？此操作不可撤销。',
+          style: const TextStyle(fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('清空'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _busy = true);
+    await ShuyuanSourceStore.instance.clearAll();
+    if (mounted) {
+      setState(() => _busy = false);
+      _toast('已清空全部书源');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -163,6 +207,42 @@ class _ShuyuanSourceRepoPageState extends State<ShuyuanSourceRepoPage> {
                     color: JellyTheme.textSecondary,
                   ),
                 ),
+              ),
+              const SizedBox(height: 8),
+              // 批量操作：全部启用 / 全部停用 / 清空
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: all.isEmpty || _busy
+                          ? null
+                          : () => _setAllEnabled(true),
+                      icon: const Icon(Icons.done_all_rounded, size: 16),
+                      label: const Text('全部启动'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: all.isEmpty || _busy
+                          ? null
+                          : () => _setAllEnabled(false),
+                      icon: const Icon(Icons.block_rounded, size: 16),
+                      label: const Text('全部关闭'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: all.isEmpty || _busy ? null : _clearAll,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Theme.of(context).colorScheme.error,
+                      ),
+                      icon: const Icon(Icons.delete_sweep_rounded, size: 16),
+                      label: const Text('清空'),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 8),
               if (all.isEmpty)

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'music/widgets/floating_play_button.dart';
+import 'music/pages/music_bottom_chrome.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'common/theme.dart';
@@ -271,6 +272,16 @@ class _TVBoxAppState extends State<TVBoxApp> with WidgetsBindingObserver {
                       // 歌单详情/喜马拉雅专辑/本地音乐，那些页面**没有**迷你
                       // 播放器，所以以前"点歌后除了声音没有任何反馈"）。
                       const MusicFloatingPlayButton(),
+                      // ── 音乐底部套装（全局，用户 2026 要求）──────────
+                      // 「**每个界面**都要有迷你条 + 导航栏」——
+                      // 与悬浮球同一层，一处挂载覆盖所有路由。
+                      // 详细取舍见 `MusicBottomChrome` 的注释。
+                      const Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: MusicBottomChrome(),
+                      ),
                     ],
                   );
                 },
@@ -283,3 +294,4 @@ class _TVBoxAppState extends State<TVBoxApp> with WidgetsBindingObserver {
     );
   }
 }
+

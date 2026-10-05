@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../models/third_party_source.dart';
 import '../services/settings_store.dart';
+import '../services/source_memory.dart';
 import '../theme/music_theme.dart';
 import '../widgets/floating_play_button.dart';
 import 'source_manager_page.dart';
@@ -67,7 +68,43 @@ class ProfilePage extends StatelessWidget {
             label: '使用导入的音乐源',
             subtitle: '关闭后只用内置的公开接口',
             value: store.useThirdPartySources.value,
+            listen: store.useThirdPartySources,
             onChanged: (v) => store.setUseThirdPartySources(v),
+          ),
+          // ── 子页面的底栏（用户 2026 要求做成设置）────────────────
+          //
+          // 「每个界面都要有迷你条 + 导航栏」做成了全局层，但那样会
+          // **盖住子页面最下面的内容**。所以给个开关让用户自己选：
+          //   · 关（默认）= 子页面干净、不被遮
+          //   · 开         = 子页面也有底栏（浮在上面）
+          _switchTile(
+            label: '子页面显示底部栏',
+            subtitle: '在歌单详情等子页面也显示迷你条和导航栏',
+            value: store.bottomBarOnSubPages.value,
+            listen: store.bottomBarOnSubPages,
+            onChanged: (v) => store.setBottomBarOnSubPages(v),
+          ),
+          // 迷你条单独一个开关：它遮挡小、价值高（在子页面想暂停/切歌
+          // 不用先返回），所以允许"只要迷你条、不要导航栏"。
+          // ⚠️ 只有上面那个总开关打开时才有效 —— 灰掉而不是隐藏，
+          //    否则用户会以为"这个功能不存在"。
+          ValueListenableBuilder<bool>(
+            valueListenable: store.bottomBarOnSubPages,
+            builder: (context, on, _) => Opacity(
+              opacity: on ? 1 : 0.4,
+              child: IgnorePointer(
+                ignoring: !on,
+                child: _switchTile(
+                  label: '子页面显示迷你播放条',
+                  subtitle: on
+                      ? '子页面里也能直接暂停 / 切歌'
+                      : '（需先打开上面的「子页面显示底部栏」）',
+                  value: store.miniPlayerOnSubPages.value,
+                  listen: store.miniPlayerOnSubPages,
+                  onChanged: (v) => store.setMiniPlayerOnSubPages(v),
+                ),
+              ),
+            ),
           ),
           // ⚠️ 「跨平台匹配」开关**已移除**（用户 2026 决定：不要跨平台）。
           //
@@ -82,6 +119,12 @@ class ProfilePage extends StatelessWidget {
 
           // ── 音源 ────────────────────────────────────────────
           const _GroupTitle('音源'),
+          // ── 音源记忆（用户 2026 要求）────────────────────────
+          //
+          // 「VIP 歌靠第三方源播成功后，退出去重新点，直接用它上次
+          // 成功的那个源」—— 那是自动的；这里给用户一个**出口**，
+          // 因为记忆是自动学的、用户看不见，记错了得能清掉。
+          _memoryTile(store),
           _groupCard([
           ValueListenableBuilder<int>(
             valueListenable: ThirdPartySourceStore.instance.revision,
@@ -229,15 +272,65 @@ class ProfilePage extends StatelessWidget {
   ///（设置其实**已经保存**，只是显示不动 → 用户以为"第三方源没打开"）。
   /// 这里改成直接跟随 `SettingsStore.useThirdPartySources` 这个 Notifier，
   /// 拨动后由它推新值，不会再回弹。（本页只有这一个开关，所以直接绑定。）
+  /// 「音源记忆」行：显示记住了多少首 + 一键清除。
+  ///
+  /// 用 `ValueListenableBuilder` 绑 `SourceMemory.count` ——
+  /// 本页是 `StatelessWidget`（没有 `setState`），清空后要让这行自己刷新。
+  Widget _memoryTile(SettingsStore store) => ValueListenableBuilder<int>(
+        valueListenable: SourceMemory.instance.count,
+        builder: (context, n, _) => ListTile(
+        leading: _iconBox(Icons.history_rounded),
+        title: Text('音源记忆',
+            style:
+                TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
+          subtitle: Text(
+            n == 0
+                ? '还没有记录。播放成功后会自动记住用的是哪个源'
+                : '已记住 $n 首，下次直接用它上次成功的源',
+            style:
+                TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
+          ),
+          trailing: n == 0
+              ? null
+              : TextButton(
+                  onPressed: () => SourceMemory.instance.clear(),
+                  child: Text('清除',
+                      style: TextStyle(
+                          color: MusicTheme.tint, fontSize: AppTheme.fontSubhead)),
+                ),
+        ),
+      );
+
+  /// 一个开关行。
+  ///
+  /// ── 🔴 修的真 bug：原来**写死**监听 `useThirdPartySources` ────────
+  /// 旧实现是：
+  /// ```dart
+  /// ValueListenableBuilder<bool>(
+  ///   valueListenable: SettingsStore.instance.useThirdPartySources,  // ← 写死
+  ///   builder: (context, v, _) => SwitchListTile(value: v, ...),
+  /// )
+  /// ```
+  /// 传进来的 `value` / `onChanged` **全都没被用** —— 它永远显示
+  /// "使用导入的音乐源"那个值。
+  ///
+  /// 只有一个开关时看不出来（恰好就是它）；一旦加第二个开关，
+  /// 两个会**显示同一个状态、点一个另一个也变** ✗。
+  ///
+  /// 修法：加一个 [listen] 参数指定要监听哪个 notifier，
+  /// 并且**以 [value] 为准**（调用方传的是它自己那份的状态）。
   Widget _switchTile({
     required String label,
     String? subtitle,
     required bool value,
     required ValueChanged<bool> onChanged,
+    ValueNotifier<bool>? listen,
   }) =>
       ValueListenableBuilder<bool>(
-        valueListenable: SettingsStore.instance.useThirdPartySources,
+        valueListenable: listen ?? SettingsStore.instance.useThirdPartySources,
         builder: (context, v, _) => SwitchListTile(
+          // ⚠️ 用 notifier 的当前值（`v`）而不是参数 `value` ——
+          // 参数是调用时**快照**，开关变化后不会更新，会"点了又弹回去"。
           value: v,
           activeThumbColor: MusicTheme.tint,
           contentPadding: const EdgeInsets.symmetric(horizontal: 16),

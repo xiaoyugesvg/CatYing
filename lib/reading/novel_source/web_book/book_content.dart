@@ -13,12 +13,9 @@ import '../model/xiaoshuo_book.dart';
 import '../model/xiaoshuo_book_chapter.dart';
 
 class BookContent {
-  // 复用同一 QuickJS 运行时（按需创建），避免每次解析正文都重建运行时。
-  static JsEngine? _jsEngineHolder;
-  static JsEngine get _jsEngine {
-    _jsEngineHolder ??= JsEngine();
-    return _jsEngineHolder!;
-  }
+  // 复用进程级共享 QuickJS 运行时（见 JsEngine.shared 说明），
+  // 避免每次解析正文都重建运行时造成原生资源泄漏。
+  static JsEngine get _jsEngine => JsEngine.shared;
 
   // 预编译正则
   static final _brRegex = RegExp(r'<br\s*/?\s*>', caseSensitive: false);

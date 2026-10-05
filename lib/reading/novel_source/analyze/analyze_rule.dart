@@ -342,7 +342,7 @@ class AnalyzeRule {
 
   String _evalJs(String jsStr, dynamic result, {Map<String, dynamic>? extraBindings}) {
     try {
-      _jsEngine ??= JsEngine();
+      _jsEngine ??= JsEngine.shared;
       final bindings = <String, dynamic>{
         'java': this,
         'result': result,
