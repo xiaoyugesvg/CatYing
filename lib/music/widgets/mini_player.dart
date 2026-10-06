@@ -5,7 +5,6 @@ import '../services/music_api.dart';
 import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
-import '../pages/player_page.dart';
 import '../pages/queue_page.dart';
 import '../widgets/quick_actions.dart';
 import '../../common/floating_nav_spec.dart';
@@ -375,16 +374,6 @@ class _MiniPlayerState extends State<MiniPlayer>
     );
   }
 }
-
-/// 全屏播放器入口（声明在 player_page.dart，这里只是转发，
-/// 避免 MiniPlayer 直接依赖页面实现细节）
-Future<void> openMusicPlayer(BuildContext context) =>
-    Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => const MusicPlayerPage(),
-      ),
-    );
 
 /// 供 RootView 复用的「当前是否在播」判断
 bool get hasCurrentMusic => MusicPlayerManager.instance.currentSong != null;

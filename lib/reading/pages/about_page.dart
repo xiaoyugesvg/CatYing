@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../theme/jelly_theme.dart';
+// 这里的 constants 已改名 CmbokConstants（原 AppConstants），
+// 不再与 common/constants.dart 的 AppConstants 冲突，所以**不需要前缀**了。
 import '../utils/constants.dart';
+import '../../common/theme.dart';
 
 /// 关于页面：顶部应用图标+名称+版本，下方免责声明
 /// （GitHub / QQ群 在「我的」页底部快捷区）
@@ -44,9 +47,9 @@ class AboutPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  '${AppConstants.appName} V${AppConstants.version}',
+                  '${CmbokConstants.appName} V${CmbokConstants.version}',
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: AppTheme.fontTitle3,
                     fontWeight: FontWeight.bold,
                     color: titleColor,
                   ),
@@ -58,7 +61,7 @@ class AboutPage extends StatelessWidget {
           Text(
             '免责声明',
             style: TextStyle(
-              fontSize: 15,
+              fontSize: AppTheme.fontHeadline,
               fontWeight: FontWeight.w700,
               color: titleColor,
             ),
@@ -73,7 +76,7 @@ class AboutPage extends StatelessWidget {
             ),
             child: const Text(
               _kDisclaimer,
-              style: TextStyle(fontSize: 13, height: 1.6),
+              style: TextStyle(fontSize: AppTheme.fontSubhead, height: 1.6),
             ),
           ),
         ],

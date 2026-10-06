@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../../widgets/common_widgets.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -17,6 +18,7 @@ import '../widgets/jelly_bookshelf_dialog.dart';
 import '../widgets/jelly_score_badge.dart';
 import '../widgets/theme_background_animation.dart';
 import 'reader_page.dart';
+import '../../common/theme.dart';
 
 /// 日志工具
 void _log(String message) {
@@ -271,7 +273,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         _comic.title,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 16),
+        style: const TextStyle(fontSize: AppTheme.fontHeadline),
       ),
     );
   }
@@ -289,14 +291,14 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
             httpHeaders: coverHeaders(_comic.sourceId),
             fit: BoxFit.cover,
             placeholder: (c, u) => Container(
-              color: isDark ? JellyTheme.cardDark : Colors.grey[200],
+              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             ),
             errorWidget: (c, u, e) => Container(
-              color: isDark ? JellyTheme.cardDark : Colors.grey[200],
-              child: const Icon(
+              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+              child: Icon(
                 Icons.broken_image,
                 size: 40,
-                color: Colors.grey,
+                color: JellyTheme.textSecondary,
               ),
             ),
           ),
@@ -332,7 +334,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, size: 48, color: Colors.red),
+            const Icon(Icons.error_outline, size: 40, color: Colors.red),
             const SizedBox(height: 16),
             Text('加载失败: $_error'),
             const SizedBox(height: 16),
@@ -369,7 +371,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                       Text(
                         _comic.title,
                         style: TextStyle(
-                          fontSize: 20,
+                          fontSize: AppTheme.fontTitle2,
                           fontWeight: FontWeight.bold,
                           color: titleColor,
                         ),
@@ -391,7 +393,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                               child: Text(
                                 _comic.author!,
                                 style: TextStyle(
-                                  fontSize: 13,
+                                  fontSize: AppTheme.fontSubhead,
                                   color: secondaryColor,
                                 ),
                                 maxLines: 1,
@@ -454,16 +456,24 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     );
   }
 
-  /// 胶囊按钮（左图标 + 右文字）
+  /// 胶囊按钮（左图标 + 右文字）。
+  /// 不传 [color] 时用"三深灰按钮"样式（参考图 IMG_8471）；传强调色时文字白。
   Widget _buildCapsuleButton({
     required IconData icon,
     required String label,
     required VoidCallback onTap,
     Color? color,
   }) {
-    color ??= JellyTheme.primary;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = color ??
+        (isDark
+            ? Colors.white.withValues(alpha: 0.14)
+            : Colors.black.withValues(alpha: 0.10));
+    final fg = color != null
+        ? Colors.white
+        : (isDark ? Colors.white70 : JellyTheme.textPrimaryLight);
     return Material(
-      color: color,
+      color: bg,
       borderRadius: BorderRadius.circular(20),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -473,13 +483,13 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 15, color: Colors.white),
+              Icon(icon, size: 15, color: fg),
               const SizedBox(width: 4),
               Text(
                 label,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Colors.white,
+                style: TextStyle(
+                  fontSize: AppTheme.fontFootnote,
+                  color: fg,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -495,6 +505,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     return _buildCapsuleButton(
       icon: Icons.play_arrow_rounded,
       label: '续读',
+      color: JellyTheme.primary,
       onTap: () {
         final rp = ReadingProgressService().getProgress(_comic.pathWord);
         final chapter = _continueChapter;
@@ -596,11 +607,11 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => DownloadChapterSheet(
+      builder: (_) => kbSheet(DownloadChapterSheet(
         comic: _comic,
         chapters: group.chapters,
         groupName: group.name,
-      ),
+      )),
     );
   }
 
@@ -623,25 +634,26 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
       ),
       child: Text(
         status,
-        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: fg),
+        style: TextStyle(fontSize: AppTheme.fontFootnote, fontWeight: FontWeight.w600, color: fg),
       ),
     );
   }
 
   Widget _buildTagChip(String tag, bool isDark) {
+    // 题材灰胶囊（参考图 IMG_8471）
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: isDark
-            ? Colors.white.withValues(alpha: 0.08)
-            : JellyTheme.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
+            ? Colors.white.withValues(alpha: 0.10)
+            : Colors.black.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Text(
         tag,
         style: TextStyle(
-          fontSize: 11,
-          color: isDark ? Colors.white70 : JellyTheme.primary,
+          fontSize: AppTheme.fontCaption,
+          color: isDark ? Colors.white70 : JellyTheme.textSecondary,
         ),
       ),
     );
@@ -657,7 +669,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         Text(
           '简介',
           style: TextStyle(
-            fontSize: 14,
+            fontSize: AppTheme.fontBody,
             fontWeight: FontWeight.w700,
             color: titleColor,
           ),
@@ -667,7 +679,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
           desc,
           maxLines: _descExpanded ? null : 3,
           overflow: _descExpanded ? TextOverflow.clip : TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 13, height: 1.5, color: secondaryColor),
+          style: TextStyle(fontSize: AppTheme.fontSubhead, height: 1.5, color: secondaryColor),
         ),
         if (likelyLong)
           Align(
@@ -681,7 +693,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
               ),
               child: Text(
                 _descExpanded ? '收起' : '展开',
-                style: const TextStyle(fontSize: 12),
+                style: const TextStyle(fontSize: AppTheme.fontFootnote),
               ),
             ),
           ),
@@ -720,7 +732,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
               child: Text(
                 '最新章节',
                 style: TextStyle(
-                  fontSize: 16,
+                  fontSize: AppTheme.fontHeadline,
                   fontWeight: FontWeight.bold,
                   color: titleColor,
                 ),
@@ -755,7 +767,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                           chapter.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 11),
+                          style: const TextStyle(fontSize: AppTheme.fontCaption),
                         ),
                       ),
                       if (isLastRead)
@@ -801,7 +813,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
             Text(
               '章节',
               style: TextStyle(
-                fontSize: 16,
+                fontSize: AppTheme.fontHeadline,
                 fontWeight: FontWeight.bold,
                 color: titleColor,
               ),
@@ -809,7 +821,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
             const SizedBox(width: 8),
             Text(
               '共 $_totalChapters 话',
-              style: TextStyle(fontSize: 13, color: JellyTheme.textSecondary),
+              style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
             ),
             if (_continueChapter != null) ...[
               const SizedBox(width: 12),
@@ -846,9 +858,9 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
       SliverPadding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
         sliver: SliverGrid(
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 100,
-            childAspectRatio: 2.5,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 4, // 4 列网格（参考图 IMG_8471）
+            childAspectRatio: 2.6,
             crossAxisSpacing: 8,
             mainAxisSpacing: 8,
           ),
@@ -875,7 +887,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                     chapter.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11),
+                    style: const TextStyle(fontSize: AppTheme.fontCaption),
                   ),
                 ),
                 if (isLastRead)
@@ -961,7 +973,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                         : (isDark
                               ? Colors.white.withValues(alpha: 0.06)
                               : Colors.white),
-                    borderRadius: BorderRadius.circular(19),
+                    borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                       color: selected
                           ? JellyTheme.primary
@@ -972,7 +984,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                   child: Text(
                     '${g.name} (${g.chapters.length})',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: AppTheme.fontSubhead,
                       fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                       color: selected
                           ? Colors.white
@@ -1001,6 +1013,10 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         child: AnimatedOpacity(
           opacity: _showBackToTop ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 200),
+          // ⛔ **有意不同、不要"统一"成 `AppIconButton`** ✗✓（与 `bookshelf_page` /
+          //   `book_search_page` / `download_page` 的返回顶部钮**同款** ✓）：
+          //   它是**滚动出现的悬浮 FAB** ✓（`primary` + `elevation: 4` 醒目 ✓），
+          //   不是顶栏同族圆钮 ✗ → 换"淡圆底"会几乎看不见 ✗✗
           child: Material(
             color: JellyTheme.primary,
             shape: const CircleBorder(),

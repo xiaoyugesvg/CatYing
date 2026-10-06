@@ -407,7 +407,12 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                     ),
                   ),
                 )
-              : ListView.separated(
+              // ── 🔴 必须监听 player（同 ximalaya_album_page 的说明）────
+              // 外层只监听了 `_store.revisionProxy`，而下面 `playing` 读的是
+              // `_player.currentSong` → 点歌后**高亮不刷新** ✗
+              : ListenableBuilder(
+                  listenable: _player,
+                  builder: (context, _) => ListView.separated(
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   itemCount: p.songs.length,
                   separatorBuilder: (_, __) => const Divider(height: 1),
@@ -455,6 +460,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                       ),
                     );
                   },
+                  ),
                 ),
         );
       },

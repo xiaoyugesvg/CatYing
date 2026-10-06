@@ -11,6 +11,7 @@ import '../services/source_import_parser.dart';
 import '../services/unblock_service.dart';
 import '../theme/music_theme.dart';
 import '../../common/theme.dart';
+import '../../widgets/app_toast.dart';
 
 /// 音源管理页 —— 移植自 Beans 的 `ThirdPartySourceManagerSheet.swift`。
 /// 界面样式对齐洛雪（LX Music）"自定义音源"设置页（参考图 IMG_8538）：
@@ -56,8 +57,30 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     _CardKind.lx: TextEditingController(),
     _CardKind.musicFree: TextEditingController(),
   };
-  String? _pickedName;
-  String? _pickedContent;
+  // ── 🔴 「文件」那一栏也必须**按卡分开存**（同一个 bug 的漏网之鱼）──
+  //
+  // 上面 `_tab` / `_textCtrl` / `_urlCtrl` 已经按 `_CardKind` 分开了，
+  // 但**选中的文件**原来还是共用的两个变量：
+  // ```dart
+  //   String? _pickedName;
+  //   String? _pickedContent;
+  // ```
+  // 于是：
+  //   · 在洛雪卡选一个文件 → **MusicFree 卡的文件行显示同一个文件名** ✗
+  //   · 此时在 MusicFree 卡点「导入」→ 会拿**洛雪卡选的那个文件**
+  //     去导入，而 `expectMusicFree: true` 会对它做 MusicFree 校验 →
+  //     报"格式不匹配"，用户完全看不懂为什么 ✗
+  //
+  // 佐证：`_fileRow({required _CardKind kind})` 原来**收了 `kind` 却没用**，
+  // 正是"打算按卡分开但没做完"的痕迹。
+  final _pickedName = <_CardKind, String?>{
+    _CardKind.lx: null,
+    _CardKind.musicFree: null,
+  };
+  final _pickedContent = <_CardKind, String?>{
+    _CardKind.lx: null,
+    _CardKind.musicFree: null,
+  };
   bool _busy = false;
 
   /// 列表类型筛选：'' = 全部 / 'lx' = 洛雪音乐源 / 'musicfree' = MusicFree 源
@@ -400,7 +423,7 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
   Widget _fileRow(BuildContext context, {required _CardKind kind}) {
     return InkWell(
       borderRadius: BorderRadius.circular(12),
-      onTap: _pickFile,
+      onTap: () => _pickFile(kind),
       child: Container(
         width: double.infinity,
         padding:
@@ -416,11 +439,12 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                _pickedName ?? '点击选择本地音源文件（JSON / JS）',
+                // ⚠️ 读**本卡**选中的文件名（见字段声明处的说明）
+                _pickedName[kind] ?? '点击选择本地音源文件（JSON / JS）',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                    color: _pickedName == null
+                    color: _pickedName[kind] == null
                         ? MusicTheme.secondary
                         : MusicTheme.label,
                     fontSize: AppTheme.fontSubhead),
@@ -434,7 +458,8 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     );
   }
 
-  Future<void> _pickFile() async {
+  /// 选本地音源文件。**[kind] 决定存到哪张卡**（见字段声明处的说明）。
+  Future<void> _pickFile(_CardKind kind) async {
     try {
       // file_picker 13：pickFiles 是静态方法，直接返回 List<PlatformFile>
       final res = await FilePicker.pickFiles(type: FileType.any);
@@ -444,10 +469,15 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       final content = await File(f.path!).readAsString();
       if (!mounted) return;
       setState(() {
-        _pickedName = f.name;
-        _pickedContent = content;
+        _pickedName[kind] = f.name;
+        _pickedContent[kind] = content;
       });
     } catch (e) {
+      // ⚠️ 这里**必须**判 mounted：上面有两次 await（选文件 + 读内容），
+      //    期间用户完全可能已经退出本页 → `_toast(context, ...)` 里
+      //    `ScaffoldMessenger.of(context)` 会命中已 deactivated 的 element
+      //    并抛异常（成功分支 :445 一直有判，只有这个 catch 漏了）。
+      if (!mounted) return;
       _toast(context, '读取文件失败：$e');
     }
   }
@@ -478,12 +508,15 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         // 传 fallbackName 让"URL 里没有平台名"时也能有个名字
         fallback = content;
       } else {
-        if (_pickedContent == null) {
+        // ⚠️ 读**本卡**的内容 —— 否则在洛雪卡选的文件会被
+        //    MusicFree 卡拿去导入并报"格式不匹配"（见字段声明处的说明）。
+        final picked = _pickedContent[kind];
+        if (picked == null) {
           _toast(context, '请先选择文件');
           return;
         }
-        content = _pickedContent!;
-        fallback = _pickedName;
+        content = picked;
+        fallback = _pickedName[kind];
       }
 
       // ── 按**卡片类型**导入：粘错格式会明确拒绝而不是静默接受 ──
@@ -509,10 +542,35 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     }
   }
 
+  /// 本页统一提示。**不依赖 `BuildContext`**（见下）。
+  ///
+  /// ── 🔴 为什么改成 `AppToast`（一次修好两个问题）────────────────
+  ///
+  /// **问题 1：会崩。** 原来实现是
+  /// ```dart
+  /// void _toast(BuildContext context, String msg) {
+  ///   ScaffoldMessenger.of(context)..hideCurrentSnackBar()..showSnackBar(...);
+  /// }
+  /// ```
+  /// 而调用点里有好几处是在 `await` **之后**调的
+  ///（保存音源 `:933`、导入结果 `:529/:532/:535` —— 导入本身要跑几秒）。
+  /// 期间用户完全可能已经退出本页 → `ScaffoldMessenger.of(context)`
+  /// 会命中已 deactivated 的 element 并抛异常。
+  /// 因为 `_toast` 是**单一收口点**，改它一处就覆盖了全部 10 个调用点，
+  /// 不用在每个 await 后面补 `if (!mounted) return;`（那样容易漏）。
+  ///
+  /// **问题 2：位置不对、长相不统一。** SnackBar 出现在屏幕**最底部**，
+  /// 而音乐模块底部有全局 `MusicBottomChrome`（迷你条 + 导航栏，
+  /// 见 `app.dart`）→ 提示正好被压在它下面看不见 ✗
+  /// 而且同一 App 里"音乐用气泡、这一页用 SnackBar"本身就不统一
+  ///（约定见 `lib/widgets/app_toast.dart` 顶部注释：
+  ///  屏幕底部会被底栏盖住，所以统一走顶部气泡）。
+  ///
+  /// `AppToast` 挂在 root Overlay 上、自动消失，**不需要 context**，
+  /// 所以 `context` 参数保留只是为了不改 10 个调用点的签名，
+  /// 实现里刻意不用它（这也顺带消除了"跨 await 用 context"的风险）。
   void _toast(BuildContext context, String msg) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(msg)));
+    AppToast.show(msg, '');
   }
 
   // ── 音源列表标题行 + 数量角标 ────────────────────────────────

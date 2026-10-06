@@ -6,6 +6,8 @@ import '../services/search_history_service.dart';
 import '../services/zlibrary_service.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/staggered_entrance.dart';
+import '../../common/theme.dart';
+import '../../widgets/app_page_header.dart';
 import 'zlibrary_nodes_sheet.dart';
 
 /// z-library 登录/注册页面（扁平风、内容丰富、灵动）。
@@ -26,6 +28,14 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
 
   // 登录表单
   final _emailCtrl = TextEditingController();
+
+  /// Z-Library 服务器地址。
+  ///
+  /// ⚠️ 为什么必须有这一项：cmbok 的域名是**云端配置下发**的
+  /// （`RemoteConfigService.cloudZlibraryUrl`），猫影没有那个服务，
+  /// 所以地址为空时所有图书接口都不可用（会报"图书功能暂不可用"）。
+  /// 用户必须自己填一个可用镜像地址。
+  final _domainCtrl = TextEditingController();
   final _pwdCtrl = TextEditingController();
   bool _obscureLogin = true;
   String? _loginError;
@@ -62,6 +72,8 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
       duration: const Duration(seconds: 12),
     )..repeat();
     _loadLoginHistory();
+    // 回填已保存的服务器地址（没有就是空的，用户得自己填）
+    _domainCtrl.text = ZlibraryService().domain;
   }
 
   Future<void> _loadLoginHistory() async {
@@ -76,6 +88,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
     _removeEmailOverlay();
     _pwdFocus.dispose();
     _emailCtrl.dispose();
+    _domainCtrl.dispose();
     _pwdCtrl.dispose();
     _regEmailCtrl.dispose();
     _regPwdCtrl.dispose();
@@ -93,6 +106,19 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
       setState(() => _loginError = '请输入邮箱和密码');
       return;
     }
+    // 没配服务器地址时登录必然失败 —— 提前拦住并说清原因，
+    // 否则用户只会看到"登录失败，请检查邮箱与密码"，方向完全错了
+    final domain = _domainCtrl.text.trim();
+    if (domain.isEmpty) {
+      setState(() => _loginError = '请先填写 Z-Library 服务器地址');
+      return;
+    }
+    final domainOk = await ZlibraryService().setDomain(domain);
+    if (!domainOk) {
+      setState(() => _loginError = '服务器地址格式不对，应形如 zh.zlibrary.by');
+      return;
+    }
+
     setState(() => _loginError = null);
     final ok = await ZlibraryService().login(email, pwd);
     if (!mounted) return;
@@ -169,12 +195,12 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
               color: Colors.transparent,
               child: Container(
                 decoration: BoxDecoration(
-                  color: isDark ? JellyTheme.cardDark : Colors.white,
+                  color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
                     color: isDark
                         ? Colors.white.withValues(alpha: 0.08)
-                        : const Color(0xFFE4E6EE),
+                        : JellyTheme.primary.withValues(alpha: 0.12),
                   ),
                   boxShadow: [
                     BoxShadow(
@@ -211,7 +237,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
                               child: Text(
                                 email,
                                 style: TextStyle(
-                                  fontSize: 14,
+                                  fontSize: AppTheme.fontBody,
                                   color: isDark
                                       ? Colors.white
                                       : JellyTheme.textPrimaryLight,
@@ -386,28 +412,6 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
             tooltip: '关闭',
             onPressed: () => Navigator.of(context).pop(),
           ),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.dns_rounded),
-            tooltip: '节点管理',
-            onPressed: () => showModalBottomSheet<void>(
-              context: context,
-              isScrollControlled: true,
-              backgroundColor: Colors.transparent,
-              builder: (ctx) => Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(ctx).brightness == Brightness.dark
-                      ? JellyTheme.cardDark
-                      : Colors.white,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-                ),
-                child: SafeArea(
-                  top: false,
-                  child: const ZlibraryNodesSheet(),
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -478,18 +482,12 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
           ),
         ),
         const SizedBox(height: 12),
-        Text(
-          'Cmbok',
-          style: TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-            color: titleColor,
-          ),
-        ),
+        // 品牌标题：字号与顶栏标题同一档（走统一组件，避免以后改字号漏这里）
+        AppPageTitle('Cmbok', color: titleColor),
         const SizedBox(height: 2),
         Text(
           '图书账号',
-          style: TextStyle(fontSize: 13, color: JellyTheme.textSecondary),
+          style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
         ),
       ],
     );
@@ -504,7 +502,9 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
         return Container(
           padding: const EdgeInsets.all(pad),
           decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : const Color(0xFFEEF0F7),
+            color: isDark
+                ? JellyTheme.cardDark
+                : JellyTheme.primary.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(16),
           ),
           child: SizedBox(
@@ -550,7 +550,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
         child: Text(
           text,
           style: TextStyle(
-            fontSize: 14,
+            fontSize: AppTheme.fontBody,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
             color: selected ? Colors.white : JellyTheme.textSecondary,
           ),
@@ -566,6 +566,8 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
       key: const ValueKey('login'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        StaggeredEntrance(index: 0, child: _buildDomainCard(isDark)),
+        const SizedBox(height: 14),
         StaggeredEntrance(index: 0, child: _buildBenefitsCard(isDark)),
         const SizedBox(height: 16),
         StaggeredEntrance(
@@ -663,7 +665,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
         Expanded(
           child: Text(
             text,
-            style: TextStyle(fontSize: 13, color: JellyTheme.textSecondary),
+            style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
           ),
         ),
       ],
@@ -763,7 +765,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
           Expanded(
             child: Text(
               '注册自有账号，享每日 ${ZlibraryService.loggedDailyLimit} 本下载额度',
-              style: TextStyle(fontSize: 13, color: JellyTheme.textSecondary),
+              style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
             ),
           ),
         ],
@@ -798,7 +800,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
             : Text(
                 label,
                 style: const TextStyle(
-                  fontSize: 13,
+                  fontSize: AppTheme.fontSubhead,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -831,7 +833,9 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
             : null,
         suffixIcon: suffix,
         filled: true,
-        fillColor: isDark ? JellyTheme.cardDark : const Color(0xFFF2F3F8),
+        fillColor: isDark
+            ? JellyTheme.cardDark
+            : JellyTheme.primary.withValues(alpha: 0.08),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,
@@ -854,7 +858,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
               padding: const EdgeInsets.only(top: 8),
               child: Text(
                 msg,
-                style: TextStyle(color: JellyTheme.error, fontSize: 12),
+                style: TextStyle(color: JellyTheme.error, fontSize: AppTheme.fontFootnote),
               ),
             ),
     );
@@ -870,7 +874,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
               padding: const EdgeInsets.only(top: 8),
               child: Text(
                 msg,
-                style: TextStyle(color: JellyTheme.success, fontSize: 12),
+                style: TextStyle(color: JellyTheme.success, fontSize: AppTheme.fontFootnote),
               ),
             ),
     );
@@ -886,7 +890,7 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
           child: Text(
             text,
             style: TextStyle(
-              fontSize: 13,
+              fontSize: AppTheme.fontSubhead,
               color: JellyTheme.primary,
               fontWeight: FontWeight.w500,
             ),
@@ -894,6 +898,123 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
         ),
       ),
     );
+  }
+
+  /// 服务器地址卡片（登录前置条件）。
+  ///
+  /// 独立的卡片而不是塞进表单里，因为它是**基础设施配置**而非账号信息，
+  /// 且需要"测试连接"按钮来区分"地址错"和"账号错"。
+  Widget _buildDomainCard(bool isDark) {
+    final svc = ZlibraryService();
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.05)
+            : Colors.black.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: JellyTheme.primary.withValues(alpha: 0.25),
+          width: 0.8,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.dns_outlined, size: 16, color: JellyTheme.primary),
+              const SizedBox(width: 6),
+              Text(
+                '服务器地址',
+                style: TextStyle(
+                  color: JellyTheme.textPrimaryLight,
+                  fontSize: AppTheme.fontSubhead,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              if (svc.hasDomain)
+                Row(
+                  children: [
+                    Icon(Icons.check_circle,
+                        size: 13, color: JellyTheme.success),
+                    const SizedBox(width: 3),
+                    Text('已配置',
+                        style: TextStyle(
+                            color: JellyTheme.success, fontSize: AppTheme.fontCaption)),
+                  ],
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _flatField(
+            _domainCtrl,
+            '如 zh.zlibrary.by（不要带 https://）',
+            icon: Icons.link_rounded,
+            keyboardType: TextInputType.url,
+            suffix: IconButton(
+              icon: const Icon(Icons.wifi_tethering_rounded, size: 20),
+              tooltip: '测试连接',
+              color: JellyTheme.primary,
+              onPressed: _testDomain,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            svc.hasDomain
+                ? '当前使用：${svc.domain}'
+                : '未配置时图书搜索/详情/下载都不可用（需要你自己填一个可用镜像）',
+            style: TextStyle(
+              color: svc.hasDomain
+                  ? JellyTheme.textSecondary
+                  : JellyTheme.warning,
+              fontSize: AppTheme.fontCaption,
+              height: 1.4,
+            ),
+          ),
+          // ✅ **节点管理入口**（本轮新增 ✓）——底层能力**早就齐全** ✗✓，此前只是**没有界面** ✗：
+          //   内置节点 ✓ 切换/并入候选/落盘 ✓ 单点测试 ✓ **延迟测量** ✓（`zlibrary_service` ✓）。
+          //   现在点开就能：**一键测试全部节点（显示每个的可用性与延迟 ms ✓）** · 切换 ✓ · 添加 ✓。
+          //   ⚠️ 「添加」走的仍是原来的 `setDomain` ✓（归一化 → 并入候选表 → 落盘 ✓），
+          //     所以**原有的"填地址 + 测试"能力一点没丢** ✓✓，只是多了一个看得见全局的入口 ✓。
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                builder: (_) => const ZlibraryNodesSheet(),
+              ),
+              icon: const Icon(Icons.dns_rounded, size: 18),
+              label: const Text('节点管理（一键测试 / 切换 / 添加）'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 测试连接：只验地址可达，不验账号 ——
+  /// 目的是让用户能区分"地址填错了"和"账号密码错了"。
+  Future<void> _testDomain() async {
+    final raw = _domainCtrl.text.trim();
+    if (raw.isEmpty) {
+      setState(() => _loginError = '请先填写服务器地址');
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(
+      content: Text('正在测试连接…'),
+      duration: Duration(seconds: 1),
+    ));
+    final r = await ZlibraryService().probeDomain(raw);
+    if (!mounted) return;
+    setState(() {
+      _loginError = r.ok ? null : r.message;
+      if (r.ok) _domainCtrl.text = ZlibraryService().domain;
+    });
+    messenger.showSnackBar(SnackBar(content: Text(r.message)));
   }
 }
 
@@ -951,7 +1072,7 @@ class _PrimaryButtonState extends State<_PrimaryButton> {
                 : Text(
                     widget.label,
                     style: const TextStyle(
-                      fontSize: 16,
+                      fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.w700,
                       color: Colors.white,
                     ),

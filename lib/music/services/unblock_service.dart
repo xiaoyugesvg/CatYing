@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../models/models.dart';
 import '../models/third_party_source.dart';
 import '../../services/app_log.dart';
 import 'music_api.dart';
+import 'semaphore.dart';
 import 'source_memory.dart';
 
 /// 音源解析结果
@@ -69,8 +72,52 @@ class UnblockService {
   /// 4 个是"够快又不激进"的平衡点。
   static const _concurrency = 4;
 
-  /// 最近一次解析的逐条失败原因（给"为什么都失败了"提供依据）
-  final lastAttempts = <String>[];
+  /// 跨调用的并发闸门（见 `resolveAll` 里的说明）。
+  ///
+  /// 抽成 `Semaphore`（`services/semaphore.dart`）是为了**能单测** ——
+  /// 并发正确性靠读代码不可靠（有 `test/semaphore_test.dart` 钉住）。
+  final _gate = Semaphore(_concurrency);
+
+  /// 最近一次解析的逐条失败原因（给"为什么都失败了"提供依据）。
+  ///
+  /// ── 🔴 每条都**带着它属于哪首歌**（修"失败原因串歌"）────────────
+  ///
+  /// 原来是一个纯 `List<String>`，而 `resolve` / `resolveAll` 都会先
+  /// `lastAttempts.clear()` 再往里 add —— 于是**两次解析重叠时会互相污染**：
+  ///
+  ///   · 快速连点 A → B：B 的 `clear()` 抹掉 A 的记录（A 的失败原因丢了）
+  ///   · A 的请求晚回来：把 A 的失败原因 add 进**已经是 B 的**那个列表
+  ///   · 然后 `player_manager` 调 `describeFailure()` 展示 →
+  ///     **用户看到的是上一首歌的失败原因** ✗
+  ///    （`player_manager._failedSummary` 也是直接数 `lastAttempts.length`，
+  ///      同样会把别的歌的条数算进来）
+  ///
+  /// 现在每条记录带上 `Song.identityKey`，[describeFailure] 只返回**本首歌**的；
+  /// 别的歌的记录留着不影响正确性（下次 `clear()` 会清）。
+  final attempts = <({String songKey, String text})>[];
+
+  /// 兼容旧用法：只取文本（顺序不变）
+  List<String> get lastAttempts =>
+      attempts.map((a) => a.text).toList(growable: false);
+
+  /// 记一条失败原因，并绑定到**当前这首歌**
+  void _record(Song song, String text) =>
+      attempts.add((songKey: song.identityKey, text: text));
+
+  /// 把**本首歌**的失败原因拼成人能看的说明。
+  ///
+  /// ⚠️ 必须传 [song]：不传就会把别的歌的失败原因也带出来（见 [attempts] 注释）。
+  String describeFailureFor(Song song) {
+    final mine = attempts
+        .where((a) => a.songKey == song.identityKey)
+        .map((a) => a.text)
+        .toList();
+    return _format(mine);
+  }
+
+  /// 本首歌有几个源试过但失败了（供 `player_manager._failedSummary` 用）。
+  int failedCountFor(Song song) =>
+      attempts.where((a) => a.songKey == song.identityKey).length;
 
   /// 用已启用的第三方音源解析播放地址。
   ///
@@ -80,7 +127,7 @@ class UnblockService {
     Song song, {
     void Function(int index, int total, String sourceName)? onProgress,
   }) async {
-    lastAttempts.clear();
+    attempts.clear();
 
     // ── 把**记住的那个源**排到最前（用户 2026 要求）──────────────
     //
@@ -120,15 +167,16 @@ class UnblockService {
         }
         // 记下每个源的失败原因 —— 全失败时一起展示，
         // 用户才知道是哪个源坏了、坏在哪
-        lastAttempts.add('${s.name}：${r.message.isEmpty ? "未返回地址" : r.message}');
+        _record(song,
+            '${s.name}：${r.message.isEmpty ? "未返回地址" : r.message}');
       } catch (e) {
-        lastAttempts.add('${s.name}：$e');
+        _record(song, '${s.name}：$e');
       }
     }
 
     return SourceResolveResult(
       ok: false,
-      error: lastAttempts.isEmpty ? '所有音源都没解析出播放地址' : '所有音源都失败了',
+      error: failedCountFor(song) == 0 ? '所有音源都没解析出播放地址' : '所有音源都失败了',
     );
   }
 
@@ -152,11 +200,19 @@ class UnblockService {
     Song song, {
     void Function(int done, int total)? onProgress,
   }) async {
-    lastAttempts.clear();
+    attempts.clear();
     final sources = ThirdPartySourceStore.instance.enabled.take(_maxTriesAll).toList();
     if (sources.isEmpty) return const [];
 
-    // 结果槽位：按**源顺序**保留，成功的填进去
+    // ── 🔴 并发上限必须是**全局跨调用**的（修"连点两首歌 = 8 个沙箱"）──
+    //
+    // 原来每个 `resolve`/`resolveAll` **各自**开 `_concurrency`(4) 个 worker：
+    // 用户快速连点两首歌时 → 两个调用同时在跑 → **最多 8 个 Node vm 沙箱**
+    // 同时开，正好是这段注释声称"必须避免"的情况 ✗
+    //（被 `epoch` 丢弃的那次调用也会把 4 个 slot 跑满，不会提前退出）
+    //
+    // 现在用一对 ACME 信号量把"同时进行的源请求总数"压到 `_concurrency`：
+    // 后进来的调用会在 `_acquire()` 里排队，而不是直接再开 4 个。
     final slots = List<SourceResolveResult?>.filled(sources.length, null);
     var done = 0;
     var next = 0;
@@ -168,6 +224,7 @@ class UnblockService {
         if (i >= sources.length) return;
         next++;
         final s = sources[i];
+        await _gate.acquire();
         try {
           final r = await MusicApi.instance.resolveBySource(s, song);
           if (r.ok && r.url.isNotEmpty) {
@@ -179,11 +236,15 @@ class UnblockService {
               headers: r.headers,
             );
           } else {
-            lastAttempts
-                .add('${s.name}：${r.message.isEmpty ? "未返回地址" : r.message}');
+            // ⚠️ 必须走 `_record`（带上"属于哪首歌"），
+            //    直接用 `lastAttempts.add` 会丢歌曲标记
+            _record(song,
+                '${s.name}：${r.message.isEmpty ? "未返回地址" : r.message}');
           }
         } catch (e) {
-          lastAttempts.add('${s.name}：$e');
+          _record(song, '${s.name}：$e');
+        } finally {
+          _gate.release();
         }
         done++;
         onProgress?.call(done, sources.length);
@@ -226,12 +287,22 @@ class UnblockService {
   /// `内置接口没有免费音源；car_conv2: GD接口失败: Clie...`，看不到真正原因）。
   /// 所以这里**永远**把完整逐条明细写进 `AppLog`（日志页可查），
   /// 返回值仍保持简短，专供 toast 用。
-  String describeFailure() {
-    if (lastAttempts.isEmpty) return '';
-    final full = lastAttempts.join('\n');
+  /// 把一批失败原因拼成人能看的说明。
+  ///
+  /// ⚠️ 完整原因**同时进日志** —— 气泡会把长文本截断，
+  /// 而可排查的信息往往在后半段（用户反馈过"看不到完整的日志"）。
+  String _format(List<String> list) {
+    if (list.isEmpty) return '';
+    final full = list.join('\n');
     debugPrint('[Unblock] 逐个失败原因:\n$full');
     AppLog.instance.log('[Unblock] 音源逐个失败原因:\n$full');
-    if (lastAttempts.length == 1) return lastAttempts.first;
-    return '试了 ${lastAttempts.length} 个音源都没成功';
+    if (list.length == 1) return list.first;
+    return '试了 ${list.length} 个音源都没成功';
   }
+
+  /// ⚠️ **已废弃**：不带歌曲参数 → 会把别的歌的失败原因一起返回
+  ///（快速连点两首歌时"显示的是上一首的失败原因"）。
+  /// 请改用 [describeFailureFor]。
+  @Deprecated('用 describeFailureFor(song) —— 这个方法会串到别的歌上')
+  String describeFailure() => _format(lastAttempts);
 }

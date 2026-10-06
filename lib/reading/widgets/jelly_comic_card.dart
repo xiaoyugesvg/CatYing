@@ -5,6 +5,7 @@ import '../theme/jelly_theme.dart';
 import 'jelly_favorite_button.dart';
 import 'jelly_score_badge.dart';
 import 'source_cover_image.dart';
+import '../../common/theme.dart';
 
 /// 果冻风漫画卡片
 class JellyComicCard extends StatefulWidget {
@@ -20,6 +21,10 @@ class JellyComicCard extends StatefulWidget {
   /// 是否显示漫画源角标（收藏页 true，搜索页默认 false）
   final bool showSourceBadge;
 
+  /// 紧凑模式（搜索/推荐卡片，对齐参考图：仅封面+名称，
+  /// 去掉收藏按钮、热度徽标与作者胶囊——名称位置不加收藏）
+  final bool compact;
+
   const JellyComicCard({
     super.key,
     required this.comic,
@@ -27,6 +32,7 @@ class JellyComicCard extends StatefulWidget {
     this.onLongPress,
     this.heroTag,
     this.showSourceBadge = false,
+    this.compact = false,
   });
 
   @override
@@ -150,8 +156,10 @@ class _JellyComicCardState extends State<JellyComicCard>
                         httpHeaders: coverHeaders(widget.comic.sourceId),
                         fit: BoxFit.cover,
                         memCacheWidth: 300,
-                        placeholder: (context, url) => Container(
-                          color: isDark ? Colors.grey[800] : Colors.grey[200],
+                        placeholder: (context, url) => ColoredBox(
+                          color: isDark
+                              ? JellyTheme.cardDark
+                              : JellyTheme.cardLight,
                           child: Center(
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
@@ -159,12 +167,14 @@ class _JellyComicCardState extends State<JellyComicCard>
                             ),
                           ),
                         ),
-                        errorWidget: (context, url, error) => Container(
-                          color: isDark ? Colors.grey[800] : Colors.grey[200],
-                          child: const Icon(
+                        errorWidget: (context, url, error) => ColoredBox(
+                          color: isDark
+                              ? JellyTheme.cardDark
+                              : JellyTheme.cardLight,
+                          child: Icon(
                             Icons.broken_image,
                             size: 40,
-                            color: Colors.grey,
+                            color: JellyTheme.textSecondary,
                           ),
                         ),
                       ),
@@ -201,12 +211,12 @@ class _JellyComicCardState extends State<JellyComicCard>
                           decoration: BoxDecoration(
                             color: (isDark ? Colors.black : JellyTheme.primary)
                                 .withValues(alpha: 0.75),
-                            borderRadius: BorderRadius.circular(4),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
                             sourceName,
                             style: const TextStyle(
-                              fontSize: 9,
+                              fontSize: AppTheme.fontCaption,
                               color: Colors.white,
                               fontWeight: FontWeight.w700,
                             ),
@@ -217,7 +227,53 @@ class _JellyComicCardState extends State<JellyComicCard>
                 ),
               ),
               // 信息区
-              Padding(
+              if (widget.compact)
+                // 紧凑模式：仅名称（参考图样式，无收藏/热度/作者胶囊）
+                // ✅ 本次两处按你要的改 ✓（① 标题居中 ✓ ② 右下角显示章节数 ✓）：
+                //   · ① 原来 `Text` 走默认**左对齐** ✗ → 加 `textAlign: center` ✓
+                //   · ② 右下角补「共 N 章」✓ —— 数据**现成** ✓（`comic.totalChapters`
+                //     正是列表组件 `JellyComicListTile:328` 用的同一个字段 ✓✓）
+                //     → **零额外网络请求** ✓（A 方案 ✓）；`totalChapters <= 0` 时**不显示** ✓
+                //     （不猜、不编"完本"✗ —— 拿不到就不写 ✓）
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        widget.comic.title,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: AppTheme.fontFootnote,
+                          fontWeight: FontWeight.w600,
+                          color:
+                              isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if ((widget.comic.totalChapters ?? 0) > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            '共 ${widget.comic.totalChapters} 章',
+                            // **右下角** ✓（`stretch` + 右对齐 ✓）
+                            textAlign: TextAlign.right,
+                            style: TextStyle(
+                              fontSize: AppTheme.fontFootnote - 1,
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.55)
+                                  : JellyTheme.textSecondary,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                  ),
+                )
+              else
+                Padding(
                 padding: const EdgeInsets.all(12.0),
                 child: SizedBox(
                   height: 50, // 固定信息区高度，保证卡片高度一致
@@ -231,17 +287,25 @@ class _JellyComicCardState extends State<JellyComicCard>
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             // 标题
-                            Text(
-                              widget.comic.title,
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: isDark
-                                    ? Colors.white
-                                    : JellyTheme.textPrimaryLight,
+                            // ✅ ① **标题居中** ✓（非紧凑分支 ✓ —— 与 `compact` 那处同款改法 ✓）
+                            //   包一层 `SizedBox(width: double.infinity)` 才能让 `textAlign` 生效 ✓；
+                            //   ⚠️ 外层 Column 的 `crossAxisAlignment` **保持 start** ✗ →
+                            //     下面的**作者 / 热度**仍左对齐 ✓（与截图一致 ✓）
+                            SizedBox(
+                              width: double.infinity,
+                              child: Text(
+                                widget.comic.title,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: AppTheme.fontSubhead,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark
+                                      ? Colors.white
+                                      : JellyTheme.textPrimaryLight,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 6),
                             // 作者
@@ -256,12 +320,12 @@ class _JellyComicCardState extends State<JellyComicCard>
                                   color: JellyTheme.primary.withValues(
                                     alpha: 0.15,
                                   ),
-                                  borderRadius: BorderRadius.circular(8),
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
                                   widget.comic.author!,
                                   style: TextStyle(
-                                    fontSize: 10,
+                                    fontSize: AppTheme.fontCaption,
                                     color: JellyTheme.primary,
                                     fontWeight: FontWeight.w500,
                                   ),

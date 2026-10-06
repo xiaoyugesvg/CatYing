@@ -5,6 +5,7 @@ import '../services/view_mode.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/bookshelf_icon.dart';
 import '../widgets/jelly_segmented_toggle.dart';
+import '../../common/theme.dart';
 
 /// 显示设置页：漫画/图书搜索页视图 + 启动默认首页。
 /// 与搜索页右上角的视图切换共用 ViewMode / BookViewMode，二者同步并持久化。
@@ -218,7 +219,7 @@ class _DisplaySettingsPageState extends State<DisplaySettingsPage>
                       Text(
                         '导航栏显示',
                         style: TextStyle(
-                          fontSize: 15,
+                          fontSize: AppTheme.fontHeadline,
                           fontWeight: FontWeight.bold,
                           color: isDark
                               ? Colors.white
@@ -229,7 +230,7 @@ class _DisplaySettingsPageState extends State<DisplaySettingsPage>
                       Text(
                         '自定义底部导航栏显示的页面（"我的"固定显示）',
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: AppTheme.fontFootnote,
                           color: JellyTheme.textSecondary,
                         ),
                       ),
@@ -332,7 +333,7 @@ class _DisplaySettingsPageState extends State<DisplaySettingsPage>
           icon(fgColor, 18),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(label, style: TextStyle(fontSize: 14, color: fgColor)),
+            child: Text(label, style: TextStyle(fontSize: AppTheme.fontBody, color: fgColor)),
           ),
           Switch(
             value: value,
@@ -369,11 +370,11 @@ class _DisplaySettingsPageState extends State<DisplaySettingsPage>
       underline: const SizedBox(),
       isDense: true,
       style: TextStyle(
-        fontSize: 14,
+        fontSize: AppTheme.fontBody,
         fontWeight: FontWeight.w600,
         color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
       ),
-      dropdownColor: isDark ? JellyTheme.cardDark : Colors.white,
+      dropdownColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
       items: visible
           .map(
             (t) => DropdownMenuItem(
@@ -421,7 +422,7 @@ class _DisplaySettingsPageState extends State<DisplaySettingsPage>
                 Text(
                   title,
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: AppTheme.fontHeadline,
                     fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                   ),
@@ -430,7 +431,7 @@ class _DisplaySettingsPageState extends State<DisplaySettingsPage>
                 Text(
                   subtitle,
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppTheme.fontFootnote,
                     color: JellyTheme.textSecondary,
                   ),
                 ),

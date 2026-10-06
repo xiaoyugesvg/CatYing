@@ -8,6 +8,7 @@ import '../models/third_party_source.dart';
 import '../theme/discover_preset.dart';
 import 'builtin_sources_service.dart';
 import 'source_memory.dart';
+import '../../services/app_log.dart';
 
 /// 音乐模块的设置存储 —— 对应 Beans 的 `@AppStorage` / `PlatformPreferenceStore`。
 ///
@@ -80,83 +81,162 @@ class SettingsStore {
   ///（否则搜到酷狗的歌却拿酷狗 id 去查网易云，必然取不到地址）。
   final musicSource = ValueNotifier<SongSource>(SongSource.netease);
 
+  /// 加载全部音乐偏好，并**连带初始化音源相关的东西**。
+  ///
+  /// ── 🔴 整体 try/catch（修"prefs 一次失败就拖垮音源列表"）──────────
+  ///
+  /// 调用方 `main.dart` 是**裸 `await SettingsStore.instance.init();`**
+  ///（没有 try/catch），而本方法里 `ThirdPartySourceStore.init()` /
+  /// `SourceMemory.init()` / `BuiltinSourcesService.init()` **三个 await
+  /// 串在同一条链上**。
+  ///
+  /// 只要**前面任何一步抛异常**（最可能的是下面
+  /// `SharedPreferences.getInstance()` 平台通道失败 ——
+  /// 本文件上面已经记录过"裸 await → 启动即崩"这个教训），
+  /// 后面就**全部不执行** → **音源列表为空** →
+  /// **点歌全部失败且用户看不到原因**（连"没有音源"都不会提示）✗
+  ///
+  /// 现在：prefs 拿不到就**用默认值继续跑**，音源相关的三步**照常执行** ——
+  /// 少一个偏好项的代价，远小于"整个音乐模块不能用"。
   Future<void> init() async {
-    final prefs = await SharedPreferences.getInstance();
-    // ⚠️ 只在「存过**且合法**」时才覆盖默认值。
-    //
-    // 原来是无条件 `audioQuality.value = AudioQuality.fromName(prefs.getString(...))`，
-    // 而 `AudioQuality.fromName` 的 orElse 是 **hires** ——
-    // 首次启动（没有存储值 → 传 null）就被悄悄改成 hires，
-    // 与这里声明的默认 `exhigh`(320K) 不符，用户更容易撞上"这首歌没有免费音源"。
-    final saved = prefs.getString(_kQuality);
-    AudioQuality? parsed;
-    if (saved != null) {
-      for (final q in AudioQuality.values) {
-        if (q.name == saved) {
-          parsed = q;
-          break;
+    SharedPreferences? prefs;
+    try {
+      prefs = await SharedPreferences.getInstance();
+    } catch (e) {
+      // 刻意不 rethrow：下面的音源初始化才是**关键路径**
+      AppLog.instance.log('[Music] SettingsStore 读取偏好失败（改用默认值）: $e');
+    }
+
+    if (prefs != null) {
+      // ⚠️ 只在「存过**且合法**」时才覆盖默认值。
+      //
+      // 原来是无条件 `audioQuality.value = AudioQuality.fromName(prefs.getString(...))`，
+      // 而 `AudioQuality.fromName` 的 orElse 是 **hires** ——
+      // 首次启动（没有存储值 → 传 null）就被悄悄改成 hires，
+      // 与这里声明的默认 `exhigh`(320K) 不符，用户更容易撞上"这首歌没有免费音源"。
+      final saved = prefs.getString(_kQuality);
+      AudioQuality? parsed;
+      if (saved != null) {
+        for (final q in AudioQuality.values) {
+          if (q.name == saved) {
+            parsed = q;
+            break;
+          }
         }
       }
+      if (parsed != null) audioQuality.value = parsed;
+      useThirdPartySources.value = prefs.getBool(_kSourceEnabled) ?? true;
+      // ── ⚠️ **强制关闭**，并清掉可能存在的历史 true ────────────────
+      //
+      // 用户决定不要跨平台匹配，且设置页的开关**已移除** ——
+      // 如果这里还老老实实读 prefs，那么"以前开过"的用户会**永远开着**，
+      // 而且**没有任何入口能关掉**（开关没了）→ 变成幽灵行为。
+      //
+      // 所以：无条件置 false，并把存储里的旧值删掉（避免以后恢复开关时
+      // 又被旧值翻上来）。
+      crossPlatformMatch.value = false;
+      if (prefs.containsKey(_kCrossPlatform)) {
+        await prefs.remove(_kCrossPlatform);
+      }
+      discoverPreset = DiscoverPreset.fromName(prefs.getString(_kDiscoverPreset));
+      // 没存过 / 存的是未知值 → `fromKey` 会兜底成 netease（行为不变）
+      musicSource.value = SongSource.fromKey(prefs.getString(_kMusicSource));
+      // 子页面底栏开关：**没存过就是 false**（默认关，见字段注释的理由）
+      bottomBarOnSubPages.value = prefs.getBool(_kBottomBarSubPages) ?? false;
     }
-    if (parsed != null) audioQuality.value = parsed;
-    useThirdPartySources.value = prefs.getBool(_kSourceEnabled) ?? true;
-    // ── ⚠️ **强制关闭**，并清掉可能存在的历史 true ────────────────
+
+    // ── 以下三步是**关键路径**：各自独立 try/catch，互不拖累 ─────────
     //
-    // 用户决定不要跨平台匹配，且设置页的开关**已移除** ——
-    // 如果这里还老老实实读 prefs，那么"以前开过"的用户会**永远开着**，
-    // 而且**没有任何入口能关掉**（开关没了）→ 变成幽灵行为。
-    //
-    // 所以：无条件置 false，并把存储里的旧值删掉（避免以后恢复开关时
-    // 又被旧值翻上来）。
-    crossPlatformMatch.value = false;
-    if (prefs.containsKey(_kCrossPlatform)) {
-      await prefs.remove(_kCrossPlatform);
-    }
-    discoverPreset = DiscoverPreset.fromName(prefs.getString(_kDiscoverPreset));
-    // 没存过 / 存的是未知值 → `fromKey` 会兜底成 netease（行为不变）
-    musicSource.value = SongSource.fromKey(prefs.getString(_kMusicSource));
-    // 子页面底栏开关：**没存过就是 false**（默认关，见字段注释的理由）
-    bottomBarOnSubPages.value = prefs.getBool(_kBottomBarSubPages) ?? false;
     // 音源列表也在这里一起初始化，保证进音乐 tab 前就绪
-    await ThirdPartySourceStore.instance.init();
+    try {
+      await ThirdPartySourceStore.instance.init();
+    } catch (e) {
+      AppLog.instance.log('[Music] 音源列表初始化失败: $e');
+    }
     // 音源记忆（"这首歌上次用哪个源" —— 见 SourceMemory）
-    await SourceMemory.instance.init();
+    try {
+      await SourceMemory.instance.init();
+    } catch (e) {
+      AppLog.instance.log('[Music] 音源记忆初始化失败: $e');
+    }
     // 内置源注册 + 自动更新（静默：失败不影响启动）
     // 先注册出厂内置源，再异步拉远端看有没有新版本
-    await BuiltinSourcesService.instance.init();
+    try {
+      await BuiltinSourcesService.instance.init();
+    } catch (e) {
+      AppLog.instance.log('[Music] 内置源注册失败: $e');
+    }
     unawaited(BuiltinSourcesService.instance.checkForUpdates());
   }
 
+  /// 写入一个偏好项，**失败就回滚内存值**。
+  ///
+  /// ── 🔴 为什么不能"只改内存 + 丢弃写盘 Future"（修假设置）─────────
+  ///
+  /// 原来的六个 setter 都是这个形状：
+  /// ```dart
+  /// Future<void> setXxx(T v) async {
+  ///   xxx.value = v;                                        // 先改内存
+  ///   (await SharedPreferences.getInstance()).setBool(k, v); // 丢弃 Future
+  /// }
+  /// ```
+  /// 问题：`set*` 返回 `Future<bool>`，**没有被 await、也没看返回值** →
+  /// 写盘失败时**静默丢弃**，而 UI 已经切到新值 →
+  /// 用户看到"设置生效了"，**重启却变回旧值**（最难查的那类 bug）。
+  ///
+  /// 现在：等写盘结果，失败就**回滚 notifier 并写日志**，
+  /// 让"界面显示的状态"和"磁盘上的状态"始终一致。
+  Future<void> _write(String key, Object v, VoidCallback rollback) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ok = v is bool
+          ? await prefs.setBool(key, v)
+          : await prefs.setString(key, v.toString());
+      if (!ok) {
+        rollback();
+        AppLog.instance.log('[Music] 偏好写入返回 false（已回滚）：$key');
+      }
+    } catch (e) {
+      rollback();
+      AppLog.instance.log('[Music] 偏好写入失败（已回滚）：$key → $e');
+    }
+  }
+
   Future<void> setAudioQuality(AudioQuality q) async {
+    final old = audioQuality.value;
     audioQuality.value = q;
-    (await SharedPreferences.getInstance()).setString(_kQuality, q.name);
+    await _write(_kQuality, q.name, () => audioQuality.value = old);
   }
 
   Future<void> setUseThirdPartySources(bool v) async {
+    final old = useThirdPartySources.value;
     useThirdPartySources.value = v;
-    (await SharedPreferences.getInstance()).setBool(_kSourceEnabled, v);
+    await _write(_kSourceEnabled, v, () => useThirdPartySources.value = old);
   }
 
   Future<void> setDiscoverPreset(DiscoverPreset v) async {
+    final old = discoverPreset;
     discoverPreset = v;
-    (await SharedPreferences.getInstance()).setString(_kDiscoverPreset, v.name);
+    await _write(_kDiscoverPreset, v.name, () => discoverPreset = old);
   }
 
   Future<void> setCrossPlatformMatch(bool v) async {
+    final old = crossPlatformMatch.value;
     crossPlatformMatch.value = v;
-    (await SharedPreferences.getInstance()).setBool(_kCrossPlatform, v);
+    await _write(_kCrossPlatform, v, () => crossPlatformMatch.value = old);
   }
 
   Future<void> setBottomBarOnSubPages(bool v) async {
+    final old = bottomBarOnSubPages.value;
     bottomBarOnSubPages.value = v;
-    (await SharedPreferences.getInstance()).setBool(_kBottomBarSubPages, v);
+    await _write(_kBottomBarSubPages, v, () => bottomBarOnSubPages.value = old);
   }
-
 
   /// 切换音乐平台（搜索/发现用哪个内置数据源）。
   /// 播放地址**不受它影响** —— 那是按每首歌自己的 `Song.source` 解析的。
   Future<void> setMusicSource(SongSource s) async {
+    final old = musicSource.value;
     musicSource.value = s;
-    (await SharedPreferences.getInstance()).setString(_kMusicSource, s.key);
+    await _write(_kMusicSource, s.key, () => musicSource.value = old);
   }
 }

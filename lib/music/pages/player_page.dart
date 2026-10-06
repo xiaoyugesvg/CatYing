@@ -320,10 +320,27 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
   /// 系统音量键调的是**设备音量**；这里调的是**播放器自身音量**
   /// （`MusicPlayerManager.setVolume`，0~100），两者互不影响。
   /// 用 `player.volume` 作为 ValueListenable 监听，滑动即时生效。
+  ///
+  /// ── 🔴 这个面板的颜色必须**恒浅**（原来全部跟全局明暗走 → 浅色下不可见）──
+  ///
+  /// 播放页底色**永远是深色**（`Color(0xFF141416)` / `0xFF0A0A0C`，见本文件
+  /// 的用法），而这个弹层原来是 `backgroundColor: Colors.transparent`
+  /// 且文字/滑块用 `MusicTheme.label` / `MusicTheme.secondary` /
+  /// `MusicTheme.tint` —— 那三个都会**跟着全局明暗走**：
+  ///   · 全局**浅色**（默认）时它们是**暗色** → 暗字压在深色播放页上
+  ///   · 后果：「音量」标题、下面那行提示、已填充的滑块轨道
+  ///     **几乎看不见** ✗（子代理报告时列的就是这几行）
+  ///
+  /// 改法与同文件 `_darkTint` 的既定思路一致（那段的注释已经写明
+  /// "播放页恒深色，所以取与白色混合后的浅色"）：
+  ///   · 弹层给一个**恒定深色底**（别再透明，透明就等于把播放页当底）
+  ///   · 文字/图标用**恒定浅色**
+  ///   · 强调色用 `_darkTint`
   void _showVolumeSheet() {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Colors.transparent,
+      // 恒定深色底：与播放页同一色系，但不透明（否则文字对比全靠运气）
+      backgroundColor: const Color(0xFF1C1C1E),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
@@ -336,34 +353,37 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
             children: [
               Text('音量',
                   style: TextStyle(
-                      color: MusicTheme.label,
+                      // ⚠️ 恒定浅色，不要用 `MusicTheme.label`
+                      color: Colors.white,
                       fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
               Row(
                 children: [
                   Icon(Icons.volume_mute_rounded,
-                      size: 18, color: MusicTheme.secondary),
+                      size: 18, color: Colors.white70),
                   Expanded(
                     child: ValueListenableBuilder<double>(
                       valueListenable: player.volume,
                       builder: (_, v, __) => Slider(
                         value: v.clamp(0, 100),
                         max: 100,
-                        activeColor: MusicTheme.tint,
-                        inactiveColor: MusicTheme.secondary
-                            .withValues(alpha: 0.3),
+                        // 强调色用深底专用的那个（浅色主题下 `MusicTheme.tint`
+                        // 是暗色，在深底上看不见）
+                        activeColor: _darkTint,
+                        inactiveColor: Colors.white24,
                         onChanged: (nv) => player.setVolume(nv),
                       ),
                     ),
                   ),
                   Icon(Icons.volume_up_rounded,
-                      size: 18, color: MusicTheme.secondary),
+                      size: 18, color: Colors.white70),
                 ],
               ),
               Text(
                 '提示：这里调的是播放器音量；手机侧边键调的是系统音量。',
-                style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
+                style: TextStyle(
+                    color: Colors.white70, fontSize: AppTheme.fontFootnote),
               ),
               const SizedBox(height: 6),
             ],
@@ -841,7 +861,12 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
             // 让当前行大致居中：向上偏移固定行数
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (!_lyricScroll.hasClients) return;
-              const lineH = 44.0;
+              // ⚠️ 与上面格子高度**用同一套公式**：格子高度现在是算出来的
+              //（激活行带翻译时更高），这里若还写死 44 就会越滚越偏。
+              // 用"激活行有翻译"这一最常见的高行值作为步长近似 ——
+              // 居中本身允许偏差（`:866` 还减了 viewport/2），
+              // 关键是**不要再用一个和实际高度无关的常数**。
+              const lineH = (17.0 * 1.25 * 2) + (AppTheme.fontFootnote * 1.4);
               final target = ((idx < 0 ? 0 : idx) * lineH) -
                   _lyricScroll.position.viewportDimension / 2 +
                   lineH;
@@ -885,8 +910,29 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                 final li = i - 1;
                 final line = lines[li];
                 final active = li == idx;
+                // ── 🔴 行高必须**算出来**，不能写死 44（修一个溢出）──────
+                //
+                // 原来固定 `height: 44`，而格子里的内容最多是：
+                //   · 正文 `maxLines: 2`，激活行 fontSize 17 × height 1.25
+                //     → 2 行 = **42.5**
+                //   · 激活行**有翻译时**再叠一行 `fontFootnote`(12)
+                //     → 再加 ≈14.4 = **56.9 > 44** ✗
+                // 于是「长歌词（超过一行容量）且带翻译」的当前行
+                // 必然 `RenderFlex overflowed`（黄黑条），
+                // 而且 `:864` 那个 `const lineH = 44.0` 的滚动位移也跟着失准。
+                //
+                // 现在按**同一套字号/行高**算出来：非激活行 15、激活行 17、
+                // 行高 1.25 都与 `_buildLyricText` 一致；激活行有翻译再加一行。
+                // ⚠️ 别用 `textScaler`：下面高度不缩放，缩放的是字号，
+                //    两边一起放大反而看不出差异（真机字号放大时
+                //    这个高度是"够用"的，不会溢出）。
+                final lyricActive = li == idx;
+                final hasTranslation = lyricActive &&
+                    (line.translation?.isNotEmpty ?? false);
+                final lineH = (lyricActive ? 17.0 : 15.0) * 1.25 * 2 +
+                    (hasTranslation ? AppTheme.fontFootnote * 1.4 : 0);
                 return Container(
-                  height: 44,
+                  height: lineH,
                   alignment: Alignment.center,
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -970,7 +1016,12 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                 TextSpan(
                   text: sung,
                   style: baseStyle.copyWith(
-                    color: MusicTheme.tint,
+                    // ⚠️ **深底专用**强调色。歌词区底色恒为深色，
+                    //    而 `MusicTheme.tint` 会跟全局明暗走 ——
+                    //    全局浅色（默认）时它是个暗色，压在深底上
+                    //    对比度 ≈1.05:1 → **已唱部分看不见** ✗
+                    //    本文件 `_darkTint` 的注释点名的就是这个位置。
+                    color: _darkTint,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -1134,8 +1185,10 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
             return _actionBtn(
               icon: fav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
               label: fav ? '已收藏' : '收藏',
-              // 收藏时用主题色，未收藏保持默认灰白
-              color: fav ? MusicTheme.tint : null,
+              // 收藏时用**深底专用**强调色（同上：`MusicTheme.tint` 在
+              // 全局浅色下是暗色，压在深色播放页上红心几乎看不见 ✗）；
+              // 未收藏保持默认灰白
+              color: fav ? _darkTint : null,
               onTap: () {
                 // 用 unawaited 包一层：onTap 要求 VoidCallback，
                 // 不能直接给 async 闭包（返回 Future）。

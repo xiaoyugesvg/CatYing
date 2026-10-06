@@ -27,7 +27,7 @@ import 'reading/services/bookshelf_service.dart';
 import 'reading/services/book_reading_progress_service.dart';
 import 'reading/services/zlibrary_service.dart';
 import 'reading/services/remote_config_service.dart';
-import 'reading/services/shuyuan_source_store.dart';
+import 'reading/models/book_source.dart';
 import 'reading/services/tts_service.dart';
 import 'music/services/settings_store.dart';
 import 'music/services/player_manager.dart';
@@ -134,6 +134,8 @@ void main() async {
   await TrimPresetService().init();
   await ReadingProgressService().init();
   await BookReadingProgressService().init();
+  // 小说书源（Legado 格式）：导入 / 管理在「阅读 → 我的 → 书源仓库」
+  await BookSourceStore.instance.init();
   await BookDownloadService().init();
   // Z-Library 图书服务：RemoteConfigService 后台拉取云端域名配置，
   // ZlibraryService 初始化后并发探测选最优节点（不阻塞启动）。
@@ -141,10 +143,6 @@ void main() async {
   // 功能都依赖这两个服务，现恢复。
   await RemoteConfigService().init();
   await ZlibraryService().init();
-  // 书源存储（Nexhub 引擎接入）：hive_ce box 加载已导入书源；
-  // 首次启动若为空则尝试从 assets 内置书源文件预载。
-  await ShuyuanSourceStore.instance.init();
-  await ShuyuanSourceStore.instance.ensureBuiltinSources();
   // 听书：走原生 tts_engine channel（系统 AVSpeechSynthesizer，零插件）
   Get.put<TtsService>(TtsService(), permanent: true);
 

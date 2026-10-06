@@ -1,23 +1,36 @@
-// 书源登录页 —— 对齐备份3.0 book_source_login_page（参考图 IMG_8113 / IMG_8114）。
-//
-// 单页形态：Cookie 回显框（网页登录自动采集）+ 说明 + 清除登录态 / 网页登录。
-// 「清除登录态」= 把 Cookie 从 header 里摘掉；「网页登录」= 内嵌 WebView 登录后采集 Cookie。
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../../common/theme.dart';
-import '../novel_source/model/book_source.dart';
-import '../novel_source/shuyuan_source_service.dart';
-import '../services/shuyuan_source_store.dart';
+import '../models/book_source.dart';
+import '../services/book_source_service.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
+/// 书源登录（截图 IMG_8113）。
+///
+/// ── 与旧版的区别 ──────────────────────────────────────────────
+/// 旧版是两个 tab（Cookie 直填 / 表单登录）。截图的形态是**单页**：
+///
+///   ⚡📂猫眼看书登录                                    ✕
+///   ┌──────────────────────────────────────┐ ┌──┐
+///   │ 网页登录后在此回显采集到的 Cookie      │ │📋│
+///   └──────────────────────────────────────┘ └──┘
+///   ┌───────────────────────────────────────────┐
+///   │ Cookie、书源变量与登录请求会按此书源保存。 │
+///   └───────────────────────────────────────────┘
+///
+///   清除登录态                      [ 网页登录 ]
+///
+/// 关键差别：**Cookie 框是"回显"用的**（从网页登录自动采集），
+/// 不是让用户手填。表单登录那条路径被"网页登录"取代了 ——
+/// 网页登录更通用（不依赖站点登录接口长什么样）。
+///
+/// 「清除登录态」= 把 Cookie 从 header 里摘掉（[applyCookie] 传空串）。
 class BookSourceLoginPage extends StatefulWidget {
   const BookSourceLoginPage({super.key, required this.source});
 
-  final XiaoshuoBookSource source;
+  final BookSource source;
 
   @override
   State<BookSourceLoginPage> createState() => _BookSourceLoginPageState();
@@ -25,24 +38,13 @@ class BookSourceLoginPage extends StatefulWidget {
 
 class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
   final _ctrl = TextEditingController();
+  final _svc = BookSourceService.instance;
   String _status = '';
-
-  /// 从书源 header（JSON 字符串）里读 Cookie。
-  String _currentCookie() {
-    try {
-      final h = jsonDecode(widget.source.header ?? '{}');
-      if (h is Map) {
-        final c = h['Cookie'];
-        if (c is String) return c;
-      }
-    } catch (_) {}
-    return '';
-  }
 
   @override
   void initState() {
     super.initState();
-    final c = _currentCookie();
+    final c = _svc.currentCookie(widget.source);
     _ctrl.text = c;
     if (c.isNotEmpty) {
       _status = '已保存 Cookie（${c.length} 字符）';
@@ -55,67 +57,26 @@ class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
     super.dispose();
   }
 
-  /// 保存 Cookie 到书源 header 并写回 store（覆盖式 addSource）。
+  /// 保存 Cookie 到书源 header
   Future<void> _save(String cookie) async {
-    final trimmed = cookie.trim();
-    final entry = ShuyuanSourceStore.instance.sourceByUrl(widget.source.bookSourceUrl);
-    if (entry == null) {
-      if (!mounted) return;
-      _toast('书源不存在，可能已被删除');
-      return;
-    }
-    // header 是 JSON 字符串：解析后设/删 Cookie 键。
-    String? nextHeader;
-    try {
-      final h = jsonDecode(entry.header ?? '{}');
-      if (h is Map) {
-        if (trimmed.isEmpty) {
-          h.remove('Cookie');
-        } else {
-          h['Cookie'] = trimmed;
-        }
-        nextHeader = jsonEncode(h);
-      }
-    } catch (_) {
-      // header 不是合法 JSON：非空 Cookie 时降级为整体覆盖。
-      nextHeader = trimmed.isEmpty ? null : jsonEncode({'Cookie': trimmed});
-    }
-    final updated = ShuyuanSource(
-      bookSourceName: entry.bookSourceName,
-      bookSourceUrl: entry.bookSourceUrl,
-      bookSourceType: entry.bookSourceType,
-      bookSourceGroup: entry.bookSourceGroup,
-      bookSourceComment: entry.bookSourceComment,
-      enabled: entry.enabled,
-      searchUrl: entry.searchUrl,
-      exploreUrl: entry.exploreUrl,
-      header: nextHeader,
-      tocUrl: entry.tocUrl,
-      ruleSearch: entry.ruleSearch,
-      ruleBookInfo: entry.ruleBookInfo,
-      ruleToc: entry.ruleToc,
-      ruleContent: entry.ruleContent,
-      ruleExplore: entry.ruleExplore,
-      filters: entry.filters,
-      homeSections: entry.homeSections,
-    );
-    await ShuyuanSourceStore.instance.addSource(updated);
+    final next = _svc.applyCookie(widget.source, cookie);
+    await BookSourceStoreBridge.save(next);
     if (!mounted) return;
     setState(() {
-      _ctrl.text = trimmed;
-      _status = trimmed.isEmpty ? '已清除登录态' : '已保存';
+      _ctrl.text = cookie.trim();
+      _status = cookie.trim().isEmpty ? '已清除登录态' : '已保存';
     });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(_status), duration: const Duration(seconds: 1)),
     );
   }
 
-  /// 「网页登录」→ 打开内嵌浏览器，登录后采集 Cookie。
+  /// 「网页登录」→ 打开内嵌浏览器，登录后采集 Cookie
   Future<void> _webLogin() async {
-    final loginUrl = widget.source.loginUrl?.trim() ?? '';
-    final home = widget.source.bookSourceUrl.trim();
-    if (loginUrl.isEmpty) {
+    final url = _loginUrlOf(widget.source);
+    if (url.isEmpty) {
       // 没有登录地址就退到站点首页 —— 多数站点的登录入口在首页
+      final home = widget.source.url;
       if (home.isEmpty) {
         _toast('这个书源没有填写源地址，无法网页登录');
         return;
@@ -123,7 +84,13 @@ class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
       await _openWeb(home);
       return;
     }
-    await _openWeb(loginUrl);
+    await _openWeb(url);
+  }
+
+  /// 登录地址：Legado 书源的 `loginUrl`，没有就用源地址
+  String _loginUrlOf(BookSource s) {
+    final v = s.readPath('loginUrl');
+    return (v ?? '').toString().trim();
   }
 
   Future<void> _openWeb(String url) async {
@@ -132,7 +99,7 @@ class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
       MaterialPageRoute(
         builder: (_) => WebLoginPage(
           url: url,
-          title: widget.source.bookSourceName,
+          title: widget.source.name,
         ),
       ),
     );
@@ -162,12 +129,12 @@ class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
                 children: [
                   Expanded(
                     child: Text(
-                      '⚡📂${widget.source.bookSourceName}登录',
+                      '⚡📂${widget.source.name}登录',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          fontSize: AppTheme.fontHeadline,
-                          fontWeight: FontWeight.w600,
+                          fontSize: AppTheme.fontTitle3,
+                          fontWeight: FontWeight.w700,
                           color: label),
                     ),
                   ),
@@ -199,9 +166,7 @@ class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
                             maxLines: 3,
                             minLines: 1,
                             style: TextStyle(
-                                fontSize: AppTheme.fontSubhead,
-                                height: 1.5,
-                                color: label),
+                                fontSize: AppTheme.fontSubhead, height: 1.5, color: label),
                             decoration: InputDecoration(
                               isDense: true,
                               filled: false,
@@ -288,7 +253,9 @@ class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
   }
 }
 
-/// 网页登录页（参考图 IMG_8114）。
+/// 网页登录页（截图 IMG_8114）。
+///
+///   ‹  ⚡📂猫眼看书 · 网页登录   ⟳            [ 完成 ]
 ///
 /// 用户在页面里登录站点，点「完成」时把 WebView 里的 Cookie 取出来
 /// 返回给上一页。
@@ -335,13 +302,13 @@ class _WebLoginPageState extends State<WebLoginPage> {
       ..loadRequest(Uri.parse(widget.url));
   }
 
-  /// 点「完成」：把 Cookie 取出来。
+  /// 点「完成」：把 Cookie 取出来
   Future<void> _done() async {
     String cookie = '';
     try {
       // WebView 的 document.cookie 只有**当前域**的 Cookie。
       // 跨子域（如 passport.xxx.com 登录后回 www.xxx.com）拿不全 ——
-      // 这是 WebView 的固有限制。
+      // 这是 WebView 的固有限制，不是这里能绕的。
       final v = await _c.runJavaScriptReturningResult('document.cookie');
       cookie = v.toString().replaceAll('"', '').trim();
     } catch (_) {
@@ -349,6 +316,7 @@ class _WebLoginPageState extends State<WebLoginPage> {
     }
     if (!mounted) return;
     if (cookie.isEmpty) {
+      // 拿不到就如实说，不假装登录成功
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('没读到 Cookie。可能还没登录，或 Cookie 在其它子域下。'),
         duration: Duration(seconds: 3),
@@ -366,8 +334,6 @@ class _WebLoginPageState extends State<WebLoginPage> {
       backgroundColor:
           isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
       appBar: AppBar(
-        backgroundColor:
-            isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
         centerTitle: true,
         leading: IconButton(
           onPressed: () => Navigator.pop(context),
@@ -378,9 +344,7 @@ class _WebLoginPageState extends State<WebLoginPage> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-              fontSize: AppTheme.fontHeadline,
-              fontWeight: FontWeight.w600,
-              color: label),
+              fontSize: AppTheme.fontHeadline, fontWeight: FontWeight.w600, color: label),
         ),
         actions: [
           IconButton(
@@ -422,13 +386,11 @@ class _WebLoginPageState extends State<WebLoginPage> {
                       size: 40, color: label.withValues(alpha: 0.4)),
                   const SizedBox(height: 12),
                   Text('网页打不开',
-                      style:
-                          TextStyle(fontSize: AppTheme.fontBody, color: label)),
+                      style: TextStyle(fontSize: AppTheme.fontBody, color: label)),
                   const SizedBox(height: 6),
                   Text('可能是源地址不通，或站点需要代理',
                       style: TextStyle(
-                          fontSize: AppTheme.fontFootnote,
-                          color: JellyTheme.textSecondary)),
+                          fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary)),
                   const SizedBox(height: 14),
                   TextButton(
                     onPressed: () => _c.reload(),
@@ -440,5 +402,36 @@ class _WebLoginPageState extends State<WebLoginPage> {
         ],
       ),
     );
+  }
+}
+
+/// 把改好的书源存回去。
+///
+/// 单独包一层是为了不把 `BookSourceStore` 直接散在各页面里 ——
+/// 存书源的入口只有这里和编辑页，收口好排查。
+class BookSourceStoreBridge {
+  const BookSourceStoreBridge._();
+
+  /// 用 updatePaths 逐字段写回整个 raw。
+  ///
+  /// ⚠️ 不能直接调 `updatePaths(id, s.raw)` —— 那个方法的语义是
+  /// "按点分路径改若干字段"，传一个含嵌套 Map 的 raw 进去，
+  /// 嵌套的 ruleSearch 等会被当成**单个值**覆盖（值类型对不上）。
+  /// 所以这里展平成点分路径再写。
+  static Future<void> save(BookSource s) async {
+    final flat = <String, dynamic>{};
+    void walk(String prefix, Map<dynamic, dynamic> m) {
+      m.forEach((k, v) {
+        final key = prefix.isEmpty ? '$k' : '$prefix.$k';
+        if (v is Map) {
+          walk(key, v);
+        } else {
+          flat[key] = v;
+        }
+      });
+    }
+
+    walk('', s.raw);
+    await BookSourceStore.instance.updatePaths(s.id, flat);
   }
 }

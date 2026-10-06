@@ -153,7 +153,19 @@ class _XimalayaAlbumPageState extends State<XimalayaAlbumPage> {
             ),
           ),
         Expanded(
-          child: ListView.separated(
+          // ── 🔴 必须监听 player（修"点歌后行号不变色"）────────────────
+          //
+          // 下面 `playing` 读的是 `_player.currentSong`，而本页原来
+          // **没有任何 player 监听**、`onTap` 也不 `setState` →
+          // 点了第 5 集开始播放，第 5 行的序号/标题**不会**变成主题色 ✗
+          //（要等页面因别的原因重建才更新）
+          //
+          // `Listenable.merge([_svc, _player])` 是项目里的标准解法
+          //（`local_music_page.dart` 的注释专门写了这一条），
+          // `ListenableBuilder` 与 `AnimatedBuilder` 等价。
+          child: ListenableBuilder(
+            listenable: _player,
+            builder: (context, _) => ListView.separated(
             padding: const EdgeInsets.symmetric(vertical: 6),
             itemCount: _songs.length,
             separatorBuilder: (_, __) => const Divider(height: 1),
@@ -198,6 +210,7 @@ class _XimalayaAlbumPageState extends State<XimalayaAlbumPage> {
                 onTap: () => _player.playQueue(_songs, index: i),
               );
             },
+            ),
           ),
         ),
       ],

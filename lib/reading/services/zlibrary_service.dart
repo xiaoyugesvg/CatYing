@@ -175,11 +175,6 @@ class ZlibraryService extends ChangeNotifier {
   /// 地址是否不可用（全候选连接失败/404）；仅状态变化才 notify
   bool _unavailable = false;
 
-  /// 最近一次**真实请求成功**的时间。探测类路径（启动探测 / 云端候选 /
-  /// 定时健康检查）失败时若近期有成功请求，说明探测只是超时/抖动误判，
-  /// 不再把状态打回「不可用」——避免「推荐流已加载却弹节点不可用」的误报。
-  DateTime? _lastRequestOkAt;
-
   /// 定时健康检查（复用本地候选探测，30 分钟一次）
   Timer? _healthTimer;
 
@@ -449,8 +444,7 @@ class ZlibraryService extends ChangeNotifier {
     final best = await _pickBestCandidate(_candidates);
     if (best == null) {
       _log('本地候选全不可用（${_candidates.length} 个）');
-      // 探测全失败不直接判死：若近期有真实请求成功，是探测超时误判
-      _markUnavailableIfStale();
+      _setUnavailable(true);
       return;
     }
     if (best != _domain) {
@@ -458,7 +452,6 @@ class ZlibraryService extends ChangeNotifier {
       _domain = best;
       await _persistDomain();
     }
-    _noteRequestOk();
     _setUnavailable(false);
     notifyListeners();
   }
@@ -524,26 +517,6 @@ class ZlibraryService extends ChangeNotifier {
     if (_unavailable == v) return;
     _unavailable = v;
     notifyListeners();
-  }
-
-  /// 探测类失败置「不可用」的守卫：最近 2 分钟内有真实请求成功时，
-  /// 探测失败只记日志不置位（探测受超时/抖动影响，不能覆盖已证实的可用性）。
-  void _markUnavailableIfStale() {
-    final last = _lastRequestOkAt;
-    if (last != null &&
-        DateTime.now().difference(last) < const Duration(minutes: 2)) {
-      _log(
-        '探测失败但 ${DateTime.now().difference(last).inSeconds}s 前有成功请求，'
-        '跳过置不可用（避免误报）',
-      );
-      return;
-    }
-    _setUnavailable(true);
-  }
-
-  /// 记录一次真实请求成功（搜索/推荐/下载/探测选优命中）。
-  void _noteRequestOk() {
-    _lastRequestOkAt = DateTime.now();
   }
 
   // -------------------- 登录 / 注册 --------------------
@@ -1299,7 +1272,6 @@ class ZlibraryService extends ChangeNotifier {
         _domain = domain;
         await _persistDomain();
       }
-      _noteRequestOk();
       _setUnavailable(false);
       _log('首页推荐解析到 ${books.length} 条（$domain），前两条: '
           '${books.take(2).map((b) => b.title).join(", ")}');
@@ -1769,7 +1741,6 @@ class ZlibraryService extends ChangeNotifier {
                   _domain = domain;
                   await _persistDomain();
                 }
-                _noteRequestOk(); // 限流说明节点可达
                 _setUnavailable(false);
                 return {
                   'success': false,
@@ -1786,7 +1757,6 @@ class ZlibraryService extends ChangeNotifier {
               _domain = domain;
               await _persistDomain();
             }
-            _noteRequestOk();
             _setUnavailable(false);
             return _asJsonMap(resp.data);
           }
@@ -1950,13 +1920,8 @@ class ZlibraryService extends ChangeNotifier {
       _domain = best;
       await _persistDomain();
     }
-    if (best != null) {
-      _noteRequestOk();
-      _setUnavailable(false);
-    } else {
-      _markUnavailableIfStale();
-    }
-    _log('启动探测完成: best=$best, unavailable=${_unavailable}');
+    _setUnavailable(best == null);
+    _log('启动探测完成: best=$best, unavailable=${best == null}');
     notifyListeners();
   }
 
@@ -2091,7 +2056,6 @@ class ZlibraryService extends ChangeNotifier {
     if (_domain.isNotEmpty) {
       final probe = await _probeUrl(_domain);
       if (probe != null) {
-        _noteRequestOk();
         _setUnavailable(false);
         return;
       }
@@ -2103,10 +2067,9 @@ class ZlibraryService extends ChangeNotifier {
         _domain = best;
         await _persistDomain();
       }
-      _noteRequestOk();
       _setUnavailable(false);
     } else {
-      _markUnavailableIfStale();
+      _setUnavailable(true);
     }
     notifyListeners();
   }

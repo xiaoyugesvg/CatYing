@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 /// HSV 取色器对话框（自建，无第三方依赖）。
 ///
@@ -105,7 +106,7 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
                   child: Text(
                     widget.title!,
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.w600,
                       color: isDark
                           ? Colors.white
@@ -211,7 +212,7 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
                       child: Stack(
                         children: [
                           ClipRRect(
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(10),
                             child: const DecoratedBox(
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
@@ -237,7 +238,7 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
                               height: _hueHeight,
                               decoration: BoxDecoration(
                                 color: Colors.white,
-                                borderRadius: BorderRadius.circular(4),
+                                borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
                                   color: Colors.black26,
                                   width: 1,
@@ -264,7 +265,7 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
                       controller: _hexCtrl,
                       onChanged: _onHexChanged,
                       style: TextStyle(
-                        fontSize: 14,
+                        fontSize: AppTheme.fontBody,
                         color: isDark
                             ? Colors.white
                             : JellyTheme.textPrimaryLight,
@@ -322,14 +323,15 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
           height: 36,
           decoration: BoxDecoration(
             color: c,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.black12),
+            borderRadius: BorderRadius.circular(10),
+            border:
+                Border.all(color: JellyTheme.primary.withValues(alpha: 0.12)),
           ),
         ),
         const SizedBox(height: 4),
         Text(
           label,
-          style: TextStyle(fontSize: 11, color: JellyTheme.textSecondary),
+          style: TextStyle(fontSize: AppTheme.fontCaption, color: JellyTheme.textSecondary),
         ),
       ],
     );

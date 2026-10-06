@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
 
-import '../../../common/theme.dart';
+// ⚠️ 这里原来写的是 `'../../../common/theme.dart'`（**多了一层 `../`**）。
+//    实测它**不会报错** —— Dart 解析相对 import 时会把超出包根（`lib/`）的
+//    层级收敛掉，所以两层和三层都落到 `lib/common/theme.dart`。
+//    但那个多出来的 `../` 表达的是"再往外一层"的错误意图，
+//    对读代码的人是误导（同目录的 `music_components.dart` 写的就是两层）。
+//    改成正确写法，行为不变。
+import '../../common/theme.dart';
 import '../models/models.dart';
 import '../theme/discover_preset.dart';
 import 'music_components.dart';
@@ -259,12 +265,27 @@ class _DailySongsRowState extends State<DailySongsRow>
                       color: Colors.black.withValues(alpha: 0.45),
                       shape: BoxShape.circle,
                     ),
-                    child: isCurrent
+                    // ── 🔴 徽标必须区分"在播"和"暂停"（修一个死分支）────
+                    //
+                    // 原来写的是：
+                    //   child: isCurrent
+                    //       ? _equalizer()
+                    //       : Icon(isCurrent && widget.isPlaying
+                    //              ? Icons.pause_rounded
+                    //              : Icons.play_arrow_rounded, ...)
+                    //
+                    // 进入 `else` 时 `isCurrent` **必为 false** →
+                    // `isCurrent && widget.isPlaying` 恒 false →
+                    // **`pause_rounded` 永远取不到**（死代码）。
+                    // 而 `isCurrent == true` 时**无条件**渲染 `_equalizer()`，
+                    // 即使已暂停（此时 `didUpdateWidget` 已 `_eq.stop()`、
+                    // 相位归零）→ 三根柱子**静止不动**，看起来仍像"正在播放" ✗
+                    //
+                    // 现在：只有"正在播"才显示均衡器，暂停/未播显示三角。
+                    child: (isCurrent && widget.isPlaying)
                         ? _equalizer()
                         : Icon(
-                            isCurrent && widget.isPlaying
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
+                            Icons.play_arrow_rounded,
                             size: 15,
                             color: Colors.white,
                           ),
@@ -529,7 +550,11 @@ class _PlaylistGridState extends State<PlaylistGrid> {
               expanded: _expanded,
               total: total,
               onTap: () => setState(() => _expanded = !_expanded),
-              collapsedLabel: '展开全部（$total）',
+              // ⚠️ **不要**在这里再拼一次计数：`ExpandToggle` 内部已经
+              //    渲染成 `'$collapsedLabel（$total）'`（见 `ExpandToggle.build`）。
+              //    原来传的是 `'展开全部（$total）'` → 界面上显示
+              //    「展开全部（12）（12）」，两个计数挨在一起 ✗
+              collapsedLabel: '展开全部',
               expandedLabel: '收起歌单广场',
             ),
         ],

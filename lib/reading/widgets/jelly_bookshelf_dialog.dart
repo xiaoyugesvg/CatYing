@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import '../../widgets/common_widgets.dart';
 import '../models/bookshelf.dart';
 import '../services/bookshelf_service.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 /// 加入书架弹窗：多选书架 + 快速新建
 /// 返回值：用户确认后返回选中的书架 ID 列表，取消返回 null
@@ -18,14 +20,14 @@ Future<List<String>?> showBookshelfDialog(
     context: context,
     backgroundColor: Colors.transparent,
     isScrollControlled: true,
-    builder: (context) => _BookshelfDialog(
+    builder: (context) => kbSheet(_BookshelfDialog(
       itemId: itemId,
       type: type,
       title: title,
       meta: meta,
       singleSelect: singleSelect,
       disabledShelfIds: disabledShelfIds,
-    ),
+    )),
   );
 }
 
@@ -116,7 +118,7 @@ class _BookshelfDialogState extends State<_BookshelfDialog> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark ? JellyTheme.cardDark : Colors.white;
+    final bgColor = isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
     final textColor = isDark ? Colors.white : Colors.black87;
 
     return Container(
@@ -138,8 +140,8 @@ class _BookshelfDialogState extends State<_BookshelfDialog> {
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 12),
                 decoration: BoxDecoration(
-                  color: Colors.grey.withValues(alpha: 0.3),
-                  borderRadius: BorderRadius.circular(2),
+                  color: JellyTheme.textSecondary.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(10),
                 ),
               ),
             ),
@@ -147,7 +149,7 @@ class _BookshelfDialogState extends State<_BookshelfDialog> {
             Text(
               widget.title ?? '加入书架',
               style: TextStyle(
-                fontSize: 18,
+                fontSize: AppTheme.fontTitle3,
                 fontWeight: FontWeight.bold,
                 color: textColor,
               ),
@@ -163,12 +165,12 @@ class _BookshelfDialogState extends State<_BookshelfDialog> {
                       child: TextField(
                         controller: _newShelfController,
                         autofocus: true,
-                        style: TextStyle(color: textColor, fontSize: 14),
+                        style: TextStyle(color: textColor, fontSize: AppTheme.fontBody),
                         decoration: InputDecoration(
                           hintText: '输入书架名称',
                           hintStyle: TextStyle(
                             color: isDark ? Colors.white38 : Colors.black38,
-                            fontSize: 14,
+                            fontSize: AppTheme.fontBody,
                           ),
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 14,
@@ -260,7 +262,7 @@ class _BookshelfDialogState extends State<_BookshelfDialog> {
                       Text(
                         '新建书架',
                         style: TextStyle(
-                          fontSize: 14,
+                          fontSize: AppTheme.fontBody,
                           color: isDark ? Colors.white60 : Colors.black54,
                         ),
                       ),
@@ -285,7 +287,7 @@ class _BookshelfDialogState extends State<_BookshelfDialog> {
                 ),
                 child: const Text(
                   '确定',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                  style: TextStyle(fontSize: AppTheme.fontHeadline, fontWeight: FontWeight.w600),
                 ),
               ),
             ),
@@ -353,7 +355,7 @@ class _BookshelfDialogState extends State<_BookshelfDialog> {
               child: Text(
                 shelf.name,
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: AppTheme.fontBody,
                   color: disabled ? dimColor : textColor,
                 ),
               ),
@@ -362,7 +364,7 @@ class _BookshelfDialogState extends State<_BookshelfDialog> {
             Text(
               '${BookshelfService().countInShelf(shelf.id)}',
               style: TextStyle(
-                fontSize: 12,
+                fontSize: AppTheme.fontFootnote,
                 color: disabled
                     ? dimColor
                     : isDark

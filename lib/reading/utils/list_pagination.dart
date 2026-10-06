@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../common/theme.dart';
+import '../theme/jelly_theme.dart';
 
 /// 列表懒加载分页工具。
 ///
@@ -43,7 +45,8 @@ class ListPaginationCountBar extends StatelessWidget {
         alignment: Alignment.centerLeft,
         child: Text(
           '共 $total $unit',
-          style: const TextStyle(fontSize: 12, color: Colors.grey),
+          style: TextStyle(
+              fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary),
         ),
       ),
     );

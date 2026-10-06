@@ -136,11 +136,13 @@ import UIKit
             }
             let authToken = args["authToken"] as? String ?? ""
             let keepAlive = args["keepAlive"] as? Bool ?? true
+            let proxy = args["proxy"] as? String ?? ""
             let ok = startNodeJS(
                 nativePort: nativePort,
                 sourcePath: sourcePath,
                 authToken: authToken,
-                keepAlive: keepAlive
+                keepAlive: keepAlive,
+                proxy: proxy
             )
             result(ok)
         case "stopNodeJS":
@@ -179,7 +181,8 @@ import UIKit
         nativePort: Int,
         sourcePath: String,
         authToken: String = "",
-        keepAlive: Bool = true
+        keepAlive: Bool = true,
+        proxy: String = ""
     ) -> Bool {
         if isRunning {
             print("[NodeJSBridge] 已经在运行中")
@@ -195,6 +198,26 @@ import UIKit
 
         // 2. NODE_PATH
         setenv("NODE_PATH", sourcePath, 1)
+
+        // 2b. 全局代理 → Node 引擎外站请求
+        // 🔴 书源引擎（main.js 内嵌 Legado 求值器）的外站请求走 Node 自带的
+        //    HTTP 客户端（undici/axios），它只认标准代理环境变量
+        //    （http_proxy/HTTP_PROXY/https_proxy/HTTPS_PROXY/ALL_PROXY）。
+        //    以前没注入 → iOS 上 Node 直连外站 → 大量超时/400/500，
+        //    用户开全局代理也没用（代理只作用在 Dart 层 Dio）。
+        //    ⇒ 在 node_start 前 setenv，Node 进程继承后书源外站请求即可走代理。
+        let proxyValue = proxy.trim()
+        if !proxyValue.isEmpty {
+            setenv("http_proxy", proxyValue, 1)
+            setenv("HTTP_PROXY", proxyValue, 1)
+            setenv("https_proxy", proxyValue, 1)
+            setenv("HTTPS_PROXY", proxyValue, 1)
+            setenv("ALL_PROXY", proxyValue, 1)
+            setenv("all_proxy", proxyValue, 1)
+            print("[NodeJSBridge] Node 引擎代理已注入: \(proxyValue)")
+        } else {
+            print("[NodeJSBridge] 无全局代理，Node 引擎直连")
+        }
 
         // **2026-07-08 node.log 诊断**: 把 iOS Documents 沙盒下的 node.log 路径
         // 通过 argv 传给 main.js, main.js 启动时 fs.appendFileSync 重定向

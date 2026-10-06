@@ -267,6 +267,38 @@ class MusicApi {
   /// 手动清缓存（下拉刷新时调用）
   void clearCache() => _cache.clear();
 
+  /// 把一批歌曲 JSON 补上**真实来源平台**，再交给 [Song.fromJson]。
+  ///
+  /// ── 🔴 为什么必须有这个（修一个"播错歌"的真 bug）─────────────────
+  ///
+  /// `Song.source` 有两个**决定性的**作用（`models.dart` 里有详述）：
+  ///   1. `identityKey` = `'${source.platform}-$id'`
+  ///      —— 收藏 / 下载 / 队列 / 最近播放**都按它去重**
+  ///   2. 播放时用它选平台：`songUrl(song.id, source: song.source)`
+  ///
+  /// 而 **Node 侧的 QQ 实现不回 `source`**：
+  ///   · `qq_source.js` 的 `mapSong` 返回 `{id, name, artist, album, albumId,
+  ///     cover, duration, fee, songmid, mediaMid, artistMid}` —— **没有 source**
+  ///   · `music_source.js` 的 QQ 分支是 `return qq.searchSongs(...)` /
+  ///     `qq.topListSongs(...)` / `qq.playlistSongs(...)` **直通**，不补字段
+  ///  （酷狗的 `mapSong` **有** `source`，所以酷狗那条路本来就对）
+  ///
+  /// 于是没兜底的地方 `SongSource.fromKey(null)` → 落到 **netease** ✗
+  ///
+  /// **后果（真实可复现）**：QQ 榜单/歌单里的歌被标成网易云，
+  /// 而 **QQ 和网易云的数字 id 区间高度重叠** →
+  /// `songUrl(QQ的id, source: netease)` 会去网易云查这个 id，
+  /// 命中就是**完全不同的一首歌** → **播错歌** ✗
+  /// 第三方源也会按 `wy`（网易云）分派，同样是错的平台约定。
+  ///
+  /// ⚠️ 只有**确实缺 `source`** 时才注入：Node 回了真实来源就尊重它
+  ///（例如酷狗、喜马拉雅、以及将来跨平台聚合的结果）。
+  List<Song> _songsWithSource(dynamic r, SongSource source) => _listOf(r, 'list')
+      .map((j) => Song.fromJson(
+            j['source'] == null ? {...j, 'source': source.key} : j,
+          ))
+      .toList();
+
 
   String _short(Object e) {
     if (e is DioException) {
@@ -319,11 +351,7 @@ class MusicApi {
       // 结果必须带上**真实来源**：`Song.source` 决定后面用哪个平台解析播放地址
       // （`identityKey` 也靠它避免"网易云的 123"和"酷狗的 123"撞车）。
       // Node 侧若没回 `source` 就用本次请求的平台兜底。
-      list: _listOf(r, 'list')
-          .map((j) => Song.fromJson(
-                j['source'] == null ? {...j, 'source': source.key} : j,
-              ))
-          .toList(),
+      list: _songsWithSource(r, source),
     );
   }
 
@@ -814,7 +842,7 @@ class MusicApi {
       'source': source.key,
     });
     final m = _asMap(r);
-    final list = _listOf(r, 'list').map(Song.fromJson).toList();
+    final list = _songsWithSource(r, source);
     return (
       ok: m['ok'] != false && list.isNotEmpty,
       list: list,
@@ -853,7 +881,7 @@ class MusicApi {
   /// 新歌速递
   Future<List<Song>> newSongs({int limit = 10, SongSource source = SongSource.netease}) async {
     final r = await _call({'action': 'newSongs', 'limit': limit, 'source': source.key});
-    return _listOf(r, 'list').map(Song.fromJson).toList();
+    return _songsWithSource(r, source);
   }
 
   /// 歌单详情（含歌曲）；返回 (歌单元信息, 歌曲列表)
@@ -872,13 +900,15 @@ class MusicApi {
             creator: p['creator']?.toString(),
           )
         : null;
-    return (pl, _listOf(r, 'list').map(Song.fromJson).toList());
+    return (pl, _songsWithSource(r, source));
   }
 
   /// 相似歌曲
   Future<List<Song>> simiSongs(int id) async {
     final r = await _call({'action': 'simiSongs', 'id': id});
-    return _listOf(r, 'list').map(Song.fromJson).toList();
+    // ⚠️ 这个 action 没带 `source` 参数 → Node 侧走网易云默认分支，
+    //    所以兜底也用 netease（见 `_songsWithSource` 的说明）
+    return _songsWithSource(r, SongSource.netease);
   }
 
   /// 歌曲评论（带 `ok`）。
@@ -916,7 +946,8 @@ class MusicApi {
 
   Future<List<Song>> artistSongs(int artistId, {int limit = 120}) async {
     final r = await _call({'action': 'artistSongs', 'id': artistId, 'limit': limit});
-    return _listOf(r, 'list').map(Song.fromJson).toList();
+    // ⚠️ 同上：没带 `source` → 网易云默认分支
+    return _songsWithSource(r, SongSource.netease);
   }
 
   Future<List<Album>> artistAlbums(int artistId, {int limit = 50}) async {
@@ -933,7 +964,8 @@ class MusicApi {
 
   Future<List<Song>> albumSongs(int albumId) async {
     final r = await _call({'action': 'albumSongs', 'id': albumId});
-    return _listOf(r, 'list').map(Song.fromJson).toList();
+    // ⚠️ 同上：没带 `source` → 网易云默认分支
+    return _songsWithSource(r, SongSource.netease);
   }
 }
 

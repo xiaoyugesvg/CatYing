@@ -6,7 +6,6 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../models/models.dart';
 import '../services/player_manager.dart';
-import '../services/download_service.dart';
 import '../theme/music_theme.dart';
 import '../../common/theme.dart';
 import '../../widgets/app_toast.dart';
@@ -102,13 +101,27 @@ class _CoverImageState extends State<CoverImage> {
     if (u.isEmpty) {
       child = _placeholder(radius);
     } else {
-      // 重试时换一个缓存键：绕过"失败已被缓存记住"的情况
-      final imageUrl = _attempts == 0
-          ? u
-          : (u.contains('?') ? '$u&_retry=$_attempts' : '$u?_retry=$_attempts');
+      // ── 🔴 重试要换**缓存键**，不能改写 URL（修一个"重试必然失败"）──
+      //
+      // 原来是把 `_retry=N` **拼到 URL 上**：
+      // ```dart
+      // final imageUrl = _attempts == 0 ? u
+      //     : (u.contains('?') ? '$u&_retry=$_attempts' : '$u?_retry=$_attempts');
+      // ```
+      // 那个参数会**真的发给图床**。而本项目已知的图床
+      //（网易云、喜马拉雅直链）**URL 上带 token/签名** ——
+      // 多一个查询参数就会让签名校验失败 → 重试**必然继续失败**，
+      // 封面永远是灰块（重试完全没起作用）。
+      // 即使某家不校验签名，同一张图也会在磁盘缓存里留最多 3 份
+      //（原图 + `_retry=1` + `_retry=2`）。
+      //
+      // `CachedNetworkImage` 本来就支持 `cacheKey`：
+      // 用它绕开"失败被缓存记住"，URL 保持原样 ✓
+      final cacheKey = _attempts == 0 ? u : '$u#retry$_attempts';
       child = CachedNetworkImage(
-        key: ValueKey<String>(imageUrl),
-        imageUrl: imageUrl,
+        key: ValueKey<String>(cacheKey),
+        imageUrl: u,
+        cacheKey: cacheKey,
         width: widget.size,
         height: widget.size,
         fit: BoxFit.cover,
@@ -344,14 +357,31 @@ Future<void> showSongActions(
   return showModalBottomSheet<void>(
     context: context,
     backgroundColor: MusicTheme.card,
+    // ── 🔴 必须 `isScrollControlled: true`（修一个"末尾项点不到"）──────
+    //
+    // 不加这个参数时，`showModalBottomSheet` 的高度上限是
+    // **屏高 × 9/16**。而本菜单有 **9 个 ListTile**：
+    //   8×56 + 1×72（「查看歌手」带 subtitle）= 520
+    //   + 头部（16+44+8=68）+ Divider(1) + SizedBox(8) ≈ **597**
+    // 对照 iPhone 14（844pt 屏）：上限只有 ≈474 → **超出约 120px**。
+    //
+    // 表现：debug 下报 `RenderFlex overflowed`；release 下末尾的
+    // 「下载」「分享」（小屏还有「评论」）被裁掉且**点不到** ✗
+    // iPhone SE（568pt 屏）上限才 ≈319 → 只能看到约 5 项。
+    //
+    // 开 `isScrollControlled` 后上限放到全屏，再用 `SingleChildScrollView`
+    // 兜住"屏幕很矮"的极端情况（同时保留 `mainAxisSize: min`，
+    // 内容少时弹层**依然只有内容那么高**，不会变成全屏大白板）。
+    isScrollControlled: true,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
     ),
     builder: (ctx) => SafeArea(
       top: false,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Row(
@@ -457,13 +487,30 @@ Future<void> showSongActions(
           ),
           // 下载：入队到 App 沙盒（`Documents/music/`）。
           // 已下载/下载中的会被服务自动忽略；下载完播放会**本地优先**（离线可听）。
+          //
+          // ── 🔴 必须走 `musicEnqueueDownload()`，不要直接 enqueue ──────
+          //
+          // 这里原来自己写了一遍：
+          // ```dart
+          //   MusicDownloadService.instance.enqueue(song);
+          //   AppToast.show('已加入下载', song.name);   // ← 无条件
+          // ```
+          // `musicEnqueueDownload`（`quick_actions.dart`）存在的**理由**
+          // 就是修这个：`enqueue` 对"已在清单里"的歌是**静默忽略**的
+          //（`download_service.dart` 里去重后直接 return），
+          // 而无条件提示会让用户以为下了第二遍 —— 去下载列表又找不到新任务。
+          // 它还负责 `isDownloaded`（已下好 → 提示"已经下载过了"）
+          // 和 `failed 可重来` 这两个分支。
+          //
+          // 直接把那条逻辑写回来 = 把已经修掉的 bug 又种回去。
           ListTile(
             leading: Icon(Icons.download_rounded, color: MusicTheme.tint),
             title: Text('下载', style: TextStyle(color: MusicTheme.label)),
             onTap: () {
               Navigator.pop(ctx);
-              MusicDownloadService.instance.enqueue(song);
-              AppToast.show('已加入下载', song.name);
+              // ⚠️ `unawaited`：Fire-and-forget，但**显式**声明意图
+              //（直接丢弃 Future 时，服务内抛异常会变成 unhandled async error）
+              unawaited(musicEnqueueDownload(song));
             },
           ),
           ListTile(
@@ -475,7 +522,8 @@ Future<void> showSongActions(
             },
           ),
           const SizedBox(height: 8),
-        ],
+          ],
+        ),
       ),
     ),
   );

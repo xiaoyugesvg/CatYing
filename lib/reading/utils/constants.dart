@@ -12,12 +12,6 @@
 /// 它只有 4 个成员（radius/cardElevation/padding/cardPadding），
 /// 与 `common/theme.dart` 的 `AppTheme` **同名冲突**，
 /// 而且经核实**全项目 0 处引用**（纯死代码）。需要圆角/间距请用 `AppTheme`。
-///
-/// ── cmbok 原版页面兼容 ───────────────────────────────────────
-/// cmbok_app 原版页面（about/me/update_service 等）引用的是 `AppConstants`。
-/// 本文件末尾的 `typedef AppConstants = CmbokConstants` 让这些页面无需改动
-/// 即可编译；下方同时补回了原版独有的 `githubUrl` / `blogUrl` /
-/// `latestReleaseApiUrl` 三个字段。
 class CmbokConstants {
   static const String appName = 'Cmbok';
   static const String version = '2.0.3';
@@ -121,16 +115,4 @@ class CmbokConstants {
   /// 分享网盘下载地址（找不到安装包时回退）
   static const String shareUrl =
       'https://1812475725.share.123pan.cn/123pan/GSy8Vv-DupEv';
-
-  /// GitHub 仓库地址（关于页）
-  static const String githubUrl = 'https://github.com/hlning/cmbok_app';
-
-  /// 「甜甜的小站」博客地址（我的页）
-  static const String blogUrl = 'https://bluemood.xiaomy.net/';
 }
-
-/// cmbok 原版页面引用的是 `AppConstants`；别名到 [CmbokConstants]，
-/// 让 about_page / me_page / update_service / update_dialog 等原版文件
-/// 无需改动即可编译（同名类在 `lib/common/constants.dart` 已有定义，
-/// 因此这里只做 typedef 别名，不重新声明类）。
-typedef AppConstants = CmbokConstants;

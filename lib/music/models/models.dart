@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 // ============================================================
 // 宽容的数值转换
 // ============================================================
@@ -256,17 +258,61 @@ class Song {
   static String listToJson(List<Song> list) =>
       jsonEncode(list.map((e) => e.toJson()).toList());
 
+  /// 从 JSON 字符串解析歌曲列表（**逐条容错**）。
+  ///
+  /// ── 🔴 为什么必须逐条容错（修一个"收藏全没了"的真 bug）────────────
+  ///
+  /// 原来整份 `.map(Song.fromJson)` 包在一个 try/catch 里：
+  /// ```dart
+  /// try {
+  ///   return d.whereType<Map>().map((e) => Song.fromJson(...)).toList();
+  /// } catch (_) {
+  ///   return const [];          // ← 一条坏数据 = 整个列表变空
+  /// }
+  /// ```
+  /// 后果**不只是"少几首"**：
+  ///   · `library_store` 的收藏 / 最近播放 / 队列都走这里
+  ///   · 只要**一条**记录坏了（旧版本写下的字段类型变了、
+  ///     手工改过、写到一半被杀进程）→ **整个收藏列表变空** ✗
+  ///   · 而且下次 `toggleFavorite` 会把**这个空列表写回磁盘**
+  ///     → 用户的收藏**真丢了**，不可恢复 ✗
+  ///
+  /// 现在跳过坏的、保留好的（`ThirdPartySource.listFromJson` 早就是这个写法，
+  /// 注释里记录了同一段教训 —— 这里补齐）。
   static List<Song> listFromJson(String raw) {
+    Object? decoded;
     try {
-      final d = jsonDecode(raw);
-      if (d is! List) return const [];
-      return d
-          .whereType<Map>()
-          .map((e) => Song.fromJson(e.cast<String, dynamic>()))
-          .toList();
-    } catch (_) {
+      decoded = jsonDecode(raw);
+    } catch (e) {
+      // 整份 JSON 语法坏了（截断等）→ 只能放弃，但**要说出来**。
+      // ⚠️ 这里用 `debugPrint` 而不是 `AppLog`：`models.dart` 目前只依赖
+      //    `dart:convert`（纯净的模型层），引 `services/app_log.dart`
+      //    会造出"模型 → 服务"的反向依赖。
+      //    `third_party_source.dart` 的同类日志也是 `debugPrint`（保持一致）。
+      debugPrint('[Music] 歌曲列表 JSON 解析失败: $e');
       return const [];
     }
+    if (decoded is! List) return const [];
+
+    final out = <Song>[];
+    var skipped = 0;
+    for (final e in decoded) {
+      if (e is! Map) {
+        skipped++;
+        continue;
+      }
+      try {
+        out.add(Song.fromJson(e.cast<String, dynamic>()));
+      } catch (err) {
+        skipped++;
+      }
+    }
+    if (skipped > 0) {
+      // ⚠️ 必须可见：用户"少了一首歌"时能查到原因
+      debugPrint('[Music] 歌曲列表跳过 $skipped 条无法解析的记录'
+          '（保留 ${out.length} 条）');
+    }
+    return out;
   }
 
   @override

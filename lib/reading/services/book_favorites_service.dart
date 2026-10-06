@@ -64,14 +64,29 @@ class BookFavoritesService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _persist() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final list = _books.map((b) => jsonEncode(b.toJson())).toList();
-      await prefs.setStringList(_key, list);
-    } catch (e) {
-      _log('保存图书收藏失败: $e');
-    }
+  /// ⚡ **写盘串行化**（本次修复 ✓）：原来每次 `toggle` / `removeMany` 都各发一次
+  /// `setStringList` ✗，而它们**并发**执行 ✓ → 快速双击收藏时，
+  /// **先发的那次可能后落地** ✗✗ → 磁盘上留下**过期状态** ✓
+  /// （表现：界面显示"已取消收藏"，重进却又回来了 ✗ —— 用户可见的错误状态 ✓）。
+  /// ✓ 现在把每次写盘**接到上一次之后**（`_writeChain` ✓）：顺序 = 调用顺序 ✓，
+  ///   且 `_books` 是在**真正写入时**才编码 ✓ → **最后一次写入必然带最终状态** ✓✓。
+  /// ⚠️ `catch` 放在**链内** ✓ —— 否则一次失败会**断掉整条链** ✗，
+  ///   导致之后所有收藏都写不进去 ✗✗。
+  /// ⚠️ 返回值仍是"这一次写盘"的 Future ✓ → 调用方 `await toggle(...)` 的
+  ///   "已保存"语义**完全不变** ✓（见 `toggle` / `removeMany` ✓）。
+  Future<void> _writeChain = Future<void>.value();
+
+  Future<void> _persist() {
+    _writeChain = _writeChain.then((_) async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final list = _books.map((b) => jsonEncode(b.toJson())).toList();
+        await prefs.setStringList(_key, list);
+      } catch (e) {
+        _log('保存图书收藏失败: $e');
+      }
+    });
+    return _writeChain;
   }
 
   void _log(String msg) {

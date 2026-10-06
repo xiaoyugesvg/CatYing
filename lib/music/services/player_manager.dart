@@ -52,6 +52,31 @@ class MusicPlayerManager extends ChangeNotifier {
   Song? get currentSong => _currentSong;
   Song? _currentSong;
 
+  /// **仅测试用**：直接指定"当前歌"与"是否在播"，不建原生播放器。
+  ///
+  /// ── 为什么需要它 ──────────────────────────────────────────────
+  /// `_player` 是 `late final Player()`（media_kit），而**单元测试环境
+  /// 没有那个原生库** —— `Player()` 一构造就抛
+  /// `MediaKit.ensureInitialized must be called`。
+  ///
+  /// 于是"有歌在播时迷你条长什么样、两条栏会不会重叠"这类**纯布局**
+  /// 问题在测试里根本测不到（我为此卡过一次，最后只能靠肉眼看截图）。
+  ///
+  /// 有了这个钩子，布局测试可以直接进入"正在播放"状态，
+  /// 不需要碰原生播放器。
+  @visibleForTesting
+  void debugSetPlayingForTest(Song? song, {bool playing = true}) {
+    _currentSong = song;
+    if (song != null) {
+      _queue
+        ..clear()
+        ..add(song);
+      _index = 0;
+    }
+    isPlaying.value = song != null && playing;
+    notifyListeners();
+  }
+
   /// 播放队列
   final List<Song> _queue = [];
   List<Song> get queue => List.unmodifiable(_queue);
@@ -85,15 +110,40 @@ class MusicPlayerManager extends ChangeNotifier {
   /// ⚠️ 优先用调用方传进来的（挂在**用户当前那个 Navigator** 上）；
   /// 兜底才用全局 key —— 直接用全局 key 在"用户在音乐 tab 点歌"
   /// 之外的情况下可能弹错位置。
-  BuildContext get _pickerCtx =>
-      _pickerContext ?? VideoPlayerPip.navigatorKey.currentContext!;
+  ///
+  /// ── 🔴 返回**可空**（修一个崩溃：原来这里是 `currentContext!`）────
+  /// 原来写的是：
+  /// ```dart
+  /// BuildContext get _pickerCtx =>
+  ///     _pickerContext ?? VideoPlayerPip.navigatorKey.currentContext!;   // ← 强制解包
+  /// ```
+  /// `navigatorKey.currentContext` 在**框架还没挂载 / 那一帧正好在重建**
+  /// 时是 **null** → `!` 直接抛 `Null check operator used on a null value`。
+  ///
+  /// 触发路径是真实存在的：**冷启动恢复队列后自动播放**、
+  /// 或从通知栏/耳机按键触发的播放 —— 那时没有任何页面调用过
+  /// `attachContext`，而 `_pickerContext` 为 null。
+  ///
+  /// 现在返回 null，由调用方（`_load`）判断：拿不到 context 就
+  /// **不弹选源弹窗**，改用「试全部源 → 取第一个能用的」+ 明确提示，
+  /// 而不是崩掉（崩了用户连声音都没有，比"没得选"更糟）。
+  BuildContext? get _pickerCtxOrNull {
+    final mine = _pickerContext;
+    if (mine != null && mine.mounted) return mine;
+    return VideoPlayerPip.navigatorKey.currentContext;
+  }
 
   /// 失败摘要：告诉用户"试了 N 个源，M 个不行"。
   ///
   /// ⚠️ 只给**数量级**信息，不把 12 条错误全塞进弹窗
   ///（详情在 `UnblockService.lastAttempts`，失败时另有 toast/日志）。
-  String _failedSummary(int okCount) {
-    final failed = UnblockService.instance.lastAttempts.length;
+  /// 失败摘要：告诉用户"试了 N 个源，M 个不行"。
+  ///
+  /// ⚠️ 必须传 [song]：`UnblockService` 的失败记录是**跨调用共享**的，
+  /// 不按歌过滤就会把**别的歌**的失败条数算进来
+  ///（快速连点两首歌时"摘要里说 12 个源失败"，而这首歌其实只试了 6 个）。
+  String _failedSummary(Song song, int okCount) {
+    final failed = UnblockService.instance.failedCountFor(song);
     if (failed == 0) return '';
     return '另有 $failed 个音源试过但没拿到地址（详情见日志）';
   }
@@ -440,9 +490,20 @@ class MusicPlayerManager extends ChangeNotifier {
 
     // 1) 解析播放地址
     //
-    // 顺序：**内置公开接口 → 用户导入的第三方音源**。
-    // 内置接口能拿到绝大多数免费歌；拿不到时（VIP/独家/接口变动）
-    // 才回退到音源，这样正常播放不会因为用户装了个坏源而变慢。
+    // ── 顺序（已按用户要求调整，别再改回去）─────────────────────
+    //   ① **本地文件** —— 已下载的直接播沙盒文件，不走网络（离线可听）
+    //   ② **音源记忆** —— 这首上次用哪个源成功了，直接再问它一次
+    //   ③ **内置公开接口**
+    //   ④ **试全部第三方源 → 弹窗让用户选**（最后兜底）
+    //
+    // ⚠️ 为什么"记忆"排在"内置"**前面**（这是修的一个真 bug）：
+    //    原来记忆是放在"内置失败"里的兜底。但内置接口**经常返回
+    //    "能用但很慢/被限速"的直链** —— 那时 `r.ok == true`，
+    //    于是**记忆根本没被查**，用户上次选好的源白记了 ✗
+    //    用户的原话是"记住从哪个源获取的，然后**直接用**"——
+    //    那意味着记忆要**优先**，不是兜底。
+    //
+    //    记忆失败会继续落到内置接口，所以**不会因为记忆而播不了**。
     var url = '';
     var quality = '';
     var fromSource = '';
@@ -451,7 +512,7 @@ class MusicPlayerManager extends ChangeNotifier {
     // 之前是 `songUrl(song.id)` —— 它会退到默认 exhigh(320K)，
     // 于是"音质"设置能选能存却**从未生效**（典型的假设置）。
     final wantQuality = SettingsStore.instance.audioQuality.value;
-    // ① **本地优先**：已下载的歌直接播沙盒里的文件 —— 不走网络解析。
+    // **本地优先**：已下载的歌直接播沙盒里的文件 —— 不走网络解析。
     // 这样"下载"才真的有用（离线能听），也省掉一次接口往返。
     // 放在解析**之前**是关键：否则离线/取不到地址时会提前 return，本地文件永远播不到。
     final dl = MusicDownloadService.instance.bySong(song);
@@ -459,14 +520,64 @@ class MusicPlayerManager extends ChangeNotifier {
         (dl != null && dl.status == MusicDownloadStatus.done && dl.path.isNotEmpty)
             ? dl.path
             : '';
-    final r = localPath.isNotEmpty
-        ? MusicUrlInfo(ok: true, url: localPath, type: '本地')
-        : await MusicApi.instance
-            .songUrl(song.id, quality: wantQuality, source: song.source);
-    if (epoch != _loadEpoch) return; // 已被更新的点歌取代，丢弃本次结果
     // 第三方音源要用**它自己配的** headers（UA/Referer/Cookie）。
-    // 在 if 分支里声明会出作用域，所以提到这里。
     Map<String, String> sourceHeaders = const {};
+    // 这次是不是靠"记忆里的那个源"拿到了地址
+    var remembered = false;
+
+
+    // ══════════════════════════════════════════════════════════
+    // ② 试**上次记住的那个源**（用户 2026 要求）
+    // ══════════════════════════════════════════════════════════
+    //
+    // ── 用户场景 ─────────────────────────────────────────────────
+    // VIP 歌靠第三方源播成功后，退出去、重新点这首歌 ——
+    // 希望**直接用上次成功的那个源**，而不是"再并发试全部源（几秒）
+    // + 弹窗选一遍"。
+    //
+    // ── 为什么命中记忆也要**验证** ──────────────────────────────
+    // 第三方源给的地址**是签名限时的**（`…/<签名>/6ac3c102/resource/…`），
+    // 会过期成 403/404。所以只能记住"**源**"，每次重新向它要新地址 ——
+    // 而"这个源现在还能不能给地址"必须当场问一次。
+    //
+    // ⚠️ **本地文件优先于记忆**：已下载的歌直接播本地文件，
+    //    不该为了"记忆"白跑一次网络请求（离线时那次请求还会失败）。
+    if (localPath.isEmpty && SettingsStore.instance.useThirdPartySources.value) {
+      final memorized = SourceMemory.instance.resolveSource(song);
+      if (memorized != null) {
+        lastError.value = '正在用「${memorized.name}」…';
+        final one = await UnblockService.instance.testOne(memorized, song);
+        switching.value = false;
+        if (epoch != _loadEpoch) return;
+        if (one.ok && one.url.isNotEmpty) {
+          // 命中！直接用，**不弹窗** —— 用户上次已经做过这个选择了
+          url = one.url;
+          fromSource = one.source?.name ?? memorized.name;
+          quality = one.source?.quality ?? '';
+          sourceHeaders =
+              one.headers.isNotEmpty ? one.headers : (one.source?.headers ?? const {});
+          remembered = true;
+          AppLog.instance.log(
+              '[Music] 命中音源记忆：《${song.name}》→「${memorized.name}」');
+        } else {
+          // 记住的源这次给不出地址（多半是它后端变了/歌下架了）→
+          // **顺手忘掉**，否则以后每次点这首都要白等这一次探测。
+          AppLog.instance.log('[Music] 音源记忆失效（${memorized.name}：'
+              '${one.error}），改用内置接口');
+          unawaited(SourceMemory.instance.forget(song));
+        }
+      }
+    }
+
+    // 命中记忆时**根本不该再请求内置接口** —— 那正是"记住它、直接用"的意义
+    //（既能省一次网络往返，也避免内置接口的慢直链把好地址盖掉）。
+    final r = remembered
+        ? MusicUrlInfo(ok: false, url: '', type: '')
+        : (localPath.isNotEmpty
+            ? MusicUrlInfo(ok: true, url: localPath, type: '本地')
+            : await MusicApi.instance
+                .songUrl(song.id, quality: wantQuality, source: song.source));
+    if (epoch != _loadEpoch) return; // 已被更新的点歌取代，丢弃本次结果
     if (r.ok && r.url.isNotEmpty) {
       url = r.url;
       quality = r.qualityText;
@@ -474,50 +585,6 @@ class MusicPlayerManager extends ChangeNotifier {
       final builtinMsg = r.noFreeSource
           ? '内置接口没有免费音源'
           : (r.message.isNotEmpty ? r.message : '内置接口取地址失败');
-
-      // ══════════════════════════════════════════════════════════
-      // ① 先试**上次记住的那个源**（用户 2026 要求）
-      // ══════════════════════════════════════════════════════════
-      //
-      // ── 为什么要有这一步 ────────────────────────────────────────
-      // 用户场景：VIP 歌靠第三方源播成功后，退出去、重新点这首歌 ——
-      // 希望**直接用上次成功的那个源**，而不是"再并发试全部源（几秒）
-      // + 弹窗选一遍"。
-      //
-      // ── 为什么命中记忆也要**验证** ──────────────────────────────
-      // 第三方源给的地址**是签名限时的**（`…/<签名>/6ac3c102/resource/…`），
-      // 会过期成 403/404。所以只能记住"**源**"，每次重新向它要新地址 ——
-      // 而"这个源现在还能不能给地址"必须当场问一次。
-      //
-      // 失败就**静默回退**到下面的"试全部源"，绝不让记忆把歌卡死。
-      var remembered = false;
-      if (SettingsStore.instance.useThirdPartySources.value) {
-        final memorized = SourceMemory.instance.resolveSource(song);
-        if (memorized != null) {
-          lastError.value = '正在用「${memorized.name}」…';
-          final one = await UnblockService.instance.testOne(memorized, song);
-          switching.value = false;
-          if (epoch != _loadEpoch) return;
-          if (one.ok && one.url.isNotEmpty) {
-            // 命中！直接用，**不弹窗** —— 用户上次已经做过这个选择了
-            url = one.url;
-            fromSource = one.source?.name ?? memorized.name;
-            quality = one.source?.quality ?? '';
-            sourceHeaders =
-                one.headers.isNotEmpty ? one.headers : (one.source?.headers ?? const {});
-            remembered = true;
-            AppLog.instance.log(
-                '[Music] 命中音源记忆：《${song.name}》→「${memorized.name}」');
-          } else {
-            // 记住的源这次给不出地址（多半是它后端变了/歌下架了）→
-            // **顺手忘掉**，否则以后每次点这首都要白等这一次探测。
-            AppLog.instance.log('[Music] 音源记忆失效（${memorized.name}：'
-                '${one.error}），回退到试全部源');
-            unawaited(SourceMemory.instance.forget(song));
-          }
-        }
-      }
-
       // ══════════════════════════════════════════════════════════
       // ② 没命中 → 回退：**试全部第三方音源 → 弹窗让用户选**
       // ══════════════════════════════════════════════════════════
@@ -548,6 +615,28 @@ class MusicPlayerManager extends ChangeNotifier {
         if (epoch != _loadEpoch) return; // 期间用户又点了别的歌
 
         if (results.isNotEmpty) {
+          // ── 🔴 先看**有没有 context 能弹窗**（修一个崩溃）──────────
+          //
+          // `SourcePickerSheet.show` 需要 `BuildContext`。而
+          // **冷启动恢复队列后自动播放**、或**从通知栏/耳机按键触发的播放**
+          // 都没有页面调用过 `attachContext` → `_pickerContext` 为 null。
+          // 原来那里是 `VideoPlayerPip.navigatorKey.currentContext!`
+          //（强制解包）→ 拿不到就**抛异常**，用户连声音都没有 ✗
+          //
+          // 现在：拿不到 context 就**不弹窗**，直接用**第一个能用的源**播
+          //（`resolveAll` 的返回已按"用户导入顺序 / 记忆优先"排好序，
+          //  第一个就是最该用的那个），并用 toast 告诉用户用了哪个源 ——
+          // "没得选但能听" 明显好过 "崩掉"。
+          final ctx = _pickerCtxOrNull;
+          if (ctx == null) {
+            final first = results.first;
+            AppLog.instance.log('[Music] 没拿到 context，无法弹选源窗 → '
+                '直接用第一个可用源：${first.source?.name}（${results.length} 个可用）');
+            // `playResolved` 内部会 remember + 开播（含歌词/最近播放/落盘）
+            await playResolved(song, first);
+            return;
+          }
+
           // ── 弹窗让用户选 ────────────────────────────────────
           //
           // ⚠️ 只有一条时**照样弹** —— 让用户知道"这首歌是靠哪个源播的"，
@@ -562,10 +651,10 @@ class MusicPlayerManager extends ChangeNotifier {
           //    这里只负责**记录最终选定的源**（用于 qualityText 展示与日志），
           //    然后正常收尾（歌词已经在 `_startPlayback` 里取过了）。
           final picked = await SourcePickerSheet.show(
-            _pickerCtx,
+            ctx,
             song: song,
             results: results,
-            failedNote: _failedSummary(results.length),
+            failedNote: _failedSummary(song, results.length),
           );
           if (epoch != _loadEpoch) return;
 
@@ -599,7 +688,7 @@ class MusicPlayerManager extends ChangeNotifier {
           return;
         } else {
           // 所有源都失败：把「内置为什么失败」+「每个源为什么失败」说清楚
-          final detail = UnblockService.instance.describeFailure();
+          final detail = UnblockService.instance.describeFailureFor(song);
           final full = detail.isEmpty ? builtinMsg : '$builtinMsg；$detail';
           // ⚠️ 完整原因**必须**进日志：toast 会把长文本截断
           AppLog.instance.log('[Music] 取播放地址失败（${song.name}）: $full');
@@ -629,7 +718,15 @@ class MusicPlayerManager extends ChangeNotifier {
     await _startPlayback(
       song: song,
       url: url,
-      headers: r.headers.isNotEmpty ? r.headers : sourceHeaders,
+      // ── ⚠️ 顺序：**源自己的 headers 优先** ──────────────────────
+      //
+      // 原来写的是 `r.headers.isNotEmpty ? r.headers : sourceHeaders` ——
+      // 而 `r` 是**内置接口**的结果。记忆命中时 `r` 是个占位失败对象
+      //（headers 为空）还看不出问题；但只要内置接口回了个非空 headers，
+      // 就会把**源自己的签名头盖掉** → "地址拿到了但播不了"（403/空流）。
+      //
+      // 第三方源（尤其 MusicFree 插件）的地址**必须带它给的 headers**。
+      headers: sourceHeaders.isNotEmpty ? sourceHeaders : r.headers,
       fromSource: fromSource,
       quality: quality,
       autoplay: autoplay,

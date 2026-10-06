@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 /// 果冻风格胶囊搜索框（固定在顶部，胶囊形状）
 class JellySearchBar extends StatefulWidget {
@@ -63,14 +64,14 @@ class _JellySearchBarState extends State<JellySearchBar> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final hintColor = isDark ? Colors.white38 : const Color(0xFF9CA3AF);
+    final hintColor = JellyTheme.textSecondary;
 
     // 外层间距由调用方控制，便于与其他控件（如视图切换）并排
     return Container(
       height: 50,
       decoration: BoxDecoration(
-        color: isDark ? JellyTheme.cardDark : Colors.white,
-        borderRadius: BorderRadius.circular(25), // 胶囊形状（半径=高度的一半）
+        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+        borderRadius: BorderRadius.circular(20), // 胶囊形状（半径=高度的一半）
         boxShadow: [
           BoxShadow(
             color: isDark
@@ -93,7 +94,7 @@ class _JellySearchBarState extends State<JellySearchBar> {
           onChanged: widget.onChanged,
           textAlignVertical: TextAlignVertical.center,
           style: TextStyle(
-            fontSize: 15,
+            fontSize: AppTheme.fontHeadline,
             height: 1.0,
             color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
           ),
@@ -101,7 +102,7 @@ class _JellySearchBarState extends State<JellySearchBar> {
             // 关闭主题默认的灰色填充，让输入框透明白底胶囊
             filled: false,
             hintText: widget.hintText,
-            hintStyle: TextStyle(fontSize: 15, color: hintColor),
+            hintStyle: TextStyle(fontSize: AppTheme.fontHeadline, color: hintColor),
             prefixIcon: Icon(
               Icons.search_rounded,
               color: _isFocused ? JellyTheme.navSelectedFg : hintColor,

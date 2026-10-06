@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/constants.dart';
-import 'settings_service.dart';
+import '../source/global_proxy.dart';
 
 void _log(String message) {
   if (kDebugMode) debugPrint('[RemoteConfig] $message');
@@ -30,9 +30,9 @@ class RemoteConfigService extends ChangeNotifier {
   static const _kZlibraryDomain = 'remote_zlibrary_domain';
   static const _kNotification = 'remote_notification';
 
-  String _copyApiUrl = AppConstants.defaultCopyApiUrl;
+  String _copyApiUrl = CmbokConstants.defaultCopyApiUrl;
   String _zlibraryDomain =
-      _hostOf(AppConstants.zLibraryApiUrl) ?? 'zh.zlibrary.by';
+      _hostOf(CmbokConstants.zLibraryApiUrl) ?? 'zh.zlibrary.by';
   Object?
   _cloudZlibraryUrl; // 云端 zlibrary_url 原始值（单字符串或数组），交 ZlibraryService 探测
   String _notification = '';
@@ -67,10 +67,11 @@ class RemoteConfigService extends ChangeNotifier {
       _log('加载缓存失败: $e');
     }
     notifyListeners();
-    _refresh(); // 后台检测远程配置（不阻塞启动）；动态生效（失败保留缓存）
+    _refresh(); // 后台检测更新（不阻塞启动）；动态生效（失败保留缓存）
   }
 
   /// 后台刷新：公告 -> 地址配置
+  /// 同步 Windows 端 StartupCheckThread 执行顺序（版本检测已移除）。
   Future<void> _refresh() async {
     final dio = Dio(
       BaseOptions(
@@ -78,6 +79,11 @@ class RemoteConfigService extends ChangeNotifier {
         receiveTimeout: const Duration(seconds: 5),
       ),
     );
+    // ✅ **云端配置刷新也走「网络代理」**（本轮接上 ✓）—— 与 `source_config_store.fetchRemote` 同款 ✓。
+    //   ℹ️ 安全依据 ✓（**已读源码确认** ✓）：本处**无自定义适配器** ✗✓（只有两个 5s 超时 ✓）
+    //     → 直接挂**安全** ✓✓
+    //   · 代理**关闭** ✓ → 返回 false ✓ **一行不改** ✓（与从前完全一致 ✓✓）
+    applyGlobalProxy(dio);
     final SharedPreferences prefs;
     try {
       prefs = await SharedPreferences.getInstance();
@@ -100,7 +106,7 @@ class RemoteConfigService extends ChangeNotifier {
   /// 拉取 url_config.json：更新拷贝漫画地址 / z-library 默认域名。返回是否有变化。
   Future<bool> _fetchUrlConfig(Dio dio, SharedPreferences prefs) async {
     try {
-      final res = await dio.get<dynamic>(AppConstants.urlConfigUrl);
+      final res = await dio.get<dynamic>(CmbokConstants.urlConfigUrl);
       final cfg = _asMap(res.data);
       if (cfg == null) return false;
       var changed = false;
@@ -122,6 +128,24 @@ class RemoteConfigService extends ChangeNotifier {
         _cloudZlibraryUrl = zl;
         changed = true;
         _log('zlibrary_url 云端候选已更新: $zl');
+        // 🔴 原来这里**只写内存 `_cloudZlibraryUrl`、从不落盘** ✗ ——
+        // 而 `init()` 读的是 prefs 键 `_kZlibraryDomain` ✓，那个键
+        // **全仓库没有任何写入方** ✗ → "跨重启记住云端下发的默认域名"
+        // 这件事**完全无效且不报错** ✓（每次启动都退回硬编码 `zh.zlibrary.by` ✓）。
+        // 现在把归一化后的**单个域名**落盘 ✓：数组/单串都取第一个非空项 ✓，
+        // 归一化交给 `Uri.host`（裸域名时 host 为空 → 回退原串 ✓），
+        // 多候选的探测选优仍由 ZlibraryService 负责 ✓，这里只负责"记住" ✓
+        final first = zl is List
+            ? zl
+                .map((e) => e.toString().trim())
+                .firstWhere((e) => e.isNotEmpty, orElse: () => '')
+            : zl.toString().trim();
+        if (first.isNotEmpty) {
+          final host = Uri.tryParse(first)?.host ?? '';
+          final domain = host.isNotEmpty ? host : first;
+          await prefs.setString(_kZlibraryDomain, domain);
+          _log('zlibrary 默认域名已持久化: $domain');
+        }
       }
       return changed;
     } catch (e) {
@@ -133,7 +157,7 @@ class RemoteConfigService extends ChangeNotifier {
   /// 拉取 notification.json：更新公告文本。返回是否有变化。
   Future<bool> _fetchNotification(Dio dio, SharedPreferences prefs) async {
     try {
-      final res = await dio.get<dynamic>(AppConstants.notificationUrl);
+      final res = await dio.get<dynamic>(CmbokConstants.notificationUrl);
       final n = _asMap(res.data)?['notification']?.toString().trim() ?? '';
       if (n != _notification) {
         _notification = n;

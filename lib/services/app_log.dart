@@ -207,21 +207,33 @@ class AppLog {
     ));
   }
 
-  /// Nexhub 书源引擎迁移：debug 级日志（语义同 log，级别标 debug）。
+  // ── 调试 / 警告级（书源体系在用，见下）──────────────────────────
+  //
+  // 🔴 为什么补上这两个（修 18 处编译错误）
+  //
+  // 阅读模块的书源引擎（`reading/novel_source/analyze/*`、
+  // `reading/novel_source/web_book/*`）里有 **18 处**调用
+  // `AppLog.instance.d(...)` / `AppLog.instance.w(...)`，
+  // 而 `AppLog` 原来**只有 `log()`**，没有 `d` / `w`
+  //   → 这些文件全部编译不过（`lib` 里 48 个 error 的一批就是这个）。
+  //
+  // 两者与 `log()` 走**同一条落盘链路**（`entry()`），只是 `level` 不同，
+  // 日志页可以按级别过滤：
+  //   · `d` = 排查用的细节（HTTP 请求、规则命中）
+  //   · `w` = 不该发生但没到致命（规则没命中、JS 执行失败、接口异常）
   void d(String message) {
     entry(LogEntry(
-      category: 'SHUYUAN',
-      action: 'msg',
+      category: 'LEGACY',
+      action: 'debug',
       level: LogLevel.debug,
       message: message,
     ));
   }
 
-  /// Nexhub 书源引擎迁移：warn 级日志（语义同 log，级别标 warn）。
   void w(String message) {
     entry(LogEntry(
-      category: 'SHUYUAN',
-      action: 'msg',
+      category: 'LEGACY',
+      action: 'warn',
       level: LogLevel.warn,
       message: message,
     ));

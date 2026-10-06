@@ -60,11 +60,56 @@ class BookPageCacheService {
         ':$bookId:$fingerprint:dp${doublePage ? 1 : 0}';
   }
 
+  /// 缓存目录（供「缓存管理」页算大小 / 清空用）
+  Future<Directory> cacheDir() async {
+    final dir = await getApplicationSupportDirectory();
+    return Directory('${dir.path}/book_pagination_cache');
+  }
+
+  /// 当前占用字节数
+  Future<int> sizeBytes() async {
+    try {
+      final d = await cacheDir();
+      if (!await d.exists()) return 0;
+      var total = 0;
+      await for (final e in d.list(recursive: true, followLinks: false)) {
+        if (e is File) {
+          total += await e.length();
+        }
+      }
+      return total;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// 清空全部分页缓存（下次打开会重新分页，只是慢一点）
+  Future<void> clear() async {
+    try {
+      final d = await cacheDir();
+      if (await d.exists()) await d.delete(recursive: true);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
   Future<File> _file(String bookId) async {
     final dir = await getApplicationSupportDirectory();
     final cacheDir = Directory('${dir.path}/book_pagination_cache');
     if (!await cacheDir.exists()) await cacheDir.create(recursive: true);
-    return File('${cacheDir.path}/$bookId.json');
+    // 🔴 **同一类路径穿越** ✗ —— 今天在 `book_content_cache_service` 首次发现 ✓，
+    //   全模块扫出 **3 处** ✓，这是第 3 处 ✓：`bookId` **未净化**直接拼路径 ✓。
+    //   图书 id 是 `book-<url>` ✓ → URL 含 `/` ✓；又因为上面
+    //   `create(recursive: true)` ✓ → 带 `../` 的 bookUrl 能把 JSON 写到
+    //   `book_pagination_cache` **之外** ✗✗。
+    // ✓ 净化：只保留 `[A-Za-z0-9_-]` ✓，其余换 `_` ✓，限长 120 ✓
+    //   （与 `book_content_cache_service._file` / `book_download_service._saveCoverBytes`
+    //     **同一套写法** ✓ —— 三处一起看，避免以后改一处漏两处 ✗）
+    // ⚠️ 副作用（无害 ✓）：文件名变化 → 旧分页缓存读不到 → 重新分页一次 ✓；
+    //   本类的调用方本来就设计了"读不到就回退重排" ✓（见下面 `:103` 的注释 ✓）
+    final safe = bookId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    final name = safe.length <= 120 ? safe : safe.substring(0, 120);
+    return File('${cacheDir.path}/$name.json');
   }
 
   /// 读缓存。返回 null 表示无此 key 或解析失败（调用方回退重排）。
@@ -170,32 +215,6 @@ class BookPageCacheService {
     } catch (_) {
       // 写缓存失败不影响阅读
     }
-  }
-
-  /// 整个缓存目录的字节数（外壳「清除缓存」页统计用）。
-  Future<int> sizeBytes() async {
-    try {
-      final dir = await getApplicationSupportDirectory();
-      final cacheDir = Directory('${dir.path}/book_pagination_cache');
-      if (!await cacheDir.exists()) return 0;
-      var total = 0;
-      await for (final f
-          in cacheDir.list(recursive: true, followLinks: false)) {
-        if (f is File) total += await f.length();
-      }
-      return total;
-    } catch (_) {
-      return 0;
-    }
-  }
-
-  /// 清空整个缓存目录（外壳「清除缓存」页用）。
-  Future<void> clear() async {
-    try {
-      final dir = await getApplicationSupportDirectory();
-      final cacheDir = Directory('${dir.path}/book_pagination_cache');
-      if (await cacheDir.exists()) await cacheDir.delete(recursive: true);
-    } catch (_) {}
   }
 }
 

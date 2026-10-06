@@ -1,23 +1,18 @@
 // lib/reading/pages/book_source_health_page.dart
 //
-// 「书源体检」页 —— 对齐备份3.0 book_source_health_page（IMG_8554~8561）：
-//   空闲页：  盾牌图标 + 流程文案 + 并发数选择(1/2/3/4/6/8/12) + 开始体检
-//   进行中：进度 X/N + 并发 N + 发热提示 + 实时统计(可用/网络源站异常/解析失败)
-//   完成页：体检完成·时间 + 统计 + 列表 + 全部/一键优化/清理
-// 引擎接线（Nexhub WebBook）：逐源 取书(searchBook)→详情(getBookInfo)
-//   →目录(getChapterList)→正文(getContent) 四环节，全部通过才算健康。
+// 「书源体检」完整页（对齐参考图 IMG_8554~8561）：
+//   空闲页   ：盾牌图标 + 流程文案 + 并发数选择(1/2/3/4/6/8/12) + 开始体检
+//   进行中   ：进度 X/N + 并发 N + 发热提示 + 实时统计(可用/网络不通/解析失败)
+//              + 搜索框 + 统计 tab + 分类标签 + 实时列表
+//   完成页   ：体检完成·时间 + 统计 + 列表 + 全选 + 一键优化 + 清理
+// 失败源会自动用代理档案复检一遍；退出页面不中断（结果写入服务缓存）。
 import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
-import '../novel_source/model/book_source.dart';
-import '../novel_source/model/search_book.dart';
-import '../novel_source/model/xiaoshuo_book.dart';
-import '../novel_source/model/xiaoshuo_book_chapter.dart';
-import '../novel_source/shuyuan_source_service.dart';
-import '../novel_source/web_book/web_book.dart';
-import '../services/book_favorites_service.dart';
-import '../services/shuyuan_source_store.dart';
+import '../models/book_source.dart';
+import '../services/book_source_service.dart';
 import '../theme/jelly_theme.dart';
+import '../utils/source_fail_text.dart';
 import '../widgets/jelly_search_bar.dart';
 
 /// 体检进行状态
@@ -25,21 +20,6 @@ enum _Phase { idle, running, done }
 
 /// 条目展示状态（由体检结果推导）
 enum _ItemState { untested, healthy, networkFail, parseFail }
-
-/// 单个源的体检结果
-class _SourceHealth {
-  final bool healthy;
-  final Duration elapsed;
-  final String detail;
-  const _SourceHealth({
-    required this.healthy,
-    required this.elapsed,
-    required this.detail,
-  });
-}
-
-/// 失败归类：网络/源站类（超时/连接/4xx/5xx/验证） vs 解析类
-enum _FailKind { network, parse }
 
 class BookSourceHealthPage extends StatefulWidget {
   const BookSourceHealthPage({super.key});
@@ -49,26 +29,26 @@ class BookSourceHealthPage extends StatefulWidget {
 }
 
 class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
-  final WebBook _webBook = WebBook();
+  final store = BookSourceStore.instance;
+  final service = BookSourceService.instance;
 
-  _Phase _phaseVal = _Phase.idle;
-
+  _Phase _phase = _Phase.idle;
   int _concurrency = 12;
   int _done = 0;
 
-/// 已测结果缓存（按源 url）
-final Map<String, _SourceHealth> _health = {};
+  /// 已测结果缓存（按源 id）；页面退出后体检继续写服务缓存，下次进入可续显
+  final Map<String, BookSourceHealth> _health = {};
 
-  /// 统计 tab：0 全部 / 1 可用 / 4 网络异常 / 5 解析失败；2 收藏 / 3 密钥（无数据维度）
+  /// 统计 tab：0 全部 / 1 可用 / 2 收藏 / 3 密钥 / 4 网络异常 / 5 解析失败
   int _statTab = 0;
 
   /// 分类：0 全部 / 1 通常书源 / 2 快速书源
-int _groupTab = 0;
+  int _groupTab = 0;
 
   final _searchCtrl = TextEditingController();
   String _kw = '';
 
-  // 多选：选中的源 url
+  /// 多选：选中的源 id
   final Set<String> _selected = {};
   bool _selectAll = false;
 
@@ -77,75 +57,71 @@ int _groupTab = 0;
   Color get _subColor => _isDark ? Colors.white54 : JellyTheme.textSecondary;
 
   @override
+  void initState() {
+    super.initState();
+    // 续显上次体检结果（退出页面不中断）
+    _health.addAll(service.healthCache);
+  }
+
+  @override
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
   }
 
   // ============================================================
-// 统计推导
+  // 统计推导
   // ============================================================
 
-  _ItemState _itemState(ShuyuanSource s) {
-    final h = _health[s.bookSourceUrl];
+  static bool _isNetworkError(String detail) {
+    // ✅ **判据已统一到 `utils/source_fail_text.dart`** ✓✓ ——
+    //   原来本函数与 `services/book_source_service.dart` 的 `_isNetError` **各写一份** ✗
+    //   （上面那段注释自己也写着「**两处必须同步**」✗，就是这次要解掉的隐患 ✓）。
+    //   ⚠️ **映射有意"三合一"** ✗✓：本页只有两档（网络不通 / 解析失败 ✓），没有「拒绝」档 ✗，
+    //     所以 `network` ✓ `denied`（403/401 ✓）`apiBroken`（404/5xx ✓）**都算"网络/服务类"** ✓✓
+    //     —— 与改造前的行为**等价** ✓（旧判据里 `status code` 一律算网络 ✓）。
+    //     若这里只认 `network` ✗，403 会掉进"解析失败" ✗✗ —— 那正是这段注释上面记录的老 bug ✓
+    //     （"223 个源全被标解析失败"✗），所以**绝不能收窄** ✗✓。
+    final kind = describeSourceFail(detail, what: '该源').kind;
+    return kind == SourceFailKind.network ||
+        kind == SourceFailKind.denied ||
+        kind == SourceFailKind.apiBroken;
+  }
+
+  _ItemState _itemState(BookSource s) {
+    final h = _health[s.id];
     if (h == null) return _ItemState.untested;
-    if (h.healthy) return _ItemState.healthy;
-    final kind = _failKind(h.detail);
-    return kind == _FailKind.network ? _ItemState.networkFail : _ItemState.parseFail;
+    if (h.level == BookSourceHealthLevel.healthy) return _ItemState.healthy;
+    if (h.level == BookSourceHealthLevel.dead && _isNetworkError(h.detail)) {
+      return _ItemState.networkFail;
+    }
+    return _ItemState.parseFail;
   }
 
-  int get _total => ShuyuanSourceStore.instance.allSources.length;
-  int get _usable => ShuyuanSourceStore.instance.allSources
-      .where((s) => _itemState(s) == _ItemState.healthy)
-      .length;
-  int get _networkFail => ShuyuanSourceStore.instance.allSources
-      .where((s) => _itemState(s) == _ItemState.networkFail)
-      .length;
-  int get _parseFail => ShuyuanSourceStore.instance.allSources
-      .where((s) => _itemState(s) == _ItemState.parseFail)
-      .length;
+  int get _total => store.all.length;
+  int get _usable => store.all.where((s) => _itemState(s) == _ItemState.healthy).length;
+  int get _networkFail => store.all.where((s) => _itemState(s) == _ItemState.networkFail).length;
+  int get _parseFail => store.all.where((s) => _itemState(s) == _ItemState.parseFail).length;
 
-  /// 分类分组：组名含「快速」→ 快速书源
-bool _isFast(ShuyuanSource s) =>
-      (s.bookSourceGroup ?? '').contains('快速');
+  /// 分类分组（对齐原版「通常书源 / 快速书源」）：组名含「快速」→ 快速书源
+  bool _isFast(BookSource s) => s.group.contains('快速');
 
-/// 该源是否有被收藏的书（详情页收藏时带 sourceName）
-bool _isFavoritedSource(ShuyuanSource s) => BookFavoritesService()
-      .books
-      .any((b) => (b.sourceName ?? '').isNotEmpty && b.sourceName == s.bookSourceName);
-
-  /// 该源是否带登录态（密钥，header 含 Cookie/token 类字段）
-  bool _isKeyedSource(ShuyuanSource s) {
-    final h = (s.header ?? '').toLowerCase();
-    return h.contains('cookie') || h.contains('token') || h.contains('secret');
-  }
-
-  List<ShuyuanSource> get _filtered {
-    var list =
-        List<ShuyuanSource>.of(ShuyuanSourceStore.instance.allSources);
+  List<BookSource> get _filtered {
+    var list = List<BookSource>.of(store.all);
     if (_kw.isNotEmpty) {
       final k = _kw.trim().toLowerCase();
-      list = list
-          .where((s) => s.bookSourceName.toLowerCase().contains(k))
-          .toList();
+      list = list.where((s) => s.name.toLowerCase().contains(k)).toList();
     }
     switch (_statTab) {
       case 1:
-        list = list
-            .where((s) => _itemState(s) == _ItemState.healthy)
-            .toList();
-      case 2:
-        list = list.where(_isFavoritedSource).toList();
-      case 3:
-        list = list.where(_isKeyedSource).toList();
+        list = list.where((s) => _itemState(s) == _ItemState.healthy).toList();
+      case 2: // 收藏：无数据维度，等同全部
+      case 3: // 密钥：无数据维度，等同全部
+        break;
       case 4:
-        list = list
-            .where((s) => _itemState(s) == _ItemState.networkFail)
-            .toList();
+        list = list.where((s) => _itemState(s) == _ItemState.networkFail).toList();
       case 5:
-        list = list
-            .where((s) => _itemState(s) == _ItemState.parseFail)
-            .toList();
+        list = list.where((s) => _itemState(s) == _ItemState.parseFail).toList();
       default:
         break;
     }
@@ -160,121 +136,45 @@ bool _isFavoritedSource(ShuyuanSource s) => BookFavoritesService()
     return list;
   }
 
-  int get _fastCount =>
-      ShuyuanSourceStore.instance.allSources.where((s) => _isFast(s)).length;
-  int get _normalCount =>
-      ShuyuanSourceStore.instance.allSources.where((s) => !_isFast(s)).length;
-  int get _favoritedCount => ShuyuanSourceStore.instance.allSources
-      .where(_isFavoritedSource)
-      .length;
-  int get _keyedCount =>
-      ShuyuanSourceStore.instance.allSources.where(_isKeyedSource).length;
+  int get _fastCount => store.all.where((s) => _isFast(s)).length;
+  int get _normalCount => store.all.where((s) => !_isFast(s)).length;
 
   // ============================================================
-  // 体检引擎（Nexhub WebBook 四环节）
+  // 动作
   // ============================================================
-
-  _FailKind _failKind(String detail) {
-    final d = detail.toLowerCase();
-    if (d.contains('timeout') ||
-        d.contains('超时') ||
-        d.contains('connection') ||
-        d.contains('连接') ||
-        d.contains('socket') ||
-        d.contains('dioexception') ||
-        d.contains('status code') ||
-        d.contains('http 4') ||
-        d.contains('http 5') ||
-        d.contains('403') ||
-        d.contains('404') ||
-        d.contains('500') ||
-        d.contains('楠岃瘉')) {
-      return _FailKind.network;
-    }
-    return _FailKind.parse;
-  }
-
-/// 逐源体检：取书→详情→目录→正文。  /// 关键字固定用大众书名「大奉打更人」（与书源仓库体检口径一致）。
-Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
-    final sw = Stopwatch()..start();
-    try {
-      final src = source.toBookSource();
-      final results = await _webBook.searchBook(source: src, key: '大奉打更人');
-      if (results == null || results.isEmpty) {
-        return _SourceHealth(
-            healthy: false, elapsed: sw.elapsed, detail: '搜索无结果');
-      }
-      final first = results.first;
-      // 详情
-      final info = await _webBook.getBookInfo(
-        source: src,
-        bookUrl: first.bookUrl,
-      );
-// 目录
-      final chapters = await _webBook.getChapterList(
-        source: src,
-        book: info,
-      );
-      if (chapters.isEmpty) {
-        return _SourceHealth(
-            healthy: false, elapsed: sw.elapsed, detail: '目录为空');
-      }
-// 正文（第一章）
-      final content = await _webBook.getContent(
-        source: src,
-        chapterUrl: chapters.first.url,
-        originalBook: info,
-      );
-      if (content.content.trim().isEmpty) {
-        return _SourceHealth(
-            healthy: false, elapsed: sw.elapsed, detail: '正文为空');
-      }
-      return _SourceHealth(
-        healthy: true,
-        elapsed: sw.elapsed,
-        detail: '取书→详情→目录→正文全部通过',
-      );
-    } catch (e) {
-      final msg = e.toString();
-      return _SourceHealth(
-          healthy: false, elapsed: sw.elapsed, detail: msg);
-    }
-  }
 
   Future<void> _start() async {
     setState(() {
-      _phaseVal = _Phase.running;
+      _phase = _Phase.running;
       _done = 0;
       _health.clear();
+      service.healthCache.clear();
     });
-    final all = ShuyuanSourceStore.instance.allSources;
-    // 并发分块：按 _concurrency 一组一组跑
-    for (var i = 0; i < all.length; i += _concurrency) {
-      final batch = all.skip(i).take(_concurrency).toList();
-      final results = await Future.wait(batch.map(_healthCheckOne));
-      if (!mounted) return;
-      for (var j = 0; j < batch.length; j++) {
-        _health[batch[j].bookSourceUrl] = results[j];
-      }
-      _done += batch.length;
-      setState(() {});
-    }
+    await service.healthCheckAll(
+      store.all,
+      concurrency: _concurrency,
+      // 退出页面不中断：dispose 后 onOne 不再 setState，但结果继续写服务缓存
+      onOne: (h) {
+        service.healthCache[h.source.id] = h;
+        if (!mounted) return;
+        setState(() {
+          _health[h.source.id] = h;
+          _done++;
+        });
+      },
+    );
     if (!mounted) return;
     setState(() {
-      _phaseVal = _Phase.done;
+      _phase = _Phase.done;
       _done = _total;
     });
   }
 
   Future<void> _optimize() async {
-    final usable = ShuyuanSourceStore.instance.allSources
-        .where((s) => _itemState(s) == _ItemState.healthy)
-        .toList();
-    final bad = ShuyuanSourceStore.instance.allSources
-        .where((s) =>
-            _itemState(s) == _ItemState.networkFail ||
-            _itemState(s) == _ItemState.parseFail)
-        .toList();
+    final usable = store.all.where((s) => _itemState(s) == _ItemState.healthy).toList();
+    final bad = store.all.where((s) =>
+        _itemState(s) == _ItemState.networkFail ||
+        _itemState(s) == _ItemState.parseFail);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -292,22 +192,16 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
       ),
     );
     if (ok != true) return;
-// 可用源置顶（按原顺序），其余保持原顺序在后
+    // 可用源置顶（按原顺序），其余保持原顺序在后
     final ordered = <String>[
-      ...usable.map((s) => s.bookSourceUrl),
-      ...ShuyuanSourceStore.instance.allSources
-          .where((s) => !usable.contains(s))
-          .map((s) => s.bookSourceUrl),
+      ...usable.map((s) => s.id),
+      ...store.all.where((s) => !usable.contains(s)).map((s) => s.id),
     ];
-    await ShuyuanSourceStore.instance.reorder(ordered);
+    await store.reorder(ordered);
     for (final s in bad) {
-      if (s.enabled) {
-        await ShuyuanSourceStore.instance.setEnabled(s.bookSourceUrl, false);
-      }
+      if (s.enabled) await store.setEnabled(s.id, false);
     }
-    if (mounted) {
-      _toast('已优化：置顶 ${usable.length} 个可用源，停用 ${bad.length} 个失败源');
-    }
+    if (mounted) _toast('已优化：置顶 ${usable.length} 个可用源，停用 ${bad.length} 个失败源');
   }
 
   Future<void> _cleanup() async {
@@ -334,11 +228,11 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
       ),
     );
     if (ok != true) return;
-    for (final url in _selected.toList()) {
-      await ShuyuanSourceStore.instance.removeSource(url);
+    for (final id in _selected.toList()) {
+      await store.remove(id);
     }
     setState(() => _selected.clear());
-    if (mounted) _toast('已删除 $n 个书源');
+    _toast('已删除 $n 个书源');
   }
 
   void _toast(String msg) {
@@ -358,11 +252,10 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = _isDark;
     return Scaffold(
-      backgroundColor: isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
+      backgroundColor: _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
       appBar: AppBar(
-        backgroundColor: isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
+        backgroundColor: _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
         surfaceTintColor: Colors.transparent,
         centerTitle: true,
         leading: IconButton(
@@ -372,18 +265,20 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
         title: Text(
           '书源体检',
           style: TextStyle(
-            fontSize: AppTheme.fontHeadline,
+            fontSize: AppTheme.fontTitle2,
             fontWeight: FontWeight.w600,
             color: _titleColor,
           ),
         ),
         actions: [
+          // 防护（装饰，对齐参考图右上盾牌）
           Icon(Icons.shield_rounded, size: 18, color: _subColor),
           const SizedBox(width: 4),
+          // 刷新：重跑体检（进行中禁用）
           IconButton(
             tooltip: '重新体检',
             icon: Icon(Icons.refresh_rounded, size: 20, color: _titleColor),
-            onPressed: _phaseVal == _Phase.running ? null : _start,
+            onPressed: _phase == _Phase.running ? null : _start,
           ),
           const SizedBox(width: 4),
         ],
@@ -391,48 +286,25 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
       body: Column(
         children: [
           Expanded(
-            child: _phaseVal == _Phase.idle
-                ? ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                    children: _buildIdle(),
-                  )
-                : CustomScrollView(
-                    slivers: [
-                      // 固定头：进度/统计/搜索/统计tab/分组tab（懒加载不参与）
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-                        sliver: SliverToBoxAdapter(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: _buildResultHeader(),
-                          ),
-                        ),
-                      ),
-// 源条目：SliverList.builder 懒加载
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                        sliver: SliverList.builder(
-                          itemCount: _filtered.length,
-                          itemBuilder: (context, i) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: _itemTile(_filtered[i]),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+              children: [
+                if (_phase == _Phase.idle) ..._buildIdle(),
+                if (_phase != _Phase.idle) ..._buildResult(),
+              ],
+            ),
           ),
-          if (_phaseVal != _Phase.idle) _buildBottomBar(),
+          if (_phase != _Phase.idle) _buildBottomBar(),
         ],
       ),
     );
   }
 
-  // ── 空闲页（8554）────────────────────────────────────────────────
+  // ── 空闲页（8554）────────────────────────────────────────────
   List<Widget> _buildIdle() {
     return [
       const SizedBox(height: 60),
-      Icon(Icons.verified_user_rounded, size: 48, color: JellyTheme.primary),
+      Icon(Icons.verified_user_rounded, size: 84, color: JellyTheme.primary),
       const SizedBox(height: 20),
       Center(
         child: Text(
@@ -447,12 +319,13 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
       const SizedBox(height: 8),
       Center(
         child: Text(
-          '搜索「大奉打更人」逐源验证，验证码/超时/403/5xx 计入网络或源站异常',
+          '失败源会自动用代理档案复检一遍；退出页面不中断',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: AppTheme.fontFootnote, color: _subColor),
         ),
       ),
       const SizedBox(height: 44),
+      // 并发数选择（1/2/3/4/6/8/12，12 选中）
       Center(
         child: Wrap(
           spacing: 8,
@@ -463,6 +336,7 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
         ),
       ),
       const SizedBox(height: 40),
+      // 开始体检
       Center(
         child: GestureDetector(
           onTap: _start,
@@ -509,7 +383,7 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
           ),
         ),
         child: Text(
-          sel ? '鉁?$n' : '$n',
+          sel ? '✓ $n' : '$n',
           style: TextStyle(
             fontSize: AppTheme.fontSubhead,
             fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
@@ -520,12 +394,12 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
     );
   }
 
-  // ── 进行中 / 完成页（8555~8561）────────────────────────────────
-  // 固定头部分（懒加载用 SliverToBoxAdapter），源条目用 SliverList.builder 提供
-  List<Widget> _buildResultHeader() {
-    final running = _phaseVal == _Phase.running;
+  // ── 进行中 / 完成页（8555~8561）─────────────────────────────
+  List<Widget> _buildResult() {
+    final running = _phase == _Phase.running;
     final doneTime = _fmtTime(DateTime.now());
     return [
+      // 信息行：进度/完成时间 + 并发
       Row(
         children: [
           Expanded(
@@ -541,7 +415,7 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
             ),
           ),
           Text(
-            '骞跺彂 $_concurrency',
+            '并发 $_concurrency',
             style: TextStyle(fontSize: AppTheme.fontFootnote, color: _subColor),
           ),
         ],
@@ -549,39 +423,43 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
       if (running) ...[
         const SizedBox(height: 6),
         Text(
-          '后台多线程体检会使手机发烫，属正常现象',
+          '后台多线程体检会使手机发热，属正常现象',
           style: TextStyle(fontSize: AppTheme.fontCaption, color: _subColor),
         ),
       ],
       const SizedBox(height: 12),
+      // 统计胶囊：可用 / 网络或源站异常 / 解析失败
+      // ✅ **标签已改准**（本轮 ✓）—— 原来写「**网络不通**」✗ 会**冤枉用户自家网络** ✓：
+      //   这一档其实是「网络 + **源站拒绝/5xx**」三合一 ✓（见 `_isNetworkError` 的注释 ✓，
+      //   它**有意**把 403 与 5xx 都归进来 ✗✓ —— 因为本页只有两档、收窄会让 403 掉进"解析失败"✗）。
+      //   ⇒ 但用户看到「网络不通 223」会以为**自己网坏了** ✗ ⇒ 改成「**网络/源站异常**」✓✓
+      //     （一句话说清"可能是它那边的服务器出错"，而不是只怪网络 ✓）
       Row(
         children: [
           _statPill('可用', _usable, Colors.green),
           const SizedBox(width: 10),
           _statPill('网络/源站异常', _networkFail, Colors.orange),
           const SizedBox(width: 10),
-          _statPill('瑙ｆ瀽澶辫触', _parseFail, JellyTheme.error),
+          _statPill('解析失败', _parseFail, JellyTheme.error),
         ],
       ),
       const SizedBox(height: 14),
-      JellySearchBar(
-        controller: _searchCtrl,
-        hintText: '搜索书源',
-        onChanged: (v) => setState(() => _kw = v.trim()),
-        onCleared: () => setState(() => _kw = ''),
-      ),
+      // 搜索框（小胶囊，参考影视首页右上角样式）
+      _searchBar(),
       const SizedBox(height: 10),
+      // 统计 tab：总数/可用/收藏/密钥/网络异常/解析失败
       Row(
         children: [
           _numTab(0, '总数', _total),
           _numTab(1, '可用', _usable),
-          _numTab(2, '收藏', _favoritedCount),
-          _numTab(3, '密钥', _keyedCount),
+          _numTab(2, '收藏', 0),
+          _numTab(3, '密钥', 0),
           _numTab(4, '网络/源站异常', _networkFail),
-          _numTab(5, '瑙ｆ瀽澶辫触', _parseFail),
+          _numTab(5, '解析失败', _parseFail),
         ],
       ),
       const SizedBox(height: 8),
+      // 分类标签：全部/通常书源/快速书源
       Row(
         children: [
           _groupTabChip(0, '全部', _total),
@@ -592,17 +470,20 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
         ],
       ),
       const SizedBox(height: 12),
+      // 列表
       if (_filtered.isEmpty)
         Padding(
           padding: const EdgeInsets.only(top: 60),
           child: Center(
             child: Text(
-              '暂无可用源',
+              running && _done == 0 ? '暂无可用的源' : '暂无可用的源',
               style: TextStyle(fontSize: AppTheme.fontSubhead, color: _subColor),
             ),
           ),
-        ),
-      const SizedBox(height: 4),
+        )
+      else
+        ..._filtered.map(_itemTile),
+      const SizedBox(height: 12),
     ];
   }
 
@@ -625,6 +506,25 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
           color: color,
         ),
       ),
+    );
+  }
+
+  Widget _searchBar() {
+    // ✅ **统一到共用组件** ✓（原实现是**手写一套皮** ✗：外层
+    //   `Container(height:32, decoration: 圆角16 卡片色)` ✓ + 自己画的
+    //   `Icon(Icons.search_rounded, size:16)` ✓ + 裸 `TextField` ✓ ——
+    //   而「书架搜索页」等处用的是 `JellySearchBar` ✓ = 同一种控件**两套皮** ✗）。
+    // ⚠️ 注意必须是**整段替换** ✓：`JellySearchBar` **自带**底色 / 圆角 / 左侧图标 ✓，
+    //   若只换里面那层、把外层 `Container(decoration: …)` 留下 ✗，
+    //   就会变成"**圆角方框里再套一个胶囊**" ✗（两层底 ✗）。
+    // 参数对照 ✓：height:32 → 组件自带 ✓ · hintText '搜索书源' → 同名参数 ✓ ·
+    //   onChanged: setState(_kw = v.trim()) → 同名参数，语义不变 ✓
+    // 🆕 顺带补上 `onCleared` ✓ —— 原手写版**没有清空键** ✗，组件版自带 ✓（体验改善 ✓）
+    return JellySearchBar(
+      controller: _searchCtrl,
+      hintText: '搜索书源',
+      onChanged: (v) => setState(() => _kw = v.trim()),
+      onCleared: () => setState(() => _kw = ''),
     );
   }
 
@@ -686,15 +586,15 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
   }
 
   // ── 列表条目 ────────────────────────────────────────────────
-  Widget _itemTile(ShuyuanSource s) {
+  Widget _itemTile(BookSource s) {
     final state = _itemState(s);
-    final h = _health[s.bookSourceUrl];
-    final selected = _selected.contains(s.bookSourceUrl);
+    final h = _health[s.id];
+    final selected = _selected.contains(s.id);
     final (Color color, IconData icon, String sub) = switch (state) {
       _ItemState.healthy => (
           Colors.green,
           Icons.check_circle_rounded,
-          '${h!.elapsed.inMilliseconds}ms路${h.detail}',
+          '${h!.elapsed.inMilliseconds}ms·${h.detail}',
         ),
       _ItemState.networkFail => (
           Colors.orange,
@@ -717,15 +617,16 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
       behavior: HitTestBehavior.opaque,
       onTap: () => setState(() {
         if (selected) {
-          _selected.remove(s.bookSourceUrl);
+          _selected.remove(s.id);
         } else {
-          _selected.add(s.bookSourceUrl);
+          _selected.add(s.id);
         }
       }),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 9),
         child: Row(
           children: [
+            // 勾选框
             Container(
               width: 20,
               height: 20,
@@ -735,9 +636,7 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
                     ? JellyTheme.primary
                     : (_isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
                 border: Border.all(
-                  color: selected
-                      ? JellyTheme.primary
-                      : _subColor.withValues(alpha: 0.4),
+                  color: selected ? JellyTheme.primary : _subColor.withValues(alpha: 0.4),
                   width: 1.2,
                 ),
               ),
@@ -751,7 +650,7 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    s.bookSourceName,
+                    s.name,
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -770,8 +669,7 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
                           sub,
                           maxLines: 3,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: AppTheme.fontCaption, color: color),
+                          style: TextStyle(fontSize: AppTheme.fontCaption, color: color),
                         ),
                       ),
                     ],
@@ -785,7 +683,7 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
     );
   }
 
-  // ── 底部操作条：全部/一键优化/清理 ─────────────────────────
+  // ── 底部操作条：全选 / 一键优化 / 清理 ───────────────────────
   Widget _buildBottomBar() {
     final list = _filtered;
     return SafeArea(
@@ -798,13 +696,14 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
         ),
         child: Row(
           children: [
+            // 全选
             TextButton.icon(
               onPressed: () => setState(() {
                 _selectAll = !_selectAll;
                 if (_selectAll) {
                   _selected
                     ..clear()
-                    ..addAll(list.map((s) => s.bookSourceUrl));
+                    ..addAll(list.map((s) => s.id));
                 } else {
                   _selected.clear();
                 }
@@ -822,7 +721,8 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
               ),
             ),
             const Spacer(),
-            if (_phaseVal == _Phase.done) ...[
+            if (_phase == _Phase.done) ...[
+              // 一键优化（盾牌+魔法棒，对齐 8560 底部操作）
               IconButton(
                 tooltip: '一键优化',
                 icon: Icon(Icons.auto_fix_high_rounded, size: 20, color: JellyTheme.primary),
@@ -830,11 +730,12 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
               ),
               const SizedBox(width: 4),
             ],
+            // 清理（删除选中）
             TextButton.icon(
               onPressed: _selected.isEmpty ? null : _cleanup,
               icon: Icon(Icons.delete_outline_rounded, size: 18, color: JellyTheme.error),
               label: Text(
-                '娓呯悊',
+                '清理',
                 style: TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.error),
               ),
             ),
@@ -844,4 +745,3 @@ Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
     );
   }
 }
-

@@ -283,8 +283,44 @@ class SourceImportParser {
       headers: headers,
       quality: quality,
       script: script,
-      enabled: dict['enabled'] as bool? ?? true,
+      // ── 🔴 必须用**宽容解析**，不能 `as bool?`（修一个导入即失败）────
+      //
+      // 原来写的是 `enabled: dict['enabled'] as bool? ?? true`。
+      // 用户导入的音源里 `enabled` 完全可能是**字符串或数字**
+      //（`"enabled": "false"` / `"enabled": 0` —— 从别的 App 导出的
+      //  配置里很常见），那时这个硬转换抛
+      // `type 'String' is not a subtype of type 'bool?'`：
+      //   · 整个导入失败，而 UI 只能显示这句**英文类型错误**，
+      //     用户完全不知道是自己那份 JSON 的哪个字段有问题 ✗
+      //
+      // ⚠️ 讽刺的是 `third_party_source.dart` 里**已经**为**同一个写法**
+      //    加了宽容解析 `_asBool`，注释还专门写了这段教训
+      //   （"一条脏数据就把整个音源列表废掉"）—— 但这里是**另一份拷贝**，
+      //    当时漏改了。
+      //
+      // 这里就地写一份等价的宽容解析（`_asBool` 是 `ThirdPartySource`
+      // 的私有静态方法，本文件用不到）。
+      enabled: _boolOf(dict['enabled']),
     );
+  }
+
+  /// 宽容解析 bool：兼容 `true/false`、`"true"/"false"`、`1/0`、
+  /// `"1"/"0"`、`yes/no/on/off`；看不懂的一律当 `true`（默认启用）。
+  ///
+  /// 语义与 `ThirdPartySource._asBool` **保持一致**（两处都别单独改）。
+  static bool _boolOf(Object? v) {
+    if (v == null) return true;
+    if (v is bool) return v;
+    if (v is num) return v != 0;
+    final s = v.toString().trim().toLowerCase();
+    if (s.isEmpty) return true;
+    if (s == 'true' || s == '1' || s == 'yes' || s == 'y' || s == 'on') {
+      return true;
+    }
+    if (s == 'false' || s == '0' || s == 'no' || s == 'n' || s == 'off') {
+      return false;
+    }
+    return true;
   }
 
   static String _templateString(Map<String, dynamic> dict) {

@@ -187,6 +187,25 @@ function mapSong(item) {
         mediaMid,
         // ⚠️ 这个名字是给"热门歌手"行用的（`topArtistsList` 会读它取头像）
         artistMid: firstSingerMid,
+        // ── 🔴 必须回 `source`（修一个"播错歌"的真 bug）──────────────
+        //
+        // `Song.source` 在 Dart 侧决定两件事：
+        //   1. `identityKey` = `'${source.platform}-$id'` ——
+        //      收藏 / 下载 / 队列 / 最近播放**都按它去重**
+        //   2. 播放时选平台：`songUrl(song.id, source: song.source)`
+        //
+        // 这里原来**没有** `source`（同模块的 `kugou_source.js` 有），
+        // 而 `music_source.js` 的 QQ 分支是 `return qq.searchSongs(...)` /
+        // `qq.topListSongs(...)` / `qq.playlistSongs(...)` **直通**、不补字段，
+        // 于是 Dart 侧 `SongSource.fromKey(null)` → 落到 **netease** ✗
+        //
+        // 后果：QQ 榜单/歌单的歌被标成网易云，而 **QQ 与网易云的数字 id
+        // 区间高度重叠** → 拿 QQ 的 id 去网易云查同一数字 →
+        // **命中就是另一首歌** → 播错歌 ✗
+        //
+        // Dart 侧 `MusicApi._songsWithSource` 也做了兜底（双保险：
+        // 那边覆盖所有平台，这里保证 QQ 的原生消费者也拿到正确来源）。
+        source: 'qq',
     };
 }
 

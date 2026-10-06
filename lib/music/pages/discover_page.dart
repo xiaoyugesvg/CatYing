@@ -1044,7 +1044,6 @@ class _DiscoverPageState extends State<DiscoverPage>
     // `dailySongs`，本项目没有那个接口，所以用"新歌速递"当每日更新内容 ——
     // 语义一致（每天变、30 首），不是假入口。
     if (_newSongs.isNotEmpty) {
-      final playing = MusicPlayerManager.instance.currentSong?.identityKey;
       out.add(SliverToBoxAdapter(
         child: SectionTitle(
           title: '每日推荐',
@@ -1053,12 +1052,29 @@ class _DiscoverPageState extends State<DiscoverPage>
         ),
       ));
       out.add(SliverToBoxAdapter(
-        child: DailySongsRow(
-          style: style,
-          songs: _newSongs,
-          playingKey: playing,
-          isPlaying: MusicPlayerManager.instance.isPlaying.value,
-          onPlay: (i) => MusicPlayerManager.instance.playQueue(_newSongs, index: i),
+        // ── 🔴 必须监听 player（修"点歌后徽标不动"）────────────────
+        //
+        // 原来在**外层**取快照再当参数传进来：
+        //   `final playing = MusicPlayerManager.instance.currentSong?.identityKey;`
+        //   `isPlaying: MusicPlayerManager.instance.isPlaying.value`
+        // 而 DiscoverPage `wantKeepAlive = true`、又没有任何 player 监听
+        // → 点歌之后这一行的 `playingKey` / `isPlaying` 永远是**旧值** ✗
+        //   · 不出现"正在播放"高亮
+        //   · 暂停后仍是均衡器（配合上面 `discover_sections` 的修复才对）
+        //
+        // 把取值挪进 `ListenableBuilder` 的 builder 里，播放状态一变就重建
+        //（`player_manager` 的切歌/播放/暂停都会 `notifyListeners()`）。
+        child: ListenableBuilder(
+          listenable: MusicPlayerManager.instance,
+          builder: (context, _) => DailySongsRow(
+            style: style,
+            songs: _newSongs,
+            playingKey:
+                MusicPlayerManager.instance.currentSong?.identityKey,
+            isPlaying: MusicPlayerManager.instance.isPlaying.value,
+            onPlay: (i) =>
+                MusicPlayerManager.instance.playQueue(_newSongs, index: i),
+          ),
         ),
       ));
     }
@@ -1241,11 +1257,36 @@ class _DiscoverPageState extends State<DiscoverPage>
       out.add(SliverPadding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         sliver: SliverGrid(
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          // ── 🔴 不要用固定 `childAspectRatio`（修一个窄屏溢出）──────────
+          //
+          // 原来写的是 `childAspectRatio: 2.4` —— 格子高 = 格宽 / 2.4。
+          // 而 `_CategoryTile` 的内容高是**固定**的：
+          //   图标盒 36 + 上下 padding 12×2 = **60**
+          // 在 **320pt 宽**的机型（iPhone SE 一代）上：
+          //   格宽 = (320 − 16×2 − 10) / 2 = 139 → 格高 = 139 / 2.4 = **57.9 < 60**
+          //   → 每个格子 `RenderFlex overflowed` ✗
+          //
+          // 这类"固定比例两头堵"本项目已经踩过两次，正确做法是**按内容算高度**
+          //（范例：`ximalaya_category_page.dart` 的同一个网格、
+          //  `library_page.dart` 的卡片网格）：
+          //   · 窄屏：格子由内容决定，不会挤
+          //   · 系统大字号：文字区跟着 `textScaler` 一起变高
+          //
+          // ⚠️ 这里格子是**横排**（图标 + 文字 + 箭头），所以文字只有一行、
+          //    高度只随字号变化，不需要按"封面宽度"算。
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
             crossAxisSpacing: 10,
             mainAxisSpacing: 12,
-            childAspectRatio: 2.4,
+            mainAxisExtent: () {
+              final ts = MediaQuery.textScalerOf(context);
+              // 内容高 60（36 图标 + 12×2 padding）与文字行高中取大者，
+              // 再留 4 的余量 —— 这样两种"撑高来源"都不会溢出。
+              final textH = ts.scale(AppTheme.fontBody) * 1.4;
+              return (36.0 + 12 * 2) > textH + 12 * 2
+                  ? 36.0 + 12 * 2 + 4
+                  : textH + 12 * 2 + 4;
+            }(),
           ),
           delegate: SliverChildBuilderDelegate(
             (c, i) {

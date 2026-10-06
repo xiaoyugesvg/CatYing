@@ -5,16 +5,18 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:html/dom.dart' as html;
 import 'package:html/parser.dart' show parse;
-import 'package:kindle_unpack/kindle_unpack.dart';
 import 'package:xml/xml.dart';
 
 import '../models/book_content.dart';
 import '../services/gbk_fast.dart';
 import '../services/platform_service.dart';
 
-/// 解析 EPUB / MOBI / TXT 为 [BookContent]。
+/// 解析 EPUB / TXT 为 [BookContent]。
+///
+/// ⚠️ 与 cmbok 原版差异：**去掉了 MOBI/AZW/AZW3 支持**。
+/// 那需要 `kindle_unpack`（本地 vendored 包，GPL v3），为减少依赖面
+/// 只保留 EPUB + TXT —— 这两种已覆盖绝大多数中文小说场景。
 /// - EPUB：archive 解 zip + xml 解 container.xml / OPF / XHTML（含 NAV/NCX 目录）。
-/// - MOBI/AZW/AZW3：[KindleBook] 转 EPUB 字节后复用 EPUB 解析（kindle_unpack，GPL v3）。
 /// - TXT：UTF-8 优先，回退 GBK（中文 TXT 主流编码），再回退容错 UTF-8。
 class BookParser {
   BookParser._();
@@ -230,14 +232,10 @@ class BookParser {
     })
   >
   parseMobiWithRatios(File file) async {
-    final bytes = await file.readAsBytes();
-    final epubBytes = KindleBook.fromBytes(bytes).toEpub();
-    final content = parseEpubBytes(epubBytes);
-    final info = decodeImageInfo(content.images);
-    return (
-      content: content,
-      ratios: info.ratios,
-      naturalWidths: info.naturalWidths,
+    // MOBI/AZW 支持已移除（见文件头说明）。这里明确报错，
+    // 而不是静默返回空内容 —— 否则用户会看到"打开是空白"却不知原因。
+    throw UnsupportedError(
+      'MOBI/AZW 格式已不再支持，请先转成 EPUB 或 TXT 再导入',
     );
   }
 
@@ -320,9 +318,8 @@ class BookParser {
   /// 从 MOBI/AZW/AZW3 提取封面图字节（不解析正文）：
   /// [KindleBook.images.cover] 由 EXTH 201 指向，直接取其原始字节。
   static Future<Uint8List?> extractMobiCover(File file) async {
-    final bytes = await file.readAsBytes();
-    final book = KindleBook.fromBytes(bytes);
-    return book.images.cover?.data;
+    // MOBI 支持已移除（见文件头说明），封面自然也无从提取。
+    return null;
   }
 
   /// 解码 TXT 字节（须在后台 isolate 调用：gbk 表首次访问才惰性构建）。

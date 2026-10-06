@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 void _log(String message) {
   if (kDebugMode) {
@@ -169,7 +170,9 @@ class _PomodoroButtonState extends State<PomodoroButton>
       backgroundColor: Colors.transparent,
       builder: (ctx) {
         final isDark = Theme.of(ctx).brightness == Brightness.dark;
-        return StatefulBuilder(
+        return SafeArea(
+          top: false,
+          child: StatefulBuilder(
           builder: (ctx, setSheet) {
             final s = SettingsService();
             final running = _phase != _PomodoroPhase.idle;
@@ -189,7 +192,7 @@ class _PomodoroButtonState extends State<PomodoroButton>
                         '番茄钟',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          fontSize: 16,
+                          fontSize: AppTheme.fontHeadline,
                           fontWeight: FontWeight.bold,
                           color: isDark
                               ? Colors.white
@@ -201,7 +204,7 @@ class _PomodoroButtonState extends State<PomodoroButton>
                         '每轮工作 ${SettingsService.pomodoroWorkMinutes} 分钟，轮间休息',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: AppTheme.fontFootnote,
                           color: isDark
                               ? Colors.white.withValues(alpha: 0.6)
                               : JellyTheme.textSecondary,
@@ -257,6 +260,7 @@ class _PomodoroButtonState extends State<PomodoroButton>
               ),
             );
           },
+        ),
         );
       },
     );
@@ -362,7 +366,7 @@ class _PomodoroButtonState extends State<PomodoroButton>
               Text(
                 _countdownText,
                 style: TextStyle(
-                  fontSize: 9,
+                  fontSize: AppTheme.fontCaption,
                   fontWeight: FontWeight.bold,
                   color: countdownColor,
                   height: 1,

@@ -148,9 +148,31 @@ class DiscoverStyle {
           accent: accent,
           blue: blue,
           cardFill: cardBase,
-          // 午夜：在全局底色上**压暗**（不是写死深蓝），这样换主题也跟着走
-          backdrop: Color.alphaBlend(
-              Colors.black.withValues(alpha: dark ? 0.45 : 0.18), p.backgroundDark),
+          // ── 🔴 午夜：底色**必须跟着全局明暗走**（修一个"整页不可读"）──
+          //
+          // 原来这里写的是 `p.backgroundDark`（**恒定深底**），只有压暗的
+          // alpha 跟明暗走：
+          //   `Color.alphaBlend(Colors.black.withValues(alpha: dark ? 0.45 : 0.18),
+          //                     p.backgroundDark)`
+          //
+          // 而上面的文字色是 `dark ? textPrimaryDark : textPrimaryLight`
+          //（浅色下 = `#1F1F1F` 近黑）。于是**全局浅色 + 选「午夜」** 时：
+          //   · 底色 ≈ #171719（近黑）
+          //   · 问候语/副标题/平台胶囊文字 ≈ #1F1F1F
+          //   → 对比度 ≈ 1.05:1，**整页看不见字** ✗
+          //
+          // 这也**违反了本文件 96-98 行自己的约定**：
+          //   "明暗只看 AppBrightness.isLight，预设自己**不判断明暗**，
+          //    否则会出现'全局浅色但发现页深色'"
+          // aurora（上面）、paper 都按明暗二选一取底色，只有午夜写岔了。
+          //
+          // 现在与 paper 同构：**基底随明暗**，再叠一层压暗把"午夜"做出来
+          //（浅色下压得更重，才看得出"午夜"的氛围；深色下本来就近黑，轻压即可）。
+          backdrop: dark
+              ? Color.alphaBlend(
+                  Colors.black.withValues(alpha: 0.30), p.backgroundDark)
+              : Color.alphaBlend(
+                  Colors.black.withValues(alpha: 0.55), p.backgroundLight),
           particles: true,
           blobs: true,
           fillAlpha: dark ? 0.14 : 0.35,

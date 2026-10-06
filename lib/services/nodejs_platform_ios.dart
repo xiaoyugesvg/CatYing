@@ -29,6 +29,7 @@ import 'package:path_provider/path_provider.dart';
 import 'app_log.dart';
 import 'player_prefs.dart';
 import 'nodejs_platform.dart';
+import '../reading/services/settings_service.dart';
 
 class IOSNodeJSPlatform implements NodeJSPlatform {
   IOSNodeJSPlatform({
@@ -66,6 +67,13 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
   // ============================================================
   // 带凭据的源地址（HTTP Basic）支持
   // ============================================================
+
+  /// 全局代理（供 Node 引擎注入）。开关关/地址非法 → 空串（引擎直连）。
+  static String _globalProxyForNode() {
+    final s = SettingsService();
+    if (!s.globalProxyEnabled) return '';
+    return s.globalProxy.trim();
+  }
 
   /// 取出 URL 里的 `user:pass@` 并生成 Basic 认证头。
   ///
@@ -216,11 +224,16 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       //   3. setenv(NODE_PATH, sourcePath)
       //   4. node_start(["node", "--security-revert=CVE-2023-46809",
       //                  "main.js", "--native-port", "$nativePort"])
+      // 全局代理 → Swift 在 node_start 前 setenv 注入 Node 引擎
+      // （书源 JS 引擎外站请求只认标准代理环境变量，不注入则 iOS 上
+      //   开全局代理对书源无效，表现为大量 500/超时）
+      final proxy = _globalProxyForNode();
       final result = await _channel.invokeMethod<bool>('startNodeJS', {
         'nativePort': nativePort,
         'sourcePath': sourcePath,
         'authToken': authToken,
         'keepAlive': PlayerPrefs.instance.silentKeepAlive.value,
+        'proxy': proxy,
       });
       AppLog.instance.log('IOSNodeJS Swift invokeMethod 返回: $result');
       if (result == true) {

@@ -53,7 +53,31 @@ class _LibraryPageState extends State<LibraryPage>
     // 本页 `wantKeepAlive = true`（切 tab 不重建），不监听的话会一直显示
     // 上一个平台的榜单，直到用户手动下拉刷新 —— 那就是"切了平台内容没变"。
     SettingsStore.instance.musicSource.addListener(_onSourceChanged);
+    // ── 🔴 收藏 / 最近播放变化时**必须刷新**（修"收藏了但乐库看不到"）──
+    //
+    // 本页 `wantKeepAlive = true`（见上面 `wantKeepAlive`），切 tab 不重建，
+    // 而 `_load()` 只在 `initState` 和"切平台"时跑。所以：
+    //   在**播放页**点收藏 → 切回「乐库」→ 列表里**没有这首歌**，
+    //   而且不会自愈（要下拉刷新或杀进程重进）。
+    //
+    // `MusicLibraryStore` 每次变更都会 `revisionProxy.value++`
+    //（见 `library_store.dart` 的 `_bump()`），
+    // 而本文件 :400-401 的 `FavoriteStore.revision` 注释也写明
+    // "收藏变化时列表要刷新" —— 但**之前全项目没有一个地方监听它**
+    //（定义了却没人用 = 等于没写）。
+    //
+    // 这里挂上就修好了：收藏/取消收藏/加最近播放/换歌单 → 自动重载。
+    MusicLibraryStore.instance.revisionProxy.addListener(_onLibraryChanged);
     _load();
+  }
+
+  /// 收藏 / 最近播放 / 歌单发生变化 → 重新读一份
+  void _onLibraryChanged() {
+    // ⚠️ `revisionProxy` 可能在 `_load()` 的 await 期间再次触发
+    //（例如连续点收藏），所以 `_load()` 自己也会判 `mounted`
+    //（见 `_load` 里的 `if (!mounted) return;`）——
+    // 这里只是再加一道，避免已销毁的 State 白跑一趟。
+    if (mounted) _load();
   }
 
   void _onSourceChanged() {
@@ -63,6 +87,9 @@ class _LibraryPageState extends State<LibraryPage>
   @override
   void dispose() {
     SettingsStore.instance.musicSource.removeListener(_onSourceChanged);
+    // ⚠️ 成对移除：`ValueNotifier` 会**一直持有**监听闭包，
+    // 不移除就是"页面已销毁但每次收藏仍会调它"的泄漏。
+    MusicLibraryStore.instance.revisionProxy.removeListener(_onLibraryChanged);
     super.dispose();
   }
 

@@ -9,6 +9,8 @@ import '../services/settings_store.dart';
 import '../theme/music_theme.dart';
 import '../widgets/mini_player.dart';
 import 'root_view.dart' show MusicRootView;
+import 'player_page.dart' show MusicPlayerPage;
+import '../../widgets/video_player_pip.dart';
 
 /// 音乐底栏的**共享状态**（tab 选中项 + 可见性）。
 ///
@@ -139,16 +141,43 @@ class MusicBottomChrome extends StatelessWidget {
               MiniPlayer(
                 // 子页面（没有导航栏）→ 紧凑贴底，别留那 26 的空档
                 tightBottom: !onRoot,
-                onOpen: () => openMusicPlayer(context),
+                // ⚠️ **不能**用 `openMusicPlayer(context)`：本组件在
+                //    Navigator 子树之外，`Navigator.of(context)` 会抛。
+                //    走全局 navigatorKey（与悬浮球的 `_openPlayer` 同款）。
+                onOpen: _openPlayerFromGlobalKey,
               ),
-            if (showNavBar) _navBar(context),
+            if (showNavBar) _navBar(),
           ],
         );
       },
     );
   }
 
-  Widget _navBar(BuildContext context) {
+  /// 打开全屏播放器 —— **用全局 `navigatorKey`**，不用本组件的 `context`。
+  ///
+  /// 原因同 `_navBar` 里 `onTap` 的注释：本组件在 Navigator 子树之外。
+  /// 与 `floating_play_button.dart` 的 `_openPlayer` 完全一致。
+  void _openPlayerFromGlobalKey() {
+    final nav = VideoPlayerPip.navigatorKey.currentState;
+    if (nav == null) return;
+    nav.push<void>(
+      MaterialPageRoute(builder: (_) => const MusicPlayerPage()),
+    );
+  }
+
+  /// 音乐底部导航栏。
+  ///
+  /// ── ⚠️ 这个函数**故意不接收 `BuildContext`**（别加回去）──────────
+  /// 本组件挂在 `app.dart` 的 Stack 里、`out`（Navigator 子树）**之外**，
+  /// 所以它拿到的任何 `context` 祖先链里**都没有 Navigator**。
+  ///
+  /// 之前它收了 `context` 并在里面写了 `Navigator.of(context)` ——
+  /// 那个调用**必然抛异常**，表现就是"整条导航栏点了没反应" ✗
+  ///（用户实测反馈过这个现象）。
+  ///
+  /// 现在一律走全局 `VideoPlayerPip.navigatorKey`（见 `onTap`）。
+  /// **不收 `context` 是为了让"这里能用 context"这种误判无从下手。**
+  Widget _navBar() {
     return JellyNavBar(
       // ⚠️ 显式传音乐的调色板（JellyNavBar 默认用阅读的 JellyTheme，
       // 切音乐配色时那个不会变 → 音乐栏颜色错）。
@@ -170,8 +199,19 @@ class MusicBottomChrome extends StatelessWidget {
         if (i < 0 || i >= musicTabs.length) return;
         // 切 tab 前**先退回根路由** —— 否则会在子页面（歌单详情等）
         // 之上悄悄换掉 tab，用户点完还停在子页面，看起来"点了没反应" ✗
-        final nav = Navigator.of(context);
-        if (nav.canPop()) nav.popUntil((r) => r.isFirst);
+        //
+        // ── 🔴 必须用全局 `navigatorKey`，**不能用 `Navigator.of(context)`** ──
+        //
+        // 本组件挂在 `app.dart` 的 Stack 里、`out`（Navigator 子树）
+        // **之外** → 它的 `context` 祖先链里**没有 Navigator**，
+        // `Navigator.of(context)` 会抛异常 → **整条导航栏点了没反应** ✗
+        //
+        // 这与 `floating_play_button.dart` / `AppToast` 的约定一致
+        //（那边注释写得很清楚："必须用全局 navigatorKey 来 push"）。
+        final nav = VideoPlayerPip.navigatorKey.currentState;
+        if (nav != null && nav.canPop()) {
+          nav.popUntil((r) => r.isFirst);
+        }
         MusicTabState.index.value = i;
       },
       onLongPress: (i) {

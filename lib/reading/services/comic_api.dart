@@ -6,6 +6,7 @@ import '../models/comic.dart';
 import '../models/search_result.dart';
 import 'crypto.dart';
 import 'remote_config_service.dart';
+import '../source/global_proxy.dart';
 
 /// 日志工具
 void _log(String message) {
@@ -43,7 +44,7 @@ class ComicApi {
   final String? token;
 
   /// 拷贝漫画 API 地址：优先构造传入的 override，否则读远程配置
-  /// （RemoteConfigService 默认回退 AppConstants.defaultCopyApiUrl，无配置时与原硬编码一致）
+  /// （RemoteConfigService 默认回退 CmbokConstants.defaultCopyApiUrl，无配置时与原硬编码一致）
   String get baseUrl => _baseUrlOverride ?? RemoteConfigService().copyApiUrl;
 
   ComicApi({String? baseUrl, this.token})
@@ -55,6 +56,12 @@ class ComicApi {
         ),
       ) {
     _log('初始化 API 客户端，baseUrl: $baseUrl');
+    // ✅ **走「网络代理」**（本轮接上 ✓）—— 本 Dio 建在**构造函数里** ✓，所以就在 body 开头挂 ✓；
+    //   与 `zlibrary_service._createDio()` / `download_service._createImageDio()` **同一手法** ✓。
+    //   · 代理**关闭** ✓ → 直接返回 false ✓ **不动适配器** ✓（与从前一字不差 ✓✓）
+    //   · 代理**开启** ✓ → 本服务**没有自定义适配器/UA** ✓（下面只加 interceptor ✓，
+    //     那是 Dio 层的东西 ✗ 与 `httpClientAdapter` 不冲突 ✓✓）→ 直接挂**安全** ✓
+    applyGlobalProxy(dio);
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (o, h) {
@@ -182,6 +189,65 @@ class ComicApi {
     }
   }
 
+  /// 无关键词的漫画列表（copymanga API v3/comics）。
+  ///
+  /// 供「热门 / 最新更新」用：ordering 传 `-popular`（热门）或
+  /// `-datetime_updated`（按更新时间，默认）。
+  Future<SearchResult<Comic>> getComicList({
+    String ordering = '-datetime_updated',
+    int page = 0,
+    int limit = 27,
+  }) async {
+    _log('漫画列表: ordering=$ordering, page=$page');
+    try {
+      final url = '${baseUrl}api/v3/comics';
+      final response = await dio.get(
+        url,
+        queryParameters: {
+          'format': 'json',
+          'platform': '1',
+          'limit': limit,
+          'offset': page * limit,
+          'ordering': ordering,
+        },
+      );
+      final data = _parseResponse(response);
+      List<dynamic> list = [];
+      int total = 0;
+      if (data.containsKey('list')) {
+        list = data['list'] as List? ?? [];
+        total = data['total'] ?? 0;
+      } else if (data.containsKey('data') && data['data'] is Map) {
+        final inner = data['data'] as Map;
+        list = inner['list'] as List? ?? [];
+        total = inner['total'] ?? 0;
+      } else if (data.containsKey('comics')) {
+        list = data['comics'] as List? ?? [];
+        total = data['total'] ?? list.length;
+      }
+      final comics = <Comic>[];
+      for (final item in list) {
+        if (item is Map<String, dynamic>) {
+          try {
+            comics.add(Comic.fromJson(item));
+          } catch (e) {
+            _log('解析第 ${comics.length} 条失败: $e');
+          }
+        }
+      }
+      _log('列表解析 ${comics.length} 条 / 总数 $total');
+      return SearchResult<Comic>(
+        items: comics,
+        total: total,
+        currentPage: page + 1,
+        totalPages: (total / limit).ceil(),
+      );
+    } catch (e) {
+      _log('漫画列表失败: $e');
+      rethrow;
+    }
+  }
+
   /// 按题材分类拉取漫画（走 www 网页域 SSR，非 API 子域）。
   ///
   /// copymanga 搜索接口不支持分类（theme 被忽略），分类列表只能走网页
@@ -207,6 +273,12 @@ class ComicApi {
           receiveTimeout: const Duration(seconds: 15),
         ),
       );
+      // ✅ **Web 抓取用的 Dio 也走「网络代理」**（本轮接上 ✓）——
+      //   它上面写着"独立 Dio：不复用主 dio 的 interceptor"✓（因为 www 网页域不能带 `webp:0` ✓），
+      //   所以**必须单独挂一次** ✓（否则主 Dio 走了代理、这个却直连 ✗ —— 分类就还是拉不到 ✓）。
+      //   它**没有自定义适配器** ✓（只调了 `webDio.get` ✓）→ 直接挂**安全** ✓✓
+      //   （若将来加 UA ✓ 记得传 `createHttpClient:` ✓ —— 否则会被整替换掉 ✗）。
+      applyGlobalProxy(webDio);
       final qp = <String, dynamic>{
         'ordering': ordering,
         'limit': limit,

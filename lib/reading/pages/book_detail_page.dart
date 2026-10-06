@@ -16,6 +16,7 @@ import '../widgets/theme_background_animation.dart';
 import 'book_reader_page.dart';
 import 'webview_page.dart';
 import 'zlibrary_auth_page.dart';
+import '../../common/theme.dart';
 
 /// 图书详情页面（参考漫画详情页 ComicDetailPage）
 /// 封面独占顶部 -> 标题/作者/评分/元信息 -> 简介 -> 推荐图书 -> 收藏/下载胶囊。
@@ -176,7 +177,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                   widget.book.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 16),
+                  style: const TextStyle(fontSize: AppTheme.fontHeadline),
                 ),
               ),
               SliverToBoxAdapter(child: _buildContent(isDark)),
@@ -199,25 +200,25 @@ class _BookDetailPageState extends State<BookDetailPage> {
           aspectRatio: 3 / 4,
           child: (widget.book.cover ?? '').isEmpty
               ? Container(
-                  color: isDark ? JellyTheme.cardDark : Colors.grey[200],
-                  child: const Icon(
+                  color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                  child: Icon(
                     Icons.menu_book_rounded,
-                    size: 56,
-                    color: Colors.grey,
+                    size: 48,
+                    color: JellyTheme.textSecondary,
                   ),
                 )
               : CachedNetworkImage(
                   imageUrl: widget.book.cover!,
                   fit: BoxFit.cover,
                   placeholder: (c, u) => Container(
-                    color: isDark ? JellyTheme.cardDark : Colors.grey[200],
+                    color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                   ),
                   errorWidget: (c, u, e) => Container(
-                    color: isDark ? JellyTheme.cardDark : Colors.grey[200],
-                    child: const Icon(
+                    color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                    child: Icon(
                       Icons.broken_image,
                       size: 48,
-                      color: Colors.grey,
+                      color: JellyTheme.textSecondary,
                     ),
                   ),
                 ),
@@ -244,15 +245,21 @@ class _BookDetailPageState extends State<BookDetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // 封面独占顶部
-          Center(child: _buildCover(isDark)),
+          // 封面独占顶部（放大到 210 宽，贴近参考样式）
+          Center(child: _buildCover(isDark, width: 210)),
           const SizedBox(height: 16),
           // 标题
+          //
+          // ⚠️ 这里**故意不用 `AppPageTitle`**：那是"页面顶栏标题"
+          // （左上角、左对齐、单行）。这个是**详情页的内容标题** ——
+          // 封面下方的书名，居中、可换行、行高 1.3。
+          // 两者字号恰好同档（`fontPageTitle`），但语义与排版都不同，
+          // 强行套用会把居中与行高一起改掉。
           Text(
             book.title,
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 22,
+              fontSize: AppTheme.fontPageTitle,
               fontWeight: FontWeight.bold,
               color: titleColor,
               height: 1.3,
@@ -269,7 +276,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                 Flexible(
                   child: Text(
                     book.author!,
-                    style: TextStyle(fontSize: 14, color: secondaryColor),
+                    style: TextStyle(fontSize: AppTheme.fontBody, color: secondaryColor),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -288,7 +295,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                 Text(
                   book.interestScore!.toStringAsFixed(1),
                   style: const TextStyle(
-                    fontSize: 13,
+                    fontSize: AppTheme.fontSubhead,
                     color: Colors.amber,
                     fontWeight: FontWeight.w600,
                   ),
@@ -296,33 +303,17 @@ class _BookDetailPageState extends State<BookDetailPage> {
                 const SizedBox(width: 4),
                 Text(
                   '兴趣评分',
-                  style: TextStyle(fontSize: 11, color: secondaryColor),
+                  style: TextStyle(fontSize: AppTheme.fontCaption, color: secondaryColor),
                 ),
               ],
             ),
           ],
           const SizedBox(height: 14),
-          // 元信息 chips
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (book.extension != null && book.extension!.isNotEmpty)
-                _chip(book.extension!.toUpperCase(), isDark, highlight: true),
-              if (book.year != null && book.year!.isNotEmpty)
-                _chip(book.year!, isDark),
-              if (book.language != null && book.language!.isNotEmpty)
-                _chip(book.language!, isDark),
-              if (book.filesizeString != null &&
-                  book.filesizeString!.isNotEmpty)
-                _chip(book.filesizeString!, isDark),
-              if (_pagesInt(book) > 0) _chip('${_pagesInt(book)} 页', isDark),
-              if (book.publisher != null && book.publisher!.isNotEmpty)
-                _chip(book.publisher!, isDark),
-              if (book.identifier != null && book.identifier!.isNotEmpty)
-                _chip('ISBN: ${book.identifier}', isDark),
-            ],
+          // 元信息标签：一行并排（EPUB / 年份 / 语言 / 大小 / 页数），
+          // 对齐参考样式；出版社 / ISBN 不再混在这一行（出版社单独在简介下方）
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: _metaChips(book, isDark),
           ),
           const SizedBox(height: 16),
           // 收藏 / 书架 / 阅读 / 下载 胶囊
@@ -342,9 +333,42 @@ class _BookDetailPageState extends State<BookDetailPage> {
             const SizedBox(height: 20),
             _buildSynopsis(desc, titleColor, secondaryColor),
           ],
+          // 出版社：单独一行，放在简介下方（对齐参考样式）
+          if (book.publisher != null && book.publisher!.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              book.publisher!,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: AppTheme.fontFootnote,
+                color: secondaryColor,
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  /// 元信息标签行：扩展名 / 年份 / 语言 / 大小 / 页数（一行并排，带间距）
+  List<Widget> _metaChips(Book book, bool isDark) {
+    final chips = <Widget>[
+      if (book.extension != null && book.extension!.isNotEmpty)
+        _chip(book.extension!.toUpperCase(), isDark, highlight: true),
+      if (book.year != null && book.year!.isNotEmpty)
+        _chip(book.year!, isDark),
+      if (book.language != null && book.language!.isNotEmpty)
+        _chip(book.language!, isDark),
+      if (book.filesizeString != null && book.filesizeString!.isNotEmpty)
+        _chip(book.filesizeString!, isDark),
+      if (_pagesInt(book) > 0) _chip('${_pagesInt(book)} 页', isDark),
+    ];
+    final out = <Widget>[];
+    for (var i = 0; i < chips.length; i++) {
+      if (i > 0) out.add(const SizedBox(width: 6));
+      out.add(chips[i]);
+    }
+    return out;
   }
 
   int _pagesInt(Book book) {
@@ -367,7 +391,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
       child: Text(
         text,
         style: TextStyle(
-          fontSize: 12,
+          fontSize: AppTheme.fontFootnote,
           color: highlight
               ? JellyTheme.primary
               : (isDark ? Colors.white70 : JellyTheme.textSecondary),
@@ -400,7 +424,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
               Text(
                 label,
                 style: const TextStyle(
-                  fontSize: 13,
+                  fontSize: AppTheme.fontSubhead,
                   color: Colors.white,
                   fontWeight: FontWeight.w600,
                 ),
@@ -514,10 +538,10 @@ class _BookDetailPageState extends State<BookDetailPage> {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Text(
-          '简介',
+          '内容简介',
           textAlign: TextAlign.center,
           style: TextStyle(
-            fontSize: 15,
+            fontSize: AppTheme.fontHeadline,
             fontWeight: FontWeight.w700,
             color: titleColor,
           ),
@@ -528,7 +552,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
           textAlign: TextAlign.center,
           maxLines: _descExpanded ? null : 4,
           overflow: _descExpanded ? TextOverflow.clip : TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 13, height: 1.6, color: secondaryColor),
+          style: TextStyle(fontSize: AppTheme.fontSubhead, height: 1.6, color: secondaryColor),
         ),
         if (likelyLong)
           TextButton(
@@ -540,7 +564,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
             ),
             child: Text(
               _descExpanded ? '收起' : '展开全部',
-              style: const TextStyle(fontSize: 12),
+              style: const TextStyle(fontSize: AppTheme.fontFootnote),
             ),
           ),
       ],
@@ -578,7 +602,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                   Text(
                     _statusText(task),
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: AppTheme.fontBody,
                       fontWeight: FontWeight.w600,
                       color: titleColor,
                     ),
@@ -595,7 +619,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(10),
                   child: LinearProgressIndicator(
                     value: task.status == BookDownloadStatus.queued
                         ? null
@@ -615,7 +639,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 child: Text(
                   '失败：${task.error}',
-                  style: TextStyle(fontSize: 12, color: JellyTheme.error),
+                  style: TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.error),
                 ),
               ),
             ],
@@ -748,7 +772,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
           Text(
             '推荐图书',
             style: TextStyle(
-              fontSize: 15,
+              fontSize: AppTheme.fontHeadline,
               fontWeight: FontWeight.w700,
               color: titleColor,
             ),
@@ -795,16 +819,17 @@ class _BookDetailPageState extends State<BookDetailPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(10),
               child: (b.cover ?? '').isEmpty
                   ? Container(
                       width: 92,
                       height: 124,
-                      color: isDark ? JellyTheme.cardDark : Colors.grey[200],
-                      child: const Icon(
+                      color:
+                          isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                      child: Icon(
                         Icons.menu_book_rounded,
                         size: 28,
-                        color: Colors.grey,
+                        color: JellyTheme.textSecondary,
                       ),
                     )
                   : CachedNetworkImage(
@@ -815,16 +840,18 @@ class _BookDetailPageState extends State<BookDetailPage> {
                       placeholder: (c, u) => Container(
                         width: 92,
                         height: 124,
-                        color: isDark ? JellyTheme.cardDark : Colors.grey[200],
+                        color:
+                            isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
                       ),
                       errorWidget: (c, u, e) => Container(
                         width: 92,
                         height: 124,
-                        color: isDark ? JellyTheme.cardDark : Colors.grey[200],
-                        child: const Icon(
+                        color:
+                            isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                        child: Icon(
                           Icons.broken_image,
                           size: 24,
-                          color: Colors.grey,
+                          color: JellyTheme.textSecondary,
                         ),
                       ),
                     ),
@@ -834,7 +861,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
               b.title,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, height: 1.3, color: titleColor),
+              style: TextStyle(fontSize: AppTheme.fontCaption, height: 1.3, color: titleColor),
             ),
           ],
         ),

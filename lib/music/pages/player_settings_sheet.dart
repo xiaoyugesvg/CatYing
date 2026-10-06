@@ -57,45 +57,68 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
             ),
             const Divider(height: 24),
             _title('外观'),
-            _switchRow(
-              label: '进播放器先看歌词',
-              value: MusicPlayerSkin.instance.showLyricFirst.value,
-              onChanged: (v) async {
-                await MusicPlayerSkin.instance.setShowLyricFirst(v);
-                setState(() {});
-              },
+            // ── 🔴 这里原来用 `setState` 刷新，是个**会崩**的写法 ──────────
+            //
+            // 原文：
+            //   onChanged: (v) async {
+            //     await MusicPlayerSkin.instance.setShowLyricFirst(v);
+            //     setState(() {});          // ← await 之后 **没有 mounted 检查**
+            //   },
+            //
+            // 为什么是硬崩（不只是 debug 断言）：`await` 的是 SharedPreferences
+            // 的平台通道写盘，期间事件循环会处理其它平台消息，用户完全可能
+            // 同时**下滑关闭这个弹层**。`State` 一旦 unmount，框架会把
+            // `_element` 置 null，而 `setState()` 内部是
+            // `_element!.markNeedsBuild()` → **release 下也抛**
+            // `Null check operator used on a null value`。
+            //
+            // ── 修法：干脆不用 `setState` ──────────────────────────────
+            // 这几个值**本来就是 `ValueNotifier`**（见 `MusicPlayerSkin` /
+            // `SettingsStore`），所以让每行自己 `ValueListenableBuilder`
+            // 监听就行 —— 一举两得：
+            //   · 不再有"await 后 setState"的崩溃路径
+            //   · 面板打开期间**别处**改了同一个值，这里也会跟着刷新
+            //    （原来"调用时快照 + onChanged 里 setState"做不到这点）
+            ValueListenableBuilder<bool>(
+              valueListenable: MusicPlayerSkin.instance.showLyricFirst,
+              builder: (context, v, _) => _switchRow(
+                label: '进播放器先看歌词',
+                value: v,
+                onChanged: (nv) =>
+                    MusicPlayerSkin.instance.setShowLyricFirst(nv),
+              ),
             ),
-            _enumRow<MusicCoverStyle>(
-              label: '封面形态',
-              values: MusicCoverStyle.values,
-              current: MusicPlayerSkin.instance.coverStyle.value,
-              labelOf: (e) => e.label,
-              onPick: (e) async {
-                await MusicPlayerSkin.instance.setCoverStyle(e);
-                setState(() {});
-              },
+            ValueListenableBuilder<MusicCoverStyle>(
+              valueListenable: MusicPlayerSkin.instance.coverStyle,
+              builder: (context, cur, _) => _enumRow<MusicCoverStyle>(
+                label: '封面形态',
+                values: MusicCoverStyle.values,
+                current: cur,
+                labelOf: (e) => e.label,
+                onPick: (e) => MusicPlayerSkin.instance.setCoverStyle(e),
+              ),
             ),
-            _enumRow<MusicDustMode>(
-              label: '背景氛围',
-              values: MusicDustMode.values,
-              current: MusicPlayerSkin.instance.dustMode.value,
-              labelOf: (e) => e.label,
-              onPick: (e) async {
-                await MusicPlayerSkin.instance.setDustMode(e);
-                setState(() {});
-              },
+            ValueListenableBuilder<MusicDustMode>(
+              valueListenable: MusicPlayerSkin.instance.dustMode,
+              builder: (context, cur, _) => _enumRow<MusicDustMode>(
+                label: '背景氛围',
+                values: MusicDustMode.values,
+                current: cur,
+                labelOf: (e) => e.label,
+                onPick: (e) => MusicPlayerSkin.instance.setDustMode(e),
+              ),
             ),
             const Divider(height: 24),
             _title('音质'),
-            _enumRow<AudioQuality>(
-              label: '优先音质',
-              values: AudioQuality.values,
-              current: SettingsStore.instance.audioQuality.value,
-              labelOf: (e) => e.displayName,
-              onPick: (e) async {
-                await SettingsStore.instance.setAudioQuality(e);
-                setState(() {});
-              },
+            ValueListenableBuilder<AudioQuality>(
+              valueListenable: SettingsStore.instance.audioQuality,
+              builder: (context, cur, _) => _enumRow<AudioQuality>(
+                label: '优先音质',
+                values: AudioQuality.values,
+                current: cur,
+                labelOf: (e) => e.displayName,
+                onPick: (e) => SettingsStore.instance.setAudioQuality(e),
+              ),
             ),
             const SizedBox(height: 8),
             Padding(

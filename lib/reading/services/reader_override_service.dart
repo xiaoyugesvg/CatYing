@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'book_font_service.dart';
 import 'settings_service.dart';
+import '../utils/safe_num.dart';
 
 void _log(String message) {
   if (kDebugMode) {
@@ -236,7 +237,7 @@ class ReaderOverrideService extends ChangeNotifier {
   double effectiveBookFontSize(String bookId) {
     final m = _book[bookId];
     if (m != null && m['fontSize'] is num) {
-      return (m['fontSize'] as num).toDouble();
+      return asDouble(m['fontSize']);
     }
     return SettingsService().bookFontSize;
   }
@@ -244,7 +245,7 @@ class ReaderOverrideService extends ChangeNotifier {
   double effectiveBookLineHeight(String bookId) {
     final m = _book[bookId];
     if (m != null && m['lineHeight'] is num) {
-      return (m['lineHeight'] as num).toDouble();
+      return asDouble(m['lineHeight']);
     }
     return SettingsService().bookLineHeight;
   }

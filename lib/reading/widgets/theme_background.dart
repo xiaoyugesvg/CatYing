@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../common/theme.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_palette.dart';
 import 'theme_background_animation.dart';
@@ -34,7 +35,12 @@ class ThemeBackground extends StatelessWidget {
           return RepaintBoundary(
             child: _ThemeImageBackground(
               path: cfg.imagePath!,
-              isDark: settings.isDarkMode,
+              // ⚠️ 必须读全局唯一的明暗真源 `AppBrightness`，
+              // **不能**用 `SettingsService.isDarkMode` ——
+              // 那是阅读自己的第二套明暗状态，与 UI 实际用的
+              // `Theme.of(context).brightness`（源自 ThemeModeStore）不同步，
+              // 会出现"UI 是浅色、背景层已按深色画"这种同屏自相矛盾。
+              isDark: !AppBrightness.isLight.value,
             ),
           );
         }

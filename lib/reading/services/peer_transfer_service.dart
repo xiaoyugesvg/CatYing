@@ -226,7 +226,10 @@ class PeerTransferService extends ChangeNotifier {
         () => PeerDevice(id: id, name: name, platform: platform),
       );
       peer.name = name;
-      peer.host = svc.hostAddress;
+      // bonsoir 7.0 重构：BonsoirService 上不再有 `host`，
+      // 改为 `hostAddress`（hostAddresses 的第一个）/ `hostname`。
+      // 见 bonsoir_platform_interface/src/service/service.dart:137
+      peer.host = svc.hostAddress ?? svc.hostname;
       peer.port = svc.port;
       peer.online = true;
       peer.lastSeen = DateTime.now();

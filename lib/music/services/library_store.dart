@@ -46,6 +46,28 @@ class MusicLibraryStore extends ChangeNotifier {
   /// 保持这个语义可以让那 3 个调用点不用改。
   final ValueNotifier<int> revisionProxy = ValueNotifier<int>(0);
 
+  /// 标记"数据变了"，并通知**两种**监听者。
+  ///
+  /// ── 🔴 为什么必须两个都通知（修一个死 UI）────────────────────────
+  ///
+  /// 本项目有两种监听风格并存：
+  ///   · `ValueListenableBuilder(valueListenable: store.revisionProxy)`
+  ///     —— `library_page` / `playlist_page` 用这种
+  ///   · `ListenableBuilder(listenable: MusicLibraryStore.instance)`
+  ///     —— `player_page.dart` 的**收藏红心**用这种
+  ///       （`:1127-1132`，注释还写着"点一下立刻变实心"）
+  ///
+  /// 而 [MusicLibraryStore] 继承 `ChangeNotifier`，
+  /// 却**从来没有调用过 `notifyListeners()`**（全类 0 次）——
+  /// 所以 `ListenableBuilder` 那条路等于挂了个死监听：
+  /// **点了收藏，红心不变实心**；要等页面因别的原因重建才更新 ✗
+  ///
+  /// 两种都通知，谁监听都能收到，不必再关心调用方用了哪种风格。
+  void _bump() {
+    revisionProxy.value++;
+    notifyListeners();
+  }
+
   SharedPreferences? _prefs;
 
   /// 正在进行的初始化。
@@ -65,9 +87,6 @@ class MusicLibraryStore extends ChangeNotifier {
   /// **先 `_bump()` 再 `_persist()`**，异常直接把方法中断 →
   /// **「最近播放」和「收藏」永远不落盘、重启就丢**。
   /// `init()` 里那次调用被 `catch (_)` 吞掉了，所以启动不崩、问题被掩盖。
-  void _bump() {
-    revisionProxy.value++;
-  }
 
   Future<void> init() => _initFuture ??= _doInit();
 

@@ -1,3 +1,5 @@
+import '../utils/safe_num.dart';
+
 /// 图书分类项（对应 z-library /category/glm_5.2_ark_toC/{slug} 路由）。
 ///
 /// [id] 取自 URL 数字段（如 /category/40/Architecture 中的 40），
@@ -12,7 +14,7 @@ class BookCategory {
   Map<String, dynamic> toJson() => {'id': id, 'slug': slug, 'zhName': zhName};
 
   factory BookCategory.fromJson(Map<String, dynamic> j) => BookCategory(
-    (j['id'] as num).toInt(),
+    asInt(j['id']),
     (j['slug'] ?? '') as String,
     (j['zhName'] ?? '') as String,
   );

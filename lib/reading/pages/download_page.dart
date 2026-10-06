@@ -16,7 +16,6 @@ import '../services/zlibrary_service.dart';
 import '../source/source_manager.dart';
 import '../utils/list_pagination.dart';
 import '../theme/jelly_theme.dart';
-import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/jelly_select_badge.dart';
 import '../widgets/staggered_entrance.dart';
@@ -24,6 +23,9 @@ import '../widgets/theme_background_animation.dart';
 import 'book_reader_page.dart';
 import 'reader_page.dart';
 import 'zlibrary_auth_page.dart';
+import '../../common/theme.dart';
+import '../../widgets/app_expandable_search.dart';
+import '../../widgets/app_page_header.dart';
 
 /// 下载页卡片列数自适应：默认每行 1 个，宽度足够时增多
 int _downloadAdaptiveCols(
@@ -278,7 +280,7 @@ class _DownloadPageState extends State<DownloadPage>
               child: Text(
                 '已选 ${_selectedIds.length} 项',
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: AppTheme.fontBody,
                   fontWeight: FontWeight.w600,
                   color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
                 ),
@@ -600,13 +602,13 @@ class _DownloadPageState extends State<DownloadPage>
                     svc.tasks.isEmpty
                         ? Icons.download_for_offline_rounded
                         : Icons.search_off_rounded,
-                    size: 64,
-                    color: Colors.grey,
+                    size: 48,
+                    color: JellyTheme.textSecondary,
                   ),
                   const SizedBox(height: 16),
                   Text(
                     svc.tasks.isEmpty ? '暂无下载任务' : '未找到匹配的下载',
-                    style: const TextStyle(color: Colors.grey),
+                    style: TextStyle(color: JellyTheme.textSecondary),
                   ),
                 ],
               ),
@@ -725,13 +727,13 @@ class _DownloadPageState extends State<DownloadPage>
                     svc.tasks.isEmpty
                         ? Icons.download_for_offline_rounded
                         : Icons.search_off_rounded,
-                    size: 64,
-                    color: Colors.grey,
+                    size: 48,
+                    color: JellyTheme.textSecondary,
                   ),
                   const SizedBox(height: 16),
                   Text(
                     svc.tasks.isEmpty ? '暂无下载任务' : '未找到匹配的下载',
-                    style: const TextStyle(color: Colors.grey),
+                    style: TextStyle(color: JellyTheme.textSecondary),
                   ),
                 ],
               ),
@@ -785,16 +787,9 @@ class _DownloadPageState extends State<DownloadPage>
           // 标题：左上角，间距小（仅底部 tab 模式）
           if (hasTitle)
             Positioned(
-              top: 6,
-              left: 16,
-              child: Text(
-                '下载',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: titleColor,
-                ),
-              ),
+              top: AppTheme.headerTop,
+              left: AppTheme.headerSide,
+              child: AppPageTitle('下载', color: titleColor),
             ),
           // 右上角：打开下载目录（仅无 AppBar 模式；AppBar 模式由 AppBar.actions 承载）
           if (hasTitle)
@@ -806,19 +801,20 @@ class _DownloadPageState extends State<DownloadPage>
             right: 12,
             child: Row(
               children: [
-                const Spacer(),
-                SizedBox(
-                  width: MediaQuery.of(context).size.width * 0.42,
-                  child: JellySearchBar(
+                // 搜索框：**可伸长**（收起 = 圆形图标，点击展开成输入框）。
+                // 原来是常驻 `JellySearchBar` 且写死"屏宽 42%"，占地方又不灵活。
+                // 用 Expanded 让它展开时能吃掉剩余宽度。
+                Expanded(
+                  child: AppExpandableSearch(
                     controller: _searchController,
                     hintText: _isComicTab ? '搜索漫画' : '搜索图书',
-                    onChanged: (v) => setState(() {
+                    onSubmitted: (v) => setState(() {
                       _searchQuery = v;
                       _comicDisplayCount = ListPagination.pageSize;
                       _bookDisplayCount = ListPagination.pageSize;
                     }),
-                    onCleared: () => setState(() {
-                      _searchQuery = '';
+                    onChanged: (v) => setState(() {
+                      _searchQuery = v;
                       _comicDisplayCount = ListPagination.pageSize;
                       _bookDisplayCount = ListPagination.pageSize;
                     }),
@@ -866,7 +862,7 @@ class _DownloadPageState extends State<DownloadPage>
         title: const Text('下载目录'),
         content: SelectableText(
           '无法直接打开文件管理器，请手动前往：\n${dir.path}',
-          style: const TextStyle(fontSize: 13),
+          style: const TextStyle(fontSize: AppTheme.fontSubhead),
         ),
         actions: [
           TextButton(
@@ -889,7 +885,7 @@ class _DownloadPageState extends State<DownloadPage>
   Widget _buildOpenDirButton() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Material(
-      color: isDark ? JellyTheme.cardDark : Colors.white,
+      color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
       shape: const CircleBorder(),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -972,7 +968,7 @@ class _DownloadPageState extends State<DownloadPage>
     return TextButton.icon(
       onPressed: enabled ? onTap : null,
       icon: Icon(icon, size: 18),
-      label: Text(label, style: const TextStyle(fontSize: 12)),
+      label: Text(label, style: const TextStyle(fontSize: AppTheme.fontFootnote)),
       style: TextButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         minimumSize: const Size(0, 34),
@@ -1064,7 +1060,7 @@ class _DownloadPageState extends State<DownloadPage>
                   Text(
                     t.title,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: AppTheme.fontBody,
                       fontWeight: FontWeight.w700,
                       color: titleColor,
                     ),
@@ -1076,7 +1072,7 @@ class _DownloadPageState extends State<DownloadPage>
                     Text(
                       t.author!,
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: AppTheme.fontFootnote,
                         color: JellyTheme.textSecondary,
                       ),
                       maxLines: 1,
@@ -1094,12 +1090,12 @@ class _DownloadPageState extends State<DownloadPage>
                           ),
                           decoration: BoxDecoration(
                             color: JellyTheme.primary.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(4),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
                             t.extension!.toUpperCase(),
                             style: TextStyle(
-                              fontSize: 9,
+                              fontSize: AppTheme.fontCaption,
                               color: JellyTheme.primary,
                               fontWeight: FontWeight.w700,
                             ),
@@ -1111,7 +1107,7 @@ class _DownloadPageState extends State<DownloadPage>
                         child: Text(
                           _bookStatusText(t),
                           style: TextStyle(
-                            fontSize: 11,
+                            fontSize: AppTheme.fontCaption,
                             color: _bookStatusColor(t),
                           ),
                         ),
@@ -1122,7 +1118,7 @@ class _DownloadPageState extends State<DownloadPage>
                       t.status == BookDownloadStatus.queued) ...[
                     const SizedBox(height: 6),
                     ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
+                      borderRadius: BorderRadius.circular(10),
                       child: LinearProgressIndicator(
                         value: t.status == BookDownloadStatus.queued
                             ? null
@@ -1137,7 +1133,7 @@ class _DownloadPageState extends State<DownloadPage>
                   if (readPct != null) ...[
                     const SizedBox(height: 6),
                     ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
+                      borderRadius: BorderRadius.circular(10),
                       child: LinearProgressIndicator(
                         value: readPct,
                         minHeight: 4,
@@ -1152,7 +1148,7 @@ class _DownloadPageState extends State<DownloadPage>
                     const SizedBox(height: 4),
                     Text(
                       '失败：${t.error}',
-                      style: TextStyle(fontSize: 10, color: JellyTheme.error),
+                      style: TextStyle(fontSize: AppTheme.fontCaption, color: JellyTheme.error),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1343,22 +1339,23 @@ class _DownloadPageState extends State<DownloadPage>
 
   Widget _buildCover(String cover, bool isDark) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
       child: CachedNetworkImage(
         imageUrl: cover,
         width: 44,
         height: 60,
         fit: BoxFit.cover,
         placeholder: (c, u) => Container(
-          color: isDark ? JellyTheme.cardDark : Colors.grey[200],
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
           width: 44,
           height: 60,
         ),
         errorWidget: (c, u, e) => Container(
-          color: isDark ? JellyTheme.cardDark : Colors.grey[200],
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
           width: 44,
           height: 60,
-          child: const Icon(Icons.broken_image, size: 20, color: Colors.grey),
+          child: Icon(Icons.broken_image,
+              size: 20, color: JellyTheme.textSecondary),
         ),
       ),
     );
@@ -1417,7 +1414,7 @@ class _DownloadPageState extends State<DownloadPage>
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: 14,
+                            fontSize: AppTheme.fontBody,
                             fontWeight: FontWeight.w700,
                             color: titleColor,
                           ),
@@ -1427,13 +1424,13 @@ class _DownloadPageState extends State<DownloadPage>
                           Text(
                             '共 ${g.completedCount} 话',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: AppTheme.fontFootnote,
                               color: JellyTheme.textSecondary,
                             ),
                           ),
                           const SizedBox(height: 6),
                           ClipRRect(
-                            borderRadius: BorderRadius.circular(3),
+                            borderRadius: BorderRadius.circular(10),
                             child: LinearProgressIndicator(
                               value: seenCount / g.completedCount,
                               minHeight: 4,
@@ -1449,7 +1446,7 @@ class _DownloadPageState extends State<DownloadPage>
                                 ? '已读 $seenCount / ${g.completedCount} 话'
                                 : '未读',
                             style: TextStyle(
-                              fontSize: 11,
+                              fontSize: AppTheme.fontCaption,
                               color: hasProgress
                                   ? JellyTheme.primary
                                   : JellyTheme.textSecondary,
@@ -1459,7 +1456,7 @@ class _DownloadPageState extends State<DownloadPage>
                           Text(
                             '暂无已完成章节',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: AppTheme.fontFootnote,
                               color: JellyTheme.textSecondary,
                             ),
                           ),
@@ -1499,7 +1496,7 @@ class _DownloadPageState extends State<DownloadPage>
                       child: Text(
                         sourceName,
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: AppTheme.fontCaption,
                           color: JellyTheme.primary,
                           fontWeight: FontWeight.w600,
                         ),
@@ -1538,7 +1535,7 @@ class _DownloadPageState extends State<DownloadPage>
                       child: Text(
                         '进行中 $activeCount',
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: AppTheme.fontCaption,
                           color: JellyTheme.primary,
                           fontWeight: FontWeight.w600,
                         ),
@@ -1646,7 +1643,7 @@ class _DownloadPageState extends State<DownloadPage>
         maxHeight: MediaQuery.of(context).size.height * 0.6,
       ),
       child: Material(
-        color: isDark ? JellyTheme.cardDark : Colors.white,
+        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         borderRadius: BorderRadius.circular(20),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -1663,7 +1660,7 @@ class _DownloadPageState extends State<DownloadPage>
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 15,
+                        fontSize: AppTheme.fontHeadline,
                         fontWeight: FontWeight.w700,
                         color: titleColor,
                       ),
@@ -1727,7 +1724,7 @@ class _DownloadPageState extends State<DownloadPage>
           child: SingleChildScrollView(
             child: SelectableText(
               error != null && error.isNotEmpty ? error : '未知错误',
-              style: const TextStyle(fontSize: 13, height: 1.5),
+              style: const TextStyle(fontSize: AppTheme.fontSubhead, height: 1.5),
             ),
           ),
         ),
@@ -1779,7 +1776,7 @@ class _DownloadPageState extends State<DownloadPage>
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: AppTheme.fontSubhead,
                             fontWeight: FontWeight.w500,
                             color: titleColor,
                           ),
@@ -1794,12 +1791,12 @@ class _DownloadPageState extends State<DownloadPage>
                           ),
                           decoration: BoxDecoration(
                             color: JellyTheme.blue.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(5),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
                             '正在阅读',
                             style: TextStyle(
-                              fontSize: 10,
+                              fontSize: AppTheme.fontCaption,
                               height: 1.2,
                               color: JellyTheme.blue,
                               fontWeight: FontWeight.w600,
@@ -1819,7 +1816,7 @@ class _DownloadPageState extends State<DownloadPage>
                           Text(
                             '缺 ${t.missingImages} 张',
                             style: TextStyle(
-                              fontSize: 10,
+                              fontSize: AppTheme.fontCaption,
                               color: JellyTheme.error,
                               fontWeight: FontWeight.w600,
                             ),
@@ -1831,7 +1828,7 @@ class _DownloadPageState extends State<DownloadPage>
                   const SizedBox(height: 2),
                   Text(
                     _statusText(t),
-                    style: TextStyle(fontSize: 11, color: _statusColor(t)),
+                    style: TextStyle(fontSize: AppTheme.fontCaption, color: _statusColor(t)),
                   ),
                 ],
               ),
@@ -2038,8 +2035,19 @@ class _DownloadPageState extends State<DownloadPage>
       ),
     );
     if (result == true) {
-      await DownloadService().deleteComic(g.pathWord);
-      await ReadingProgressService().clearComic(g.pathWord);
+      // 🔴 这里原来**没有任何 try/catch** ✗，而底层的文件删除是**自己吞异常**的 ✓
+      //（`download_service.dart` 的 `_deleteFiles` 里 `catch (e) { _log(...) }` ✓，
+      // 页面根本拿不到失败信号 ✓）→ 文件删不掉时，卡片照样消失、
+      // 用户以为已经删干净了 ✓（对话框还明确承诺"本地文件将被删除" ✓）。
+      // 这里先把**抛得出来的**异常挡住并留痕 ✓；
+      // ⚠️ 遗留（需 service 侧配合 ✓）：真正的"部分文件删除失败"要让
+      //   `deleteComic/deleteBooks` **返回失败数**，页面才能如实提示 ✗
+      try {
+        await DownloadService().deleteComic(g.pathWord);
+        await ReadingProgressService().clearComic(g.pathWord);
+      } catch (e) {
+        debugPrint('[DownloadPage] 删除整本失败（本地文件可能仍存在）: $e');
+      }
     }
     return false; // 让服务 notify 后重建移除，避免与 Dismissible 动画冲突
   }
@@ -2090,6 +2098,10 @@ class _DownloadPageState extends State<DownloadPage>
         child: AnimatedOpacity(
           opacity: _showChapterBackToTop ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 200),
+          // ⛔ **有意不同、不要"统一"成 `AppIconButton`** ✗✓（与 `bookshelf_page` /
+          //   `book_search_page` 的返回顶部钮同款 ✓）：它是**滚动出现的悬浮 FAB** ✓
+          //   （`onTap: _scrollChapterToTop` ✓ · 40×40 ✓ · `primary` + `elevation: 4` 醒目 ✓），
+          //   不是顶栏同族圆钮 ✓ → 换成"淡圆底"会几乎看不见 ✗✗
           child: Material(
             color: JellyTheme.primary,
             shape: const CircleBorder(),
@@ -2124,6 +2136,11 @@ class _DownloadPageState extends State<DownloadPage>
         child: AnimatedOpacity(
           opacity: _showBackToTop ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 200),
+          // ⛔ **有意不同、不要"统一"成 `AppIconButton`** ✗✓（本文件第 2 处 ✓，
+          //   与 `:2103` 的章节弹窗版、以及 `bookshelf_page` / `book_search_page`
+          //   的返回顶部钮**同款** ✓）：滚动出现的**悬浮 FAB** ✓
+          //   （`onTap: _scrollToTop` ✓ · `primary` + `elevation: 4` 醒目 ✓）
+          //   → 换"淡圆底"会几乎看不见 ✗✗
           child: Material(
             color: JellyTheme.primary,
             shape: const CircleBorder(),

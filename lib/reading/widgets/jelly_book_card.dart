@@ -4,6 +4,7 @@ import '../models/book.dart';
 import '../services/book_favorites_service.dart';
 import '../services/book_reading_progress_service.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 /// 果冻风图书卡片（grid / list 两态）
 /// 布局同漫画主卡片：封面 + 书名 + 作者 + 元信息 + 收藏按钮；点击进入详情页。
@@ -19,6 +20,10 @@ class JellyBookCard extends StatefulWidget {
   /// 封面 Hero 动画 tag（与详情页一致；为空则不启用共享元素过渡）
   final String? heroTag;
 
+  /// 名称位置是否显示收藏按钮（搜索/推荐页 false，对齐参考图"名称位置不加收藏"；
+  /// 收藏页/足迹页默认 true 保留）
+  final bool showFavorite;
+
   const JellyBookCard({
     super.key,
     required this.book,
@@ -26,6 +31,7 @@ class JellyBookCard extends StatefulWidget {
     this.onTap,
     this.onLongPress,
     this.heroTag,
+    this.showFavorite = true,
   });
 
   @override
@@ -105,6 +111,11 @@ class _JellyBookCardState extends State<JellyBookCard>
     final hasSize = size != null && size.isNotEmpty;
     return Row(
       mainAxisSize: MainAxisSize.min,
+      // ✅ ② **靠右下** ✓ —— 原来是默认左对齐 ✗（截图里信息行贴在左边 ✓），
+      //   按你要的改成**右下角** ✓。这里只改对齐 ✓，**内容一字未动** ✓
+      //   （仍是"文件大小（主色加粗）+ 年份/语言"✓，顺序与样式都保持 ✓）。
+      // ℹ️ 两处卡片布局都调它 ✓ → 一起生效，保持同族观感一致 ✓✓
+      mainAxisAlignment: MainAxisAlignment.end,
       children: [
         if (hasSize)
           Text(
@@ -193,13 +204,13 @@ class _JellyBookCardState extends State<JellyBookCard>
     final coverUrl = widget.book.cover ?? '';
     return coverUrl.isEmpty
         ? Container(
-            color: isDark ? Colors.grey[800] : Colors.grey[200],
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             width: width,
             height: height,
-            child: const Icon(
+            child: Icon(
               Icons.menu_book_rounded,
               size: 32,
-              color: Colors.grey,
+              color: JellyTheme.textSecondary,
             ),
           )
         : CachedNetworkImage(
@@ -209,7 +220,7 @@ class _JellyBookCardState extends State<JellyBookCard>
             width: width,
             height: height,
             placeholder: (c, u) => Container(
-              color: isDark ? Colors.grey[800] : Colors.grey[200],
+              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
               width: width,
               height: height,
               child: Center(
@@ -220,13 +231,13 @@ class _JellyBookCardState extends State<JellyBookCard>
               ),
             ),
             errorWidget: (c, u, e) => Container(
-              color: isDark ? Colors.grey[800] : Colors.grey[200],
+              color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
               width: width,
               height: height,
-              child: const Icon(
+              child: Icon(
                 Icons.menu_book_rounded,
                 size: 32,
-                color: Colors.grey,
+                color: JellyTheme.textSecondary,
               ),
             ),
           );
@@ -274,7 +285,8 @@ class _JellyBookCardState extends State<JellyBookCard>
                 bottom: 0,
                 left: 0,
                 right: 0,
-                height: 50,
+                // 黑渐变减薄（原 50/0.7 太厚，参考图只覆盖书名一行）
+                height: 28,
                 child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -282,7 +294,7 @@ class _JellyBookCardState extends State<JellyBookCard>
                       end: Alignment.bottomCenter,
                       colors: [
                         Colors.transparent,
-                        Colors.black.withValues(alpha: 0.7),
+                        Colors.black.withValues(alpha: 0.55),
                       ],
                     ),
                   ),
@@ -298,12 +310,12 @@ class _JellyBookCardState extends State<JellyBookCard>
                   ),
                   decoration: BoxDecoration(
                     color: JellyTheme.primary.withValues(alpha: 0.9),
-                    borderRadius: BorderRadius.circular(5),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
                     _extBadge,
                     style: const TextStyle(
-                      fontSize: 9,
+                      fontSize: AppTheme.fontCaption,
                       color: Colors.white,
                       fontWeight: FontWeight.w700,
                     ),
@@ -325,24 +337,35 @@ class _JellyBookCardState extends State<JellyBookCard>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        widget.book.title,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: isDark
-                              ? Colors.white
-                              : JellyTheme.textPrimaryLight,
+                      // ✅ ① **书名居中** ✓ —— 原来走默认左对齐 ✗（截图 IMG_8595/8606 那种）
+                      // 做法 ✓：只给**标题**包一层 `SizedBox(width: double.infinity)`
+                      //   → 它就有了确定宽度 ✓ → `textAlign: center` 才真正生效 ✓✓
+                      // ⚠️ **不要**改下面 Column 的 `crossAxisAlignment` ✗ ——
+                      //   那会连 `_buildMetaRow`（作者等 ✓）一起居中 ✗，
+                      //   而截图里作者行是**左对齐**的 ✓，要保持 ✓
+                      SizedBox(
+                        width: double.infinity,
+                        child: Text(
+                          widget.book.title,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: AppTheme.fontSubhead,
+                            fontWeight: FontWeight.w600,
+                            color: isDark
+                                ? Colors.white
+                                : JellyTheme.textPrimaryLight,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
-                      _buildMetaRow(isDark, fontSize: 10),
+                      _buildMetaRow(isDark, fontSize: AppTheme.fontCaption),
                     ],
                   ),
                 ),
-                _buildFavoriteButton(),
+                // 名称位置不加收藏（搜索/推荐页）：右侧留空让书名占满
+                if (widget.showFavorite) _buildFavoriteButton(),
               ],
             ),
           ),
@@ -370,15 +393,24 @@ class _JellyBookCardState extends State<JellyBookCard>
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  widget.book.title,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                // ✅ ① **书名居中**（第二处 ✓ —— 与上面那处同款改法 ✓）
+                //   这里标题更大（fontHeadline + w700 ✓ = 详情/推荐位样式 ✓），
+                //   同样包一层 `SizedBox(width: double.infinity)` 才能让 `textAlign` 生效 ✓
+                //   ⚠️ 下面 Column 的 `crossAxisAlignment` **保持 start** ✗ ——
+                //     让紧随其后的**作者行仍左对齐** ✓（与截图一致 ✓）
+                SizedBox(
+                  width: double.infinity,
+                  child: Text(
+                    widget.book.title,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: AppTheme.fontHeadline,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 6),
                 if (widget.book.author != null &&
@@ -386,7 +418,7 @@ class _JellyBookCardState extends State<JellyBookCard>
                   Text(
                     widget.book.author!,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: AppTheme.fontFootnote,
                       color: isDark ? Colors.white54 : JellyTheme.textSecondary,
                     ),
                     maxLines: 1,
@@ -394,13 +426,13 @@ class _JellyBookCardState extends State<JellyBookCard>
                   ),
                   const SizedBox(height: 6),
                 ],
-                _buildMetaRow(isDark, fontSize: 11),
+                _buildMetaRow(isDark, fontSize: AppTheme.fontCaption),
                 if (readPct != null) ...[
                   const SizedBox(height: 4),
                   Text(
                     '已读 ${(readPct * 100).toInt()}%',
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: AppTheme.fontCaption,
                       color: JellyTheme.primary,
                       fontWeight: FontWeight.w700,
                     ),
@@ -410,7 +442,7 @@ class _JellyBookCardState extends State<JellyBookCard>
             ),
           ),
         ),
-        // 右侧：格式标签 + 收藏按钮 垂直对齐
+        // 右侧：格式标签 + 收藏按钮 垂直对齐（showFavorite=false 时只留标签）
         Padding(
           padding: const EdgeInsets.only(right: 8),
           child: Column(
@@ -420,19 +452,21 @@ class _JellyBookCardState extends State<JellyBookCard>
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: JellyTheme.primary.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(5),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
                   _extBadge,
                   style: TextStyle(
-                    fontSize: 10,
+                    fontSize: AppTheme.fontCaption,
                     color: JellyTheme.primary,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
-              const SizedBox(height: 8),
-              _buildFavoriteButton(),
+              if (widget.showFavorite) ...[
+                const SizedBox(height: 8),
+                _buildFavoriteButton(),
+              ],
             ],
           ),
         ),

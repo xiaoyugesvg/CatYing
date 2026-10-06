@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'image_restore.dart';
 import 'site_config.dart';
+import 'global_proxy.dart';
 
 void _log(String message) {
   if (kDebugMode) {
@@ -23,18 +24,31 @@ class SourceCoverCache {
   SourceCoverCache._();
   static final SourceCoverCache instance = SourceCoverCache._();
 
-  final Dio _dio = Dio(
-    BaseOptions(
-      responseType: ResponseType.bytes,
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 20),
-      headers: {
-        'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-            '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-    ),
-  );
+  /// 构造封面下载用的 Dio，并**挂上「网络代理」**（本轮接上 ✓）。
+  ///
+  /// ✅ **本处与"UA 工厂"那个坑无关** ✓✓：它的 UA 是写在 **`BaseOptions.headers`** 里 ✓
+  ///   （**不是**自定义 `createHttpClient` 适配器 ✓）—— headers 属于 **Dio 选项层** ✓，
+  ///   而 `applyGlobalProxy` 只换 **socket 层适配器** ✓ → **两者互不干扰** ✓✓（UA 不会丢 ✓）。
+  ///   这与 `download_service` 那种"适配器里设 UA"的情况**不同** ✓（那里必须传工厂 ✓）。
+  /// · 代理**关闭** ✓ → 返回 false ✓ **一字不改** ✓（与从前完全一致 ✓✓）
+  static Dio _createDio() {
+    final dio = Dio(
+      BaseOptions(
+        responseType: ResponseType.bytes,
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 20),
+        headers: {
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+              '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+      ),
+    );
+    applyGlobalProxy(dio);
+    return dio;
+  }
+
+  final Dio _dio = _createDio();
 
   /// 进行中的下载（同 URL 去重并发）
   final Map<String, Future<String?>> _pending = {};
@@ -49,6 +63,14 @@ class SourceCoverCache {
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;
   }
+
+  /// ✅ **缓存目录（公开只读入口）** ✓ —— 供「缓存上限」按 GB 淘汰复用 ✓。
+  ///
+  /// 为什么需要它 ✗：设置里的 `onlineComicCacheGb`（在线漫画图片缓存上限 ✓）
+  /// **全模块 0 个读取点** ✗ → 拨了没有任何效果 ✓；而容量淘汰必须有目录 ✓。
+  /// ✅ 现在由 `CacheCapacity.evictToLimit(await SourceCoverCache().dir, 上限字节)` ✓
+  /// 直接在**设置页**完成淘汰 ✓（`_dir` 本身保持私有 ✓，不扩大可变面 ✓）。
+  Future<Directory> get dir => _dir;
 
   /// 封面落地：下载还原后存缓存目录，返回本地绝对路径。
   /// 站点未配还原（非加密/base64）或下载失败返回 null。

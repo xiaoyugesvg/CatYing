@@ -1,29 +1,53 @@
-// 书源编辑页 —— 对齐备份3.0 book_source_editor_page：7 个 tab
-//（源变量 / 基础 / 搜索 / 发现 / 详情 / 目录 / 正文）。
-//
-// 全部字段用一张 spec 表驱动（_Field/_Toggle/_Tab），读写在源 JSON 的
-// 点分路径上；保存时把整份 _raw 重建为 ShuyuanSource 写回 store。
-// 与当前模型差异：源变量保存到 `variableComment`（Nexhub 模型无 customVariable 键）。
 import 'package:flutter/material.dart';
 
-import '../../common/theme.dart';
-import '../novel_source/model/book_source.dart';
-import '../novel_source/shuyuan_source_service.dart';
-import '../services/shuyuan_source_store.dart';
+import '../models/book_source.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
+
+/// 书源编辑页 —— 7 个 tab（源变量 / 基础 / 搜索 / 发现 / 详情 / 目录 / 正文）。
+///
+/// ── 字段路径的来源（重要）─────────────────────────────────────
+/// 所有点分路径都取自**一份真实书源 JSON**，不是猜的：
+/// ```json
+/// { "bookSourceName":"…", "bookSourceUrl":"…", "bookSourceGroup":"…",
+///   "bookSourceComment":"…", "enabled":true, "enabledExplore":true,
+///   "enabledCookieJar":true, "header":"{…}", "searchUrl":"…",
+///   "exploreUrl":"[…]",
+///   "ruleSearch":{"bookList":"…","name":"…","author":"…","bookUrl":"…",
+///                 "checkKeyWord":"…","intro":"…","lastChapter":"…","wordCount":"…"},
+///   "ruleBookInfo":{…}, "ruleToc":{"chapterList":"…","chapterName":"…","chapterUrl":"…"},
+///   "ruleContent":{"content":"…"} }
+/// ```
+/// `BookSource.readPath/writePath` 按这些路径读写。
+///
+/// ⚠️ 路径写错的后果不是报错，而是**静默失效**：用户改了规则、
+/// 保存成功、但引擎读的是另一个键 → 书源莫名其妙不工作。
+/// 所以这里宁可啰嗦，每个字段都写明它对应哪个键（见 [_Field.key]）。
+///
+/// ── 为什么用字段表驱动而不是手写 7 个 TabView ────────────────
+/// 全部字段加起来 60 多个，手写会产生 7 份几乎一样的
+/// 「标签 + 输入框」代码。用一张 spec 表生成，改样式只改一处。
+class BookSourceEditorPage extends StatefulWidget {
+  const BookSourceEditorPage({super.key, required this.source});
+
+  final BookSource source;
+
+  @override
+  State<BookSourceEditorPage> createState() => _BookSourceEditorPageState();
+}
 
 /// 一个可编辑字段
 class _Field {
   const _Field(this.key, this.label, {this.hint, this.multiline = false});
 
-  /// 点分路径（如 ruleSearch.name）
+  /// 点分路径，直接交给 `readPath/writePath`
   final String key;
   final String label;
 
-  /// 占位提示
+  /// 占位提示（截图里多数字段是空的灰框）
   final String? hint;
 
-  /// 多行（JS 脚本、JSON 文本）
+  /// 多行（JS 脚本、JSON 文本这类都不是单行）
   final bool multiline;
 }
 
@@ -43,13 +67,24 @@ class _Tab {
   final String title;
   final List<_Toggle> toggles;
   final List<_Field> fields;
-  /// 「源变量」tab 是特殊布局（单值/键值对 切换 + 变量值框）。
+  /// 「源变量」tab 是特殊布局（单值/键值对 切换 + 变量值框），
+  /// 与其它 tab 的"标签+输入框"列表不同，所以单列一个标记。
   final bool isVariable;
 }
 
-/// 7 个 tab 的字段定义（与用户截图顺序一致）。
+/// 7 个 tab 的字段定义。
+///
+/// 顺序与用户截图一致：源变量 / 基础 / 搜索 / 发现 / 详情 / 目录 / 正文。
 const _tabs = <_Tab>[
+  // ── 源变量（截图第一个 tab）────────────────────────────────
+  //
+  // 说明文字（截图原文）：
+  //   "源变量可在脚本中通过 source.getVariable() 获取"
+  //   "单值：整条串直接保存，适合单个 Token 等裸值"
+  // 右上角有「单值 / 键值对」分段切换。
   _Tab('源变量', isVariable: true),
+
+  // ── 基础 ──────────────────────────────────────────────────
   _Tab(
     '基础',
     toggles: [
@@ -69,6 +104,8 @@ const _tabs = <_Tab>[
       _Field('coverDecodeJs', '封面解码 JS', multiline: true),
     ],
   ),
+
+  // ── 搜索 ──────────────────────────────────────────────────
   _Tab(
     '搜索',
     fields: [
@@ -84,6 +121,8 @@ const _tabs = <_Tab>[
       _Field('ruleSearch.coverUrl', '封面'),
     ],
   ),
+
+  // ── 发现 ──────────────────────────────────────────────────
   _Tab(
     '发现',
     fields: [
@@ -99,6 +138,8 @@ const _tabs = <_Tab>[
       _Field('ruleExplore.bookUrl', '详情页 URL', multiline: true),
     ],
   ),
+
+  // ── 详情 ──────────────────────────────────────────────────
   _Tab(
     '详情',
     fields: [
@@ -115,6 +156,8 @@ const _tabs = <_Tab>[
       _Field('ruleBookInfo.downloadUrls', '下载 URL 规则', multiline: true),
     ],
   ),
+
+  // ── 目录 ──────────────────────────────────────────────────
   _Tab(
     '目录',
     fields: [
@@ -130,6 +173,8 @@ const _tabs = <_Tab>[
       _Field('ruleToc.nextTocUrl', '下一页目录 URL', multiline: true),
     ],
   ),
+
+  // ── 正文 ──────────────────────────────────────────────────
   _Tab(
     '正文',
     fields: [
@@ -148,75 +193,32 @@ const _tabs = <_Tab>[
   ),
 ];
 
-class BookSourceEditorPage extends StatefulWidget {
-  const BookSourceEditorPage({super.key, required this.source});
-
-  final ShuyuanSource source;
-
-  @override
-  State<BookSourceEditorPage> createState() => _BookSourceEditorPageState();
-}
-
 class _BookSourceEditorPageState extends State<BookSourceEditorPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tab;
+  late BookSource _src;
 
-  /// 编辑中的整份源 JSON（点分路径读写都在它上面，保存时整体重建）。
-  late Map<String, dynamic> _raw;
-
-  /// 编辑中的值（key = 点分路径；源变量用 variableComment）。
+  /// 编辑中的值（key = 点分路径）。保存时一次性写入。
   final Map<String, String> _draft = {};
   final Map<String, bool> _draftBool = {};
-
-  /// 点分路径读值。
-  dynamic _readPath(String path) {
-    final parts = path.split('.');
-    dynamic cur = _raw;
-    for (final p in parts) {
-      if (cur is Map && cur.containsKey(p)) {
-        cur = cur[p];
-      } else {
-        return null;
-      }
-    }
-    return cur;
-  }
-
-  /// 点分路径写值（中间 Map 缺省自动创建；null 则删除键）。
-  void _writePath(String path, dynamic value) {
-    final parts = path.split('.');
-    var cur = _raw;
-    for (var i = 0; i < parts.length - 1; i++) {
-      final p = parts[i];
-      final next = cur[p];
-      if (next is! Map) {
-        cur[p] = <String, dynamic>{};
-      }
-      cur = cur[p] as Map<String, dynamic>;
-    }
-    final last = parts.last;
-    if (value == null) {
-      cur.remove(last);
-    } else {
-      cur[last] = value;
-    }
-  }
 
   @override
   void initState() {
     super.initState();
-    _raw = Map<String, dynamic>.from(widget.source.toJson());
+    _src = widget.source;
     _tab = TabController(length: _tabs.length, vsync: this);
     _tab.addListener(() => setState(() {}));
-    _varCtrl.text = (_raw['variableComment'] ?? '').toString();
-    _draft['variableComment'] = _varCtrl.text;
+    // 源变量（自定义变量存在 customVariable 里，Legado 就是这个键）
+    _varCtrl.text = (_src.readPath('customVariable') ?? '').toString();
+    _draft['variable'] = _varCtrl.text;
+    // 把已有值读进 draft（只读一次，之后以 draft 为准）
     for (final t in _tabs) {
       for (final f in t.fields) {
-        final v = _readPath(f.key);
+        final v = _src.readPath(f.key);
         _draft[f.key] = v?.toString() ?? '';
       }
       for (final tg in t.toggles) {
-        final v = _readPath(tg.key);
+        final v = _src.readPath(tg.key);
         _draftBool[tg.key] = v == true;
       }
     }
@@ -226,6 +228,7 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
   void dispose() {
     _tab.dispose();
     _varCtrl.dispose();
+    // 表单字段的持久 controller 也要释放 ✓（不放就是换个地方泄漏 ✗）
     for (final c in _fieldCtrls.values) {
       c.dispose();
     }
@@ -234,14 +237,15 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
   }
 
   Future<void> _save() async {
-    // 一次性写回 _raw，避免每字段一次写盘。
+    // 一次性写回：每改一个字段写一次盘会有 60 次写操作
+    final values = <String, dynamic>{};
     _draft.forEach((k, v) {
-      final key = k == 'variableComment' ? 'variableComment' : k;
-      _writePath(key, v.trim().isEmpty ? null : v.trim());
+      // 「源变量」在 Legado 里对应的键是 customVariable
+      final key = k == 'variable' ? 'customVariable' : k;
+      values[key] = v.trim().isEmpty ? null : v.trim();
     });
-    _draftBool.forEach((k, v) => _writePath(k, v));
-    final updated = ShuyuanSource.fromJson(_raw);
-    await ShuyuanSourceStore.instance.addSource(updated);
+    _draftBool.forEach((k, v) => values[k] = v);
+    await BookSourceStore.instance.updatePaths(_src.id, values);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('已保存'), duration: Duration(seconds: 1)),
@@ -253,28 +257,22 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final label = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-    final name = (_raw['bookSourceName'] ?? '').toString();
     return Scaffold(
       backgroundColor:
           isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
       appBar: AppBar(
-        backgroundColor:
-            isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
         centerTitle: true,
         title: Text(
-          name.isEmpty ? '书源编辑' : name,
+          _src.name,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-              fontSize: AppTheme.fontHeadline,
-              fontWeight: FontWeight.w600,
-              color: label),
+              fontSize: AppTheme.fontTitle3, fontWeight: FontWeight.w700, color: label),
         ),
         actions: [
           TextButton(
             onPressed: _save,
-            child: Text('保存',
-                style: TextStyle(fontSize: AppTheme.fontHeadline, color: label)),
+            child: const Text('保存', style: TextStyle(fontSize: AppTheme.fontHeadline)),
           ),
         ],
         bottom: TabBar(
@@ -285,8 +283,8 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
           unselectedLabelColor: JellyTheme.textSecondary,
           indicatorColor: label,
           indicatorSize: TabBarIndicatorSize.label,
-          labelStyle: const TextStyle(
-              fontSize: AppTheme.fontBody, fontWeight: FontWeight.w600),
+          labelStyle:
+              const TextStyle(fontSize: AppTheme.fontBody, fontWeight: FontWeight.w600),
           unselectedLabelStyle: const TextStyle(fontSize: AppTheme.fontBody),
           tabs: [for (final t in _tabs) Tab(text: t.title)],
         ),
@@ -301,6 +299,13 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
   /// 源变量 tab 的"单值 / 键值对"模式
   bool _varKvMode = false;
   final _varCtrl = TextEditingController();
+  // 🔴 表单各字段的 controller：原来是在 `build` 里**每次重建都 new 一个** ✗
+  //（见下面 `TextField(controller: TextEditingController(text: …))` ✓）
+  // → 每帧泄漏一个 ✓（而且那个 `..selection = …末尾` 的写法正是为了掩盖
+  //   "新 controller 光标总跳到开头/末尾" ✗）。
+  // ✓ 改成**按字段名缓存**的持久 controller ✓。
+  // ⚠️ **不能共用一个** ✗：这些字段是**同屏同时显示**的 ✓，
+  //   共用一个会让所有输入框显示同一段文字 ✗✗（比泄漏更糟 ✓）
   final _fieldCtrls = <String, TextEditingController>{};
   TextEditingController _ctrlFor(String key) => _fieldCtrls.putIfAbsent(
         key,
@@ -313,19 +318,19 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 40),
       children: [
         Text('源变量可在脚本中通过 source.getVariable() 获取',
-            style: TextStyle(
-                fontSize: AppTheme.fontSubhead,
-                color: JellyTheme.textSecondary)),
+            style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
         const SizedBox(height: 4),
         Text(
-          _varKvMode
-              ? '键值对：每行一个 key=value，脚本里按键取值'
-              : '单值：整条串直接保存，适合单个 Token 等裸值',
-          style: TextStyle(
-              fontSize: AppTheme.fontSubhead,
-              color: JellyTheme.textSecondary),
+          _varKvMode ? '键值对：每行一个 key=value，脚本里按键取值' : '单值：整条串直接保存，适合单个 Token 等裸值',
+          style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
         ),
         const SizedBox(height: 14),
+        // ── 单值 / 键值对 分段切换（按截图 IMG_8112）────────────
+        //
+        // ⚠️ 我第一版做错了 3 处，对照截图后修正：
+        //   ① 容器要是**整宽**的（我原来 mainAxisSize.min 只包住内容）
+        //   ② 两个选项要**等宽**（截图里"单值"胶囊占左半，右边留白给"键值对"）
+        //   ③ 选中态是**浅灰胶囊 + 深色字**（不是黑底白字 —— 那是另一套视觉）
         Container(
           padding: const EdgeInsets.all(3),
           decoration: BoxDecoration(
@@ -344,6 +349,7 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
+                        // 选中 = 浅灰胶囊（浅色模式比底色略深一点）
                         color: _varKvMode == kv
                             ? (isDark
                                 ? Colors.white.withValues(alpha: 0.14)
@@ -379,7 +385,7 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
           ),
           child: TextField(
             controller: _varCtrl,
-            onChanged: (v) => _draft['variableComment'] = v,
+            onChanged: (v) => _draft['variable'] = v,
             maxLines: 6,
             minLines: 3,
             style: TextStyle(fontSize: AppTheme.fontBody, color: label),
@@ -388,8 +394,7 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
               filled: false,
               hintText: _varKvMode ? 'key1=value1\nkey2=value2' : '变量值',
               hintStyle: TextStyle(
-                  fontSize: AppTheme.fontBody,
-                  color: JellyTheme.textSecondary),
+                  fontSize: AppTheme.fontBody, color: JellyTheme.textSecondary),
               border: InputBorder.none,
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -406,6 +411,7 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 40),
       children: [
+        // 开关组（基础 tab）
         if (t.toggles.isNotEmpty) ...[
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -423,9 +429,8 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           child: Text(t.toggles[i].label,
-                              style: TextStyle(
-                                  fontSize: AppTheme.fontHeadline,
-                                  color: label)),
+                              style:
+                                  TextStyle(fontSize: AppTheme.fontHeadline, color: label)),
                         ),
                       ),
                       Switch(
@@ -441,6 +446,7 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
           ),
           const SizedBox(height: 14),
         ],
+        // 普通字段
         for (final f in t.fields) ...[
           Text(f.label,
               style: TextStyle(
@@ -454,6 +460,10 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
               borderRadius: BorderRadius.circular(12),
             ),
             child: TextField(
+              // ✓ 按字段名取**持久** controller（见 `_fieldCtrls` 的说明 ✓）——
+              // 顺带修掉一个观感问题 ✓：原来每次重建都新建 controller +
+              // 强行把光标塞到末尾 ✗ → 输入时**光标会乱跳** ✓；
+              // 现在光标停在用户实际输入的位置 ✓
               controller: _ctrlFor(f.key),
               onChanged: (v) => _draft[f.key] = v,
               maxLines: f.multiline ? 6 : 1,
@@ -464,8 +474,7 @@ class _BookSourceEditorPageState extends State<BookSourceEditorPage>
                 filled: false,
                 hintText: f.hint,
                 hintStyle: TextStyle(
-                    fontSize: AppTheme.fontBody,
-                    color: JellyTheme.textSecondary),
+                    fontSize: AppTheme.fontBody, color: JellyTheme.textSecondary),
                 border: InputBorder.none,
                 contentPadding: const EdgeInsets.symmetric(
                     horizontal: 14, vertical: 12),

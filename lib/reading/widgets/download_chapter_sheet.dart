@@ -6,6 +6,7 @@ import '../pages/trim_preview_page.dart';
 import '../services/download_service.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
+import '../../common/theme.dart';
 
 /// 章节选择底部弹窗（网格多列自适应）
 /// 勾选章节 -> 加入下载队列 -> 提示并关闭（进度去"下载中"页查看）
@@ -99,7 +100,7 @@ class _DownloadChapterSheetState extends State<DownloadChapterSheet> {
       builder: (ctx) {
         final isDark = Theme.of(ctx).brightness == Brightness.dark;
         return AlertDialog(
-          backgroundColor: isDark ? JellyTheme.cardDark : Colors.white,
+          backgroundColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('去白边下载'),
@@ -150,7 +151,7 @@ class _DownloadChapterSheetState extends State<DownloadChapterSheet> {
       builder: (context, scrollController) {
         return Container(
           decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : Colors.white,
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(
@@ -173,8 +174,8 @@ class _DownloadChapterSheetState extends State<DownloadChapterSheet> {
         width: 40,
         height: 4,
         decoration: BoxDecoration(
-          color: Colors.grey[400],
-          borderRadius: BorderRadius.circular(2),
+          color: JellyTheme.textSecondary.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(10),
         ),
       ),
     );
@@ -191,7 +192,7 @@ class _DownloadChapterSheetState extends State<DownloadChapterSheet> {
           Text(
             '${widget.groupName} · 共 ${widget.chapters.length} 话',
             style: TextStyle(
-              fontSize: 15,
+              fontSize: AppTheme.fontHeadline,
               fontWeight: FontWeight.bold,
               color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
             ),
@@ -200,7 +201,7 @@ class _DownloadChapterSheetState extends State<DownloadChapterSheet> {
           if (downloadedCount > 0)
             Text(
               '已下载 $downloadedCount',
-              style: TextStyle(fontSize: 12, color: JellyTheme.success),
+              style: TextStyle(fontSize: AppTheme.fontFootnote, color: JellyTheme.success),
             ),
         ],
       ),
@@ -262,7 +263,7 @@ class _DownloadChapterSheetState extends State<DownloadChapterSheet> {
               : (isDark
                     ? Colors.white.withValues(alpha: 0.05)
                     : Colors.black.withValues(alpha: 0.03)),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: selected
                 ? JellyTheme.primary
@@ -293,7 +294,7 @@ class _DownloadChapterSheetState extends State<DownloadChapterSheet> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: AppTheme.fontCaption,
                   color: downloaded ? disabledColor : null,
                 ),
               ),

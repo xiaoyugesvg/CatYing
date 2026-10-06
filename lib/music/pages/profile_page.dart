@@ -350,8 +350,13 @@ class ProfilePage extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const SizedBox(height: 12),
-                    ...List.generate(5, (i) {
-                      final e = AudioQuality.values[i];
+                    // ⚠️ **不要**写死档位数量。原来这里是
+                    //     `List.generate(5, (i) => AudioQuality.values[i])` ——
+                    //     今天 `AudioQuality` 恰好 5 个所以看不出问题，但：
+                    //       · 少一个档位 → `values[4]` 抛 RangeError，弹层直接崩
+                    //       · 多一个档位 → 新档位**静默消失**，用户永远选不到
+                    //     遍历 `values` 本身，加档位就自动出现。
+                    ...AudioQuality.values.map((e) {
                       return ListTile(
                         title: Text(e.displayName,
                             style: TextStyle(
