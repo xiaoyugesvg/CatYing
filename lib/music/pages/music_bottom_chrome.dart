@@ -8,8 +8,8 @@ import '../services/player_manager.dart';
 import '../services/settings_store.dart';
 import '../theme/music_theme.dart';
 import '../widgets/mini_player.dart';
-import 'root_view.dart' show MusicRootView;
 import 'player_page.dart' show MusicPlayerPage;
+import '../services/route_observer.dart';
 import '../../widgets/video_player_pip.dart';
 
 /// 音乐底栏的**共享状态**（tab 选中项 + 可见性）。
@@ -127,6 +127,10 @@ class MusicBottomChrome extends StatelessWidget {
         MusicPlayerManager.instance.isPlaying,
         _visible,
         SettingsStore.instance.bottomBarOnSubPages,
+        // 全屏播放器开/关 —— 它开着时本组件整个隐藏（见下面那段）
+        MusicPlayerPage.isOpen,
+        // 路由深度 —— 它变了才知道"进/出子页面"（见 `onRoot` 的说明）
+        MusicRouteObserver.pushedCount,
       ]),
       builder: (context, _) {
         // ── 懒桥接：把 RxInt 的变化同步到 `_visible` ──────────────────
@@ -149,6 +153,20 @@ class MusicBottomChrome extends StatelessWidget {
         // 不在音乐模块 → 整个不显示（看视频/读书时底部不该有音乐栏）
         if (!MusicTabState.visible) return const SizedBox.shrink();
 
+        // ── 🔴 全屏播放器开着时**整个隐藏**（修一个"播放器被盖住"）──────
+        //
+        // 本组件挂在 `app.dart` 的 Stack 里、**在 `out`（Navigator）之后**
+        // → 盖在**所有**路由之上，包括全屏播放器。
+        //
+        // 而播放器**自己**有一条底部操作栏（`_bottomBar()`：
+        // 列表循环 / 收藏 / 上一首 / 歌词 / 下一首 / 设置）——
+        // 被迷你条 + 导航栏压在下面，**既看不清也点不到** ✗
+        //（用户实测截图：`列表循环 收藏 上一首 歌词 下一首 设置` 全被盖住）
+        //
+        // 而且导航栏出现在播放器上本身**语义就不对**：播放器是全屏模态页，
+        // 底部该是"播放控制"，不是"切模块 tab"。
+        if (MusicPlayerPage.isOpen.value) return const SizedBox.shrink();
+
         // ── 主页 vs 子页面（用户 2026 定稿）────────────────────────
         //
         // · **主页**（`MusicRootView` 挂着）
@@ -165,7 +183,20 @@ class MusicBottomChrome extends StatelessWidget {
         // 理由也站得住：子页面里用户已经在看内容了，再压一条导航栏
         // 既遮内容又和"返回"语义重叠；而播放条是**纯播放控制**，
         // 正在放的时候它有用，暂停了它就是多余的遮挡。
-        final onRoot = MusicRootView.isMounted;
+        // ── 🔴 用**路由深度**判断"根页面 vs 子页面"（修一个真 bug）──────
+        //
+        // 原来写的是 `MusicRootView.isMounted` —— **它永远为 true** ✗：
+        // `MusicRootView` 挂在 `ContentView` 的 `IndexedStack` 里，
+        // `IndexedStack` 会让**所有**子页保持挂载，push 子页面时
+        // 根视图仍在树里 → `dispose` 永远不调用 → 标记永远 true。
+        //
+        // 后果（用户实测反馈「关闭了子页面浮动导航栏结果还是不行」）：
+        //   · 「子页面显示播放条」开关关掉，**子页面照样有导航栏** ✗
+        //   · push 出来的全屏播放器上也画着导航栏 ✗
+        //
+        // `MusicRouteObserver.isOnRoot` 读的是**导航器真实的路由栈深度**，
+        // 这才是"在不在根页面"的正解。见 `route_observer.dart` 的说明。
+        final onRoot = MusicRouteObserver.isOnRoot;
         final playing = MusicPlayerManager.instance.isPlaying.value;
         final hasSong = MusicPlayerManager.instance.currentSong != null;
 

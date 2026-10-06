@@ -177,6 +177,22 @@ export function normalizeSearchResult(raw) {
             // ⚠️ MusicFree 的 duration 是**秒**，本 App 也是秒 → 不换算
             duration: Number(it.duration) || 0,
             fee: 0,
+            // ── 🔴 `_src` 必须**原样保留**（修一个"MusicFree 插件全失败"）──
+            //
+            // 很多插件（如 `kugou-source.plugin`）的取址入口**不是**顶层字段，
+            // 而是 `musicItem._src`：
+            // ```js
+            // var srcMap = musicItem._src || {};      // ← 它只从这取
+            // var order  = pickCandidates(srcMap, quality);
+            // ```
+            // 插件 `search()` 产出的 item 长这样：
+            //   `{ id, title, …, _src: { kugou: { hash, hash320, hashSq, hashHires } } }`
+            // 我们原来是**手挑字段**重建对象 —— 手挑就意味着**一定会漏**，
+            // 而 `_src` 正是被漏掉的那个 → 自搜回退拿到的候选**同样播不了** ✗
+            //
+            // 所以这里把 `_src` 原样带出来（`source_resolver` 会把它透传给
+            // 插件的 `getMediaSource`）。这样"自搜回退"才真的有用。
+            ...(it._src && typeof it._src === 'object' ? { _src: it._src } : {}),
         });
     }
     return { ok: true, list: out, isEnd: isEnd || out.length === 0 };

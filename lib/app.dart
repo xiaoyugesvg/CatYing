@@ -21,6 +21,7 @@ import 'music/widgets/floating_play_button.dart';
 //    **不能用 `Navigator.of(context)`**，必须走全局
 //    `VideoPlayerPip.navigatorKey`（组件里有详细注释）。
 import 'music/pages/music_bottom_chrome.dart';
+import 'music/services/route_observer.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'common/theme.dart';
@@ -172,6 +173,14 @@ class _TVBoxAppState extends State<TVBoxApp> with WidgetsBindingObserver {
                 transitionDuration: const Duration(milliseconds: 320),
                 // 把 NavigatorState 暴露给 VideoPlayerPip，让画中画能插入到顶层 Overlay
                 navigatorKey: VideoPlayerPip.navigatorKey,
+                // ── 路由深度观察者（音乐底栏判"根页面 vs 子页面"）──────
+                //
+                // 🔴 音乐底栏原来靠 `MusicRootView.isMounted` 判断，
+                //    而它在 `IndexedStack` 里**永不销毁** → 永远为 true
+                //    → **子页面也画导航栏**（用户实测反馈：
+                //    "关闭了子页面浮动导航栏结果还是不行"）。
+                //    见 `MusicRouteObserver` 的注释。
+                navigatorObservers: [MusicRouteObserver()],
                 // ── ⚠️ 这里原来会**换 key 销毁重建整个 ContentView** ──────
                 //
                 //   key: ValueKey('root-$effectiveLight-$paletteRev')

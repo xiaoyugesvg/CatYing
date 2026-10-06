@@ -2,7 +2,6 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../pages/player_page.dart';
@@ -11,7 +10,6 @@ import 'mini_player.dart';
 import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../../services/app_log.dart';
-import '../../services/main_tab_controller.dart';
 import '../../widgets/video_player_pip.dart';
 
 /// **可拖动的悬浮播放球**（音乐模块）。
@@ -70,35 +68,46 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
 
   @override
   Widget build(BuildContext context) {
-    // 自定义样式（图片/GIF）与 tab 判断一起在这里生效
+    // 自定义样式（图片/GIF）在这里生效
     MusicFloatingBallStyle.instance.init();
-    // ── 只在**音乐模块**里显示 ──────────────────────────────────────
-    // 音乐本身是一个主 tab（`MainTabController.musicTabIndex`），而
-    // **push 音乐子页面不会改变当前 tab** —— 所以：
-    //   · 歌单详情 / 喜马拉雅专辑 / 本地音乐 / 队列 里它照样在 ✓
-    //   · 切到影视 / 直播 / 阅读 tab 时**自动隐藏** ✓
-    // 这样就不必给 5 个页面各挂一次（那种做法还容易漏）。
-    return Obx(() {
-      if (!Get.isRegistered<MainTabController>() ||
-          MainTabController.instance.selectedTab.value !=
-              MainTabController.musicTabIndex) {
-        // 🔴 切走音乐 tab 时**复位展开态**：这个 State 在切 tab 时不会被销毁
-        //（`SizedBox.shrink()` 只是不渲染子树 ✗）→ 去影视 tab 待一会儿再回音乐，
-        // 悬浮球会**莫名处于展开状态** ✗。build 期间不能 setState → 后置回调 ✓
-        if (_open || !_tucked) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && (_open || !_tucked)) {
-              setState(() {
-                _open = false;
-                _tucked = true;
-              });
-            }
-          });
-        }
-        return const SizedBox.shrink();
-      }
-      return _ball(context);
-    });
+
+    // ── 🔄 用户 2026 要求：**所有模块都显示**（改成全局悬浮球）────────
+    //
+    // 原来这里有一道"只在音乐模块显示"的判断：
+    // ```dart
+    // if (MainTabController.instance.selectedTab.value != musicTabIndex) {
+    //   return const SizedBox.shrink();
+    // }
+    // ```
+    // 理由（旧注释）是"切到影视/阅读时自动隐藏"。
+    //
+    // 用户实测后明确要求：**希望所有模块都显示** ——
+    // 这样在影视 / 直播 / 阅读里也能一眼看到"正在放什么"、
+    // 直接暂停或点进播放器，不用先切回音乐 tab。
+    //
+    // 它本来就挂在 `app.dart` 的全局 Stack（`MusicFloatingPlayButton`
+    // 与背景层同层）→ **天然覆盖所有路由与所有模块**，
+    // 所以这里**只需要把 tab 判断去掉**，不需要改挂载点。
+    //
+    // ⚠️ 保留的仍是"有歌才显示"（见下面 `_ball` 里
+    //    `if (song == null) return SizedBox.shrink();`）——
+    //    没在播时屏幕上不该挂个球。
+    //
+    // ── ⚠️ 但**全屏播放器打开时也要隐藏**（否则球会盖住播放器自己 ──
+    //    的操作栏）────────────────────────────────────────────────
+    // 播放器是全屏模态页，底部有它自己的操作栏
+    //（列表循环 / 收藏 / 上一首 / 歌词 / 下一首 / 设置），
+    // 而这个球挂在**所有路由之上**（`app.dart` 全局 Stack）。
+    // 球默认停在右下、离底约 96px —— 正好压在那排按钮上。
+    //
+    // 这是用户已经报过的同一类问题（"播放器底部被全局底栏盖住"），
+    // 所以这里用同一个标记让球也让位：`MusicPlayerPage.isOpen`。
+    // 播放器里本来就有完整的播放控制，球是多余的。
+    return ValueListenableBuilder<bool>(
+      valueListenable: MusicPlayerPage.isOpen,
+      builder: (context, open, _) =>
+          open ? const SizedBox.shrink() : _ball(context),
+    );
   }
 
   Widget _ball(BuildContext context) {

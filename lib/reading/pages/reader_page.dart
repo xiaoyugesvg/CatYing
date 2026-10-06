@@ -2444,6 +2444,11 @@ class _ReaderPageState extends State<ReaderPage> {
   /// 翻页模式：PhotoViewGallery 逐页翻页（横向=左右翻页，竖向=上下翻页）
   Widget _buildPagedGallery({Axis scrollDirection = Axis.horizontal}) {
     if (_isDoublePage) return _buildDoublePageGallery();
+    // [PATCH-3] 让「双指缩放」开关真正生效。
+    // 此前 PhotoViewGallery 的 min/maxScale 写死，而 settings_service.dart
+    // 的 pinchZoom / rememberZoom 在整个 pages/ + widgets/ 里没有任何消费点，
+    // 表现为「开关关掉了照样能放大」。
+    final allowZoom = SettingsService().pinchZoom;
     return GestureDetector(
       onTapUp: _handleTap,
       child: PhotoViewGallery.builder(
@@ -2457,7 +2462,10 @@ class _ReaderPageState extends State<ReaderPage> {
                 : _imageProviderOf(_images[index]),
             initialScale: PhotoViewComputedScale.contained,
             minScale: PhotoViewComputedScale.contained,
-            maxScale: PhotoViewComputedScale.covered * 2,
+            // 关掉开关时 maxScale 与 contained 相同 → 无法放大。
+            maxScale: allowZoom
+                ? PhotoViewComputedScale.covered * 2
+                : PhotoViewComputedScale.contained,
             heroAttributes: PhotoViewHeroAttributes(tag: 'image_$index'),
             errorBuilder: (context, error, stackTrace) => Center(
               child: Column(

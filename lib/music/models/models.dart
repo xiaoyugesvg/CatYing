@@ -101,7 +101,15 @@ enum SongSource {
   // 映射：**专辑 → Album，单集 → Song**（`id`=trackId、`artists`=专辑名/主播）。
   // 播放时 Node 侧返回的是集自带直链，但**必须带 User-Agent 才能播**
   //（所以 `MusicUrlInfo` 还要把 headers 透传给播放器）。
-  ximalaya('ximalaya', '喜马拉雅');
+  ximalaya('ximalaya', '喜马拉雅'),
+  // 博看听书：有声书 / 听书（与喜马拉雅同形态：专辑 → 单集）。
+  // 与喜马拉雅的差别：**纯 Dart 直连博看官方接口**（不走 Node），
+  // 单集直链在 `bookanAlbum()` 时直接填进 `Song.directUrl`。
+  bookan('bookan', '博看听书'),
+  // 275听书：HTML 站 + PHP 会话。专辑/单集来自页面解析，
+  // 单集 `directUrl` 填**播放页 URL**，播放时由 `book275Resolve`
+  // 解析出真实音频直链（含 lrts 懒人听书 token 解析）。
+  book275('book275', '275听书');
 
   const SongSource(this.key, this.displayName);
   final String key;
@@ -144,6 +152,18 @@ class Song {
   ///    字符串原生 id 单独一列，缺省空串（等于"这个平台不需要"）。
   final String songmid;
 
+  /// **直接音频直链**（可空，默认空串）。
+  ///
+  /// 用于**不走 Node 取址**的数据源：博看听书（纯 Dart 直连）在
+  /// `bookanAlbum()` 时把单集 `file` 直链直接填进来，播放器解析地址时
+  /// 优先用它，不再调用 Node 的 `url` action。
+  ///
+  /// 空串 = 走常规取址链路（内置接口 / 音源记忆 / 第三方源）。
+  final String directUrl;
+
+  /// 直链需要带的请求头（如博听的 UA）。与 [directUrl] 配合使用。
+  final Map<String, String> directHeaders;
+
   const Song({
     required this.id,
     required this.name,
@@ -154,6 +174,8 @@ class Song {
     this.source = SongSource.netease,
     this.fee = 0,
     this.songmid = '',
+    this.directUrl = '',
+    this.directHeaders = const {},
   });
 
   String get formattedDuration {
@@ -184,6 +206,8 @@ class Song {
         'source': source.key,
         'fee': fee,
         'songmid': songmid,
+        'directUrl': directUrl,
+        'directHeaders': directHeaders,
       };
 
   factory Song.fromJson(Map<String, dynamic> j) => Song(
@@ -224,6 +248,9 @@ class Song {
               const ['songmid', 'mid', 'hash', 'fileHash', 'FileHash'],
             ) ??
             '',
+        // 博听直链（bookanAlbum 填充）：JSON 里可能是空串或缺失，容忍。
+        directUrl: (j['directUrl'] ?? '').toString(),
+        directHeaders: _stringMap(j['directHeaders']),
       );
 
   /// 按顺序取第一个非空字符串字段（兼容不同接口的字段命名）。
@@ -253,6 +280,21 @@ class Song {
       if (s.isNotEmpty) return s;
     }
     return null;
+  }
+
+  /// 把 JSON 里的 headers 字段容错转成字符串映射。
+  ///
+  /// 可能是缺失 / null / 空 Map / `{ 'User-Agent': '…' }`。坏数据一律给空表，
+  /// 不因一条坏记录崩掉整个列表。
+  static Map<String, String> _stringMap(dynamic v) {
+    if (v is Map) {
+      final out = <String, String>{};
+      for (final e in v.entries) {
+        if (e.value != null) out[e.key.toString()] = e.value.toString();
+      }
+      return out;
+    }
+    return const {};
   }
 
   static String listToJson(List<Song> list) =>

@@ -29,6 +29,7 @@ import 'reading/services/zlibrary_service.dart';
 import 'reading/services/remote_config_service.dart';
 import 'reading/models/book_source.dart';
 import 'reading/services/tts_service.dart';
+import 'music/services/now_playing_service.dart';
 import 'music/services/settings_store.dart';
 import 'music/services/player_manager.dart';
 import 'music/services/download_service.dart';
@@ -157,6 +158,17 @@ void main() async {
   // 所以它要排在主题之前，保证首帧就有正确的强调色与音源数据。
   await SettingsStore.instance.init();
   await MusicThemeStore.instance.init();
+
+  // ── 锁屏 / 控制中心 / 耳机按键 的媒体控制（用户 2026 要求）──────────
+  //
+  // 原生侧在 `ios/Runner/MusicNowPlaying.swift`（由 AppDelegate 注册），
+  // 这里只是**开始跟随播放器**：换歌/播放态变化时把元数据推给系统，
+  // 并接收系统的播放/暂停/上下首/拖动。
+  //
+  // ⚠️ 必须在音乐初始化之后调 —— 它会立刻同步一次当前状态。
+  // ⚠️ 桌面/单测环境没有原生侧，它会静默忽略（见 `_invoke` 的
+  //    `MissingPluginException` 处理），不会崩。
+  NowPlayingService.instance.start();
 
   // ── 统一主题（影视/直播/音乐/阅读 分模块配色）─────────────────
   // 顺序要求：必须在 SettingsService().init() 之后 ——

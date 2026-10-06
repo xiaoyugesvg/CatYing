@@ -82,9 +82,50 @@ class CmbokConstants {
     //   zh.z-lib.gd · zh.zlib.li · zh.z-library.sk · zh.z-lib.rest
     //   z-library.website · z-lib.fm · z-lib.sk · z-library.qa · z-library.im
     //   z-library.gy · z-lib.by · intl.su · zh.101su.ru · zh.zlibrary.by
-    'z-library.my',
-    'zh.intcn.online',
-    // ④ 已知不可用，仅作老配置兼容（最后兜底）
+    // ── [PATCH-4] 默认候选 = 上游云端 url_config.json 的实测可用节点 ──────
+    //
+    // 依据（上游自己放在 GitHub 上的数据）：
+    //   https://cdn.jsdelivr.net/gh/hlning/cmbok@main/url_config.json
+    //   zlibrary_url = ["free2read.cc","26h2.tech","86110101.xyz","loves.works",
+    //                   "toffeeboba.com","zh.zlibrary.by","zlib.bz"]
+    //
+    // 逐节点实测（GET https://<域名>/eapi/book/most-popular，20s 超时）：
+    //   ✅ 26h2.tech        HTTP 200  2.3s  {"success":1,"books":[100 条]}
+    //   ✅ 86110101.xyz     HTTP 200  1.9s  {"success":1,"books":[100 条]}
+    //   ✅ loves.works      HTTP 200  3.5s  {"success":1,"books":[100 条]}
+    //   ✅ toffeeboba.com   HTTP 200  1.7s  {"success":1,"books":[100 条]}
+    //   ✅ zlib.bz          HTTP 200  2.6s  {"success":1,"books":[100 条]}
+    //   ❌ free2read.cc     TLS 握手失败
+    //   ⚠️ zh.zlibrary.by   HTTP 301（重定向到新域名，由 _maybeRedirect 自动接管）
+    //
+    // ⚠️ 被替换掉的两个旧默认节点（实测均失效，故移出默认列表）：
+    //   · z-library.my   —— 首页 200（115 KB）但 **/eapi/book/most-popular 返回 HTTP 521**
+    //     （Cloudflare: web server is down）；且首页所有书籍链接都指向 /profile、
+    //     封面走外部 isbncoverdb.com ⇒ **假站/SEO 克隆**特征。
+    //     它的首页 200 会让 _probeUrl 判"可用"（假阳性），真实 eapi 请求却拿不到 JSON
+    //     ⇒ 推荐/搜索恒空。用户仍可在「节点管理」手动加回。
+    //   · zh.intcn.online —— 根路径仅 5.6 KB，非 eapi 主机。
+    // ── [PATCH-18] aiset-zlibrary(icodebase-cn, MIT) 项目实测可用的域名 ──
+    // 依据：该项目 README/scripts/download.py 全程使用 `https://zh.zlib.li/`，
+    // 我用它的域名实测 eapi（与线上书源同款请求）：
+    //   zh.zlib.li  /eapi/book/most-popular → HTTP 200  2.8s  success=1  books=100
+    //   zlib.li     /eapi/book/most-popular → HTTP 200  2.9s  success=1  books=100
+    // ⚠️ 两站**首页都返回 503**，但 eapi 完全可用 ⇒ 再次印证"探首页判健康"
+    //    会误杀可用节点（zlibrary_service._probeUrl 的判定需以 eapi 为准）。
+    // ⚠️ `zh.zlib.li` 原先在本项目里被注释为"已知不可用"删掉了 —— 实测是错的。
+    // ── [PATCH-20] 来自官方接口 `/eapi/info/domains` 的当前域名（实测）──
+    //   article.sk   /eapi/book/most-popular → 200 2.3s books=100，/eapi/info → books=33577617
+    //   articles.sk  /eapi/book/most-popular → 200 2.7s books=100，/eapi/info → books=33577617
+    //   z-library.sk / 1lib.sk → 307 重定向（由 _maybeRedirect 接管，故不列入默认但会由自愈拉回）
+    'article.sk',
+    'articles.sk',
+    'zh.zlib.li',
+    'zlib.li',
+    '26h2.tech',
+    '86110101.xyz',
+    'loves.works',
+    'toffeeboba.com',
+    'zlib.bz',
   ];
 
   /// 每页加载数量

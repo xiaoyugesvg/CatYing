@@ -11,18 +11,24 @@ import '../widgets/music_components.dart';
 import '../widgets/discover_sections.dart';
 import 'playlist_detail_page.dart';
 import 'ximalaya_album_page.dart';
+import 'bookan_album_page.dart';
+import 'bookan_category_page.dart';
+import 'book275_album_page.dart';
+import 'book275_category_page.dart';
 import '../../widgets/app_page_loading.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/app_empty_view.dart';
 import '../../common/theme.dart';
 import '../../services/app_log.dart';
 
-/// 发现页（主页）—— 支持多平台：网易云 / 酷狗 / 喜马拉雅
+/// 发现页（主页）—— 支持多平台：网易云 / 酷狗 / 喜马拉雅 / 博看听书 / 275听书
 ///
 /// 各平台主页内容不同：
 ///   · 网易云：新歌速递 + 推荐歌单 + 排行榜 + 歌单广场
 ///   · 酷狗：新歌速递 + 排行榜（推荐歌单/歌单广场接口不支持）
 ///   · 喜马拉雅：分类浏览 + 热门专辑（有声书/播客形态）
+///   · 博看：分类浏览 + 各分类热门专辑（有声书，纯 Dart 直连）
+///   · 275：分类浏览 + 最近上架（有声小说，HTML 站 + PHP 会话）
 class DiscoverPage extends StatefulWidget {
   const DiscoverPage({super.key});
 
@@ -88,6 +94,12 @@ class _DiscoverPageState extends State<DiscoverPage>
   List<Song> _xmFeatured = const []; // 精选专辑（取若干分类的头部内容）
   String _xmFeaturedCat = '';
 
+  // 博看听书数据（纯 Dart 直连，见 MusicApi.bookan*）
+  List<Song> _bkFeatured = const []; // 热门推荐（各分类头部合并）
+
+  // 275听书数据（纯 Dart 直连，见 MusicApi.book275*）
+  List<Song> _b275Featured = const []; // 最近上架（首页）
+
   bool _loading = true;
   String _error = '';
 
@@ -123,6 +135,10 @@ class _DiscoverPageState extends State<DiscoverPage>
     try {
       if (_source == SongSource.ximalaya) {
         await _loadXimalaya();
+      } else if (_source == SongSource.bookan) {
+        await _loadBookan();
+      } else if (_source == SongSource.book275) {
+        await _loadBook275();
       } else if (_source == SongSource.qq) {
         await _loadQQ();
       } else {
@@ -247,6 +263,24 @@ class _DiscoverPageState extends State<DiscoverPage>
     }
   }
 
+  // ── 博看听书 ──────────────────────────────────────────────────
+
+  Future<void> _loadBookan() async {
+    // 热门推荐：各分类第一页头部合并（上限 30，容错：单分类失败跳过）
+    final r = await api.bookanHome();
+    if (!mounted) return;
+    setState(() => _bkFeatured = r);
+  }
+
+  // ── 275听书 ──────────────────────────────────────────────────
+
+  Future<void> _loadBook275() async {
+    // 最近上架 = 首页卡片
+    final r = await api.book275Home();
+    if (!mounted) return;
+    setState(() => _b275Featured = r);
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -360,7 +394,29 @@ class _DiscoverPageState extends State<DiscoverPage>
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
         child: Container(
-          height: 108,
+          // ── 🔴 高度必须**随字号**算，不能写死 108（修黄黑溢出条纹）────
+          //
+          // 用户实测：这张卡（「每日推荐」/「私人漫游」）文字下面出现
+          // **黄黑相间的溢出标记**。根因就是这里的固定高度：
+          //   内容 = 上内边距 12 + 图标 18 + 弹性间距 + 标题(19) + 3 + 副标题(12) + 下内边距 12
+          //   `Spacer` 在"内容已经超了"时会被压成 0，于是最小需求 ≈ 76 + 文字高
+          //   字号 x1.5 时需求 ≈ **119.3 > 108** → `RenderFlex overflowed by 4.0 pixels
+          //   on the bottom`（测试已复现，见 `music_bottom_overflow_test`）
+          //
+          // 现在按 `textScalerOf` 把文字那部分的增长算进去，
+          // 并保留 108 作为**基准**（字号 1.0 时高度与原来完全一致，
+          // 不会让布局跳变）。
+          //
+          // ⚠️ 与项目里其它网格一致的做法：按可用宽度/字号算尺寸，
+          //    不用固定值（`library_page` / `ximalaya_category_page` 同款注释）。
+          height: () {
+            final ts = MediaQuery.textScalerOf(context);
+            // 图标行 + 各段间距 + 上下内边距 = 76（字号 1.0 下与原来一致）
+            const base = 76.0;
+            // 文字部分（标题 19 + 间距 3 + 副标题 12）随字号增长
+            const textBase = 19.0 + 3 + 12;
+            return base + ts.scale(textBase);
+          }(),
           color: MusicTheme.tint.withValues(alpha: 0.14),
           child: Stack(
             fit: StackFit.expand,
@@ -390,10 +446,15 @@ class _DiscoverPageState extends State<DiscoverPage>
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Icon(icon, size: 18, color: iconColor),
-                    const Spacer(),
+                    // ⚠️ 原来是 `Spacer()` —— 它只在"还有富余空间"时撑开；
+                    //    内容一旦超出就被压成 0，**把溢出藏起来看不出原因**。
+                    //    高度已经按字号算准（见上面 `height:`），
+                    //    这里用固定间距，语义更清楚。
+                    const SizedBox(height: 6),
                     Text(title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -536,6 +597,8 @@ class _DiscoverPageState extends State<DiscoverPage>
       _SourceTab(source: SongSource.qq, label: 'QQ音乐'),
       _SourceTab(source: SongSource.kugou, label: '酷狗'),
       _SourceTab(source: SongSource.ximalaya, label: '喜马拉雅'),
+      _SourceTab(source: SongSource.bookan, label: '博看'),
+      _SourceTab(source: SongSource.book275, label: '275'),
     ];
     final isPaper = style.preset == DiscoverPreset.paper;
     return Padding(
@@ -708,6 +771,12 @@ class _DiscoverPageState extends State<DiscoverPage>
   List<Widget> _buildSections(DiscoverStyle style) {
     if (_source == SongSource.ximalaya) {
       return _buildXimalayaSections();
+    }
+    if (_source == SongSource.bookan) {
+      return _buildBookanSections();
+    }
+    if (_source == SongSource.book275) {
+      return _buildBook275Sections();
     }
     if (_source == SongSource.qq) {
       return _buildQQSections();
@@ -1321,6 +1390,156 @@ class _DiscoverPageState extends State<DiscoverPage>
               );
             },
             childCount: _xmCategories.length,
+          ),
+        ),
+      ));
+    }
+
+    return out;
+  }
+
+  /// 博看听书板块：热门推荐（各分类头部合并）+ 全部分类。
+  List<Widget> _buildBookanSections() {
+    final out = <Widget>[];
+
+    // 热门推荐
+    if (_bkFeatured.isNotEmpty) {
+      out.add(const SliverToBoxAdapter(
+          child: SectionTitle(title: '热门推荐')));
+      out.add(SliverToBoxAdapter(
+        child: HorizontalCards(
+          itemCount: _bkFeatured.length,
+          height: 212,
+          itemWidth: 152,
+          itemBuilder: (c, i) {
+            final s = _bkFeatured[i];
+            return CoverCard(
+              coverUrl: s.coverUrl,
+              title: s.name,
+              subtitle: s.artists,
+              width: 152,
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) => BookanAlbumPage(
+                    albumId: s.id.toString(),
+                    albumName: s.name,
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ));
+    }
+
+    // 全部分类（博看分类是固定配置，无需网络）
+    final cats = MusicApi.bookanCategories;
+    if (cats.isNotEmpty) {
+      out.add(const SliverToBoxAdapter(
+          child: SectionTitle(title: '全部分类')));
+      out.add(SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        sliver: SliverGrid(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 12,
+            mainAxisExtent: () {
+              final ts = MediaQuery.textScalerOf(context);
+              final textH = ts.scale(AppTheme.fontBody) * 1.4;
+              return (36.0 + 12 * 2) > textH + 12 * 2
+                  ? 36.0 + 12 * 2 + 4
+                  : textH + 12 * 2 + 4;
+            }(),
+          ),
+          delegate: SliverChildBuilderDelegate(
+            (c, i) {
+              final cat = cats[i];
+              return _CategoryTile(
+                name: cat.name,
+                onTap: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => BookanCategoryPage(),
+                  ),
+                ),
+              );
+            },
+            childCount: cats.length,
+          ),
+        ),
+      ));
+    }
+
+    return out;
+  }
+
+  /// 275听书板块：最近上架（首页）+ 全部分类。
+  List<Widget> _buildBook275Sections() {
+    final out = <Widget>[];
+
+    // 最近上架
+    if (_b275Featured.isNotEmpty) {
+      out.add(const SliverToBoxAdapter(
+          child: SectionTitle(title: '最近上架')));
+      out.add(SliverToBoxAdapter(
+        child: HorizontalCards(
+          itemCount: _b275Featured.length,
+          height: 212,
+          itemWidth: 152,
+          itemBuilder: (c, i) {
+            final s = _b275Featured[i];
+            return CoverCard(
+              coverUrl: s.coverUrl,
+              title: s.name,
+              subtitle: s.artists,
+              width: 152,
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) => Book275AlbumPage(
+                    bookId: s.id.toString(),
+                    albumName: s.name,
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ));
+    }
+
+    // 全部分类（275 分类是固定配置，无需网络）
+    final cats = MusicApi.book275Categories;
+    if (cats.isNotEmpty) {
+      out.add(const SliverToBoxAdapter(
+          child: SectionTitle(title: '全部分类')));
+      out.add(SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        sliver: SliverGrid(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 12,
+            mainAxisExtent: () {
+              final ts = MediaQuery.textScalerOf(context);
+              final textH = ts.scale(AppTheme.fontBody) * 1.4;
+              return (36.0 + 12 * 2) > textH + 12 * 2
+                  ? 36.0 + 12 * 2 + 4
+                  : textH + 12 * 2 + 4;
+            }(),
+          ),
+          delegate: SliverChildBuilderDelegate(
+            (c, i) {
+              final cat = cats[i];
+              return _CategoryTile(
+                name: cat.name,
+                onTap: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => Book275CategoryPage(),
+                  ),
+                ),
+              );
+            },
+            childCount: cats.length,
           ),
         ),
       ));

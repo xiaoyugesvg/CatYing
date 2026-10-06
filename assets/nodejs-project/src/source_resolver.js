@@ -288,7 +288,54 @@ async function resolveMusicFree(source, song) {
         };
     }
 
-    const buildItem = (id, extra) => {
+    // ── 🔴 必须把 `_src` 一起给插件（修一个"MusicFree 插件全失败"）──────
+    //
+    // 用户实测反馈：「酷狗音乐里面，一个第三方源都用不了？」
+    // 实测结论（探针）：**洛雪系（huibq.js）6/6 成功，MusicFree 插件 6/6 失败**
+    //   失败文案：`酷狗取链失败：未取得播放链接`
+    //
+    // 根因（读插件源码得到）：
+    //   `kugou-source.plugin` 的 `getMediaSource` → `resolveWithFallback`：
+    //   ```js
+    //   var srcMap = musicItem._src || {};        // ← 它只从 `_src` 取源
+    //   var order  = pickCandidates(srcMap, quality);
+    //   var tries  = order.slice(0, 3);
+    //   // srcMap 为空 → tries 为空 → 直接 reject
+    //   //   → "酷狗取链失败：未取得播放链接"
+    //   ```
+    //   而它自己 `search()` 产出的 item 是：
+    //   `{ id:'kr_<hash>', title, artist, …, _src: { kugou: { hash, hash320,
+    //      hashSq, hashHires, mixsongid } } }`
+    //   —— 也就是说 **`_src` 才是它取地址的真正入口**，
+    //      顶层那个扁平的 `hash` 它**根本没读** ✗
+    //
+    // 而我们这边（Dart `Song` → 这里的 `musicItem`）**只有扁平字段**
+    //（`buildItem` 的注释还写着"酷狗系插件 → `musicItem.hash`"，那是**猜的**）。
+    // 于是：**插件拿不到 `_src` → 一律失败**。
+    //
+    // 修法：按歌曲的**原生平台**补一个最小可用的 `_src`。
+    //   ⚠️ 我们只知道"这首在酷狗上的 hash"这一个值（Dart 侧把它统一收进了
+    //      `song.songmid`），拿不到插件内部那套 320/SQ/HiRes 多档 hash ——
+    //      所以只填**基础档** `hash`。插件多数通道用它就能取到免费档，
+    //      高音质档取不到时会自己降级（它本来就有 fallback 链）。
+    const srcMapForPlugin = (() => {
+        const v = midForPlugin != null ? String(midForPlugin) : '';
+        if (!v) return null;
+        // LX 平台码 → 插件 `_src` 的键名。
+        // 实测酷狗插件用 `kugou`；其余按各家惯例给（给错了也只是不被读，无副作用）。
+        const key = {
+            kg: 'kugou',
+            kw: 'kuwo',
+            tx: 'qq',
+            wy: 'netease',
+            mg: 'migu',
+        }[platform];
+        if (!key) return null;
+        return { [key]: { hash: v, songmid: v } };
+    })();
+
+    // [withSrc] 见下面 `_src` 的说明：**只有首选 item 该带它**。
+    const buildItem = (id, extra, withSrc = true) => {
         const v = id != null ? String(id) : '';
         return {
             id: v,
@@ -298,7 +345,7 @@ async function resolveMusicFree(source, song) {
             //   · 元力音源   → `musicItem.songmid`
             //   · 星海音乐源 → 报错文案就是"**缺少 songmid 或 hash**"
             //                 → 它**两个都认**，但必须有一个有值
-            //   · 酷狗系插件 → `hash`
+            //   · 酷狗系插件 → **其实读的是 `_src.kugou.hash`**（见上面说明）
             // 所以这里把同一个值同时写进 songmid / hash / mid，
             // **不要**只写一个 —— 那会让"换个插件就播不了"。
             //（代价只是几个重复字段，换来跨插件兼容。）
@@ -310,6 +357,12 @@ async function resolveMusicFree(source, song) {
             artist: song && song.artists ? String(song.artists) : '',
             album: song && song.album ? String(song.album) : '',
             source: platform,
+            // ⚠️ 只有**首选 item**（用真实原生 mid 构造的那次）才带 `_src`；
+            //    自搜回退拿到的候选**本身就是插件给的**，它自带 `_src`
+            //   （插件的 `search()` 产出的 item 里就有），
+            //    如果被这里的 `_src` 覆盖，反而会丢掉它自己的多档 hash
+            //   （hash320 / hashSq / hashHires）。
+            ...(withSrc && srcMapForPlugin ? { _src: srcMapForPlugin } : {}),
             ...(extra || {}),
         };
     };
@@ -384,12 +437,13 @@ async function resolveMusicFree(source, song) {
                     const cand = normalizeSearchResult(sr.result).list || [];
                     // 逐个候选试（第一首未必对，但通常前几个里就有）
                     for (const c of cand.slice(0, 3)) {
+                        // ⚠️ 第三参 `false`：候选自带 `_src`（见 buildItem 说明）
                         const alt = buildItem(c.id, {
                             name: c.name || (song && song.name) || '',
                             singer: c.artist || (song && song.artists) || '',
                             artist: c.artist || (song && song.artists) || '',
                             album: c.album || (song && song.album) || '',
-                        });
+                        }, false);
                         const r2 = await invoke(alt);
                         if (!r2.ok) continue;
                         const m2 = normalizeMedia(r2.result);

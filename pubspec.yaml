@@ -79,6 +79,8 @@ dependencies:
   xpath_selector: ^3.0.2
   xpath_selector_html_parser: ^3.0.1
   fast_gbk: ^1.0.0
+  # [PATCH-5] 同步 HTTP：java.ajax 的同步抓取用（纯 Dart，无原生插件）
+  sync_http: ^0.3.0
   # cached_network_image 3.3.1 已移除（A2）：它与 cached_network_image_ce
   # 是**两条平行的完整实现**（各带 platform_interface / web 子包），
   # 同时编译进 App 且各自维护磁盘缓存 → 同一个网络图在影视和音乐会存两份。
@@ -110,7 +112,29 @@ flutter:
     - assets/images/
     # 出厂内置漫画源（15 个官方源明文，装上即有源；文档目录 sources.json 云端覆盖层优先）
     - assets/config/
+    # ── 🔴 出厂内置**音乐源**（之前漏声明 → 从没打进包）───────────────
+    #
+    # 用户 2026 要求：「这些源全部要加进去」（MusicFree 官方索引里的 50 个）。
+    #
+    # 原来这一条**不存在**：
+    #   · `assets/music/lx/`          10 个洛雪源
+    #   · `assets/music/musicfree/`   50 个 MusicFree 插件 + `.index.json`
+    # 两者都只在磁盘上、**从未被 pubspec 声明** →
+    # `rootBundle.loadString('assets/music/…')` 在**真机/发布包**里必然失败 →
+    # 而 `BuiltinSourcesService._loadMusicFreeSources()` 里
+    # `catch (_) { script = null; }` 把它**静默吞掉**
+    #（这就是为什么"内置源加载失败"一直没被发现）。
+    #
+    # ⚠️ 目录式声明**要带结尾 `/`**，Flutter 会递归收录该目录下所有文件。
+    #    这样以后往这两个目录里加源，**不用再改 pubspec**。
+    - assets/music/
+    - assets/music/lx/
+    - assets/music/musicfree/
 
 dependency_overrides:
   media_kit_libs_windows_video:
     path: .local_plugins/media_kit_libs_windows_video
+  # [PATCH-5] 书源 JS 引擎：vendor 到本地以便打补丁
+  # （文件头说明见 packages/quickjs_engine/VENDOR.md）
+  quickjs_engine:
+    path: packages/quickjs_engine

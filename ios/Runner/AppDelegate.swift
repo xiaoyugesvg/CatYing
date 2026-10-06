@@ -93,5 +93,24 @@ import AVFoundation
     } else {
       print("[AppDelegate] ❌ 无法获取 TtsEngine 的 registrar")
     }
+
+    // 注册**锁屏 / 控制中心 媒体控制**（音乐）
+    //
+    // 用户 2026 要求：「苹果系统层次不能控制呢？…不能在控制中心控制？」
+    // 原状是全项目 0 处 MPNowPlayingInfoCenter / MPRemoteCommandCenter →
+    // 锁屏和控制中心完全看不到音乐、也没法控制。
+    //
+    // 与上面几个同款模式：registrar(forPlugin:).messenger() 拿
+    // FlutterBinaryMessenger，MusicNowPlaying 内部建
+    // "tvbox/music_now_playing" MethodChannel。
+    //
+    // ⚠️ 它只写 nowPlayingInfo（元数据）并接收远程按键，
+    //    **不碰** BackgroundAudio 那个保活用的静音 buffer（见该文件注释）。
+    if let nowPlayingRegistrar =
+      engineBridge.pluginRegistry.registrar(forPlugin: "MusicNowPlaying") {
+      MusicNowPlaying.shared.register(messenger: nowPlayingRegistrar.messenger())
+    } else {
+      print("[AppDelegate] ❌ 无法获取 MusicNowPlaying 的 registrar")
+    }
   }
 }

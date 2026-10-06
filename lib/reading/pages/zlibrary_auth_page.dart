@@ -9,6 +9,7 @@ import '../widgets/staggered_entrance.dart';
 import '../../common/theme.dart';
 import '../../widgets/app_page_header.dart';
 import 'zlibrary_nodes_sheet.dart';
+import 'zlibrary_web_login_page.dart';
 
 /// z-library 登录/注册页面（扁平风、内容丰富、灵动）。
 /// 一个全屏页面内用分段切换在「登录 / 注册」间过渡。
@@ -121,6 +122,41 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
 
     setState(() => _loginError = null);
     final ok = await ZlibraryService().login(email, pwd);
+    // [PATCH-21] eapi 账号登录失败时给一条「网页登录」旁路：
+    // WebView 里登录官网 → 取会话 Cookie（remix_userid/remix_userkey）回灌。
+    // 与 aiset-zlibrary「浏览器登录一次、复用会话」同一思路；密码不经过 App。
+    if (!ok && mounted) {
+      final useWeb = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('账号登录失败'),
+          content: const Text('可能是 eapi 被拦截或当前网络受限。\n\n'
+              '可以改用「网页登录」：在应用内登录 Z-Library 官网，'
+              'App 只取会话 Cookie，不保存你的密码。'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('取消')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('网页登录')),
+          ],
+        ),
+      );
+      if (useWeb == true && mounted) {
+        final done = await Navigator.of(context).push<bool>(
+          MaterialPageRoute(
+            builder: (_) =>
+                ZlibraryWebLoginPage(domain: ZlibraryService().domain),
+          ),
+        );
+        if (done == true && mounted) {
+          _removeEmailOverlay();
+          Navigator.of(context).pop(true);
+          return;
+        }
+      }
+    }
     if (!mounted) return;
     if (ok) {
       _removeEmailOverlay();

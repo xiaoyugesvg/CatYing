@@ -15,6 +15,7 @@ import '../source/config_book_source.dart';
 import '../source/legado_to_config.dart';
 import '../source/global_proxy.dart';
 import '../utils/source_fail_text.dart';
+import 'book_source_dart_engine.dart';
 
 /// 书源搜索到的一本书。
 ///
@@ -257,6 +258,12 @@ class BookSourceService {
   static const int maxConcurrent = 10;
 
   Future<dynamic> _call(Map<String, dynamic> body) async {
+    // [PATCH-9] 先试 **Dart 原生 legado 引擎**（含 `@js:`/`<js>` 规则 + 同步宿主桥）。
+    // 返回 null（动作未接管 / 空结果 / 异常）⇒ 回落 Node 引擎，现行为不变。
+    // 背景：本层原先是「含 JS 的源必须走 Node」（`legadoNeedsNode`），
+    // 而 Dart 侧现在已有 quickjs 引擎与宿主方法表（补丁 0005/0007/0008）。
+    final dartHandled = await BookSourceDartEngine.instance.handle(body);
+    if (dartHandled != null) return dartHandled;
     final port = NodeJSManager.instance.managementPort;
     if (port <= 0) {
       if (!_portWarned) {

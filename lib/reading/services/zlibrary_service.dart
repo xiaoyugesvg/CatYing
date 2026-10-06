@@ -90,6 +90,8 @@ class ZlibraryService extends ChangeNotifier {
   static const _kUsername = 'zlibrary_username';
   static const _kRemixUserid = 'zlibrary_remix_userid';
   static const _kRemixUserkey = 'zlibrary_remix_userkey';
+  /// [PATCH-21] 网页登录会话的完整 Cookie 串（留档；登录态本身靠上面两个键）
+  static const _kWebSession = 'zlibrary_web_session';
 
   /// 内置账号全局每日限额 / 自有账号每日限额（对应 cmbook BUILTIN_DAILY_LIMIT / LOGGED_DAILY_LIMIT）
   static const int builtinDailyLimit = 5;
@@ -101,7 +103,20 @@ class ZlibraryService extends ChangeNotifier {
   static const _kCategories =
       'zlibrary_categories'; // JSON [{title,children:[{id,slug,zhName}]}]
   static const _kMaxRetries = 3; // 429/5xx 同域名退避重试次数
-  static const _kRetryStatus = {429, 500, 502, 503, 504};
+  // [PATCH-4] 退避重试的状态码。
+  //
+  // ⚠️ 必须包含 **Cloudflare 系 5xx**（520/521/522/523/524/525/527）：
+  //   镜像挂掉时 Cloudflare 返回的是 **521**（web server is down），而旧集合只有
+  //   {429,500,502,503,504} ⇒ 521 不在其中 ⇒ 落到 _send 末尾的"业务响应"分支
+  //   （`return _asJsonMap(resp.data)`）⇒ 去解析 Cloudflare 的错误 HTML ⇒ 0 条，
+  //   而且**永远不会切到下一个候选**。
+  //   实测：旧默认节点 z-library.my 的 /eapi/book/most-popular 正是返回 521。
+  //   加入后：521 退避重试到上限，再走 `status != 429` 分支**切下一候选** ✓。
+  static const _kRetryStatus = {
+    429,
+    500, 502, 503, 504,
+    520, 521, 522, 523, 524, 525, 527,
+  };
   static const _kHealthInterval = Duration(hours: 1);
 
   static const _browserUa =
@@ -153,6 +168,8 @@ class ZlibraryService extends ChangeNotifier {
   String _username = '';
   String _remixUserid = '';
   String _remixUserkey = '';
+  /// [PATCH-21] 网页登录原始 Cookie 串（仅留档/日志用；请求统一由 _cookies() 生成）
+  String _webSessionCookies = '';
 
   /// 自有账号服务端每日下载限额（来自 /eapi/user/profile；null=未取到，回退硬编码）
   int? _serverDownloadsLimit;
@@ -348,7 +365,34 @@ class ZlibraryService extends ChangeNotifier {
     _username = prefs.getString(_kUsername) ?? '';
     _remixUserid = prefs.getString(_kRemixUserid) ?? '';
     _remixUserkey = prefs.getString(_kRemixUserkey) ?? '';
+
+    // [PATCH-21] 网页登录会话（仅在登录态成立时恢复）
+
+    _webSessionCookies =
+
+        isLoggedIn ? (prefs.getString(_kWebSession) ?? '') : '';
     _candidates = _decodeCandidates(prefs.getString(_kCandidates));
+
+    // [PATCH-4b] 剔除**已知失效**节点（幂等，每次启动都跑，无需迁移标志）。
+    //
+    // 为什么必须有 ✗：上面 :341-343 对**持久化过的**域名会 `_domainPersisted = true`
+    // 并"尊重它不自动改" —— 于是**老用户**（SharedPreferences 里已存
+    // `zlibrary_domain = z-library.my` / 候选表里也有它）即使打了本补丁，
+    // 第一个请求仍会打到坏节点上。虽然 PATCH-4 的 521 处理最终会切候选，
+    // 但每次都要先白等一轮退避（2+4+8s）。
+    //   · 这里在内存里剔除坏节点（不写盘、不改用户手填的其它节点）；
+    //   · 当前域名本身是坏节点时清空它 + 取消"用户已设定"标记，
+    //     让后面的 _probeLocalCandidatesIfNeeded 重新选优，
+    //     成功节点由 _send() 里的 _persistDomain() 写回。
+    // 实测依据：z-library.my 的 /eapi/book/most-popular 返回 HTTP 521；
+    //          zh.intcn.online 根路径仅 5.6 KB，非 eapi 主机。
+    const _kKnownDeadNodes = {'z-library.my', 'zh.intcn.online'};
+    _candidates.removeWhere(_kKnownDeadNodes.contains);
+    if (_kKnownDeadNodes.contains(_domain)) {
+      _log('当前域名 $_domain 属已知失效节点，已清除并改为重新选优');
+      _domain = '';
+      _domainPersisted = false;
+    }
 
     // ── 🔴 种子候选：本地默认节点（修"开箱即不可用"）────────────────
     //
@@ -432,6 +476,8 @@ class ZlibraryService extends ChangeNotifier {
   /// 结果写回 `_domain` 并持久化。探测是并发 + <3s 提前返回，不会拖慢。
   Future<void> _probeLocalCandidatesIfNeeded() async {
     if (_candidates.isEmpty) return;
+    // [PATCH-20] 先向官方 eapi 要一次**最新域名列表**（自愈域名漂移），再走选优
+    await _discoverDomainsFromEapi();
     // 用户在设置页手填过域名（有持久化记录）就尊重它，不擅自改。
     //
     // ⚠️ 判据必须是"**从 prefs 读出来的**"，不能是 `_candidates.contains(_domain)`
@@ -454,6 +500,116 @@ class ZlibraryService extends ChangeNotifier {
     }
     _setUnavailable(false);
     notifyListeners();
+  }
+
+  /// [PATCH-20] 从官方 eapi 拉取**当前域名列表**并合并进候选（自愈域名漂移）。
+  ///
+  /// 依据（实测 2026-10-06，4 个可用镜像返回**完全一致**）：
+  /// ```
+  /// GET /eapi/info/domains →
+  /// {"success":1,"domains":[
+  ///    {"domain":"z-library.sk","contentAvailable":true,"isRedirector":false},
+  ///    {"domain":"1lib.sk","contentAvailable":true,"isRedirector":false},
+  ///    {"domain":"article.sk","contentAvailable":true,"isRedirector":false},
+  ///    {"domain":"articles.sk","contentAvailable":true,"isRedirector":false},
+  ///    {"domain":"proxy.zlibraryproxies.workees.dev",…}]}
+  /// ```
+  /// 这是**官方 Android App 自用**的接口（文档：baroxyton/zlibrary-eapi-documentation）。
+  /// 本项目此前只能靠硬编码 + 云端 `url_config.json`（国内常拉不到）
+  /// ⇒ 节点一漂移就全灭。有了它就能自愈。
+  ///
+  /// 附带价值：`/eapi/info` 返回站点真实规模（如 books=33577617）——
+  /// **SEO 克隆假站（如 z-library.my）不可能返回这种 JSON** ⇒ 可作"真主机"判据。
+  ///
+  /// 失败/超时一律静默：不阻塞 init、不影响既有选优流程。
+  Future<void> _discoverDomainsFromEapi() async {
+    try {
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 8),
+          receiveTimeout: const Duration(seconds: 8),
+          followRedirects: true,
+          validateStatus: (_) => true,
+          headers: {
+            'user-agent': _browserUa,
+            'accept': 'application/json, text/plain, */*',
+          },
+        ),
+      );
+      applyGlobalProxy(dio);
+      // 依次问最多 3 个候选（当前域名优先），第一个给出列表就够
+      for (final d in _candidateOrder().take(3)) {
+        final resp = await dio.get('https://$d/eapi/info/domains');
+        if (resp.statusCode != 200) continue;
+        final map = _asJsonMap(resp.data);
+        if (!_isTruthy(map['success'])) continue;
+        final list = map['domains'];
+        if (list is! List) continue;
+        var added = 0;
+        for (final it in list) {
+          if (it is! Map) continue;
+          final host = '${it['domain'] ?? ''}'.trim();
+          if (host.isEmpty) continue;
+          // 重定向器留作跳板意义不大（它只做 307），不主动加入候选
+          if (it['isRedirector'] == true) continue;
+          if (_candidates.contains(host)) continue;
+          _candidates.add(host);
+          added++;
+        }
+        if (added > 0) {
+          await _persistCandidates();
+          _log('官方 eapi 发现 $added 个新域名，候选共 ${_candidates.length} 个');
+          notifyListeners();
+        } else {
+          _log('官方 eapi 未给出新域名（源节点 $d）');
+        }
+        return;
+      }
+      _log('官方 eapi 域名发现：候选里没有能应答的节点（忽略）');
+    } catch (e) {
+      _log('官方 eapi 域名发现失败（忽略）：$e');
+    }
+  }
+
+  /// [PATCH-21] 把**网页登录会话**回灌为 eapi 登录态。
+  ///
+  /// 依据（官方 eapi 文档 `baroxyton/zlibrary-eapi-documentation`）：
+  /// > In some cases, it may also be necessary to provide the login as the
+  /// > cookies `remix_userid` and `remix_userkey`
+  /// ⇒ 拿到这两个 Cookie，**无需邮箱密码**即可让所有 eapi 请求进入已登录态
+  ///   （本类所有请求的 Cookie 都出自 [_cookies]，所以只要设好这两个字段，
+  ///    推荐/搜索/详情/下载就全部自动带上会话 ✓）。
+  /// 与 `icodebase-cn/aiset-zlibrary`（MIT）"浏览器登录一次、复用会话"同一思路。
+  ///
+  /// [cookieHeader] 形如 `a=1; remix_userid=123; remix_userkey=abc`。
+  /// 返回 true 表示成功解析并持久化了登录态。
+  Future<bool> applyWebSession(String cookieHeader) async {
+    final raw = cookieHeader.trim();
+    if (raw.isEmpty) return false;
+    final jar = <String, String>{};
+    for (final part in raw.split(';')) {
+      final i = part.indexOf('=');
+      if (i <= 0) continue;
+      jar[part.substring(0, i).trim().toLowerCase()] =
+          part.substring(i + 1).trim();
+    }
+    final uid = jar['remix_userid'] ?? jar['remix-userid'] ?? '';
+    final key = jar['remix_userkey'] ?? jar['remix-userkey'] ?? '';
+    if (uid.isEmpty || key.isEmpty) {
+      _log('网页登录会话缺少 remix_userid/remix_userkey（可能 HttpOnly），登录态不变');
+      return false;
+    }
+    _remixUserid = uid;
+    _remixUserkey = key;
+    _webSessionCookies = raw;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kRemixUserid, uid);
+    await prefs.setString(_kRemixUserkey, key);
+    await prefs.setString(_kWebSession, raw);
+    _log('网页登录会话已回灌（remix_userid=${uid.length > 4 ? uid.substring(0, 4) : uid}…）');
+    notifyListeners();
+    refreshUserProfile(); // fire-and-forget：用 /eapi/user/profile 校验会话是否生效
+    return true;
   }
 
   static String _defaultDomain() => RemoteConfigService().zlibraryDomain;
@@ -592,6 +748,8 @@ class ZlibraryService extends ChangeNotifier {
     _email = '';
     _username = '';
     _remixUserid = '';
+
+    _webSessionCookies = ''; // [PATCH-21]
     _remixUserkey = '';
     _serverDownloadsLimit = null;
     _serverDownloadsToday = 0;
@@ -1979,9 +2137,74 @@ class ZlibraryService extends ChangeNotifier {
     return completer.future;
   }
 
+  /// [PATCH-19] eapi 健康探测：`GET {base}/eapi/book/most-popular`。
+  ///
+  /// 判"可用"的条件（三者必须同时满足）：
+  ///   1. HTTP 200（其它状态码说明被 CF 拦或不是 z-library 主机）；
+  ///   2. 正文能解析成 JSON 且 `success` 为真（该字段是整数 1，用 `_isTruthy`）；
+  ///   3. `books` 是非空数组（镜像没同步数据时会是空/缺失 ⇒ 不算可用）。
+  ///
+  /// 连接异常重试 1 次（跨境网络抖动），仍失败返回 null 交给首页兜底。
+  Future<_Probe?> _probeEapi(Dio dio, String target, String url) async {
+    final base =
+        target.endsWith('/') ? target.substring(0, target.length - 1) : target;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final sw = Stopwatch()..start();
+        final resp = await dio.get(
+          '$base/eapi/book/most-popular',
+          options: Options(headers: {
+            'accept': 'application/json, text/plain, */*',
+          }),
+        );
+        final latency = sw.elapsedMilliseconds / 1000.0;
+        if (resp.statusCode == 200) {
+          final map = _asJsonMap(resp.data);
+          final books = map['books'];
+          if (_isTruthy(map['success']) && books is List && books.isNotEmpty) {
+            _log('探测器 eapi 判定 $url 可用（${books.length} 条，${latency}s）');
+            return _Probe(_finalHostOf(resp, target), latency);
+          }
+          _log('探测 $url eapi 返回 200 但无有效 books（镜像可能未同步）');
+        } else {
+          _log('探测 $url eapi 状态码 ${resp.statusCode}');
+        }
+        return null; // 有响应但内容不合格 ⇒ 交给首页兜底
+      } on DioException catch (e) {
+        _log('探测 $url eapi 第${attempt + 1}次失败: $e');
+        if (attempt == 1) return null;
+      } catch (e) {
+        _log('探测 $url eapi 异常: $e');
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /// 跟随重定向后的最终域名；无重定向则用 [target] 的 host。
+  String _finalHostOf(Response<dynamic> resp, String target) {
+    if (resp.redirects.isNotEmpty) {
+      final h = resp.redirects.last.location.host;
+      if (h.isNotEmpty) return h;
+    }
+    return Uri.tryParse(target)?.host ?? target;
+  }
+
   /// 探测单个节点可用性，跟随重定向，返回 (最终落地域名, 延迟秒)；不可用返回 null。
-  /// 能拿到 HTTP 响应即视为可用（zlibrary 根路径常返 503 但站点实际可用）。
-  /// 对应 cmbook StartupCheckThread._probe_zlibrary_url。
+  ///
+  /// ── [PATCH-19] 判据从"首页"改成 **eapi 优先** ──────────────────────
+  /// 实测依据（2026-10-06）：
+  /// ```
+  /// zh.zlib.li  首页 → HTTP 503      /eapi/book/most-popular → 200  success=1  books=100
+  /// zlib.li     首页 → HTTP 503      /eapi/book/most-popular → 200  success=1  books=100
+  /// ```
+  /// ⇒ 探首页会把**完全可用**的节点误判为不可用 —— 这正是此前把 `zh.zlib.li`
+  ///   从候选里删掉的原因。而本服务后续**所有**请求都走 eapi ⇒ eapi 才是
+  ///   正确的健康判据。
+  /// 顺序：① eapi（200 且 success 且 books 非空）→ ② 退回首页探测
+  ///   （兼容只提供网页、或 eapi 需登录态的镜像；CF 挑战页仍判不可用）。
+  /// 对应 cmbook StartupCheckThread._probe_zlibrary_url（其"根路径常返 503"
+  /// 的注释恰好说明首页判据不可靠）。
   Future<_Probe?> _probeUrl(String url) async {
     if (url.isEmpty) return null;
     final target = url.startsWith('http://') || url.startsWith('https://')
@@ -2004,6 +2227,12 @@ class ZlibraryService extends ChangeNotifier {
     //   至此 **z-library 的每一个请求都受「网络代理」开关控制** ✓✓；
     //   开关关着时 `applyGlobalProxy` **连适配器都不换** ✓（零副作用 ✓ 不影响其它模块 ✓）。
     applyGlobalProxy(dio);
+
+    // ── [PATCH-19] ① 先用 eapi 判健康（首页 503 但 eapi 200 的节点不能被误杀）──
+    final eapiProbe = await _probeEapi(dio, target, url);
+    if (eapiProbe != null) return eapiProbe;
+
+    // ── ② eapi 不通时退回首页探测（见方法头注释的取舍说明）──
     // 连接异常重试 1 次（对抗跨境网络瞬时抖动，避免单次超时误判不可用）
     for (var attempt = 0; attempt < 2; attempt++) {
       try {

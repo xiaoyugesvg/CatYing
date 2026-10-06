@@ -7,6 +7,7 @@ import '../services/settings_store.dart';
 import '../services/source_memory.dart';
 import '../theme/music_theme.dart';
 import '../widgets/floating_play_button.dart';
+import 'music_log_page.dart';
 import 'source_manager_page.dart';
 import '../../common/module_theme_store.dart';
 import '../../common/module_theme_sync.dart';
@@ -138,6 +139,30 @@ class ProfilePage extends StatelessWidget {
                 )),
               );
             },
+          ),
+          // ── 音乐运行日志（用户 2026 要求）────────────────────────
+          //
+          // 「源切换过程中源不能用的日志在哪看呢？"详情见日志"在哪呢？」
+          // 日志一直在写，但入口原来只在**阅读模块**的设置里 →
+          // 音乐这边报错让用户"见日志"，用户找不到 ✗
+          // 所以音乐「我的」页里也放一个，出错时一句话就能到。
+          ListTile(
+            leading: _iconBox(Icons.receipt_long_rounded),
+            title: Text('音乐运行日志',
+                style: TextStyle(
+                    color: MusicTheme.label,
+                    fontSize: AppTheme.fontHeadline)),
+            subtitle: Text(
+              '音源为什么失败、锁屏控制状态等（可复制）',
+              style: TextStyle(
+                  color: MusicTheme.secondary,
+                  fontSize: AppTheme.fontFootnote),
+            ),
+            trailing: Icon(Icons.chevron_right,
+                size: 18, color: MusicTheme.secondary),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const MusicLogPage(),
+            )),
           ),
           ]),
         ],

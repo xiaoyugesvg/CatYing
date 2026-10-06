@@ -135,17 +135,27 @@ class MusicPlayerManager extends ChangeNotifier {
 
   /// 失败摘要：告诉用户"试了 N 个源，M 个不行"。
   ///
-  /// ⚠️ 只给**数量级**信息，不把 12 条错误全塞进弹窗
-  ///（详情在 `UnblockService.lastAttempts`，失败时另有 toast/日志）。
-  /// 失败摘要：告诉用户"试了 N 个源，M 个不行"。
+  /// ⚠️ 只给**数量级**信息，不把每条错误都塞进弹窗。
   ///
   /// ⚠️ 必须传 [song]：`UnblockService` 的失败记录是**跨调用共享**的，
   /// 不按歌过滤就会把**别的歌**的失败条数算进来
   ///（快速连点两首歌时"摘要里说 12 个源失败"，而这首歌其实只试了 6 个）。
+  ///
+  /// ── 🔴 必须写清"日志在**哪**"（修用户实测反馈）──────────────────
+  /// 用户原话：「那个源切换过程中源不能用的日志在哪看呢？…详情见日志在哪呢？」
+  ///
+  /// 原来只写「（详情见日志）」—— **用户根本不知道日志在哪** ✗。
+  /// 这个 App 的日志入口藏得比较深（在设置里的一个子页），
+  /// 所以这里直接把**路径**写出来。
   String _failedSummary(Song song, int okCount) {
     final failed = UnblockService.instance.failedCountFor(song);
     if (failed == 0) return '';
-    return '另有 $failed 个音源试过但没拿到地址（详情见日志）';
+    // ⚠️ 文案控制在两行以内（弹窗里显示不下更多）
+    // ⚠️ 这里指的入口是**音乐模块自己的**「我的 → 音乐运行日志」
+    //    （`music/pages/music_log_page.dart`）。
+    //    不要再指向阅读模块的「软件日志」—— 那条路用户找不到。
+    return '另有 $failed 个音源试过但没拿到地址。'
+        '完整原因在「我的 → 音乐运行日志」';
   }
 
   /// 播放状态
@@ -544,6 +554,26 @@ class MusicPlayerManager extends ChangeNotifier {
     // 这次是不是靠"记忆里的那个源"拿到了地址
     var remembered = false;
 
+    // ── 直链优先（博看听书等纯 Dart 数据源）──────────────────────
+    // `bookanAlbum()` 已经把单集 `file` 直链填进 `Song.directUrl`，
+    // 本地文件之下、记忆/内置/第三方之上直接播 —— 不查任何取址链路。
+    // UA 是博看服务端要求的，必须带（否则 403 / 空流）。
+    // 275听书的 `directUrl` 是**播放页 URL**（HTML），需先由
+    // `book275Resolve()` 解析出真实音频直链再播。
+    final direct = localPath.isEmpty && song.directUrl.isNotEmpty;
+    // 275听书的 `directUrl` 是**播放页 URL**（HTML），先解析成真实音频直链
+    MusicUrlInfo? directResolved;
+    if (direct) {
+      if (song.source == SongSource.book275) {
+        directResolved = await MusicApi.instance.book275Resolve(song.directUrl);
+        if (directResolved!.ok && directResolved.url.isNotEmpty) {
+          sourceHeaders = directResolved.headers;
+        }
+      } else {
+        sourceHeaders = song.directHeaders;
+      }
+    }
+
 
     // ══════════════════════════════════════════════════════════
     // ② 试**上次记住的那个源**（用户 2026 要求）
@@ -594,12 +624,17 @@ class MusicPlayerManager extends ChangeNotifier {
         ? MusicUrlInfo(ok: false, url: '', type: '')
         : (localPath.isNotEmpty
             ? MusicUrlInfo(ok: true, url: localPath, type: '本地')
-            : await MusicApi.instance
-                .songUrl(song.id, quality: wantQuality, source: song.source));
+            : (direct
+                ? (directResolved ??
+                    MusicUrlInfo(ok: true, url: song.directUrl, type: '博看'))
+                : await MusicApi.instance
+                    .songUrl(song.id, quality: wantQuality, source: song.source)));
     if (epoch != _loadEpoch) return; // 已被更新的点歌取代，丢弃本次结果
     if (r.ok && r.url.isNotEmpty) {
       url = r.url;
       quality = r.qualityText;
+      // 直链命中时补源名（否则播放器下方"来源"是空的）
+      if (direct) fromSource = song.source.displayName;
     } else {
       final builtinMsg = r.noFreeSource
           ? '内置接口没有免费音源'

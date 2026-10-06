@@ -17,6 +17,7 @@
 		A1B2C3D40000000000000008 /* NodeJSBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000007 /* NodeJSBridge.swift */; };
 		A1B2C3D4000000000000000A /* BackgroundAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000009 /* BackgroundAudio.swift */; };
 		A1B2C3D4000000000000000C /* TtsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4000000000000000B /* TtsEngine.swift */; };
+		A1B2C3D4000000000000000D /* MusicNowPlaying.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4000000000000000E /* MusicNowPlaying.swift */; };
 		A1B2C3D4000000000000000E /* ExceptionGuard.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4000000000000000D /* ExceptionGuard.m */; };
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
@@ -50,6 +51,7 @@
 		A1B2C3D40000000000000005 /* PipManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PipManager.swift; sourceTree = "<group>"; };
 		A1B2C3D40000000000000007 /* NodeJSBridge.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NodeJSBridge.swift; sourceTree = "<group>"; };
 		A1B2C3D40000000000000009 /* BackgroundAudio.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BackgroundAudio.swift; sourceTree = "<group>"; };
+		A1B2C3D4000000000000000E /* MusicNowPlaying.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicNowPlaying.swift; sourceTree = "<group>"; };
 		A1B2C3D4000000000000000B /* TtsEngine.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TtsEngine.swift; sourceTree = "<group>"; };
 		A1B2C3D4000000000000000D /* ExceptionGuard.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ExceptionGuard.m; sourceTree = "<group>"; };
 		A1B2C3D4000000000000000F /* ExceptionGuard.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ExceptionGuard.h; sourceTree = "<group>"; };
@@ -128,6 +130,7 @@
 				A1B2C3D40000000000000007 /* NodeJSBridge.swift */,
 				A1B2C3D40000000000000009 /* BackgroundAudio.swift */,
 				A1B2C3D4000000000000000B /* TtsEngine.swift */,
+				A1B2C3D4000000000000000E /* MusicNowPlaying.swift */,
 				A1B2C3D4000000000000000D /* ExceptionGuard.m */,
 				A1B2C3D4000000000000000F /* ExceptionGuard.h */,
 			);
@@ -318,6 +321,7 @@
 				A1B2C3D40000000000000008 /* NodeJSBridge.swift in Sources */,
 				A1B2C3D4000000000000000A /* BackgroundAudio.swift in Sources */,
 				A1B2C3D4000000000000000C /* TtsEngine.swift in Sources */,
+				A1B2C3D4000000000000000D /* MusicNowPlaying.swift in Sources */,
 				A1B2C3D4000000000000000E /* ExceptionGuard.m in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 			);

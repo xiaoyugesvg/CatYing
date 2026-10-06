@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import '../models/third_party_source.dart';
+import 'plugin_script_cache.dart';
 
 /// 内置音源注册 + 自动更新服务。
 ///
@@ -75,18 +76,36 @@ class BuiltinSourcesService {
   }
 
   /// 异步检查远端更新（洛雪 + MusicFree）。无网络/失败时静默。
-  Future<void> checkForUpdates() async {
+  ///
+  /// ── 🔴 它现在还负责"**补齐缺失的内置插件**"（用户 2026 要求）──────
+  /// 用户原话：「这些源全部要加进去」（指的是远端 `plugins.json` 里那 50 个）。
+  ///
+  /// 原实现只"升级已注册的"，所以随包没带的 40 个**永远不会出现** ✗
+  /// 现在这个入口也会**注册缺失的**（见 [_updateMusicFreeSources]）。
+  ///
+  /// ⚠️ 调用方（`SettingsStore.init`）是 `unawaited(...)` 调的 ——
+  ///    **不能**在这里做重活到阻塞 UI 的程度。下载总量 ~4 MB
+  ///    但要落盘 + 全量重写 prefs，所以用 [_mfMaxDownloadsPerRun] 限流。
+  Future<void> checkForUpdates({bool force = false}) async {
     if (_updating) return;
     _updating = true;
     try {
       await _updateLxSources();
+      // `force`（"恢复默认"）时允许再跑一次补齐
+      if (force) _backfilled = false;
+      _forceBackfill = force;
       await _updateMusicFreeSources();
+      _backfilled = true;
     } catch (e) {
       debugPrint('[BuiltinSources] 更新失败: $e');
     } finally {
       _updating = false;
     }
   }
+
+  /// 当前已注册的 MusicFree 源数量（管理页/日志用）
+  int get registeredMusicFreeCount =>
+      ThirdPartySourceStore.instance.all.where((s) => s.isMusicFree).length;
 
   // ────────────────────────────────────────────────────────────
   // 洛雪源
@@ -165,6 +184,26 @@ class BuiltinSourcesService {
       'https://hebijunge.github.io/musicfree-plugins/plugins.json';
   static const _mfPluginDir = 'assets/music/musicfree/';
 
+  /// 单个插件脚本的**大小上限**（超过就跳过，防被塞垃圾）
+  ///
+  /// 实测最大的 `agg-source.plugin` 约 1.7 MB，所以 2 MB 足够；
+  /// 原来是 512 KB —— 那个值会**误杀** agg 这类大插件。
+  static const _mfMaxScriptBytes = 2 * 1024 * 1024;
+
+  /// 单次 [checkForUpdates] 最多**新增**多少个插件。
+  ///
+  /// 远端索引有 50 个（总计约 4.2 MB），一次全下 + 全量重写 prefs 会拖慢
+  /// 启动。40 这个值让"首次安装"**一次就基本补齐**（随包带 10 个 → 补 40 个
+  /// = 50 个），同时留一点余量给"以后索引继续变长"的情况。
+  /// 没补完的**下次启动继续**（下好的已落文件缓存，不重复下）。
+  static const _mfMaxDownloadsPerRun = 40;
+
+  /// 是否已经跑过一次"补齐全量插件"（避免同一进程内重复跑）
+  bool _backfilled = false;
+
+  /// 本轮是否强制补齐（"恢复默认" / 用户手动点检查更新时置 true）
+  bool _forceBackfill = false;
+
   /// 读取 assets 里的 MusicFree 插件索引（.index.json）。
   Future<List<Map<String, String>>> _mfIndexFromAssets() async {
     try {
@@ -197,7 +236,16 @@ class BuiltinSourcesService {
     }
   }
 
-  /// 从远端索引 + 对应插件脚本，加载/更新 MusicFree 内置源。
+  /// 从**本地**（assets / 文件缓存）加载 MusicFree 内置源。
+  ///
+  /// ── 🔴 这里**不做网络下载**（重要）─────────────────────────────
+  /// 启动路径上必须快：网络下载全部交给 [checkForUpdates]（异步、不 await）。
+  /// 所以这里只解决"**已经拿到手的**脚本怎么变成内置源"：
+  ///   ① 随包 `assets/music/musicfree/<file>` —— 出厂自带的
+  ///   ② `PluginScriptCache` 文件缓存 —— 之前 [checkForUpdates] 下过并落盘的
+  ///
+  /// ⚠️ 索引取的是 **assets 里的 `.index.json`**。
+  ///    远端索引（50 个）在 [checkForUpdates] 里处理 —— 那里才能联网。
   Future<List<ThirdPartySource>> _loadMusicFreeSources() async {
     final index = await _mfIndexFromAssets();
     final out = <ThirdPartySource>[];
@@ -208,13 +256,14 @@ class BuiltinSourcesService {
       // 稳定 id：用插件文件名作为 id 的一部分
       final id = 'builtin_mf_$fileName';
       try {
-        // 从 assets 读插件内容；没有则跳过（用索引注册但内容缺失时稍后在线拉）
+        // ① 先看随包 assets；② 再回落到文件缓存
         String? script;
         try {
           script = await rootBundle.loadString('$_mfPluginDir$fileName');
         } catch (_) {
           script = null;
         }
+        script ??= await PluginScriptCache.instance.read(fileName);
         if (script != null && script.trim().isNotEmpty) {
           out.add(ThirdPartySource(
             id: id,
@@ -234,7 +283,32 @@ class BuiltinSourcesService {
     return out;
   }
 
-  /// 从远端索引对比并更新已内置的 MusicFree 插件版本。
+  /// 拉远端索引 + 下载脚本，**升级已有插件、并注册缺失的插件**。
+  ///
+  /// ── 🔴 原实现的缺口（用户 2026 要求"这些源全部要加进去"）──────────
+  /// 原来这里只做"**升级**"：
+  /// ```dart
+  /// final cur = store.byId(id);
+  /// if (cur == null) continue;   // 本地没有，不拉  ← 就是这一行
+  /// ```
+  /// 于是 `plugins.json` 里那 **50 个**插件，
+  /// **只有随包 assets 里的 10 个**会被注册，其余 40 个**永远不会出现** ——
+  /// 用户在管理页看到的永远是 10 个，而不是远端索引的 50 个 ✗
+  ///（`_loadMusicFreeSources` 里那句注释"内容缺失时稍后在线拉"，
+  ///  实际上"稍后"从未发生 —— 没有任何代码在做这件事）
+  ///
+  /// ── 现在的行为 ─────────────────────────────────────────────────
+  ///   · **已有**（store 里有该 id）→ 拉最新脚本覆盖（原逻辑，保留）
+  ///   · **缺失**（store 里没有）   → 下载脚本并**新增**一个内置源
+  ///
+  /// ⚠️ **不覆盖用户改动**：只对"store 里不存在"的 id 做新增；
+  ///    已存在的仍走原来的 `copyWith(script:)` 升级路径 ——
+  ///    也就是说用户改过的名字/开关/音质不会被这次批量注册冲掉。
+  ///
+  /// ⚠️ **单次上限**（[_mfMaxDownloadsPerRun]）：50 个插件的"首次全量"
+  ///    要下 ~4 MB。全放在一次调用里、又紧接着下完立刻 `store.upsert`
+  ///    （每次都全量重写 prefs JSON）会拖慢启动。所以一次最多补这么多，
+  ///    剩下的**下次启动继续补**（已下好的会落进文件缓存，不重复下）。
   Future<void> _updateMusicFreeSources() async {
     List<Map<String, String>> remoteIndex;
     try {
@@ -247,22 +321,77 @@ class BuiltinSourcesService {
     if (remoteIndex.isEmpty) return;
 
     final store = ThirdPartySourceStore.instance;
-    // 远端索引里有，且本 App 已注册过该 id → 拉新脚本替换
+    // 本轮的"新增"先攒在内存里，最后**一次性** addAll ——
+    // 每个都单独 upsert 的话，prefs 那份大 JSON 会被反复读+写，很浪费。
+    final added = <ThirdPartySource>[];
+    var downloads = 0;
+
     for (final entry in remoteIndex) {
-      final fileName = _fileNameFromUrl(entry['url']!);
+      final name = entry['name']!;
+      final url = entry['url']!;
+      final fileName = _fileNameFromUrl(url);
       final id = 'builtin_mf_$fileName';
       final cur = store.byId(id);
-      if (cur == null) continue; // 本地没有，不拉
-      try {
-        final resp = await _dio.get(entry['url']!);
-        final script = resp.data is String
-            ? resp.data as String
-            : (resp.data?.toString() ?? '');
-        if (script.trim().isEmpty || script.length > 512 * 1024) continue;
-        store.upsert(cur.copyWith(script: script));
-      } catch (e) {
-        debugPrint('[BuiltinSources] 更新 MusicFree ${entry['name']} 失败: $e');
+
+      // ── 情况 A：已存在 → 拉新版本覆盖（保持既有语义）──────────────
+      if (cur != null) {
+        try {
+          final resp = await _dio.get(url);
+          final script = resp.data is String
+              ? resp.data as String
+              : (resp.data?.toString() ?? '');
+          if (script.trim().isEmpty || script.length > _mfMaxScriptBytes) {
+            continue;
+          }
+          // 顺手落一份文件缓存（下次冷启动读文件比读 prefs 快）
+          await PluginScriptCache.instance.write(fileName, script);
+          store.upsert(cur.copyWith(script: script));
+        } catch (e) {
+          debugPrint('[BuiltinSources] 更新 MusicFree $name 失败: $e');
+        }
+        continue;
       }
+
+      // ── 情况 B：缺失 → 下载并**注册**（这就是原来缺的那一步）────────
+      //
+      // ⚠️ 如果本轮已经补齐过（`_backfilled`）且不是 force，就跳过 ——
+      //    否则每次进设置页都重新扫一遍 50 个索引项（虽然后面会命中
+      //    文件缓存、不会真下载，但没必要反复走这个循环）。
+      if (_backfilled && !_forceBackfill) continue;
+      if (downloads >= _mfMaxDownloadsPerRun) continue;
+      try {
+        // 先看文件缓存（上次下过、但 store 被用户删过的情况）
+        var script = await PluginScriptCache.instance.read(fileName);
+        if (script == null) {
+          final resp = await _dio.get(url);
+          script = resp.data is String
+              ? resp.data as String
+              : (resp.data?.toString() ?? '');
+          if (script.trim().isEmpty || script.length > _mfMaxScriptBytes) {
+            continue;
+          }
+          await PluginScriptCache.instance.write(fileName, script);
+        }
+        downloads++;
+        added.add(ThirdPartySource(
+          id: id,
+          name: name,
+          kind: 'musicfree',
+          template: '',
+          script: script,
+          enabled: true,
+          isBuiltin: true,
+          updateUrl: url,
+        ));
+      } catch (e) {
+        debugPrint('[BuiltinSources] 新增 MusicFree $name 失败: $e');
+      }
+    }
+
+    if (added.isNotEmpty) {
+      await store.addAll(added);
+      debugPrint('[BuiltinSources] 新增 MusicFree 内置源 ${added.length} 个'
+          '（本轮共处理 ${remoteIndex.length} 个索引项）');
     }
   }
 

@@ -39,6 +39,26 @@ const double _kDeckInset = 116;
 class MusicPlayerPage extends StatefulWidget {
   const MusicPlayerPage({super.key});
 
+  /// **全屏播放器当前是否打开**（供全局底栏判断要不要让位）。
+  ///
+  /// ── 🔴 为什么需要它（用户实测截图：播放器底部被盖住）────────────
+  /// 全局 `MusicBottomChrome`（迷你条 + 导航栏）挂在 `app.dart` 的
+  /// Stack 里、**在 `out`（Navigator）之后** → 它盖在**所有**路由之上，
+  /// 包括这个全屏播放器。
+  ///
+  /// 而播放器**自己**有一条底部操作栏
+  ///（`_bottomBar()`：列表循环 / 收藏 / 上一首 / 歌词 / 下一首 / 设置）——
+  /// 于是被迷你条 + 导航栏**压在下面，既看不清也点不到** ✗
+  ///
+  /// 而且导航栏出现在播放器上本身**语义就不对**：播放器是全屏模态页，
+  /// 底部该是"播放控制"，不是"切模块 tab"。
+  ///
+  /// 所以：播放器打开时，全局底栏**整个隐藏**（见 `MusicBottomChrome`）。
+  ///
+  /// ⚠️ 用 `ValueNotifier` 而不是裸 `bool`：底栏那层是
+  /// `AnimatedBuilder` + `Listenable.merge`，裸 bool 变了**不会触发重建** → 白改。
+  static final ValueNotifier<bool> isOpen = ValueNotifier<bool>(false);
+
   @override
   State<MusicPlayerPage> createState() => _MusicPlayerPageState();
 }
@@ -97,6 +117,8 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
       vsync: this,
       duration: const Duration(milliseconds: 1600),
     );
+    // 告诉全局底栏"让位"（见 `MusicPlayerPage.isOpen` 的说明）
+    MusicPlayerPage.isOpen.value = true;
     showLyric = MusicPlayerSkin.instance.showLyricFirst.value;
     player.addListener(_onPlayerChanged);
     player.isPlaying.addListener(_syncSpin);
@@ -106,6 +128,8 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
 
   @override
   void dispose() {
+    // 关掉播放器 → 全局底栏恢复显示
+    MusicPlayerPage.isOpen.value = false;
     player.removeListener(_onPlayerChanged);
     player.isPlaying.removeListener(_syncSpin);
     _spin.dispose();
