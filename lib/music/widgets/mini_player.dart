@@ -350,7 +350,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                 height: 34,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: MusicTheme.accentGradient,
+                  gradient: LinearGradient(colors: MusicTheme.accentGradient),
                 ),
                 child: Icon(icon, color: Colors.white, size: 21),
               )
