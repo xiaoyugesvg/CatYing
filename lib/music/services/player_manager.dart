@@ -214,18 +214,37 @@ class MusicPlayerManager extends ChangeNotifier {
     lastError.addListener(() {
       final msg = lastError.value;
       if (msg.isEmpty) return;
-      // "正在尝试音源 2/3：xxx" 这类是进度信息，用中性色；
-      // 其余（无免费音源 / 播放失败）按错误显示。
-      final isProgress = msg.startsWith('正在尝试音源');
+
+      // ── 🔴 进度信息**绝不能弹窗**（用户实测反馈截图）────────────────
+      //
+      // 「正在试音源 10/12…」是**进度**，不是错误。原来只认
+      // `startsWith('正在尝试音源')` 一种前缀，而实际还存在两种写法：
+      //   · `'正在试音源 $done/$total…'`（`resolveAll` 的 onProgress）
+      //   · `'正在用「xxx」…'`（音源记忆命中时的提示）
+      // 它们不匹配那个前缀 → 走进"真错误"分支 →
+      // **弹出「播放失败 / 正在试音源 10/12…」的居中弹窗** ✗
+      //（还必须手点"关闭"，而它只是进度 —— 用户截图里的就是它）
+      //
+      // 现在用一个**统一的判据**：所有进度类文案都带"正在"开头。
+      // 真错误从来不是"正在…"（是"没有免费音源"/"播放出错"/"xxx：失败"）。
+      final isProgress = msg.startsWith('正在');
       if (isProgress) {
-        // 进度信息（"正在尝试音源 2/3：xxx"）用气泡就够了
+        // 进度用**自动消失的顶部气泡**，不打断操作
         AppToast.show(msg, '', isError: false);
         return;
       }
-      // 🔴 真错误 → **弹窗显示全文**：气泡是 `maxLines: 1`，会把
-      // "内置接口没有免费音源；car_conv2: GD接口失败: …" 截断，
-      // 而可排查的信息恰恰在后半段（用户反馈过"看不到完整的日志"）。
-      AppToast.detail('播放失败', msg);
+
+      // ── 真错误：也**不弹居中弹窗**（用户要求"失败就弹一哈就消失"）──
+      //
+      // 原来这里用 `AppToast.detail(...)` —— 那是**必须手点关闭**的居中
+      // 模态框（带「复制全文」），连续几首失败会叠窗、挡住整个界面 ✗
+      // 用户原话：「那么多失败的弹窗，能不能失败就弹一哈就消失呢？」
+      //
+      // 改成 `AppToast.show(..., isError: true)`：顶部气泡、自动消失、
+      // 点一下也能立刻关掉。**全文照样进日志**（下面这句），
+      // 排查不受影响（可排查的信息本来就在日志里，不在弹窗里）。
+      AppToast.show('播放失败', msg, isError: true);
+      AppLog.instance.log('[Music] 播放失败（完整原因）: $msg');
     });
 
     _player = Player();

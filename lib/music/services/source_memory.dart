@@ -51,10 +51,42 @@ class SourceMemory {
 
   /// 内存镜像（读的时候不用等 SharedPreferences）
   final Map<String, String> _map = {};
-  bool _inited = false;
 
-  Future<void> init() async {
-    if (_inited) return;
+  /// 正在进行的初始化。
+  ///
+  /// ── 🔴 为什么是 `Future?` 而不是 `bool _inited` 闩锁（修"记不住"）──
+  ///
+  /// 原来写的是：
+  /// ```dart
+  /// bool _inited = false;
+  /// Future<void> init() async {
+  ///   if (_inited) return;          // ← 闩锁
+  ///   final prefs = await SharedPreferences.getInstance();   // ← 这里让出事件循环
+  ///   ...
+  ///   _inited = true;               // ← 置位在 await **之后**
+  /// }
+  /// ```
+  /// 问题：`init()` **一开始就不 await** 直接把 Future 交出去了 ——
+  /// 但只有在**第一次**调用时才会走进去。真正的坑在下面这个交错：
+  ///
+  ///   1. 启动时 `SettingsStore.init()` 调 `SourceMemory.init()`（还没读完盘）
+  ///   2. 用户立刻点了一首歌、第三方源成功 → `remember()` → 它内部
+  ///      `await init()` → **又进一次 init()**，此时 `_inited` 还是 false！
+  ///   3. 两次 `init()` 并发：先完成的那次读到的盘上数据**覆盖** `_map`，
+  ///      把第 2 步刚 `remember` 进去的值**冲掉** ✗
+  ///
+  /// 表现正是用户反馈的「**用了第三方源，退出再点又播不了**」——
+  /// 记忆写进去了，但被并发的那次 load 覆盖回旧状态。
+  ///
+  /// 现在用 `_initFuture`：所有调用者 `await` **同一个 Future**，
+  /// 初始化只跑一次、且"跑完之前谁也别想读/写 `_map`"。
+  /// 这与 `library_store.dart` / `download_service.dart` 的做法一致
+  ///（那边注释记录了同一段教训，这里是漏改的第三处）。
+  Future<void>? _initFuture;
+
+  Future<void> init() => _initFuture ??= _doInit();
+
+  Future<void> _doInit() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getStringList(_kMap) ?? const [];
@@ -63,13 +95,14 @@ class SourceMemory {
         // 而且不会被引号/转义问题坑到。
         final i = line.indexOf('\u0001');
         if (i <= 0) continue;
-        _map[line.substring(0, i)] = line.substring(i + 1);
+        // ⚠️ `putIfAbsent`：万一在 init 完成前已经有并发 `remember` 写进来，
+        //    保留内存里那份（更新），不要让盘上的旧值盖掉它。
+        _map.putIfAbsent(line.substring(0, i), () => line.substring(i + 1));
       }
-      _inited = true;
       count.value = _map.length;
       AppLog.instance.log('[Music] 音源记忆载入 ${_map.length} 条');
     } catch (e) {
-      _inited = true; // 失败也要置位，否则每次点歌都重试一遍
+      // 失败也**不要把 Future 置空**：否则每次点歌都重试一遍
       AppLog.instance.log('[Music] 音源记忆载入失败: $e');
     }
   }

@@ -37,7 +37,24 @@ class MusicTabState {
   ///
   /// 全局底栏只在音乐模块里显示 —— 否则看视频/读书时底部会冒出
   /// 音乐导航栏（那显然不对）。
+  ///
+  /// ── 🔴 为什么加了 `Get.isRegistered` 守卫（修一个潜在崩溃）──────────
+  /// 原来直接 `MainTabController.instance`（内部是 `Get.find`）——
+  /// **没注册时抛** `"MainTabController" not found`（GetX 的异常），
+  /// 而抛出位置在 `build()` 里 → **整条底栏（播放条 + 导航栏）崩掉** ✗
+  ///
+  /// 真机上 `main.dart` 会先 `Get.put(MainTabController(), permanent: true)`，
+  /// 所以平时看不到；但这是**隐式的初始化顺序依赖**：
+  ///   · 单测里 pump 一下 `MusicBottomChrome` 就炸（实测确认过）
+  ///   · 将来若有人调启动顺序、或某个更早的入口提前 build 到它，
+  ///     就会直接崩，而且报的是"找不到控制器"这种**和底栏毫不相干**
+  ///     的信息，极难定位
+  ///
+  /// 没注册时**当作"不在音乐模块"**（false → 底栏不显示）——
+  /// 比崩掉合理得多：它本来就不该在"还没初始化完"的时候显示。
   static bool get visible {
+    // ⚠️ 不能直接写 `MainTabController.instance` —— 未注册时它会抛
+    if (!Get.isRegistered<MainTabController>()) return false;
     final c = MainTabController.instance;
     return c.selectedTab.value == MainTabController.musicTabIndex;
   }
@@ -58,8 +75,24 @@ class MusicTabState {
 /// 不用 `Obx` 是因为这里同时还要读 `MusicTabState.index`（普通
 /// `ValueNotifier`）和 `MusicPlayerManager`（`ChangeNotifier`）——
 /// 三者在 `Obx` 里混用容易漏通知，统一成 `AnimatedBuilder` 更可靠。
+///
+/// ── 🔴 初值不能直接读 `MainTabController.instance`（修一个崩溃）──────
+/// 原来写的是：
+/// ```dart
+/// final ValueNotifier<int> _visible =
+///     ValueNotifier<int>(MainTabController.instance.selectedTab.value);
+/// ```
+/// 这是**文件级顶层变量** —— 它的初始化在**第一次被读到**时执行，
+/// 而那一刻 `MainTabController` 可能**还没注册**（`Get.find` 抛
+/// `"MainTabController" not found`）→ `MusicBottomChrome.build` 直接炸 ✗
+/// （实测：单测里 pump 一下就复现；真机靠 `main.dart` 的注册顺序侥幸没事）
+///
+/// 现在未注册时用 `-1`（"不在任何音乐 tab"）——
+/// 反正后面 `_bridged` 那段 `ever()` 会把真实值同步进来。
 final ValueNotifier<int> _visible = ValueNotifier<int>(
-  MainTabController.instance.selectedTab.value,
+  Get.isRegistered<MainTabController>()
+      ? MainTabController.instance.selectedTab.value
+      : -1,
 );
 bool _bridged = false;
 
@@ -96,8 +129,18 @@ class MusicBottomChrome extends StatelessWidget {
         SettingsStore.instance.bottomBarOnSubPages,
       ]),
       builder: (context, _) {
-        // 懒桥接：第一次 build 时把 RxInt 的变化同步到 `_visible`
-        if (!_bridged) {
+        // ── 懒桥接：把 RxInt 的变化同步到 `_visible` ──────────────────
+        //
+        // ⚠️ 必须判 `Get.isRegistered`：`ever(...)` 的第一个参数要先求值
+        //    `MainTabController.instance`（`Get.find`）——
+        //    **未注册时它会抛**，而这里在 `build` 里 → 底栏整个炸 ✗
+        //    （实测：单测里 pump 一下就复现）
+        //
+        // 未注册时**不桥接**：`_visible` 保持初值 -1 →
+        // `MusicTabState.visible` 走的是…… 见下面那个 getter（它也判了），
+        // 总之底栏不显示，而不是崩。
+        if (!_bridged &&
+            Get.isRegistered<MainTabController>()) {
           _bridged = true;
           ever(MainTabController.instance.selectedTab, (v) {
             _visible.value = v;
@@ -233,8 +276,15 @@ class MusicBottomChrome extends StatelessWidget {
 ///
 /// ⚠️ 5 项时每个格子变窄 → 标签都控制在 **2~3 个汉字**。
 const musicTabs = <({String label, IconData icon, IconData active})>[
+  // ── ⚠️ 顺序必须与 `root_view.dart` 的 `IndexedStack.children` **严格一一对应** ──
+  //
+  // 用户 2026 要求：**「搜索」放到「我的」右边**。
+  // 所以现在是：主页 / 乐库 / 榜单 / 我的 / 搜索
+  //   （原来「搜索」在第二位，紧挨主页）
+  //
+  // ⚠️ 长按「我的」回影视是按 **label** 判断的（`musicTabs[i].label == '我的'`），
+  //    不是按索引 → 换位置不会影响它。
   (label: '主页', icon: Icons.home_outlined, active: Icons.home_rounded),
-  (label: '搜索', icon: Icons.search_rounded, active: Icons.search_rounded),
   (
     label: '乐库',
     icon: Icons.library_music_outlined,
@@ -250,4 +300,5 @@ const musicTabs = <({String label, IconData icon, IconData active})>[
     icon: Icons.person_outline_rounded,
     active: Icons.person_rounded,
   ),
+  (label: '搜索', icon: Icons.search_rounded, active: Icons.search_rounded),
 ];

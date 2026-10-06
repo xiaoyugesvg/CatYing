@@ -284,12 +284,17 @@ class Song {
     try {
       decoded = jsonDecode(raw);
     } catch (e) {
-      // 整份 JSON 语法坏了（截断等）→ 只能放弃，但**要说出来**。
-      // ⚠️ 这里用 `debugPrint` 而不是 `AppLog`：`models.dart` 目前只依赖
-      //    `dart:convert`（纯净的模型层），引 `services/app_log.dart`
-      //    会造出"模型 → 服务"的反向依赖。
-      //    `third_party_source.dart` 的同类日志也是 `debugPrint`（保持一致）。
-      debugPrint('[Music] 歌曲列表 JSON 解析失败: $e');
+      // ⚠️ **空字符串不打日志**：那是"从没存过"的正常情况
+      //（`prefs.getString(k) ?? ''` 在首次启动时就传空串进来），
+      // 打出来只是噪音 —— 测试输出里能看到一堆 `FormatException` 刷屏。
+      if (raw.trim().isNotEmpty) {
+        // 整份 JSON 语法坏了（截断等）→ 只能放弃，但**要说出来**。
+        // ⚠️ 用 `debugPrint` 而不是 `AppLog`：`models.dart` 目前只依赖
+        //    `dart:convert`（纯净的模型层），引 `services/app_log.dart`
+        //    会造出"模型 → 服务"的反向依赖。
+        //    `third_party_source.dart` 的同类日志也是 `debugPrint`（保持一致）。
+        debugPrint('[Music] 歌曲列表 JSON 解析失败: $e');
+      }
       return const [];
     }
     if (decoded is! List) return const [];

@@ -88,6 +88,11 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
           id: widget.id,
           name: widget.title,
           coverUrl: r.list.isNotEmpty ? r.list.first.coverUrl : null,
+          // ⚠️ `trackCount` 必须给：头部副标题是
+          //    `'$trackCount 首 · $creator'`，不填就是 **0 首** ——
+          //    而 0 会被当成"没有"，整行副标题**不显示** ✗
+          //   （用户截图里"69 首 · 寻找维恩斯"那行在榜单页缺失，就是这个）
+          trackCount: r.list.length,
         );
         _songs = r.list;
         _loading = false;
@@ -105,7 +110,14 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
       _pl = pl;
       _songs = songs;
       _loading = false;
-      if (pl == null && songs.isEmpty) _error = '歌单加载失败';
+      if (pl == null && songs.isEmpty) {
+        // ⚠️ 原来只写一句"歌单加载失败"，用户既不知道**为什么**、
+        //    也不知道**能做什么**。这里把最可能的原因和下一步说清楚：
+        //    最常见就是"平台选错了"（拿 A 平台的 id 去查 B 平台）——
+        //    那正是 `discover_page` 漏传 `source` 时的表现（已修）。
+        _error = '这个内容在「${widget.source.displayName}」上没找到。\n'
+            '可以试试：返回后在顶部切换平台，或下拉刷新。';
+      }
     });
   }
 
@@ -170,17 +182,48 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
               ),
             DecoratedBox(
               decoration: BoxDecoration(
+                // ── 🔴 顶部再叠一层**专门给返回按钮看的压暗**（修"看不清"）──
+                //
+                // 封面是任意图片：浅色封面 + `MusicTheme.label`（浅色主题下
+                // 是深色）→ 返回箭头糊在图上**看不见**；
+                // 深色封面 + 深色主题同理。用户截图反映的就是
+                // "左上角返回按钮看着有问题"。
+                //
+                // 主渐变（下面那段）在顶部只有 0.55 黑，对**浅色封面**
+                // 还不够；这里再加一段从 0.55 衰减到 0 的黑色，
+                // 只覆盖状态栏 + 工具栏那 ≈110px ——
+                // **视觉问题用视觉手段解决，不动布局预算**
+                //（抬高内边距会把 `expandedHeight` 撑爆，见下面 Padding 的注释）。
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
                     Colors.black.withValues(alpha: 0.55),
+                    Colors.black.withValues(alpha: 0.18),
                     MusicTheme.background,
                   ],
+                  // 0~0.30 这一段就是顶部 ≈110px（360 × 0.30）
+                  stops: const [0.0, 0.30, 1.0],
                 ),
               ),
             ),
             Padding(
+              // ── ⚠️ 这个顶边距为什么是 84（别再随手改大）────────────────
+              //
+              // 它必须同时满足两件事：
+              //   ① 让过**状态栏**（428×926 机型安全区顶 ≈59）
+              //   ② **不和返回按钮抢位置** —— 返回按钮落在 ≈59~103
+              // 84 是"封面刚好压在返回按钮下缘"的位置，所以**必然重叠**。
+              //
+              // 我试过把它抬到 `安全区 + 52`（≈111），但那样内容总高变成
+              // ≈378，而 `expandedHeight: 360` 扣掉工具栏后只剩 ≈245 可用 →
+              // **反而会 RenderFlex overflow**（按钮被裁掉）✗
+              // 要真按安全区推开，得把 `expandedHeight` 也一起抬到 420+，
+              // 那会占掉太多首屏 —— 不值得。
+              //
+              // 所以这里**保持 84**，改用**在返回按钮后面加一层压暗渐变**
+              //（见上面 `DecoratedBox` 的第一段）保证它看得清 ——
+              // 视觉问题用视觉手段解决，不动布局预算。
               padding: const EdgeInsets.fromLTRB(16, 84, 16, 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

@@ -170,13 +170,14 @@ class _MusicRootViewState extends State<MusicRootView> {
                           'music-tabs-${MusicThemeStore.instance.revision.value}'),
                       index: tabIndex,
                       // ⚠️ 顺序必须与 `musicTabs` **严格一一对应**
-                      //（主页 / 搜索 / 乐库 / 榜单 / 我的）
+                      //（主页 / 乐库 / 榜单 / 我的 / 搜索 —— 用户要求
+                      //  「搜索」放在「我的」右边，见 `musicTabs` 的注释）
                       children: const [
                         DiscoverPage(),
-                        SearchPage(),
                         LibraryPage(),
                         ChartsPage(),
                         ProfilePage(),
+                        SearchPage(),
                       ],
                     ),
                   ),

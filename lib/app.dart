@@ -5,6 +5,22 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'music/widgets/floating_play_button.dart';
+// 🔴 **必须挂载 `MusicBottomChrome`**（音乐底部两条：播放条 + 导航栏）——
+//    它在 `c50ddd1` 那次提交里被**连带删掉了**（那次本来是改阅读体系，
+//    但 `app.dart` 被回退到了"加底栏之前"的版本，diff 是
+//    `de9ae4b..822003c`）。
+//
+// 后果：`music_bottom_chrome.dart` 还在、`MusicTabState` 还在、
+//       所有相关代码都在，**但没有任何地方挂载它** →
+//       音乐模块里**导航栏和播放条都不显示** ✗（用户实测反馈）
+//
+// 之所以挂在**这一层**（`app.dart` 的全局 Stack、Navigator 之外）：
+//   一处挂载覆盖所有路由 —— 含 push 出去的歌单详情/喜马拉雅专辑/
+//   本地音乐，那些页面自己没有播放条。
+// ⚠️ 正因为这一层在 Navigator 之外，`MusicBottomChrome` 内部
+//    **不能用 `Navigator.of(context)`**，必须走全局
+//    `VideoPlayerPip.navigatorKey`（组件里有详细注释）。
+import 'music/pages/music_bottom_chrome.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'common/theme.dart';
@@ -271,6 +287,19 @@ class _TVBoxAppState extends State<TVBoxApp> with WidgetsBindingObserver {
                       // 歌单详情/喜马拉雅专辑/本地音乐，那些页面**没有**迷你
                       // 播放器，所以以前"点歌后除了声音没有任何反馈"）。
                       const MusicFloatingPlayButton(),
+                      // ── 音乐底部套装（全局）──────────────────────────
+                      // 迷你播放条 + 悬浮导航栏。与悬浮球同一层挂载，
+                      // 一处覆盖所有路由。显示规则（含"子页面只显示
+                      // 播放条、且只在播放时显示"）全在 `MusicBottomChrome` 里。
+                      //
+                      // ⚠️ 这个 `Positioned` **不能删** —— 删了音乐模块
+                      //    就没有导航栏和播放条（`c50ddd1` 踩过这个坑）。
+                      const Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: MusicBottomChrome(),
+                      ),
                     ],
                   );
                 },

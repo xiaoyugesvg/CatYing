@@ -1112,10 +1112,27 @@ class _DiscoverPageState extends State<DiscoverPage>
         child: RankListCard(
           style: style,
           items: _topLists,
-          onTap: (t) => Navigator.of(context).push<void>(
-            MaterialPageRoute(
-              builder: (_) => PlaylistDetailPage(id: t.id, title: t.name),
-            ),
+          // ── 🔴 必须传 `source` + `isTopList`（修一个"点进去全空白"）──
+          //
+          // 原来写的是 `PlaylistDetailPage(id: t.id, title: t.name)` ——
+          // **没传 `source`** → 页面默认 `SongSource.netease`。
+          // 而 `_topLists` 是**按当前平台**拉的（比如用户选了酷狗）→
+          // 于是拿**酷狗的榜单 id 去查网易云**：
+          //   · 网易云恰好也有同数字 id 时 → 打开**另一个榜单**（张冠李戴）
+          //   · 没有时 → `playlistDetail` 返回 ok:false → **整页空白**、
+          //     连标题都没有（用户实测截图就是这个）✗
+          //
+          // `isTopList` 同理：QQ 的 topId **不是歌单 id**，
+          // 走歌单接口必然空列表（`PlaylistDetailPage` 的字段注释写明了）。
+          //
+          // 用 `openPlaylist` 这个统一入口，而不是自己拼 `MaterialPageRoute`
+          //（`charts_page.dart` 走的就是它，那边一直是对的）。
+          onTap: (t) => openPlaylist(
+            context,
+            t.id,
+            t.name,
+            source: _source,
+            isTopList: true,
           ),
         ),
       ));

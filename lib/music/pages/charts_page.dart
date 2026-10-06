@@ -4,9 +4,8 @@ import '../../../common/theme.dart';
 import '../models/models.dart';
 import '../services/music_api.dart';
 import '../services/settings_store.dart';
-import '../theme/discover_preset.dart';
 import '../theme/music_theme.dart';
-import '../widgets/discover_sections.dart';
+import '../widgets/music_components.dart';
 import 'playlist_detail_page.dart';
 
 /// 「榜单」独立页（从音乐库拆出来的）。
@@ -153,21 +152,107 @@ class _ChartsPageState extends State<ChartsPage>
                 ),
               )
             else if (_tops.isNotEmpty)
-              // 复用发现页的榜单卡（单卡片内竖排，前 3 名主题色，收起3/展开10）
-              RankListCard(
-                style: DiscoverStyle.of(DiscoverPreset.aurora),
-                items: _tops,
-                onTap: (t) => openPlaylist(
-                  context,
-                  t.id,
-                  t.name,
-                  source: _source,
-                  // ⚠️ QQ 的 topId 不是歌单 id（用歌单接口查会得到空列表）
-                  isTopList: true,
-                ),
-              ),
+              // ── 卡片网格（用户 2026 要求）────────────────────────────
+              //
+              // 原来这里是 `RankListCard` —— 一个**大卡片内竖排**名次行。
+              // 用户要求「榜单分类里面能不能卡片布局呢」→ 改成
+              // **2 列卡片网格**，每张卡是：封面 + 榜名 + 更新频率，
+              // 与「乐库」「歌单广场」的卡片观感统一。
+              //
+              // ⚠️ 高度必须**按可用宽度算**（`mainAxisExtent`），
+              //    不能用固定 `childAspectRatio` —— 窄屏 + 系统大字号下
+              //    内容会超出格子高（本项目踩过两次，见
+              //    `ximalaya_category_page` / `library_page` 的同款注释）。
+              _chartGrid(context),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 榜单**卡片网格**（2 列）。
+  ///
+  /// 每张卡 = 封面（正方形，边长 = 格宽）+ 榜名（最多 2 行）+ 更新频率。
+  ///
+  /// ⚠️ 没有复用 `CoverCard`：它的 `width` 参数是**封面尺寸**（直接喂给
+  /// `CoverImage(size:)`），传 `double.infinity` 会让封面撑爆格子。
+  /// 而榜单要的是"封面跟着格宽走"，所以这里自己拼更直接。
+  Widget _chartGrid(BuildContext context) {
+    // 去掉左右 padding(16×2) 与列间距(12) 后每格宽度 ——
+    // 封面的边长就用它（正方形，跟乐库卡片观感一致）
+    final cellW = (MediaQuery.sizeOf(context).width - 16 * 2 - 12) / 2;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        padding: EdgeInsets.zero,
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          mainAxisSpacing: 14,
+          crossAxisSpacing: 12,
+          mainAxisExtent: () {
+            final ts = MediaQuery.textScalerOf(context);
+            // 封面(cellW) + 间距 8 + 榜名 2 行 + 间距 2 + 更新频率 1 行 + 余量 8
+            return cellW +
+                8 +
+                ts.scale(AppTheme.fontSubhead) * 1.35 * 2 +
+                2 +
+                ts.scale(AppTheme.fontCaption) * 1.35 +
+                8;
+          }(),
+        ),
+        itemCount: _tops.length,
+        itemBuilder: (c, i) => _chartCard(context, _tops[i], cellW),
+      ),
+    );
+  }
+
+  Widget _chartCard(BuildContext context, TopList t, double cellW) {
+    final freq = (t.updateFrequency ?? '').trim();
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => openPlaylist(
+        context,
+        t.id,
+        t.name,
+        source: _source,
+        // ⚠️ QQ 的 topId 不是歌单 id（用歌单接口查会得到空列表）
+        isTopList: true,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 封面：正方形，边长 = 格宽（与乐库卡片同款圆角 20）
+          CoverImage(url: t.coverUrl, size: cellW, cornerRadius: 20),
+          const SizedBox(height: 8),
+          Text(
+            t.name,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: MusicTheme.label,
+              fontSize: AppTheme.fontSubhead,
+              fontWeight: FontWeight.w600,
+              height: 1.35,
+            ),
+          ),
+          // 更新频率：没有就不占位（少一行也更好看）
+          if (freq.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              freq,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: MusicTheme.secondary,
+                fontSize: AppTheme.fontCaption,
+                height: 1.35,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
