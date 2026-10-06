@@ -1,5 +1,5 @@
-﻿// 涔︽簮璇︽儏椤碉紙Nexhub 寮曟搸鎺ュ叆锛夛細鍔犺浇涔︾睄璇︽儏涓庣珷鑺傜洰褰曘€?// 甯冨眬瀵归綈澶囦唤3.0 book_source_detail_page锛氬乏淇℃伅+鍙冲皝闈€佸洓鎸夐挳
-//锛堟敹钘?鍔犲叆涔︽灦/闃呰/涓嬭浇锛夈€佺畝浠嬪睍寮€鏀惰捣銆佺洰褰曢粯璁ゅ墠 8 绔犮€侀敊璇€佸彲鎹㈡簮銆?// 鐩綍鐢?getChapterList 鐨?onBatch 娓愯繘鍥炶皟锛堥灞忓揩鏄?+ 鍚庡彴缁姄锛夈€?
+// 书源详情页（Nexhub 引擎接入）：加载书籍详情与章节目录。// 布局对齐备份3.0 book_source_detail_page：左信息+右封面、四按钮
+//（收藏/加入书架/阅读/下载）、简介展开收起、目录默认前 8 章、错误态可换源。// 目录用 getChapterList 的 onBatch 渐进回调
 import 'dart:convert';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
@@ -60,12 +60,13 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
     if (srcUrl != null && srcUrl.isNotEmpty) {
       source = ShuyuanSourceStore.instance.sourceByUrl(srcUrl)?.toBookSource();
     }
-    // 鏈甫婧?URL锛堣仛鎼滅粨鏋滐級鏃讹紝鎸?bookUrl 鍦ㄥ惎鐢ㄦ簮閲屾壘绗竴涓彲瑙ｆ瀽璇︽儏鐨勬簮銆?    source ??= _guessSource();
+// 未带源 URL（聚搜结果）时，按 bookUrl 在启用源里找第一个可解析详情的源。
+    source ??= _guessSource();
     if (source == null) {
       setState(() {
         _loadingInfo = false;
         _loadingToc = false;
-        _error = '鏈壘鍒板彲鐢ㄤ功婧?;
+        _error = '未找到可用书源';
       });
       return;
     }
@@ -73,7 +74,8 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
     await _load(source, widget.bookUrl);
   }
 
-  /// 鐢ㄦ寚瀹氭簮鍔犺浇璇︽儏涓庣洰褰曪紙鎹㈡簮鍚庡鐢級銆?  Future<void> _load(XiaoshuoBookSource source, String bookUrl) async {
+/// 用指定源加载详情与目录（换源后复用）。
+  Future<void> _load(XiaoshuoBookSource source, String bookUrl) async {
     try {
       final book = await _webBook.getBookInfo(
         source: source,
@@ -104,7 +106,8 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
     }
   }
 
-  /// 鎹㈡簮锛氱敤涔﹀悕鍘诲叾瀹冨凡鍚敤婧愬啀鎼滀竴娆★紝閫変腑缁撴灉鍚庨噸杞借鎯呫€?  Future<void> _changeSource() async {
+/// 换源：用书名去其它已启用源再搜一次，选中结果后重载详情。
+  Future<void> _changeSource() async {
     final source = _source;
     if (source == null) return;
     final name = _book?.name.isNotEmpty == true ? _book!.name : widget.name;
@@ -114,7 +117,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
         .where((s) => s.enabled && s.bookSourceUrl != source.bookSourceUrl)
         .toList();
     if (others.isEmpty) {
-      _toast('娌℃湁鍏跺畠宸插惎鐢ㄧ殑涔︽簮鍙崲');
+      _toast('没有其它已启用的书源可换');
       return;
     }
     final picked = await Navigator.push<SearchBook>(
@@ -135,7 +138,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
             ?.toBookSource()
         : null;
     if (newSrc == null) {
-      _toast('鐩爣涔︽簮涓嶅彲鐢?);
+      _toast('目标书源不可用');
       return;
     }
     setState(() {
@@ -149,7 +152,8 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
     await _load(newSrc, picked.bookUrl);
   }
 
-  /// 鑱氭悳缁撴灉娌℃湁婧愪俊鎭椂锛岄亶鍘嗗惎鐢ㄦ簮锛屼紭鍏堝懡涓?exploreUrl 涓?bookUrl 鍚屽煙鑰呫€?  XiaoshuoBookSource? _guessSource() {
+/// 聚搜结果没有源信息时，遍历启用源，优先命中 exploreUrl 与 bookUrl 同域者。
+  XiaoshuoBookSource? _guessSource() {
     final sources = ShuyuanSourceStore.instance.toBookSources();
     if (sources.isEmpty) return null;
     try {
@@ -179,7 +183,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
     final book = _book;
     if (source == null || book == null) return;
     if (_chapters.isEmpty) {
-      _toast('鏆傛棤绔犺妭');
+      _toast('暂无章节');
       return;
     }
     Navigator.push(
@@ -213,7 +217,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          '涔︾睄璇︽儏',
+          '书籍详情',
           style: TextStyle(
             fontSize: AppTheme.fontHeadline,
             fontWeight: FontWeight.w600,
@@ -222,7 +226,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
         ),
         actions: [
           IconButton(
-            tooltip: '鎹㈡簮',
+            tooltip: '换源',
             onPressed: _source == null || _chapters.isEmpty
                 ? null
                 : _changeSource,
@@ -235,7 +239,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
             TextButton(
               onPressed: () => _openReader(0),
               child: Text(
-                '寮€濮嬮槄璇?,
+                '开始阅读',
                 style: TextStyle(
                   fontSize: AppTheme.fontHeadline,
                   color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
@@ -298,13 +302,13 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
                 _load(s, widget.bookUrl);
               },
               icon: const Icon(Icons.refresh_rounded),
-              label: const Text('閲嶈瘯'),
+              label: const Text('重试'),
             ),
             if (_source != null)
               TextButton.icon(
                 onPressed: _changeSource,
                 icon: const Icon(Icons.swap_horiz_rounded),
-                label: const Text('鎹釜涔︽簮'),
+                label: const Text('换源'),
               ),
           ],
         ),
@@ -322,7 +326,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 鈹€鈹€ 宸︿俊鎭?+ 鍙冲皝闈?鈹€鈹€
+          // ── 左信息 + 右封面 ──
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -342,14 +346,14 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
                     ),
                     if (book != null && book.author.isNotEmpty) ...[
                       const SizedBox(height: 6),
-                      Text('${book.author} 钁?,
+                      Text('${book.author} 著',
                           style: TextStyle(
                               fontSize: AppTheme.fontSubhead,
                               color: JellyTheme.textSecondary)),
                     ],
                     if (_source != null) ...[
                       const SizedBox(height: 6),
-                      Text('鏉ユ簮锛?{_source!.bookSourceName}',
+                      Text('来源：${_source!.bookSourceName}',
                           style: TextStyle(
                               fontSize: AppTheme.fontSubhead,
                               color: JellyTheme.textSecondary)),
@@ -374,7 +378,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
                                   JellyTheme.primary.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: Text('鏈€鏂扮珷鑺?,
+                            child: Text('最新章节',
                                 style: TextStyle(
                                     fontSize: AppTheme.fontCaption,
                                     color: JellyTheme.primary,
@@ -423,27 +427,27 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
               ),
             ],
           ),
-          // 鈹€鈹€ 鍥涙寜閽細鏀惰棌 / 鍔犲叆涔︽灦 / 闃呰 / 涓嬭浇 鈹€鈹€
+          // ── 四按钮：收藏 / 加入书架 / 阅读 / 下载 ──
           const SizedBox(height: 14),
           Row(
             children: [
-              _actionCapsule(Icons.favorite_border_rounded, '鏀惰棌',
+              _actionCapsule(Icons.favorite_border_rounded, '收藏',
                   _toggleFavorite),
               const SizedBox(width: 8),
               _actionCapsule(
-                  Icons.library_add_rounded, '鍔犲叆涔︽灦', _addToBookshelf),
+                  Icons.library_add_rounded, '加入书架', _addToBookshelf),
               const SizedBox(width: 8),
-              _actionCapsule(Icons.play_arrow_rounded, '闃呰',
+              _actionCapsule(Icons.play_arrow_rounded, '阅读',
                   _chapters.isEmpty ? null : () => _openReader(0)),
               const SizedBox(width: 8),
-              _actionCapsule(Icons.download_for_offline_rounded, '涓嬭浇',
+              _actionCapsule(Icons.download_for_offline_rounded, '下载',
                   _chapters.isEmpty ? null : _downloadBook),
             ],
           ),
-          // 鈹€鈹€ 绠€浠嬫澘鍧?鈹€鈹€
+          // ── 简介板块 ──
           if (intro.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Text('绠€浠?,
+            Text('简介',
                 style: TextStyle(
                     fontSize: AppTheme.fontBody,
                     fontWeight: FontWeight.w700,
@@ -464,7 +468,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   child: Text(
-                    _descExpanded ? '鏀惰捣' : '灞曞紑鍏ㄩ儴',
+                    _descExpanded ? '收起' : '展开全部',
                     style: TextStyle(
                         fontSize: AppTheme.fontSubhead,
                         color: JellyTheme.primary,
@@ -483,14 +487,15 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
     final raw = (_book?.wordCount ?? '').toString();
     if (raw.isEmpty) return '';
     final n = int.tryParse(raw.replaceAll(RegExp(r'\D'), '')) ?? 0;
-    if (n <= 0) return '$raw瀛?;
+    if (n <= 0) return '$raw字';
     if (n >= 10000) {
-      return '${(n / 10000).toStringAsFixed(n % 10000 == 0 ? 0 : 1)}涓囧瓧';
+      return '${(n / 10000).toStringAsFixed(n % 10000 == 0 ? 0 : 1)}万字';
     }
-    return '$n瀛?;
+    return '$n字';
   }
 
-  /// 鍥涙寜閽箣涓€锛堟繁鐏拌兌鍥婏紝瀵归綈澶囦唤3.0锛夈€?  Widget _actionCapsule(IconData icon, String label, VoidCallback? onTap) {
+/// 四按钮之一（深灰胶囊，对齐备份3.0）。
+  Widget _actionCapsule(IconData icon, String label, VoidCallback? onTap) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final labelColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
     return Expanded(
@@ -537,7 +542,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
       'sourceName': _source?.bookSourceName ?? '',
     }));
     setState(() {});
-    _toast(_favorites.isFavorite(id) ? '宸叉敹钘忋€?name銆? : '宸插彇娑堟敹钘忋€?name銆?);
+    _toast(_favorites.isFavorite(id) ? '已收藏「$name」' : '已取消收藏「$name」');
   }
 
   Future<void> _addToBookshelf() async {
@@ -546,7 +551,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
       context,
       itemId: _favoriteId,
       type: BookshelfItemType.book,
-      title: '鍔犲叆涔︽灦',
+      title: '加入书架',
       meta: jsonEncode({
         'id': _favoriteId,
         'hash': '',
@@ -558,11 +563,12 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
       }),
     );
     if (result != null && mounted) {
-      _toast(result.isEmpty ? '宸蹭粠鎵€鏈変功鏋剁Щ闄? : '宸插姞鍏?${result.length} 涓功鏋?);
+      _toast(result.isEmpty ? '已从所有书架移除' : '已加入 ${result.length} 本书架');
     }
   }
 
-  /// 涓嬭浇鍏ㄤ功锛氶€夋嫨鑼冨洿鍚庝氦缁?BookDownloadService锛堝甫杩涘害锛屽彲鍙栨秷锛夈€?  Future<void> _downloadBook() async {
+/// 下载全书：选择范围后交给 BookDownloadService（带进度，可取消）。
+  Future<void> _downloadBook() async {
     final book = _book;
     if (book == null) return;
     final total = _chapters.length;
@@ -583,7 +589,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('涓嬭浇鍏ㄤ功',
+              Text('下载全书',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                       fontSize: AppTheme.fontHeadline,
@@ -592,16 +598,16 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
                           ? Colors.white
                           : JellyTheme.textPrimaryLight)),
               const SizedBox(height: 6),
-              Text('鍏?$total 绔狅紝淇濆瓨涓烘湰鍦?TXT锛屽彲绂荤嚎闃呰',
+              Text('共 $total 章，保存为本地 TXT，可离线阅读',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                       fontSize: AppTheme.fontFootnote,
                       color: JellyTheme.textSecondary)),
               const SizedBox(height: 14),
               for (final (n, label) in [
-                (100, '鍓?100 绔?),
-                (200, '鍓?200 绔?),
-                (total, '鍏ㄩ儴锛?total 绔狅級'),
+                (100, '前 100 章'),
+                (200, '前 200 章'),
+                (total, '全部（$total 章）'),
               ]) ...[
                 if (n <= total) ...[
                   FilledButton(
@@ -620,7 +626,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
               ],
               TextButton(
                 onPressed: () => Navigator.pop(ctx, 0),
-                child: const Text('鍙栨秷'),
+                child: const Text('取消'),
               ),
             ],
           ),
@@ -629,14 +635,15 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
     );
     if (picked == null || picked <= 0 || !mounted) return;
 
-    // 璧?BookDownloadService锛氫笌涓嬭浇璁板綍椤靛叡鐢ㄥ悓涓€濂椾换鍔′綋绯汇€?    await BookDownloadService().download(Book.fromJson({
+// 走 BookDownloadService：与下载记录页共用同一套任务体系。
+    await BookDownloadService().download(Book.fromJson({
       'id': _favoriteId,
       'hash': '',
       'title': book.name.isNotEmpty ? book.name : widget.name,
       'author': book.author,
       'cover': book.coverUrl,
     }));
-    if (mounted) _toast('宸插姞鍏ヤ笅杞介槦鍒楋紝鍙湪涓嬭浇璁板綍椤垫煡鐪嬭繘搴?);
+    if (mounted) _toast('已加入下载队列，可在下载记录页查看进度');
   }
 
   Widget _tocArea() {
@@ -649,7 +656,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
           children: [
             CircularProgressIndicator(color: JellyTheme.primary),
             const SizedBox(height: 14),
-            Text('姝ｅ湪鑾峰彇鐩綍...',
+            Text('正在获取目录...',
                 style: TextStyle(
                     fontSize: AppTheme.fontSubhead,
                     color: JellyTheme.textSecondary)),
@@ -659,7 +666,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
     }
     if (_chapters.isEmpty) {
       return Center(
-        child: Text('鏈В鏋愬埌绔犺妭鐩綍',
+        child: Text('未解析到章节目录',
             style: TextStyle(
                 fontSize: AppTheme.fontSubhead,
                 color: JellyTheme.textSecondary)),
@@ -675,13 +682,13 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
           child: Row(
             children: [
-              Text('绔犺妭鐩綍',
+              Text('章节目录',
                   style: TextStyle(
                       fontSize: AppTheme.fontHeadline,
                       fontWeight: FontWeight.bold,
                       color: label)),
               const SizedBox(width: 8),
-              Text('鍏?${_chapters.length} 绔?,
+              Text('共 ${_chapters.length} 章',
                   style: TextStyle(
                       fontSize: AppTheme.fontSubhead,
                       color: JellyTheme.textSecondary)),
@@ -690,7 +697,7 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
         ),
         ...List.generate(visibleCount, (i) {
           final ch = _chapters[i];
-          final title = ch.title.isNotEmpty ? ch.title : '绗?${i + 1} 绔?;
+          final title = ch.title.isNotEmpty ? ch.title : '第 ${i + 1} 章';
           return ListTile(
             dense: true,
             title: Text(title,
@@ -712,8 +719,8 @@ class _ShuyuanBookDetailPageState extends State<ShuyuanBookDetailPage> {
                 size: 18,
               ),
               label: Text(_showAllChapters
-                  ? '鏀惰捣'
-                  : '鏄剧ず鍏ㄩ儴锛堝叡 ${_chapters.length} 绔狅級'),
+                  ? '收起'
+                  : '显示全部（共 ${_chapters.length} 章）'),
             ),
           ),
       ],

@@ -1,6 +1,7 @@
-﻿// 鎹㈡簮椤?鈥斺€?瀵归綈澶囦唤3.0 book_source_switch_page锛堝弬鑰冨浘 IMG_8482 / IMG_8483锛夈€?//
-// 纭鎬侊細璇存槑鍖?+ 銆屽紑濮嬫悳绱€嶏紱
-// 鎼滅储鎬侊細椤堕儴瀹炴椂杩涘害銆屾鍦ㄦ悳绱?x/N 涓簮 路 鎵惧埌 M 鏈€? 缁撴灉鍒楄〃杈规悳杈规彃锛?// 鐐逛腑涓€涓粨鏋滃悗 pop 杩斿洖缁欒鎯呴〉鏇挎崲褰撳墠婧愩€?import 'package:cached_network_image_ce/cached_network_image.dart';
+// 换源页 —— 对齐备份3.0 book_source_switch_page（参考图 IMG_8482 / IMG_8483）。
+// 确认态：说明区 + 「开始搜索」；
+// 搜索态：顶部实时进度「正在搜索 x/N 个源 · 找到 M 本」 结果列表边搜边插；// 点中一个结果后 pop 返回给详情页替换当前源。
+import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
@@ -48,7 +49,8 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
       _doneCount = 0;
       _results.clear();
     });
-    // 鍥哄畾 6 璺苟鍙戞壂鎻忥紙瀵归綈涔︽簮椤佃仛鎼滐紝閬垮厤 iOS 涓婃棤鐣屽苟鍙?OOM锛夈€?    final sources = widget.sources.where((s) => s.enabled).toList();
+    // 固定 6 路并发扫描（对齐书源页聚搜，避免 iOS 上无界并发 OOM）。
+    final sources = widget.sources.where((s) => s.enabled).toList();
     final total = sources.length;
     const limit = 6;
     var cursor = 0;
@@ -71,7 +73,8 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
             });
           }
         } catch (_) {
-          // 鍗曟簮澶辫触涓嶆墦鎵?        }
+// 单源失败不打扰
+        }
         if (!mounted) return;
         setState(() => _doneCount++);
       }
@@ -122,7 +125,7 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
                 color: JellyTheme.primary.withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Text('鎹㈡簮',
+                child: Text('换源',
                   style: TextStyle(
                       fontSize: AppTheme.fontCaption,
                       color: JellyTheme.primary,
@@ -134,7 +137,7 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
       ),
       body: Column(
         children: [
-          // 鈹€鈹€ 璇存槑 / 杩涘害鍖?鈹€鈹€
+          // ── 说明 / 进度区 ──
           Container(
             width: double.infinity,
             color: (_isDark
@@ -145,21 +148,21 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('鍦ㄥ叾浠栦功婧愰噷鎵惧悓鍚嶄功',
+                Text('在其它书源里找同名书',
                     style: TextStyle(
                         fontSize: AppTheme.fontBody,
                         fontWeight: FontWeight.w700,
                         color: _titleColor)),
                 const SizedBox(height: 4),
-                Text('鎸変功鍚嶃€?{widget.bookName}銆嶆悳绱?,
+                Text('按书名「${widget.bookName}」搜索',
                     style: TextStyle(
                         fontSize: AppTheme.fontFootnote,
                         color: JellyTheme.textSecondary)),
                 const SizedBox(height: 2),
                 Text(
                   _searching || _done
-                      ? '姝ｅ湪鎼滅储 $_doneCount/$total 涓簮 路 鎵惧埌 ${_results.length} 鏈?
-                      : '鍏?$total 涓惎鐢ㄤ功婧愶紝涓€杞悳 50 涓紙鍚屾椂 10 璺級',
+                      ? '正在搜索 $_doneCount/$total 个源 · 找到 ${_results.length} 本'
+                      : '共 $total 个启用书源，一轮搜 50 个（同时 10 路）',
                   style: TextStyle(
                       fontSize: AppTheme.fontFootnote,
                       color: _searching
@@ -188,7 +191,7 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
                       ),
                       onPressed: total == 0 ? null : _startSearch,
                       icon: const Icon(Icons.search_rounded, size: 18),
-                      label: const Text('寮€濮嬫悳绱?,
+                      label: const Text('开始搜索',
                           style: TextStyle(
                               fontSize: AppTheme.fontBody,
                               color: Colors.white,
@@ -222,7 +225,7 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
           children: [
             CircularProgressIndicator(),
             SizedBox(height: 12),
-            Text('姝ｅ湪鍏跺畠涔︽簮涓煡鎵?..'),
+            Text('正在其它书源中查找...'),
           ],
         ),
       );
@@ -235,7 +238,7 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
             const Icon(Icons.search_off_rounded,
                 size: 48, color: Colors.orangeAccent),
             const SizedBox(height: 12),
-            Text('鍏跺畠涔︽簮閲屾病鎵惧埌銆?{widget.bookName}銆?,
+            Text('其它书源里没找到「${widget.bookName}」。',
                 style: TextStyle(
                     fontSize: AppTheme.fontSubhead,
                     color: JellyTheme.textSecondary)),
@@ -244,7 +247,7 @@ class _BookSourceSwitchPageState extends State<BookSourceSwitchPage> {
       );
     }
     return Center(
-      child: Text('鐐瑰嚮銆屽紑濮嬫悳绱€嶅湪鍏跺畠涔︽簮涓煡鎵惧悓鍚嶄功',
+      child: Text('点击「开始搜索」在其它书源中查找同名书',
           style: TextStyle(
               fontSize: AppTheme.fontSubhead,
               color: JellyTheme.textSecondary)),

@@ -1,11 +1,11 @@
-﻿// lib/reading/pages/book_source_health_page.dart
+// lib/reading/pages/book_source_health_page.dart
 //
-// 銆屼功婧愪綋妫€銆嶉〉 鈥斺€?瀵归綈澶囦唤3.0 book_source_health_page锛圛MG_8554~8561锛夛細
-//   绌洪棽椤?  锛氱浘鐗屽浘鏍?+ 娴佺▼鏂囨 + 骞跺彂鏁伴€夋嫨(1/2/3/4/6/8/12) + 寮€濮嬩綋妫€
-//   杩涜涓?  锛氳繘搴?X/N + 骞跺彂 N + 鍙戠儹鎻愮ず + 瀹炴椂缁熻(鍙敤/缃戠粶婧愮珯寮傚父/瑙ｆ瀽澶辫触)
-//   瀹屾垚椤?  锛氫綋妫€瀹屾垚路鏃堕棿 + 缁熻 + 鍒楄〃 + 鍏ㄩ€?+ 涓€閿紭鍖?+ 娓呯悊
-// 寮曟搸鎺ョ嚎锛圢exhub WebBook锛夛細閫愭簮 鍙栦功(searchBook)鈫掕鎯?getBookInfo)
-//   鈫掔洰褰?getChapterList)鈫掓鏂?getContent) 鍥涚幆鑺傦紝鍏ㄩ儴閫氳繃鎵嶇畻鍋ュ悍銆?
+// 「书源体检」页 —— 对齐备份3.0 book_source_health_page（IMG_8554~8561）：
+//   空闲页：  盾牌图标 + 流程文案 + 并发数选择(1/2/3/4/6/8/12) + 开始体检
+//   进行中：进度 X/N + 并发 N + 发热提示 + 实时统计(可用/网络源站异常/解析失败)
+//   完成页：体检完成·时间 + 统计 + 列表 + 全部/一键优化/清理
+// 引擎接线（Nexhub WebBook）：逐源 取书(searchBook)→详情(getBookInfo)
+//   →目录(getChapterList)→正文(getContent) 四环节，全部通过才算健康。
 import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
@@ -20,11 +20,13 @@ import '../services/shuyuan_source_store.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/jelly_search_bar.dart';
 
-/// 浣撴杩涜鐘舵€?enum _Phase { idle, running, done }
+/// 体检进行状态
+enum _Phase { idle, running, done }
 
-/// 鏉＄洰灞曠ず鐘舵€侊紙鐢变綋妫€缁撴灉鎺ㄥ锛?enum _ItemState { untested, healthy, networkFail, parseFail }
+/// 条目展示状态（由体检结果推导）
+enum _ItemState { untested, healthy, networkFail, parseFail }
 
-/// 鍗曚釜婧愮殑浣撴缁撴灉
+/// 单个源的体检结果
 class _SourceHealth {
   final bool healthy;
   final Duration elapsed;
@@ -36,7 +38,8 @@ class _SourceHealth {
   });
 }
 
-/// 澶辫触褰掔被锛氱綉缁?婧愮珯绫伙紙瓒呮椂/杩炴帴/4xx/5xx/楠岃瘉锛?vs 瑙ｆ瀽绫?enum _FailKind { network, parse }
+/// 失败归类：网络/源站类（超时/连接/4xx/5xx/验证） vs 解析类
+enum _FailKind { network, parse }
 
 class BookSourceHealthPage extends StatefulWidget {
   const BookSourceHealthPage({super.key});
@@ -53,17 +56,19 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
   int _concurrency = 12;
   int _done = 0;
 
-  /// 宸叉祴缁撴灉缂撳瓨锛堟寜婧?url锛?  final Map<String, _SourceHealth> _health = {};
+/// 已测结果缓存（按源 url）
+final Map<String, _SourceHealth> _health = {};
 
-  /// 缁熻 tab锛? 鍏ㄩ儴 / 1 鍙敤 / 4 缃戠粶寮傚父 / 5 瑙ｆ瀽澶辫触锛? 鏀惰棌 / 3 瀵嗛挜 鏃犳暟鎹淮搴︼級
+  /// 统计 tab：0 全部 / 1 可用 / 4 网络异常 / 5 解析失败；2 收藏 / 3 密钥（无数据维度）
   int _statTab = 0;
 
-  /// 鍒嗙被锛? 鍏ㄩ儴 / 1 閫氬父涔︽簮 / 2 蹇€熶功婧?  int _groupTab = 0;
+  /// 分类：0 全部 / 1 通常书源 / 2 快速书源
+int _groupTab = 0;
 
   final _searchCtrl = TextEditingController();
   String _kw = '';
 
-  // 澶氶€夛細閫変腑鐨勬簮 url
+  // 多选：选中的源 url
   final Set<String> _selected = {};
   bool _selectAll = false;
 
@@ -78,7 +83,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
   }
 
   // ============================================================
-  // 缁熻鎺ㄥ
+// 统计推导
   // ============================================================
 
   _ItemState _itemState(ShuyuanSource s) {
@@ -100,14 +105,16 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
       .where((s) => _itemState(s) == _ItemState.parseFail)
       .length;
 
-  /// 鍒嗙被鍒嗙粍锛氱粍鍚嶅惈銆屽揩閫熴€嶁啋 蹇€熶功婧?  bool _isFast(ShuyuanSource s) =>
-      (s.bookSourceGroup ?? '').contains('蹇€?);
+  /// 分类分组：组名含「快速」→ 快速书源
+bool _isFast(ShuyuanSource s) =>
+      (s.bookSourceGroup ?? '').contains('快速');
 
-  /// 璇ユ簮鏄惁鏈夎鏀惰棌鐨勪功锛堣鎯呴〉鏀惰棌鏃跺甫 sourceName锛?  bool _isFavoritedSource(ShuyuanSource s) => BookFavoritesService()
+/// 该源是否有被收藏的书（详情页收藏时带 sourceName）
+bool _isFavoritedSource(ShuyuanSource s) => BookFavoritesService()
       .books
       .any((b) => (b.sourceName ?? '').isNotEmpty && b.sourceName == s.bookSourceName);
 
-  /// 璇ユ簮鏄惁甯︾櫥褰曟€?瀵嗛挜锛坔eader 鍚?Cookie/token 绫诲瓧娈碉級
+  /// 该源是否带登录态（密钥，header 含 Cookie/token 类字段）
   bool _isKeyedSource(ShuyuanSource s) {
     final h = (s.header ?? '').toLowerCase();
     return h.contains('cookie') || h.contains('token') || h.contains('secret');
@@ -164,15 +171,15 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
       ShuyuanSourceStore.instance.allSources.where(_isKeyedSource).length;
 
   // ============================================================
-  // 浣撴寮曟搸锛圢exhub WebBook 鍥涚幆鑺傦級
+  // 体检引擎（Nexhub WebBook 四环节）
   // ============================================================
 
   _FailKind _failKind(String detail) {
     final d = detail.toLowerCase();
     if (d.contains('timeout') ||
-        d.contains('瓒呮椂') ||
+        d.contains('超时') ||
         d.contains('connection') ||
-        d.contains('杩炴帴') ||
+        d.contains('连接') ||
         d.contains('socket') ||
         d.contains('dioexception') ||
         d.contains('status code') ||
@@ -187,31 +194,32 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
     return _FailKind.parse;
   }
 
-  /// 閫愭簮浣撴锛氬彇涔︹啋璇︽儏鈫掔洰褰曗啋姝ｆ枃銆?  /// 鍏抽敭瀛楀浐瀹氱敤澶т紬涔﹀悕銆屽ぇ濂夋墦鏇翠汉銆嶏紙涓庝功婧愪粨搴撲綋妫€鍙ｅ緞涓€鑷达級銆?  Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
+/// 逐源体检：取书→详情→目录→正文。  /// 关键字固定用大众书名「大奉打更人」（与书源仓库体检口径一致）。
+Future<_SourceHealth> _healthCheckOne(ShuyuanSource source) async {
     final sw = Stopwatch()..start();
     try {
       final src = source.toBookSource();
-      final results = await _webBook.searchBook(source: src, key: '澶у鎵撴洿浜?);
+      final results = await _webBook.searchBook(source: src, key: '大奉打更人');
       if (results == null || results.isEmpty) {
         return _SourceHealth(
-            healthy: false, elapsed: sw.elapsed, detail: '鎼滅储鏃犵粨鏋?);
+            healthy: false, elapsed: sw.elapsed, detail: '搜索无结果');
       }
       final first = results.first;
-      // 璇︽儏
+      // 详情
       final info = await _webBook.getBookInfo(
         source: src,
         bookUrl: first.bookUrl,
       );
-      // 鐩綍
+// 目录
       final chapters = await _webBook.getChapterList(
         source: src,
         book: info,
       );
       if (chapters.isEmpty) {
         return _SourceHealth(
-            healthy: false, elapsed: sw.elapsed, detail: '鐩綍涓虹┖');
+            healthy: false, elapsed: sw.elapsed, detail: '目录为空');
       }
-      // 姝ｆ枃锛堢涓€绔狅級
+// 正文（第一章）
       final content = await _webBook.getContent(
         source: src,
         chapterUrl: chapters.first.url,
@@ -219,12 +227,12 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
       );
       if (content.content.trim().isEmpty) {
         return _SourceHealth(
-            healthy: false, elapsed: sw.elapsed, detail: '姝ｆ枃涓虹┖');
+            healthy: false, elapsed: sw.elapsed, detail: '正文为空');
       }
       return _SourceHealth(
         healthy: true,
         elapsed: sw.elapsed,
-        detail: '鍙栦功鈫掕鎯呪啋鐩綍鈫掓鏂?鍏ㄩ儴閫氳繃',
+        detail: '取书→详情→目录→正文全部通过',
       );
     } catch (e) {
       final msg = e.toString();
@@ -240,7 +248,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
       _health.clear();
     });
     final all = ShuyuanSourceStore.instance.allSources;
-    // 骞跺彂鍒嗗潡锛氭寜 _concurrency 涓€缁勪竴缁勮窇
+    // 并发分块：按 _concurrency 一组一组跑
     for (var i = 0; i < all.length; i += _concurrency) {
       final batch = all.skip(i).take(_concurrency).toList();
       final results = await Future.wait(batch.map(_healthCheckOne));
@@ -270,21 +278,22 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('涓€閿紭鍖?, style: TextStyle(fontSize: AppTheme.fontHeadline)),
+        title: const Text('一键优化', style: TextStyle(fontSize: AppTheme.fontHeadline)),
         content: Text(
-          '灏嗘妸 ${usable.length} 涓彲鐢ㄦ簮缃《锛?
-          '骞跺仠鐢?${bad.length} 涓綉缁?婧愮珯寮傚父鎴栬В鏋愬け璐ョ殑婧?
-          '锛堜笉鍒犻櫎锛屽彲鍐嶆浣撴鎭㈠锛夈€傜‘瀹氱户缁紵',
+          '将把 ${usable.length} 个可用源置顶，其中重新启用 0 个；'
+          '停用 ${bad.length} 个网络不通/解析失败的源'
+          '（不删除，可再次体检恢复）。确定继续？',
           style: const TextStyle(fontSize: AppTheme.fontSubhead, height: 1.6),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('鍙栨秷')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('浼樺寲')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('优化')),
         ],
       ),
     );
     if (ok != true) return;
-    // 鍙敤婧愮疆椤讹紙鎸夊師椤哄簭锛夛紝鍏朵綑淇濇寔鍘熼『搴忓湪鍚?    final ordered = <String>[
+// 可用源置顶（按原顺序），其余保持原顺序在后
+    final ordered = <String>[
       ...usable.map((s) => s.bookSourceUrl),
       ...ShuyuanSourceStore.instance.allSources
           .where((s) => !usable.contains(s))
@@ -297,29 +306,29 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
       }
     }
     if (mounted) {
-      _toast('宸蹭紭鍖栵細缃《 ${usable.length} 涓彲鐢ㄦ簮锛屽仠鐢?${bad.length} 涓け璐ユ簮');
+      _toast('已优化：置顶 ${usable.length} 个可用源，停用 ${bad.length} 个失败源');
     }
   }
 
   Future<void> _cleanup() async {
     final n = _selected.length;
     if (n == 0) {
-      _toast('璇峰厛鍕鹃€夎娓呯悊鐨勪功婧?);
+      _toast('请先勾选要清理的书源');
       return;
     }
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('娓呯悊涔︽簮', style: TextStyle(fontSize: AppTheme.fontHeadline)),
+        title: const Text('清理书源', style: TextStyle(fontSize: AppTheme.fontHeadline)),
         content: Text(
-          '灏嗗垹闄?$n 涓功婧愶紝鍒犻櫎鍚庝笉鍙仮澶嶏紝纭畾缁х画锛?,
+          '将删除 $n 个书源，删除后不可恢复，确定继续？',
           style: const TextStyle(fontSize: AppTheme.fontSubhead, height: 1.6),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('鍙栨秷')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('鍒犻櫎', style: TextStyle(color: JellyTheme.error)),
+            child: Text('删除', style: TextStyle(color: JellyTheme.error)),
           ),
         ],
       ),
@@ -329,7 +338,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
       await ShuyuanSourceStore.instance.removeSource(url);
     }
     setState(() => _selected.clear());
-    _toast('宸插垹闄?$n 涓功婧?);
+    if (mounted) _toast('已删除 $n 个书源');
   }
 
   void _toast(String msg) {
@@ -344,7 +353,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
   }
 
   // ============================================================
-  // 鏋勫缓
+  // 构建
   // ============================================================
 
   @override
@@ -361,7 +370,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          '涔︽簮浣撴',
+          '书源体检',
           style: TextStyle(
             fontSize: AppTheme.fontHeadline,
             fontWeight: FontWeight.w600,
@@ -372,7 +381,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
           Icon(Icons.shield_rounded, size: 18, color: _subColor),
           const SizedBox(width: 4),
           IconButton(
-            tooltip: '閲嶆柊浣撴',
+            tooltip: '重新体检',
             icon: Icon(Icons.refresh_rounded, size: 20, color: _titleColor),
             onPressed: _phaseVal == _Phase.running ? null : _start,
           ),
@@ -389,7 +398,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
                   )
                 : CustomScrollView(
                     slivers: [
-                      // 鍥哄畾澶达細杩涘害/缁熻/鎼滅储/缁熻tab/鍒嗙粍tab锛堟噿鍔犺浇涓嶅弬涓庯級
+                      // 固定头：进度/统计/搜索/统计tab/分组tab（懒加载不参与）
                       SliverPadding(
                         padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
                         sliver: SliverToBoxAdapter(
@@ -399,7 +408,8 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
                           ),
                         ),
                       ),
-                      // 婧愭潯鐩細SliverList.builder 鎳掑姞杞?                      SliverPadding(
+// 源条目：SliverList.builder 懒加载
+                      SliverPadding(
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                         sliver: SliverList.builder(
                           itemCount: _filtered.length,
@@ -418,7 +428,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
     );
   }
 
-  // 鈹€鈹€ 绌洪棽椤碉紙8554锛夆攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // ── 空闲页（8554）────────────────────────────────────────────────
   List<Widget> _buildIdle() {
     return [
       const SizedBox(height: 60),
@@ -426,7 +436,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
       const SizedBox(height: 20),
       Center(
         child: Text(
-          '閫愭簮浣撴锛氬彇涔︹啋璇︽儏鈫掔洰褰曗啋姝ｆ枃',
+          '逐源体检：取书→详情→目录→正文',
           style: TextStyle(
             fontSize: AppTheme.fontSubhead,
             fontWeight: FontWeight.w600,
@@ -437,7 +447,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
       const SizedBox(height: 8),
       Center(
         child: Text(
-          '鎼滅储銆屽ぇ濂夋墦鏇翠汉銆嶉€愭簮楠岃瘉锛岄獙璇佺爜/瓒呮椂/403/5xx 璁″叆缃戠粶鎴栨簮绔欏紓甯?,
+          '搜索「大奉打更人」逐源验证，验证码/超时/403/5xx 计入网络或源站异常',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: AppTheme.fontFootnote, color: _subColor),
         ),
@@ -465,7 +475,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
             ),
             child: const Center(
               child: Text(
-                '寮€濮嬩綋妫€',
+                '开始体检',
                 style: TextStyle(
                   fontSize: AppTheme.fontHeadline,
                   fontWeight: FontWeight.w600,
@@ -510,8 +520,8 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
     );
   }
 
-  // 鈹€鈹€ 杩涜涓?/ 瀹屾垚椤碉紙8555~8561锛夆攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-  // 鍥哄畾澶撮儴鍒嗭紙鎳掑姞杞?SliverToBoxAdapter 鐢級锛屾簮鏉＄洰鐢?SliverList.builder 鎻愪緵
+  // ── 进行中 / 完成页（8555~8561）────────────────────────────────
+  // 固定头部分（懒加载用 SliverToBoxAdapter），源条目用 SliverList.builder 提供
   List<Widget> _buildResultHeader() {
     final running = _phaseVal == _Phase.running;
     final doneTime = _fmtTime(DateTime.now());
@@ -521,8 +531,8 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
           Expanded(
             child: Text(
               running
-                  ? '浣撴涓?$_done/$_total锛堝彇涔︹啋璇︽儏鈫掔洰褰曗啋姝ｆ枃锛?
-                  : '浣撴瀹屾垚路$doneTime',
+                  ? '体检中 $_done/$_total（取书→详情→目录→正文）'
+                  : '体检完成·$doneTime',
               style: TextStyle(
                 fontSize: AppTheme.fontSubhead,
                 fontWeight: FontWeight.w600,
@@ -539,16 +549,16 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
       if (running) ...[
         const SizedBox(height: 6),
         Text(
-          '鍚庡彴澶氱嚎绋嬩綋妫€浼氫娇鎵嬫満鍙戠儹锛屽睘姝ｅ父鐜拌薄',
+          '后台多线程体检会使手机发烫，属正常现象',
           style: TextStyle(fontSize: AppTheme.fontCaption, color: _subColor),
         ),
       ],
       const SizedBox(height: 12),
       Row(
         children: [
-          _statPill('鍙敤', _usable, Colors.green),
+          _statPill('可用', _usable, Colors.green),
           const SizedBox(width: 10),
-          _statPill('缃戠粶/婧愮珯寮傚父', _networkFail, Colors.orange),
+          _statPill('网络/源站异常', _networkFail, Colors.orange),
           const SizedBox(width: 10),
           _statPill('瑙ｆ瀽澶辫触', _parseFail, JellyTheme.error),
         ],
@@ -556,29 +566,29 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
       const SizedBox(height: 14),
       JellySearchBar(
         controller: _searchCtrl,
-        hintText: '鎼滅储涔︽簮',
+        hintText: '搜索书源',
         onChanged: (v) => setState(() => _kw = v.trim()),
         onCleared: () => setState(() => _kw = ''),
       ),
       const SizedBox(height: 10),
       Row(
         children: [
-          _numTab(0, '鎬绘暟', _total),
-          _numTab(1, '鍙敤', _usable),
-          _numTab(2, '鏀惰棌', _favoritedCount),
-          _numTab(3, '瀵嗛挜', _keyedCount),
-          _numTab(4, '缃戠粶/婧愮珯寮傚父', _networkFail),
+          _numTab(0, '总数', _total),
+          _numTab(1, '可用', _usable),
+          _numTab(2, '收藏', _favoritedCount),
+          _numTab(3, '密钥', _keyedCount),
+          _numTab(4, '网络/源站异常', _networkFail),
           _numTab(5, '瑙ｆ瀽澶辫触', _parseFail),
         ],
       ),
       const SizedBox(height: 8),
       Row(
         children: [
-          _groupTabChip(0, '鍏ㄩ儴', _total),
+          _groupTabChip(0, '全部', _total),
           const SizedBox(width: 8),
-          _groupTabChip(1, '閫氬父涔︽簮', _normalCount),
+          _groupTabChip(1, '通常书源', _normalCount),
           const SizedBox(width: 8),
-          _groupTabChip(2, '蹇€熶功婧?, _fastCount),
+          _groupTabChip(2, '快速书源', _fastCount),
         ],
       ),
       const SizedBox(height: 12),
@@ -587,7 +597,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
           padding: const EdgeInsets.only(top: 60),
           child: Center(
             child: Text(
-              '鏆傛棤鍙敤鐨勬簮',
+              '暂无可用源',
               style: TextStyle(fontSize: AppTheme.fontSubhead, color: _subColor),
             ),
           ),
@@ -675,7 +685,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
     );
   }
 
-  // 鈹€鈹€ 鍒楄〃鏉＄洰 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // ── 列表条目 ────────────────────────────────────────────────
   Widget _itemTile(ShuyuanSource s) {
     final state = _itemState(s);
     final h = _health[s.bookSourceUrl];
@@ -699,7 +709,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
       _ItemState.untested => (
           _subColor,
           Icons.radio_button_unchecked_rounded,
-          '灏氭湭浣撴',
+          '尚未体检',
         ),
     };
 
@@ -775,7 +785,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
     );
   }
 
-  // 鈹€鈹€ 搴曢儴鎿嶄綔鏉★細鍏ㄩ€?/ 涓€閿紭鍖?/ 娓呯悊 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // ── 底部操作条：全部/一键优化/清理 ─────────────────────────
   Widget _buildBottomBar() {
     final list = _filtered;
     return SafeArea(
@@ -807,14 +817,14 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
                 color: _titleColor,
               ),
               label: Text(
-                _selectAll ? '鍙栨秷鍏ㄩ€? : '鍏ㄩ€?,
+                _selectAll ? '取消全选' : '全选',
                 style: TextStyle(fontSize: AppTheme.fontFootnote, color: _titleColor),
               ),
             ),
             const Spacer(),
             if (_phaseVal == _Phase.done) ...[
               IconButton(
-                tooltip: '涓€閿紭鍖?,
+                tooltip: '一键优化',
                 icon: Icon(Icons.auto_fix_high_rounded, size: 20, color: JellyTheme.primary),
                 onPressed: _usable > 0 ? _optimize : null,
               ),
