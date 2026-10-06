@@ -207,7 +207,7 @@ class _SearchPageState extends State<SearchPage>
           // 直接切换搜索平台会让搜索结果出现"点一下播不了"的假可用。
           GestureDetector(
             onTap: () => Navigator.of(context).push<void>(
-              MaterialPageRoute(
+              MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                 builder: (_) => const XimalayaCategoryPage(),
               ),
             ),
@@ -607,7 +607,7 @@ class _SearchPageState extends State<SearchPage>
                         fontSize: AppTheme.fontFootnote)),
                 trailing: const Icon(Icons.chevron_right, size: 18),
                 onTap: () => Navigator.of(context).push<void>(
-                  MaterialPageRoute(
+                  MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                     builder: (_) => XimalayaAlbumPage(
                       albumId: '${a.id}',
                       albumName: a.name,
@@ -682,7 +682,7 @@ class _SearchPageState extends State<SearchPage>
       );
       return;
     }
-    await Navigator.of(context).push(MaterialPageRoute(
+    await Navigator.of(context).push(MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
       builder: (_) => _SongListPage(title: a.name, songs: songs),
     ));
   }
@@ -696,7 +696,7 @@ class _SearchPageState extends State<SearchPage>
       );
       return;
     }
-    await Navigator.of(context).push(MaterialPageRoute(
+    await Navigator.of(context).push(MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
       builder: (_) => _SongListPage(title: al.name, songs: songs),
     ));
   }

@@ -254,7 +254,7 @@ class _PlaylistListPageState extends State<PlaylistListPage> {
                         fontSize: AppTheme.fontFootnote)),
                 onTap: () async {
                   await Navigator.of(context).push<void>(
-                    MaterialPageRoute(
+                    MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                       builder: (_) => PlaylistDetailPage(playlistId: p.id),
                     ),
                   );

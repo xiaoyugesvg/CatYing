@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../models/book_source.dart';
 import '../services/book_source_service.dart';
+import '../services/qread_api.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/jelly_icon_menu_button.dart';
 import '../widgets/jelly_pull_cord.dart';
@@ -120,6 +121,84 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       ));
   }
 
+  /// 壳模式：已连接 qread 服务端时，搜索/探索由服务端执行规则。
+  bool get _serverMode => QreadServerConfig.instance.isLoggedIn;
+
+  /// 服务端结果（QreadSearchResult）→ 本地结果（BookSourceResult）
+  BookSourceResult _fromQread(QreadSearchResult r, BookSource src) =>
+      BookSourceResult(
+        source: src,
+        name: r.name,
+        author: r.author,
+        bookUrl: r.bookUrl,
+        coverUrl: r.coverUrl,
+        intro: r.intro,
+        kind: r.kind,
+        lastChapter: r.latestChapterTitle,
+        wordCount: r.wordCount,
+      );
+
+  /// 服务端聚合搜索：分批并发调 qread，边搜边显示（与本地引擎同款 UI）。
+  Future<void> _runViaServer(List<BookSource> enabled, String kw, int mySession) async {
+    const batch = 4;
+    var idx = 0;
+    while (idx < enabled.length) {
+      final chunk = enabled.skip(idx).take(batch).toList();
+      await Future.wait(chunk.map((s) => _searchOneServer(s, kw, mySession)));
+      idx += batch;
+      if (!mounted || _session != mySession) return;
+    }
+    if (!mounted || _session != mySession) return;
+    setState(() => _searching = false);
+  }
+
+  Future<void> _searchOneServer(BookSource s, String kw, int mySession) async {
+    final st = SourceSearchState(source: s);
+    final sw = Stopwatch()..start();
+    try {
+      final list = await QreadApi.instance.searchBook(s.url, kw);
+      final results = list.map((r) => _fromQread(r, s)).toList();
+      st
+        ..done = true
+        ..ok = results.isNotEmpty
+        ..count = results.length
+        ..elapsed = sw.elapsed;
+      if (!mounted || _session != mySession) return;
+      setState(() {
+        _perSource[s.id] = results;
+        _states.add(st);
+        _doneCount++;
+        rebuildGroups();
+      });
+    } on QreadException catch (e) {
+      if (!mounted || _session != mySession) return;
+      setState(() {
+        st
+          ..done = true
+          ..ok = false
+          ..error = e.message
+          ..elapsed = sw.elapsed;
+        _perSource[s.id] = const [];
+        _states.add(st);
+        _doneCount++;
+        rebuildGroups();
+      });
+    } catch (e) {
+      if (!mounted || _session != mySession) return;
+      setState(() {
+        st
+          ..done = true
+          ..ok = false
+          ..error = '$e'
+          ..elapsed = sw.elapsed;
+        _perSource[s.id] = const [];
+        _states.add(st);
+        _doneCount++;
+        rebuildGroups();
+      });
+    }
+  }
+
   Future<void> _run([String? kwArg]) async {
     // 兼容两处调用：胶囊提交时传 value（提交后输入框会被清空收起），
     // 初筛自动搜索时无参（从 _ctrl.text 读）
@@ -163,6 +242,12 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       _focusMode = false;
       _selectedSourceIds.clear();
     });
+
+    // 壳模式：服务端执行书源规则（解决本地引擎 @js: 垫片不全 / 接口 500）
+    if (_serverMode) {
+      await _runViaServer(enabled, kw, mySession);
+      return;
+    }
 
     await BookSourceService.instance.searchAll(
       enabled,
@@ -248,6 +333,49 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       _exploreVisibleSections = 2;
       _exploreHomeMode = true;
     });
+    // 壳模式：服务端解析 exploreKinds（分类列表）
+    if (_serverMode) {
+      try {
+        final res = await QreadApi.instance.getExploreKinds(source.url);
+        final found = res['found'];
+        final cats = <ExploreCategory>[];
+        if (found is List) {
+          for (final e in found) {
+            if (e is! Map) continue;
+            final title = (e['title'] ?? '').toString().trim();
+            final url = (e['url'] ?? '').toString().trim();
+            if (title.isEmpty) continue;
+            cats.add(ExploreCategory(title: title, url: url));
+          }
+        }
+        if (!mounted || source.id != _selectedSourceId) return;
+        if (cats.isEmpty) {
+          setState(() {
+            _exploreLoading = false;
+            _exploreError =
+                _friendlyError('该源没有配置分类浏览（exploreKinds 为空）');
+          });
+          return;
+        }
+        setState(() {
+          _cats = cats;
+          _exploreLoading = false;
+        });
+        final src = source;
+        for (final c in cats.take(_exploreVisibleSections)) {
+          unawaited(_loadSection(src, c));
+        }
+        return;
+      } on QreadException catch (e) {
+        if (!mounted || source.id != _selectedSourceId) return;
+        setState(() {
+          _exploreLoading = false;
+          _exploreError = e.message;
+        });
+        return;
+      }
+    }
+
     final r = await BookSourceService.instance.exploreCategories(source);
     if (!mounted || source.id != _selectedSourceId) return;
     if (!r.ok || r.categories.isEmpty) {
@@ -272,6 +400,26 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
   Future<void> _loadSection(BookSource source, ExploreCategory cat) async {
     if (_catLoading[cat.url] == true) return;
     setState(() => _catLoading[cat.url] = true);
+    // 壳模式：服务端执行 exploreBook
+    if (_serverMode) {
+      try {
+        final list = await QreadApi.instance.exploreBook(source.url, cat.url);
+        if (!mounted || source.id != _selectedSourceId) return;
+        setState(() {
+          _catLoading[cat.url] = false;
+          _catError[cat.url] = null;
+          _catBooksCache[cat.url] = list.map((r) => _fromQread(r, source)).toList();
+        });
+      } on QreadException catch (e) {
+        if (!mounted || source.id != _selectedSourceId) return;
+        setState(() {
+          _catLoading[cat.url] = false;
+          _catError[cat.url] = e.message;
+          _catBooksCache[cat.url] ??= const [];
+        });
+      }
+      return;
+    }
     final r = await BookSourceService.instance.exploreBooks(source, cat.url);
     if (!mounted || source.id != _selectedSourceId) return;
     setState(() {
@@ -316,6 +464,27 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
         _exploreLoading = false;
         _exploreList = cached;
       });
+      return;
+    }
+    // 壳模式：服务端执行 exploreBook
+    if (_serverMode) {
+      try {
+        final list = await QreadApi.instance.exploreBook(source.url, cat.url);
+        if (!mounted || source.id != _selectedSourceId) return;
+        setState(() {
+          _exploreLoading = false;
+          _exploreError = null;
+          _catBooksCache[cat.url] = list.map((r) => _fromQread(r, source)).toList();
+          _exploreList = _catBooksCache[cat.url]!;
+        });
+      } on QreadException catch (e) {
+        if (!mounted || source.id != _selectedSourceId) return;
+        setState(() {
+          _exploreLoading = false;
+          _exploreError = _friendlyError(e.message);
+          _catBooksCache[cat.url] = const [];
+        });
+      }
       return;
     }
     final r = await BookSourceService.instance.exploreBooks(source, cat.url);

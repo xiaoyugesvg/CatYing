@@ -328,7 +328,7 @@ class _MiniPlayerState extends State<MiniPlayer>
   /// 打开播放队列（歌单）
   void _openQueue(BuildContext context) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const MusicQueuePage()),
+      MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),builder: (_) => const MusicQueuePage()),
     );
   }
 

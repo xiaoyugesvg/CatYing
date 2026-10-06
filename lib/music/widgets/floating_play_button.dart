@@ -62,7 +62,7 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
     final nav = VideoPlayerPip.navigatorKey.currentState;
     if (nav == null) return;
     nav.push<void>(
-      MaterialPageRoute(builder: (_) => const MusicPlayerPage()),
+      MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),builder: (_) => const MusicPlayerPage()),
     );
   }
 

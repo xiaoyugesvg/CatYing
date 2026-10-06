@@ -129,8 +129,13 @@ class MusicBottomChrome extends StatelessWidget {
         SettingsStore.instance.bottomBarOnSubPages,
         // 全屏播放器开/关 —— 它开着时本组件整个隐藏（见下面那段）
         MusicPlayerPage.isOpen,
-        // 路由深度 —— 它变了才知道"进/出子页面"（见 `onRoot` 的说明）
-        MusicRouteObserver.pushedCount,
+        // 子页面层数 —— 它变了才知道"进/出子页面"（见 `onRoot` 的说明）
+        //
+        // ⚠️ 必须听 pushedFrom（"压在根之上的层数"），
+        //    **不能**听 pushedCount（"路由总数"）——
+        //    启动时平级的根路由会让总数 >1，导致主页被误判成子页面，
+        //    把导航栏和播放条整体隐藏掉（这是我修过的一个真 bug）。
+        MusicRouteObserver.pushedFrom,
       ]),
       builder: (context, _) {
         // ── 懒桥接：把 RxInt 的变化同步到 `_visible` ──────────────────
@@ -235,7 +240,7 @@ class MusicBottomChrome extends StatelessWidget {
     final nav = VideoPlayerPip.navigatorKey.currentState;
     if (nav == null) return;
     nav.push<void>(
-      MaterialPageRoute(builder: (_) => const MusicPlayerPage()),
+      MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),builder: (_) => const MusicPlayerPage()),
     );
   }
 

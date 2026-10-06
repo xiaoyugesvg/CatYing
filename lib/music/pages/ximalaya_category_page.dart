@@ -98,7 +98,7 @@ class _XimalayaCategoryPageState extends State<XimalayaCategoryPage> {
                       trailing: Icon(Icons.chevron_right_rounded,
                           color: MusicTheme.secondary),
                       onTap: () => Navigator.of(context).push<void>(
-                        MaterialPageRoute(
+                        MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                           builder: (_) => _AlbumListPage(
                             categoryId: c.id,
                             categoryName: c.name,
@@ -224,7 +224,7 @@ class _AlbumListPageState extends State<_AlbumListPage> {
                           return _AlbumGridCard(
                             song: a,
                             onTap: () => Navigator.of(context).push<void>(
-                              MaterialPageRoute(
+                              MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                                 builder: (_) => XimalayaAlbumPage(
                                   albumId: '${a.id}',
                                   albumName: a.name,

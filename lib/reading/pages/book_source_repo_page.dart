@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 
 import '../models/book_source.dart';
 import '../services/book_source_service.dart';
+import '../services/qread_api.dart';
 import 'book_source_editor_page.dart';
 import 'book_source_health_page.dart';
 import 'book_source_login_page.dart';
@@ -84,6 +85,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   void initState() {
     super.initState();
     if (store.isEmpty) store.init();
+    QreadServerConfig.instance.load();
   }
 
   @override
@@ -278,6 +280,265 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       );
 
   // ============================================================
+  // qread 服务端连接（壳模式）
+  // ============================================================
+
+  /// 服务端设置弹窗：地址/账号/密码 + 登录/登出 + 一键拉取服务端书源。
+  Future<void> _showServerDialog() async {
+    final cfg = QreadServerConfig.instance;
+    final baseCtrl = TextEditingController(text: cfg.baseUrl);
+    final userCtrl = TextEditingController(text: cfg.username);
+    final passCtrl = TextEditingController(text: cfg.password);
+    var busy = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Container(
+          decoration: BoxDecoration(
+            color: _card,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 12,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: JellyTheme.textSecondary.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: [
+                    Icon(Icons.cloud_outlined,
+                        size: 22,
+                        color: cfg.isLoggedIn
+                            ? Colors.lightBlueAccent
+                            : _titleColor),
+                    const SizedBox(width: 8),
+                    Text('qread 服务端',
+                        style: TextStyle(
+                            fontSize: AppTheme.fontTitle2,
+                            fontWeight: FontWeight.w700,
+                            color: _titleColor)),
+                    const Spacer(),
+                    Text(
+                      cfg.isLoggedIn ? '已连接' : '未连接',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontSubhead,
+                        color: cfg.isLoggedIn
+                            ? Colors.lightGreenAccent
+                            : JellyTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  cfg.isLoggedIn
+                      ? '书源规则由服务端执行；本页导入/编辑/删除会同步到服务端'
+                      : '配置你的 qread（轻阅读）服务端地址与账号，书源规则改由服务端执行，解决客户端加密站/接口 500 问题',
+                  style: TextStyle(
+                      fontSize: AppTheme.fontFootnote,
+                      color: JellyTheme.textSecondary),
+                ),
+                const SizedBox(height: 14),
+                _serverField(baseCtrl, '服务端地址', 'https://example.com:8080',
+                    keyboardType: TextInputType.url),
+                const SizedBox(height: 10),
+                _serverField(userCtrl, '账号', '服务端注册的用户名'),
+                const SizedBox(height: 10),
+                _serverField(passCtrl, '密码', '服务端密码', obscure: true),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: busy
+                            ? null
+                            : () async {
+                                setSheet(() => busy = true);
+                                try {
+                                  await cfg.save(
+                                    baseUrl: baseCtrl.text.trim(),
+                                    username: userCtrl.text.trim(),
+                                    password: passCtrl.text,
+                                  );
+                                  await QreadApi.instance.login();
+                                  if (ctx.mounted) {
+                                    Navigator.pop(ctx);
+                                  }
+                                  if (mounted) {
+                                    setState(() {});
+                                    _toast('服务端连接成功');
+                                  }
+                                } on QreadException catch (e) {
+                                  if (mounted) _toast('连接失败：${e.message}');
+                                } catch (e) {
+                                  if (mounted) _toast('连接失败：$e');
+                                } finally {
+                                  setSheet(() => busy = false);
+                                }
+                              },
+                        icon: busy
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.login_rounded, size: 18),
+                        label: const Text('保存并连接'),
+                      ),
+                    ),
+                    if (cfg.isLoggedIn) ...[
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: busy
+                              ? null
+                              : () async {
+                                  setSheet(() => busy = true);
+                                  try {
+                                    await _syncFromServer();
+                                    if (ctx.mounted) Navigator.pop(ctx);
+                                    if (mounted) setState(() {});
+                                  } finally {
+                                    setSheet(() => busy = false);
+                                  }
+                                },
+                          icon: const Icon(Icons.cloud_download_outlined,
+                              size: 18),
+                          label: const Text('拉取书源'),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                if (cfg.isLoggedIn) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton(
+                      onPressed: () async {
+                        await cfg.logout();
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (mounted) {
+                          setState(() {});
+                          _toast('已断开服务端，回到本地模式');
+                        }
+                      },
+                      child: Text('断开连接（回到本地模式）',
+                          style: TextStyle(
+                              fontSize: AppTheme.fontSubhead,
+                              color: JellyTheme.textSecondary)),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _serverField(TextEditingController c, String label, String hint,
+      {bool obscure = false, TextInputType? keyboardType}) {
+    return TextField(
+      controller: c,
+      obscureText: obscure,
+      keyboardType: keyboardType,
+      style: TextStyle(fontSize: AppTheme.fontBody, color: _titleColor),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        hintStyle: TextStyle(
+            fontSize: AppTheme.fontBody, color: JellyTheme.textSecondary),
+        filled: true,
+        fillColor: _isDark
+            ? Colors.white.withValues(alpha: 0.05)
+            : Colors.black.withValues(alpha: 0.035),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      ),
+    );
+  }
+
+  /// 从服务端拉取全部书源（完整规则 JSON）并替换本地书源列表。
+  /// 服务端是权威库：替换前弹确认，防止冲掉本地手动导入的源。
+  Future<void> _syncFromServer() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('从服务端拉取书源'),
+        content: const Text('将用服务端书源列表替换本地书源列表（含已禁用的），继续？'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('拉取')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      final list = await QreadApi.instance.exportSources(null);
+      final parsed = <BookSource>[];
+      for (final m in list) {
+        final s = BookSource.fromJson(m);
+        if (s != null) parsed.add(s);
+      }
+      if (parsed.isEmpty) {
+        _toast('服务端没有书源');
+        return;
+      }
+      await store.removeAll();
+      final r = await store.addAll(parsed);
+      _toast('已从服务端拉取 ${parsed.length} 个书源'
+          '（新增 ${r.added}、更新 ${r.updated}）');
+    } on QreadException catch (e) {
+      _toast('拉取失败：${e.message}');
+    } catch (e) {
+      _toast('拉取失败：$e');
+    }
+  }
+
+  /// 导入双写：本地已保存成功后，把完整规则同步到服务端。
+  Future<void> _pushImportToServer(List<BookSource> parsed) async {
+    if (!QreadServerConfig.instance.isLoggedIn) return;
+    try {
+      final n = await QreadApi.instance
+          .saveSources(parsed.map((s) => s.raw).toList());
+      _toast('已同步 $n 个书源到服务端');
+    } on QreadException catch (e) {
+      _toast('本地已导入，服务端同步失败：${e.message}');
+    } catch (e) {
+      _toast('本地已导入，服务端同步失败：$e');
+    }
+  }
+
+  // ============================================================
   // AppBar：标题「书源仓库」（居中）+ 分享 + 体检（按截图）
   // ============================================================
 
@@ -321,6 +582,34 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
               ),
             ),
       actions: [
+        // ✅ **qread 服务端连接**（壳模式）—— 书源规则执行挪到自建服务端：
+        //   · 未连接：普通云图标，点击打开服务端设置
+        //   · 已连接：云图标高亮 + 右上角小圆点（表示服务端同步模式已生效）
+        IconButton(
+          tooltip: QreadServerConfig.instance.isLoggedIn
+              ? 'qread 服务端已连接'
+              : 'qread 服务端设置',
+          icon: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Icon(
+                Icons.cloud_outlined,
+                size: 20,
+                color: QreadServerConfig.instance.isLoggedIn
+                    ? Colors.lightBlueAccent
+                    : _titleColor,
+              ),
+              if (QreadServerConfig.instance.isLoggedIn)
+                const Positioned(
+                  right: -2,
+                  top: -2,
+                  child: Icon(Icons.circle,
+                      size: 7, color: Colors.lightGreenAccent),
+                ),
+            ],
+          ),
+          onPressed: _showServerDialog,
+        ),
         // ✅ **滑动动作栏**（③ 的正确形式 ✓）—— 与漫画页 `search_page.dart:1371` **同款** ✓✓：
         //   `JellySlidingActions` = **左右一个个滑动切换** ✓ + **下滑展开成一列** ✓
         //   （就是我先前误做成"顶栏指环"✗的那个东西 ✓；指环已撤 ✓，这里换成正确的 ✓）
@@ -1090,6 +1379,23 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                         ),
                       );
                       if (mounted) setState(() {});
+                      // 壳模式：编辑完成后把最新规则同步到服务端
+                      if (QreadServerConfig.instance.isLoggedIn) {
+                        final updated = store.byId(s.id);
+                        if (updated != null) {
+                          try {
+                            await QreadApi.instance
+                                .editSource(updated.id, jsonEncode(updated.raw));
+                            if (mounted) _toast('已同步到服务端');
+                          } on QreadException catch (e) {
+                            if (mounted) {
+                              _toast('本地已保存，服务端同步失败：${e.message}');
+                            }
+                          } catch (e) {
+                            if (mounted) _toast('本地已保存，服务端同步失败：$e');
+                          }
+                        }
+                      }
                     }),
                     const SizedBox(width: 8),
                     _groupActionBtn(Icons.vertical_align_top_rounded, '置顶',
@@ -1097,6 +1403,13 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                       Navigator.pop(ctx);
                       // 置顶 = 把它排到最前（store 有 order 字段）
                       store.reorder([s.id]);
+                      // 壳模式：同步置顶到服务端
+                      if (QreadServerConfig.instance.isLoggedIn) {
+                        QreadApi.instance.topSources([s.id]).catchError((Object e) {
+                          if (mounted) _toast('服务端置顶失败：$e');
+                          return false;
+                        });
+                      }
                     }),
                     const SizedBox(width: 8),
                     // ⚠️ 这个「登录」圆钮必须有：BookSourceLoginPage 原来的
@@ -1134,7 +1447,22 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                           ],
                         ),
                       );
-                      if (ok == true) await store.remove(s.id);
+                      if (ok == true) {
+                        await store.remove(s.id);
+                        // 壳模式：同步删除到服务端
+                        if (QreadServerConfig.instance.isLoggedIn) {
+                          try {
+                            await QreadApi.instance.deleteSource(s.id);
+                            if (mounted) _toast('已同步删除服务端书源');
+                          } on QreadException catch (e) {
+                            if (mounted) {
+                              _toast('本地已删除，服务端删除失败：${e.message}');
+                            }
+                          } catch (e) {
+                            if (mounted) _toast('本地已删除，服务端删除失败：$e');
+                          }
+                        }
+                      }
                     }),
                   ],
                 ),
@@ -1306,6 +1634,16 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     }
     await store.setGroup(s.id, target);
     _toast('已归入「$target」');
+    // 壳模式：同步分组到服务端（editsourcegroup 批量改分组）
+    if (QreadServerConfig.instance.isLoggedIn) {
+      try {
+        await QreadApi.instance.setGroup(target, ids: [s.id]);
+      } on QreadException catch (e) {
+        if (mounted) _toast('本地已改分组，服务端同步失败：${e.message}');
+      } catch (e) {
+        if (mounted) _toast('本地已改分组，服务端同步失败：$e');
+      }
+    }
   }
 
   // ============================================================
@@ -1757,6 +2095,8 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     _toast(r.added > 0 && r.updated > 0
         ? '新增 ${r.added} 个、更新 ${r.updated} 个书源'
         : (r.added > 0 ? '已导入 ${r.added} 个书源' : '已更新 ${r.updated} 个书源'));
+    // 壳模式：已连接服务端时把完整规则同步过去（服务端为权威书源库）
+    await _pushImportToServer(parsed);
   }
 
   /// 解析书源 JSON。兼容 4 种形态 + 带尾随逗号的脏 JSON。
@@ -1901,8 +2241,19 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       ),
     );
     if (ok != true) return;
-    for (final id in _selected.toList()) {
+    final ids = _selected.toList();
+    for (final id in ids) {
       await store.remove(id);
+    }
+    // 壳模式：同步批量删除到服务端
+    if (QreadServerConfig.instance.isLoggedIn) {
+      try {
+        await QreadApi.instance.deleteSources(ids);
+      } on QreadException catch (e) {
+        if (mounted) _toast('本地已删除，服务端删除失败：${e.message}');
+      } catch (e) {
+        if (mounted) _toast('本地已删除，服务端删除失败：$e');
+      }
     }
     if (!mounted) return;
     setState(() {

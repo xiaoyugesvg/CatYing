@@ -461,7 +461,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
             icon: const Icon(Icons.queue_music_rounded,
                 color: Colors.white, size: 24),
             onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
+              MaterialPageRoute<void>(settings: const RouteSettings(name: 'music:page'),
                 builder: (_) => const MusicQueuePage(),
               ),
             ),

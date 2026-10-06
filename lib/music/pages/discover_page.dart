@@ -1323,7 +1323,7 @@ class _DiscoverPageState extends State<DiscoverPage>
               subtitle: s.artists,
               width: 152,
               onTap: () => Navigator.of(context).push<void>(
-                MaterialPageRoute(
+                MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                   builder: (_) => XimalayaAlbumPage(
                     albumId: s.id.toString(),
                     albumName: s.name,
@@ -1380,7 +1380,7 @@ class _DiscoverPageState extends State<DiscoverPage>
               return _CategoryTile(
                 name: cat.name,
                 onTap: () => Navigator.of(context).push<void>(
-                  MaterialPageRoute(
+                  MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                     builder: (_) => _AlbumListPage(
                       categoryId: cat.id,
                       categoryName: cat.name,
@@ -1419,7 +1419,7 @@ class _DiscoverPageState extends State<DiscoverPage>
               subtitle: s.artists,
               width: 152,
               onTap: () => Navigator.of(context).push<void>(
-                MaterialPageRoute(
+                MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                   builder: (_) => BookanAlbumPage(
                     albumId: s.id.toString(),
                     albumName: s.name,
@@ -1458,7 +1458,7 @@ class _DiscoverPageState extends State<DiscoverPage>
               return _CategoryTile(
                 name: cat.name,
                 onTap: () => Navigator.of(context).push<void>(
-                  MaterialPageRoute(
+                  MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                     builder: (_) => BookanCategoryPage(),
                   ),
                 ),
@@ -1494,7 +1494,7 @@ class _DiscoverPageState extends State<DiscoverPage>
               subtitle: s.artists,
               width: 152,
               onTap: () => Navigator.of(context).push<void>(
-                MaterialPageRoute(
+                MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                   builder: (_) => Book275AlbumPage(
                     bookId: s.id.toString(),
                     albumName: s.name,
@@ -1533,7 +1533,7 @@ class _DiscoverPageState extends State<DiscoverPage>
               return _CategoryTile(
                 name: cat.name,
                 onTap: () => Navigator.of(context).push<void>(
-                  MaterialPageRoute(
+                  MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                     builder: (_) => Book275CategoryPage(),
                   ),
                 ),
@@ -1770,7 +1770,7 @@ class _AlbumListPageState extends State<_AlbumListPage> {
                       return SongCell(
                         song: s,
                         onTap: () => Navigator.of(context).push<void>(
-                          MaterialPageRoute(
+                          MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                             builder: (_) => XimalayaAlbumPage(
                               albumId: s.id.toString(),
                               albumName: s.name,
@@ -1857,7 +1857,7 @@ class _QuickSearchDelegate extends SearchDelegate<void> {
               return SongCell(
                 song: song,
                 onTap: () => Navigator.of(context).push<void>(
-                  MaterialPageRoute(
+                  MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                     builder: (_) => XimalayaAlbumPage(
                       albumId: song.id.toString(),
                       albumName: song.name,

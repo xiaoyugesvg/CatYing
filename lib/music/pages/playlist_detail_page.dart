@@ -21,7 +21,7 @@ Future<void> openPlaylist(
   bool isTopList = false,
 }) {
   return Navigator.of(context).push(
-    MaterialPageRoute(
+    MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
       builder: (_) => PlaylistDetailPage(
         id: id,
         title: title,

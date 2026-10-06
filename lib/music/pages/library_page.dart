@@ -160,7 +160,7 @@ class _LibraryPageState extends State<LibraryPage>
             trailing:
                 Icon(Icons.chevron_right, size: 18, color: MusicTheme.secondary),
             onTap: () => Navigator.of(context).push<void>(
-              MaterialPageRoute(builder: (_) => const PlaylistListPage()),
+              MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),builder: (_) => const PlaylistListPage()),
             ),
           ),
           ListTile(
@@ -177,6 +177,7 @@ class _LibraryPageState extends State<LibraryPage>
                 Icon(Icons.chevron_right, size: 18, color: MusicTheme.secondary),
             onTap: () => Navigator.of(context).push<void>(
               MaterialPageRoute(
+                settings: const RouteSettings(name: 'music:page'),
                 // 🔴 音乐子页面是 push 到 root Navigator 的 → **不在**
                 // `MusicRootView` 的 `Theme(MusicTheme.themeData())` 作用域里 ✗
                 // → Scaffold/AppBar/Divider/Card 会回落到**影视侧** AppTheme 的配色 ✗

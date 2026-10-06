@@ -461,7 +461,7 @@ Future<void> showSongActions(
             onTap: () {
               Navigator.pop(ctx);
               Navigator.of(context).push<void>(
-                MaterialPageRoute(builder: (_) => const PlaylistListPage()),
+                MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),builder: (_) => const PlaylistListPage()),
               );
             },
           ),

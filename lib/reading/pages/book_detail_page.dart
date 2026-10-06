@@ -495,7 +495,27 @@ class _BookDetailPageState extends State<BookDetailPage> {
         onTap: () => BookReaderPage.open(context, task),
       );
     }
-    final onlineUrl = widget.book.readOnlineUrl;
+    // [PATCH-22] 在线阅读地址兜底 —— 修"图书不能在线阅读"的根因。
+    //
+    // 事实：`Book.readOnlineUrl` **只**从 JSON 的 `readOnlineUrl` 字段读入
+    //   （models/book.dart:71），而 z-library eapi 的图书 JSON **没有这个字段**
+    //   ⇒ 全项目**没有任何地方**给它赋值 ⇒ 恒为 null
+    //   ⇒ 点「在线阅读」永远弹下面那句"暂无在线阅读地址，请先下载"（死路）。
+    //   （WebView 注入登录 Cookie 的在线阅读页 `OnlineReaderPage` 本身是好的，
+    //     只是永远拿不到 URL、没机会执行。）
+    //
+    // z-library 的阅读页地址可推导：`https://<domain>/book/<id>/<hash>`
+    //   依据：aiset-zlibrary(icodebase-cn) 的示例 URL 形如
+    //   `https://zh.zlib.li/book/25314781/aa05a1/...`。
+    //   未登录时会跳到登录页 —— 而登录态由 cookiesForWebview() 注入 ✓
+    //   （网页登录会话在 [PATCH-21] 之后同样能填上这两个 Cookie ✓）。
+    final explicit = widget.book.readOnlineUrl;
+    final _zlHost = ZlibraryService().domain;
+    final onlineUrl = (explicit != null && explicit.isNotEmpty)
+        ? explicit
+        : (_zlHost.isEmpty
+            ? null
+            : 'https://$_zlHost/book/${widget.book.id}/${widget.book.hash}');
     return _buildCapsule(
       icon: Icons.menu_book_outlined,
       label: '在线阅读',

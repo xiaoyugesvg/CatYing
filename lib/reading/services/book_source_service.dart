@@ -16,6 +16,7 @@ import '../source/legado_to_config.dart';
 import '../source/global_proxy.dart';
 import '../utils/source_fail_text.dart';
 import 'book_source_dart_engine.dart';
+import 'qread_api.dart';
 
 /// 书源搜索到的一本书。
 ///
@@ -137,6 +138,9 @@ class SourceSearchState {
 class BookSourceService {
   BookSourceService._();
   static final BookSourceService instance = BookSourceService._();
+
+  /// 壳模式：已连接 qread 服务端时，详情/目录/正文由服务端执行规则。
+  bool get _serverMode => QreadServerConfig.instance.isLoggedIn;
 
   /// 构造书源服务用的 Dio，并**挂上「网络代理」**（本轮接上 ✓）。
   ///
@@ -545,6 +549,26 @@ class BookSourceService {
   /// 「网络不通 / 解析失败」，用本方法拿 error。
   Future<({Map<String, dynamic>? info, String? error})> bookInfoChecked(
       BookSource source, String bookUrl) async {
+    // ── 壳模式：qread 服务端执行 ruleBookInfo（解决本地引擎 @js: 垫片/500）──
+    if (_serverMode) {
+      try {
+        final book = await QreadApi.instance.getBookInfo2(bookUrl);
+        return (
+          info: {
+            'name': (book['name'] ?? '').toString(),
+            'author': (book['author'] ?? '').toString(),
+            'coverUrl': (book['coverUrl'] ?? '').toString(),
+            'intro': (book['intro'] ?? '').toString(),
+            'lastChapter': (book['latestChapterTitle'] ?? '').toString(),
+            'kind': (book['kind'] ?? '').toString(),
+            'tocUrl': (book['tocUrl'] ?? '').toString(),
+          },
+          error: null,
+        );
+      } on QreadException catch (e) {
+        return (info: null, error: e.message);
+      }
+    }
     // ── config 明文源：Dart 侧引擎 ─────────────────────────────
     if (_canUseDart(source)) {
       try {
@@ -589,6 +613,22 @@ class BookSourceService {
     BookSource source,
     String tocUrl,
   ) async {
+    // ── 壳模式：qread 服务端执行 ruleToc ─────────────────────
+    if (_serverMode) {
+      try {
+        final chapters = await QreadApi.instance.getChapterList(source.url, tocUrl);
+        final out = chapters
+            .map((c) => BookSourceChapter(name: c.title, url: c.url))
+            .toList();
+        return (ok: true, error: null, list: out);
+      } on QreadException catch (e) {
+        return (
+          ok: false,
+          error: e.message,
+          list: const <BookSourceChapter>[],
+        );
+      }
+    }
     // ── config 明文源：Dart 侧引擎 ─────────────────────────────
     if (_canUseDart(source)) {
       try {
@@ -651,6 +691,20 @@ class BookSourceService {
     BookSource source,
     String chapterUrl,
   ) async {
+    // ── 壳模式：qread 服务端执行 ruleContent（含翻页聚合/净化）──
+    if (_serverMode) {
+      try {
+        final text = await QreadApi.instance.getBookContent(source.url, chapterUrl);
+        return (ok: true, error: null, content: text, images: const <String>[]);
+      } on QreadException catch (e) {
+        return (
+          ok: false,
+          error: e.message,
+          content: '',
+          images: const <String>[],
+        );
+      }
+    }
     // ── config 明文源：Dart 侧引擎（正文纯文字，无图片）──────
     if (_canUseDart(source)) {
       try {

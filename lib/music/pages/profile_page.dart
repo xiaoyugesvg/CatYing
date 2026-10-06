@@ -134,7 +134,7 @@ class ProfilePage extends StatelessWidget {
                 ),
                 trailing: Icon(Icons.chevron_right,
                     size: 18, color: MusicTheme.secondary),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                   builder: (_) => const SourceManagerPage(),
                 )),
               );
@@ -160,7 +160,7 @@ class ProfilePage extends StatelessWidget {
             ),
             trailing: Icon(Icons.chevron_right,
                 size: 18, color: MusicTheme.secondary),
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
               builder: (_) => const MusicLogPage(),
             )),
           ),
