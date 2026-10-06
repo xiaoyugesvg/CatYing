@@ -71,40 +71,22 @@ class ProfilePage extends StatelessWidget {
             listen: store.useThirdPartySources,
             onChanged: (v) => store.setUseThirdPartySources(v),
           ),
-          // ── 子页面的底栏（用户 2026 要求做成设置）────────────────
+          // ── 子页面的播放条（用户 2026 定稿）────────────────────
           //
-          // 「每个界面都要有迷你条 + 导航栏」做成了全局层，但那样会
-          // **盖住子页面最下面的内容**。所以给个开关让用户自己选：
-          //   · 关（默认）= 子页面干净、不被遮
-          //   · 开         = 子页面也有底栏（浮在上面）
+          // 用户原话：「去掉那个子页面也有悬浮导航栏呢？只是显示播放栏呢？
+          //            播放的时候显示，不播放就不显示呢」
+          //
+          // 所以**只有一个开关**，管的也只是"子页面要不要播放条"：
+          //   · 子页面**永远没有导航栏**（那会把内容和"返回"语义都搞乱）
+          //   · 播放条**只在真的在播放时**出现（暂停/没歌就收起来）
+          //（原来那个"子页面显示迷你播放条"的子开关因此**删掉了** ——
+          //  它表达的就是这一件事，留着就是两个开关说同一句话。）
           _switchTile(
-            label: '子页面显示底部栏',
-            subtitle: '在歌单详情等子页面也显示迷你条和导航栏',
+            label: '子页面显示播放条',
+            subtitle: '在歌单详情等子页面，播放时显示迷你播放条',
             value: store.bottomBarOnSubPages.value,
             listen: store.bottomBarOnSubPages,
             onChanged: (v) => store.setBottomBarOnSubPages(v),
-          ),
-          // 迷你条单独一个开关：它遮挡小、价值高（在子页面想暂停/切歌
-          // 不用先返回），所以允许"只要迷你条、不要导航栏"。
-          // ⚠️ 只有上面那个总开关打开时才有效 —— 灰掉而不是隐藏，
-          //    否则用户会以为"这个功能不存在"。
-          ValueListenableBuilder<bool>(
-            valueListenable: store.bottomBarOnSubPages,
-            builder: (context, on, _) => Opacity(
-              opacity: on ? 1 : 0.4,
-              child: IgnorePointer(
-                ignoring: !on,
-                child: _switchTile(
-                  label: '子页面显示迷你播放条',
-                  subtitle: on
-                      ? '子页面里也能直接暂停 / 切歌'
-                      : '（需先打开上面的「子页面显示底部栏」）',
-                  value: store.miniPlayerOnSubPages.value,
-                  listen: store.miniPlayerOnSubPages,
-                  onChanged: (v) => store.setMiniPlayerOnSubPages(v),
-                ),
-              ),
-            ),
           ),
           // ⚠️ 「跨平台匹配」开关**已移除**（用户 2026 决定：不要跨平台）。
           //

@@ -3,8 +3,20 @@
 library;
 
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart' as dkcrypto;
+import 'package:encrypt/encrypt.dart' as dkenc;
 import 'package:html/dom.dart';
+import 'package:html/parser.dart' as html_parser;
+import 'package:pointycastle/api.dart';
+import 'package:pointycastle/block/desede_engine.dart';
+import 'package:pointycastle/block/modes/cbc.dart';
+import 'package:pointycastle/block/modes/ecb.dart';
+import 'package:pointycastle/padded_block_cipher/padded_block_cipher_impl.dart';
+import 'package:pointycastle/paddings/pkcs7.dart';
+import 'package:pointycastle/pointycastle.dart';
+import 'package:uuid/uuid.dart';
 import '../../../services/app_log.dart';
 import 'source_rule.dart';
 import 'analyze_jsoup.dart';
@@ -140,6 +152,291 @@ class AnalyzeRule {
 
   List<SourceRule> _splitSourceRuleCache(String ruleStr) {
     return _stringRuleCache.putIfAbsent(ruleStr, () => splitSourceRule(ruleStr));
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // java.* 桥（对齐原版 cmbok / Legado 引擎）：这些方法通过 JS 绑定的
+  // `java` 对象直接可调（js_engine 把本实例注入 JS 全局）。
+  // ════════════════════════════════════════════════════════════════
+
+  static final Uuid _uuid = Uuid();
+
+  /// java.randomUUID()
+  String randomUUID() => _uuid.v4();
+
+  /// java.md5Encode(str) → 32 位小写 hex
+  String md5Encode(String s) => dkcrypto.md5.convert(utf8.encode(s)).toString();
+
+  /// java.md5Encode16(str) → 16 位（Legado：中间 16 位）
+  String md5Encode16(String s) {
+    final full = md5Encode(s);
+    return full.substring(8, 24);
+  }
+
+  /// java.base64Encode(str)（UTF-8 → base64）
+  String base64EncodeString(String s) => base64.encode(utf8.encode(s));
+
+  /// java.base64Decode(str) → latin1 字符串（Legado 返回 byte[]，JS 按字符串用）
+  String base64Decode(String s) {
+    try {
+      return latin1.decode(base64.decode(s));
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// java.base64DecodeToByteArray(str) → Uint8List
+  Uint8List base64DecodeToByteArray(String s) {
+    try {
+      return base64.decode(s);
+    } catch (_) {
+      return Uint8List(0);
+    }
+  }
+
+  /// java.hexEncodeToString(str)（UTF-8 → hex 小写）
+  String hexEncodeToString(String s) {
+    return utf8.encode(s).map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  /// java.hexDecodeToString(hex) → UTF-8 字符串
+  String hexDecodeToString(String s) {
+    try {
+      final bytes = Uint8List(s.length ~/ 2);
+      for (var i = 0; i < s.length; i += 2) {
+        bytes[i ~/ 2] = int.parse(s.substring(i, i + 2), radix: 16);
+      }
+      return utf8.decode(bytes, allowMalformed: true);
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// java.getElementsSingle(rule, [text])：列表规则取首元素
+  dynamic getElementsSingle(String ruleStr, [String? text]) {
+    final saved = content;
+    if (text != null) content = text;
+    try {
+      final list = getElements(ruleStr);
+      return list.isEmpty ? null : list.first;
+    } finally {
+      content = saved;
+    }
+  }
+
+  /// java.getStringListByRules(rules, [text])：依次取非空列表（Legado 语义）
+  List<String> getStringListByRules(List<dynamic> rules, [String? text]) {
+    final saved = content;
+    if (text != null) content = text;
+    try {
+      for (final r in rules) {
+        if (r == null || r.toString().isEmpty) continue;
+        final list = getStringList(r.toString());
+        if (list.isNotEmpty) return list;
+      }
+      return [];
+    } finally {
+      content = saved;
+    }
+  }
+
+  // ── 对称加密（AES/DES）────────────────────────────────────────
+
+  final Map<int, _CryptoSpec> _cryptoHandles = {};
+  int _cryptoSeq = 1;
+
+  /// java.createSymmetricCrypto(algorithm, key, iv, mode) → 句柄
+  /// algorithm 如 `AES/CBC/PKCS7Padding`、`AES/ECB/NoPadding`、`DES/CBC/PKCS5Padding`
+  /// 返回 `{'__handle': id}`，后续调 java.cryptoOp(handle, op, data)。
+  Map<String, int> createSymmetricCrypto(String algorithm, String key,
+      [String? iv, dynamic mode]) {
+    final spec = _buildSpec(algorithm, key);
+    final id = _cryptoSeq++;
+    _cryptoHandles[id] = spec;
+    return {'__handle': id};
+  }
+
+  /// java.cryptoOp(handle, op, data)
+  /// op：Base64Decode / Base64Encode / HexDecode / HexEncode / String（原样）
+  String cryptoOp(int handle, String op, String data) {
+    final spec = _cryptoHandles[handle];
+    if (spec == null) return '';
+    try {
+      final bytes = base64.decode(data);
+      final dec = _decryptSpec(spec, bytes, null);
+      switch (op) {
+        case 'Base64Decode':
+          return latin1.decode(dec);
+        case 'HexDecode':
+          return utf8.decode(dec, allowMalformed: true);
+        case 'Base64Encode':
+          return base64.encode(dec);
+        case 'HexEncode':
+          return dec.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+        default:
+          return utf8.decode(dec, allowMalformed: true);
+      }
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// java.aesBase64DecodeToString(data, key, mode, iv)
+  /// mode 如 `AES/CBC/PKCS7Padding`；key 可为 base64 或明文；iv 为空时用全零。
+  String aesBase64DecodeToString(String data, String key,
+      [String? mode, String? iv]) {
+    try {
+      final spec = _buildSpec(mode ?? 'AES/CBC/PKCS7Padding', key);
+      final dec = _decryptSpec(spec, base64.decode(data), iv);
+      return utf8.decode(dec, allowMalformed: true);
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// java.desBase64DecodeToString(data, key, mode, iv)
+  String desBase64DecodeToString(String data, String key,
+      [String? mode, String? iv]) {
+    try {
+      final spec = _buildSpec(mode ?? 'DES/CBC/PKCS5Padding', key);
+      final dec = _decryptSpec(spec, base64.decode(data), iv);
+      return utf8.decode(dec, allowMalformed: true);
+    } catch (_) {
+      return '';
+    }
+  }
+
+  _CryptoSpec _buildSpec(String algorithm, String key) {
+    final upper = algorithm.toUpperCase();
+    final parts = upper.split('/');
+    final algo = parts.isNotEmpty ? parts[0] : 'AES';
+    final useCbc = parts.length > 1 ? parts[1] == 'CBC' : true;
+    final isDes = algo == 'DES' || algo == 'DESEDE' || algo == '3DES';
+    final keyBytes = _decodeKeyBytes(key);
+    if (isDes) {
+      final len = keyBytes.length == 8 ? 8 : (keyBytes.length >= 24 ? 24 : 16);
+      return _CryptoSpec.des(_padKey(keyBytes, len), useCbc);
+    }
+    final len = _aesKeyLen(keyBytes);
+    return _CryptoSpec.aes(
+        dkenc.Key(_padKey(keyBytes, len)),
+        useCbc ? dkenc.AESMode.cbc : dkenc.AESMode.ecb,
+        _normPadding(parts.length > 2 ? parts[2] : 'PKCS7'));
+  }
+
+  static String? _normPadding(String p) {
+    final up = p.toUpperCase();
+    if (up == 'NOPADDING') return null;
+    if (up == 'PKCS5PADDING' || up == 'PKCS7PADDING' || up == 'PKCS5' || up == 'PKCS7') {
+      return 'PKCS7';
+    }
+    return up.isEmpty ? 'PKCS7' : up;
+  }
+
+  List<int> _decryptSpec(_CryptoSpec spec, Uint8List bytes, String? iv) {
+    if (spec.isDes) {
+      // pointycastle 3.9 无单 DES 引擎：8 字节密钥复制 3 份交给
+      // DESede（DES∘DES⁻¹∘DES = DES），16/24 字节直接用。
+      final desKey = spec.keyBytes.length == 8
+          ? Uint8List.fromList([...spec.keyBytes, ...spec.keyBytes, ...spec.keyBytes])
+          : spec.keyBytes;
+      final engine = DESedeEngine();
+      final cipher = spec.cbc
+          ? PaddedBlockCipherImpl(PKCS7Padding(), CBCBlockCipher(engine))
+          : PaddedBlockCipherImpl(PKCS7Padding(), ECBBlockCipher(engine));
+      if (spec.cbc) {
+        final ivBytes = _padIv(_decodeKeyBytes(iv ?? ''), 8);
+        final withIv = ParametersWithIV<KeyParameter>(KeyParameter(desKey), ivBytes);
+        cipher.init(
+            false,
+            PaddedBlockCipherParameters<ParametersWithIV<KeyParameter>,
+                ParametersWithIV<KeyParameter>>(withIv, withIv));
+      } else {
+        cipher.init(
+            false,
+            PaddedBlockCipherParameters<KeyParameter, Null>(
+                KeyParameter(desKey), null));
+      }
+      return _runBlockCipher(cipher, bytes);
+    }
+    final ivObj = spec.mode != dkenc.AESMode.ecb
+        ? dkenc.IV(_padIv(_decodeKeyBytes(iv ?? ''), 16))
+        : null;
+    return dkenc.Encrypter(dkenc.AES(spec.key!, mode: spec.mode, padding: spec.padding))
+        .decryptBytes(dkenc.Encrypted(bytes), iv: ivObj);
+  }
+
+  static List<int> _runBlockCipher(PaddedBlockCipherImpl cipher, Uint8List input) {
+    // pointycastle 3.9 的 PaddedBlockCipherImpl.process 一步完成
+    // 尾块 + padding 处理（内部 doFinal），解密直接返回明文字节。
+    return cipher.process(input);
+  }
+
+  static int _aesKeyLen(Uint8List bytes) {
+    if (bytes.length >= 32) return 32;
+    if (bytes.length >= 24) return 24;
+    return 16;
+  }
+
+  static Uint8List _padKey(Uint8List bytes, int len) {
+    if (bytes.length >= len) return Uint8List.fromList(bytes.sublist(0, len));
+    final out = Uint8List(len);
+    for (var i = 0; i < len; i++) {
+      out[i] = i < bytes.length ? bytes[i] : 0;
+    }
+    return out;
+  }
+
+  static Uint8List _padIv(Uint8List bytes, int len) {
+    if (bytes.length >= len) return Uint8List.fromList(bytes.sublist(0, len));
+    final out = Uint8List(len);
+    for (var i = 0; i < len; i++) {
+      out[i] = i < bytes.length ? bytes[i] : 0;
+    }
+    return out;
+  }
+
+  /// 密钥解码：base64 优先（Legado 常用 base64 密钥），失败按 UTF-8。
+  static Uint8List _decodeKeyBytes(String s) {
+    try {
+      return base64.decode(s.trim());
+    } catch (_) {
+      return Uint8List.fromList(utf8.encode(s));
+    }
+  }
+
+  // ── jsoup 句柄（org.jsoup 风格：java.jsoupParse(html).select(css)）──
+
+  final Map<int, Element> _jsoupDocs = {};
+  int _jsoupSeq = 1;
+
+  Map<String, int> jsoupParse(String html) {
+    final doc = html_parser.parse(html).documentElement;
+    if (doc == null) return {'__handle': 0};
+    final id = _jsoupSeq++;
+    _jsoupDocs[id] = doc;
+    return {'__handle': id};
+  }
+
+  /// java.jsoupSelect(handle, css) → 元素文本列表
+  List<String> jsoupSelect(int handle, String css) {
+    final root = _jsoupDocs[handle];
+    if (root == null) return [];
+    try {
+      return root
+          .querySelectorAll(css)
+          .map((e) => e.text.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// java.jsoupSelectFirst(handle, css) → 首个元素文本
+  String jsoupSelectFirst(int handle, String css) {
+    final list = jsoupSelect(handle, css);
+    return list.isEmpty ? '' : list.first;
   }
 
   List<SourceRule> splitSourceRule(String? ruleStr, {bool allInOne = false}) {
@@ -550,4 +847,25 @@ class _RuleState {
 
   _RuleState(this.rule, this.replaceRegex, this.replacement, this.replaceFirst,
       this.templateMode);
+}
+
+/// 对称加密规格（java.createSymmetricCrypto 句柄背后）。
+class _CryptoSpec {
+  final bool isDes;
+  final Uint8List keyBytes;
+  final bool cbc;
+  final dkenc.Key? key;
+  final dkenc.AESMode mode;
+  final String? padding;
+
+  const _CryptoSpec.des(this.keyBytes, this.cbc)
+      : isDes = true,
+        key = null,
+        mode = dkenc.AESMode.cbc,
+        padding = null;
+
+  _CryptoSpec.aes(this.key, this.mode, this.padding)
+      : isDes = false,
+        keyBytes = Uint8List(0),
+        cbc = true;
 }

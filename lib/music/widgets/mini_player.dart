@@ -70,7 +70,14 @@ class MiniPlayer extends StatefulWidget {
     super.key,
     required this.onOpen,
     this.bottomInset = 0,
+    this.tightBottom = false,
   });
+
+  /// **紧凑贴底**：只留极小间隙（4），不要"导航栏那 20 + 间隙 6"。
+  ///
+  /// 给**子页面**用 —— 那里下面没有导航栏，那 26 的空档纯属白留，
+  /// 用户反馈"播放条上面空了一大截、想再往下移"。
+  final bool tightBottom;
 
   /// 除 [MusicMiniPlayerLayout.gapAboveNavBar] 之外，**再往下垫多少**。
   ///
@@ -148,11 +155,25 @@ class _MiniPlayerState extends State<MiniPlayer>
           //   · 在 push 出去的子页：下面没有导航栏，贴底（+ 安全区）
           // 所以这里用一个参数表达"还要再往下垫多少"，
           // 由调用方决定（`RootView` 里传 0，因为 Column 已经排好了）。
+          // ── ⚠️ `tightBottom` 是给**子页面**用的（用户 2026 要求）──────
+          // 用户反馈：子页面里播放条下面**空了一大截**，希望**再往下移**。
+          //
+          // 那一截的来源是两段叠加：
+          //   · 导航栏的 `floatingBottomMargin`（20）—— 子页面**没有导航栏**，
+          //     所以这段纯粹是白留的
+          //   · 播放条自己的 `gapAboveNavBar`（6）—— 那是"和导航栏之间的
+          //     间距"，没有导航栏时也不需要
+          // 合计 26 的空档。
+          //
+          // `tightBottom: true` 时只留一个**小间隙**（8）——
+          // 再小就会贴到 Home 指示条上，看着像被切掉了；
+          // 把播放条压到接近屏幕底（安全区仍由外层 `Positioned` 保证）。
           padding: EdgeInsets.fromLTRB(
             MusicMiniPlayerLayout.sideMargin,
             0,
             MusicMiniPlayerLayout.sideMargin,
-            MusicMiniPlayerLayout.gapAboveNavBar + widget.bottomInset,
+            (widget.tightBottom ? 8.0 : MusicMiniPlayerLayout.gapAboveNavBar) +
+                widget.bottomInset,
           ),
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,

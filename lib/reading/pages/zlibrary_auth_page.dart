@@ -6,6 +6,7 @@ import '../services/search_history_service.dart';
 import '../services/zlibrary_service.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/staggered_entrance.dart';
+import 'zlibrary_nodes_sheet.dart';
 
 /// z-library 登录/注册页面（扁平风、内容丰富、灵动）。
 /// 一个全屏页面内用分段切换在「登录 / 注册」间过渡。
@@ -384,6 +385,28 @@ class _ZlibraryAuthPageState extends State<ZlibraryAuthPage>
             icon: const Icon(Icons.close_rounded),
             tooltip: '关闭',
             onPressed: () => Navigator.of(context).pop(),
+          ),
+          const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.dns_rounded),
+            tooltip: '节点管理',
+            onPressed: () => showModalBottomSheet<void>(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (ctx) => Container(
+                decoration: BoxDecoration(
+                  color: Theme.of(ctx).brightness == Brightness.dark
+                      ? JellyTheme.cardDark
+                      : Colors.white,
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: const ZlibraryNodesSheet(),
+                ),
+              ),
+            ),
           ),
         ],
       ),

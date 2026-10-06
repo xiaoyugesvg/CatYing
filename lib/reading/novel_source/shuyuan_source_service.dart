@@ -338,13 +338,30 @@ class ShuyuanSourceService {
     return sources;
   }
 
+  /// Cmbok 包装格式展开：条目形如 `{"name":"源名","json":"{\"bookSourceName\":...}"}`
+  /// （cmbok.db 导出 / cmbok_book_sources.json 的结构），真正书源在 `json` 内嵌串里。
+  /// 非包装条目原样返回。
+  static Map<String, dynamic> _unwrapCmbokEntry(Map<String, dynamic> entry) {
+    final inner = entry['json'];
+    if (inner is String && inner.trim().isNotEmpty) {
+      try {
+        final dec = json.decode(inner);
+        if (dec is Map<String, dynamic>) return dec;
+        if (dec is Map) {
+          return Map<String, dynamic>.from(dec.cast<String, dynamic>());
+        }
+      } catch (_) {}
+    }
+    return entry;
+  }
+
   List<ShuyuanSource> _parseJsonArray(String jsonStr) {
     try {
       final decoded = json.decode(jsonStr);
       if (decoded is List) {
         return decoded
             .whereType<Map<String, dynamic>>()
-            .map((e) => ShuyuanSource.fromJson(e))
+            .map((e) => ShuyuanSource.fromJson(_unwrapCmbokEntry(e)))
             .toList();
       }
 
@@ -356,13 +373,13 @@ class ShuyuanSourceService {
             if (arr is List) {
               return arr
                   .whereType<Map<String, dynamic>>()
-                  .map((e) => ShuyuanSource.fromJson(e))
+                  .map((e) => ShuyuanSource.fromJson(_unwrapCmbokEntry(e)))
                   .toList();
             }
           }
         }
         // 视为单个书源对象
-        return [ShuyuanSource.fromJson(decoded)];
+        return [ShuyuanSource.fromJson(_unwrapCmbokEntry(decoded))];
       }
     } catch (_) {}
     return <ShuyuanSource>[];
@@ -372,7 +389,7 @@ class ShuyuanSourceService {
     try {
       final decoded = json.decode(jsonStr);
       if (decoded is Map<String, dynamic>) {
-        return ShuyuanSource.fromJson(decoded);
+        return ShuyuanSource.fromJson(_unwrapCmbokEntry(decoded));
       }
     } catch (_) {}
     return null;

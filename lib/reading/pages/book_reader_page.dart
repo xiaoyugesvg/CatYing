@@ -7,8 +7,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:screen_brightness/screen_brightness.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../common/theme.dart';
 import '../models/book.dart';
 import '../models/book_content.dart';
 import '../models/bookshelf.dart';
@@ -23,16 +26,27 @@ import '../services/reader_override_service.dart';
 import '../services/bookshelf_service.dart';
 import '../services/platform_service.dart';
 import '../services/settings_service.dart';
+import '../services/tts_service.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/book_page_cover.dart';
 import '../widgets/book_page_curl.dart';
 import '../widgets/pomodoro_button.dart';
 import 'book_prefetch_page.dart';
+import 'notes_and_journey_page.dart';
 
-/// 图书阅读器固定浅色阅读主题，不跟随全局暗色模式：
-/// 仿真翻页为固定纸张图背景，全局暗色下文字翻白配浅纸看不清。
-/// 改为 true 可启用夜间反色（未来若加阅读器独立夜间模式开关，改此处即可）。
-const bool _readerIsDark = false;
+/// 顶栏全书搜索的命中条目
+class _SearchHit {
+  final int chapterIndex;
+  final String chapterTitle;
+  final String preview;
+  final int blockIndex;
+  const _SearchHit({
+    required this.chapterIndex,
+    required this.chapterTitle,
+    required this.preview,
+    required this.blockIndex,
+  });
+}
 
 /// 图书阅读页：EPUB / MOBI / TXT / PDF app 内排版阅读；
 /// 其余格式由 [open] 路由到外部应用。
@@ -137,6 +151,19 @@ class BookPrefetchedData {
 }
 
 class _BookReaderPageState extends State<BookReaderPage> {
+  /// 阅读器独立明暗：0=跟随全局，1=强制白天，2=强制夜间。
+  /// 实例字段随页面生命周期走，换书重新从 0（跟随全局）开始，不跨书残留。
+  int _darkOverride = 0;
+
+  bool get _readerIsDark {
+    if (_darkOverride == 1) return false;
+    if (_darkOverride == 2) return true;
+    return !AppBrightness.isLight.value;
+  }
+
+  /// 朗读引擎（iOS 原生 TTS / easyVoice 网络合成）
+  final _tts = TtsService.instance;
+
   BookContent? _content;
   bool _loading = true;
   String? _error;
@@ -2011,6 +2038,55 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         ],
                       ),
                     ),
+                    // 功能图标：搜索 / 刷新 / 书签 / 朗读 / 亮度 / 日夜 / 编辑
+                    IconButton(
+                      tooltip: '搜索本书',
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.search_rounded, size: 20, color: iconColor),
+                      onPressed: _showBookSearch,
+                    ),
+                    IconButton(
+                      tooltip: '刷新本章',
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.refresh_rounded, size: 20, color: iconColor),
+                      onPressed: _refreshCurrentChapter,
+                    ),
+                    IconButton(
+                      tooltip: '书签',
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.bookmark_border_rounded, size: 20, color: iconColor),
+                      onPressed: _toggleBookmark,
+                    ),
+                    IconButton(
+                      tooltip: '朗读',
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.record_voice_over_outlined, size: 20, color: iconColor),
+                      onPressed: _toggleTts,
+                    ),
+                    IconButton(
+                      tooltip: '亮度',
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.brightness_6_rounded, size: 20, color: iconColor),
+                      onPressed: _showBrightnessSheet,
+                    ),
+                    IconButton(
+                      tooltip: _darkOverride == 2 ? '切换白天' : '切换夜间',
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(
+                        _darkOverride == 2
+                            ? Icons.light_mode_outlined
+                            : Icons.dark_mode_outlined,
+                        size: 20,
+                        color: iconColor,
+                      ),
+                      onPressed: _toggleDayNight,
+                    ),
+                    IconButton(
+                      tooltip: '编辑（划线与笔记）',
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.edit_outlined, size: 20, color: iconColor),
+                      onPressed: _showEditPlaceholder,
+                    ),
                   ],
                 ),
               ),
@@ -2163,6 +2239,508 @@ class _BookReaderPageState extends State<BookReaderPage> {
           : '$left/${_pages.length} 页';
     }
     return '${_currentPage + 1}/${_pages.length} 页';
+  }
+
+  // ---------------- 顶栏功能（搜索 / 刷新 / 书签 / 朗读 / 亮度 / 日夜 / 编辑） ----------------
+
+  /// 把当前章的所有文本块拼成朗读文本
+  String _currentChapterText() {
+    final ci = _currentChapterIndex();
+    final chapters = _content?.chapters ?? const [];
+    if (ci < 0 || ci >= chapters.length) return '';
+    final buf = StringBuffer();
+    for (final b in chapters[ci].blocks) {
+      if (b is ParagraphBlock) {
+        buf.writeln(b.text);
+      } else if (b is HeadingBlock) {
+        buf.writeln(b.text);
+      }
+    }
+    return buf.toString();
+  }
+
+  /// 点听书按钮：正在念就暂停/继续，没在念就从当前章开头念
+  Future<void> _toggleTts() async {
+    if (_tts.isSpeaking.value) {
+      await _tts.pause();
+      if (!mounted) return;
+      setState(() {});
+      return;
+    }
+    if (_tts.isPaused.value) {
+      await _tts.resume();
+      if (!mounted) return;
+      setState(() {});
+      return;
+    }
+
+    final text = _currentChapterText();
+    if (text.trim().isEmpty) {
+      BookReaderPage._toast(context, '这一章没有可朗读的内容');
+      return;
+    }
+
+    // 念完本章 → 自动跳下一章接着念
+    _tts.onFinished = () {
+      if (!mounted) return;
+      final next = _currentChapterIndex() + 1;
+      if (next < _chapterStarts.length) {
+        _goChapter(next);
+        // 等切章完成再取文本
+        Future.delayed(const Duration(milliseconds: 400), () {
+          if (!mounted) return;
+          final t = _currentChapterText();
+          if (t.trim().isNotEmpty) _tts.speak(t);
+        });
+      }
+    };
+
+    await _tts.speak(text);
+    setState(() {});
+  }
+
+  /// 顶栏搜索：全书全文搜索（本地书已全部解析，直接遍历章节文本块）
+  Future<void> _showBookSearch() async {
+    final content = _content;
+    if (content == null || _pages.isEmpty) {
+      BookReaderPage._toast(context, '内容尚未加载完成');
+      return;
+    }
+    final dark = _readerIsDark;
+    final fg = dark ? Colors.white : JellyTheme.textPrimaryLight;
+    final bgTop = dark
+        ? Colors.black.withValues(alpha: 0.96)
+        : Colors.white.withValues(alpha: 0.98);
+    final controller = TextEditingController();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheet) {
+          List<_SearchHit> hits = const [];
+          bool searched = false;
+          String keyword = '';
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.72,
+            decoration: BoxDecoration(
+              color: bgTop,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+            ),
+            padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom + 8),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: Row(
+                    children: [
+                      Icon(Icons.search_rounded, size: 20, color: fg),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: controller,
+                          autofocus: true,
+                          style: TextStyle(color: fg),
+                          decoration: InputDecoration(
+                            hintText: '输入关键词搜索全书',
+                            hintStyle: TextStyle(color: fg.withValues(alpha: 0.4)),
+                            isDense: true,
+                            border: InputBorder.none,
+                          ),
+                          textInputAction: TextInputAction.search,
+                          onSubmitted: (v) {
+                            keyword = v.trim();
+                            if (keyword.isEmpty) return;
+                            hits = _searchFullBook(keyword);
+                            searched = true;
+                            setSheet(() {});
+                          },
+                        ),
+                      ),
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: Icon(Icons.close_rounded, size: 18, color: fg.withValues(alpha: 0.6)),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+                Divider(height: 1, color: fg.withValues(alpha: 0.1)),
+                if (!searched)
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        '输入关键词，回车搜索全书',
+                        style: TextStyle(fontSize: 13, color: fg.withValues(alpha: 0.5)),
+                      ),
+                    ),
+                  )
+                else if (hits.isEmpty)
+                  Expanded(
+                    child: Center(
+                      child: Text('没有找到「$keyword」相关内容',
+                          style: TextStyle(fontSize: 13, color: fg.withValues(alpha: 0.5))),
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      itemCount: hits.length,
+                      itemBuilder: (context, i) {
+                        final h = hits[i];
+                        return InkWell(
+                          onTap: () {
+                            Navigator.pop(context);
+                            _jumpToSearchHit(h.blockIndex);
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  h.chapterTitle.isEmpty ? '第 ${h.chapterIndex + 1} 章' : h.chapterTitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: JellyTheme.primary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  h.preview,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(fontSize: 13, color: fg.withValues(alpha: 0.85)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: Text(
+                    hits.isEmpty ? '' : '共 ${hits.length} 处匹配',
+                    style: TextStyle(fontSize: 12, color: fg.withValues(alpha: 0.5)),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 遍历全部章节文本块找关键词（忽略大小写，最多 300 条）。
+  /// 全局 blockIndex = 章节起始块索引 + 章内序号（章节标题块占 1）。
+  List<_SearchHit> _searchFullBook(String keyword) {
+    final content = _content;
+    if (content == null) return const [];
+    final lower = keyword.toLowerCase();
+    final starts = content.chapterStarts;
+    final out = <_SearchHit>[];
+    for (var ci = 0; ci < content.chapters.length; ci++) {
+      final ch = content.chapters[ci];
+      final base = starts[ci];
+      final headOffset = ch.title.isNotEmpty ? 1 : 0;
+      for (var j = 0; j < ch.blocks.length; j++) {
+        final b = ch.blocks[j];
+        final text = (b is ParagraphBlock)
+            ? b.text
+            : (b is HeadingBlock ? b.text : '');
+        if (text.isEmpty || !text.toLowerCase().contains(lower)) continue;
+        // 摘录关键词前后片段
+        final idx = text.toLowerCase().indexOf(lower);
+        final start = (idx - 12).clamp(0, text.length);
+        final end = (idx + keyword.length + 24).clamp(0, text.length);
+        var preview = text.substring(start, end).replaceAll('\n', ' ');
+        if (start > 0) preview = '…$preview';
+        if (end < text.length) preview = '$preview…';
+        out.add(_SearchHit(
+          chapterIndex: ci,
+          chapterTitle: ch.title,
+          preview: preview,
+          blockIndex: base + headOffset + j,
+        ));
+        if (out.length >= 300) return out;
+      }
+    }
+    return out;
+  }
+
+  /// 搜索命中跳转：窗口内直接定位，窗口外先补排（补排完成内部会定位）
+  void _jumpToSearchHit(int blockIndex) {
+    setState(() => _showControls = false);
+    if (_ongoingPaginator != null && blockIndex > _paginatedBlockCount) {
+      _extendToBlock(blockIndex);
+      return;
+    }
+    _goChapterJump(blockIndex);
+  }
+
+  /// 顶栏刷新：清掉分页缓存重排当前章
+  void _refreshCurrentChapter() {
+    final ci = _currentChapterIndex();
+    // 清掉全部分页缓存（缓存 key 由屏宽/屏高决定，参数没变会命中缓存，
+    // 必须清缓存才真正重排）
+    BookPageCacheService.instance.clear();
+    setState(() {});
+    _goChapter(ci);
+    BookReaderPage._toast(context, '已重新排版');
+  }
+
+  // ---- 本地书签（轻量 prefs：taskId -> [{chapterTitle, chapterIndex, blockIndex}]） ----
+  static const _bookmarkPrefsKey = 'book_reader_bookmarks_v1';
+
+  Future<Map<String, List<Map<String, dynamic>>>> _loadAllBookmarks() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_bookmarkPrefsKey);
+      if (raw == null || raw.isEmpty) return {};
+      final dec = jsonDecode(raw) as Map<String, dynamic>;
+      return dec.map((k, v) => MapEntry(
+            k,
+            (v as List).map((e) => Map<String, dynamic>.from(e as Map)).toList(),
+          ));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> _persistBookmarks(Map<String, List<Map<String, dynamic>>> all) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_bookmarkPrefsKey, jsonEncode(all));
+    } catch (_) {}
+  }
+
+  /// 书签面板：列出本书书签可跳转，长按删除，空态引导加书签
+  Future<void> _showBookmarks() async {
+    final dark = _readerIsDark;
+    final fg = dark ? Colors.white : JellyTheme.textPrimaryLight;
+    final bgTop = dark
+        ? Colors.black.withValues(alpha: 0.96)
+        : Colors.white.withValues(alpha: 0.98);
+    final all = await _loadAllBookmarks();
+    final bookId = widget.task.bookId;
+    final list = List<Map<String, dynamic>>.from(all[bookId] ?? const []);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheet) {
+          return Container(
+            decoration: BoxDecoration(
+              color: bgTop,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+            ),
+            padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom + 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 8, 6),
+                  child: Row(
+                    children: [
+                      Icon(Icons.bookmark_rounded, size: 18, color: fg),
+                      const SizedBox(width: 8),
+                      Text('书签（${list.length}）',
+                          style: TextStyle(fontSize: AppTheme.fontSubhead, fontWeight: FontWeight.w700, color: fg)),
+                      const Spacer(),
+                      if (list.isNotEmpty)
+                        TextButton(
+                          onPressed: () async {
+                            all[bookId] = [];
+                            await _persistBookmarks(all);
+                            setSheet(() => list.clear());
+                            BookReaderPage._toast(context, '已清除全部书签');
+                          },
+                          child: Text('清除全部',
+                              style: TextStyle(fontSize: 13, color: JellyTheme.primary)),
+                        ),
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: Icon(Icons.close_rounded, size: 18, color: fg.withValues(alpha: 0.6)),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+                Divider(height: 1, color: fg.withValues(alpha: 0.1)),
+                if (list.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(28),
+                    child: Column(
+                      children: [
+                        Icon(Icons.bookmark_border_rounded, size: 40, color: fg.withValues(alpha: 0.3)),
+                        const SizedBox(height: 10),
+                        Text('还没有书签，点击顶部书签图标收藏当前页',
+                            style: TextStyle(fontSize: 13, color: fg.withValues(alpha: 0.5))),
+                      ],
+                    ),
+                  )
+                else
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: list.length,
+                      itemBuilder: (context, i) {
+                        final b = list[i];
+                        return ListTile(
+                          dense: true,
+                          leading: Icon(Icons.bookmark_rounded, size: 18, color: JellyTheme.primary),
+                          title: Text(
+                            (b['chapterTitle'] as String?)?.isNotEmpty == true
+                                ? b['chapterTitle'] as String
+                                : '第 ${((b['chapterIndex'] as num?)?.toInt() ?? 0) + 1} 章',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 14, color: fg),
+                          ),
+                          trailing: IconButton(
+                            visualDensity: VisualDensity.compact,
+                            icon: Icon(Icons.delete_outline_rounded, size: 18, color: fg.withValues(alpha: 0.5)),
+                            onPressed: () async {
+                              list.removeAt(i);
+                              all[bookId] = list;
+                              await _persistBookmarks(all);
+                              setSheet(() {});
+                            },
+                          ),
+                          onTap: () {
+                            Navigator.pop(context);
+                            final block = (b['blockIndex'] as num?)?.toInt();
+                            if (block != null) _jumpToSearchHit(block);
+                          },
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 顶栏书签图标：有书签面板可点；无书签时点击=收藏当前页并提示
+  Future<void> _toggleBookmark() async {
+    final all = await _loadAllBookmarks();
+    final bookId = widget.task.bookId;
+    final list = List<Map<String, dynamic>>.from(all[bookId] ?? const []);
+    if (list.isNotEmpty) {
+      _showBookmarks();
+      return;
+    }
+    final ci = _currentChapterIndex();
+    final chapters = _content?.chapters ?? const [];
+    final title = ci < chapters.length ? chapters[ci].title : '';
+    final blockIndex = _currentBlockIndexForPage(_currentPage);
+    all[bookId] = [
+      ...list,
+      {'chapterTitle': title, 'chapterIndex': ci, 'blockIndex': blockIndex},
+    ];
+    await _persistBookmarks(all);
+    setState(() {});
+    BookReaderPage._toast(context, '已添加书签：${title.isEmpty ? '第 ${ci + 1} 章' : title}');
+    _showBookmarks();
+  }
+
+  int _currentBlockIndexForPage(int page) {
+    if (page < 0 || page >= _pages.length) return 0;
+    return _pages[page].firstBlockIndex;
+  }
+
+  /// 顶栏日夜切换：夜间 ↔ 白天（首次点击进入夜间，再点切回白天）
+  void _toggleDayNight() {
+    setState(() {
+      _darkOverride = _darkOverride == 2 ? 1 : 2;
+    });
+  }
+
+  /// 顶栏亮度：底部滑杆调系统屏幕亮度（screen_brightness）
+  Future<void> _showBrightnessSheet() async {
+    final dark = _readerIsDark;
+    final fg = dark ? Colors.white : JellyTheme.textPrimaryLight;
+    final bgTop = dark
+        ? Colors.black.withValues(alpha: 0.96)
+        : Colors.white.withValues(alpha: 0.98);
+    double current = 1.0;
+    try {
+      current = await ScreenBrightness().current;
+    } catch (_) {}
+    if (current < 0.05) current = 1.0; // 系统"自动亮度"返回 0 时按 1 展示
+    final v = current.clamp(0.1, 1.0);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheet) {
+          var value = v;
+          return Container(
+            decoration: BoxDecoration(
+              color: bgTop,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+            ),
+            padding: EdgeInsets.only(top: 14, bottom: MediaQuery.of(context).padding.bottom + 14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.brightness_6_rounded, size: 18, color: fg),
+                    const SizedBox(width: 8),
+                    Text('亮度',
+                        style: TextStyle(fontSize: AppTheme.fontSubhead, fontWeight: FontWeight.w700, color: fg)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Row(
+                    children: [
+                      Icon(Icons.brightness_low_rounded, size: 18, color: fg.withValues(alpha: 0.5)),
+                      Expanded(
+                        child: Slider(
+                          value: value,
+                          min: 0.1,
+                          max: 1.0,
+                          activeColor: fg,
+                          inactiveColor: fg.withValues(alpha: 0.2),
+                          onChanged: (nv) {
+                            setSheet(() => value = nv);
+                            ScreenBrightness().setScreenBrightness(nv);
+                          },
+                        ),
+                      ),
+                      Icon(Icons.brightness_high_rounded, size: 18, color: fg.withValues(alpha: 0.5)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 顶栏编辑（划线与笔记）：查看与管理已有笔记（含书源阅读器里划的线，
+  /// 同一个 ReaderNotesService 同一份存储）
+  void _showEditPlaceholder() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const BookNotesPage()),
+    );
   }
 
   // ---------------- 目录 ----------------
@@ -2973,7 +3551,7 @@ class _PdfPageImageState extends State<_PdfPageImage> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = _readerIsDark;
+    final isDark = !AppBrightness.isLight.value;
     if (_bytes != null) {
       return Image.memory(
         _bytes!,

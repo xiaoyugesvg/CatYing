@@ -104,6 +104,29 @@ class ShuyuanSourceStore extends ChangeNotifier {
     await _save();
   }
 
+  /// 重排书源顺序（体检页「一键优化」置顶可用源用）：
+  /// 传入的 url 列表按顺序排到最前，其余保持原相对顺序在后。
+  Future<void> reorder(List<String> firstUrls) async {
+    final front = <ShuyuanSource>[];
+    for (final u in firstUrls) {
+      ShuyuanSource? found;
+      for (final s in _sources) {
+        if (s.bookSourceUrl == u) {
+          found = s;
+          break;
+        }
+      }
+      if (found != null && !front.contains(found)) front.add(found);
+    }
+    final rest =
+        _sources.where((s) => !front.contains(s)).toList();
+    _sources
+      ..clear()
+      ..addAll(front)
+      ..addAll(rest);
+    await _save();
+  }
+
   /// 清空全部书源（仓库页「清空」用）。
   Future<void> clearAll() async {
     _sources.clear();

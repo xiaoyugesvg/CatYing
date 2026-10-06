@@ -28,7 +28,6 @@ class SettingsStore {
   static const String _kDiscoverPreset = 'music.discoverPreset';
   static const _kMusicSource = 'music.platform';
   static const String _kBottomBarSubPages = 'music.bottomBarOnSubPages';
-  static const String _kMiniPlayerSubPages = 'music.miniPlayerOnSubPages';
 
   /// **子页面是否显示音乐底部栏**（迷你条 + 导航栏）。
   ///
@@ -47,17 +46,6 @@ class SettingsStore {
   ///    而"子页面没有底栏"只是少一个便利入口 —— 默认取不冒犯的那个。
   final bottomBarOnSubPages = ValueNotifier<bool>(false);
 
-  /// **子页面的迷你条**是否显示（仅在 [bottomBarOnSubPages] 打开时有意义）。
-  ///
-  /// 与导航栏分开是因为两者的**好处/代价不一样**：
-  ///   · 导航栏：方便切 tab，但和子页面的返回操作语义重叠（子页面里
-  ///     用户往往只想"看完返回"，而不是"跳去另一个 tab"）
-  ///   · 迷你条：纯播放控制，**几乎不干扰**（用户就是想换个歌/暂停）
-  /// 所以允许只开迷你条、不要导航栏。
-  ///
-  /// 默认 **开**：迷你条遮挡小、价值高（不放它的话，在子页面里
-  /// 想暂停都得先返回，很别扭）。
-  final miniPlayerOnSubPages = ValueNotifier<bool>(true);
 
   /// 优先音质
   final audioQuality = ValueNotifier<AudioQuality>(AudioQuality.exhigh);
@@ -129,7 +117,6 @@ class SettingsStore {
     musicSource.value = SongSource.fromKey(prefs.getString(_kMusicSource));
     // 子页面底栏开关：**没存过就是 false**（默认关，见字段注释的理由）
     bottomBarOnSubPages.value = prefs.getBool(_kBottomBarSubPages) ?? false;
-    miniPlayerOnSubPages.value = prefs.getBool(_kMiniPlayerSubPages) ?? true;
     // 音源列表也在这里一起初始化，保证进音乐 tab 前就绪
     await ThirdPartySourceStore.instance.init();
     // 音源记忆（"这首歌上次用哪个源" —— 见 SourceMemory）
@@ -165,10 +152,6 @@ class SettingsStore {
     (await SharedPreferences.getInstance()).setBool(_kBottomBarSubPages, v);
   }
 
-  Future<void> setMiniPlayerOnSubPages(bool v) async {
-    miniPlayerOnSubPages.value = v;
-    (await SharedPreferences.getInstance()).setBool(_kMiniPlayerSubPages, v);
-  }
 
   /// 切换音乐平台（搜索/发现用哪个内置数据源）。
   /// 播放地址**不受它影响** —— 那是按每首歌自己的 `Song.source` 解析的。

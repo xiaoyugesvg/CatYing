@@ -4,6 +4,7 @@ library;
 
 import 'package:html/dom.dart';
 import 'package:html/parser.dart' as html_parser;
+import 'package:xpath_selector_html_parser/xpath_selector_html_parser.dart';
 import 'rule_analyzer.dart';
 import 'source_rule.dart';
 
@@ -14,6 +15,7 @@ class AnalyzeByJsoup {
   AnalyzeByJsoup(this.content) : _element = _parse(content);
 
   static Element _parse(dynamic doc) {
+    if (doc is HtmlNodeTree) return doc.element;
     if (doc is Element) return doc;
     if (doc is Document) return doc.documentElement!;
     if (doc is String) {

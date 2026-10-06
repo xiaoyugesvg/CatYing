@@ -81,7 +81,13 @@ function splitUrlOptions(raw) {
   const url = s.substring(0, j).trim();
   const jsonPart = s.substring(idx);
   try {
-    const cfg = JSON.parse(jsonPart);
+    // Legado 的 URL 选项是**单引号 JS 对象字面量**（`{'body':'...','method':'POST'}`），
+    // 不是严格 JSON —— JSON.parse 直接失败 → POST 选项全丢、退化成 GET。
+    // 宽松转换：单引号→双引号；无引号 key 补双引号。
+    const lax = jsonPart
+      .replace(/'/g, '"')
+      .replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g, '$1"$2"$3');
+    const cfg = JSON.parse(lax);
     return {
       url,
       headers: cfg.headers && typeof cfg.headers === 'object' ? cfg.headers : {},
@@ -288,6 +294,106 @@ function ruleCtx(baseUrl, source) {
 // 搜索
 // ============================================================
 
+/**
+ * 异步执行整段 @js:/<js> 脚本型 searchUrl，返回脚本写入的 `result`。
+ * 非脚本 URL 原样返回。
+ *
+ * Legado 规范：searchUrl 可以是完整 JS 脚本，内部用 java.ajax 发
+ * POST/带 headers 请求、可选人机验证分支，最后 `result=url;`。
+ * 原实现把脚本文本当普通 URL 直接 httpGet → 搜索必然失败
+ * （思路客等大量脚本型源就是这种写法）。
+ */
+async function evalSearchUrlScript(rawUrl, { state, source, base }) {
+  let script = null;
+  const s = String(rawUrl || '').trim();
+  if (s.startsWith('@js:')) script = s.slice(4);
+  else {
+    const m = /^\s*<js>([\s\S]*?)<\/js>\s*$/i.exec(s);
+    if (m) script = m[1];
+  }
+  if (script == null) return rawUrl;
+
+  // java.ajax：Legado 语义是**同步返回响应文本**（脚本里常见
+  // `java.ajax(url).match(/Just a moment/)` 人机验证检测）。
+  // 异步沙箱无法同步等待请求；而这类脚本的 ajax 返回值只影响
+  // 「人机验证」检测分支，不影响 `result=url` 主流程（搜索结果仍由
+  // splitUrlOptions 解析出的 URL 正式请求取得）。
+  // 因此：同步返回空串（检测分支不命中，流程继续），真实请求后台
+  // 发起一次（预热 UA/Referer/Cookie 一致性）。
+  const fireRequest = (arg) => {
+    let url;
+    let opt = {};
+    if (typeof arg === 'string') {
+      const o = splitUrlOptions(arg);
+      url = o.url;
+      opt = o;
+    } else if (arg && typeof arg === 'object') {
+      url = String(arg.url || arg.urlStr || '');
+      opt = arg;
+    }
+    if (!url) return;
+    const headers = Object.assign(
+      {},
+      normalizeHeaders(source.header, source.jsLib),
+      opt.headers || {},
+    );
+    void httpGet(absolute(url, base), headers, opt.method || 'GET', opt.body)
+      .then(() => {})
+      .catch(() => {});
+  };
+  const ajax = (arg) => {
+    fireRequest(arg);
+    return '';
+  };
+
+  const sandbox = {
+    result: '',
+    baseUrl: base,
+    key: state.key || '',
+    page: state.page || 1,
+    book: state.book || {},
+    src: source.bookSourceUrl || '',
+    java: {
+      ajax,
+      getString: (rule, text) => {
+        const rs = rule == null ? '' : String(rule);
+        const rt = rs.trim();
+        if (rt.startsWith('$')) {
+          try {
+            const root = JSON.parse(
+              text != null ? String(text) : String(sandbox.result),
+            );
+            const out = jsonPath(root, rt);
+            return out.length > 0 ? (out[0] == null ? '' : String(out[0])) : '';
+          } catch (_) {
+            return '';
+          }
+        }
+        return rs;
+      },
+      longToast: () => {},
+      shortToast: () => {},
+      startBrowserAwait: () => false,
+    },
+    console: { log: () => {}, error: () => {} },
+  };
+  sandbox.globalThis = sandbox;
+
+  const fn = new Function(
+    'sandbox',
+    `with (sandbox) { return (async () => { ${script} })(); }`,
+  );
+  try {
+    await fn(sandbox);
+  } catch (e) {
+    throw new Error(
+      '搜索地址脚本执行失败：' + (e && e.message ? e.message : String(e)),
+    );
+  }
+  const out = sandbox.result;
+  return out == null ? '' : String(out);
+}
+
 async function search({ source, keyword, page = 1 }) {
   setProxy(source && source.proxy);
   const base = source.bookSourceUrl || '';
@@ -320,6 +426,9 @@ async function search({ source, keyword, page = 1 }) {
     .replace(/\{\{\s*page\s*\}\}/g, String(page))
     .replace(/\{key\}/g, encodeURIComponent(keyword))
     .replace(/\{page\}/g, String(page));
+
+  // 整段 @js:/<js> 脚本型 searchUrl：执行脚本取 result 作为最终地址
+  rawUrl = await evalSearchUrlScript(rawUrl, { state, source, base });
 
   const opt = splitUrlOptions(rawUrl);
   if (opt.webView) {
@@ -1072,4 +1181,5 @@ export {
   bsExplore,
   splitUrlOptions,
   decodeBody,
+  evalSearchUrlScript,
 };

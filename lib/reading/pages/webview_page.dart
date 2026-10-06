@@ -36,7 +36,10 @@ class _OnlineReaderPageState extends State<OnlineReaderPage> {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onProgress: (p) => setState(() => _progress = p),
+          // webview 进度回调可能晚于页面销毁到达，必须加 mounted 检查
+          onProgress: (p) {
+            if (mounted) setState(() => _progress = p);
+          },
           onPageStarted: (_) {
             if (mounted) setState(() => _loading = true);
           },

@@ -25,6 +25,8 @@
 import * as cheerioNs from 'cheerio';
 const cheerio = cheerioNs.default ?? cheerioNs;
 import vm from 'node:vm';
+// ESM 下没有 require：crypto 能力走顶层 import（esbuild 打包同样正确转换）
+import { createHash, createCipheriv, createDecipheriv, randomUUID as nodeRandomUUID } from 'node:crypto';
 
 // ============================================================
 // 工具
@@ -344,6 +346,8 @@ function xpathToCss(xp) {
 function jsonPath(obj, path) {
   let p = path.trim();
   if (p.startsWith('$')) p = p.substring(1);
+  // 兼容 Legado 写法：@json:data.items（无 $ 前缀）→ 补点号
+  else if (!p.startsWith('.')) p = '.' + p;
   if (!p) return [obj];
 
   const tokens = [];
@@ -463,7 +467,26 @@ function runJs(expr, ctx) {
       ajax: () => {
         throw new Error('java.ajax 需要同步网络，请改用 @css/@json 或分步规则');
       },
-      getString: (s) => (s == null ? '' : String(s)),
+      getString: (s, text) => {
+        // Legado 语义：java.getString(rule, text?) —— rule 可以是 JSONPath。
+        // 原实现退化成 String(s)，顶点小说等源的目录 URL 解密脚本
+        // `java.getString("$.data[?].url", m)` 会取空。
+        const ruleStr = s == null ? '' : String(s);
+        const ruleTrim = ruleStr.trim();
+        if (ruleTrim.startsWith('$')) {
+          try {
+            const target = text != null
+              ? String(text)
+              : String(ctx.result == null ? '' : ctx.result);
+            const root = JSON.parse(target);
+            const out = jsonPath(root, ruleTrim);
+            return out.length > 0 ? (out[0] == null ? '' : String(out[0])) : '';
+          } catch (_) {
+            return '';
+          }
+        }
+        return ruleStr;
+      },
 
       /**
        * java.getElements(sel) —— 取节点数组（返回带 attr/text/html 的对象）。
@@ -587,8 +610,74 @@ function runJs(expr, ctx) {
 
       base64Decode: (s) => Buffer.from(String(s), 'base64').toString('utf8'),
       base64Encode: (s) => Buffer.from(String(s), 'utf8').toString('base64'),
-      md5Encode: (s) =>
-        require('node:crypto').createHash('md5').update(String(s)).digest('hex'),
+      md5Encode: (s) => createHash('md5').update(String(s)).digest('hex'),
+      randomUUID: () => nodeRandomUUID(),
+      hexDecodeToString: (s) => Buffer.from(String(s), 'hex').toString('utf8'),
+
+      /**
+       * java.createSymmetricCrypto(algo, mode, pad, key, iv) —— 对称加解密。
+       * 目前覆盖 AES-CBC（Legado 目录/正文解密最常见的组合），
+       * key 16 字节 → AES-128，32 字节 → AES-256；密文自动识别 hex / base64。
+       * 返回 { decryptStr, encryptStr }。
+       */
+      createSymmetricCrypto: (algo, mode, pad, key, iv) => {
+        const alg = String(algo || '').toUpperCase();
+        const keyBuf = Buffer.from(String(key || ''), 'utf8');
+        const ivBuf = Buffer.from(String(iv || ''), 'utf8');
+        const cipherName = alg.includes('AES')
+          ? (keyBuf.length === 32 ? 'aes-256-cbc'
+            : keyBuf.length === 16 ? 'aes-128-cbc' : null)
+          : null;
+        if (!cipherName) {
+          throw new Error(
+            `createSymmetricCrypto: 不支持的算法/密钥长度 (${alg}, key=${keyBuf.length}B)`
+          );
+        }
+        return {
+          decryptStr: (data) => {
+            const raw = String(data == null ? '' : data);
+            if (!raw) return '';
+            let ct;
+            if (/^[0-9a-fA-F]+$/.test(raw) && raw.length % 2 === 0) {
+              ct = Buffer.from(raw, 'hex');
+            } else {
+              ct = Buffer.from(raw, 'base64');
+            }
+            try {
+              const dc = createDecipheriv(cipherName, keyBuf, ivBuf);
+              dc.setAutoPadding(true);
+              return Buffer.concat([dc.update(ct), dc.final()]).toString('utf8');
+            } catch (_) {
+              // 少数源密文是裸 UTF-8 文本，不是 hex/base64 编码
+              return raw;
+            }
+          },
+          encryptStr: (data) => {
+            const ce = createCipheriv(cipherName, keyBuf, ivBuf);
+            return Buffer.concat([ce.update(String(data), 'utf8'), ce.final()])
+              .toString('base64');
+          },
+        };
+      },
+    },
+    // org.jsoup.Jsoup.parse(html).select(css) —— 69书吧-H 等源详情/简介脚本依赖。
+    // 语义：对传入的 html 文本**新建文档**解析（不依赖当前 input 的 cheerio）。
+    org: {
+      jsoup: {
+        Jsoup: {
+          parse: (html) => ({
+            select: (css) => {
+              try {
+                const $ = cheerio.load(String(html == null ? '' : html));
+                const els = $(String(css == null ? '' : css));
+                return wrapNodes($, els.toArray());
+              } catch (_) {
+                return [];
+              }
+            },
+          }),
+        },
+      },
     },
     JSON,
     Math,
@@ -882,6 +971,48 @@ function nodeOrDocToString(input) {
  * @param {boolean} p.isList  是否要求返回列表
  * @returns {any} 字符串 或 字符串数组 或 对象
  */
+/**
+ * 拆分「JSONPath + @js」组合链规则：`$.a.b@js:脚本` / `$.a[*]@js:脚本`。
+ * 返回 { path, js }；不是组合链返回 null。
+ */
+function splitJsonJsChain(rule) {
+  const r = String(rule || '').trim();
+  // 支持 `$.x@js:`（带 $）与 `data.items@js:`（Legado 无 $ 前缀写法）
+  if (!r.startsWith('$') && !/^[A-Za-z_$][\w$]*/.test(r)) return null;
+  const idx = r.indexOf('@js:');
+  if (idx <= 0) return null;
+  const path = r.substring(0, idx).trim();
+  if (!path) return null;
+  const js = r.substring(idx + 4);
+  if (!js.trim()) return null;
+  return { path, js };
+}
+
+/**
+ * 对 JSONPath 取到的一组值执行 JS 模板（组合链后半段）。
+ * result 注入为字符串：标量转 String，对象/数组 JSON.stringify。
+ */
+function runChainJs(vals, js, { ctx, isList }) {
+  // jsonPath 的结果集是标准 JSONPath 语义：`$.data.items` 返回 [items 数组]（嵌套）。
+  // 组合链要对**每个元素**注入 result 运行脚本（Legado `$.x@js:` 逐项语义），
+  // 所以先展平一层：[[{id:42}]] → [{id:42}]；标量路径 ['123'] 不变。
+  const flatVals = (vals || []).flatMap((v) => (Array.isArray(v) ? v : [v]));
+  const results = flatVals.map((v) => {
+    let res;
+    if (v == null) res = '';
+    else if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+      res = String(v);
+    } else {
+      // 对象/数组原样注入（vm context 会复制），脚本里 `result.id` 才能取到属性；
+      // 之前 JSON.stringify 成字符串导致 `result.id` 变 undefined。
+      res = v;
+    }
+    return runJs(js, { ...ctx, result: res });
+  });
+  if (isList) return results;
+  return results.length > 0 ? (results[0] == null ? '' : results[0]) : '';
+}
+
 function evalRuleCore({ rule, input, vars = {}, ctx = {}, isList = false }) {
   if (rule == null) return isList ? [] : '';
   const raw = String(rule).trim();
@@ -950,6 +1081,13 @@ function evalRuleCore({ rule, input, vars = {}, ctx = {}, isList = false }) {
 
   // ── @json: ────────────────────────────────────────────
   if (prefix === 'json') {
+    // 组合链：@json:x@js:脚本 —— 先 JSONPath 取值，再注入 result 执行 JS
+    const chain = splitJsonJsChain(parts[0]);
+    if (chain) {
+      const root = input && input.__json ? input.__json : input;
+      const vals = jsonPath(root, chain.path);
+      return runChainJs(vals, chain.js, { ctx, input, isList });
+    }
     const root = input && input.__json ? input.__json : input;
     const out = jsonPath(root, parts[0]);
     if (isList) {
@@ -957,6 +1095,20 @@ function evalRuleCore({ rule, input, vars = {}, ctx = {}, isList = false }) {
     }
     const v = out.length > 0 ? out[0] : '';
     return v == null ? '' : v;
+  }
+
+  // ── 组合链：$.x@js:脚本（裸 JSONPath + JS，无 @json: 前缀）────────
+  // Legado 常见写法（如 coverUrl: `$.bookid@js:`${book.origin}/img/${result}...``）：
+  // 先按 JSONPath 从 JSON 取到字段，再把字段值作为 result 注入 JS 模板拼串。
+  {
+    const chain = prefix === '' ? splitJsonJsChain(r) : null;
+    if (chain) {
+      const root = input && input.__json ? input.__json : input;
+      if (root != null && typeof root === 'object') {
+        const vals = jsonPath(root, chain.path);
+        return runChainJs(vals, chain.js, { ctx, input, isList });
+      }
+    }
   }
 
   // 裸 JSONPath 兜底（JSON 响应 + `$.x` 规则，无 @json: 前缀）
@@ -1316,4 +1468,5 @@ export {
   applyVars,
   xpathToCss,
   jsonPath,
+  runJs,
 };

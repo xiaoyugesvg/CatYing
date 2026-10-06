@@ -1,137 +1,101 @@
-/// XPath 规则解析器：支持 `/@attr`、`/text()`、`//tag`、`/path/to` 等表达式。
+/// XPath 规则解析器（真 XPath）：基于 `xpath_selector` + `xpath_selector_html_parser`
+/// （html 包容错解析），支持完整 XPath 1.0 语法——谓词 `[@class='x']`、
+/// `[contains()]`、位置 `[1]`、轴 `ancestor::`/`following-sibling::`、
+/// `/@attr`、`/text()` 等。对齐原版 cmbok（package:xpath_selector）。
 library;
 
-import 'package:xml/xml.dart';
+import 'package:html/dom.dart';
 import 'package:html/parser.dart' as html_parser;
+import 'package:xpath_selector/xpath_selector.dart';
+import 'package:xpath_selector_html_parser/xpath_selector_html_parser.dart';
 
 class AnalyzeByXPath {
   dynamic content;
 
   AnalyzeByXPath(this.content);
 
-  XmlDocument get _document {
-    if (content is XmlDocument) return content as XmlDocument;
-    if (content is XmlElement) {
-      return XmlDocument.parse((content as XmlElement).toXmlString());
-    }
-    if (content is String) {
+  HtmlXPath? _xpath;
+  bool _tried = false;
+
+  HtmlXPath? _getXpath() {
+    if (_tried) return _xpath;
+    _tried = true;
+    final c = content;
+    if (c is HtmlNodeTree) {
+      _xpath = HtmlXPath.node(c.element);
+    } else if (c is Element) {
+      _xpath = HtmlXPath.node(c);
+    } else if (c is Document) {
+      final root = c.documentElement;
+      if (root != null) _xpath = HtmlXPath.node(root);
+    } else if (c is String) {
       try {
-        return XmlDocument.parse(content as String);
-      } catch (_) {
-        final htmlDoc = html_parser.parse(content as String);
-        return XmlDocument.parse(htmlDoc.outerHtml);
+        _xpath = HtmlXPath.html(c);
+      } catch (_) {}
+    } else if (c is List && c.isNotEmpty) {
+      final first = c.first;
+      if (first is HtmlNodeTree) {
+        _xpath = HtmlXPath.node(first.element);
+      } else if (first is Element) {
+        _xpath = HtmlXPath.node(first);
+      } else if (first is String) {
+        try {
+          _xpath = HtmlXPath.html(first);
+        } catch (_) {}
       }
     }
-    return XmlDocument.parse('<root/>');
+    return _xpath;
   }
 
-  static (String, String?) _splitRule(String rule) {
-    // 结尾的 /@attribute 形式
-    final attrMatch = RegExp(r'/@(\w+)$').firstMatch(rule);
-    if (attrMatch != null) {
-      final selector = rule.substring(0, attrMatch.start);
-      return (selector, attrMatch.group(1));
+  /// 查询：剥离结尾 `/text()`（文本用节点 text 取），其余交给 xpath_selector。
+  XPathResult<Node> _query(HtmlXPath xp, String rule) {
+    var r = rule.trim();
+    final textMatch = RegExp(r'/text\(\)\s*$').firstMatch(r);
+    if (textMatch != null) r = r.substring(0, textMatch.start);
+    try {
+      return xp.query(r);
+    } catch (_) {
+      return XPathResult(const [], const []);
     }
-
-    // 结尾的 /text() 形式
-    if (rule.endsWith('/text()')) {
-      return (rule.substring(0, rule.length - 7), null);
-    }
-
-    return (rule, null);
   }
 
   String getString(String rule) {
     if (rule.isEmpty) return '';
-    try {
-      final doc = _document;
-      final (xpathExpr, attrName) = _splitRule(rule);
-      final elements = _queryXPath(doc, xpathExpr);
-      if (elements.isEmpty) return '';
-      if (attrName != null) {
-        return elements.first.getAttribute(attrName) ?? '';
-      }
-      return elements.first.innerText.trim();
-    } catch (_) {
-      return '';
-    }
+    final xp = _getXpath();
+    if (xp == null) return '';
+    final q = _query(xp, rule);
+    final attr = q.attr;
+    if (attr != null) return attr;
+    final node = q.node;
+    if (node == null) return '';
+    return node.text?.trim() ?? '';
   }
 
   List<String> getStringList(String rule) {
     if (rule.isEmpty) return [];
-    try {
-      final doc = _document;
-      final (xpathExpr, attrName) = _splitRule(rule);
-      final elements = _queryXPath(doc, xpathExpr);
-      if (attrName != null) {
-        return elements.map((e) => e.getAttribute(attrName) ?? '').where((s) => s.isNotEmpty).toList();
-      }
-      return elements.map((e) => e.innerText.trim()).where((s) => s.isNotEmpty).toList();
-    } catch (_) {
-      return [];
+    final xp = _getXpath();
+    if (xp == null) return [];
+    final q = _query(xp, rule);
+    final out = <String>[];
+    final attrs = q.attrs.where((a) => a != null && a!.isNotEmpty).toList();
+    if (attrs.isNotEmpty) {
+      out.addAll(attrs.cast<String>());
     }
+    for (final n in q.nodes) {
+      final t = n.text?.trim() ?? '';
+      if (t.isNotEmpty) out.add(t);
+    }
+    return out;
   }
 
   List<dynamic> getElements(String rule) {
     if (rule.isEmpty) return [];
-    try {
-      final doc = _document;
-      final (xpathExpr, _) = _splitRule(rule);
-      return _queryXPath(doc, xpathExpr).cast<dynamic>();
-    } catch (_) {
-      return [];
-    }
+    final xp = _getXpath();
+    if (xp == null) return [];
+    final q = _query(xp, rule);
+    return q.nodes.cast<dynamic>().toList();
   }
 
-  List<XmlElement> _queryXPath(dynamic node, String xpath) {
-    if (xpath.startsWith('//')) {
-      final name = xpath.substring(2).trim();
-      return _deepSearch(node, name);
-    }
-    if (xpath.startsWith('/')) {
-      final parts = xpath.substring(1).split('/').where((s) => s.isNotEmpty).toList();
-      return _navigatePath(node, parts);
-    }
-    return _deepSearch(node, xpath);
-  }
-
-  List<XmlElement> _deepSearch(dynamic node, String name) {
-    final results = <XmlElement>[];
-    if (node is XmlElement) {
-      if (name == '*' || node.name.local == name) {
-        results.add(node);
-      }
-      for (final child in node.childElements) {
-        results.addAll(_deepSearch(child, name));
-      }
-    } else if (node is XmlDocument) {
-      for (final child in node.childElements) {
-        results.addAll(_deepSearch(child, name));
-      }
-    }
-    return results;
-  }
-
-  List<XmlElement> _navigatePath(dynamic node, List<String> parts) {
-    if (parts.isEmpty) return [];
-    final name = parts.first;
-    final remaining = parts.skip(1).toList();
-
-    List<XmlElement> current;
-    if (node is XmlDocument) {
-      current = node.childElements.where((e) => name == '*' || e.name.local == name).toList();
-    } else if (node is XmlElement) {
-      current = node.childElements.where((e) => name == '*' || e.name.local == name).toList();
-    } else {
-      return [];
-    }
-
-    if (remaining.isEmpty) return current;
-
-    final results = <XmlElement>[];
-    for (final el in current) {
-      results.addAll(_navigatePath(el, remaining));
-    }
-    return results;
-  }
+  /// 供 XPath 结果节点继续做相对子查询（返回包装类，可再 getString/...）
+  static AnalyzeByXPath of(dynamic node) => AnalyzeByXPath(node);
 }

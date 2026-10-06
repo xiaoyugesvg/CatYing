@@ -23,6 +23,8 @@ import 'display_settings_page.dart';
 import 'download_page.dart';
 import 'download_settings_page.dart';
 import 'favorites_page.dart';
+import 'notes_and_journey_page.dart';
+import 'reading_plan_page.dart';
 import 'reading_settings_page.dart';
 import 'search_page.dart';
 import 'source_repo_page.dart';
@@ -99,6 +101,48 @@ class _MePageState extends State<MePage> {
                   ),
                   const Spacer(),
                   _buildThemeToggle(isDark),
+                ],
+              ),
+            ),
+            // ── 我的笔记 / 阅读经历 / 阅读计划（三个图标入口，不是卡片）──
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 8),
+              child: Row(
+                children: [
+                  _iconEntry(
+                    isDark,
+                    icon: Icons.edit_note_rounded,
+                    label: '我的笔记',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const NotesAndJourneyPage(),
+                      ),
+                    ),
+                  ),
+                  _iconEntry(
+                    isDark,
+                    icon: Icons.route_rounded,
+                    label: '阅读经历',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const BrowseHistoryPage(
+                            showTabs: false),
+                      ),
+                    ),
+                  ),
+                  _iconEntry(
+                    isDark,
+                    icon: Icons.event_available_rounded,
+                    label: '阅读计划',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const ReadingPlanPage(),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -397,6 +441,39 @@ class _MePageState extends State<MePage> {
               ),
             ),
             const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // -------------------- 图标入口（我的笔记 / 阅读经历 / 阅读计划） --------------------
+
+  Widget _iconEntry(
+    bool isDark, {
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    final fg = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: JellyTheme.primary.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: JellyTheme.primary, size: 20),
+            ),
+            const SizedBox(height: 6),
+            Text(label, style: TextStyle(fontSize: 12, color: fg)),
           ],
         ),
       ),

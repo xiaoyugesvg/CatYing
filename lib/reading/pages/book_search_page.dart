@@ -147,7 +147,7 @@ class _BookSearchPageState extends State<BookSearchPage>
         SnackBar(
           content: Text(msg),
           duration: unavailable
-              ? const Duration(seconds: 8)
+              ? const Duration(seconds: 5)
               : const Duration(seconds: 4),
           behavior: SnackBarBehavior.floating,
         ),
@@ -582,7 +582,6 @@ class _BookSearchPageState extends State<BookSearchPage>
 
   /// 首页推荐流网格（z-library 最受欢迎）。
   Widget _buildRecGrid() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return LayoutBuilder(
       builder: (context, constraints) {
         final cols = _adaptiveColumns(
@@ -594,36 +593,17 @@ class _BookSearchPageState extends State<BookSearchPage>
           slivers: [
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+                padding: const EdgeInsets.fromLTRB(8, 2, 8, 4),
                 child: Row(
                   children: [
-                    Text(
-                      '推荐',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? Colors.white
-                            : JellyTheme.textPrimaryLight,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _recIsDouban
-                          ? '豆瓣热门榜（z-library 暂不可用）'
-                          : 'Z-Library 最受欢迎',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: JellyTheme.textSecondary,
-                      ),
-                    ),
                     const Spacer(),
                     IconButton(
                       tooltip: '刷新推荐',
+                      visualDensity: VisualDensity.compact,
                       onPressed: _recLoading ? null : _loadRecommendations,
                       icon: Icon(
                         Icons.refresh_rounded,
-                        size: 20,
+                        size: 18,
                         color: JellyTheme.textSecondary,
                       ),
                     ),

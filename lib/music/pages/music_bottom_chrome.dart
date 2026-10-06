@@ -87,10 +87,11 @@ class MusicBottomChrome extends StatelessWidget {
       animation: Listenable.merge([
         MusicTabState.index,
         MusicPlayerManager.instance,
+        // 「正在播放」是**独立**的 ValueNotifier（不是 ChangeNotifier 的通知），
+        // 所以必须单独听它 —— 否则暂停后播放条不会消失。
+        MusicPlayerManager.instance.isPlaying,
         _visible,
-        // 两个开关也要能立刻生效（用户改了设置马上看到变化）
         SettingsStore.instance.bottomBarOnSubPages,
-        SettingsStore.instance.miniPlayerOnSubPages,
       ]),
       builder: (context, _) {
         // 懒桥接：第一次 build 时把 RxInt 的变化同步到 `_visible`
@@ -103,18 +104,30 @@ class MusicBottomChrome extends StatelessWidget {
         // 不在音乐模块 → 整个不显示（看视频/读书时底部不该有音乐栏）
         if (!MusicTabState.visible) return const SizedBox.shrink();
 
-        // ── 主页 vs 子页面 分别处理（用户 2026 要求做成开关）────────
+        // ── 主页 vs 子页面（用户 2026 定稿）────────────────────────
         //
-        // · **主页**（`MusicRootView` 挂着）= 底栏是它的主体结构，
-        //   切 tab 全靠它 → **永远显示**，不受开关影响。
-        // · **子页面**（push 上去的）= 底栏是浮在上面的，会遮内容 →
-        //   由用户决定要不要，以及要不要迷你条。
+        // · **主页**（`MusicRootView` 挂着）
+        //     导航栏 = 切 tab 的唯一入口 → **永远显示**
+        //     播放条 = 有歌就显示（暂停也留着，方便继续播）
+        // · **子页面**（push 上去的）
+        //     **只有播放条**，而且**只在真的在播放时才显示** ——
+        //     暂停/没歌就整条收起来，不占地方。
+        //
+        // ── 为什么子页面这一侧改成"仅播放中"（用户 2026 要求）────────
+        // 原话：「去掉那个子页面也有悬浮导航栏呢？只是显示播放栏呢？
+        //        播放的时候显示，不播放就不显示呢」
+        //
+        // 理由也站得住：子页面里用户已经在看内容了，再压一条导航栏
+        // 既遮内容又和"返回"语义重叠；而播放条是**纯播放控制**，
+        // 正在放的时候它有用，暂停了它就是多余的遮挡。
         final onRoot = MusicRootView.isMounted;
-        final s = SettingsStore.instance;
-        final showNavBar = onRoot || s.bottomBarOnSubPages.value;
+        final playing = MusicPlayerManager.instance.isPlaying.value;
+        final hasSong = MusicPlayerManager.instance.currentSong != null;
+
+        final showNavBar = onRoot;
         final showMini = onRoot
-            ? true
-            : (s.bottomBarOnSubPages.value && s.miniPlayerOnSubPages.value);
+            ? hasSong
+            : (SettingsStore.instance.bottomBarOnSubPages.value && playing);
 
         if (!showNavBar && !showMini) return const SizedBox.shrink();
 
@@ -124,6 +137,8 @@ class MusicBottomChrome extends StatelessWidget {
             // 迷你条（没歌时它自己 `SizedBox.shrink()`，不占位）
             if (showMini)
               MiniPlayer(
+                // 子页面（没有导航栏）→ 紧凑贴底，别留那 26 的空档
+                tightBottom: !onRoot,
                 onOpen: () => openMusicPlayer(context),
               ),
             if (showNavBar) _navBar(context),

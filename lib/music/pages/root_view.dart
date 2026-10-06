@@ -144,24 +144,41 @@ class _MusicRootViewState extends State<MusicRootView> {
                   // 修法与影视侧的 `content_view.dart` 完全一致：
                   // 换 key 强制子页重建。revision 在每次主题变更时 ++，
                   // 所以拼进 key 就能让子页跟着换色。
-                  child: IndexedStack(
-                    // ⚠️ key 里**不能**带 `_tab`：IndexedStack 的 key 一变，
-                    // 整个子树（5 个 tab 页）就被销毁重建 —— 表现是
-                    // **每次切到乐库都闪一次 loading**、滚动位置与搜索词全丢，
-                    // 而且子页的 `wantKeepAlive` 完全失效。
-                    // tab 由下面的 `index:` 负责，key 只需跟"主题版本"（换肤要重建）。
-                    key: ValueKey(
-                        'music-tabs-${MusicThemeStore.instance.revision.value}'),
-                    index: MusicTabState.index.value,
-                    // ⚠️ 顺序必须与 `_tabs` **严格一一对应**
-                    //（主页 / 搜索 / 乐库 / 榜单 / 我的）
-                    children: const [
-                      DiscoverPage(),
-                      SearchPage(),
-                      LibraryPage(),
-                      ChartsPage(),
-                      ProfilePage(),
-                    ],
+                  // 🔴 **必须监听 `MusicTabState.index`**（修一个真 bug）──
+                  //
+                  // tab 状态在重构后从本地 `_tab` 提到了共享的
+                  // `MusicTabState.index`（因为全局底栏也要读它）。
+                  // 但**共享的 `ValueNotifier` 变了不会自己重建** ——
+                  // 而本页外层的 `AnimatedBuilder` 只监听**主题 revision**，
+                  // 与 tab 无关。
+                  //
+                  // 后果（用户实测反馈：「点击没反应」）：
+                  //   点导航栏 → `index.value` 变了 → **没有任何 widget 重建**
+                  //   → 界面停在第 1 个 tab，看起来就是"点了没反应" ✗
+                  //
+                  // 用 `ValueListenableBuilder` 包住 `IndexedStack`：
+                  // 只有它重建（5 个子页实例仍是 `const`，不会丢状态）。
+                  child: ValueListenableBuilder<int>(
+                    valueListenable: MusicTabState.index,
+                    builder: (context, tabIndex, _) => IndexedStack(
+                      // ⚠️ key 里**不能**带 tab：`IndexedStack` 的 key 一变，
+                      // 整个子树（5 个 tab 页）就被销毁重建 —— 表现是
+                      // **每次切到乐库都闪一次 loading**、滚动位置与搜索词全丢，
+                      // 而且子页的 `wantKeepAlive` 完全失效。
+                      // tab 由 `index:` 负责，key 只需跟"主题版本"（换肤要重建）。
+                      key: ValueKey(
+                          'music-tabs-${MusicThemeStore.instance.revision.value}'),
+                      index: tabIndex,
+                      // ⚠️ 顺序必须与 `musicTabs` **严格一一对应**
+                      //（主页 / 搜索 / 乐库 / 榜单 / 我的）
+                      children: const [
+                        DiscoverPage(),
+                        SearchPage(),
+                        LibraryPage(),
+                        ChartsPage(),
+                        ProfilePage(),
+                      ],
+                    ),
                   ),
                 ),
                 // #14：预热失败提示条（可点重试）

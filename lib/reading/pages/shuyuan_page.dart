@@ -10,8 +10,10 @@
 //   几千条源也能秒开；选源弹层用「搜索框 + 懒加载列表」过滤，同样不卡。
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
+import '../novel_source/analyze/verification_exception.dart';
 import '../novel_source/model/book_source.dart';
 import '../novel_source/model/search_book.dart';
 import '../novel_source/shuyuan_source_service.dart';
@@ -117,32 +119,38 @@ class _ShuyuanPageState extends State<ShuyuanPage> {
       final snapshot = _enabled;
       const limit = 6;
       var cursor = 0;
+      var failCount = 0;
       Future<void> worker() async {
         while (cursor < snapshot.length) {
           final i = cursor++;
-          await _searchOne(
+          final ok = await _searchOne(
             _aggregateKey,
             snapshot[i].toBookSource(),
             k,
-          ).catchError((_) {});
+          );
+          if (!ok) failCount++;
         }
       }
 
       await Future.wait(
         <Future<void>>[for (var w = 0; w < limit; w++) worker()],
       );
+      // 全部源都失败才提示（部分成功不打扰）；单源失败不逐条弹堆栈
+      if (mounted && failCount > 0 && (_results[_aggregateKey]?.isNotEmpty != true)) {
+        _toast('$failCount 个书源搜索失败，请检查网络后重试');
+      }
     } else {
       final s = _sourceByKey(_currentKey);
       if (s != null) {
-        await _searchOne(s.bookSourceUrl, s.toBookSource(), k).catchError(
-          (_) {},
-        );
+        await _searchOne(s.bookSourceUrl, s.toBookSource(), k);
       }
     }
     if (mounted) setState(() => _isLoading = false);
   }
 
-  Future<void> _searchOne(String key, XiaoshuoBookSource s, String k) async {
+  /// 搜单个源。成功返回 true；失败落空结果并返回 false。
+  /// 聚搜模式失败静默（不弹堆栈），单源模式弹精简错误。
+  Future<bool> _searchOne(String key, XiaoshuoBookSource s, String k) async {
     try {
       final list = await _webBook.searchBook(source: s, key: k);
       if (mounted) {
@@ -151,12 +159,37 @@ class _ShuyuanPageState extends State<ShuyuanPage> {
           _categories[key] ??= _webBook.getExploreCategories(s);
         });
       }
+      return true;
     } catch (e) {
       if (mounted) {
         _results[key] = const [];
-        _toast('${s.bookSourceName}: $e');
+        if (key != _aggregateKey) {
+          _toast('${s.bookSourceName}: ${_shortError(e)}');
+        }
       }
+      return false;
     }
+  }
+
+  /// 把异常压成一行可读信息，不把完整堆栈塞给用户。
+  String _shortError(Object e) {
+    if (e is DioException) {
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout) {
+        return '网络超时';
+      }
+      final code = e.response?.statusCode;
+      return code != null ? '网络请求失败[$code]' : '网络请求失败';
+    }
+    if (e is VerificationRequiredException) {
+      final code = e.statusCode;
+      return code != null
+          ? '站点要求浏览器验证[$code]'
+          : '站点要求浏览器验证';
+    }
+    final line = e.toString().split('\n').first.trim();
+    return line.length > 40 ? '${line.substring(0, 40)}…' : line;
   }
 
   /// 单源浏览：当前源加载发现页（分类或首页）。
