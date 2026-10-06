@@ -239,6 +239,16 @@ class AppLog {
     ));
   }
 
+  /// 记录 error 级日志（兼容 Nexhub 移植引擎的 `AppLog.instance.e(...)`）。
+  void e(String message) {
+    entry(LogEntry(
+      category: 'LEGACY',
+      action: 'error',
+      level: LogLevel.error,
+      message: message,
+    ));
+  }
+
   // ============================================================
   // 便捷方法 — 按 category 分
   // ============================================================

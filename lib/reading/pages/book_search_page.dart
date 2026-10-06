@@ -79,6 +79,12 @@ class _BookSearchPageState extends State<BookSearchPage>
   String _keyword = '';
   bool _guideShown = false; // 新手引导已展示标记
 
+  // 首页推荐流（z-library「最受欢迎」）：打开图书页自动加载，
+  // 不再让用户面对空态先选分类/搜索（用户 2026-10-06 要求恢复内容）。
+  bool _homeLoading = false;
+  bool _homeLoaded = false;
+  String? _homeError;
+
   // 分类额外过滤条件：年份/语言仅分类模式用；格式 _filterExtensions 与搜索页小标签
   // 同源联动，关键词/分类模式都用，跨模式保留。
   bool _categoryMode = false; // 分类浏览模式（与关键词搜索互斥）
@@ -120,6 +126,7 @@ class _BookSearchPageState extends State<BookSearchPage>
     _wasUnavailable = ZlibraryService().isUnavailable;
     _loadHistory();
     _ensureCategories();
+    _loadHome();
     _maybeTriggerGuide();
     // 豆瓣排行「去找书」跳转：预填关键词并立即执行搜索
     // （首帧后触发，避免 initState 阶段 FocusScope 查询）
@@ -194,6 +201,42 @@ class _BookSearchPageState extends State<BookSearchPage>
     final h = await SearchHistoryService.load(key: 'book_search_history');
     _log('加载搜索历史: ${h.length} 条');
     if (mounted) setState(() => _history = h);
+  }
+
+  /// 首页推荐流：打开图书页自动加载 z-library「最受欢迎」，
+  /// 让用户一进来就有内容（不再空态逼用户先选分类/搜索）。
+  Future<void> _loadHome() async {
+    if (_homeLoading) return;
+    setState(() {
+      _homeLoading = true;
+      _homeError = null;
+    });
+    try {
+      final r = await ZlibraryService().fetchHomeRecommendations();
+      if (!mounted) return;
+      setState(() {
+        _result = r;
+        _homeLoaded = true;
+        _homeLoading = false;
+      });
+      _log('首页推荐加载完成: ${r.items.length} 条');
+    } on ZlibraryException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _homeLoading = false;
+        _homeLoaded = false;
+        _homeError = _friendlyError(e);
+      });
+      _log('首页推荐加载失败: $_homeError');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _homeLoading = false;
+        _homeLoaded = false;
+        _homeError = '推荐加载失败';
+      });
+      _log('首页推荐异常: $e');
+    }
   }
 
   /// 分类目录：缓存为空且域名就绪时后台拉取一次。
@@ -1123,9 +1166,15 @@ class _BookSearchPageState extends State<BookSearchPage>
     }
 
     // 未搜索 = 初始界面（分类模式除外）。
-    // 首页推荐流已按用户要求移除（不再显示「推荐 / Z-Library 最受欢迎」区块），
-    // 改为轻量引导：搜索图书或走分类浏览。
+    // 默认展示 z-library「最受欢迎」推荐流（打开即加载，不再空态逼用户选分类）；
+    // 仅当推荐也加载失败时才显示轻量引导 + 重试。
     if (_result.items.isEmpty && _keyword.isEmpty && !_categoryMode) {
+      if (_homeLoading) {
+        return Center(
+          child: CircularProgressIndicator(color: JellyTheme.primary),
+        );
+      }
+      final error = _homeError;
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1133,14 +1182,21 @@ class _BookSearchPageState extends State<BookSearchPage>
             Icon(Icons.auto_stories_rounded,
                 size: 48, color: JellyTheme.textSecondary),
             const SizedBox(height: 16),
-            Text('搜索图书或选择分类开始浏览',
-                style: TextStyle(color: JellyTheme.textSecondary)),
+            Text(
+              error ?? '搜索图书或选择分类开始浏览',
+              style: TextStyle(color: JellyTheme.textSecondary),
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 16),
             TextButton.icon(
-              onPressed: () => _openCategorySheet(
-                  Theme.of(context).brightness == Brightness.dark),
-              icon: const Icon(Icons.category_rounded),
-              label: const Text('选择分类'),
+              onPressed: error != null
+                  ? _loadHome
+                  : () => _openCategorySheet(
+                      Theme.of(context).brightness == Brightness.dark),
+              icon: Icon(error != null
+                  ? Icons.refresh_rounded
+                  : Icons.category_rounded),
+              label: Text(error != null ? '重试加载推荐' : '选择分类'),
             ),
           ],
         ),

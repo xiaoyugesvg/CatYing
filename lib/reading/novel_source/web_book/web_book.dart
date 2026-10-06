@@ -19,7 +19,6 @@ import 'book_content.dart';
 import 'book_info.dart';
 import 'book_list.dart';
 import 'web_book_types.dart';
-import 'runner_isolate.dart';
 
 export 'web_book_types.dart';
 
@@ -34,12 +33,6 @@ class WebBook {
     required String key,
     int page = 1,
   }) async {
-    // [PATCH-8] worker isolate 路径：打开 `BookSourceRunner.enabled` 后走 isolate。
-    // worker 内会把 SyncHttpBridge 的同步抓取闸门打开（`java.ajax` 才真正生效），
-    // 且阻塞只发生在 worker isolate，不会卡 UI。
-    if (BookSourceRunner.enabled) {
-      return BookSourceRunner.instance.searchBook(source: source, key: key, page: page);
-    }
     final searchUrl = source.searchUrl;
     if (searchUrl == null || searchUrl.isEmpty) {
       throw Exception('书源未配置 searchUrl');
@@ -225,12 +218,6 @@ class WebBook {
     required XiaoshuoBookSource source,
     required String bookUrl,
   }) async {
-    // [PATCH-8] worker isolate 路径：打开 `BookSourceRunner.enabled` 后走 isolate。
-    // worker 内会把 SyncHttpBridge 的同步抓取闸门打开（`java.ajax` 才真正生效），
-    // 且阻塞只发生在 worker isolate，不会卡 UI。
-    if (BookSourceRunner.enabled) {
-      return BookSourceRunner.instance.getBookInfo(source: source, bookUrl: bookUrl);
-    }
     final analyzeUrl = AnalyzeUrl(
       url: bookUrl,
       baseUrl: source.bookSourceUrl,
@@ -269,13 +256,6 @@ class WebBook {
     required XiaoshuoBook book,
     void Function(List<XiaoshuoBookChapter>)? onBatch,
   }) async {
-    // [PATCH-8] worker isolate 路径：打开 `BookSourceRunner.enabled` 后走 isolate。
-    // worker 内会把 SyncHttpBridge 的同步抓取闸门打开（`java.ajax` 才真正生效），
-    // 且阻塞只发生在 worker isolate，不会卡 UI。
-    if (BookSourceRunner.enabled) {
-      return BookSourceRunner.instance.getChapterList(source: source, book: book);
-    }
-    // 注意：onBatch 回调无法跨 isolate，isolate 路径只返回最终完整列表。
     final tocRule = source.getTocRule();
     var tocUrl = (book.tocUrl != null && book.tocUrl!.isNotEmpty)
         ? book.tocUrl!
@@ -415,12 +395,6 @@ class WebBook {
     required String chapterUrl,
     XiaoshuoBook? originalBook,
   }) async {
-    // [PATCH-8] worker isolate 路径：打开 `BookSourceRunner.enabled` 后走 isolate。
-    // worker 内会把 SyncHttpBridge 的同步抓取闸门打开（`java.ajax` 才真正生效），
-    // 且阻塞只发生在 worker isolate，不会卡 UI。
-    if (BookSourceRunner.enabled) {
-      return BookSourceRunner.instance.getContent(source: source, chapterUrl: chapterUrl, originalBook: originalBook);
-    }
     final contentRule = source.getContentRule();
     final book = originalBook ?? XiaoshuoBook(bookUrl: '', name: '');
 

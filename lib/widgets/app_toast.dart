@@ -105,15 +105,20 @@ class AppToast {
     _current = null;
     late OverlayEntry entry;
     entry = OverlayEntry(
-      builder: (_) => _ToastView(
-        title: title,
-        status: status,
-        isError: isError,
-        duration: duration,
-        onDone: () {
-          if (identical(_current, entry)) _current = null;
-          entry.remove();
-        },
+      builder: (_) => Material(
+        // OverlayEntry 无 Material 上下文 → Text 触发 Flutter
+        // 「DefaultTextStyle 缺失」黄色调试线（"双黄线"）。
+        type: MaterialType.transparency,
+        child: _ToastView(
+          title: title,
+          status: status,
+          isError: isError,
+          duration: duration,
+          onDone: () {
+            if (identical(_current, entry)) _current = null;
+            entry.remove();
+          },
+        ),
       ),
     );
     _current = entry;

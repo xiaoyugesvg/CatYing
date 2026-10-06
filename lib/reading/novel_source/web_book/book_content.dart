@@ -13,9 +13,12 @@ import '../model/xiaoshuo_book.dart';
 import '../model/xiaoshuo_book_chapter.dart';
 
 class BookContent {
-  // 复用进程级共享 QuickJS 运行时（见 JsEngine.shared 说明），
-  // 避免每次解析正文都重建运行时造成原生资源泄漏。
-  static JsEngine get _jsEngine => JsEngine.shared;
+  // 复用同一 QuickJS 运行时（按需创建），避免每次解析正文都重建运行时。
+  static JsEngine? _jsEngineHolder;
+  static JsEngine get _jsEngine {
+    _jsEngineHolder ??= JsEngine();
+    return _jsEngineHolder!;
+  }
 
   // 预编译正则
   static final _brRegex = RegExp(r'<br\s*/?\s*>', caseSensitive: false);
@@ -244,7 +247,7 @@ class BookContent {
     if (contentRule.imageStyle != null && contentRule.imageStyle!.isNotEmpty) {
       final style = contentRule.imageStyle!;
       blocks = blocks.map((b) => b is NovelImageBlock
-          ? NovelImageBlock(b.url, style: style)
+          ? NovelImageBlock(b.url, source: b.source, style: style)
           : b).toList();
     }
 
@@ -564,7 +567,7 @@ class BookContent {
             _jsEngine.eval(decodeJs, bindings: <String, dynamic>{'result': url});
         if (decoded.isNotEmpty) url = decoded;
       } catch (_) {}
-      out.add(NovelImageBlock(url, style: b.style));
+      out.add(NovelImageBlock(url, source: b.source, style: b.style));
     }
     return out;
   }

@@ -280,36 +280,44 @@ class _TVBoxAppState extends State<TVBoxApp> with WidgetsBindingObserver {
                   // 放到这里之后：壁纸在 Navigator 之下、所有路由之上，
                   // 任何透明 Scaffold 都能透出它，深浅两套场景也由
                   // `BackgroundService` 按 `AppBrightness` 自动选。
-                  return Stack(
-                    fit: StackFit.expand,
-                    // 用非方向性的 Alignment：避免依赖 Directionality
-                    //（builder 这一层的位置在各 Flutter 版本间略有差异）
-                    alignment: Alignment.topLeft,
-                    children: [
-                      BackgroundService.instance.buildBackground(
-                        overlayAlpha: 0.3,
-                      ),
-                      out,
-                      // ── 悬浮播放球（方案 C）──────────────────────────
-                      // 可拖动、点击进播放页；没有在播的歌时它自己隐藏。
-                      // 挂在这一层 → **一处挂载覆盖所有路由**（含 push 出去的
-                      // 歌单详情/喜马拉雅专辑/本地音乐，那些页面**没有**迷你
-                      // 播放器，所以以前"点歌后除了声音没有任何反馈"）。
-                      const MusicFloatingPlayButton(),
-                      // ── 音乐底部套装（全局）──────────────────────────
-                      // 迷你播放条 + 悬浮导航栏。与悬浮球同一层挂载，
-                      // 一处覆盖所有路由。显示规则（含"子页面只显示
-                      // 播放条、且只在播放时显示"）全在 `MusicBottomChrome` 里。
-                      //
-                      // ⚠️ 这个 `Positioned` **不能删** —— 删了音乐模块
-                      //    就没有导航栏和播放条（`c50ddd1` 踩过这个坑）。
-                      const Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        child: MusicBottomChrome(),
-                      ),
-                    ],
+                  return Material(
+                    // 🔴 MaterialApp.builder 这层在 Navigator/Scaffold 之外，
+                    //    没有 Material 祖先 → 里面（壁纸层、悬浮播放球、
+                    //    迷你播放条、悬浮导航栏）的 Text 会触发 Flutter
+                    //    「DefaultTextStyle 缺失」黄色调试线（"双黄线"）。
+                    //    包一层透明 Material 补齐（背景仍由下方绘制）。
+                    type: MaterialType.transparency,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      // 用非方向性的 Alignment：避免依赖 Directionality
+                      //（builder 这一层的位置在各 Flutter 版本间略有差异）
+                      alignment: Alignment.topLeft,
+                      children: [
+                        BackgroundService.instance.buildBackground(
+                          overlayAlpha: 0.3,
+                        ),
+                        out,
+                        // ── 悬浮播放球（方案 C）──────────────────────────
+                        // 可拖动、点击进播放页；没有在播的歌时它自己隐藏。
+                        // 挂在这一层 → **一处挂载覆盖所有路由**（含 push 出去的
+                        // 歌单详情/喜马拉雅专辑/本地音乐，那些页面**没有**迷你
+                        // 播放器，所以以前"点歌后除了声音没有任何反馈"）。
+                        const MusicFloatingPlayButton(),
+                        // ── 音乐底部套装（全局）──────────────────────────
+                        // 迷你播放条 + 悬浮导航栏。与悬浮球同一层挂载，
+                        // 一处覆盖所有路由。显示规则（含"子页面只显示
+                        // 播放条、且只在播放时显示"）全在 `MusicBottomChrome` 里。
+                        //
+                        // ⚠️ 这个 `Positioned` **不能删** —— 删了音乐模块
+                        //    就没有导航栏和播放条（`c50ddd1` 踩过这个坑）。
+                        const Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: MusicBottomChrome(),
+                        ),
+                      ],
+                    ),
                   );
                 },
                 ),

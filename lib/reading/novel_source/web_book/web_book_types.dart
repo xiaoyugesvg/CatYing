@@ -149,10 +149,10 @@ String _executeExploreJs(String jsCode) {
   }
 
   try {
-    // 复用进程级共享引擎：不再每次 new+dispose，避免频繁创建/销毁
-    // quickjs 原生运行时（3907 书源并发发现页时是闪退主因之一）。
+    final jsEngine = JsEngine();
     final fullJs = '$jsCode\nJSON.stringify(typeof result !== "undefined" ? result : []);';
-    final jsResult = JsEngine.shared.eval(fullJs);
+    final jsResult = jsEngine.eval(fullJs);
+    jsEngine.dispose();
 
     if (jsResult.isNotEmpty && jsResult != '[]') {
       return _parseJsResult(jsResult);

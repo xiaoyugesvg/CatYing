@@ -54,26 +54,32 @@ class _JellyIconMenuButtonState extends State<JellyIconMenuButton> {
     final pos = box.localToGlobal(Offset.zero);
     _close();
     final entry = OverlayEntry(
-      builder: (_) => Stack(
-        children: [
-          // 透明 barrier：点击面板外区域关闭
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: _close,
+      builder: (_) => Material(
+        // OverlayEntry 无 Material 上下文 → 里面 Text 会触发 Flutter
+        // 「DefaultTextStyle 缺失」黄色调试线（用户遇到的"双黄线"）。
+        // 包一层透明 Material 补齐 DefaultTextStyle / InkWell 涟漪。
+        type: MaterialType.transparency,
+        child: Stack(
+          children: [
+            // 透明 barrier：点击面板外区域关闭
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _close,
+              ),
             ),
-          ),
-          Positioned(
-            left: pos.dx + box.size.width - widget.menuWidth,
-            top: pos.dy + box.size.height + 6,
-            child: _JellyIconMenuPanel(
-              isDark: widget.isDark,
-              actions: actions,
-              width: widget.menuWidth,
-              onClose: _close,
+            Positioned(
+              left: pos.dx + box.size.width - widget.menuWidth,
+              top: pos.dy + box.size.height + 6,
+              child: _JellyIconMenuPanel(
+                isDark: widget.isDark,
+                actions: actions,
+                width: widget.menuWidth,
+                onClose: _close,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
     _entry = entry;

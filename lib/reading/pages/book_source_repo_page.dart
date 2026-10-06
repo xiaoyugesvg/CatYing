@@ -15,6 +15,7 @@ import '../services/qread_api.dart';
 import 'book_source_editor_page.dart';
 import 'book_source_health_page.dart';
 import 'book_source_login_page.dart';
+import 'cloud_book_source_page.dart';
 // ✅ **补齐缺失的 import** ✗✓（本轮修的 8 条 error 全因它们 ✗）：
 //   · `JellySearchBar` / `JellyExpandableSearch` / `JellySlidingActions`(+`JellyAction`)
 //     这三个是**共用组件** ✓ —— 我之前误以为"能被传递导出"✗，那是因为**闸门跑错了目录** ✗✗
@@ -426,6 +427,24 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                       ),
                     ],
                   ],
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (mounted) {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const CloudBookSourcePage(),
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.language, size: 18),
+                    label: const Text('打开云端网页版（源分类/详情/目录/阅读器）'),
+                  ),
                 ),
                 if (cfg.isLoggedIn) ...[
                   const SizedBox(height: 8),

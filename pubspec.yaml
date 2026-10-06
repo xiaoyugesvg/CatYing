@@ -79,6 +79,8 @@ dependencies:
   xpath_selector: ^3.0.2
   xpath_selector_html_parser: ^3.0.1
   fast_gbk: ^1.0.0
+  # [NEXHUB-移植] 书源引擎 XML 导入/解析（shuyuan_source_service / analyze_xpath）
+  xml: ^6.5.0
   # [PATCH-5] 同步 HTTP：java.ajax 的同步抓取用（纯 Dart，无原生插件）
   sync_http: ^0.3.0
   # cached_network_image 3.3.1 已移除（A2）：它与 cached_network_image_ce

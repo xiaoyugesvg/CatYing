@@ -26,27 +26,33 @@ Future<T?> showMusicSheet<T>({
     transitionDuration: const Duration(milliseconds: 280),
     pageBuilder: (ctx, _, __) => Align(
       alignment: Alignment.topCenter,
-      child: SafeArea(
-        bottom: false,
-        child: Container(
-          width: double.infinity,
-          constraints: BoxConstraints(maxHeight: maxHeight),
-          margin: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-          decoration: BoxDecoration(
-            color: backgroundColor ?? MusicTheme.card,
-            borderRadius: const BorderRadius.vertical(
-              bottom: Radius.circular(24),
-            ),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black26,
-                blurRadius: 24,
-                offset: Offset(0, 8),
+      child: Material(
+        // showGeneralDialog 内容不提供 Material/DefaultTextStyle 上下文，
+        // 里面 Text 会触发 Flutter「DefaultTextStyle 缺失」黄色调试线（双黄线）。
+        // 包一层透明 Material 补齐（背景仍由下方 Container 绘制）。
+        type: MaterialType.transparency,
+        child: SafeArea(
+          bottom: false,
+          child: Container(
+            width: double.infinity,
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            margin: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+            decoration: BoxDecoration(
+              color: backgroundColor ?? MusicTheme.card,
+              borderRadius: const BorderRadius.vertical(
+                bottom: Radius.circular(24),
               ),
-            ],
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black26,
+                  blurRadius: 24,
+                  offset: Offset(0, 8),
+                ),
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: builder(ctx),
           ),
-          clipBehavior: Clip.antiAlias,
-          child: builder(ctx),
         ),
       ),
     ),

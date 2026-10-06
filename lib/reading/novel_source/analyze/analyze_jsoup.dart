@@ -4,7 +4,6 @@ library;
 
 import 'package:html/dom.dart';
 import 'package:html/parser.dart' as html_parser;
-import 'package:xpath_selector_html_parser/xpath_selector_html_parser.dart';
 import 'rule_analyzer.dart';
 import 'source_rule.dart';
 
@@ -15,7 +14,6 @@ class AnalyzeByJsoup {
   AnalyzeByJsoup(this.content) : _element = _parse(content);
 
   static Element _parse(dynamic doc) {
-    if (doc is HtmlNodeTree) return doc.element;
     if (doc is Element) return doc;
     if (doc is Document) return doc.documentElement!;
     if (doc is String) {
@@ -347,20 +345,10 @@ class AnalyzeByJsoup {
     final trimmed = rule.trim();
     if (trimmed.isEmpty) return [];
 
-    // [PATCH-11] 先摘掉选择器**末尾**的方括号索引（legado 写法：`tag.tr[1:20]`、
-    // `tag.a[1]`、`class.x@tag.tr[1:20]@tag.a[1]`）。
-    //
-    // 为什么必须摘 ✗：下面按 `[.!:]` 找分隔符切 `afterPrefix`，而 `tr[1:20]`
-    // 里的 `:` 会被当成索引分隔符 ⇒ `getElementsByTagName('tr[1')` ⇒ **空结果**。
-    // 实测：`[N]`/`[a:b]` 写法出现在 **129 个规则字段 / 83 条源**。
-    // 只认纯数字/区间/逗号列表的方括号 ⇒ `[property$=chapter_name]` 这类
-    // CSS 属性选择器不会被误吃 ✓
-    final (bareRule, bracketIndex) = _splitBracketIndex(trimmed);
-
     // 纯索引选择器（如 "0"、"-1"）
-    final indexMatch = RegExp(r'^(-?\d+)$').firstMatch(bareRule);
+    final indexMatch = RegExp(r'^(-?\d+)$').firstMatch(trimmed);
     if (indexMatch != null) {
-      final index = int.parse(bareRule);
+      final index = int.parse(trimmed);
       final children = temp.children;
       if (index >= 0 && index < children.length) {
         return [children[index]];
@@ -373,7 +361,7 @@ class AnalyzeByJsoup {
     // 带索引的特殊选择器（如 "tag.div.0"、"class.name.-1"）
     // 语法：'':' 分隔索引，'.' 表示选择，'!' 表示排除
     for (final prefix in ['children', 'tag.', 'class.', 'id.', 'text.']) {
-      if (bareRule.startsWith(prefix)) {
+      if (trimmed.startsWith(prefix)) {
         List<Element> elements;
         String remaining = '';
 
@@ -381,7 +369,7 @@ class AnalyzeByJsoup {
           elements = temp.children;
           remaining = trimmed.substring(8).trim(); // "children" 之后
         } else {
-          final afterPrefix = bareRule.substring(prefix.length);
+          final afterPrefix = trimmed.substring(prefix.length);
           final sepMatch = RegExp(r'[.!:]').firstMatch(afterPrefix);
           if (sepMatch != null) {
             final sepIndex = sepMatch.start;
@@ -428,9 +416,6 @@ class AnalyzeByJsoup {
           }
         }
 
-        if (bracketIndex.isNotEmpty && elements.isNotEmpty) {
-          elements = _applyIndexFilter(elements, '[$bracketIndex]');
-        }
         if (remaining.isNotEmpty && elements.isNotEmpty) {
           elements = _applyIndexFilter(elements, remaining);
         }
@@ -439,27 +424,7 @@ class AnalyzeByJsoup {
     }
 
     // 默认按 CSS 选择器处理（透明支持 :contains(...) 伪选择器）
-    var cssHits = _safeQuery(temp, bareRule);
-    if (bracketIndex.isNotEmpty && cssHits.isNotEmpty) {
-      cssHits = _applyIndexFilter(cssHits, '[$bracketIndex]');
-    }
-    return cssHits;
-  }
-
-  /// 拆分选择器末尾的方括号索引（legado 的 `tag.tr[1:20]` / `tag.a[1]` 写法）。
-  ///
-  /// 返回 `(去掉方括号的选择器, 方括号内的索引表达式)`；没有可识别的索引时
-  /// 第二部分为空串。
-  ///
-  /// **只认纯数字 / 区间 / 逗号列表**（`[1]`、`[-1]`、`[1:20]`、`[0,1,2]`、
-  /// `[0:5:2]`）—— 这样 `[property$=chapter_name]`、`[href]` 这类
-  /// **CSS 属性选择器**不会被误当作索引 ✓
-  static (String, String) _splitBracketIndex(String s) {
-    final m = RegExp(
-      r'\[(\s*-?\d+(?:\s*:\s*-?\d+(?:\s*:\s*-?\d+)?)?(?:\s*,\s*-?\d+)*\s*)\]$',
-    ).firstMatch(s);
-    if (m == null) return (s, '');
-    return (s.substring(0, m.start).trim(), m.group(1)!);
+    return _safeQuery(temp, trimmed);
   }
 
   /// 索引过滤：支持 .0、.-1、.0:5、.0:5:2、!0、[0,1,2]、[-1,0:2]

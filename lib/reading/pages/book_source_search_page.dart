@@ -13,6 +13,7 @@ import 'book_download_records_page.dart';
 import 'book_source_detail_page.dart';
 import 'book_source_repo_page.dart';
 import 'browse_history_page.dart';
+import 'cloud_book_source_page.dart';
 import 'favorites_page.dart';
 import '../../common/theme.dart';
 import '../utils/source_fail_text.dart';
@@ -623,6 +624,18 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
             icon: const Icon(Icons.view_list_rounded),
             onPressed: _showQuickSources,
           ),
+          // 云模式：直接打开 qread 服务端网页版（源分类/详情/目录/阅读器）
+          if (_serverMode)
+            IconButton(
+              tooltip: '云端网页版',
+              icon: const Icon(Icons.cloud_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => const CloudBookSourcePage(),
+                ),
+              ),
+            ),
           // 聚合菜单：浏览记录 / 收藏 / 下载（与图书共用）+ 书源仓库
           JellyIconMenuButton(
             isDark: _isDark,

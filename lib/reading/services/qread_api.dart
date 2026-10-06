@@ -265,13 +265,21 @@ class QreadApi {
   /// 解析 `JsonResponse{isSuccess,errorMsg,data}`，失败抛 [QreadException]。
   dynamic _unwrap(Response res) {
     if (res.statusCode != 200) {
-      throw QreadException('服务端错误 HTTP ${res.statusCode}');
+      final hint = switch (res.statusCode) {
+        404 => '（接口不存在：确认地址是 http://IP:端口，不要加 /api）',
+        401 || 403 => '（服务端拒绝访问，请检查账号权限）',
+        502 || 503 => '（服务端未就绪或网关错误）',
+        _ => '',
+      };
+      throw QreadException('服务端错误 HTTP ${res.statusCode}$hint');
     }
     dynamic body;
+    final text = res.data?.toString() ?? '';
     try {
-      body = jsonDecode(res.data?.toString() ?? '');
+      body = jsonDecode(text);
     } catch (_) {
-      throw QreadException('服务端返回无法解析');
+      final preview = text.length > 120 ? '${text.substring(0, 120)}…' : text;
+      throw QreadException('服务端返回无法解析（可能地址连错服务）：$preview');
     }
     if (body is! Map) throw QreadException('服务端返回格式异常');
     final ok = body['isSuccess'] == true;
