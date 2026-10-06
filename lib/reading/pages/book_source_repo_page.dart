@@ -19,9 +19,7 @@ import 'book_source_login_page.dart';
 //   · `JellySearchBar` / `JellyExpandableSearch` / `JellySlidingActions`(+`JellyAction`)
 //     这三个是**共用组件** ✓ —— 我之前误以为"能被传递导出"✗，那是因为**闸门跑错了目录** ✗✗
 //     （`dart analyze` 没带仓库根 → 分析的是别的项目 ✓ → 假绿 ✓）。
-//   · `BrowseHistoryPage` / `FavoritesPage` 是本目录的**页面** ✓（悬浮菜单栏要跳它们 ✓）。
-import 'browse_history_page.dart';
-import 'favorites_page.dart';
+//   （书源页本身不再提供「浏览记录 / 收藏」入口，如需查看请到漫画/图书搜索页或“我的”页。）
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_sliding_actions.dart';
@@ -613,29 +611,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         // ✅ **滑动动作栏**（③ 的正确形式 ✓）—— 与漫画页 `search_page.dart:1371` **同款** ✓✓：
         //   `JellySlidingActions` = **左右一个个滑动切换** ✓ + **下滑展开成一列** ✓
         //   （就是我先前误做成"顶栏指环"✗的那个东西 ✓；指环已撤 ✓，这里换成正确的 ✓）
-        //   动作与漫画页对齐 ✓：浏览记录 ✓ · 收藏 ✓（`FavoritesPage` 的 `comicOnly` 默认
-        //   `false` = 图书模式 ✓，正合书源页 ✓）；外加本页已有的**书源体检** ✓
+        //   动作与漫画页对齐 ✓：只保留**书源体检** ✓（浏览记录/收藏入口已按要求移除 ✓）
         JellySlidingActions(
           isDark: _isDark,
           actions: [
-            JellyAction(
-              icon: Icons.history_rounded,
-              tooltip: '浏览记录',
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const BrowseHistoryPage(showTabs: false),
-                ),
-              ),
-            ),
-            JellyAction(
-              icon: Icons.favorite_rounded,
-              tooltip: '收藏',
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const FavoritesPage()),
-              ),
-            ),
             JellyAction(
               icon: Icons.verified_user_rounded,
               tooltip: '书源体检',
@@ -1302,7 +1281,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
 
   /// 点书源卡片弹出的底部菜单（按截图）：
   ///   顶部：源名 + 分组名 + ✏编辑 / ⬆置顶 / 🗑删除
-  ///   列表：代理设置（跟随全局）/ 设置分组
+  ///   列表：设置分组
   Future<void> _showSourceMenu(BookSource s) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -1468,26 +1447,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                 ),
               ),
               const Divider(height: 1),
-              // 代理设置
-              ListTile(
-                leading: Icon(Icons.vpn_key_outlined,
-                    size: 22, color: _titleColor),
-                title: Text('代理设置',
-                    style: TextStyle(fontSize: AppTheme.fontHeadline, color: _titleColor)),
-                subtitle: Text(
-                  (s.raw['proxy']?.toString() ?? '').trim().isEmpty
-                      ? '跟随全局（当前直连）'
-                      : '代理：${s.raw['proxy']}',
-                  style: TextStyle(
-                      fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
-                ),
-                trailing: Icon(Icons.chevron_right_rounded,
-                    size: 20, color: JellyTheme.textSecondary),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _editProxy(s);
-                },
-              ),
               // 设置分组
               ListTile(
                 leading:
@@ -1510,54 +1469,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         ),
       ),
     );
-  }
-
-  /// 单源代理：输入 "host:port"（留空 = 跟随全局/直连）。
-  Future<void> _editProxy(BookSource s) async {
-    final c = TextEditingController(
-      text: s.raw['proxy']?.toString() ?? '',
-    );
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('单源代理'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('仅对该书源生效，格式：主机:端口（如 127.0.0.1:7890）。留空则跟随全局/直连。'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: c,
-              keyboardType: TextInputType.text,
-              decoration: const InputDecoration(
-                hintText: '如 127.0.0.1:7890',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    final v = c.text.trim();
-    if (v.isNotEmpty &&
-        !RegExp(r'^[^:\s]+:\d{1,5}$').hasMatch(v)) {
-      _toast('代理格式不对，应为「主机:端口」');
-      return;
-    }
-    await store.updatePath(s.id, 'proxy', v);
-    _toast(v.isEmpty ? '已清除该书源代理，跟随全局' : '已保存代理：$v');
   }
 
   /// 「设置分组」：给单个书源选一个已有分组，或新建

@@ -5,7 +5,7 @@
 //   进行中   ：进度 X/N + 并发 N + 发热提示 + 实时统计(可用/网络不通/解析失败)
 //              + 搜索框 + 统计 tab + 分类标签 + 实时列表
 //   完成页   ：体检完成·时间 + 统计 + 列表 + 全选 + 一键优化 + 清理
-// 失败源会自动用代理档案复检一遍；退出页面不中断（结果写入服务缓存）。
+// 退出页面不中断（结果写入服务缓存）。
 import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
@@ -319,7 +319,7 @@ class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
       const SizedBox(height: 8),
       Center(
         child: Text(
-          '失败源会自动用代理档案复检一遍；退出页面不中断',
+          '逐源体检：取书→详情→目录→正文；退出页面不中断',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: AppTheme.fontFootnote, color: _subColor),
         ),

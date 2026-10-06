@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'music_sheet.dart';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -354,7 +355,7 @@ Future<void> showSongActions(
   List<Song>? playbackContext,
 ]) {
   final player = MusicPlayerManager.instance;
-  return showModalBottomSheet<void>(
+  return showMusicSheet<void>(
     context: context,
     backgroundColor: MusicTheme.card,
     // ── 🔴 必须 `isScrollControlled: true`（修一个"末尾项点不到"）──────
@@ -373,9 +374,6 @@ Future<void> showSongActions(
     // 兜住"屏幕很矮"的极端情况（同时保留 `mainAxisSize: min`，
     // 内容少时弹层**依然只有内容那么高**，不会变成全屏大白板）。
     isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-    ),
     builder: (ctx) => SafeArea(
       top: false,
       child: SingleChildScrollView(

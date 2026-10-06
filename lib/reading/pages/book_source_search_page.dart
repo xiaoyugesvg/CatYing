@@ -616,6 +616,13 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
               }
             },
           ),
+          // 搜索源：快速书源列表弹窗（「搜索源」筛选框 + 源列表 + 快速切换）
+          // （用户 2026-10-06 反馈"书源页少个搜索源"，顶栏增加显式入口）
+          IconButton(
+            tooltip: '搜索源',
+            icon: const Icon(Icons.view_list_rounded),
+            onPressed: _showQuickSources,
+          ),
           // 聚合菜单：浏览记录 / 收藏 / 下载（与图书共用）+ 书源仓库
           JellyIconMenuButton(
             isDark: _isDark,

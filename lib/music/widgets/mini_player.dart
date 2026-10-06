@@ -5,7 +5,6 @@ import '../services/music_api.dart';
 import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../widgets/music_components.dart';
-import '../pages/queue_page.dart';
 import '../widgets/quick_actions.dart';
 import '../../common/floating_nav_spec.dart';
 import '../../common/theme.dart';
@@ -240,25 +239,25 @@ class _MiniPlayerState extends State<MiniPlayer>
                   ),
                   const SizedBox(width: 10),
                   Expanded(child: _titleColumn(player, song)),
-                  const SizedBox(width: 2),
-                  // 功能快捷排：上一集 / 歌单 / 下载 / 历史 / 收藏
-                  _iconBtn(Icons.skip_previous_rounded, () => player.previous()),
-                  _iconBtn(Icons.queue_music_rounded, () => _openQueue(context)),
-                  _iconBtn(
-                      Icons.download_rounded, () => musicEnqueueDownload(song)),
-                  _iconBtn(Icons.history_rounded, () => showRecentSongsSheet()),
-                  _iconBtn(
-                      Icons.favorite_border_rounded,
-                      () => musicToggleFavorite(song)),
-                  _btn(
+                  const SizedBox(width: 4),
+                  // 控制按钮（用户要求精简 + 样式统一）：
+                  // 只留 收藏 / 上一首 / 播放 / 下一首，等大圆形图标按钮。
+                  _controlBtn(
+                    Icons.favorite_border_rounded,
+                    () => musicToggleFavorite(song),
+                  ),
+                  _controlBtn(
+                    Icons.skip_previous_rounded,
+                    () => player.previous(),
+                  ),
+                  _controlBtn(
                     player.isPlaying.value
                         ? Icons.pause_rounded
                         : Icons.play_arrow_rounded,
                     () => player.toggle(),
-                    size: 32,
-                    filled: true,
+                    primary: true,
                   ),
-                  _btn(Icons.skip_next_rounded, () => player.next(), size: 30),
+                  _controlBtn(Icons.skip_next_rounded, () => player.next()),
                 ],
               ),
             ),
@@ -298,6 +297,9 @@ class _MiniPlayerState extends State<MiniPlayer>
                         song.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                        // 播放条是 56 高紧凑条：标题固定字号，
+                        // 不随 App 文字缩放放大，否则 Column 超高溢出（黄线）。
+                        textScaler: TextScaler.noScaling,
                         style: TextStyle(
                             color: MusicTheme.label,
                             fontSize: AppTheme.fontBody,
@@ -315,6 +317,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                   sub,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  textScaler: TextScaler.noScaling,
                   style: TextStyle(color: subColor, fontSize: AppTheme.fontFootnote),
                 ),
               ],
@@ -325,51 +328,41 @@ class _MiniPlayerState extends State<MiniPlayer>
     );
   }
 
-  /// 打开播放队列（歌单）
-  void _openQueue(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),builder: (_) => const MusicQueuePage()),
-    );
-  }
-
-  /// 小功能图标键（上一集/歌单/下载/历史/收藏）—— 30×30 点击区
-  Widget _iconBtn(IconData icon, VoidCallback onTap) {
+  /// 统一控制按钮：等大圆形图标按钮（用户要求"图标样式统一"）。
+  ///
+  /// · 普通按钮：34×34 圆形浅色底 + 21px 图标
+  /// · [primary]（播放/暂停）：同尺寸渐变填充圆 + 白色图标，作为主操作
+  Widget _controlBtn(
+    IconData icon,
+    VoidCallback onTap, {
+    bool primary = false,
+  }) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Container(
-        width: 30,
-        height: 30,
+        width: 36,
+        height: 36,
         alignment: Alignment.center,
-        child: Icon(icon, color: MusicTheme.secondary, size: 19),
-      ),
-    );
-  }
-
-  Widget _btn(IconData icon, VoidCallback onTap,
-      {double size = 32, bool filled = false}) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Container(
-        width: size + 8,
-        height: size + 8,
-        alignment: Alignment.center,
-        child: filled
+        child: primary
             ? Container(
-                width: size,
-                height: size,
+                width: 34,
+                height: 34,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: MusicTheme.accentGradient,
-                  ),
+                  gradient: MusicTheme.accentGradient,
                 ),
-                child: Icon(icon, color: Colors.white, size: size * 0.62),
+                child: Icon(icon, color: Colors.white, size: 21),
               )
-            : Icon(icon, color: MusicTheme.label, size: size * 0.8),
+            : Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: MusicTheme.tint.withValues(alpha: 0.10),
+                ),
+                child: Icon(icon, color: MusicTheme.label, size: 21),
+              ),
       ),
     );
   }

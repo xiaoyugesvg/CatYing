@@ -293,7 +293,9 @@ class QreadApi {
     final data = await _get('/login', query: {
       'username': cfg.username.trim(),
       'password': cfg.password,
-      'model': 'cmbok',
+      // 账号来源（bank）：xs.muiu.site 等服务端不认 cmbok，会返回 NOT_BANK；
+      // 实测 model=bank 进入密码校验，为通用可用来源。
+      'model': 'bank',
       'v': apiVersion,
     });
     final token = (data is Map) ? (data['accessToken'] ?? '').toString() : '';

@@ -408,7 +408,7 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 通用设置：网络代理 / 软件日志 / 缓存清理 / 同步与备份
+                    // 通用设置：软件日志 / 缓存清理 / 同步与备份
                     // （对齐参考图 IMG_8465）
                     StaggeredEntrance(
                       key: ValueKey('${_session}_general_settings'),
@@ -420,7 +420,7 @@ class _MePageState extends State<MePage> {
                           icon: Icons.settings_rounded,
                           iconBg: JellyTheme.primary,
                           title: '通用设置',
-                          subtitle: '网络代理 · 日志 · 缓存 · 同步',
+                          subtitle: '日志 · 缓存 · 同步',
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(

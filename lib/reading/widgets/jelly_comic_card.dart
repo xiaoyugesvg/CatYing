@@ -229,35 +229,35 @@ class _JellyComicCardState extends State<JellyComicCard>
               // 信息区
               if (widget.compact)
                 // 紧凑模式：仅名称（参考图样式，无收藏/热度/作者胶囊）
-                // ✅ 本次两处按你要的改 ✓（① 标题居中 ✓ ② 右下角显示章节数 ✓）：
-                //   · ① 原来 `Text` 走默认**左对齐** ✗ → 加 `textAlign: center` ✓
-                //   · ② 右下角补「共 N 章」✓ —— 数据**现成** ✓（`comic.totalChapters`
-                //     正是列表组件 `JellyComicListTile:328` 用的同一个字段 ✓✓）
-                //     → **零额外网络请求** ✓（A 方案 ✓）；`totalChapters <= 0` 时**不显示** ✓
-                //     （不猜、不编"完本"✗ —— 拿不到就不写 ✓）
+                // ✅ 名称栏固定 36 高 + 文字均匀填满 + 标题单行省略：
+                //   同一行卡片高度统一、不留底部空白（用户 2026-10-06 反馈
+                //   "名称栏太高、底下文字不满"）
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        widget.comic.title,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: AppTheme.fontFootnote,
-                          fontWeight: FontWeight.w600,
-                          color:
-                              isDark ? Colors.white : JellyTheme.textPrimaryLight,
+                  padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+                  child: SizedBox(
+                    height: 36,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      // spaceEvenly：单标题时垂直居中；有章节时上下均匀分布
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        Text(
+                          widget.comic.title,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: AppTheme.fontFootnote,
+                            fontWeight: FontWeight.w600,
+                            color: isDark
+                                ? Colors.white
+                                : JellyTheme.textPrimaryLight,
+                          ),
+                          // 单行省略：名称高度统一的关键（2 行会让同一行卡片参差）
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if ((widget.comic.totalChapters ?? 0) > 0)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Text(
+                        if ((widget.comic.totalChapters ?? 0) > 0)
+                          Text(
                             '共 ${widget.comic.totalChapters} 章',
-                            // **右下角** ✓（`stretch` + 右对齐 ✓）
                             textAlign: TextAlign.right,
                             style: TextStyle(
                               fontSize: AppTheme.fontFootnote - 1,
@@ -268,8 +268,8 @@ class _JellyComicCardState extends State<JellyComicCard>
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
                 )
               else

@@ -396,8 +396,15 @@ class _HomePageState extends State<HomePage> {
               bottomNavigationBar: JellyNavBar(
                 currentIndex: currentIndex,
                 floating: floating,
-                onTap: (index) =>
-                    setState(() => _currentTab = visible[index]),
+                onTap: (index) => setState(() {
+                  _currentTab = visible[index];
+                  // 内嵌页（书源页等）打开时，点导航栏要先退出内嵌页：
+                  // 否则 body 一直被 embedded 占据，界面切不过去
+                  // （用户 2026-10-06 反馈"书源页悬浮导航栏点击没反应"）
+                  if (shellEmbeddedPage.value != null) {
+                    shellEmbeddedPage.value = null;
+                  }
+                }),
                 onLongPress: _onNavLongPress,
                 onSlideUp: _onNavSlideUp,
                 items: navItems,

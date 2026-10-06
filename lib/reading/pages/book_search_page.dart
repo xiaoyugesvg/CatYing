@@ -97,14 +97,6 @@ class _BookSearchPageState extends State<BookSearchPage>
   /// z-library 可用性上一状态（仅状态变化才弹通知；null=尚未初始化）
   bool? _wasUnavailable;
 
-  /// 首页推荐流（z-library 首页热门，走用户配置的节点域名）——进页即拉，
-  /// 供未搜索/无结果时直接展示推荐书籍网格。
-  List<Book> _recBooks = [];
-  bool _recLoading = false;
-  bool _recFailed = false;
-  /// 推荐流来源：false = z-library 首页热门；true = zlib 失败后的豆瓣热门榜兜底
-  bool _recIsDouban = false;
-
   ScrollController get _activeScrollController =>
       _tabController.index == 0 ? _gridScrollController : _listScrollController;
 
@@ -129,7 +121,6 @@ class _BookSearchPageState extends State<BookSearchPage>
     _loadHistory();
     _ensureCategories();
     _maybeTriggerGuide();
-    _loadRecommendations();
     // 豆瓣排行「去找书」跳转：预填关键词并立即执行搜索
     // （首帧后触发，避免 initState 阶段 FocusScope 查询）
     final kw = widget.initialKeyword?.trim() ?? '';
@@ -215,44 +206,6 @@ class _BookSearchPageState extends State<BookSearchPage>
     } catch (e) {
       _log('后台拉取分类失败: $e');
     }
-  }
-
-  /// 拉取 z-library「最受欢迎」直抓（走当前节点域名）作图书主页推荐流。
-  ///
-  /// 不再使用豆瓣兜底：推荐流数据源只有 z-library 最受欢迎分类页
-  /// （zlibrary_service.fetchHomeRecommendations 直抓 /s/?dsource=mostpopular，
-  /// SSR HTML + 结构容错）。失败且当前无内容才置 _recFailed。
-  Future<void> _loadRecommendations() async {
-    if (_recLoading) return;
-    _recLoading = true;
-    _recFailed = false;
-    if (mounted) setState(() {});
-    try {
-      final r = await ZlibraryService().fetchHomeRecommendations();
-      if (!mounted) return;
-      setState(() {
-        if (r.items.isNotEmpty) {
-          _recBooks = r.items;
-          _recIsDouban = false;
-          _recFailed = false;
-        } else {
-          // ✅ **补上"抓到但解析出 0 条"的日志**（本轮 ✓）—— 原来这条分支**一个字都不记** ✗
-          //   ⇒ 用户只看到"推荐书籍加载失败"✗，我们**无法判断**是"没抓到"还是"抓到了没解析出" ✗✓
-          //   （"没抓到"会走下面的 catch ✓ 那条**本来就有**日志 ✓）
-          //   ⇒ 现在这条也留痕 ✓：**能一眼分清**是"网络/被拒"✗ 还是"**HTML 结构变了**"✗✓
-          _log('首页推荐拉取成功但**解析出 0 条**（可能是首页 HTML 结构变了 / 区块选择器失效）');
-          _recFailed = true;
-        }
-      });
-    } catch (e) {
-      _log('首页推荐拉取失败: $e');
-      if (!mounted) return;
-      setState(() {
-        if (_recBooks.isEmpty) _recFailed = true;
-      });
-    }
-    _recLoading = false;
-    if (mounted) setState(() {});
   }
 
   Future<void> _addHistory(String keyword) async {
@@ -633,11 +586,6 @@ class _BookSearchPageState extends State<BookSearchPage>
     }
   }
 
-  /// 推荐区点击：zlib 推荐直接进详情。
-  void _onRecTap(Book book) {
-    _openDetail(book);
-  }
-
   void _openDetail(Book book) async {
     FocusScope.of(context).unfocus(); // 进详情前先收起键盘与历史弹层
     // 分类页来源（hash 是 dl/{slug}，无 eapi hash）：先搜索匹配 bookId 拿 eapi hash
@@ -1010,6 +958,14 @@ class _BookSearchPageState extends State<BookSearchPage>
           _doCategorySearch();
         } else if (_keyword.trim().isNotEmpty) {
           _doSearch();
+        } else if (_result.items.isNotEmpty) {
+          // 初始/推荐模式：当前列表已有内容 → 本地按格式过滤，立即生效
+          // （用户 2026-10-06 反馈"格式切换没有内容"：原来只弹提示不过滤）
+          _applyLocalFormatFilter();
+        } else {
+          // 初始界面（无关键词、无分类、无内容）：格式筛选此时没有内容可作用，
+          // 给一句明确反馈，避免"点了没反应"的错觉。
+          _showTip('输入关键词或选择分类后，格式筛选生效');
         }
       },
       child: Container(
@@ -1040,6 +996,27 @@ class _BookSearchPageState extends State<BookSearchPage>
         ),
       ),
     );
+  }
+
+  /// 本地按格式过滤当前列表（初始/推荐模式已有内容时，点格式标签立即生效，
+  /// 无需重新请求；用户 2026-10-06 反馈"格式切换没有内容"）
+  void _applyLocalFormatFilter() {
+    final filtered = _result.items.where((b) {
+      if (_filterExtensions.isEmpty) return true;
+      final ext = b.extension?.trim().toUpperCase() ?? '';
+      return _filterExtensions.contains(ext);
+    }).toList();
+    setState(() {
+      _result = SearchResult<Book>(
+        items: filtered,
+        total: filtered.length,
+        currentPage: 1,
+        totalPages: filtered.isEmpty ? 0 : 1,
+      );
+    });
+    if (filtered.isEmpty) {
+      _showTip('当前列表没有「${_filterExtensions.join(' / ')}」格式的图书');
+    }
   }
 
   /// 悬浮返回顶部按钮
@@ -1146,55 +1123,24 @@ class _BookSearchPageState extends State<BookSearchPage>
     }
 
     // 未搜索 = 初始界面（分类模式除外）。
-    //
-    // ⚠️ 文案按 cmbok V2.0.8 截图对齐：进页面时是在**拉推荐**，
-    // 所以显示「正在获取推荐...」+ 转圈，而不是"请输入关键词"。
-    // 拉取结束（_isSearching 结束）仍无数据时，退回可操作的提示 ——
-    // 否则用户会以为一直卡在加载中。
+    // 首页推荐流已按用户要求移除（不再显示「推荐 / Z-Library 最受欢迎」区块），
+    // 改为轻量引导：搜索图书或走分类浏览。
     if (_result.items.isEmpty && _keyword.isEmpty && !_categoryMode) {
-      if (_isSearching) {
-        return Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(color: JellyTheme.primary),
-              const SizedBox(height: 16),
-              Text(
-                '正在获取推荐...',
-                style: TextStyle(color: JellyTheme.textSecondary),
-              ),
-            ],
-          ),
-        );
-      }
-      // 首页推荐流（z-library 首页热门，走用户配置的节点域名）
-      if (_recBooks.isNotEmpty) return _buildRecGrid();
-      if (_recLoading) {
-        return Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(color: JellyTheme.primary),
-              const SizedBox(height: 16),
-              Text('正在加载推荐书籍...',
-                  style: TextStyle(color: JellyTheme.textSecondary)),
-            ],
-          ),
-        );
-      }
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.book_rounded, size: 48, color: JellyTheme.textSecondary),
+            Icon(Icons.auto_stories_rounded,
+                size: 48, color: JellyTheme.textSecondary),
             const SizedBox(height: 16),
-            Text(_recFailed ? '推荐书籍加载失败' : '暂无推荐内容',
+            Text('搜索图书或选择分类开始浏览',
                 style: TextStyle(color: JellyTheme.textSecondary)),
             const SizedBox(height: 16),
             TextButton.icon(
-              onPressed: _loadRecommendations,
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('重新获取'),
+              onPressed: () => _openCategorySheet(
+                  Theme.of(context).brightness == Brightness.dark),
+              icon: const Icon(Icons.category_rounded),
+              label: const Text('选择分类'),
             ),
           ],
         ),
@@ -1331,90 +1277,7 @@ class _BookSearchPageState extends State<BookSearchPage>
     );
   }
 
-  /// 首页推荐网格（z-library 首页热门）：封面 + 书名，点击进图书详情。
-  Widget _buildRecGrid() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final cols = _adaptiveColumns(
-          constraints.maxWidth,
-          min: 3,
-          target: 118,
-        );
-        return CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
-                child: Row(
-                  children: [
-                    Text(
-                      '推荐',
-                      style: TextStyle(
-                        fontSize: AppTheme.fontTitle3,
-                        fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? Colors.white
-                            : JellyTheme.textPrimaryLight,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _recIsDouban
-                          ? '豆瓣热门榜（z-library 暂不可用）'
-                          : 'Z-Library 最受欢迎',
-                      style: TextStyle(
-                          fontSize: AppTheme.fontFootnote,
-                          color: JellyTheme.textSecondary),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      tooltip: '刷新推荐',
-                      onPressed: _recLoading ? null : _loadRecommendations,
-                      icon: Icon(
-                        Icons.refresh_rounded,
-                        size: 20,
-                        color: JellyTheme.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            SliverPadding(
-              padding: EdgeInsets.only(
-                left: 12,
-                right: 12,
-                bottom: 12 + JellyNavBar.contentBottomAvoid,
-              ),
-              sliver: SliverGrid(
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: cols,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 3 / 4.55,
-                ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final book = _recBooks[index];
-                    return JellyBookCard(
-                      book: book,
-                      isGrid: true,
-                      heroTag: bookCoverHeroTag('rec', book),
-                      onTap: () => _onRecTap(book),
-                      showFavorite: false,
-                    );
-                  },
-                  childCount: _recBooks.length,
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
+  /// 首页推荐网格（已按用户要求移除 —— 不再显示「推荐 / Z-Library 最受欢迎」区块）
   Widget _buildListView() {
     return LayoutBuilder(
       builder: (context, constraints) {

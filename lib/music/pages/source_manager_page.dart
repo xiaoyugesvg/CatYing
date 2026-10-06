@@ -1,4 +1,5 @@
 import 'dart:io';
+import '../widgets/music_sheet.dart';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -730,12 +731,9 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
 
   Future<void> _sortMenu(BuildContext context,
       ThirdPartySourceStore store, ThirdPartySource s) async {
-    final action = await showModalBottomSheet<String>(
+    final action = await showMusicSheet<String>(
       context: context,
       backgroundColor: MusicTheme.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       builder: (ctx) => SafeArea(
         top: false,
         child: Column(
@@ -800,13 +798,10 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     final qualityCtrl = TextEditingController(text: s.quality);
     final headersCtrl = TextEditingController(
         text: s.headers.entries.map((e) => '${e.key}=${e.value}').join('\n'));
-    final saved = await showModalBottomSheet<bool>(
+    final saved = await showMusicSheet<bool>(
       context: context,
       backgroundColor: MusicTheme.card,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       builder: (ctx) => Padding(
         padding: EdgeInsets.only(
           left: 16,

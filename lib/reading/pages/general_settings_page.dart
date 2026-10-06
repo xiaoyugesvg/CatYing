@@ -1,7 +1,6 @@
 // lib/reading/pages/general_settings_page.dart
 //
 // 通用设置页（参考图 IMG_8465）：
-//   网络代理（开关 + host:port 配置，源请求直连/走全局代理）
 //   软件日志（查看 / 清理运行日志）
 //   缓存清理（按维度列出并清理缓存文件）
 //   同步与备份（WebDAV 配置 + 自动同步开关 + 本地导出导入）
@@ -13,7 +12,6 @@ import 'package:path_provider/path_provider.dart';
 import '../services/bookshelf_service.dart';
 import '../services/settings_service.dart';
 import '../services/sync_service.dart';
-import '../source/global_proxy.dart';
 import '../theme/jelly_theme.dart';
 import '../utils/file_browser.dart';
 import '../../../services/app_log.dart';
@@ -43,36 +41,12 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
         listenable: SettingsService(),
         builder: (context, _) {
           final s = SettingsService();
-          final proxyDisplay = globalProxyDisplay();
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
               // ── 通用 ────────────────────────────────────────
               _sectionTitle('通用'),
               const SizedBox(height: 8),
-              // 网络代理开关（与「阅读设置」开关卡片一致）
-              _buildSwitchCard(
-                isDark: _isDark,
-                title: '网络代理',
-                subtitle: s.globalProxyEnabled
-                    ? (proxyDisplay ?? '代理未配置')
-                    : '关闭中 · 源请求直连',
-                value: s.globalProxyEnabled,
-                onChanged: s.setGlobalProxyEnabled,
-              ),
-              if (s.globalProxyEnabled) ...[
-                const SizedBox(height: 12),
-                _buildNavCard(
-                  isDark: _isDark,
-                  icon: Icons.settings_ethernet_rounded,
-                  title: '代理服务器',
-                  subtitle: s.globalProxy.trim().isEmpty
-                      ? '未设置，点击填写「主机:端口」'
-                      : s.globalProxy.trim(),
-                  onTap: _editGlobalProxy,
-                ),
-              ],
-              const SizedBox(height: 16),
 
               // ── 运行维护 ────────────────────────────────────
               _sectionTitle('运行维护'),
@@ -128,58 +102,6 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
     );
   }
 
-  /// 开关行卡片（与「阅读设置」页一致）
-  Widget _buildSwitchCard({
-    required bool isDark,
-    required String title,
-    required String subtitle,
-    required bool value,
-    required Future<void> Function(bool) onChanged,
-  }) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-      decoration: BoxDecoration(
-        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: AppTheme.fontHeadline,
-                    fontWeight: FontWeight.bold,
-                    color:
-                        isDark ? Colors.white : JellyTheme.textPrimaryLight,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    fontSize: AppTheme.fontFootnote,
-                    height: 1.5,
-                    color: JellyTheme.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Switch(
-            value: value,
-            activeColor: JellyTheme.primary,
-            onChanged: (v) => onChanged(v),
-          ),
-        ],
-      ),
-    );
-  }
-
   /// 导航行卡片（图标 + 标题 + 副标题 + 右箭头）
   Widget _buildNavCard({
     required bool isDark,
@@ -218,68 +140,6 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
         onTap: onTap,
       ),
     );
-  }
-
-  /// 编辑全局代理 "host:port"
-  Future<void> _editGlobalProxy() async {
-    final s = SettingsService();
-    final controller = TextEditingController(text: s.globalProxy.trim());
-    final v = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('网络代理'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('填写代理服务器「主机:端口」，留空 = 直连。'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: const InputDecoration(
-                hintText: '例如 127.0.0.1:7890',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-    if (v == null) return;
-    await s.setGlobalProxy(v);
-    if (!mounted) return;
-    if (v.isNotEmpty && !_validProxy(v)) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(
-          content: Text('代理格式不对，应为「主机:端口」'),
-          behavior: SnackBarBehavior.floating,
-        ));
-    } else {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(
-          content: Text(v.isEmpty ? '已改为直连' : '已保存代理：$v'),
-          behavior: SnackBarBehavior.floating,
-        ));
-    }
-  }
-
-  bool _validProxy(String p) {
-    final parts = p.split(':');
-    if (parts.length != 2) return false;
-    return parts[0].trim().isNotEmpty &&
-        (int.tryParse(parts[1].trim()) ?? 0) > 0;
   }
 
   /// 同步与备份面板：WebDAV 配置 + 立即备份/恢复 + 自动同步 + 本地导出导入

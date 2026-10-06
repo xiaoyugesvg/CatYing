@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/music_sheet.dart';
 
 import '../models/models.dart';
 import '../services/library_store.dart';
@@ -660,12 +661,9 @@ class _DiscoverPageState extends State<DiscoverPage>
 
   /// 选视觉预设（底部弹窗，三选一 + 一句话说明）
   Future<void> _pickPreset(DiscoverStyle style) async {
-    final picked = await showModalBottomSheet<DiscoverPreset>(
+    final picked = await showMusicSheet<DiscoverPreset>(
       context: context,
       backgroundColor: MusicTheme.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1229,13 +1227,10 @@ class _DiscoverPageState extends State<DiscoverPage>
 
   /// 「每日推荐 → 查看全部」弹窗（Beans 的 DailySongsSheet）
   Future<void> _showAllNewSongs(DiscoverStyle style) async {
-    await showModalBottomSheet<void>(
+    await showMusicSheet<void>(
       context: context,
       backgroundColor: MusicTheme.card,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       builder: (ctx) => SafeArea(
         child: SizedBox(
           height: MediaQuery.sizeOf(ctx).height * 0.7,
@@ -1549,12 +1544,9 @@ class _DiscoverPageState extends State<DiscoverPage>
   }
 
   Future<void> _pickCat() async {
-    final picked = await showModalBottomSheet<String>(
+    final picked = await showMusicSheet<String>(
       context: context,
       backgroundColor: MusicTheme.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
       builder: (ctx) => SafeArea(
         top: false,
         child: ListView(

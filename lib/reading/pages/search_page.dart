@@ -21,6 +21,7 @@ import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_comic_list_tile.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_icon_menu_button.dart';
+import '../widgets/jelly_search_bar.dart';
 import '../widgets/guide_overlay.dart';
 import '../widgets/jelly_sliding_actions.dart';
 import '../widgets/staggered_entrance.dart';
@@ -780,7 +781,8 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     return JellyExpandableSearch(
       controller: _searchController,
       hintText: '搜索漫画',
-      maxWidth: 200,
+      // 用户要求"搜索框再缩短点"：200 → 160，右侧按钮排整体更靠右
+      maxWidth: 160,
       onFocusChange: (f) => setState(() {
         if (f) {
           if (_searchController.text.isEmpty) {
@@ -820,6 +822,26 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: chips,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        // 搜索源按钮（快速源列表弹窗）：源排最右侧
+        // （用户 2026-10-06 反馈"漫画页少个搜索源"——与书源页 view_list 对齐）
+        Material(
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+          shape: const CircleBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: _showQuickSourceSheet,
+            child: SizedBox(
+              width: 32,
+              height: 32,
+              child: Icon(
+                Icons.view_list_rounded,
+                size: 18,
+                color: JellyTheme.textPrimaryLight,
+              ),
             ),
           ),
         ),
@@ -868,6 +890,102 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         ),
       ),
     );
+  }
+
+  /// 快速漫画源列表弹窗（「搜索源」输入框 + 源列表筛选 + 快速切换）
+  /// 入口：源 chip 排最右侧的 view_list 按钮（用户 2026-10-06 反馈"少个搜索源"）
+  Future<void> _showQuickSourceSheet() async {
+    final sources = SourceManager().enabledSources;
+    final isDark =
+        Theme.of(context).brightness == Brightness.dark;
+    final filter = TextEditingController();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            final kw = filter.text.trim().toLowerCase();
+            final shown = kw.isEmpty
+                ? sources
+                : sources
+                    .where((s) => s.name.toLowerCase().contains(kw))
+                    .toList();
+            return SafeArea(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.7,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                      child: JellySearchBar(
+                        controller: filter,
+                        hintText: '搜索源',
+                        onChanged: (_) => setSheetState(() {}),
+                        onCleared: () => setSheetState(() {}),
+                      ),
+                    ),
+                    Flexible(
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: shown.length,
+                        itemBuilder: (_, i) {
+                          final s = shown[i];
+                          final selected =
+                              s.id == SourceManager().current.id;
+                          return ListTile(
+                            dense: true,
+                            leading: CircleAvatar(
+                              radius: 16,
+                              backgroundColor:
+                                  JellyTheme.primary.withValues(alpha: 0.12),
+                              child: Text(
+                                // 兜底：空名源用 '?' 占位，避免 characters.first 越界
+                                s.name.isEmpty
+                                    ? '?'
+                                    : s.name.characters.first,
+                                style: TextStyle(
+                                  fontSize: AppTheme.fontSubhead,
+                                  color: JellyTheme.primary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            title: Text(
+                              s.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: selected
+                                ? Icon(
+                                    Icons.check_circle_rounded,
+                                    color: JellyTheme.primary,
+                                    size: 20,
+                                  )
+                                : null,
+                            selected: selected,
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              if (!selected) _switchSource(s);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    filter.dispose();
   }
 
   Widget _buildSourceChip(

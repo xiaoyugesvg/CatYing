@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'music_sheet.dart';
 
 import '../models/models.dart';
 import 'music_components.dart';
@@ -16,13 +17,10 @@ import '../../common/theme.dart';
 /// 酷狗的歌传进去会拿酷狗的 id 去查网易云 → 必然取不到。
 /// 因此调用方必须**先判断平台**（见 `music_components.dart` 的「评论」入口）。
 Future<void> showCommentSheet(BuildContext context, Song song) {
-  return showModalBottomSheet<void>(
+  return showMusicSheet<void>(
     context: context,
     backgroundColor: MusicTheme.card,
     isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-    ),
     builder: (_) => _CommentSheet(song: song),
   );
 }

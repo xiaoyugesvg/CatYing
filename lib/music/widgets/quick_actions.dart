@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'music_sheet.dart';
 
 import '../models/models.dart';
 import '../services/download_service.dart';
@@ -63,12 +64,9 @@ Future<void> musicEnqueueDownload(Song song) async {
 Future<void> showMiniPlayerActions(Song song) async {
   final ctx = VideoPlayerPip.navigatorKey.currentContext;
   if (ctx == null || !ctx.mounted) return;
-  await showModalBottomSheet<void>(
+  await showMusicSheet<void>(
     context: ctx,
     backgroundColor: MusicTheme.card,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-    ),
     builder: (sheetCtx) => SafeArea(
       top: false,
       child: Column(
@@ -132,12 +130,9 @@ Future<void> showRecentSongsSheet() async {
     AppToast.show('还没有播放历史', '');
     return;
   }
-  await showModalBottomSheet<void>(
+  await showMusicSheet<void>(
     context: ctx,
     backgroundColor: MusicTheme.card,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-    ),
     builder: (sheetCtx) => SafeArea(
       top: false,
       child: ConstrainedBox(

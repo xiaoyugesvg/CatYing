@@ -1,4 +1,5 @@
 import 'package:file_picker/file_picker.dart';
+import '../widgets/music_sheet.dart';
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
@@ -190,12 +191,9 @@ class ProfilePage extends StatelessWidget {
 
   Future<void> _pickFloatingBallStyle(BuildContext context) async {
     final style = MusicFloatingBallStyle.instance;
-    final act = await showModalBottomSheet<String>(
+    final act = await showMusicSheet<String>(
       context: context,
       backgroundColor: MusicTheme.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
       builder: (ctx) => SafeArea(
         top: false,
         child: Column(
@@ -363,12 +361,9 @@ class ProfilePage extends StatelessWidget {
           trailing: Icon(Icons.chevron_right,
               size: 18, color: MusicTheme.secondary),
           onTap: () async {
-            final picked = await showModalBottomSheet<dynamic>(
+            final picked = await showMusicSheet<dynamic>(
               context: context,
               backgroundColor: MusicTheme.card,
-              shape: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-              ),
               builder: (ctx) => SafeArea(
                 top: false,
                 child: Column(
@@ -413,12 +408,9 @@ class ProfilePage extends StatelessWidget {
           subtitle: Text(v.label,
               style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
           onTap: () async {
-            final picked = await showModalBottomSheet<MusicCoverStyle>(
+            final picked = await showMusicSheet<MusicCoverStyle>(
               context: context,
               backgroundColor: MusicTheme.card,
-              shape: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-              ),
               builder: (ctx) => SafeArea(
                 top: false,
                 child: Column(
@@ -457,12 +449,9 @@ class ProfilePage extends StatelessWidget {
           subtitle: Text(v.label,
               style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
           onTap: () async {
-            final picked = await showModalBottomSheet<MusicDustMode>(
+            final picked = await showMusicSheet<MusicDustMode>(
               context: context,
               backgroundColor: MusicTheme.card,
-              shape: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-              ),
               builder: (ctx) => SafeArea(
                 top: false,
                 child: Column(
@@ -542,12 +531,9 @@ class _ModeTile extends StatelessWidget {
               (mode: ThemeMode.dark, label: '深色'),
               (mode: ThemeMode.system, label: '跟随系统'),
             ];
-            final picked = await showModalBottomSheet<ThemeMode>(
+            final picked = await showMusicSheet<ThemeMode>(
               context: context,
               backgroundColor: MusicTheme.card,
-              shape: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-              ),
               builder: (ctx) => SafeArea(
                 top: false,
                 child: Column(

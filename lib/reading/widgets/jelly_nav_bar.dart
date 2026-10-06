@@ -407,30 +407,37 @@ class _JellyNavItem extends StatelessWidget {
         child: Center(
           child: iconOnly
               ? _buildIcon(color)
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _buildIcon(color),
-                    const SizedBox(height: FloatingNavSpec.iconLabelGap),
-                    Text(
-                      item.label,
-                      // ⚠️ 必须限一行 + 省略号。
-                      // 阅读栏可能到 6 项，每项宽度只有
-                      // (屏宽 - 边距) / 项数 ≈ 65px。
-                      // 标签一旦折成两行，总高度就会超过胶囊可用高度
-                      // （72 - 上下内边距），表现为文字被切一半或溢出条纹。
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: color,
-                        fontSize: FloatingNavSpec.labelSize,
-                        // w600 = 音乐/影视的文字权重，统一后不会有一处偏粗
-                        fontWeight: FloatingNavSpec.labelWeight,
+              // 用户调大 App 文字缩放（app.dart 全局 textScaler）时，
+              // icon+label 的 Column 高度会超过 bandHeight → RenderFlex
+              // 垂直溢出（黄黑条纹）。用 FittedBox(scaleDown) 包住：
+              // 高度不够时等比缩小，任何字号下都不会溢出。
+              : FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _buildIcon(color),
+                      const SizedBox(height: FloatingNavSpec.iconLabelGap),
+                      Text(
+                        item.label,
+                        // ⚠️ 必须限一行 + 省略号。
+                        // 阅读栏可能到 6 项，每项宽度只有
+                        // (屏宽 - 边距) / 项数 ≈ 65px。
+                        // 标签一旦折成两行，总高度就会超过胶囊可用高度
+                        // （72 - 上下内边距），表现为文字被切一半或溢出条纹。
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: color,
+                          fontSize: FloatingNavSpec.labelSize,
+                          // w600 = 音乐/影视的文字权重，统一后不会有一处偏粗
+                          fontWeight: FloatingNavSpec.labelWeight,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
         ),
       ),

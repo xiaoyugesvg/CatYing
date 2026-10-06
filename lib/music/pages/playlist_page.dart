@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/music_sheet.dart';
 
 import '../models/models.dart';
 import '../services/library_store.dart';
@@ -26,12 +27,9 @@ Future<void> showAddToPlaylistSheet(BuildContext context, Song song) async {
   final store = MusicLibraryStore.instance;
   await store.init();
   if (!context.mounted) return;
-  return showModalBottomSheet<void>(
+  return showMusicSheet<void>(
     context: context,
     backgroundColor: MusicTheme.card,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-    ),
     builder: (ctx) => SafeArea(
       top: false,
       child: ValueListenableBuilder<int>(

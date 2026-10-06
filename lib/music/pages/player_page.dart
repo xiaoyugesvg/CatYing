@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import '../widgets/music_sheet.dart';
 import 'dart:async';
 import 'dart:ui';
 
@@ -361,13 +362,10 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
   ///   · 文字/图标用**恒定浅色**
   ///   · 强调色用 `_darkTint`
   void _showVolumeSheet() {
-    showModalBottomSheet<void>(
+    showMusicSheet<void>(
       context: context,
       // 恒定深色底：与播放页同一色系，但不透明（否则文字对比全靠运气）
       backgroundColor: const Color(0xFF1C1C1E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
@@ -1249,12 +1247,9 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
         _actionBtn(
           icon: Icons.tune_rounded,
           label: '设置',
-          onTap: () => showModalBottomSheet<void>(
+          onTap: () => showMusicSheet<void>(
             context: context,
             backgroundColor: MusicTheme.card,
-            shape: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            ),
             builder: (_) => const PlayerSettingsSheet(),
           ),
         ),

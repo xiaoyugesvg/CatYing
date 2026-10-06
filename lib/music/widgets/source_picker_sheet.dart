@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'music_sheet.dart';
 
 import '../../common/theme.dart';
 import '../models/models.dart';
@@ -76,13 +77,10 @@ class SourcePickerSheet extends StatefulWidget {
     if (_showing) return null;
     _showing = true;
     try {
-      return await showModalBottomSheet<SourceResolveResult>(
+      return await showMusicSheet<SourceResolveResult>(
         context: context,
         backgroundColor: MusicTheme.card,
         isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
         builder: (_) => SourcePickerSheet(
           song: song,
           results: results,
