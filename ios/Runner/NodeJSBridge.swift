@@ -206,7 +206,7 @@ import UIKit
         //    以前没注入 → iOS 上 Node 直连外站 → 大量超时/400/500，
         //    用户开全局代理也没用（代理只作用在 Dart 层 Dio）。
         //    ⇒ 在 node_start 前 setenv，Node 进程继承后书源外站请求即可走代理。
-        let proxyValue = proxy.trim()
+        let proxyValue = proxy.trimmingCharacters(in: .whitespacesAndNewlines)
         if !proxyValue.isEmpty {
             setenv("http_proxy", proxyValue, 1)
             setenv("HTTP_PROXY", proxyValue, 1)
