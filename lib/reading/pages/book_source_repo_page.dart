@@ -547,44 +547,58 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
 
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
-      centerTitle: true,
-      title: _searching
-          // 收小的固定胶囊搜索框（参考影视首页右上角样式：高 32 圆角）
-          // ✅ 统一到共用组件 ✓（原为**手写固定胶囊** ✗：`SizedBox(210×32)` + `Container`
-          //   圆角 16 + 手画放大镜 + 裸 `TextField` ✓）。
-          // ⚠️ 这里**必须用 `JellyExpandableSearch`** ✓，**不能**用 `JellySearchBar` ✗ ——
-          //   后者是**全宽**搜索栏 ✗，塞进标题行会把 210 宽的小胶囊**撑成整行** ✗
-          //   （它的 `maxWidth` 参数正是为"顶部行内限宽"准备的 ✓）。
-          // 参数对照（照 `bookshelf_page:1180` 的现成用法 ✓）：
-          //   `SizedBox(210×32)` → `maxWidth: 210` + `height: 32` ✓（胶囊外观组件自带 ✓）
-          //   controller `_searchCtrl` ✓ · `autofocus: true` ✓（组件支持 ✓）
-          //   hintText 同文案 ✓ · onChanged: setState(_keyword = v.trim()) ✓（**即时过滤照旧** ✓）
-          //   ⚠️ `onSubmitted` 是**必填**（见组件 `:24` ✓）→ 回车时做同样的事 ✓（无害 ✓）
-          // ⚠️ **这个 `?` 之前丢了** ✗（我早前统一搜索框时，替换锚点从旧代码中间开始 ✗ →
-          //   `?` 连同旧控件一起被删掉 ✓）⇒ 三元缺 `?` → 下面 `: Text(...)` 的 `:` 悬空 ✗✗
-          //   → 报 "Expected to find ','" / "Expected to find ')'" ✓（并连带 4 条假错 ✗）。
-          //   现已补回 ✓；**教训**：把三元的一支整段换掉时，锚点必须从**含 `?`/`:` 的那一行**开始 ✓。
-          ? JellyExpandableSearch(
-            controller: _searchCtrl,
-            hintText: '搜索书源',
-            // 用户 2026-10-07：宽度改成原来的三分之二（210 → 140）
-            maxWidth: 140,
-            height: 32,
-            // ⚠️ **这里原来写了 `autofocus: true` ✗ —— 该组件没有这个参数** ✓（我凭记忆写错了 ✗）。
-            //   组件注释 `jelly_expandable_search.dart:14` 自己写明：`autofocus` 是
-            //   **`JellySearchBar`** 的能力 ✓（弹窗/浮层场景 ✓），常驻小胶囊**不提供** ✗。
-            //   ⇒ 已删 ✓；本页是"标题行内常驻胶囊"✓，本来也不该自动弹键盘 ✗（会盖住列表 ✓）。
-            onChanged: (v) => setState(() => _keyword = v.trim()),
-            onSubmitted: (v) => setState(() => _keyword = v.trim()),
-          )
-          : Text(
-              _selectMode ? '已选 ${_selected.length}' : '书源仓库',
-              style: TextStyle(
-                fontSize: AppTheme.fontTitle2,
-                fontWeight: FontWeight.w600,
-                color: _titleColor,
+      // ── 🔴 `centerTitle` 改成 false（修用户反馈"搜索框要往右靠"）──────
+      //
+      // 原来 `centerTitle: true` ✗，而搜索框就挂在 `title` 里 →
+      // 它被塞进**居中区**，再叠加组件内部当时写死的 `Alignment.centerLeft` ✗
+      // ⇒ 搜索框落在屏幕偏左，离右边 `actions` 的图标**空一大截** ✗
+      // 用户原话：「搜索框要靠右，然后右边的图标也要靠右，不要贴那么近」
+      //
+      // 改成 false 后 `title` 从左侧排版，再由下面的 `Spacer`
+      // 把搜索框推到**紧挨右侧图标**的位置 ✓
+      centerTitle: false,
+      title: Row(
+        children: [
+          // 非搜索态：显示标题
+          if (!_searching)
+            Flexible(
+              child: Text(
+                _selectMode ? '已选 ${_selected.length}' : '书源仓库',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: AppTheme.fontTitle2,
+                  fontWeight: FontWeight.w600,
+                  color: _titleColor,
+                ),
               ),
             ),
+          // 搜索态：搜索框 + 靠右（原来的三元两支拆成两个分支，语义更清楚）
+          if (_searching) ...[
+            // ⚠️ **必须用 `Spacer`，不能用 `Expanded(child: 搜索框)`** ✗
+            //
+            // 实测（量胶囊本体，不是外层 Align）：
+            //   · `Expanded` 包裹 → 组件内部那个 `Align(centerLeft)` 生效，
+            //     胶囊被推到可用区**左缘**，与右侧图标之间空 **46.8px** ✗
+            //     （这正是用户报"搜索框不靠右"的成因）
+            //   · `Spacer` → 组件只占内容宽（`maxWidth`），内部 `Align`
+            //     没有可推空间 ⇒ 胶囊自然贴到右侧 ✓ 间距 = 下面那个 12px ✓
+            const Spacer(),
+            JellyExpandableSearch(
+              controller: _searchCtrl,
+              hintText: '搜索书源',
+              // 用户 2026-10-07：宽度改成原来的三分之二（210 → 140）
+              maxWidth: 140,
+              height: 32,
+              // ⚠️ 组件**没有** `autofocus` 参数（那是 `JellySearchBar` 的能力）——
+              //    本页是"标题行内常驻胶囊"，也不该自动弹键盘（会盖住列表）。
+              onChanged: (v) => setState(() => _keyword = v.trim()),
+              onSubmitted: (v) => setState(() => _keyword = v.trim()),
+            ),
+            // 与右侧 `actions` 的图标留出间距（用户：**不要贴那么近**）
+            const SizedBox(width: 12),
+          ],
+        ],
+      ),
       actions: [
         // ✅ **qread 服务端连接**（壳模式）—— 书源规则执行挪到自建服务端：
         //   · 未连接：普通云图标，点击打开服务端设置
@@ -1702,7 +1716,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                 ),
                 const SizedBox(height: 14),
                 Align(
-                  alignment: Alignment.centerRight,
                   child: FilledButton(
                     onPressed: () async {
                       final url = ctrl.text.trim();

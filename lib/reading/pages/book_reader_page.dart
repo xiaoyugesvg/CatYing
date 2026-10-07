@@ -765,7 +765,7 @@ class _BookReaderPageState extends State<BookReaderPage> {
     _ongoingPaginator = null; // 取消旧后台分页
     _paginatingAhead = false;
     _pendingResumeBlock = null; // 调参重排定位由首批直接完成，无需续读跳转
-    _paginateKey = key;
+    // ⚠️ `_paginateKey = key` **不在这里**（原来在这里 ✗）—— 见下面首批成功处 ✓
     final typo = _typo;
     final allBlocks = content.flatBlocks;
     final starts = content.chapterStarts;
@@ -786,7 +786,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
       _paginateDone = 0;
       _paginateTotal = totalChapters;
     });
-    final pages = <BookPage>[];
     // 🔴 `clamp(0, -1)` 会**真抛 `ArgumentError`** ✗ —— `num.clamp` 在
     // `lowerLimit > upperLimit` 时抛异常（release 同样抛 ✓，不是 assert ✓，
     // 已在 SDK 的 `_internal/vm/lib/integers.dart` 核实 ✓）。
@@ -797,42 +796,66 @@ class _BookReaderPageState extends State<BookReaderPage> {
     final preserve = allBlocks.isEmpty
         ? 0
         : preserveBlockIndex.clamp(0, allBlocks.length - 1);
+    // ✅ **异常也必须复位 `_paginating`**（[high] 修复 ✓）：
+    //   原来整个循环与首批分页都在 `try` 之外 ✗，唯一把 `_paginating` 置回
+    //   false 的地方是**正常完成路径** ✗ → 一旦 `stepInto` / TextPainter 度量抛异常
+    //   （畸形 HTML 超长段落 / 异常字体度量 / 图片比例缺失 ✓），异常直接从
+    //   post-frame 回调抛走 ✗，`_paginating` **永远为 true** ✓，
+    //   而重排入口又被 `if (needRepaginate && !_paginating)` 挡住 ✗ →
+    //   之后旋屏 / 改字号都不会再重排 ✓，永久停在"排版中 N/M 章" ✓，
+    //   只能杀页面重进 ✓。放进 `finally` 保证任何路径都复位 ✓。
+    final pages = <BookPage>[];
     var chapterDone = 0;
-    // 首批：增量分到覆盖当前阅读位置（preserve），每批让出 UI
-    while (!paginator.finished && paginator.currentBlockIndex <= preserve) {
-      paginator.stepInto(pages, chunk: chunk);
-      final bi = paginator.currentBlockIndex;
-      while (chapterDone < totalChapters && starts[chapterDone] < bi) {
-        chapterDone++;
+    try {
+      // 首批：增量分到覆盖当前阅读位置（preserve），每批让出 UI
+      while (!paginator.finished && paginator.currentBlockIndex <= preserve) {
+        paginator.stepInto(pages, chunk: chunk);
+        final bi = paginator.currentBlockIndex;
+        while (chapterDone < totalChapters && starts[chapterDone] < bi) {
+          chapterDone++;
+        }
+        if (mounted) setState(() => _paginateDone = chapterDone);
+        SchedulerBinding.instance.scheduleFrame();
+        await SchedulerBinding.instance.endOfFrame;
+        if (!mounted) return;
       }
-      if (mounted) setState(() => _paginateDone = chapterDone);
-      SchedulerBinding.instance.scheduleFrame();
-      await SchedulerBinding.instance.endOfFrame;
       if (!mounted) return;
-    }
-    if (!mounted) return;
-    final target = BookPaginator.pageIndexOf(pages, preserve);
-    setState(() {
-      _pages = pages;
-      _paginating = false;
-      _currentPage = target;
-      _ongoingPaginator = paginator;
-      _totalBlockCount = allBlocks.length;
-      _paginatedBlockCount = paginator.currentBlockIndex;
-      _bgPaginateTotal = paginator.blockCount;
-      _bgPaginateDone = paginator.currentBlockIndex;
-    });
-    _currentPageNotifier.value = target;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _pageController.hasClients) {
-        _pageController.jumpToPage(
-          _isDoublePage ? _pageToSpread(target) : target,
-        );
+      final target = BookPaginator.pageIndexOf(pages, preserve);
+      // ⚠️ `_paginateKey` 只在**首批真的排成功之后**才推进 ✓：原来在方法开头就
+      //   赋值 ✗ → 首批抛异常时 key 已经是"新参数" ✓，但 `_pages` 还是旧的 ✗，
+      //   下面 `needRepaginate` 恒 false ✗ → 卡在"排版中"永远不再重排 ✓
+      //   （`_pages` 为空时更会一直显示占位视图 ✓）。
+      _paginateKey = key;
+      setState(() {
+        _pages = pages;
+        _paginating = false;
+        _currentPage = target;
+        _ongoingPaginator = paginator;
+        _totalBlockCount = allBlocks.length;
+        _paginatedBlockCount = paginator.currentBlockIndex;
+        _bgPaginateTotal = paginator.blockCount;
+        _bgPaginateDone = paginator.currentBlockIndex;
+      });
+      _currentPageNotifier.value = target;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _pageController.hasClients) {
+          _pageController.jumpToPage(
+            _isDoublePage ? _pageToSpread(target) : target,
+          );
+        }
+      });
+      _log('重排首批 ${pages.length} 页 -> 定位 block $preserve 页 $target，后台补齐剩余');
+      // 后台增量补齐剩余页（底部进度条，不打扰阅读）
+      _continuePagination();
+    } catch (e) {
+      // 失败时保留上一份可用分页 ✓（不清 `_pages` ✓）并给出提示 ✓，不把页面卡死 ✓
+      if (mounted) {
+        _log('重排失败，保留上一份分页：$e');
+        BookReaderPage._toast(context, '排版失败，已保留原排版');
       }
-    });
-    _log('重排首批 ${pages.length} 页 -> 定位 block $preserve 页 $target，后台补齐剩余');
-    // 后台增量补齐剩余页（底部进度条，不打扰阅读）
-    _continuePagination();
+    } finally {
+      if (mounted && _paginating) setState(() => _paginating = false);
+    }
   }
 
   void _onPointerDown(PointerDownEvent e) {
@@ -1719,7 +1742,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
             mode != BookReadingMode.cover) {
           // pageTurn 模式 PageView 在图片模式期间未挂载，重建控制器以 initialPage 定位
           _pageController.dispose();
-          _pageController = PageController(initialPage: _currentPage);
+          // ⚠️ 双页模式下 PageView 的 `itemCount` 是 `_spreadCount` ✓、下标语义是
+          //   **spread** ✓，而 `_currentPage` 是**页下标** ✗ → 必须换算 ✓
+          //   （其它所有重建点都做了换算：`:322-324` / `:496-498` / `:734-736` ✓；
+          //    不换算时横屏 + 双页会按页下标当 spread 跳错跨页 ✓，越界则被 clamp 到最后一页 ✗）。
+          _pageController = PageController(
+            initialPage: _isDoublePage ? _pageToSpread(_currentPage) : _currentPage,
+          );
         }
       } else {
         final startBlock = _pages.isEmpty
@@ -1859,9 +1888,21 @@ class _BookReaderPageState extends State<BookReaderPage> {
         child: const Center(child: CircularProgressIndicator()),
       );
     }
+    // ✅ **限解码分辨率**（[medium] 修复 ✓）：原来既无 `cacheWidth` 也无宽度约束 ✗ →
+    //   配图扫描件常见 2000×3000 级别 ✓，单张 RGBA 解码 ≈24MB ✗，
+    //   叠加下面 600ms 的 `AnimatedSwitcher` 会**同时持有前后两张** ✓ → 低内存机型 OOM ✗。
+    //   文本模式对同一张图早就降采样了（见 `Image.memory(..., cacheWidth: contentWidth*dpr)` ✓），
+    //   这里与它对齐 ✓。
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final dw = (MediaQuery.sizeOf(context).width * dpr).round();
     return SizedBox.expand(
       key: ValueKey(index),
-      child: Image.memory(bytes, fit: BoxFit.contain, gaplessPlayback: true),
+      child: Image.memory(
+        bytes,
+        fit: BoxFit.contain,
+        cacheWidth: dw,
+        gaplessPlayback: true,
+      ),
     );
   }
 
@@ -1982,6 +2023,13 @@ class _BookReaderPageState extends State<BookReaderPage> {
         if (loader != null) {
           return Flexible(
             child: _PdfPageImage(
+              // ✅ **必须有 key**（[medium] 修复 ✓）：重排（改字号 / 旋屏 ✓）后
+              //   同一 index 的 element 会被赋予**新的 imageKey** ✗，而
+              //   `_PdfPageImage` 原来没有任何 key ✓ → State 被复用 ✓，
+              //   加载判据又只看"本 State 是否已有字节" ✗ → 既不重新光栅化也不清空 ✓，
+              //   页面显示上一轮那张 PDF 图（错页 ✓），新页永远加载不出来 ✗。
+              //   key 绑定 imageKey → 换图就是换 element ✓（State 重新走 `_load()` ✓）。
+              key: ValueKey(block.imageKey),
               imageKey: block.imageKey,
               contentWidth: contentWidth,
               // 日夜覆盖现在是页面实例状态，子 widget 读不到，必须显式传下去 ✓
@@ -2529,7 +2577,12 @@ class _BookReaderPageState extends State<BookReaderPage> {
     };
 
     await _tts.speak(text);
-    setState(() {});
+    // 🔴 **第三处漏掉的 `mounted` 检查** ✗（上面暂停 / 继续两处已补 ✓）：
+    //   `TtsService.speak()` 内部先 `await TtsSourceStore.instance.init()`（磁盘 ✓），
+    //   必要时还要等网络合成 ✓，之后才返回 ✓ → 这段窗口里用户按返回键离开阅读器 ✓，
+    //   这里 `setState` 就会在 State 已 dispose 之后执行 ✗
+    //   （debug 抛 `setState() called after dispose()` ✓，release 同样抛 ✓）。
+    if (mounted) setState(() {});
   }
 
   String _indicatorText() {
@@ -3792,6 +3845,7 @@ class _PdfPageImage extends StatefulWidget {
   final void Function(String imageKey, Uint8List bytes) onLoaded;
 
   const _PdfPageImage({
+    super.key,
     required this.imageKey,
     required this.contentWidth,
     required this.isDark,
@@ -3812,6 +3866,22 @@ class _PdfPageImageState extends State<_PdfPageImage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (!_loading && _bytes == null && _error == null) {
+      _load();
+    }
+  }
+
+  /// ✅ **`imageKey` / `contentWidth` 变化要重新加载**（[medium] 修复 ✓）：
+  ///   外层已用 `key: ValueKey(imageKey)` 换掉 element ✓，但 key 只在同一父级
+  ///   的兄弟之间比较 ✓ —— 双页 / 单页容器结构变化时仍可能复用同一个 State ✓，
+  ///   那时本方法就是唯一的兜底 ✓（否则一直显示上一张图 ✗）。
+  @override
+  void didUpdateWidget(covariant _PdfPageImage old) {
+    super.didUpdateWidget(old);
+    if (old.imageKey != widget.imageKey ||
+        old.contentWidth != widget.contentWidth) {
+      _bytes = null;
+      _error = null;
+      _loading = false;
       _load();
     }
   }

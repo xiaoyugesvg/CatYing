@@ -121,6 +121,22 @@ class XiaoshuoBookSource {
     return ruleContent!;
   }
 
+  /// `header` 形态兼容：String 原样；Map/List 编码成 JSON 字符串；其它 → toString。
+  ///
+  /// 见 [fromJson] 里 [FIX-HEADER-MAP] 的说明：服务层可能写 Map，引擎只吃字符串。
+  static String? _headerString(dynamic v) {
+    if (v == null) return null;
+    if (v is String) return v;
+    if (v is Map || v is List) {
+      try {
+        return jsonEncode(v);
+      } catch (_) {
+        return null;
+      }
+    }
+    return v.toString();
+  }
+
   factory XiaoshuoBookSource.fromJson(Map<String, dynamic> json) {
     return XiaoshuoBookSource(
       bookSourceUrl: json['bookSourceUrl'] as String? ?? '',
@@ -134,7 +150,13 @@ class XiaoshuoBookSource {
       jsLib: json['jsLib'] as String?,
       enabledCookieJar: json['enabledCookieJar'] as bool? ?? true,
       concurrentRate: json['concurrentRate']?.toString(),
-      header: json['header'] as String?,
+      // [FIX-HEADER-MAP] `header` 在 legado 里是 **JSON 字符串**（如 '{"User-Agent":"…"}'），
+      // 但本项目服务层保存 Cookie 时会把它写成 **Map**（book_source_service.dart 里
+      // `header['Cookie'] = c` 后 `raw['header'] = header`）⇒ 原来的 `as String?`
+      // 会抛类型错，被上层吞掉后**整个源在 Dart-only 引擎下不可用**（保存过 Cookie 的源必现）。
+      // 这里两种形态都接受：Map/List 一律 `jsonEncode` 成字符串，与引擎的
+      // `analyze_url.dart` `_parseHeader(String)` 消费口径一致。
+      header: _headerString(json['header']),
       loginUrl: json['loginUrl'] as String?,
       loginUi: json['loginUi'] as String?,
       loginCheckJs: json['loginCheckJs'] as String?,

@@ -59,6 +59,7 @@ class JellyExpandableSearch extends StatefulWidget {
   final VoidCallback? onCleared;
   final Widget? trailing;
 
+
   @override
   State<JellyExpandableSearch> createState() => _JellyExpandableSearchState();
 }
@@ -184,6 +185,16 @@ class _JellyExpandableSearchState extends State<JellyExpandableSearch> {
     // 否则 ConstrainedBox 会被 Expanded 的 tight 宽度吞掉）
     if (widget.maxWidth != null) {
       return Align(
+        // ⚠️ 这里的对齐**只在"组件被给了超出自身需要的宽度"时才看得出来**：
+        //   · 外面用 `Spacer`（推荐）→ 组件只占内容宽（maxWidth）→
+        //     本 `Align` 没有可推空间，等于不起作用（也就无所谓了 ✓）
+        //   · 外面用 `Expanded`（tight 满宽）→ 本 `Align` 生效，
+        //     `centerLeft` 会把胶囊推到**左缘**，与右侧图标空一大截 ✗
+        //     （这正是用户报的 bug 的成因）
+        //
+        // 所以**页面侧的正确做法是"不要用 Expanded 包它，用 Spacer"** ✓
+        //（见 `bookshelf_page` / `book_search_page` / `book_source_repo_page`
+        //  的注释）。这里保持 `centerLeft` 不变，不动其它调用点的观感。
         alignment: Alignment.centerLeft,
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: widget.maxWidth!),

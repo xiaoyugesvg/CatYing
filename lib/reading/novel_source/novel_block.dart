@@ -8,6 +8,7 @@
 /// 公民共存于同一列表，渲染层按类型分别处理。
 library;
 
+
 /// 章节正文的一个块：要么是一段文本，要么是一张插图。
 abstract class NovelBlock {
   const NovelBlock();
@@ -39,17 +40,13 @@ class NovelTextBlock extends NovelBlock {
 /// 插图块：章节正文中的一张图片。
 ///
 /// [url] 已是解析层拼好的绝对地址（含 baseUrl 归一化）。
-/// [source] 透传给 [SourceImage] 以注入书源防盗链 headers（Referer/Cookie 等）。
 /// [style] 透传书源 `ruleContent.imageStyle`（CSS 字符串，如 `max-width:100%`），
 /// 渲染层据此约束图片显示方式（未声明则为 null，走默认行为）。
 class NovelImageBlock extends NovelBlock {
   final String url;
-
-  /// 透传给图片加载层以注入防盗链 headers（Referer/Cookie 等）。
-  final Object? source;
   final String? style;
 
-  const NovelImageBlock(this.url, {this.source, this.style});
+  const NovelImageBlock(this.url, {this.style});
 
   /// 是否为可显示的图片地址（http/https 或 data:image 内联）。
   bool get isValid =>

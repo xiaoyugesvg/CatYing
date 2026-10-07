@@ -64,6 +64,17 @@ class _ReaderPageState extends State<ReaderPage> {
   /// 翻页模式控制器（程序化翻页用）
   late PageController _pageController;
 
+  /// ✅ **`data:` 图片的解码缓存**（[medium] 修复 ✓）：
+  ///   `MemoryImage` 的 `==` 比较的是 `bytes` 的**引用** ✓，而展示路径原来每次
+  ///   `build` 都 `base64.decode` 出**新的** `Uint8List` ✗ →
+  ///   （a）同一张图的缓存键每帧都不同 ✓ → 每次 setState（翻页 / 显隐控制栏 /
+  ///   切墨水屏 / 改边距）都**绕过图片缓存重新解码整张图** ✗，缓存里还留下大量
+  ///   同图不同键的条目 ✗；（b）预载用的又是另一次解码 ✗ → 键与展示路径不同 ✗，
+  ///   预载对 data: 图**完全不生效** ✗（注释声称"命中同一缓存条目"并不成立 ✗）。
+  ///   这里按 url 缓存**同一个** `Uint8List` 实例 ✓，展示与预载共用 ✓ → 键相等 ✓。
+  ///   随章节切换（[_loadImages]）清理 ✓，不会跨章累积 ✓。
+  final Map<String, Uint8List> _dataImageBytes = {};
+
   /// 拼页模式：按索引滚动/跳转
   final ItemScrollController _itemScrollController = ItemScrollController();
 
@@ -307,6 +318,9 @@ class _ReaderPageState extends State<ReaderPage> {
       _builtMode = _effectiveReadingMode;
       _builtDoublePage = isDouble;
     });
+    // ✅ **旧控制器必须 dispose**（[medium] 修复 ✓）：原来直接换新实例 ✗，
+    //   旧实例仍被上一帧的 `PageView` / `PhotoViewGallery` 持有 ✗。
+    _pageController.dispose();
     _pageController = PageController(initialPage: initialPage);
     if (_isContinuousMode) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -326,6 +340,10 @@ class _ReaderPageState extends State<ReaderPage> {
       _loadId++; // 每次加载用新 key，确保列表全新实例
       _galleryBucket = PageStorageBucket(); // 空桶，杜绝历史偏移恢复
     });
+    // ✅ 切章清掉 data: 解码缓存（[medium] 修复 ✓）：缓存键是整条 data: URL ✓，
+    //   不清的话整本书的 base64 图都会常驻内存 ✗（blob 站整章 base64 本身就是大头 ✓）。
+    _dataImageBytes.clear();
+    _dataProviderCache.clear();
     // 拼页模式：等一帧让"加载中"界面构建、旧列表释放，
     // 避免 ScrollablePositionedList 复用 ItemScrollController 时
     // 新列表 attach 早于旧列表 detach 触发断言崩溃（本地图片加载快时易发）
@@ -464,9 +482,12 @@ class _ReaderPageState extends State<ReaderPage> {
         // base64 图片预解码：限宽至屏幕物理像素（与展示路径的
         // Image.memory(cacheWidth) 同参数，命中同一缓存条目），
         // 避免全尺寸预解码大图叠加导致内存溢出
-        final commaIdx = url.indexOf(',');
-        if (commaIdx > 0) {
-          final bytes = base64.decode(url.substring(commaIdx + 1));
+        // ✅ **必须用 [_dataBytesOf]**（[medium] 修复 ✓）：这里原来自己又
+        //   `base64.decode` 了一次 ✗ → 解出的 `Uint8List` 与展示路径**不是同一个引用** ✗
+        //   → `MemoryImage` / `ResizeImage` 的键不相等 ✓，预载**完全不生效** ✗
+        //   （注释声称"命中同一缓存条目"并不成立 ✗）。
+        if (url.indexOf(',') > 0) {
+          final bytes = _dataBytesOf(url);
           final dw =
               (MediaQuery.sizeOf(context).width *
                       MediaQuery.devicePixelRatioOf(context))
@@ -527,6 +548,10 @@ class _ReaderPageState extends State<ReaderPage> {
       _currentIndex = initialPage;
       _continuousPageNotifier.value = initialPage; // 拼页模式：切章节页码归零
     });
+    // ✅ **旧控制器必须 dispose**（[medium] 修复 ✓）：原来直接换新实例 ✗，
+    //   旧控制器仍被上一帧的 `PageView` / `PhotoViewGallery` 持有 ✗，
+    //   其 ScrollPosition 与 listener 一直挂到重建完成 ✓（`dispose()` 里只处理当前那个 ✓）。
+    _pageController.dispose();
     _pageController = PageController(initialPage: initialPage);
     _loadImages();
   }
@@ -2405,6 +2430,10 @@ class _ReaderPageState extends State<ReaderPage> {
     // + gallery 实例。_currentIndex 保持 image index，initialPage 转 spread。
     if (_isDoublePage != _builtDoublePage) {
       _builtDoublePage = _isDoublePage;
+      // ✅ **旧控制器必须 dispose**（[medium] 修复 ✓）：原来只换实例 ✗，
+      //   旧实例从不 `dispose()` ✓，仍被上一帧的 `PhotoViewGallery` 持有 ✗，
+      //   其 ScrollPosition 与 listener 一直挂到重建完成 ✓。
+      _pageController.dispose();
       _pageController = PageController(initialPage: _controllerInitialPage);
       _loadId++;
       _galleryBucket = PageStorageBucket();
@@ -2470,7 +2499,10 @@ class _ReaderPageState extends State<ReaderPage> {
           return PhotoViewGalleryPageOptions(
             imageProvider: _useLocal
                 ? FileImage(File(_images[index]))
-                : _imageProviderOf(_images[index]),
+                // data: 走限宽 provider ✓（见 `_dataProviderOf` 的说明 ✓）
+                : _images[index].startsWith('data:')
+                    ? _dataProviderOf(_images[index])
+                    : _imageProviderOf(_images[index]),
             initialScale: PhotoViewComputedScale.contained,
             minScale: PhotoViewComputedScale.contained,
             // 关掉开关时 maxScale 与 contained 相同 → 无法放大。
@@ -2583,9 +2615,7 @@ class _ReaderPageState extends State<ReaderPage> {
   /// 构建在线图片 ImageProvider：data: URL 用 MemoryImage，其余用 CachedNetworkImageProvider。
   ImageProvider _imageProviderOf(String url) {
     if (url.startsWith('data:')) {
-      final commaIdx = url.indexOf(',');
-      final data = commaIdx > 0 ? url.substring(commaIdx + 1) : '';
-      return MemoryImage(base64.decode(data));
+      return MemoryImage(_dataBytesOf(url));
     }
     // blob 站落盘临时文件路径（file:// 或绝对路径）— FileImage 直读
     if (url.startsWith('file://') || !url.contains('://')) {
@@ -2597,6 +2627,40 @@ class _ReaderPageState extends State<ReaderPage> {
       url,
       headers: _imageHeaders,
       cacheManager: appImageCacheManager,
+    );
+  }
+
+  /// `data:` URL → **缓存过**的解码字节（同一个实例 ✓，见 [_dataImageBytes]）✓。
+  /// 展示路径与预载路径必须共用它 ✓，否则 `MemoryImage` 的键永远不相等 ✗。
+  Uint8List _dataBytesOf(String url) => _dataImageBytes.putIfAbsent(url, () {
+        final commaIdx = url.indexOf(',');
+        final data = commaIdx > 0 ? url.substring(commaIdx + 1) : '';
+        return base64.decode(data);
+      });
+
+  /// 翻页（PhotoView）路径专用：`data:` URL 的**限宽** provider ✓。
+  ///
+  /// ✅ **[medium] 修复**：这条路径原来是裸 `MemoryImage` ✗ ——
+  ///   既没有 `ResizeImage` 也没有 `cacheWidth` ✓（对照双页 / 消散 / 拼页三条路径
+  ///   都按屏幕物理宽度限制了解码 ✓），于是默认的「左右翻页」模式对 blob 站的
+  ///   整章 base64 大图**按原始分辨率**解码 ✓（代码自己的注释指出 2244×2717
+  ///   一张就解出约 24MB ✓），翻几页就容易 OOM / 明显卡顿 ✗。
+  ///
+  /// ⚠️ 这里**只改 data:** ✓：`file:` 那条不动 ✗ —— `PhotoView` 的
+  ///   `maxScale: covered * 2` 允许放大 ✓，对本地文件预先降采样会**把放大后的画质钉死** ✗，
+  ///   而 data: 图本来就是内存里的字节 ✓，降采样是纯收益（也才与预载路径的键真正相等 ✓）。
+  /// 同一 url 返回**同一个 provider 实例** ✓ → 缓存键稳定 ✓、不做二次解码 ✓。
+  final Map<String, ImageProvider> _dataProviderCache = {};
+
+  ImageProvider _dataProviderOf(String url) {
+    final dw = (MediaQuery.sizeOf(context).width *
+            MediaQuery.devicePixelRatioOf(context))
+        .round();
+    final k = '$dw|$url';
+    return _dataProviderCache.putIfAbsent(
+      k,
+      () => ResizeImage(MemoryImage(_dataBytesOf(url)),
+          width: dw, allowUpscaling: false),
     );
   }
 
@@ -2644,9 +2708,10 @@ class _ReaderPageState extends State<ReaderPage> {
     }
     if (url.startsWith('data:')) {
       // data:image/xxx;base64,... — 直接用 Image.memory 解码
-      final commaIdx = url.indexOf(',');
-      final data = commaIdx > 0 ? url.substring(commaIdx + 1) : '';
-      final bytes = base64.decode(data);
+      // ✅ 用**缓存过的**字节（[medium] 修复 ✓）：每次 build 都 `base64.decode`
+      //   会产出新的 `Uint8List` ✗ → `MemoryImage` 的键每帧都不同 ✗ →
+      //   每次 setState 都绕过图片缓存重新解码整张图 ✓。
+      final bytes = _dataBytesOf(url);
       return Image.memory(
         bytes,
         key: key,

@@ -827,9 +827,20 @@ class _BookSearchPageState extends State<BookSearchPage>
                               openEmbeddedPage(const BookSourceSearchPage()),
                         ),
                         const SizedBox(width: 10),
-                        // 搜索框占据剩余宽度（Expanded 让右侧图标始终贴边）
-                        Expanded(child: _buildSearchBar(isDark)),
-                        const SizedBox(width: 8),
+                        // ── 🔴 搜索框靠右（修用户反馈）────────────────
+                        // 原来包在 `Expanded` 里 ✗ —— `Expanded` 是 tight 宽度，
+                        // 搜索框在满宽里靠左 ⇒ 与右侧筛选按钮之间**空一大截** ✗
+                        // 用户原话：「搜索框要靠右，右边的图标也要靠右，不要贴那么近」
+                        //
+                        // 改成 `Spacer` 之后：组件只占内容宽（`maxWidth`），
+                        // 由 `Spacer` 吃掉左侧空白 ⇒ 胶囊自然贴到右侧 ✓，
+                        // 再用 `SizedBox(width: 12)` 留出**不贴太近**的间距 ✓
+                        //
+                        // 实测对比：`Expanded` 包裹时胶囊停在可用区左缘、
+                        // 与右侧图标空 46.8px ✗；`Spacer` 时间距正好 12px ✓
+                        const Spacer(),
+                        _buildSearchBar(isDark),
+                        const SizedBox(width: 12),
                         // ⚠️ 用户 2026-10-07（第二轮修正）：
                         //   · **筛选按钮单独拉出来** ✓ —— 与漫画页/书源页一致，
                         //     直接是那个 tune 按钮（原来藏在「视图与分类」指环菜单里 ✗）

@@ -106,10 +106,36 @@ class SourceRule {
     return min;
   }
 
+  /// [PATCH-17] legado 前缀规则**不是 CSS**。
+  ///
+  /// 为什么必须显式排除 ✗：`class.item` / `tag.div` / `children.0` 里都含
+  /// `字母+.`，会被下面的 `RegExp(r'[a-zA-Z][.#]')` 命中而误判成 CSS ⇒
+  /// 走 `querySelectorAll('class.item')` ⇒ **0 个元素**。
+  ///
+  /// 实测影响（本机 fixture 端到端 + 探针）：
+  ///   getElements('class.item') = 0（应为 2）        ← 书源 bookList 的典型写法
+  ///   getElements('tag.div')    = 0（应为 2）        ← 书源 chapterList 的典型写法
+  ///   getElements('children.0') = 0（应为 1）
+  ///   getElements('div.item')   = 2 ✓（纯 CSS 不受影响）
+  ///   getElements('class.item@tag.a') = 2 ✓（含 @ 提前返回 false，本就正确）
+  /// ⇒ 后果：**目录拿不到任何章节、搜索列表退化成只出书名**
+  ///   （作者/分类/最新章节为空）—— 这正是"书源不好用"的根因。
+  static const List<String> _legadoPrefixes = <String>[
+    'class.',
+    'tag.',
+    'id.',
+    'text.',
+    'children.',
+  ];
+
   bool _looksLikeCss(String rule) {
     final trimmed = rule.trim();
     if (trimmed.isEmpty) return false;
     if (trimmed.contains('@')) return false;
+    // [PATCH-17] 先排除 legado 前缀写法，再走"看起来像 CSS"的判断
+    for (final p in _legadoPrefixes) {
+      if (trimmed.startsWith(p)) return false;
+    }
     if (trimmed.startsWith('.') || trimmed.startsWith('#') || trimmed.startsWith('[')) return true;
     if (trimmed.contains(':') && !trimmed.startsWith('@')) return true;
     if (RegExp(r'[a-zA-Z][.#]').hasMatch(trimmed)) return true;

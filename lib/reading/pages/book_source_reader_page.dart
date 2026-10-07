@@ -30,6 +30,24 @@ import '../../common/theme.dart';
 import '../theme/jelly_theme.dart';
 import '../../widgets/app_image_cache.dart';
 
+/// ✅ **页号夹取**（blocker 修复的纯函数核心 ✓ —— 独立出来是为了**可单测** ✓）。
+///
+/// 背景：`_paginate()` 会在循环里把 `_pages` 换成"只排了第一批"的**短列表** ✗，
+/// 而 `_pageIndex` 在此期间仍是上一次的值（多达几十页 ✓）→
+/// 渲染层 `_pages[_pageIndex]` 就会 **`RangeError` 崩溃** ✗
+/// （触发路径都是日常操作：仿真模式读到大页号点「下一章」/ 旋屏 ✓）。
+///
+/// 契约：**永不 throw** ✓，返回值一定落在 `[0, pageCount - 1]` ✓（`pageCount == 0` 时返回 0 ✓）。
+/// ⚠️ 这里绝不能写成 `index.clamp(0, pageCount - 1)` ✗ —— `pageCount == 0` 时上界为 -1 ✓，
+/// `num.clamp` 在 `lowerLimit > upperLimit` 时**真抛 `ArgumentError`** ✗
+/// （同 `book_reader_page.dart:790-796` 已记录的那个坑 ✓）。
+int clampPageIndexToPages(int index, int pageCount) {
+  if (pageCount <= 0) return 0;
+  if (index < 0) return 0;
+  if (index >= pageCount) return pageCount - 1;
+  return index;
+}
+
 /// 书源在线阅读器。
 ///
 /// ── 为什么不复用 `BookReaderPage` ──────────────────────────────
@@ -154,6 +172,22 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   bool _paginating = false;
   /// 分页用的视口尺寸（LayoutBuilder 给出）
   Size _viewport = Size.zero;
+
+  /// 🆕 **分页代次号**（单调递增 ✓）—— `_paginate()` 是"忘了 await 的后台任务" ✓，
+  ///   每批之间 `await endOfFrame` 会跨很多帧 ✗ → 分页途中切章 / 旋屏会让
+  ///   **两次分页同时在跑** ✗，后结束的那个把 `_pages` 覆盖成**上一章**的页 ✗。
+  ///   每次开始分页 `final gen = ++_paginateGen;` ✓，
+  ///   `await` 回来先校验 `gen == _paginateGen` ✓，不等就直接 return ✓。
+  int _paginateGen = 0;
+
+  /// ✅ **`_pages` 属于哪一章**（`_index` ✓）。`_pages` 被换成**章节不同**的
+  ///   分页时，页号语义完全变了 ✗ → 必须把 `_pageIndex` 归零 ✓（越界崩溃的根因 ✓）。
+  ///   同一章内重排（改字号 / 旋屏 ✓）则**保留阅读位置** ✓（见 [_pageAnchor]）✓。
+  int _pagesChapter = -1;
+
+  /// 重排前记下的"当前页首块"锚点 ✓ —— 同章重排后按它把 `_pageIndex` 找回来 ✓
+  /// （`null` = 不需要恢复 ✓）。字段类型：(块下标 ✓, 块内字符偏移 ✓)。
+  (int, int)? _pageAnchor;
 
   // ── 朗读（听书）─────────────────────────────────────────────
   //
@@ -308,6 +342,25 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   ///   **需要"已保存"语义**的调用点（如"存预设后弹提示"✓）继续 `await _savePrefs()` ✗。
   Timer? _saveDebounce;
 
+  /// ✅ **重排防抖**（[high] 修复 ✓）：排版面板的字号 / 行距 / 边距滑杆改动后
+  ///   必须重排 ✓（否则 `_pages` 还是按旧字号度量的 ✗，正文按新字号渲染 ✗ →
+  ///   每页内容高于视口，而承载它的 `ListView` 是 `NeverScrollableScrollPhysics`
+  ///   ✓ → 超出的部分**既不能滚也读不到** ✗）。
+  ///   滑杆 `onChanged` 每秒触发几十次 ✗ → 与 [_scheduleSavePrefs] 同款 300ms 防抖 ✓。
+  Timer? _repaginateDebounce;
+
+  /// 排版参数改动后节流重排一次 ✓（保留当前阅读位置 —— 见 [_repaginateLayout] ✓）。
+  void _scheduleRepaginate() {
+    _repaginateDebounce?.cancel();
+    _repaginateDebounce = Timer(
+      const Duration(milliseconds: 300),
+      () {
+        if (!mounted) return;
+        _repaginateLayout();
+      },
+    );
+  }
+
   /// ✅ **阅读时长：本次会话"已累计到"的时间点** ✓（`ReadingTimeService` 接线 ✓ ——
   ///   为「阅读计划 / 阅读热力图」提供真实数据 ✓；此前这两处**完全没有时长数据** ✗）。
   ///   为什么要"**增量累计**"✗：本页高频改动（滑杆/悬浮球拖动 ✓）会反复调 [_scheduleSavePrefs] ✓ ——
@@ -334,6 +387,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_onKey);
+    // 🆕 **退出阅读器必须停掉朗读** ✓ —— `TtsService` 是**进程单例** ✓，
+    //   原来这里既不 `stop()` 也不清 `onFinished` ✗ → 用户点朗读后按返回键
+    //   离开阅读器，语音会**继续在书架/首页念** ✗；`onFinished` 闭包还一直
+    //   持有已销毁的 State ✗（直到被别处覆盖 ✓）。
+    //   与 `book_reader_page.dart` 的 dispose 同款写法 ✓
+    _tts.onFinished = null;
+    _tts.stop();
     // ⚠️ 必须恢复息屏：否则用户离开阅读器后屏幕永远不灭（严重耗电）
     if (_awakeRequested) _tts.allowSleep();
     _sleepTimer?.cancel();
@@ -349,6 +409,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     //   `_scheduleTtsTimer` 内部被取消 ✗，离开阅读器时**没人取消它** ✗
     //   （定时器会在页面销毁后照常触发 → 潜在泄漏/异常 ✓）
     _ttsTimerHandle?.cancel();
+    _repaginateDebounce?.cancel();
     _pageCtrl.dispose();
     super.dispose();
   }
@@ -938,27 +999,33 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         // 它不是 PageView —— 自己处理拖动/点击与卷曲光栅化，
         // 所以这里单独一条分支，而不是塞进 PageView 的 itemBuilder。
         if (_rs.pageMode == PageMode.curl) {
+          // ✅ **越界保护**（blocker 修复 ✓）：`_paginate()` 会在循环里把 `_pages`
+          //   换成"只排了第一批"的短列表 ✗，而 `_pageIndex` 是上一次的值 ✗ →
+          //   这里 `_pages[_pageIndex]` 会直接 `RangeError` 崩掉 ✓
+          //   （触发路径都是日常操作：仿真模式读到大页号点「下一章」/ 旋屏 ✓）。
+          //   统一走 [_safePageIndex]：越界就夹回合法范围 + 记一条日志 ✓，**不 throw** ✓
+          final pi = _safePageIndex();
           return BookPageCurl(
-            page: _pageContent(fg, _pages[_pageIndex]),
-            nextPage: _pageIndex + 1 < _pages.length
-                ? _pageContent(fg, _pages[_pageIndex + 1])
+            page: _pageContent(fg, _pages[pi]),
+            nextPage: pi + 1 < _pages.length
+                ? _pageContent(fg, _pages[pi + 1])
                 : null,
-            prevPage: _pageIndex > 0
-                ? _pageContent(fg, _pages[_pageIndex - 1])
+            prevPage: pi > 0
+                ? _pageContent(fg, _pages[pi - 1])
                 : null,
             background: Container(color: _bgTop),
-            canNext: _pageIndex + 1 < _pages.length,
-            canPrev: _pageIndex > 0,
+            canNext: pi + 1 < _pages.length,
+            canPrev: pi > 0,
             onTurnNext: () {
-              if (_pageIndex + 1 < _pages.length) {
-                setState(() => _pageIndex++);
+              if (pi + 1 < _pages.length) {
+                setState(() => _pageIndex = pi + 1);
               } else {
                 _go(1);
               }
             },
             onTurnPrev: () {
-              if (_pageIndex > 0) {
-                setState(() => _pageIndex--);
+              if (pi > 0) {
+                setState(() => _pageIndex = pi - 1);
               } else {
                 _go(-1);
               }
@@ -1358,7 +1425,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final items = _rs.statusItems;
     final progress = _pages.isEmpty
         ? 0.0
-        : (_pageIndex + 1) / _pages.length;
+        : (_pageIndex.clamp(0, _pages.length - 1) + 1) / _pages.length;
     return GestureDetector(
       onTapUp: (d) => _handleTap(d.localPosition, _viewport),
       child: Column(
@@ -2136,6 +2203,67 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     return FontWeight.values[(i ~/ 100) - 1];
   }
 
+  /// ✅ **越界安全的页号**（blocker 修复 ✓）—— 渲染层读 `_pages[_pageIndex]` 前
+  /// 必须过这里 ✓。
+  ///
+  /// 背景：`_paginate()` 会在循环里把 `_pages` 换成"只排了第一批"的**短列表** ✗，
+  /// 而 `_pageIndex` 在此期间仍是上一次的值 ✓ → 直接取页就是
+  /// `RangeError: Invalid value: Not in inclusive range 0..N` ✗。
+  /// 这里夹到合法范围并**记一条日志** ✓，**绝不 throw** ✓。
+  int _safePageIndex() {
+    final i = _pageIndex;
+    final cl = clampPageIndexToPages(i, _pages.length);
+    if (cl != i) {
+      // 记一条日志（禁止 throw ✓）—— 越界说明分页列表被换短了 ✓
+      debugPrint('[BsrReader] _pageIndex 越界夹取: $i -> $cl (共 ${_pages.length} 页)');
+    }
+    return cl;
+  }
+
+  /// **当前页的锚点**（重排定位用 ✓）：本页第一个 entry 的「块下标 + 块内字符偏移」✓。
+  /// 返回 `null` 表示拿不到锚点（不需要恢复位置 ✓）。
+  (int, int)? _currentPageAnchor() {
+    if (_pages.isEmpty) return null;
+    final p = _pages[_safePageIndex()];
+    if (p.entries.isEmpty) return null;
+    final e = p.entries.first;
+    return (e.blockIndex >= 0 ? e.blockIndex : p.firstBlockIndex, 0);
+  }
+
+  /// 按锚点在**新**分页里找回页号 ✓ —— 找不到就退回 0 ✓。
+  /// ⚠️ `PageEntry.blockIndex` 为 -1 表示"分页器没填"（见 `book_paginator.dart:84-100` ✓），
+  ///   那种 entry **不能用 `firstBlockIndex` 兜底去比对** ✗ —— 会误命中上一页 ✓；
+  ///   先只认**精确**的 entry ✓，全都没有才退回 `firstBlockIndex` 比对 ✓。
+  int _pageIndexForAnchor((int, int) a, List<BookPage> pages) {
+    for (var i = 0; i < pages.length; i++) {
+      for (final e in pages[i].entries) {
+        if (e.blockIndex == a.$1) return i;
+      }
+    }
+    for (var i = 0; i < pages.length; i++) {
+      if (pages[i].firstBlockIndex == a.$1) return i;
+    }
+    return 0;
+  }
+
+  /// 调参重排（改字号 / 行距 / 边距 ✓）：**不换章** ✓，只是按新排版重量一遍 ✓。
+  /// 与 [_paginate] 的区别：先把旧页清掉（旧页是按**旧**字号度量的 ✗，
+  /// 而渲染已经用新字号 ✓ → 正文被 `NeverScrollableScrollPhysics` 的
+  /// `ListView` 裁掉且滚不动 ✗），并按锚点**保留当前阅读位置** ✓。
+  void _repaginateLayout() {
+    if (!mounted) return;
+    if (!_rs.pageMode.paginates) return; // 滚动模式本来就不分页 ✓
+    // 先记锚点 ✓（`_pages` 清掉之后就取不到了 ✓），再让 `_paginate()` 复用 ✓
+    final anchor = _currentPageAnchor();
+    setState(() {
+      _pages = const [];
+      _pageIndex = 0;
+      _pagesChapter = -1; // 强制走"清干净"分支 ✓
+    });
+    _pageAnchor = anchor;
+    _paginate();
+  }
+
   /// 按当前视口与排版参数，把本章段落切成页。
   ///
   /// ── 为什么复用 BookPaginator 而不是自己写 ─────────────────────
@@ -2154,7 +2282,31 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       if (_pages.isNotEmpty) setState(() => _pages = const []);
       return;
     }
-    setState(() => _paginating = true);
+    // ✅ **代次号**（high 修复 ✓）：分页是后台任务 ✓（调用点均不 await ✓），
+    //   每批 `await endOfFrame` 会跨很多帧 ✗ → 分页途中切章 / 旋屏会让两次
+    //   分页同时跑 ✗，后结束的那个把 `_pages` 覆盖成**上一章**的页 ✗
+    //   （现象：标题已是新章，正文与页数还是旧章 ✓）。
+    //   每次开始都自增 ✓；`await` 回来校验 ✓，不相等立即放弃 ✓（不做任何 setState ✓）。
+    final gen = ++_paginateGen;
+    final chapter = _index;
+    // ✅ 同章重排 → 记下当前页锚点 ✓，排完把页号找回来 ✓（位置不丢 ✓）；
+    //    换章 → 页号语义完全变了 ✗ → 归零 ✓，并把 `_pages` 清干净 ✓
+    //    （清不干净正是 blocker 的根因：短列表配旧页号 = 越界 ✓）。
+    final sameChapter = _pagesChapter == chapter && _pages.isNotEmpty;
+    final liveAnchor = sameChapter ? _currentPageAnchor() : null;
+    if (sameChapter) {
+      _pageAnchor ??= liveAnchor;
+    } else {
+      _pageAnchor = null;
+    }
+    setState(() {
+      _paginating = true;
+      if (!sameChapter) {
+        _pages = const [];
+        _pageIndex = 0;
+      }
+      _pagesChapter = chapter;
+    });
     final blocks = <BookBlock>[
       // 章标题当 heading 块，保证它自己起一页
       BookBlock.heading(widget.chapters[_index].name, 1),
@@ -2194,20 +2346,36 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       // stepInto(List<BookPage> out, {int chunk = 12})
       while (!pg.finished) {
         pg.stepInto(out, chunk: 60);
-        if (!mounted) return;
-        setState(() => _pages = List<BookPage>.of(out));
+        // ⚠️ 代次校验必须放在 `setState` **之前** ✓（await 回来后先校验 ✓）
+        if (!mounted || gen != _paginateGen) return;
+        setState(() {
+          _pages = List<BookPage>.of(out);
+          // ✅ 每批都夹一次页号（blocker 修复 ✓）：`out` 在循环里从 0 页长到 N 页 ✓，
+          //    旧页号（切章前 / 上一份排版 ✓）随时可能超出当前长度 ✗ → 不夹就是 RangeError ✓
+          if (_pages.isNotEmpty) _pageIndex = _safePageIndex();
+        });
         WidgetsBinding.instance.scheduleFrame();
         await WidgetsBinding.instance.endOfFrame;
       }
-      if (!mounted) return;
+      if (!mounted || gen != _paginateGen) return;
+      final anchor = _pageAnchor;
       setState(() {
         _pages = out;
-        _pageIndex = 0;
+        _pageIndex = anchor == null ? 0 : _pageIndexForAnchor(anchor, out);
+        _pagesChapter = chapter;
         _paginating = false;
       });
+      _pageAnchor = null;
     } catch (_) {
       // 分页失败就退回整章滚动 —— 能读比"分页正确"重要
-      if (mounted) setState(() { _pages = const []; _paginating = false; });
+      if (mounted && gen == _paginateGen) {
+        setState(() {
+          _pages = const [];
+          _pageIndex = 0;
+          _pageAnchor = null;
+          _paginating = false;
+        });
+      }
     }
   }
 
@@ -2439,6 +2607,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             _scheduleSavePrefs();
           }
 
+          /// ✅ **排版类**改动（字号/字重/段间距/字间距/行距/边距/缩进 ✓）——
+          ///   这些会改变正文度量 ✓，只 `upd()`（仅 setState ✓）不够 ✗：
+          ///   `_pages` 仍按旧度量 ✓，新字号渲染会把正文裁掉且滚不动 ✗ →
+          ///   这里额外排一次防抖重排 ✓（300ms ✓，拖滑杆不会每帧重排 ✓）。
+          void updLayout(VoidCallback fn) {
+            upd(fn);
+            _scheduleRepaginate();
+          }
+
           return Container(
             constraints:
                 BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.82),
@@ -2538,8 +2715,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         children: [
                           if (tab == 0) ..._layoutPresetTab(ctx, setSheet),
                           if (tab == 1) ..._layoutThemeTab(upd),
-                          if (tab == 2) ..._layoutTextTab(upd),
-                          if (tab == 3) ..._layoutMarginTab(upd),
+                          if (tab == 2) ..._layoutTextTab(updLayout),
+                          if (tab == 3) ..._layoutMarginTab(updLayout),
                           if (tab == 4) ..._layoutUnderlineTab(upd),
                         ],
                       ),

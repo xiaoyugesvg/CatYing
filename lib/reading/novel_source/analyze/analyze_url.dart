@@ -307,7 +307,12 @@ class AnalyzeUrl {
     if (url.isNotEmpty) {
       try {
         final uri = Uri.parse(url);
-        baseUrl = '${uri.scheme}://${uri.host}';
+        // [FIX-B03-BASEURL] 不再降级成 `scheme://host`：丢掉 path 后，正文/下一页
+        // 规则里以 baseUrl 为基准的相对链接会被绝对化到站点根
+        // （`link/2.html` → `http://host/link/2.html`，而非 `/dir/link/2.html`），
+        // 表现为目录只有第一页 / 正文 404。保留最终 URL 的完整形式（含 path），
+        // 与基类 AnalyzeRule 的 `setBaseUrl(最终 URL)` 语义一致。
+        baseUrl = uri.toString();
       } catch (_) {}
     }
   }
@@ -706,7 +711,24 @@ class AnalyzeUrl {
     if (effectiveCharset != null) {
       final lower = effectiveCharset.toLowerCase();
       if (lower == 'gbk' || lower == 'gb2312' || lower == 'gb18030') {
-        return gbk.decode(bytes);
+        // [FIX-B03-GBK] fast_gbk 的 decode 是**严格**模式：响应体在双字节序列
+        // 中间被截断（chunk 边界/代理/上面的接收超时）或出现非法字节就抛
+        // FormatException，异常逃到 getStrResponse 的 catch 后被包成
+        // 「网络请求失败」，搜索/目录/正文整条链路失败，且看不出是编码问题。
+        // 现改为：先按原路径严格解（正常响应结果不变），失败则降级容错解码，
+        // 并留一条 debug 日志（字节数 + 前 16 字节 hex）便于定位。
+        try {
+          return gbk.decode(bytes);
+        } catch (e) {
+          AppLog.instance.d(
+              '[书源GBK] $lower 严格解码失败已降级容错：${bytes.length} 字节 '
+              'head=${_hexPreview(bytes)} ($e)');
+          try {
+            return gbk.decode(bytes, allowMalformed: true);
+          } catch (_) {
+            return utf8.decode(bytes, allowMalformed: true);
+          }
+        }
       }
       if (lower == 'big5') {
         // Dart 内置不支持 Big5，先按 UTF-8 容错解码，避免直接崩溃
@@ -715,6 +737,15 @@ class AnalyzeUrl {
     }
 
     return utf8.decode(bytes, allowMalformed: true);
+  }
+
+  /// 前 16 字节的 hex（配合 [FIX-B03-GBK] 的降级日志定位非法/截断字节）。
+  static String _hexPreview(Uint8List bytes) {
+    final n = bytes.length < 16 ? bytes.length : 16;
+    return bytes
+        .sublist(0, n)
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join(' ');
   }
 
   /// 从 HTML 头部探测 `<meta charset>` / `http-equiv="Content-Type"` 声明的字符集。

@@ -27,12 +27,41 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
+import 'package:tvbox/services/app_log.dart';
 
 class BrowserFaithfulHttpClientAdapter implements HttpClientAdapter {
   BrowserFaithfulHttpClientAdapter({HttpClientAdapter? fallback})
       : _fallback = fallback ?? IOHttpClientAdapter();
 
   final HttpClientAdapter _fallback;
+
+  /// [FIX-B03-TLS] 是否允许「坏证书」继续连接。
+  ///
+  /// **默认 false = 严格校验证书链与主机名**（`onBadCertificate` 传 null）。
+  /// 历史行为是无条件 `onBadCertificate: (_) => true`：等于对所有 https 书源
+  /// 关闭证书校验且不打任何日志，中间人可透明读取/改写搜索、目录、正文，
+  /// 以及书源登录表单里的账号密码。
+  ///
+  /// 确有证书损坏（自签 / 过期 / 域名不匹配）又愿意承担风险的老源，由调用方
+  /// **显式**打开本开关；每次放行都会写一条 WARN 日志（含目标 host 与证书
+  /// 主体/有效期）便于追溯。也可在构建期用
+  /// `--dart-define=TVBOX_ALLOW_INSECURE_CERT=true` 打开。
+  static bool allowInsecureCertificates =
+      const bool.fromEnvironment('TVBOX_ALLOW_INSECURE_CERT');
+
+  /// 返回本次连接应使用的 `onBadCertificate` 回调：默认 **null**（Dart 默认
+  /// 即校验证书链与主机名），仅当 [allowInsecureCertificates] 打开时放行。
+  static bool Function(X509Certificate)? badCertificateHandlerFor(String host) {
+    if (!allowInsecureCertificates) return null;
+    return (cert) {
+      AppLog.instance.w(
+        '[书源TLS] 用户已允许不安全证书 host=$host '
+        'subject=${cert.subject} issuer=${cert.issuer} '
+        'notAfter=${cert.endValidity.toIso8601String()}',
+      );
+      return true;
+    };
+  }
 
   /// 状态码属于「需要跟随的重定向」。
   static const Set<int> _redirectCodes = {301, 302, 303, 307, 308};
@@ -149,7 +178,8 @@ class BrowserFaithfulHttpClientAdapter implements HttpClientAdapter {
             host,
             port,
             timeout: connectTimeout,
-            onBadCertificate: (_) => true,
+            // [FIX-B03-TLS] 默认 null = 正常校验；仅显式开关打开时放行坏证书。
+            onBadCertificate: badCertificateHandlerFor(host),
             supportedProtocols: const ['http/1.1'],
           )
         : await Socket.connect(host, port, timeout: connectTimeout);
@@ -161,11 +191,16 @@ class BrowserFaithfulHttpClientAdapter implements HttpClientAdapter {
       final all = <int>[];
       // 逐块读取直到服务端关闭连接（我们发送 Connection: close）。
       // 用 per-gap 超时兜底，避免坏连接永久挂起。
-      await socket
-          .timeout(receiveTimeout, onTimeout: (sink) => sink.close())
-          .forEach(all.addAll);
+      // [FIX-B03-TIMEOUT] 超时不再静默 close 后把「半截响应」当完整正文返回：
+      // 记下超时交给 _parseResponse 做完整性判定，不完整就抛可重试异常
+      // （此前表现为正文少半章 / 列表缺尾部条目，无异常、无日志）。
+      var timedOut = false;
+      await socket.timeout(receiveTimeout, onTimeout: (sink) {
+        timedOut = true;
+        sink.close();
+      }).forEach(all.addAll);
 
-      return _parseResponse(Uint8List.fromList(all));
+      return _parseResponse(Uint8List.fromList(all), timedOut: timedOut);
     } finally {
       socket.destroy();
     }
@@ -218,7 +253,11 @@ class BrowserFaithfulHttpClientAdapter implements HttpClientAdapter {
     return uri.query.isEmpty ? path : '$path?${uri.query}';
   }
 
-  _RawResponse _parseResponse(Uint8List raw) {
+  /// 解析原始响应字节（头 + 体 + 解块 + 解压）。
+  ///
+  /// [timedOut] 为 true 表示读取阶段发生过超时（连接是被我们主动断开的）：
+  /// 此时只有长度自洽的响应才允许当完整响应返回，否则抛 [HttpException]。
+  _RawResponse _parseResponse(Uint8List raw, {bool timedOut = false}) {
     final sep = _indexOfHeaderEnd(raw);
     if (sep < 0) {
       // 没有完整头（异常响应）——当作空体 502 交给上层判定。
@@ -250,9 +289,32 @@ class BrowserFaithfulHttpClientAdapter implements HttpClientAdapter {
     }
 
     // Transfer-Encoding: chunked → 先解块。
+    // [FIX-B03-TIMEOUT] 顺手做完整性校验：被超时/断流截断的响应不能当完整
+    // 正文返回（否则正文少半章、列表缺尾部条目，且没有任何信号）。
     final te = headers['transfer-encoding']?.join(',').toLowerCase() ?? '';
     if (te.contains('chunked')) {
-      bodyBytes = _dechunk(bodyBytes);
+      final (dechunked, complete) = _dechunk(bodyBytes);
+      bodyBytes = dechunked;
+      if (!complete) {
+        throw HttpException(
+          '响应被截断：chunked 传输未读到终止块（已收 ${raw.length} 字节）',
+        );
+      }
+    } else {
+      final cl = headers['content-length']?.first.trim();
+      final expected = cl == null ? null : int.tryParse(cl);
+      if (expected != null) {
+        if (bodyBytes.length != expected) {
+          throw HttpException(
+            '响应被截断：正文 ${bodyBytes.length} 字节 != content-length $expected',
+          );
+        }
+      } else if (timedOut) {
+        // close 定界的响应没有长度可校验，读取又超时 ⇒ 无法确认正文完整。
+        throw HttpException(
+          '接收超时且响应无 content-length，正文可能不完整（已收 ${raw.length} 字节）',
+        );
+      }
     }
 
     // Content-Encoding: gzip/deflate → 解压。
@@ -289,9 +351,12 @@ class BrowserFaithfulHttpClientAdapter implements HttpClientAdapter {
   }
 
   /// 解 HTTP chunked 传输编码。
-  Uint8List _dechunk(List<int> data) {
+  ///
+  /// 返回 `(正文, 是否读到终止块)`：终止块缺失说明传输被截断（[FIX-B03-TIMEOUT]）。
+  (Uint8List, bool) _dechunk(List<int> data) {
     final out = <int>[];
     var i = 0;
+    var complete = false;
     while (i < data.length) {
       // 读取块长度行（十六进制，可能带 `;扩展`）。
       final lineEnd = _indexOfCRLF(data, i);
@@ -302,7 +367,10 @@ class BrowserFaithfulHttpClientAdapter implements HttpClientAdapter {
       final size = int.tryParse(hex, radix: 16);
       if (size == null) break;
       i = lineEnd + 2;
-      if (size == 0) break; // 终止块。
+      if (size == 0) {
+        complete = true; // 终止块。
+        break;
+      }
       if (i + size > data.length) {
         out.addAll(data.sublist(i));
         break;
@@ -310,7 +378,7 @@ class BrowserFaithfulHttpClientAdapter implements HttpClientAdapter {
       out.addAll(data.sublist(i, i + size));
       i += size + 2; // 跳过块尾 CRLF。
     }
-    return Uint8List.fromList(out);
+    return (Uint8List.fromList(out), complete);
   }
 
   int _indexOfHeaderEnd(List<int> data) {

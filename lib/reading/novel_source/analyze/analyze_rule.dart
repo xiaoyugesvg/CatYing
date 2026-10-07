@@ -291,7 +291,9 @@ class AnalyzeRule {
       final dec = _decryptSpec(spec, bytes, null);
       switch (op) {
         case 'Base64Decode':
-          return latin1.decode(dec);
+          // [FIX-CRYPTO-UTF8] 必须是 UTF-8：中文正文用 latin1 解会变 'ä½ å¥½ä¸ç'。
+          // legado 的 `Base64Decode` 语义是 new String(bytes, UTF_8)。
+          return utf8.decode(dec, allowMalformed: true);
         case 'HexDecode':
           return utf8.decode(dec, allowMalformed: true);
         case 'Base64Encode':

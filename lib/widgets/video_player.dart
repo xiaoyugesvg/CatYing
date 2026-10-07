@@ -15,6 +15,7 @@ import '../common/system_ui.dart';
 import 'video_player_pip.dart';
 import 'window_fullscreen.dart';
 import 'danmaku.dart';
+import 'stall_detector.dart';
 import '../services/audio_focus.dart';
 import 'app_toast.dart';
 import '../pages/settings/sub/danmu_settings_page.dart';
@@ -188,6 +189,32 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// 缓冲状态：不再默认 true，而是从 player.state 同步读取，避免全屏/普通模式
   /// 切换时新实例显示"转圈"假象
   bool _isBuffering = false;
+
+  // ── 加载卡死检测（复核发现的严重缺口）────────────────────────────
+  //
+  // 原来**媒体加载完全没有超时**：
+  //   · 弹幕 HTTP 有 8s/12s 超时，但 `_player.open(...)` **一处超时都没有**
+  //   · 采集源给的 CDN 直链挂起（不发数据也不断开）时，
+  //     media_kit **不会**抛 error 事件 → `_isBuffering` 永远为 true
+  //     → **转圈无限转**，用户不知道是"在加载"还是"坏了" ✗
+  //   · 更糟的是：详情页的重试按钮**只在 `onError` 被调用后才出现**
+  //     → 连接挂起时**连重试按钮都不出来** ✗
+  //
+  // 现在自己数：缓冲中且**播放位置连续 N 秒没前进** → 判为卡死，
+  // 换成一条**可点重试**的提示（不依赖 media_kit 的 error 事件 ✓）。
+
+  /// 「加载卡死」判定（纯逻辑，见 `stall_detector.dart` 的说明）。
+  ///
+  /// 抽成独立类是为了**可测**：这个 State 依赖 media_kit 原生库，
+  /// 测试里构造不出来，判定逻辑埋在里面就没法验证。
+  final StallDetector _stall = StallDetector();
+
+  /// 卡死检测定时器（每秒 tick 一次）
+  Timer? _stallTimer;
+
+  /// 当前是否已判定卡死（给 UI 用的镜像，避免每帧问 detector）
+  bool _loadStalled = false;
+
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   bool _showControls = true;
@@ -429,6 +456,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     // 启动电池监听 (iOS / Android / 桌面端都支持, 失败时静默忽略)
     _initBatteryMonitor();
 
+    // 启动"加载卡死"检测（缓冲期间每秒看位置有没有前进）
+    _startStallWatch();
+
     // 注册到全局音频焦点协调器：音乐/直播要出声时会调这里的 pause()。
     //
     // ⚠️ 这里原来**完全没有互斥** —— 原来的 `LiveService.pauseLivePlayer`
@@ -469,7 +499,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
     _playerSubs.add(
       _player.stream.error.listen((error) {
-        if (error.isNotEmpty) widget.onError?.call();
+        if (error.isEmpty) return;
+        // ── 🔴 错误内容必须写日志（复核发现它原来被完全丢掉）──────────
+        // `onError` 是**无参**的 `VoidCallback`，所以错误详情到不了 UI；
+        // 而这里原来连日志都不打 ⇒ 现场**没有任何可排查的证据** ✗
+        AppLog.instance.log('[video_player] stream error: $error');
+        // 出错时把"卡死"提示收起来（下面那个可点重试的提示会接管）
+        if (mounted && _loadStalled) {
+          setState(() => _loadStalled = false);
+        }
+        widget.onError?.call();
       }),
     );
 
@@ -478,7 +517,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         if (mounted) {
           setState(() {
             _isPlaying = playing;
-            _isBuffering = false;
+            // ── 🟡 只在**确实没在缓冲**时才清（修"转圈闪现"）──────────
+            //
+            // 原来**无条件**清 ✗：缓冲中 `playing` 变 true 时会把转圈
+            // 提前抹掉（直到下一个 buffering 事件才纠正）→ 视觉上闪一下。
+            // 现在读一次 player 的真实缓冲状态再决定 ✓
+            if (!_player.state.buffering) {
+              _isBuffering = false;
+            }
             // 暂停时常显控制条；开播后再按空闲隐藏
             if (!playing) {
               _showControls = true;
@@ -488,9 +534,27 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             _scheduleHideControls();
             widget.onPlaying?.call();
             _applyPendingResumeSeek();
-            // Spider 异步解析 URL 后才可匹配弹幕：开播时再试一次
-            if (!_danmuLoaded && _danmuApiUrl.isNotEmpty) {
-              _ensureDanmuLoaded(urlOverride: widget.url);
+            // ── 🔴 开播时**重读**弹幕地址，再试一次加载（修一个真 bug）──
+            //
+            // 用户实测反馈：「填进去，弹幕不显示」（**所有片都不显示**）。
+            //
+            // 根因是**时序**：`_loadDanmuSettings()` 只在 `initState` 那条路径
+            // 调一次（`:582`）→ `_danmuApiUrl` 一辈子只读一次 ✗ 于是：
+            //   ① 先开播（那时还没填地址）→ `_danmuApiUrl = ''`
+            //   ② 再去设置里填地址 → 存进 prefs ✓，但**运行中的播放器不重读** ✗
+            //   ③ 下面那句判断又被 `_danmuApiUrl.isNotEmpty` **挡住** ✗
+            //   ⇒ 播放器永远不知道地址存在 ⇒ **一条弹幕都不加载** ✗
+            //（这也解释了为什么"重启 App 后就能显示"。）
+            //
+            // 现在：**每次开播都重读一次地址**（读 prefs 很便宜，且只在
+            // `playing` 变 true 时触发）✓；地址**变了**就清掉 `_danmuLoaded`
+            // 允许重新拉取 ✓
+            if (!_danmuLoaded) {
+              _refreshDanmuApiUrlIfNeeded().then((_) {
+                if (mounted && !_danmuLoaded && _danmuApiUrl.isNotEmpty) {
+                  _ensureDanmuLoaded(urlOverride: widget.url);
+                }
+              });
             }
             // iOS：前台预热原生 AVPlayer（静音预缓冲常驻），退后台/点 PiP 时
             // 原生立即启动系统悬浮窗，避免"后台等缓冲"导致 PiP 时灵时不灵
@@ -527,9 +591,24 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         if (!mounted) return;
         _position = position;
         _positionVN.value = position;
+
+        // ── 🟡 清缓冲标志必须进 setState（修"靠巧合消失"）────────────
+        //
+        // 原来是在 setState **外面**赋值 ✗ —— 而这个监听回调里
+        // **根本没有 setState**。它之所以"看起来能消失"，
+        // 是因为 `_positionVN` 是个 `ValueNotifier`，它一变会让
+        // **进度条那一带**局部重建，中间那个转圈恰好在受影响范围内
+        // ⇒ **靠巧合工作** ✗：一旦把转圈挪到别的子树就会卡住不消失。
+        //
+        // 现在：位置真的有前进（>0）时就明确重建一次 ✓。
+        // ⚠️ 只在标志确实要变时才 setState，避免每 20ms 都整树重建。
         if (_isBuffering && position > Duration.zero) {
-          _isBuffering = false;
+          setState(() => _isBuffering = false);
         }
+
+        // 告诉卡死检测"位置有前进"（内部会按整秒去重）
+        _stall.markProgress(position.inSeconds);
+
         final sec = position.inSeconds;
         if (sec != _lastNotifiedPositionSec) {
           final prevSkip = _skipVisibilityFor(
@@ -541,6 +620,27 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             setState(() {});
           }
           widget.onPositionChanged?.call(position);
+
+          // ── 🔴 周期性检测「弹幕地址」是否刚被改过（修一个真 bug）────
+          //
+          // 用户反馈：「填进去，弹幕不显示」（所有片都不显示）。
+          // 完整根因：**播放器自己就能打开弹幕设置页**
+          //（`:4390` 的 `Get.to(DanmuSettingsPage)`）——
+          // 也就是用户常常是"**正在播着的时候**去填地址"的 ✗
+          // 而 `_danmuApiUrl` 只在 `initState` 读一次 →
+          // 填完地址后当前这次播放**永远不会加载弹幕** ✗
+          //
+          // 这里借"每秒一次的位置回调"做一次便宜的检测：
+          // 地址变了 → `_danmuLoaded` 被清掉 → 立刻重新拉一次 ✓
+          // （只读一个 prefs key，开销可忽略；`_refreshDanmuApiUrlIfNeeded`
+          //   内部有"没变就直接 return"的短路 ✓）
+          if (!_danmuLoaded) {
+            _refreshDanmuApiUrlIfNeeded().then((_) {
+              if (mounted && !_danmuLoaded && _danmuApiUrl.isNotEmpty) {
+                _ensureDanmuLoaded(urlOverride: widget.url);
+              }
+            });
+          }
         }
       }),
     );
@@ -744,7 +844,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         _positionVN.value = Duration.zero;
         _durationVN.value = Duration.zero;
         _isBuffering = true;
+        // 换集是新一次加载 → 清掉上一集的"卡死"判定
+        _loadStalled = false;
       });
+      _resetStallWatch();
       if (_danmuApiUrl.isNotEmpty) {
         // 传新集地址：此处 _openMedia() 还没执行，播放器里仍是上一集 URL
         _ensureDanmuLoaded(urlOverride: widget.url);
@@ -770,6 +873,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         ? Duration(seconds: widget.resumeSeconds!.toInt())
         : null;
     _persisted.resumeApplied = true;
+    // 新一次加载开始 → 复位"卡死"计时（否则上一集的计时会立刻误报）
+    _resetStallWatch();
     _player.open(AppMedia(widget.url, httpHeaders: headers, start: start));
     _scheduleResumeSeek();
   }
@@ -907,6 +1012,29 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (mounted) setState(() {});
     } catch (e) {
       AppLog.instance.log('[video_player] _loadPlayerPrefs 失败: $e');
+    }
+  }
+
+  /// 轻量重读「弹幕 API 地址」；**地址变了**就把 `_danmuLoaded` 清掉，
+  /// 让本次播放能重新拉一次弹幕。
+  ///
+  /// 为什么需要它：用户常常是**先开播、后去设置里填地址**的
+  ///（见 `playing` 监听里那段说明）。只读一次会造成"填了不生效"。
+  ///
+  /// ⚠️ 只重读**地址**这一项，不重读字号/速度等样式 ——
+  ///    那些在播放中被改时本来就会即时生效，重读反而可能覆盖用户的临时调整。
+  Future<void> _refreshDanmuApiUrlIfNeeded() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final latest = (prefs.getString('danmu_api_url') ?? '').trim();
+      if (latest == _danmuApiUrl) return;
+      _danmuApiUrl = latest;
+      // 地址变了 → 之前"已加载过"的结论作废，允许重新拉
+      _danmuLoaded = false;
+      AppLog.instance.log('[video_player] danmu api url 变为: '
+          '${latest.isEmpty ? "（空）" : latest}');
+    } catch (e) {
+      AppLog.instance.log('[video_player] 重读弹幕地址失败: $e');
     }
   }
 
@@ -1050,6 +1178,89 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     // 代次校验：快速换集时丢弃过期响应，避免旧集弹幕盖到新集上
     if (mounted && list.isNotEmpty && loadGen == _danmuLoadGen) {
       setState(() => _danmus = list);
+    }
+  }
+
+  // ============================================================
+  // 加载卡死检测
+  // ============================================================
+
+  /// 启动卡死检测：缓冲期间每秒看一次"播放位置有没有前进"。
+  ///
+  /// 为什么不靠 media_kit 的 error 事件：
+  ///   **连接挂起**（服务器收下请求但不发数据、也不断开）在多数
+  ///   播放内核里**不会**产生 error 事件 —— 它只是永远不 ready。
+  ///   这时候用户看到的是"转圈无限转"，而且详情页的重试按钮
+  ///   （它挂在 `onError` 回调上）**根本不会出现** ✗
+  ///
+  /// 所以这里自己数时间：只要"在缓冲 + 位置 N 秒没动"就判卡死。
+  void _startStallWatch() {
+    _stallTimer?.cancel();
+    _stallTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      final justStalled = _stall.tick(
+        buffering: _isBuffering,
+        playing: _isPlaying,
+      );
+      if (justStalled) {
+        AppLog.instance.log(
+          '[video_player] 加载卡死：缓冲中已 '
+          '${_stall.idleFor(DateTime.now()).inSeconds}s 位置未前进 '
+          '（url=${widget.url}）',
+        );
+        setState(() {
+          _loadStalled = true;
+          // ── 🔴 必须**强制显示控制条**（否则提示根本看不见）──────────
+          //
+          // 那个"加载超时 / 点这里重试"的提示挂在
+          // `_buildCenterSeekButtons()` 里，而它只在
+          // `_showControls && !_isLocked` 时渲染（见 build 里那处）。
+          //
+          // 播放中途卡死时，控制条**往往已经自动隐藏了**（`_hideTimer` 到期）
+          // → 提示不显示 → 用户还是只看到"画面冻住" ✗
+          // 所以判定卡死时顺手把控制条拉出来 ✓
+          _showControls = true;
+        });
+        // 并且取消待执行的"自动隐藏"，否则 2~3 秒后提示又被藏掉
+        _hideTimer?.cancel();
+      } else if (!_stall.stalled && _loadStalled) {
+        // detector 已经不认为卡死了（缓冲结束 / 位置恢复）→ 收回提示
+        setState(() => _loadStalled = false);
+      }
+    });
+  }
+
+  /// 新的媒体开始加载时复位卡死检测（换集/重试/新 URL 都要调）。
+  void _resetStallWatch() {
+    _stall.reset();
+    _loadStalled = false;
+  }
+
+  /// 卡死提示上的「重试」：重新打开当前媒体。
+  ///
+  /// 不依赖详情页那个重试按钮（它只在 `onError` 时出现），
+  /// 所以"连接挂起"这种**没有 error 事件**的情况也能恢复 ✓
+  void _retryLoad() {
+    AppLog.instance.log('[video_player] 用户点重试加载: ${widget.url}');
+    setState(() {
+      _isBuffering = true;
+      _loadStalled = false;
+      // 重试后要让用户看到转圈与控制条（否则像点了没反应）
+      _showControls = true;
+      _position = Duration.zero;
+      _duration = Duration.zero;
+      _positionVN.value = Duration.zero;
+      _durationVN.value = Duration.zero;
+    });
+    _resetStallWatch();
+    // 重试期间别把控制条自动藏掉
+    _hideTimer?.cancel();
+    if (_ownsPlayer) {
+      _openMedia();
+    } else {
+      // 外部 Player：父级负责 open，这里只做兜底 seek
+      _persisted.resumeApplied = false;
+      _scheduleResumeSeek();
     }
   }
 
@@ -1825,6 +2036,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _indicatorTimer?.cancel();
     _timeTimer?.cancel();
     _hintClearTimer?.cancel();
+    _stallTimer?.cancel();
 
     // 还原「优先横屏」强制过的方向，避免退出播放器后整个 App 卡在横屏
     if (_landscapeForcedByPref) {
@@ -4539,22 +4751,61 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               alignment: Alignment.center,
               child: _audioMode
                   ? const SizedBox.shrink()
-                  : _isBuffering
-                      ? const SizedBox(
-                          width: 52,
-                          height: 52,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 3,
+                  // ── 🔴 卡死优先于转圈（复核补的缺口）─────────────────
+                  //
+                  // 原来这里只有"转圈"这一态：连接挂起时转圈**无限转**，
+                  // 用户分不清"在加载"还是"坏了"；而详情页的重试按钮
+                  // 只在 `onError` 时出现 → 挂起时**连重试都没有** ✗
+                  //
+                  // 现在：缓冲中且位置 N 秒没前进 → 换成**可点重试**的提示 ✓
+                  : _loadStalled
+                      ? GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => _safeTap(_retryLoad),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 18, vertical: 14),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.55),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.error_outline_rounded,
+                                    color: Colors.white, size: 30),
+                                const SizedBox(height: 8),
+                                const Text('加载超时',
+                                    style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600)),
+                                const SizedBox(height: 4),
+                                Text('点了没反应？点这里重试',
+                                    style: TextStyle(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.85),
+                                        fontSize: 12)),
+                              ],
+                            ),
                           ),
                         )
-                      : !_isPlaying
-                          ? GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () => _safeTap(_togglePlayPause),
-                              child: Container(
-                                width: 60,
-                                height: 60,
+                      : _isBuffering
+                          ? const SizedBox(
+                              width: 52,
+                              height: 52,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 3,
+                              ),
+                            )
+                          : !_isPlaying
+                              ? GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: () => _safeTap(_togglePlayPause),
+                                  child: Container(
+                                    width: 60,
+                                    height: 60,
                                 decoration: BoxDecoration(
                                   color: Colors.black.withValues(alpha: 0.35),
                                   shape: BoxShape.circle,

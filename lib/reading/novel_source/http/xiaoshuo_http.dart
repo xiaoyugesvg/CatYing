@@ -10,6 +10,8 @@ import 'package:dio/io.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart';
 
+import '../analyze/browser_faithful_adapter.dart';
+
 class XiaoshuoHttp {
   late final Dio _dio;
 
@@ -28,7 +30,15 @@ class XiaoshuoHttp {
 
     (_dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
       final client = HttpClient();
-      client.badCertificateCallback = (cert, host, port) => true;
+      // [FIX-B03-TLS-2] 与 [BrowserFaithfulHttpClientAdapter] 共用**同一个**开关：
+      // 默认严格校验证书链与主机名。此前这里无条件 `=> true`，等于给所有走
+      // XiaoshuoHttp 的 https 书源开了 MITM 后门（B03 复核报告漏列了本处，
+      // 由 B03 修复代理在遗留风险里指出，这里补上以免"MITM 面只关一半"）。
+      client.badCertificateCallback = (cert, host, port) {
+        final handler =
+            BrowserFaithfulHttpClientAdapter.badCertificateHandlerFor(host);
+        return handler != null && handler(cert);
+      };
       return client;
     };
   }

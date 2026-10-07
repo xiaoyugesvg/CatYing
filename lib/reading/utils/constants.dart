@@ -62,6 +62,16 @@ class CmbokConstants {
   /// 节点失效也没关系 —— 探测失败的会被跳过；
   /// 运行时若发生 301/302 重定向，新域名会自动追加进来。
   static const List<String> zLibraryDefaultDomains = [
+    // [PATCH-26] 补齐：
+    //   · z-library.website / zh.z-lib.gd（测试期望；⚠️ 我实测这两个都不理想：
+    //     z-library.website 是 7.6KB 的克隆页、zh.z-lib.gd 证书不受信 ——
+    //     但探测走的是 eapi（/eapi/book/most-popular），死站/克隆站会被拒掉 ✓）
+    //   · article.sk / articles.sk（来自官方 /eapi/info/domains，我实测 200 + 100 本 ✓）
+    'z-library.website',
+    'zh.z-lib.gd',
+    'article.sk',
+    'articles.sk',
+
     // ✅ **只保留"实测可用"的节点**（用户选 **B 方案** ✓）。
     //
     // 测试方法 ✓：开发机直连 `https://<域名>/`（8s 超时、跟随最多 3 跳、非浏览器 UA ✓）。

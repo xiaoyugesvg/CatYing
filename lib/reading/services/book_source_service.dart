@@ -6,17 +6,12 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
-import '../../services/nodejs_manager.dart';
 import '../models/book_source.dart';
-import '../source/book_site_config.dart';
-import '../source/config_book_source.dart';
 // ✅ **Legado → BookSiteConfig 转换**（本轮重构 ✓）：让书源**先走 Dart（含 WebView 兜底 ✓）**，
 //   失败 / 含 `@js:` 才回落 Node 引擎 ✓（Node 那段保持原样 ✓ 只增不减 ✓）
-import '../source/legado_to_config.dart';
 import '../source/global_proxy.dart';
 import '../utils/source_fail_text.dart';
 import 'book_source_dart_engine.dart';
-import 'qread_api.dart';
 
 /// 书源搜索到的一本书。
 ///
@@ -140,8 +135,7 @@ class BookSourceService {
   static final BookSourceService instance = BookSourceService._();
 
   /// 壳模式：已连接 qread 服务端时，详情/目录/正文由服务端执行规则。
-  bool get _serverMode => QreadServerConfig.instance.isLoggedIn;
-
+ 
   /// 构造书源服务用的 Dio，并**挂上「网络代理」**（本轮接上 ✓）。
   ///
   /// ⚠️ 本文件**早就 import 了 `global_proxy`** ✓✓（`:13` ✓，因为它自己就有
@@ -172,19 +166,9 @@ class BookSourceService {
   /// 返回 Cloudflare `400 The plain HTTP request was sent to HTTPS port` ✗ →
   /// App 里表现为「接口 500 / 节点不可用」✗（用户不开代理时正常、开代理就炸 ✓）。
   /// ⇒ 本地回环调用必须**排除代理** ✓（与 NodeJSManager._localHttpDio 同口径 ✓）。
-  static Dio _createLocalDio() {
-    final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 5),
-      receiveTimeout: const Duration(seconds: 40),
-    ));
-    // 不调用 applyGlobalProxy —— 本地回环请求绝不经过用户代理
-    return dio;
-  }
-
-  final _localDio = _createLocalDio();
-
-  bool _portWarned = false;
-
+ 
+ 
+ 
   /// 最近一次体检结果缓存（按源 id）。
   ///
   /// 「退出页面不中断」：体检页退出后批量任务继续跑，结果写到这里；
@@ -268,37 +252,17 @@ class BookSourceService {
     // 而 Dart 侧现在已有 quickjs 引擎与宿主方法表（补丁 0005/0007/0008）。
     final dartHandled = await BookSourceDartEngine.instance.handle(body);
     if (dartHandled != null) return dartHandled;
-    final port = NodeJSManager.instance.managementPort;
-    if (port <= 0) {
-      if (!_portWarned) {
-        _portWarned = true;
-        debugPrint('[BookSource] Node 管理端口未就绪');
-      }
-      return {'ok': false, 'error': '后台服务未就绪，请稍后重试'};
-    }
-    try {
-      final res = await _localDio.post(
-        'http://127.0.0.1:$port/book/source',
-        data: body,
-        options: Options(contentType: Headers.jsonContentType),
-      );
-      return res.data;
-    } catch (e) {
-      return {'ok': false, 'error': '请求失败：${_short(e)}'};
-    }
+    // [PATCH-24] 旧 Node 引擎回退已移除：书源现在**只**由本地 Dart legado 引擎执行
+    //（含 `@js:` 规则 —— quickjs 原生库已随包编出）。云端壳模式（QreadApi）与
+    // config 转换引擎（ConfigBookSource/legadoToConfig）的调用点也已删除。
+    // ⚠️ Node 侧车本身仍保留给 视频/音乐/直播（36 处调用），这里只断了"书源回落"。
+    return {
+      'ok': false,
+      'error': '本地引擎未接管该动作（动作：${body['action']}）——旧 Node 书源引擎已移除',
+    };
   }
 
-  String _short(Object e) {
-    if (e is DioException) {
-      if (e.type == DioExceptionType.connectionTimeout ||
-          e.type == DioExceptionType.receiveTimeout) {
-        return '网络超时';
-      }
-      return e.message ?? e.toString();
-    }
-    return e.toString();
-  }
-
+ 
   Map<String, dynamic> _asMap(dynamic raw) =>
       raw is Map ? raw.cast<String, dynamic>() : <String, dynamic>{};
 
@@ -309,47 +273,7 @@ class BookSourceService {
   /// 明文 config 源 → Dart 侧 ConfigBookSource 引擎。
   ///
   /// config 源（type=config）不走 Node/Legado，直接按 CSS 选择器抓取。
-  ConfigBookSource _configSource(BookSource source) {
-    // ✅ **Legado 源也走 Dart 引擎**（本轮重构 ✓ 关键 ✓）
-    //
-    // 原来本方法**假定一定存在 `config` 块** ✗（下一行 `source.raw['config'] as Map` ✓
-    // ⇒ 对 Legado 源会直接抛 ✗）⇒ 所以 6 个入口的门槛都写成 `if (source.isConfig)` ✗
-    // ⇒ **Legado 源永远进不了 Dart 分支** ✓ ⇒ 只能走 Node 引擎 ✗
-    // ⇒ 而 Node 的网络栈被不少站点**拒** ✗（实测 `HTTP 400` / `read ECONNRESET` /
-    //    `socket hang up` / `SSL alert 40` / `certificate has expired` ✓）——
-    //    这些**不是源失效** ✗，是网络栈/防护问题 ✓
-    // ⇒ 现在用本轮写的转换层 `legadoToConfig` ✓ 把扁平 Legado 源转成 `BookSiteConfig` ✓
-    //    ⇒ 书源就能走 **Dart + WebView 真浏览器栈** ✓（= 母项目同款 ✓ 这也是
-    //      "别人 631 基本都能用"的原因 ✓）
-    // ⚠️ `@js:` 源**不会**走到这里 ✓（`_canUseDart` 已把它们挡在门外 ✓ 仍走 Node ✓ 不倒退 ✓）
-    if (!source.isConfig) {
-      return ConfigBookSource(
-        legadoToConfig(source.raw),
-        // proxy 口径与下面 config 分支**完全一致** ✓（都取 `raw['proxy']` ✓ 不做两套 ✓）
-        proxy: source.raw['proxy']?.toString() ?? '',
-      );
-    }
-    final c = (source.raw['config'] as Map).cast<String, dynamic>();
-    // 🔴 **请求头必须合并两层** ✓：config 源的引擎只读 `config.header`
-    //（book_site_config.dart:123 ✓），而**书源登录**（`applyCookie`，:958-981）
-    // 把 Cookie 写进**顶层** `raw['header']` ✗ → 于是 config 源登录「成功」了
-    // 却**完全没带上 Cookie** ✓（`sources.json` 的 config 体里 header 出现 0 次 ✓，
-    // 也没有人从另一侧补救 ✓）。
-    // 合并规则：顶层在前、`config` 体内同名键覆盖 ✓（与同族的 group 修复一致 ✓）
-    final rawHeader = source.raw['header'];
-    final bodyHeader = c['header'];
-    final merged = <String, dynamic>{
-      if (rawHeader is Map) ...rawHeader.cast<String, dynamic>(),
-      if (bodyHeader is Map) ...bodyHeader.cast<String, dynamic>(),
-    };
-    final body =
-        merged.isEmpty ? c : <String, dynamic>{...c, 'header': merged};
-    return ConfigBookSource(
-      BookSiteConfig.fromJson(body),
-      proxy: source.raw['proxy']?.toString() ?? '',
-    );
-  }
-
+ 
   /// 这个源能否走 **Dart 引擎** ✓（本轮重构 ✓）
   ///
   /// · `isConfig`（config 明文源 ✓）⇒ 一直可以 ✓
@@ -358,9 +282,7 @@ class BookSourceService {
   ///
   /// 6 个入口（搜索 ✓ 分类列表 ✓ 分类页 ✓ 详情 ✓ 目录 ✓ 正文 ✓）统一用本方法做门槛 ✓
   /// ⇒ 一次改动把**全部链路**对 Legado 源开放 ✓（不再各写一份 ✗）
-  bool _canUseDart(BookSource s) =>
-      s.isConfig || !legadoNeedsNode(s.raw);
-
+ 
   /// 用**一个**书源搜索。
   Future<({bool ok, String? error, List<BookSourceResult> list})> searchOne(
     BookSource source,
@@ -368,31 +290,7 @@ class BookSourceService {
     int page = 1,
   }) async {
     // ── config 明文源：Dart 侧引擎 ─────────────────────────────
-    if (_canUseDart(source)) {
-      try {
-        final list = await _configSource(source).search(keyword, page: page);
-        return (
-          ok: true,
-          error: null,
-          list: list
-              .map(
-                (r) => BookSourceResult(
-                  source: source,
-                  name: r.title,
-                  author: r.author,
-                  bookUrl: r.bookUrl,
-                  coverUrl: r.cover,
-                  intro: r.intro,
-                  lastChapter: r.lastChapter,
-                ),
-              )
-              .toList(),
-        );
-      } catch (e) {
-        return (ok: false, error: e.toString(), list: const <BookSourceResult>[]);
-      }
-    }
-    // ── ✅ **先走 Dart（含 WebView 兜底）**，失败才回落 Node 引擎 ──────────────
+     // ── ✅ **先走 Dart（含 WebView 兜底）**，失败才回落 Node 引擎 ──────────────
     // 为什么 ✓：Node 的网络栈被不少站点拒 ✗（实测 `HTTP 400` ✓ `read ECONNRESET` ✓
     //   `socket hang up` ✓ `SSL alert 40` ✓ `certificate has expired` ✓）——
     //   这些**不是源失效** ✗（源真死会是 DNS 失败/404 ✓），是**网络栈/防护**问题 ✓。
@@ -401,37 +299,7 @@ class BookSourceService {
     //   ⇒ 与母项目同款网络栈 ✓（这正是"别人 631 基本都能用"的原因 ✓）
     // 安全 ✓：`legadoNeedsNode()` 命中 `@js:` ⇒ 直接用下面的 Node ✓；
     //   抛错/空结果 ⇒ **也回落 Node** ✓（现行为不变 ✓）；Node 引擎代码**一行未动** ✓
-    if (!legadoNeedsNode(source.raw)) {
-      try {
-        final hits = await ConfigBookSource(
-          legadoToConfig(source.raw),
-        ).search(keyword, page: page);
-        if (hits.isNotEmpty) {
-          debugPrint('[书源] Dart 搜索成功：${source.name} → ${hits.length} 条');
-          return (
-            ok: true,
-            error: '',
-            list: hits
-                .map(
-                  (h) => BookSourceResult(
-                    source: source,
-                    name: h.title,
-                    author: h.author,
-                    bookUrl: h.bookUrl,
-                    coverUrl: h.cover,
-                    intro: h.intro,
-                    lastChapter: h.lastChapter,
-                  ),
-                )
-                .toList(),
-          );
-        }
-        debugPrint('[书源] Dart 搜索返回 0 条，回落 Node 引擎：${source.name}');
-      } catch (e) {
-        debugPrint('[书源] Dart 搜索未成功，回落 Node 引擎：${source.name} → $e');
-      }
-    }
-    // ── Legado 源：Node 引擎（回落路径 ✓ 原样保留 ✓）──────────────────
+     // ── Legado 源：Node 引擎（回落路径 ✓ 原样保留 ✓）──────────────────
     final raw = await _call({
       'action': 'bsSearch',
       'source': source.raw,
@@ -560,48 +428,8 @@ class BookSourceService {
   Future<({Map<String, dynamic>? info, String? error})> bookInfoChecked(
       BookSource source, String bookUrl) async {
     // ── 壳模式：qread 服务端执行 ruleBookInfo（解决本地引擎 @js: 垫片/500）──
-    if (_serverMode) {
-      try {
-        final book = await QreadApi.instance.getBookInfo2(bookUrl);
-        return (
-          info: {
-            'name': (book['name'] ?? '').toString(),
-            'author': (book['author'] ?? '').toString(),
-            'coverUrl': (book['coverUrl'] ?? '').toString(),
-            'intro': (book['intro'] ?? '').toString(),
-            'lastChapter': (book['latestChapterTitle'] ?? '').toString(),
-            'kind': (book['kind'] ?? '').toString(),
-            'tocUrl': (book['tocUrl'] ?? '').toString(),
-          },
-          error: null,
-        );
-      } on QreadException catch (e) {
-        return (info: null, error: e.message);
-      }
-    }
-    // ── config 明文源：Dart 侧引擎 ─────────────────────────────
-    if (_canUseDart(source)) {
-      try {
-        final info = await _configSource(source)
-            .bookInfo(BookSiteResult(title: '', bookUrl: bookUrl));
-        return (
-          info: {
-            'name': info.title,
-            'author': info.author,
-            'coverUrl': info.cover,
-            'intro': info.intro,
-            'lastChapter': info.lastChapter,
-            // 详情页解析出的目录页 URL（legado ruleBookInfo.tocUrl）。
-            // 为空时上层回退 bookUrl 当目录页（"详情页即目录页"的站）。
-            'tocUrl': info.tocUrl,
-          },
-          error: null,
-        );
-      } catch (e) {
-        return (info: null, error: e.toString());
-      }
-    }
-    final raw = await _callCached(
+     // ── config 明文源：Dart 侧引擎 ─────────────────────────────
+     final raw = await _callCached(
       {
         'action': 'bsBookInfo',
         'source': source.raw,
@@ -627,41 +455,8 @@ class BookSourceService {
     String tocUrl,
   ) async {
     // ── 壳模式：qread 服务端执行 ruleToc ─────────────────────
-    if (_serverMode) {
-      try {
-        final chapters = await QreadApi.instance.getChapterList(source.url, tocUrl);
-        final out = chapters
-            .map((c) => BookSourceChapter(name: c.title, url: c.url))
-            .toList();
-        return (ok: true, error: null, list: out);
-      } on QreadException catch (e) {
-        return (
-          ok: false,
-          error: e.message,
-          list: const <BookSourceChapter>[],
-        );
-      }
-    }
-    // ── config 明文源：Dart 侧引擎 ─────────────────────────────
-    if (_canUseDart(source)) {
-      try {
-        final list = await _configSource(source).toc(tocUrl);
-        return (
-          ok: true,
-          error: null,
-          list: list
-              .map((c) => BookSourceChapter(name: c.name, url: c.url))
-              .toList(),
-        );
-      } catch (e) {
-        return (
-          ok: false,
-          error: e.toString(),
-          list: const <BookSourceChapter>[],
-        );
-      }
-    }
-    final raw = await _callCached(
+     // ── config 明文源：Dart 侧引擎 ─────────────────────────────
+     final raw = await _callCached(
       {
         'action': 'bsToc',
         'source': source.raw,
@@ -705,34 +500,8 @@ class BookSourceService {
     String chapterUrl,
   ) async {
     // ── 壳模式：qread 服务端执行 ruleContent（含翻页聚合/净化）──
-    if (_serverMode) {
-      try {
-        final text = await QreadApi.instance.getBookContent(source.url, chapterUrl);
-        return (ok: true, error: null, content: text, images: const <String>[]);
-      } on QreadException catch (e) {
-        return (
-          ok: false,
-          error: e.message,
-          content: '',
-          images: const <String>[],
-        );
-      }
-    }
-    // ── config 明文源：Dart 侧引擎（正文纯文字，无图片）──────
-    if (_canUseDart(source)) {
-      try {
-        final text = await _configSource(source).content(chapterUrl);
-        return (ok: true, error: null, content: text, images: const <String>[]);
-      } catch (e) {
-        return (
-          ok: false,
-          error: e.toString(),
-          content: '',
-          images: const <String>[],
-        );
-      }
-    }
-    final raw = await _call({
+     // ── config 明文源：Dart 侧引擎（正文纯文字，无图片）──────
+     final raw = await _call({
       'action': 'bsContent',
       'source': source.raw,
       'chapterUrl': chapterUrl,

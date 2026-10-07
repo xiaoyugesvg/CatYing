@@ -6,6 +6,8 @@
 /// 直接基于 XiaoshuoHttp/AnalyzeUrl + 静态分析方法实现，便于在新项目架构下复用。
 library;
 
+import 'dart:convert';
+
 import '../novel_block.dart';
 import '../novel_chinese_converter.dart';
 import '../analyze/analyze_rule.dart';
@@ -19,6 +21,7 @@ import 'book_content.dart';
 import 'book_info.dart';
 import 'book_list.dart';
 import 'web_book_types.dart';
+import 'runner_isolate.dart';
 
 export 'web_book_types.dart';
 
@@ -33,6 +36,12 @@ class WebBook {
     required String key,
     int page = 1,
   }) async {
+    // [PATCH-8] worker isolate 路径：打开 `BookSourceRunner.enabled` 后走 isolate。
+    // worker 内会把 SyncHttpBridge 的同步抓取闸门打开（`java.ajax` 才真正生效），
+    // 且阻塞只发生在 worker isolate，不会卡 UI。
+    if (BookSourceRunner.enabled) {
+      return BookSourceRunner.instance.searchBook(source: source, key: key, page: page);
+    }
     final searchUrl = source.searchUrl;
     if (searchUrl == null || searchUrl.isEmpty) {
       throw Exception('书源未配置 searchUrl');
@@ -93,34 +102,76 @@ class WebBook {
     );
   }
 
-  /// 解析书源的发现分类列表（基于 `exploreUrl` 多级 URL 字符串）。
+  /// 解析书源的发现分类列表（基于 `exploreUrl`）。
+  ///
+  /// [FIX-EXPLORE-JS] `exploreUrl` 实际有三种形式，旧实现漏了最常见的第 ① 种：
+  ///   ① **`@js:` 脚本**（很多源都是）—— 脚本里 `push({title,url,style})` 后返回数组。
+  ///      旧实现**没求值**，把整段脚本交给 `parseMultiLevelUrls` ⇒ **整段脚本被当成
+  ///      一个分类**（实测「绿色小说」的分类名就是那一大串 JSON，分类全废）。
+  ///   ② JSON 数组字面量 `[{"title":…,"url":…}]`。
+  ///   ③ legado 多行 `分类名::url`。
   List<ExploreCategory> getExploreCategories(XiaoshuoBookSource source) {
     final exploreUrl = source.exploreUrl;
     if (exploreUrl == null || exploreUrl.isEmpty) {
       return <ExploreCategory>[];
     }
+    final trimmed = exploreUrl.trim();
 
-    // JSON 数组格式的 exploreUrl
-    if (exploreUrl.trim().startsWith('[')) {
-      final result = _parseRawJsonArray(exploreUrl);
-      if (result.isNotEmpty) {
-        final entries = parseMultiLevelUrls(result);
-        return entries
-            .map((e) => ExploreCategory(
-                  name: e.name.isNotEmpty ? e.name : e.url,
-                  url: e.url,
-                ))
-            .toList();
+    // ① `@js:`：先求值（结果可能是 JSON 数组字符串，也可能是多行文本）
+    if (trimmed.toLowerCase().startsWith('@js:')) {
+      final evaluated = _evalExploreJs(trimmed.substring(4).trim(), source);
+      if (evaluated.isNotEmpty) {
+        final cats = _catsFromRaw(evaluated);
+        if (cats.isNotEmpty) return cats;
       }
+      // 求值失败（缺 quickjs / 需要登录变量）⇒ 返回空，不要返回垃圾
+      return <ExploreCategory>[];
     }
 
-    final urlEntries = parseMultiLevelUrls(exploreUrl);
-    return urlEntries
+    // ② JSON 数组字面量
+    if (trimmed.startsWith('[')) {
+      final result = _parseRawJsonArray(trimmed);
+      if (result.isNotEmpty) return _catsFromRaw(result);
+    }
+
+    // ③ legado 多行
+    return _catsFromRaw(trimmed);
+  }
+
+  /// 把「JSON 数组字符串 / legado 多行文本」统一成分类列表。
+  List<ExploreCategory> _catsFromRaw(String raw) {
+    final text = raw.trim();
+    if (text.isEmpty) return <ExploreCategory>[];
+    final lines = text.startsWith('[') ? _parseRawJsonArray(text) : text;
+    final src = lines.isNotEmpty ? lines : text;
+    return parseMultiLevelUrls(src)
         .map((e) => ExploreCategory(
               name: e.name.isNotEmpty ? e.name : e.url,
               url: e.url,
             ))
+        .where((c) => c.url.isNotEmpty || c.name.isNotEmpty)
         .toList();
+  }
+
+  /// 求值 `@js:` 形式的 exploreUrl。
+  ///
+  /// ⚠️ 必须用 **eval 的完成值**语义：脚本是一串语句（`var out=[]; push(...); out`），
+  ///   最后那个表达式才是结果。若包成 `(function(){ <script> })()` 会因为**没有
+  ///   return** 而得到 undefined（实测：绿色小说的分类因此全空）。
+  ///   所以用 `JSON.stringify(eval("<script>"))` —— legado 的 `@js:` 就是这种语义 ✓
+  ///   （脚本用 jsonEncode 转成合法 JS 字符串字面量 ✓）
+  String _evalExploreJs(String script, XiaoshuoBookSource source) {
+    try {
+      final rule = AnalyzeRule()..setContent('', source.bookSourceUrl);
+      final wrapped = 'JSON.stringify(eval(${jsonEncode(script)}))';
+      final raw = rule.evalJs(wrapped, null);
+      final text = '$raw'.trim();
+      // JSON.stringify(undefined) 会返回字面量 undefined ⇒ 视为无结果
+      if (text.isEmpty || text == 'undefined' || text == 'null') return '';
+      return text;
+    } catch (_) {
+      return '';
+    }
   }
 
   /// 抓取发现页（按分类 URL 列表逐个请求并合并结果）。
@@ -218,6 +269,12 @@ class WebBook {
     required XiaoshuoBookSource source,
     required String bookUrl,
   }) async {
+    // [PATCH-8] worker isolate 路径：打开 `BookSourceRunner.enabled` 后走 isolate。
+    // worker 内会把 SyncHttpBridge 的同步抓取闸门打开（`java.ajax` 才真正生效），
+    // 且阻塞只发生在 worker isolate，不会卡 UI。
+    if (BookSourceRunner.enabled) {
+      return BookSourceRunner.instance.getBookInfo(source: source, bookUrl: bookUrl);
+    }
     final analyzeUrl = AnalyzeUrl(
       url: bookUrl,
       baseUrl: source.bookSourceUrl,
@@ -256,6 +313,13 @@ class WebBook {
     required XiaoshuoBook book,
     void Function(List<XiaoshuoBookChapter>)? onBatch,
   }) async {
+    // [PATCH-8] worker isolate 路径：打开 `BookSourceRunner.enabled` 后走 isolate。
+    // worker 内会把 SyncHttpBridge 的同步抓取闸门打开（`java.ajax` 才真正生效），
+    // 且阻塞只发生在 worker isolate，不会卡 UI。
+    if (BookSourceRunner.enabled) {
+      return BookSourceRunner.instance.getChapterList(source: source, book: book);
+    }
+    // 注意：onBatch 回调无法跨 isolate，isolate 路径只返回最终完整列表。
     final tocRule = source.getTocRule();
     var tocUrl = (book.tocUrl != null && book.tocUrl!.isNotEmpty)
         ? book.tocUrl!
@@ -395,6 +459,12 @@ class WebBook {
     required String chapterUrl,
     XiaoshuoBook? originalBook,
   }) async {
+    // [PATCH-8] worker isolate 路径：打开 `BookSourceRunner.enabled` 后走 isolate。
+    // worker 内会把 SyncHttpBridge 的同步抓取闸门打开（`java.ajax` 才真正生效），
+    // 且阻塞只发生在 worker isolate，不会卡 UI。
+    if (BookSourceRunner.enabled) {
+      return BookSourceRunner.instance.getContent(source: source, chapterUrl: chapterUrl, originalBook: originalBook);
+    }
     final contentRule = source.getContentRule();
     final book = originalBook ?? XiaoshuoBook(bookUrl: '', name: '');
 

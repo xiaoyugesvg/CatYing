@@ -57,21 +57,9 @@ class BookSourceDartEngine {
 
   /// 是否启用。
   ///
-  /// ⚠️ **已置 false**（用户 2026-10-07：「书源没有封面，没有章节目录，看不了正文」）
-  ///
-  /// 为什么关掉：这一层的 `bsBookInfo` 是**无条件 `ok:true`** 返回的，
-  /// 而且**只回填部分字段**（原先连 `tocUrl` 都没有 ✗）⇒
-  /// 上层拿到的"详情"是残缺的，却**不会回落 Node** ⇒ 表现为：
-  ///   · 没有封面（coverUrl 丢失）
-  ///   · 没有章节目录（`info.tocUrl` 为空 ⇒ 上层退回用详情页当目录页解析 ⇒ 0 章）
-  ///   · 于是正文也点不进去
-  ///
-  /// 同一条链路走 **Node 引擎是完整的**（实测 错层小说：封面 img.cuoceng.com ✓、
-  /// 目录 500 章 ✓、首章正文 2804 字 ✓）。本层在文件头就写明是"叠加在 Node 之上、
-  /// 失败一律回落 Node"的**可选加速层**，所以关掉它 = 回到补丁前那套（能用的）行为 ✓。
-  ///
-  /// 想再启用：改回 `true` 即可（但需先把 `bsBookInfo` 改成"字段不全就 return null"）。
-  static bool enabled = false;
+  /// **默认 true**：先走 Dart，异常/空结果自动回落 Node
+  /// （见文件头"安全设计"）。要回退到补丁前行为，置 false 即可。
+  static bool enabled = true;
 
   /// 本层接管的动作（其余一律返回 null 交给 Node）。
   static const Set<String> _supported = {
@@ -152,15 +140,9 @@ class BookSourceDartEngine {
               'coverUrl': b.coverUrl ?? '',
               'intro': b.intro ?? '',
               'lastChapter': b.lastChapter ?? '',
-              // ⚠️ **必须带上 `tocUrl`**（修「这个源没有返回任何章节」）✗→✓
-              //   原来这里**漏了 tocUrl** ✗ ⇒ Dart 层返回的 info 里没有目录地址 ⇒
-              //   上层取不到 `info.tocUrl`、只好拿详情页当目录页去解析 ⇒
-              //   手机版详情页的 `#allchapter` 里没有 `dd` ⇒ 0 章 ⇒
-              //   报「这个源没有返回任何章节」✗（而源本身是好的：真目录在
-              //   `/book/chapter/<uuid>.html`，实测 500 章 ✓）
+              // 详情页解析出的目录地址：为空说明该源的 ruleBookInfo.tocUrl
+              // 没算出结果（很多榜单类 bookUrl 不是详情接口 ⇒ 目录必然空）
               'tocUrl': b.tocUrl ?? '',
-              'kind': b.kind ?? '',
-              'wordCount': b.wordCount ?? '',
             },
           };
 
