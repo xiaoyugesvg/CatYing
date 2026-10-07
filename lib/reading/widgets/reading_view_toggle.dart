@@ -98,7 +98,7 @@ class ReadingViewToggle extends StatelessWidget {
               ),
             ),
             trailing: selected
-                ? const Icon(Icons.check_rounded, color: JellyTheme.primary)
+                ? Icon(Icons.check_rounded, color: JellyTheme.primary)
                 : null,
             onTap: onTap,
           );
