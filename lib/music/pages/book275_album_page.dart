@@ -5,6 +5,7 @@ import '../services/music_api.dart';
 import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../../common/theme.dart';
+import '../widgets/listen_episode_list.dart';
 
 /// 275听书专辑页（有声小说）——「专辑 = 影片，单集 = 剧集」。
 ///
@@ -124,46 +125,11 @@ class _Book275AlbumPageState extends State<Book275AlbumPage> {
     }
     return ListenableBuilder(
       listenable: _player,
-      builder: (context, _) => ListView.separated(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        itemCount: _songs.length,
-        separatorBuilder: (_, __) => const Divider(height: 1),
-        itemBuilder: (_, i) {
-          final s = _songs[i];
-          final playing = _player.currentSong?.identityKey == s.identityKey;
-          return ListTile(
-            leading: SizedBox(
-              width: 28,
-              child: Text('${i + 1}',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: playing ? MusicTheme.tint : MusicTheme.secondary,
-                      fontSize: AppTheme.fontFootnote)),
-            ),
-            title: Row(
-              children: [
-                Icon(
-                  Icons.audiotrack_rounded,
-                  size: 15,
-                  color: playing ? MusicTheme.tint : MusicTheme.secondary,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    s.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: playing ? MusicTheme.tint : MusicTheme.label,
-                      fontWeight: playing ? FontWeight.w600 : FontWeight.w400,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            onTap: () => _player.playQueue(_songs, index: i),
-          );
-        },
+      builder: (context, _) => ListenEpisodeList(
+        songs: _songs,
+        sourceLabel: '七五',
+        currentIdentityKey: _player.currentSong?.identityKey,
+        onPlay: (index) => _player.playQueue(_songs, index: index),
       ),
     );
   }

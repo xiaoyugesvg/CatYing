@@ -147,6 +147,8 @@ class SettingsService extends ChangeNotifier {
   static const _kAutoAddShelfForBookKey = 'reader_auto_add_shelf_book';
   // 墨水屏模式：漫画黑白显示 + 柔和浅灰底（默认关）
   static const _kInkScreenModeKey = 'reader_ink_screen_mode';
+  // 漫画阅读器页面亮度（独立叠加层，不调系统亮度；0.35~1.0，默认 1.0）
+  static const _kComicBrightnessKey = 'comic_reader_brightness';
   // 番茄钟：循环次数 / 每轮休息分钟
   static const _kPomodoroLoopCountKey = 'pomodoro_loop_count';
   static const _kPomodoroRestMinutesKey = 'pomodoro_rest_minutes';
@@ -258,6 +260,7 @@ class SettingsService extends ChangeNotifier {
   bool _showReaderHud = true; // 阅读信息栏（时间/页码/进度）
   bool _volumeKeyTurn = false; // 音量键翻页
   bool _inkScreenMode = false; // 墨水屏模式（漫画黑白 + 柔和浅灰底）
+  double _comicBrightness = 1.0; // 漫画阅读器页面亮度（0.35~1.0，独立叠加层）
   // ── 下面 6 项对应 cmbok「阅读设置」里的开关（截图逐项对齐）──
   /// 启动时自动检查书架/收藏是否有新章节（有更新在封面/导航角标提示）
   bool _checkShelfUpdateOnStart = true;
@@ -428,6 +431,8 @@ class SettingsService extends ChangeNotifier {
   bool isShelfHidden(String id) => _hiddenShelfIds.contains(id);
   bool get shelfRemoveDeletesFile => _shelfRemoveDeletesFile;
   bool get inkScreenMode => _inkScreenMode;
+  /// 漫画阅读器页面亮度（独立叠加层，不调系统亮度；0.35~1.0）
+  double get comicBrightness => _comicBrightness;
   int get pomodoroLoopCount => _pomodoroLoopCount;
   int get pomodoroRestMinutes => _pomodoroRestMinutes;
 
@@ -691,6 +696,8 @@ class SettingsService extends ChangeNotifier {
     _shelfRemoveDeletesFile =
         prefs.getBool(_kRemoveDeletesFileKey) ?? false;
       _inkScreenMode = prefs.getBool(_kInkScreenModeKey) ?? false;
+      _comicBrightness =
+          (prefs.getDouble(_kComicBrightnessKey) ?? 1.0).clamp(0.35, 1.0);
       // 若默认首页不在可见列表中，自动修正到第一个可见
       if (!_visibleNavTabs.any((t) => t == _defaultHomePage.toNavTab())) {
         _defaultHomePage = _visibleNavTabs.first.toDefaultHomePage();
@@ -1649,6 +1656,20 @@ class SettingsService extends ChangeNotifier {
       await prefs.setBool(_kInkScreenModeKey, value);
     } catch (e) {
       _log('保存墨水屏模式开关失败: $e');
+    }
+  }
+
+  /// 设置漫画阅读器页面亮度（独立叠加层，0.35~1.0，不调系统亮度）。
+  Future<void> setComicBrightness(double value) async {
+    final v = value.clamp(0.35, 1.0).toDouble();
+    if ((_comicBrightness - v).abs() < 0.001) return;
+    _comicBrightness = v;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_kComicBrightnessKey, v);
+    } catch (e) {
+      _log('保存漫画阅读器亮度失败: $e');
     }
   }
 

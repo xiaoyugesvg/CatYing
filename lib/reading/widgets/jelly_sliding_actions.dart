@@ -323,9 +323,12 @@ class _JellySlidingActionsState extends State<JellySlidingActions>
     final left = _lerp(collapsedLeft, expandedLeft, t);
     final top = _lerp(0.0, expandedTop, t);
 
-    // 越靠环边缘越淡（让位给中间那个）
-    final edgeFade =
-        t > 0.5 ? 1.0 : (1.0 - (dist.abs() / half) * 0.75).clamp(0.25, 1.0);
+    // ⚠️ 用户 2026-10-07：「滑动的时候是一个个显示，不是三一起显示哈」✗→✓
+    //   原来只是"越靠环边缘越淡"、且下限 0.25 ⇒ 收起态会同时露出**三个**图标 ✗
+    //   现在：收起态**只留中心那一个**，距中心 ≥0.5 的一律全透明；
+    //   0 → 0.5 之间线性淡出，滑动时能看清"交接"过程 ✓
+    final slotFade =
+        t > 0.5 ? 1.0 : (1.0 - dist.abs() * 2).clamp(0.0, 1.0);
 
     final bg = Color.lerp(
       _selectedBg(a, i),
@@ -340,7 +343,7 @@ class _JellySlidingActionsState extends State<JellySlidingActions>
       left: left,
       top: top,
       child: Opacity(
-        opacity: edgeFade,
+        opacity: slotFade,
         child: Material(
           color: Colors.transparent,
           child: InkWell(

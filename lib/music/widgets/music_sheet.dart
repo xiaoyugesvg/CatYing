@@ -2,46 +2,47 @@ import 'package:flutter/material.dart';
 
 import '../theme/music_theme.dart';
 
-/// 音乐模块统一"顶部下滑"弹窗。
+/// 音乐模块统一"中间弹出"弹窗。
 ///
-/// 替代 `showModalBottomSheet`：不再从底部弹出，改为从顶部滑入
-/// （用户需求：弹窗不要从下往上）。圆角翻到容器底部，内容高度受限，
+/// 替代 `showModalBottomSheet`：不从底部弹出，也不从顶部滑入，
+/// 改为**屏幕中间弹出**（用户需求：所有弹窗中间弹出、显示约 4 行、
+/// 内容多时内部滚动）。圆角四角，内容高度受限（约 30% 屏高 ≈ 4 行），
 /// 超出部分由内容自身滚动（`ListView` / `SingleChildScrollView`）处理。
 ///
-/// - [isScrollControlled]：为 `true` 时允许更高（约 92% 屏高），
-///   对应原来需要全高内容的弹层（评论、源选择等）。
+/// - [isScrollControlled]：保留参数以兼容旧调用方，不再放开高度——
+///   统一按"4 行左右"上限约束；内容多由内部滚动兜底。
 Future<T?> showMusicSheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
   Color? backgroundColor,
   bool isScrollControlled = false,
 }) {
-  final maxHeight = MediaQuery.of(context).size.height *
-      (isScrollControlled ? 0.92 : 0.75);
+  // 约 30% 屏高 ≈ 4 行列表项高度（内容多时内部滚动）。
+  final maxHeight =
+      MediaQuery.of(context).size.height * (isScrollControlled ? 0.34 : 0.30);
   return showGeneralDialog<T>(
     context: context,
     barrierDismissible: true,
     barrierLabel: 'close',
     barrierColor: Colors.black54,
-    transitionDuration: const Duration(milliseconds: 280),
+    transitionDuration: const Duration(milliseconds: 220),
     pageBuilder: (ctx, _, __) => Align(
-      alignment: Alignment.topCenter,
+      // 中间弹出：垂直水平都居中
+      alignment: Alignment.center,
       child: Material(
         // showGeneralDialog 内容不提供 Material/DefaultTextStyle 上下文，
         // 里面 Text 会触发 Flutter「DefaultTextStyle 缺失」黄色调试线（双黄线）。
         // 包一层透明 Material 补齐（背景仍由下方 Container 绘制）。
         type: MaterialType.transparency,
         child: SafeArea(
-          bottom: false,
           child: Container(
             width: double.infinity,
             constraints: BoxConstraints(maxHeight: maxHeight),
-            margin: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+            margin: const EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(
               color: backgroundColor ?? MusicTheme.card,
-              borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(24),
-              ),
+              // 中间弹出：四角统一圆角
+              borderRadius: BorderRadius.circular(24),
               boxShadow: const [
                 BoxShadow(
                   color: Colors.black26,
@@ -56,12 +57,14 @@ Future<T?> showMusicSheet<T>({
         ),
       ),
     ),
-    transitionBuilder: (ctx, anim, _, child) => SlideTransition(
-      position: Tween<Offset>(
-        begin: const Offset(0, -1),
-        end: Offset.zero,
-      ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
-      child: child,
+    transitionBuilder: (ctx, anim, _, child) => FadeTransition(
+      opacity: anim,
+      child: ScaleTransition(
+        scale: Tween<double>(begin: 0.92, end: 1).animate(
+          CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
+        ),
+        child: child,
+      ),
     ),
   );
 }

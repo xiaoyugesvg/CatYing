@@ -48,11 +48,21 @@
 		<key>LSRequiresIPhoneOS</key>
 		<true/>
 		<!-- iOS 13+ 推荐配置：用 UILaunchScreen 字典替代 LaunchScreen.storyboard。
-		     不引用任何 storyboard / 图片 / 颜色，编译产物最小、加载最快。
-		     iOS 系统会显示一帧系统默认空白（无 logo 无图无背景色），巨魔应用不上架，
-		     可以接受这个最轻量占位。 -->
+		     ✅ 2026-10-07 修复「每次打开黑闪一下」：
+		       原来这里是**空字典** `<dict/>` ⇒ 按 Apple 规则，未指定 UIColorName 时
+		       系统用 `UIColor.systemBackground` 兜底，而它是**随明暗自适应的动态色**
+		       （浅色=白 / 深色=黑）。App 默认外观又是「跟随系统」⇒ 深色设备上
+		       启动屏整块是**纯黑**，直到 Flutter 画出第一帧才消失 = 用户看到的黑闪。
+		       现在显式指向资源目录里的 `LaunchBackground` 颜色集
+		       （any=#F7F5F1 宣纸米白 / dark=#1C1C1E 墨夜，即 App 首屏底色），
+		       启动那一下与首屏同色，黑闪消失。
+		     ⚠️ 不要改回 `<dict/>`（那会退回系统黑/白兜底）。
+		     不引用任何 storyboard / 图片，编译产物依旧最小。 -->
 		<key>UILaunchScreen</key>
-		<dict/>
+		<dict>
+			<key>UIColorName</key>
+			<string>LaunchBackground</string>
+		</dict>
 		<key>UIMainStoryboardFile</key>
 		<string>Main</string>
 		<key>UISupportedInterfaceOrientations</key>

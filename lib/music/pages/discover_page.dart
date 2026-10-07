@@ -13,9 +13,8 @@ import '../widgets/discover_sections.dart';
 import 'playlist_detail_page.dart';
 import 'ximalaya_album_page.dart';
 import 'bookan_album_page.dart';
-import 'bookan_category_page.dart';
 import 'book275_album_page.dart';
-import 'book275_category_page.dart';
+import '../widgets/listen_category_content_page.dart';
 import '../../widgets/app_page_loading.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/app_empty_view.dart';
@@ -1376,9 +1375,21 @@ class _DiscoverPageState extends State<DiscoverPage>
                 name: cat.name,
                 onTap: () => Navigator.of(context).push<void>(
                   MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
-                    builder: (_) => _AlbumListPage(
-                      categoryId: cat.id,
-                      categoryName: cat.name,
+                    builder: (_) => ListenCategoryContentPage(
+                      title: cat.name,
+                      sourceLabel: '喜雅',
+                      loader: (page) => MusicApi.instance
+                          .ximalayaCategory(cat.id, page: page),
+                      onOpenAlbum: (ctx, song) =>
+                          Navigator.of(ctx).push<void>(
+                        MaterialPageRoute(
+                          settings: const RouteSettings(name: 'music:page'),
+                          builder: (_) => XimalayaAlbumPage(
+                            albumId: '${song.id}',
+                            albumName: song.name,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -1454,7 +1465,22 @@ class _DiscoverPageState extends State<DiscoverPage>
                 name: cat.name,
                 onTap: () => Navigator.of(context).push<void>(
                   MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
-                    builder: (_) => BookanCategoryPage(),
+                    builder: (_) => ListenCategoryContentPage(
+                      title: cat.name,
+                      sourceLabel: '博看',
+                      loader: (page) =>
+                          MusicApi.instance.bookanCategory(cat.id, page: page),
+                      onOpenAlbum: (ctx, song) =>
+                          Navigator.of(ctx).push<void>(
+                        MaterialPageRoute(
+                          settings: const RouteSettings(name: 'music:page'),
+                          builder: (_) => BookanAlbumPage(
+                            albumId: '${song.id}',
+                            albumName: song.name,
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               );
@@ -1529,7 +1555,27 @@ class _DiscoverPageState extends State<DiscoverPage>
                 name: cat.name,
                 onTap: () => Navigator.of(context).push<void>(
                   MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
-                    builder: (_) => Book275CategoryPage(),
+                    builder: (_) => ListenCategoryContentPage(
+                      title: cat.name,
+                      sourceLabel: '七五',
+                      // 275 分类是"搜索词聚合"，一页即全部：第 2 页起返回空列表停分页
+                      loader: (page) async {
+                        if (page > 1) {
+                          return const MusicListResult(ok: true, list: []);
+                        }
+                        return MusicApi.instance.book275Category(cat.id, page: 1);
+                      },
+                      onOpenAlbum: (ctx, song) =>
+                          Navigator.of(ctx).push<void>(
+                        MaterialPageRoute(
+                          settings: const RouteSettings(name: 'music:page'),
+                          builder: (_) => Book275AlbumPage(
+                            bookId: '${song.id}',
+                            albumName: song.name,
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               );
@@ -1626,154 +1672,6 @@ class _CategoryTile extends StatelessWidget {
                 color: MusicTheme.secondary, size: 18),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// 分类下的专辑列表页（内嵌；独立页也有一个，这里保持轻量）
-class _AlbumListPage extends StatefulWidget {
-  const _AlbumListPage({required this.categoryId, required this.categoryName});
-
-  final String categoryId;
-  final String categoryName;
-
-  @override
-  State<_AlbumListPage> createState() => _AlbumListPageState();
-}
-
-class _AlbumListPageState extends State<_AlbumListPage> {
-  final _scrollCtrl = ScrollController();
-  final _items = <Song>[];
-  int _page = 1;
-  bool _loading = true;
-  bool _loadingMore = false;
-  bool _hasMore = true;
-  String _error = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-    _scrollCtrl.addListener(() {
-      if (!_hasMore || _loadingMore) return;
-      if (_scrollCtrl.position.pixels >=
-          _scrollCtrl.position.maxScrollExtent - 200) {
-        _loadMore();
-      }
-    });
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = '';
-    });
-    try {
-      final r = await MusicApi.instance
-          .ximalayaCategory(widget.categoryId, page: 1);
-      if (!mounted) return;
-      setState(() {
-        _items.clear();
-        _items.addAll(r.list);
-        _page = 1;
-        _hasMore = r.list.length >= 20;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = '$e';
-      });
-    }
-  }
-
-  Future<void> _loadMore() async {
-    if (_loadingMore) return;
-    setState(() => _loadingMore = true);
-    try {
-      final r = await MusicApi.instance
-          .ximalayaCategory(widget.categoryId, page: _page + 1);
-      if (!mounted) return;
-      setState(() {
-        _items.addAll(r.list);
-        _page++;
-        _hasMore = r.list.length >= 20;
-        _loadingMore = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _loadingMore = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Theme(
-      data: MusicTheme.themeData(),
-      child: Scaffold(
-        appBar: AppBar(title: Text(widget.categoryName)),
-        body: _loading
-            ? Center(
-                child: SizedBox(
-                  width: 26,
-                  height: 26,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2.4, color: MusicTheme.tint),
-                ),
-              )
-            : _error.isNotEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(_error,
-                            style: TextStyle(
-                                color: MusicTheme.secondary,
-                                fontSize: AppTheme.fontBody)),
-                        const SizedBox(height: 14),
-                        TextButton(
-                            onPressed: _load,
-                            child: Text('重试',
-                                style: TextStyle(color: MusicTheme.tint))),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    controller: _scrollCtrl,
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    itemCount: _items.length + (_hasMore ? 1 : 0),
-                    itemBuilder: (_, i) {
-                      if (i == _items.length) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          child: Center(
-                            child: SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: MusicTheme.tint),
-                            ),
-                          ),
-                        );
-                      }
-                      final s = _items[i];
-                      return SongCell(
-                        song: s,
-                        onTap: () => Navigator.of(context).push<void>(
-                          MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
-                            builder: (_) => XimalayaAlbumPage(
-                              albumId: s.id.toString(),
-                              albumName: s.name,
-                            ),
-                          ),
-                        ),
-                        trailing: Icon(Icons.chevron_right_rounded,
-                            color: MusicTheme.secondary, size: 20),
-                      );
-                    },
-                  ),
       ),
     );
   }

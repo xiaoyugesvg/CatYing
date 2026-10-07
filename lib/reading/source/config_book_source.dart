@@ -34,6 +34,7 @@ class BookSiteResult {
     this.bookUrl = '',
     this.intro = '',
     this.lastChapter = '',
+    this.tocUrl = '',
   });
 
   final String title;
@@ -43,6 +44,10 @@ class BookSiteResult {
   final String intro;
   final String lastChapter;
 
+  /// 详情页解析出的目录页 URL（legado `ruleBookInfo.tocUrl`）。
+  /// 空 = 目录页即详情页（用 [bookUrl] 当目录）。
+  final String tocUrl;
+
   BookSiteResult copyWith({
     String? title,
     String? author,
@@ -50,6 +55,7 @@ class BookSiteResult {
     String? bookUrl,
     String? intro,
     String? lastChapter,
+    String? tocUrl,
   }) => BookSiteResult(
     title: title ?? this.title,
     author: author ?? this.author,
@@ -57,6 +63,7 @@ class BookSiteResult {
     bookUrl: bookUrl ?? this.bookUrl,
     intro: intro ?? this.intro,
     lastChapter: lastChapter ?? this.lastChapter,
+    tocUrl: tocUrl ?? this.tocUrl,
   );
 }
 
@@ -264,12 +271,26 @@ class ConfigBookSource {
       final el = doc.querySelector(site.bookLastChapterDom!);
       if (el != null) lastChapter = el.text.trim();
     }
+    // 目录页 URL：legado `ruleBookInfo.tocUrl`（详情页与目录页分离的站必须有）。
+    // 命中「目录页链接」元素取其 href；为空则保持 base.tocUrl（无则空 =
+    // 上层按 bookUrl 当目录页请求，兼容"详情页即目录页"的站）。
+    String tocUrl = base.tocUrl;
+    if (site.tocUrlDom != null && site.tocUrlDom!.isNotEmpty) {
+      final el = doc.querySelector(site.tocUrlDom!);
+      if (el != null) {
+        final href = el.attributes['href'] ?? '';
+        if (href.isNotEmpty && !href.startsWith('javascript:')) {
+          tocUrl = _resolveUrl(href, url);
+        }
+      }
+    }
     return base.copyWith(
       title: title,
       cover: cover,
       author: author,
       intro: intro,
       lastChapter: lastChapter,
+      tocUrl: tocUrl,
     );
   }
 

@@ -591,6 +591,9 @@ class BookSourceService {
             'coverUrl': info.cover,
             'intro': info.intro,
             'lastChapter': info.lastChapter,
+            // 详情页解析出的目录页 URL（legado ruleBookInfo.tocUrl）。
+            // 为空时上层回退 bookUrl 当目录页（"详情页即目录页"的站）。
+            'tocUrl': info.tocUrl,
           },
           error: null,
         );

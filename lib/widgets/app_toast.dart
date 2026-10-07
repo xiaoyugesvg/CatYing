@@ -109,15 +109,26 @@ class AppToast {
         // OverlayEntry 无 Material 上下文 → Text 触发 Flutter
         // 「DefaultTextStyle 缺失」黄色调试线（"双黄线"）。
         type: MaterialType.transparency,
-        child: _ToastView(
-          title: title,
-          status: status,
-          isError: isError,
-          duration: duration,
-          onDone: () {
-            if (identical(_current, entry)) _current = null;
-            entry.remove();
-          },
+        // ⚠️ 结构修正（2026-10-07）：_ToastView 内部返回 `Positioned`，
+        // 它**必须**是 Overlay 的 Stack 直接子项。原来直接放在 Material 下，
+        // Positioned 的父级不是 Stack → debug 断言失败（异常/灰屏）、
+        // release 静默失效（气泡错位居中）——即用户实测
+        // 「点击保存后表面出现灰色遮罩，随机点击又消失」（所有保存都弹
+        // AppToast，所以"所有保存都这样"）。中间补一层 Stack 后结构与
+        // jelly_icon_menu_button 一致（Material > Stack > Positioned）。
+        child: Stack(
+          children: [
+            _ToastView(
+              title: title,
+              status: status,
+              isError: isError,
+              duration: duration,
+              onDone: () {
+                if (identical(_current, entry)) _current = null;
+                entry.remove();
+              },
+            ),
+          ],
         ),
       ),
     );

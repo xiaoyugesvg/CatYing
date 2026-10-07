@@ -36,8 +36,12 @@ import 'theme.dart';
 /// 而壁纸场景本身已经通过 `AppBrightness` 跟随明暗，那个反向推送纯属多余。
 /// 故连同 `followBackground` getter 一并删除。
 class ThemeModeStore {
+  /// ⚠️ 初始值必须是 `system`（用户 2026-10-07：「整个软件第一次打开，
+  ///   默认的外观应该是跟随系统」）✗→✓
+  /// 原来初始值写死 `ThemeMode.dark` ✗ —— 一旦 `load()` 里 SharedPreferences
+  /// 读取抛异常（走 catch 分支），模式就永远停在深色 ✗。
   static ValueNotifier<ThemeMode> notifier =
-      ValueNotifier(ThemeMode.dark);
+      ValueNotifier(ThemeMode.system);
 
   /// 防止递归：同步到模块 → 模块回调 notifyModuleChanged → 再 set 回去
   static bool _syncing = false;
@@ -62,7 +66,10 @@ class ThemeModeStore {
   static Future<void> load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final v = prefs.getString('theme_mode') ?? 'dark';
+      // ✅ 首次打开（prefs 里还没有 `theme_mode`）默认 **跟随系统** ✓
+      //    原来是 `?? 'dark'` ✗ —— 新装用户一进来就是深色，
+      //    哪怕系统是浅色。用户 2026-10-07 明确要求改成跟随系统 ✓
+      final v = prefs.getString('theme_mode') ?? 'system';
       notifier.value = switch (v) {
         'light' => ThemeMode.light,
         'system' => ThemeMode.system,

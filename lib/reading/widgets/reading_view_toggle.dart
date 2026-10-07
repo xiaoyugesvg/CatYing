@@ -69,10 +69,29 @@ class ReadingViewToggle extends StatelessWidget {
     );
   }
 
-  Future<void> _openSheet(BuildContext context) async {
+  Future<void> _openSheet(BuildContext context) => ReadingViewToggle.showSheet(
+        context,
+        isDark: isDark,
+        isGrid: isGrid,
+        onChanged: onChanged,
+      );
+
+  /// 弹出「视图」选择表：列表 / 宫格·一排 3 个 / 4 个 / 5 个。
+  ///
+  /// ⚠️ 公开成**静态方法**：用户 2026-10-07 要求「将视图按钮只在我的里面的
+  ///   显示设置里面就行」⇒ 页面顶栏不再放按钮，但**选择表复用同一个** ✓
+  ///   （显示设置页直接调它，两处选项/持久化完全一致，不会分叉 ✓）
+  static Future<void> showSheet(
+    BuildContext context, {
+    required bool isDark,
+    required bool isGrid,
+    required void Function(bool isGrid, int columns) onChanged,
+  }) async {
     final cols = ReadingLayout().columns;
     final picked = await showModalBottomSheet<Object>(
       context: context,
+      // ⚠️ 要让内容真的铺到底，必须允许超过半屏高度
+      isScrollControlled: true,
       backgroundColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -85,6 +104,12 @@ class ReadingViewToggle extends StatelessWidget {
           required VoidCallback onTap,
         }) {
           return ListTile(
+            // ⚠️ 用户 2026-10-07：「这种弹窗要延伸到底」——
+            //   原来末尾留了 `SizedBox(height: 8)` + 默认密度，最后一个选项
+            //   离屏幕底边还有一段空白 ✗；现在加大行高 + 去掉尾部留白 ⇒
+            //   菜单**直接铺到屏幕底边**（只保留底部安全区）✓
+            minVerticalPadding: 14,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20),
             leading: Icon(icon,
                 color: selected ? JellyTheme.primary : JellyTheme.textSecondary),
             title: Text(
@@ -105,10 +130,13 @@ class ReadingViewToggle extends StatelessWidget {
         }
 
         return SafeArea(
+          // ⚠️ `top: false` + 底部不再叠加额外留白 ⇒ 内容贴底 ✓
+          top: false,
+          minimum: const EdgeInsets.only(bottom: 6),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
                 child: Row(
@@ -140,7 +168,6 @@ class ReadingViewToggle extends StatelessWidget {
                   selected: isGrid && cols == n,
                   onTap: () => Navigator.pop(ctx, n),
                 ),
-              const SizedBox(height: 8),
             ],
           ),
         );

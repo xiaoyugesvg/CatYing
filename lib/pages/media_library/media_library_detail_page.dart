@@ -450,9 +450,16 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
             final n = _parseEpisodeNumber(e.value.name);
             return n != null && '$n'.contains(query.trim());
           }).toList();
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          // ⚠️ **整张弹窗再套一层 Stack**：线路下拉菜单改挂在这一层（见本方法末尾）✓
+          //   根因 ✗：菜单原来是第一排那个**只有 ≈50 高**的局部 Stack 里的
+          //   `Positioned(top:46)`；`clipBehavior: Clip.none` 只能让它**画**得出来 ✗，
+          //   命中测试仍以父级 size 为界（`RenderBox.hitTest` → `size.contains(position)`）
+          //   ⇒ 越出那 50px 的部分**永远点不到** ✓ —— 这就是"线路切换点击不了"的原因 ✓
+          return Stack(
             children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
               // 拖拽条
               Center(
                 child: Container(
@@ -466,14 +473,10 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                 ),
               ),
               // 第一排：选集 + 线路名（点击下拉切换）+ 集数 + 视图切换 + 排序 + 定位
-              // ⚠️ Stack 必须 `clipBehavior: Clip.none`：
-              //    线路下拉菜单是 Positioned(top:46)，超出了 Stack 自身高度（≈50）。
-              //    默认 Clip.hardEdge 会把菜单剪掉 → 看着像"弹出来了"但实际点不到 ✗
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 12, 4),
+              // ℹ️ 原来这里套了个 `Stack(clipBehavior: Clip.none)` 专门放线路下拉菜单，
+              //    但那层只有 ≈50 高 ⇒ 菜单"画得出、点不到"✗；菜单已挪到整张弹窗的 Stack ✓
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 12, 4),
                     child: Row(
                       children: [
                         Text(
@@ -605,68 +608,6 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                       ],
                     ),
                   ),
-                  // 线路下拉：≤4 项（每项 42 高），超出可滑动（无滚动条图标）
-                  if (flagMenuOpen && flags.length > 1)
-                    Positioned(
-                      top: 46,
-                      left: 16,
-                      child: Container(
-                        width: 200,
-                        constraints: const BoxConstraints(maxHeight: 168),
-                        decoration: BoxDecoration(
-                          color: AppTheme.backgroundSecondary,
-                          borderRadius: BorderRadius.circular(14),
-                          border:
-                              Border.all(color: AppTheme.borderLight),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Colors.black38,
-                              blurRadius: 14,
-                              offset: Offset(0, 5),
-                            ),
-                          ],
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: ListView.builder(
-                          shrinkWrap: true,
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          physics: const ClampingScrollPhysics(),
-                          itemCount: flags.length,
-                          itemBuilder: (_, i) => InkWell(
-                            onTap: () {
-                              _controller.selectFlag(flags[i]);
-                              setSheetState(() {
-                                _episodeSelectedFlag = flags[i];
-                                _epPageIndex = 0; // 切线路回到第 1 页
-                                flagMenuOpen = false;
-                              });
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 9),
-                              color: flags[i] == _episodeSelectedFlag
-                                  ? AppTheme.accentColor
-                                      .withValues(alpha: 0.15)
-                                  : null,
-                              child: Text(
-                                flags[i],
-                                style: TextStyle(
-                                  color: flags[i] == _episodeSelectedFlag
-                                      ? AppTheme.accentColor
-                                      : AppTheme.textSecondary,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
               // 第二排：搜索框（搜索剧集）
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -887,6 +828,75 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                   );
                 }(),
               ),
+                ],
+              ),
+
+              // ── 线路下拉菜单 ─────────────────────────────────────────
+              // ⚠️ 必须挂在**整张弹窗**这一层 Stack 上 ✓
+              //   放在第一排那个只有 ≈50 高的局部 Stack 里时，`Clip.none` 只让它
+              //   "画得出来"✗ —— Flutter 的命中测试以父级 size 为界
+              //   （`RenderBox.hitTest` → `size.contains(position)`）⇒
+              //   越界的那 160 多像素**永远点不到** ✓（= "线路切换点击不了"的根因 ✓）
+              // ℹ️ `top: 60` = 拖拽条(≈14) + 第一排上内边距(12) + 线路胶囊高(28) + 间距(6)，
+              //    与原来"相对第一排 top:46"的视觉位置一致 ✓
+              if (flagMenuOpen && flags.length > 1)
+                Positioned(
+                  top: 60,
+                  left: 16,
+                  // ≤4 项（每项 42 高），超出可滑动（无滚动条图标）
+                  child: Container(
+                    width: 200,
+                    constraints: const BoxConstraints(maxHeight: 168),
+                    decoration: BoxDecoration(
+                      color: AppTheme.backgroundSecondary,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppTheme.borderLight),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Colors.black38,
+                          blurRadius: 14,
+                          offset: Offset(0, 5),
+                        ),
+                      ],
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      physics: const ClampingScrollPhysics(),
+                      itemCount: flags.length,
+                      itemBuilder: (_, i) => InkWell(
+                        onTap: () {
+                          _controller.selectFlag(flags[i]);
+                          setSheetState(() {
+                            _episodeSelectedFlag = flags[i];
+                            _epPageIndex = 0; // 切线路回到第 1 页
+                            flagMenuOpen = false;
+                          });
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 9),
+                          color: flags[i] == _episodeSelectedFlag
+                              ? AppTheme.accentColor.withValues(alpha: 0.15)
+                              : null,
+                          child: Text(
+                            flags[i],
+                            style: TextStyle(
+                              color: flags[i] == _episodeSelectedFlag
+                                  ? AppTheme.accentColor
+                                  : AppTheme.textSecondary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
             ],
           );
         },

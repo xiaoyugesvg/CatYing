@@ -35,6 +35,25 @@ import 'book_site_config.dart';
 ///   ⇒ 且单页 **30 秒超时** ✗（`webview_image_fetcher.dart:302/:392/:578` ✓）
 ///   ⇒ 一律走 WebView = **每次请求都可能卡 30 秒 / 失败** ✗ ⇒ 比不改还糟 ✗
 bool _wantsWebView(Map<String, dynamic> json) {
+  // 嵌套格式（legado 3.0）：ruleSearch/ruleBookInfo/ruleToc/ruleContent 子对象里
+  // 可能带 `"webJs": "{\"webView\":true}"` / `"webView": true` 声明。
+  const nestedRules = ['ruleSearch', 'ruleBookInfo', 'ruleToc', 'ruleContent'];
+  for (final key in nestedRules) {
+    final obj = json[key];
+    if (obj is Map) {
+      for (final v in obj.values) {
+        if (v is String && v.contains('webView') && v.contains('true')) {
+          return true;
+        }
+      }
+      final webJs = obj['webJs'];
+      if (webJs is String &&
+          webJs.contains('webView') &&
+          webJs.contains('true')) {
+        return true;
+      }
+    }
+  }
   const keys = [
     'ruleSearchUrl',
     'ruleExploreUrl',
@@ -53,6 +72,25 @@ bool _wantsWebView(Map<String, dynamic> json) {
   return false;
 }
 
+/// 从嵌套子对象或扁平字段取值：先读 [obj] 里的 [nestedKey]，再读 [json] 里的
+/// [flatKey]（老式扁平源兼容）。
+String? _pick(Map<String, dynamic> json, Map<String, dynamic>? obj,
+    String nestedKey, String flatKey) {
+  if (obj != null) {
+    final v = obj[nestedKey];
+    if (v != null) {
+      final t = v.toString().trim();
+      if (t.isNotEmpty) return t;
+    }
+  }
+  final f = json[flatKey];
+  if (f != null) {
+    final t = f.toString().trim();
+    return t.isEmpty ? null : t;
+  }
+  return null;
+}
+
 /// 把一个 **Legado 书源 JSON** 转成 `BookSiteConfig` ✓
 ///
 /// [json] = 源文件里那一个源对象 ✓（键是 `bookSourceName` / `ruleSearchUrl` / … ✓）
@@ -61,6 +99,10 @@ bool _wantsWebView(Map<String, dynamic> json) {
 ///     ⇒ 只有写了 `{"webView":true}` 的源才走 ✓（那些源**必须**走 ✓ 否则拿不到内容 ✗）
 ///     ⇒ 其余走 **Dio 直连** ✓（快 ✓ —— 直连失败/空结果时，调用方还会**回落 Node** ✓ 兜底 ✓）
 ///   · 传 `true` / `false` 可覆盖 ✓
+///
+/// ⚠️ **嵌套格式支持**（本轮修复 ✓）：legado 3.0 主流源用**嵌套子对象**
+///   `ruleSearch` / `ruleBookInfo` / `ruleToc` / `ruleContent` ✓；老式扁平源
+///   （`ruleSearchUrl` / `ruleChapterList` …）同样兼容 ✓ —— 先读嵌套、读不到再读扁平 ✓
 BookSiteConfig legadoToConfig(
   Map<String, dynamic> json, {
   bool? useWebView,
@@ -72,6 +114,20 @@ BookSiteConfig legadoToConfig(
     final t = v.toString().trim();
     return t.isEmpty ? null : t;
   }
+
+  // ── 嵌套子对象（legado 3.0）──────────────────────────────
+  final ruleSearch = json['ruleSearch'] is Map
+      ? (json['ruleSearch'] as Map).cast<String, dynamic>()
+      : null;
+  final ruleBookInfo = json['ruleBookInfo'] is Map
+      ? (json['ruleBookInfo'] as Map).cast<String, dynamic>()
+      : null;
+  final ruleToc = json['ruleToc'] is Map
+      ? (json['ruleToc'] as Map).cast<String, dynamic>()
+      : null;
+  final ruleContent = json['ruleContent'] is Map
+      ? (json['ruleContent'] as Map).cast<String, dynamic>()
+      : null;
 
   Map<String, String> hdr() {
     final raw = json['header'];
@@ -86,34 +142,39 @@ BookSiteConfig legadoToConfig(
     return const {};
   }
 
+  // 顶层占位符统一成 ConfigBookSource 认识的单花括号由引擎处理，
+  // 双花括号 {{key}}/{{page}} 引擎已兼容（search/toc 处 replaceAll），
+  // 这里原样透传即可。
+
   return BookSiteConfig(
     name: s('bookSourceName') ?? '',
     url: s('bookSourceUrl') ?? '',
     icon: null,
-    // ── 搜索（Legado 扁平 → 配置字段 ✓ 一一对应 ✓）──────────────
-    searchUrl: s('ruleSearchUrl'),
-    searchResultDom: s('ruleSearchList'),
-    searchTitleDom: s('ruleSearchName'),
-    searchAuthorDom: s('ruleSearchAuthor'),
-    searchCoverDom: s('ruleSearchCoverUrl'),
-    searchBookUrlDom: s('ruleSearchNoteUrl'),
-    searchIntroDom: s('ruleSearchIntroduce'),
-    searchLastChapterDom: s('ruleSearchLastChapter'),
-    // ── 详情 ──────────────────────────────────────────────
-    bookNameDom: s('ruleBookName'),
-    bookCoverDom: s('ruleCoverUrl'),
-    bookAuthorDom: s('ruleBookAuthor'),
-    bookDescDom: s('ruleIntroduce'),
-    bookLastChapterDom: s('ruleBookLastChapter'),
-    // ── 目录 ──────────────────────────────────────────────
-    // ⚠️ 确认过的映射 ✓：`toc()` 内部走 `_parseToc` ✓，**列表项**选择器 = `tocLinkDom` ✓
-    //   ⇒ `ruleChapterList`（列表 ✓）→ `tocLinkDom` ✓；`ruleChapterName`（章节名 ✓）→ `tocNameDom` ✓
-    //   ℹ️ `ruleContentUrl`（章节链接规则 ✓）在常见形态（`tag.a@href` ✓）下
-    //     由"列表项自身 href"天然满足 ✓；复杂形态 ⇒ 由调用方**回落 Node** ✓
-    tocLinkDom: s('ruleChapterList'),
-    tocNameDom: s('ruleChapterName'),
-    // ── 正文 ──────────────────────────────────────────────
-    contentDom: s('ruleBookContent'),
+    // ── 搜索（嵌套 ruleSearch / 扁平 ruleSearch* 二选一）────────
+    searchUrl: s('searchUrl') ?? s('ruleSearchUrl'),
+    searchResultDom: _pick(json, ruleSearch, 'bookList', 'ruleSearchList'),
+    searchTitleDom: _pick(json, ruleSearch, 'name', 'ruleSearchName'),
+    searchAuthorDom: _pick(json, ruleSearch, 'author', 'ruleSearchAuthor'),
+    searchCoverDom: _pick(json, ruleSearch, 'coverUrl', 'ruleSearchCoverUrl'),
+    searchBookUrlDom: _pick(json, ruleSearch, 'bookUrl', 'ruleSearchNoteUrl'),
+    searchIntroDom: _pick(json, ruleSearch, 'intro', 'ruleSearchIntroduce'),
+    searchLastChapterDom:
+        _pick(json, ruleSearch, 'lastChapter', 'ruleSearchLastChapter'),
+    // ── 详情（嵌套 ruleBookInfo / 扁平 rule*）────────────────
+    bookNameDom: _pick(json, ruleBookInfo, 'name', 'ruleBookName'),
+    bookCoverDom: _pick(json, ruleBookInfo, 'coverUrl', 'ruleCoverUrl'),
+    bookAuthorDom: _pick(json, ruleBookInfo, 'author', 'ruleBookAuthor'),
+    bookDescDom: _pick(json, ruleBookInfo, 'intro', 'ruleIntroduce'),
+    bookLastChapterDom:
+        _pick(json, ruleBookInfo, 'lastChapter', 'ruleBookLastChapter'),
+    tocUrlDom: _pick(json, ruleBookInfo, 'tocUrl', 'ruleTocUrl'),
+    // ── 目录（嵌套 ruleToc / 扁平 ruleChapter*）──────────────
+    tocLinkDom: _pick(json, ruleToc, 'chapterList', 'ruleChapterList'),
+    tocNameDom: _pick(json, ruleToc, 'chapterName', 'ruleChapterName'),
+    // ── 正文（嵌套 ruleContent / 扁平 ruleBookContent）────────
+    contentDom: _pick(json, ruleContent, 'content', 'ruleBookContent'),
+    contentNextDom:
+        _pick(json, ruleContent, 'nextContentUrl', 'ruleContentNextUrl'),
     // ── 网络 ──────────────────────────────────────────────
     pageEncoding: s('rulePageEncoding') ?? s('pageEncoding'),
     useWebViewFetch: webView,
@@ -125,6 +186,19 @@ BookSiteConfig legadoToConfig(
 ///
 /// 调用方在"先 Dart、失败回落"之外，也可以用它在**动手前**判断 ✓ 省一次无谓请求 ✓
 bool legadoNeedsNode(Map<String, dynamic> json) {
+  // 嵌套格式（legado 3.0）：ruleSearch/ruleBookInfo/ruleToc/ruleContent 子对象里
+  // 的 `@js:` / `<js>` 规则 Dart 同样跑不了，必须一并判出。
+  const nestedRules = ['ruleSearch', 'ruleBookInfo', 'ruleToc', 'ruleContent'];
+  for (final key in nestedRules) {
+    final obj = json[key];
+    if (obj is Map) {
+      for (final v in obj.values) {
+        if (v is String && (v.contains('@js:') || v.contains('<js>'))) {
+          return true;
+        }
+      }
+    }
+  }
   const keys = [
     'ruleSearchUrl',
     'ruleSearchList',

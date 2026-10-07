@@ -74,14 +74,14 @@ class _JellySearchBarState extends State<JellySearchBar> {
         // 原来这里是**卡片色 + 阴影**（一块浅灰底），而顶部行里的
         // `JellyExpandableSearch` 早已按用户要求改成**透明底 + 细边框**
         // ⇒ 同一个阅读模块里两种搜索框底色不一样 ✗。
-        // 现在两边**完全同款**：透明底 + 一档细边框（随明暗主题），
-        // 底色永远是"页面背景"，不再出现灰色块 ✓。
+        // 现在两边**完全同款**：透明底 + 一档细边框（走 JellyTheme 主题语义色，
+        // 随明暗外观），底色永远是"页面背景"，不再出现灰色块 ✓。
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(25), // 胶囊形状（半径=高度的一半）
         border: Border.all(
           color: isDark
-              ? Colors.white.withValues(alpha: 0.18)
-              : Colors.black.withValues(alpha: 0.12),
+              ? JellyTheme.textPrimaryDark.withValues(alpha: 0.22)
+              : JellyTheme.textPrimaryLight.withValues(alpha: 0.22),
           width: 1,
         ),
       ),

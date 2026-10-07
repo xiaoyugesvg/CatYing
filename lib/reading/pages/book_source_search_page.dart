@@ -7,16 +7,14 @@ import '../services/book_source_service.dart';
 import '../services/qread_api.dart';
 import '../services/reading_layout.dart';
 import '../theme/jelly_theme.dart';
-import '../widgets/jelly_icon_menu_button.dart';
+import '../widgets/jelly_sliding_actions.dart';
 import '../widgets/jelly_pull_cord.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_search_bar.dart';
-import '../widgets/reading_view_toggle.dart';
 import 'book_download_records_page.dart';
 import 'book_source_detail_page.dart';
 import 'book_source_repo_page.dart';
 import 'browse_history_page.dart';
-import 'cloud_book_source_page.dart';
 import 'favorites_page.dart';
 import '../../common/theme.dart';
 import '../utils/source_fail_text.dart';
@@ -702,41 +700,24 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
           ),
           // 视图切换：列表 / 宫格·3列 / 宫格·4列 / 宫格·5列
           // （用户 2026-10-07：书源页也要宫格/列表 + 3/4/5 列）
-          ListenableBuilder(
-            listenable: SourceViewMode(),
-            builder: (context, _) => ReadingViewToggle(
-              isDark: _isDark,
-              isGrid: SourceViewMode().isGrid,
-              onChanged: (grid, columns) {
-                ReadingLayout().setColumns(columns);
-                SourceViewMode().set(grid);
-              },
-            ),
-          ),
-          const SizedBox(width: 4),
-          // 云端网页版：直接打开 qread 服务端网页（源分类/详情/目录/阅读器）。
-          // 用户 2026-10-07 要求：这个入口放**书源页**（而不是书源仓库），
-          // 且**始终可见**（未登录服务端时 CloudBookSourcePage 会回退到
-          // 默认站点 xs.muiu.site，无需先登录）。
-          IconButton(
-            tooltip: '云端网页版',
-            icon: const Icon(Icons.cloud_outlined),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute<void>(
-                builder: (_) => const CloudBookSourcePage(),
-              ),
-            ),
-          ),
-          // 聚合菜单：浏览记录 / 收藏 / 下载（与图书共用）+ 书源仓库
-          JellyIconMenuButton(
+          // ✅ 用户 2026-10-07：「将视图按钮只在我的里面的显示设置里面就行」
+          //   ⇒ 书源页顶栏的视图按钮**已移除** ✓（只留右边的**筛选**按钮）
+          //   视图（列表 / 宫格·3/4/5 列）+ 书源视图 统一在
+          //   「我的 → 显示设置 → 书源页视图」里选 ✓
+          // ✅ 用户 2026-10-07：「去掉那个云端按钮」——
+          //   顶部那个 `cloud_outlined`（云端网页版，指向 CloudBookSourcePage）按钮
+          //   **已移除** ✓（页面代码保留，只是不再有顶栏入口）
+          // ⚠️ 用户 2026-10-07（第二轮修正）：
+          //   · **筛选按钮单独拉出来** ✓（上面那个 tune 按钮保持不动）
+          //   · 其余 4 个动作叠在一起、左右滑动轮换 ✓
+          //     （原来是 ··· 下拉菜单，现在换成滑动动作栏同款）
+          JellySlidingActions(
             isDark: _isDark,
-            tooltip: '历史 · 收藏 · 下载 · 仓库',
             actions: [
-              (
+              JellyAction(
                 icon: Icons.history_rounded,
                 tooltip: '浏览记录',
-                onTap: () => Navigator.push(
+                onPressed: () => Navigator.push(
                   context,
                   MaterialPageRoute(
                     // 历史统一界面：漫画/图书聚合（showTabs 默认 true）
@@ -744,10 +725,10 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                   ),
                 ),
               ),
-              (
+              JellyAction(
                 icon: Icons.favorite_rounded,
                 tooltip: '收藏',
-                onTap: () => Navigator.push(
+                onPressed: () => Navigator.push(
                   context,
                   MaterialPageRoute(
                     // 收藏统一界面：漫画/图书聚合 + 返回按钮
@@ -755,10 +736,10 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                   ),
                 ),
               ),
-              (
+              JellyAction(
                 icon: Icons.file_download_rounded,
                 tooltip: '下载',
-                onTap: () => Navigator.push(
+                onPressed: () => Navigator.push(
                   context,
                   MaterialPageRoute(
                     // 与图书共用的下载记录页
@@ -766,10 +747,10 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                   ),
                 ),
               ),
-              (
+              JellyAction(
                 icon: Icons.manage_search_rounded,
                 tooltip: '书源仓库',
-                onTap: () async {
+                onPressed: () async {
                   await Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -960,78 +941,37 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                         onCleared: () => setSheetState(() {}),
                       ),
                     ),
+                    // ⚠️ 用户 2026-10-07：「那个源搜索能不能是一个接一个呢，
+                    //   一行接一行的，不要以列表形式呢」
+                    //   ⇒ 变成**自动换行的源 chip 流** ✓（与漫画页同款 ✓）
                     Flexible(
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: shown.length,
-                        itemBuilder: (_, i) {
-                          final s = shown[i];
-                          final selected = s.id == _selectedSourceId;
-                          return ListTile(
-                            dense: true,
-                            leading: CircleAvatar(
-                              radius: 16,
-                              backgroundColor: JellyTheme.primary
-                                  .withValues(alpha: 0.12),
-                              child: Text(
-                                // 原来为什么坏 ✗：书源 name 可能是空串（有的书源返回
-                                // 空书名），characters.first 对空串会抛 StateError，
-                                // 打开搜索源弹窗直接崩。
-                                // 现在为什么安全 ✓：先判空，空时用 '?' 占位兜底，
-                                // 非空才取首字符，不会再越界。
-                                s.name.isEmpty
-                                    ? '?'
-                                    : s.name.characters.first,
-                                style: TextStyle(
-                                  fontSize: AppTheme.fontSubhead,
-                                  color: JellyTheme.primary,
-                                  fontWeight: FontWeight.w700,
-                                ),
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final s in shown)
+                              _quickSourceChip(
+                                name: s.name,
+                                selected: s.id == _selectedSourceId,
+                                onTap: () {
+                                  setSheetState(() {
+                                    _selectedSourceId = s.id;
+                                  });
+                                  _rememberSource(s.id);
+                                  Navigator.pop(ctx);
+                                  setState(() {});
+                                  _toast('已切换到书源：${s.name}');
+                                  if (_keyword.isNotEmpty) {
+                                    _run(_keyword);
+                                  } else {
+                                    _loadExploreIfNeeded();
+                                  }
+                                },
                               ),
-                            ),
-                            title: Text(
-                              s.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: AppTheme.fontBody,
-                                color: _isDark
-                                    ? Colors.white
-                                    : JellyTheme.textPrimaryLight,
-                              ),
-                            ),
-                            subtitle: s.group.isNotEmpty
-                                ? Text(
-                                    s.group,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: AppTheme.fontCaption,
-                                      color: JellyTheme.textSecondary,
-                                    ),
-                                  )
-                                : null,
-                            trailing: selected
-                                ? Icon(Icons.check_circle_rounded,
-                                    color: JellyTheme.primary, size: 20)
-                                : const Icon(Icons.chevron_right_rounded,
-                                    size: 20),
-                            onTap: () {
-                              setSheetState(() {
-                                _selectedSourceId = s.id;
-                              });
-                              _rememberSource(s.id);
-                              Navigator.pop(ctx);
-                              setState(() {});
-                              _toast('已切换到书源：${s.name}');
-                              if (_keyword.isNotEmpty) {
-                                _run(_keyword);
-                              } else {
-                                _loadExploreIfNeeded();
-                              }
-                            },
-                          );
-                        },
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -1281,9 +1221,43 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
     );
   }
 
+  /// 「搜索源」弹窗里的一枚源 chip（**流式换行**排布，用户 2026-10-07：
+  /// 原来是一行一个的列表，现在改成"一个接一个、满行自动换行"）✓
+  /// 与漫画页 `_quickSourceChip` 同款视觉 ✓
+  Widget _quickSourceChip({
+    required String name,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? JellyTheme.primary
+              : JellyTheme.primary.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Text(
+          // 兜底：空名书源用 '?' 占位（空串取首字符会抛 StateError）
+          name.isEmpty ? '?' : name,
+          style: TextStyle(
+            fontSize: AppTheme.fontSubhead,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected ? Colors.white : JellyTheme.primary,
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 板块流：单个板块 = 标题行 + 3 列封面网格
   Widget _sectionBlock(BookSource src, ExploreCategory cat) {
-    final items = _catBooksCache[cat.url] ?? const <BookSourceResult>[];
+    // ⚠️ 用户 2026-10-07：「漫画页和书源页里面的分类内容只要显示前6个就行」
+    //   ⇒ 板块只预览**前 6 个** ✓（点「查看全部」进去仍是完整列表，不受影响 ✓）
+    final all = _catBooksCache[cat.url] ?? const <BookSourceResult>[];
+    final items = all.length > 6 ? all.sublist(0, 6) : all;
     final loading = _catLoading[cat.url] == true;
     final err = _catError[cat.url];
     return Column(

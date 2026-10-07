@@ -2434,11 +2434,22 @@ class _ReaderPageState extends State<ReaderPage> {
     );
     // 墨水屏模式：纸张色背景置于灰度罩外（保留暖意），滤镜只作用于图片；
     // 各画廊内部底色（PhotoView/dissolve）墨水屏下设透明，露出此处纸色。
-    if (!SettingsService().inkScreenMode) return galleryWidget;
-    return ColoredBox(
-      color: _galleryBg,
-      child: ColorFiltered(colorFilter: _inkColorFilter, child: galleryWidget),
-    );
+    final Widget base = SettingsService().inkScreenMode
+        ? ColoredBox(
+            color: _galleryBg,
+            child: ColorFiltered(
+                colorFilter: _inkColorFilter, child: galleryWidget),
+          )
+        : galleryWidget;
+    // 页面亮度（独立叠加层，不调系统亮度、不影响全局）：黑遮罩盖在漫画上。
+    final dim = 1.0 - SettingsService().comicBrightness;
+    if (dim <= 0.001) return base;
+    return Stack(fit: StackFit.expand, children: [
+      base,
+      IgnorePointer(
+        child: ColoredBox(color: Colors.black.withValues(alpha: dim)),
+      ),
+    ]);
   }
 
   /// 翻页模式：PhotoViewGallery 逐页翻页（横向=左右翻页，竖向=上下翻页）
@@ -3043,8 +3054,10 @@ class _ReaderPageState extends State<ReaderPage> {
       duration: const Duration(milliseconds: 200),
       child: IgnorePointer(
         ignoring: !_showControls,
-        child: Column(
+        child: Stack(
           children: [
+            Column(
+              children: [
             // 顶部栏
             AppBar(
               backgroundColor: Colors.black87,
@@ -3090,13 +3103,37 @@ class _ReaderPageState extends State<ReaderPage> {
               ],
             ),
             const Spacer(),
-            // 底部栏：颜色铺到底部边缘，SafeArea 抬高内容避开系统导航栏/手势条
-            Container(
-              color: Colors.black87,
-              child: SafeArea(
-                top: false,
+            // 底部功能栏（**悬浮卡片**）
+            // ✅ 用户 2026-10-07：「漫画的阅读器里面的功能栏也改成这种**悬浮**的」——
+            //   原来：`Container(color: Colors.black87)` 是**通栏贴边**的
+            //         （左右/下都顶到屏幕边）⇒ 看着就是"底部工具条" ✗
+            //   现在：四周留白 + **四角全圆 18** + 向下投影 + 一道浅描边
+            //         ⇒ 悬浮玻璃卡片 ✓
+            //   ⚠️ 为什么加那道 14% 白描边：漫画底默认是 `#141416`（暗夜），
+            //     纯黑卡片压在它上面**边界几乎看不见**，描边让卡片"立"起来 ✓
+            //   ⚠️ `SafeArea` 放在**外层**（不是卡片内部）：这样"避开手势条"抬的
+            //     是卡片**整体**，卡片四周的留白才会均匀 ✓（放里面会让卡片底部
+            //     多出一块和手势条等高的空白 ✗）
+            SafeArea(
+              top: false,
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.72),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.14),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.45),
+                      blurRadius: 20,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
                 child: Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -3179,8 +3216,110 @@ class _ReaderPageState extends State<ReaderPage> {
             ),
           ],
         ),
+        // 右侧悬浮竖条：设置圆钮 / 亮度滑块 / 黑白切换（对齐参考图
+        // "竖排阅读侧边悬浮栏"：上=圆形图标，中=亮度滑杆，下=月亮）
+        _buildSideDock(),
+      ],
+    ),
+  ),
+    );
+  }
+
+  /// 右侧悬浮竖条：设置圆钮 + 亮度滑杆 + 黑白切换。
+  Widget _buildSideDock() {
+    final ink = SettingsService().inkScreenMode;
+    final brightness = SettingsService().comicBrightness;
+    return Positioned(
+      right: 14,
+      top: 0,
+      bottom: 0,
+      child: Center(
+        child: Container(
+          width: 46,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(23),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.45),
+                blurRadius: 20,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _dockCircleButton(
+                icon: Icons.settings_rounded,
+                onTap: _showReaderSettingsSheet,
+              ),
+              const SizedBox(height: 8),
+              // 亮度竖滑杆（独立叠加层亮度，0.35~1.0，不调系统亮度）
+              SizedBox(
+                height: 150,
+                child: RotatedBox(
+                  quarterTurns: -1,
+                  child: Slider(
+                    value: brightness,
+                    min: 0.35,
+                    max: 1.0,
+                    activeColor: Colors.white,
+                    inactiveColor: Colors.white24,
+                    onChanged: (v) {
+                      setState(() => SettingsService().setComicBrightness(v));
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              _dockCircleButton(
+                icon: ink
+                    ? Icons.light_mode_rounded
+                    : Icons.dark_mode_rounded,
+                highlight: ink,
+                onTap: _toggleInk,
+              ),
+            ],
+          ),
+        ),
       ),
     );
+  }
+
+  /// 竖条里的圆形按钮。
+  Widget _dockCircleButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    bool highlight = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: highlight
+              ? Colors.white.withValues(alpha: 0.2)
+              : Colors.white.withValues(alpha: 0.08),
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: highlight
+                ? Colors.white.withValues(alpha: 0.5)
+                : Colors.white.withValues(alpha: 0.18),
+          ),
+        ),
+        child: Icon(icon, size: 20, color: Colors.white),
+      ),
+    );
+  }
+
+  /// 黑白切换：与设置弹层里的「墨水屏」开关同源。
+  void _toggleInk() {
+    final s = SettingsService();
+    setState(() => s.setInkScreenMode(!s.inkScreenMode));
   }
 }
 

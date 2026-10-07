@@ -89,6 +89,18 @@ class SettingsStore {
   ///（否则搜到酷狗的歌却拿酷狗 id 去查网易云，必然取不到地址）。
   final musicSource = ValueNotifier<SongSource>(SongSource.netease);
 
+  /// 听书分类内容页视图：0=列表，2/3/4/5=宫格列数（默认 2 列，对齐原网格）。
+  static const String _kListenGrid = 'music.listenGrid';
+  final listenGrid = ValueNotifier<int>(2);
+
+  /// 听书专辑单集视图：0=列表，2=2 列宫格（默认列表）。
+  static const String _kAlbumGrid = 'music.albumGrid';
+  final albumGrid = ValueNotifier<int>(0);
+
+  /// 听书专辑单集排序：false=正序（原序），true=倒序。
+  static const String _kAlbumSortDesc = 'music.albumSortDesc';
+  final albumSortDesc = ValueNotifier<bool>(false);
+
   /// 加载全部音乐偏好，并**连带初始化音源相关的东西**。
   ///
   /// ── 🔴 整体 try/catch（修"prefs 一次失败就拖垮音源列表"）──────────
@@ -153,6 +165,10 @@ class SettingsStore {
       bottomBarOnSubPages.value = prefs.getBool(_kBottomBarSubPages) ?? false;
       // 启动自动播放：默认关
       autoPlayOnLaunch.value = prefs.getBool(_kAutoPlayOnLaunch) ?? false;
+      // 听书视图/排序（没存过用默认值；非法值夹到合法范围）
+      listenGrid.value = (prefs.getInt(_kListenGrid) ?? 2).clamp(0, 5);
+      albumGrid.value = (prefs.getInt(_kAlbumGrid) ?? 0).clamp(0, 2);
+      albumSortDesc.value = prefs.getBool(_kAlbumSortDesc) ?? false;
     }
 
     // ── 以下三步是**关键路径**：各自独立 try/catch，互不拖累 ─────────
@@ -201,7 +217,9 @@ class SettingsStore {
       final prefs = await SharedPreferences.getInstance();
       final ok = v is bool
           ? await prefs.setBool(key, v)
-          : await prefs.setString(key, v.toString());
+          : v is int
+              ? await prefs.setInt(key, v)
+              : await prefs.setString(key, v.toString());
       if (!ok) {
         rollback();
         AppLog.instance.log('[Music] 偏好写入返回 false（已回滚）：$key');
@@ -254,5 +272,23 @@ class SettingsStore {
     final old = musicSource.value;
     musicSource.value = s;
     await _write(_kMusicSource, s.key, () => musicSource.value = old);
+  }
+
+  Future<void> setListenGrid(int v) async {
+    final old = listenGrid.value;
+    listenGrid.value = v;
+    await _write(_kListenGrid, v, () => listenGrid.value = old);
+  }
+
+  Future<void> setAlbumGrid(int v) async {
+    final old = albumGrid.value;
+    albumGrid.value = v;
+    await _write(_kAlbumGrid, v, () => albumGrid.value = old);
+  }
+
+  Future<void> setAlbumSortDesc(bool v) async {
+    final old = albumSortDesc.value;
+    albumSortDesc.value = v;
+    await _write(_kAlbumSortDesc, v, () => albumSortDesc.value = old);
   }
 }

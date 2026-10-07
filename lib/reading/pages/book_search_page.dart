@@ -17,12 +17,10 @@ import '../theme/jelly_theme.dart';
 import '../services/settings_service.dart';
 import '../widgets/jelly_book_card.dart';
 import '../widgets/jelly_nav_bar.dart';
-import '../widgets/jelly_icon_menu_button.dart';
-import '../widgets/jelly_ring_button.dart';
+import '../widgets/jelly_sliding_actions.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_pull_cord.dart';
 import '../widgets/guide_overlay.dart';
-import '../widgets/reading_view_toggle.dart';
 import '../widgets/staggered_entrance.dart';
 import 'book_detail_page.dart';
 import 'book_source_search_page.dart';
@@ -83,7 +81,6 @@ class _BookSearchPageState extends State<BookSearchPage>
   // 首页推荐流（z-library「最受欢迎」）：打开图书页自动加载，
   // 不再让用户面对空态先选分类/搜索（用户 2026-10-06 要求恢复内容）。
   bool _homeLoading = false;
-  bool _homeLoaded = false;
   String? _homeError;
 
   // 分类额外过滤条件：年份/语言仅分类模式用；格式 _filterExtensions 与搜索页小标签
@@ -95,6 +92,11 @@ class _BookSearchPageState extends State<BookSearchPage>
   int? _filterYearTo;
   List<String> _filterLanguages = [];
   List<String> _filterExtensions = [];
+
+  /// 格式筛选是否已由用户显式激活（点过任意格式标签 = true；点「推荐」回到
+  /// 推荐流 = false）。用于让「推荐」圆钮与「全部」标签**互斥高亮**：
+  /// 初始/推荐态 → 推荐钮亮、「全部」不亮；点了格式 → 推荐钮灭、所选格式亮。
+  bool _formatActive = false;
 
   bool _showBackToTop = false;
   bool _historyVisible = false;
@@ -220,7 +222,6 @@ class _BookSearchPageState extends State<BookSearchPage>
       if (!mounted) return;
       setState(() {
         _result = r;
-        _homeLoaded = true;
         _homeLoading = false;
       });
       _log('首页推荐加载完成: ${r.items.length} 条');
@@ -228,7 +229,6 @@ class _BookSearchPageState extends State<BookSearchPage>
       if (!mounted) return;
       setState(() {
         _homeLoading = false;
-        _homeLoaded = false;
         _homeError = _friendlyError(e);
       });
       _log('首页推荐加载失败: $_homeError');
@@ -236,7 +236,6 @@ class _BookSearchPageState extends State<BookSearchPage>
       if (!mounted) return;
       setState(() {
         _homeLoading = false;
-        _homeLoaded = false;
         _homeError = '推荐加载失败';
       });
       _log('首页推荐异常: $e');
@@ -630,6 +629,18 @@ class _BookSearchPageState extends State<BookSearchPage>
     // 动画继续飞向旧目标 → 视图"切不回来"。动画中一律强制重定向。
     if (_tabController.index != target || _tabController.indexIsChanging) {
       _tabController.animateTo(target);
+      // ⚠️ 兜底（用户 2026-10-07：「图书没有切换」）：
+      //   本页若正处在**没被显示**的 tab（IndexedStack 里）或被重建，
+      //   `animateTo` 的动画有时不会推进（TabBarView 未挂载/被回收）
+      //   ⇒ 表现为"显示设置里改了图书视图，图书页却没变"✗
+      //   这里下一帧对一次：动画没在跑且还没到位就直接跳过去 ✓
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (!_tabController.indexIsChanging &&
+            _tabController.index != target) {
+          _tabController.index = target;
+        }
+      });
     }
   }
 
@@ -819,41 +830,20 @@ class _BookSearchPageState extends State<BookSearchPage>
                         // 搜索框占据剩余宽度（Expanded 让右侧图标始终贴边）
                         Expanded(child: _buildSearchBar(isDark)),
                         const SizedBox(width: 8),
-                        // 指环切换菜单：**只保留视图 + 分类筛选**
-                        // （已下载/历史/收藏/下载/豆瓣排行收敛到右侧聚合按钮）
-                        JellyRingButton(
-                          isDark: isDark,
-                          tooltip: '视图与分类',
-                          menuBuilder: (ctx) => JellyRingMenuPanel(
-                            isDark: isDark,
-                            title: '视图与分类',
-                            children: [
-                              // 视图切换（网格/列表）
-                              JellyRingMenuRow(
-                                isDark: isDark,
-                                label: '视图',
-                                child: _buildViewToggle(isDark),
-                              ),
-                              // 分类筛选（年份/语言/格式）
-                              JellyRingMenuRow(
-                                isDark: isDark,
-                                label: '分类筛选',
-                                child: _buildCategoryButton(isDark),
-                              ),
-                            ],
-                          ),
-                        ),
+                        // ⚠️ 用户 2026-10-07（第二轮修正）：
+                        //   · **筛选按钮单独拉出来** ✓ —— 与漫画页/书源页一致，
+                        //     直接是那个 tune 按钮（原来藏在「视图与分类」指环菜单里 ✗）
+                        //   · 视图（列表/宫格）已统一收到「我的 → 显示设置」✓
+                        //   · 其余 4 个动作叠在一起、左右滑动轮换 ✓
+                        _buildCategoryButton(isDark),
                         const SizedBox(width: 6),
-                        // 聚合菜单：浏览历史 / 收藏 / 下载 / 豆瓣排行
-                        // （纯图标下拉菜单栏；登录入口在设置界面里）
-                        JellyIconMenuButton(
+                        JellySlidingActions(
                           isDark: isDark,
-                          tooltip: '历史 · 收藏 · 下载 · 排行',
                           actions: [
-                            (
+                            JellyAction(
                               icon: Icons.history_rounded,
                               tooltip: '浏览记录',
-                              onTap: () => Navigator.push(
+                              onPressed: () => Navigator.push(
                                 context,
                                 MaterialPageRoute(
                                   // 历史统一界面：漫画/图书聚合（showTabs 默认 true）
@@ -861,10 +851,10 @@ class _BookSearchPageState extends State<BookSearchPage>
                                 ),
                               ),
                             ),
-                            (
+                            JellyAction(
                               icon: Icons.favorite_rounded,
                               tooltip: '收藏',
-                              onTap: () => Navigator.push(
+                              onPressed: () => Navigator.push(
                                 context,
                                 MaterialPageRoute(
                                   // 收藏统一界面：漫画/图书聚合 + 返回按钮
@@ -873,10 +863,10 @@ class _BookSearchPageState extends State<BookSearchPage>
                                 ),
                               ),
                             ),
-                            (
+                            JellyAction(
                               icon: Icons.file_download_rounded,
                               tooltip: '下载',
-                              onTap: () => Navigator.push(
+                              onPressed: () => Navigator.push(
                                 context,
                                 MaterialPageRoute(
                                   // 下载记录页（参考图 IMG_8397：5 状态 tab）
@@ -885,10 +875,10 @@ class _BookSearchPageState extends State<BookSearchPage>
                                 ),
                               ),
                             ),
-                            (
+                            JellyAction(
                               icon: Icons.leaderboard_rounded,
                               tooltip: '豆瓣排行',
-                              onTap: () => Navigator.push(
+                              onPressed: () => Navigator.push(
                                 context,
                                 MaterialPageRoute(
                                   builder: (_) => const DoubanRankingPage(),
@@ -947,25 +937,14 @@ class _BookSearchPageState extends State<BookSearchPage>
     );
   }
 
-  /// 视图切换（统一控件）：列表 / 宫格·3列 / 宫格·4列 / 宫格·5列。
+  /// 视图切换 —— **已按要求从顶栏移除**。
   ///
-  /// 宫格/列表状态走 `BookViewMode().isGrid`（services/book_view_mode.dart，
-  /// 与图书收藏页联动）；宫格列数走跨页面共享的 `ReadingLayout()`。
-  /// （用户 2026-10-07：三页统一，宫格支持 3/4/5 列）
-  Widget _buildViewToggle(bool isDark) {
-    return ListenableBuilder(
-      listenable: BookViewMode(),
-      builder: (context, _) => ReadingViewToggle(
-        isDark: isDark,
-        isGrid: BookViewMode().isGrid,
-        onChanged: (grid, columns) {
-          FocusScope.of(context).unfocus();
-          ReadingLayout().setColumns(columns);
-          BookViewMode().set(grid);
-        },
-      ),
-    );
-  }
+  /// 用户 2026-10-07：「将视图按钮只在我的里面的显示设置里面就行」
+  ///   ⇒ 图书页顶栏只留**筛选**按钮 ✓
+  ///   ⇒ 视图（列表 / 宫格·3/4/5 列）统一在
+  ///      「我的 → 显示设置 → 图书搜索页视图」里选 ✓
+  ///      （那边调用的是同一个 `ReadingViewToggle.showSheet`，
+  ///        仍然写 `BookViewMode` + `ReadingLayout`，本页照旧实时联动 ✓）
 
   /// 「推荐」按钮 —— 固定在格式标签行**最左侧**（与漫画页「聚搜」按钮同款
   /// 位置与样式：32 圆钮、卡片底、主色图标，选中态用主色实心）。
@@ -974,8 +953,14 @@ class _BookSearchPageState extends State<BookSearchPage>
   /// 聚搜按钮一样固定在那里；推荐里面的就是图书的那个推荐内容」——
   /// 所以点它就是**回到推荐流**（z-library「最受欢迎」，与打开图书页默认加载的
   /// 是同一份数据 `_loadHome()`）。
+  ///
+  /// 高亮 = 推荐态：未激活格式筛选 且 无关键词/分类 且 推荐流已有内容。
+  /// （与「全部」标签互斥 —— 修复"推荐钮 + 全部同时高亮"）
   Widget _recommendChip(bool isDark) {
-    final active = !_categoryMode && _keyword.isEmpty && _result.items.isNotEmpty;
+    final active = !_formatActive &&
+        !_categoryMode &&
+        _keyword.isEmpty &&
+        _result.items.isNotEmpty;
     return GestureDetector(
       onTap: _showRecommendations,
       child: Container(
@@ -1015,6 +1000,7 @@ class _BookSearchPageState extends State<BookSearchPage>
       _selectedCategory = null;
       _errorMsg = null;
       _historyVisible = false;
+      _formatActive = false; // 回到推荐态：「全部」标签取消高亮（与推荐钮互斥）
     });
     await _loadHome();
   }
@@ -1047,12 +1033,16 @@ class _BookSearchPageState extends State<BookSearchPage>
 
   Widget _buildFormatChip(BookFormat f, bool isDark) {
     final isAll = f.value == null;
+    // 「全部」只在高亮**激活了格式筛选且未选具体格式**时才亮；
+    // 初始/推荐态（未激活）不亮 —— 避免与「推荐」圆钮同时高亮。
     final selected = isAll
-        ? _filterExtensions.isEmpty
-        : _filterExtensions.contains(f.value);
+        ? _formatActive && _filterExtensions.isEmpty
+        : _formatActive && _filterExtensions.contains(f.value);
     return GestureDetector(
       onTap: () {
         setState(() {
+          // 点任意格式标签 = 显式进入格式筛选态（「推荐」圆钮随之灭）
+          _formatActive = true;
           if (isAll) {
             _filterExtensions.clear();
           } else {

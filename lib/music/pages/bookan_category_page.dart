@@ -1,16 +1,15 @@
 import 'package:flutter/material.dart';
 
-import '../models/models.dart';
+import '../../common/theme.dart';
 import '../services/music_api.dart';
 import '../theme/music_theme.dart';
-import '../../common/theme.dart';
-import '../widgets/music_components.dart';
+import '../widgets/listen_category_content_page.dart';
 import 'bookan_album_page.dart';
 
 /// 博看听书的**分类浏览**（有声书：相声评书 / 国学经典 / 故事会…）。
 ///
-/// 与喜马拉雅同形态（分类 → 专辑网格 → 专辑单集页），但数据源是
-/// **纯 Dart 直连博看官方接口**（`MusicApi.bookan*`），不走 Node。
+/// 分类以**宫格**展示（与发现页"全部分类"同款），点击分类直接进入
+/// 该分类的**专辑内容页**（搜索 + 视图切换 + 分页），不再"把分类再列表一次"。
 class BookanCategoryPage extends StatefulWidget {
   const BookanCategoryPage({super.key});
 
@@ -19,277 +18,108 @@ class BookanCategoryPage extends StatefulWidget {
 }
 
 class _BookanCategoryPageState extends State<BookanCategoryPage> {
-  bool _loading = true;
-  String _error = '';
-  List<({String id, String name})> _cats = const [];
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = '';
-    });
-    try {
-      // 博看分类是固定配置（官方实例的 11 个分类），本地直接返回
-      final cats = MusicApi.bookanCategories;
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _cats = cats;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = '$e';
-      });
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
+    final cats = MusicApi.bookanCategories;
     return Scaffold(
       backgroundColor: MusicTheme.background,
       appBar: AppBar(title: const Text('博看')),
-      body: _loading
-          ? Center(
-              child: SizedBox(
-                width: 26,
-                height: 26,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2.4, color: MusicTheme.tint),
-              ),
-            )
-          : _error.isNotEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(_error,
-                          style: TextStyle(
-                              color: MusicTheme.secondary,
-                              fontSize: AppTheme.fontBody)),
-                      const SizedBox(height: 14),
-                      TextButton(
-                          onPressed: _load,
-                          child: Text('重试',
-                              style: TextStyle(color: MusicTheme.tint))),
-                    ],
-                  ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  itemCount: _cats.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (_, i) {
-                    final c = _cats[i];
-                    return ListTile(
-                      leading: Icon(Icons.headphones_rounded,
-                          color: MusicTheme.tint),
-                      title: Text(c.name,
-                          style: TextStyle(color: MusicTheme.label)),
-                      trailing: Icon(Icons.chevron_right_rounded,
-                          color: MusicTheme.secondary),
-                      onTap: () => Navigator.of(context).push<void>(
-                        MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
-                          builder: (_) => _AlbumListPage(
-                            categoryId: c.id,
-                            categoryName: c.name,
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-    );
-  }
-}
-
-/// 某分类下的专辑列表（2 列网格 + 手动"加载更多"）。
-class _AlbumListPage extends StatefulWidget {
-  const _AlbumListPage({required this.categoryId, required this.categoryName});
-
-  final String categoryId;
-  final String categoryName;
-
-  @override
-  State<_AlbumListPage> createState() => _AlbumListPageState();
-}
-
-class _AlbumListPageState extends State<_AlbumListPage> {
-  final _items = <Song>[];
-  bool _loading = true;
-  bool _loadingMore = false;
-  String _error = '';
-  int _page = 1;
-  bool _hasMore = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    if (_loadingMore || !_hasMore) return;
-    setState(() {
-      if (_items.isEmpty) _loading = true;
-      _loadingMore = true;
-    });
-    final r = await MusicApi.instance
-        .bookanCategory(widget.categoryId, page: _page);
-    if (!mounted) return;
-    setState(() {
-      _loading = false;
-      _loadingMore = false;
-      if (!r.ok) {
-        _error = r.message;
-        _hasMore = false;
-        return;
-      }
-      if (r.list.isEmpty) {
-        _hasMore = false;
-        return;
-      }
-      _items.addAll(r.list);
-      _page++;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: MusicTheme.background,
-      appBar: AppBar(
-          title: Text(widget.categoryName,
-              maxLines: 1, overflow: TextOverflow.ellipsis)),
-      body: _loading
-          ? Center(
-              child: SizedBox(
-                width: 26,
-                height: 26,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2.4, color: MusicTheme.tint),
-              ),
-            )
-          : _error.isNotEmpty && _items.isEmpty
-              ? Center(
-                  child: Text(_error,
-                      style: TextStyle(
-                          color: MusicTheme.secondary,
-                          fontSize: AppTheme.fontBody)),
-                )
-              : Column(
-                  children: [
-                    Expanded(
-                      child: GridView.builder(
-                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          mainAxisSpacing: 16,
-                          crossAxisSpacing: 12,
-                          mainAxisExtent: () {
-                            final w = (MediaQuery.sizeOf(context).width -
-                                    16 * 2 -
-                                    12) /
-                                2;
-                            final ts = MediaQuery.textScalerOf(context);
-                            return w +
-                                6 +
-                                ts.scale(12) * 1.35 * 2 +
-                                2 +
-                                ts.scale(11) * 1.35 +
-                                8;
-                          }(),
-                        ),
-                        itemCount: _items.length,
-                        itemBuilder: (_, i) {
-                          final a = _items[i];
-                          return _AlbumGridCard(
-                            song: a,
-                            onTap: () => Navigator.of(context).push<void>(
-                              MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
-                                builder: (_) => BookanAlbumPage(
-                                  albumId: '${a.id}',
-                                  albumName: a.name,
-                                ),
-                              ),
-                            ),
-                          );
-                        },
+      body: GridView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 12,
+          mainAxisExtent: () {
+            final ts = MediaQuery.textScalerOf(context);
+            final textH = ts.scale(AppTheme.fontBody) * 1.4;
+            return (36.0 + 12 * 2) > textH + 12 * 2
+                ? 36.0 + 12 * 2 + 4
+                : textH + 12 * 2 + 4;
+          }(),
+        ),
+        itemCount: cats.length,
+        itemBuilder: (_, i) {
+          final c = cats[i];
+          return _CategoryTile(
+            name: c.name,
+            onTap: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                settings: const RouteSettings(name: 'music:page'),
+                builder: (_) => ListenCategoryContentPage(
+                  title: c.name,
+                  sourceLabel: '博看',
+                  loader: (page) =>
+                      MusicApi.instance.bookanCategory(c.id, page: page),
+                  onOpenAlbum: (ctx, song) =>
+                      Navigator.of(ctx).push<void>(
+                    MaterialPageRoute(
+                      settings: const RouteSettings(name: 'music:page'),
+                      builder: (_) => BookanAlbumPage(
+                        albumId: '${song.id}',
+                        albumName: song.name,
                       ),
                     ),
-                    if (_hasMore)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 14),
-                        child: _loadingMore
-                            ? SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: MusicTheme.tint),
-                              )
-                            : TextButton(
-                                onPressed: _load,
-                                child: Text('加载更多',
-                                    style: TextStyle(color: MusicTheme.tint)),
-                              ),
-                      ),
-                  ],
+                  ),
                 ),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
 
-/// 专辑网格卡：1:1 封面 + 两行标题 + 「博看 · 作者」。
-class _AlbumGridCard extends StatelessWidget {
-  const _AlbumGridCard({required this.song, required this.onTap});
+/// 分类宫格卡（图标 + 名称 + 箭头），与发现页"全部分类"同款。
+class _CategoryTile extends StatelessWidget {
+  const _CategoryTile({required this.name, required this.onTap});
 
-  final Song song;
+  final String name;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final artist = song.artists.trim();
     return GestureDetector(
       onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AspectRatio(
-            aspectRatio: 1,
-            child: LayoutBuilder(
-              builder: (c, cons) => CoverImage(
-                url: song.coverUrl,
-                size: cons.maxWidth,
-                cornerRadius: 10,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: MusicTheme.card,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: MusicTheme.label.withValues(alpha: 0.06),
+            width: 0.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: MusicTheme.tint.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(Icons.graphic_eq_rounded,
+                  color: MusicTheme.tint, size: 20),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: MusicTheme.label,
+                    fontSize: AppTheme.fontBody,
+                    fontWeight: FontWeight.w500),
               ),
             ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            song.name,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-                color: MusicTheme.label,
-                fontSize: AppTheme.fontFootnote,
-                height: 1.25,
-                fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            '博看 · ${artist.isEmpty ? '主播' : artist}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: MusicTheme.secondary, fontSize: 11),
-          ),
-        ],
+            Icon(Icons.chevron_right_rounded,
+                color: MusicTheme.secondary, size: 18),
+          ],
+        ),
       ),
     );
   }

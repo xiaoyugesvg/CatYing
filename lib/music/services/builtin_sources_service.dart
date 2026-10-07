@@ -56,10 +56,12 @@ class BuiltinSourcesService {
   /// 不覆盖用户的修改，也不把用户关掉的开关重新打开。
   /// [force] 为 true 时无条件用出厂版覆盖重写全部内置源（"恢复默认"）。
   Future<void> init({bool force = false}) async {
-    // ✅ 用户 2026-10-07：名称带 dj/DJ 的 MusicFree 源**全部去掉** ——
+    // ✅ 用户 2026-10-07：**下架名单**里的 MusicFree 源全部去掉 ——
+    //   第一批是名称带 dj/DJ 的；第二批是脚本里 `require('cheerio')` 的 6 个
+    //   （相声评书 / 水晶舞曲 / 172Mix / 黑色音频 / 好听轻音乐 / 电音阁）。
     //   已有设备上 store 里可能还留着（init 只补"缺失"、不删"已存在"），
     //   所以每次启动先显式清一遍 ✓
-    await _purgeDjMusicFreeSources();
+    await _purgeBlockedMusicFreeSources();
     final lx = await _loadLxSources();
     final mf = await _loadMusicFreeSources();
     final all = [...lx, ...mf];
@@ -133,6 +135,11 @@ class BuiltinSourcesService {
     (path: 'grass', name: 'Grass'),
     (path: 'juhe', name: 'JuheApi'),
     (path: 'qdy', name: 'QDY'),
+    // ✅ 用户 2026-10-07 提供的两个洛雪(lx)音源，随包内置 ✓
+    //   两者都用 `globalThis.lx.EVENT_NAMES`（Node 求值实测确认是 lx 格式，
+    //   不是 MusicFree 插件）⇒ 走本列表而非 MusicFree 索引 ✓
+    (path: 'dujia', name: '独家音源'),
+    (path: 'quandouyao', name: '全豆要聚合'),
   ];
 
   Future<List<ThirdPartySource>> _loadLxSources() async {
@@ -255,8 +262,9 @@ class BuiltinSourcesService {
     final out = <ThirdPartySource>[];
     for (final entry in index) {
       final name = entry['name']!;
-      // ✅ 用户 2026-10-07：名称带 dj/DJ 的源不注册（远端索引也走这道闸）
-      if (_isDjName(name)) continue;
+      // ✅ 用户 2026-10-07：**下架名单**里的源不注册（远端索引也走这道闸）
+      //   第一批 dj/DJ；第二批 require('cheerio') 的 6 个 ✓
+      if (_isBlockedName(name)) continue;
       final url = entry['url']!;
       final fileName = _fileNameFromUrl(url);
       // 稳定 id：用插件文件名作为 id 的一部分
@@ -334,8 +342,9 @@ class BuiltinSourcesService {
 
     for (final entry in remoteIndex) {
       final name = entry['name']!;
-      // ✅ 用户 2026-10-07：名称带 dj/DJ 的源既不升级也不新增
-      if (_isDjName(name)) continue;
+      // ✅ 用户 2026-10-07：**下架名单**里的源既不升级也不新增
+      //   （dj/DJ 一批 + require('cheerio') 一批）✓
+      if (_isBlockedName(name)) continue;
       final url = entry['url']!;
       final fileName = _fileNameFromUrl(url);
       final id = 'builtin_mf_$fileName';
@@ -408,24 +417,41 @@ class BuiltinSourcesService {
     return seg.isEmpty ? 'unknown' : seg.last;
   }
 
-  /// 名称里是否带 `dj`（不区分大小写）—— 用户 2026-10-07 要求把
-  /// 这类 MusicFree 源**全部去掉**（DJ 类音源）。
+  /// **下架名单**：这些 MusicFree 源不再内置、也不再注册。
   ///
-  /// 判据按**名称**（不是 url）：`DJ多多 / 火龙DJ / djuu DJ / SpaceDJ …`
-  /// 一律命中；像 `水晶舞曲`（url 里含 dj14 但名字没有）保持保留 ✓。
-  static bool _isDjName(String name) => name.toLowerCase().contains('dj');
+  /// 用户 2026-10-07 分两批下架：
+  ///   · 第一批 —— 名称带 `dj/DJ` 的 DJ 类音源（`DJ多多 / 火龙DJ / djuu DJ /
+  ///     SpaceDJ …`）。判据按**名称**而不是 url：像 `水晶舞曲` 当时 url 含
+  ///     `dj14` 但名字里没有，所以那一轮保留了下来 ✓
+  ///   · 第二批（本轮）—— 脚本里写 `const cheerio = require('cheerio')` 的
+  ///     6 个源：`相声评书 / 水晶舞曲 / 172Mix / 黑色音频 / 好听轻音乐 /
+  ///     电音阁`。这 6 个都靠 cheerio 解析 HTML 页面，按要求**一并去掉** ✓
+  static const Set<String> _blockedNames = {
+    '相声评书',
+    '水晶舞曲',
+    '172Mix',
+    '黑色音频',
+    '好听轻音乐',
+    '电音阁',
+  };
 
-  /// 清掉**已经注册过**的 DJ 类 MusicFree 内置源 + 它们的脚本文件缓存。
+  /// 命中下架名单？`dj/DJ` 按包含判断（大小写不敏感），其余按**精确名称**判断。
+  static bool _isBlockedName(String name) {
+    if (name.toLowerCase().contains('dj')) return true;
+    return _blockedNames.contains(name.trim());
+  }
+
+  /// 清掉**已经注册过**的下架 MusicFree 内置源 + 它们的脚本文件缓存。
   ///
   /// 为什么必须单独做这一步：上面的过滤只能挡住"**之后**注册"的源 ✗，
   /// 而已经装过 App 的设备里那些 DJ 源**还在 store 里** ✓
   /// （`init` 只为"缺失的"补源 ✓、不会删除"已存在的" ✗）
   /// ⇒ 不显式删一次，用户删不干净 ✓。
-  Future<void> _purgeDjMusicFreeSources() async {
+  Future<void> _purgeBlockedMusicFreeSources() async {
     try {
       final store = ThirdPartySourceStore.instance;
       final doomed = store.all
-          .where((s) => s.isMusicFree && _isDjName(s.name))
+          .where((s) => s.isMusicFree && _isBlockedName(s.name))
           .toList();
       if (doomed.isEmpty) return;
       for (final s in doomed) {
@@ -436,9 +462,9 @@ class BuiltinSourcesService {
         }
         await store.remove(s.id);
       }
-      debugPrint('[BuiltinSources] 已移除 DJ 类 MusicFree 源 ${doomed.length} 个');
+      debugPrint('[BuiltinSources] 已移除下架 MusicFree 源 ${doomed.length} 个');
     } catch (e) {
-      debugPrint('[BuiltinSources] 移除 DJ 类 MusicFree 源失败: $e');
+      debugPrint('[BuiltinSources] 移除下架 MusicFree 源失败: $e');
     }
   }
 }

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import '../services/book_view_mode.dart';
+import '../services/reading_layout.dart';
 import '../services/settings_service.dart';
 import '../services/view_mode.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/bookshelf_icon.dart';
 import '../widgets/jelly_segmented_toggle.dart';
+import '../widgets/reading_view_toggle.dart';
 import '../../common/theme.dart';
 
 /// 显示设置页：漫画/图书搜索页视图 + 启动默认首页。
@@ -16,34 +18,11 @@ class DisplaySettingsPage extends StatefulWidget {
   State<DisplaySettingsPage> createState() => _DisplaySettingsPageState();
 }
 
-class _DisplaySettingsPageState extends State<DisplaySettingsPage>
-    with TickerProviderStateMixin {
-  late final TabController _mangaViewCtrl;
-  late final TabController _bookViewCtrl;
-  bool _mangaViewAnimating = false;
-  bool _bookViewAnimating = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _mangaViewCtrl = TabController(
-      length: 2,
-      vsync: this,
-      initialIndex: ViewMode().isGrid ? 0 : 1,
-    );
-    _bookViewCtrl = TabController(
-      length: 2,
-      vsync: this,
-      initialIndex: BookViewMode().isGrid ? 0 : 1,
-    );
-  }
-
-  @override
-  void dispose() {
-    _mangaViewCtrl.dispose();
-    _bookViewCtrl.dispose();
-    super.dispose();
-  }
+class _DisplaySettingsPageState extends State<DisplaySettingsPage> {
+  // ⚠️ 用户 2026-10-07：「将视图按钮只在我的里面的显示设置里面就行」
+  //   ⇒ 视图换成了与页面共用的**同一个选择表**（列表 / 宫格·3/4/5 列），
+  //     这里不再需要两个 2 段的 TabController 做动画切换 ✓
+  //   ⇒ 同时补上**书源页视图**（原来只有漫画/图书两项）✓
 
   @override
   Widget build(BuildContext context) {
@@ -87,73 +66,96 @@ class _DisplaySettingsPageState extends State<DisplaySettingsPage>
             builder: (context, _) => _buildDefaultContentCard(isDark),
           ),
           const SizedBox(height: 12),
-          _buildCard(
+          _buildViewCard(
             isDark,
             title: '漫画搜索页视图',
             subtitle: '漫画搜索与漫画收藏页的卡片布局',
-            trailing: ListenableBuilder(
-              listenable: ViewMode(),
-              builder: (context, _) {
-                final target = ViewMode().isGrid ? 0 : 1;
-                if (!_mangaViewAnimating && _mangaViewCtrl.index != target) {
-                  _mangaViewCtrl.animateTo(target);
-                }
-                return AnimatedBuilder(
-                  animation: _mangaViewCtrl.animation!,
-                  builder: (context, _) => JellySegmentedToggle(
-                    index: _mangaViewCtrl.animation!.value,
-                    onChanged: (i) {
-                      _mangaViewAnimating = true;
-                      _mangaViewCtrl.animateTo(i);
-                      ViewMode().set(i == 0);
-                      Future.delayed(const Duration(milliseconds: 320), () {
-                        if (mounted) _mangaViewAnimating = false;
-                      });
-                    },
-                    segments: const [
-                      JellySegmentData(icon: Icons.grid_view_rounded),
-                      JellySegmentData(icon: Icons.view_list_rounded),
-                    ],
-                  ),
-                );
-              },
-            ),
+            mode: ViewMode(),
+            isGridOf: () => ViewMode().isGrid,
+            setGrid: (g) => ViewMode().set(g),
           ),
           const SizedBox(height: 12),
-          _buildCard(
+          _buildViewCard(
             isDark,
             title: '图书搜索页视图',
             subtitle: '图书搜索与图书收藏页的卡片布局',
-            trailing: ListenableBuilder(
-              listenable: BookViewMode(),
-              builder: (context, _) {
-                final target = BookViewMode().isGrid ? 0 : 1;
-                if (!_bookViewAnimating && _bookViewCtrl.index != target) {
-                  _bookViewCtrl.animateTo(target);
-                }
-                return AnimatedBuilder(
-                  animation: _bookViewCtrl.animation!,
-                  builder: (context, _) => JellySegmentedToggle(
-                    index: _bookViewCtrl.animation!.value,
-                    onChanged: (i) {
-                      _bookViewAnimating = true;
-                      _bookViewCtrl.animateTo(i);
-                      BookViewMode().set(i == 0);
-                      Future.delayed(const Duration(milliseconds: 320), () {
-                        if (mounted) _bookViewAnimating = false;
-                      });
-                    },
-                    segments: const [
-                      JellySegmentData(icon: Icons.grid_view_rounded),
-                      JellySegmentData(icon: Icons.view_list_rounded),
-                    ],
-                  ),
-                );
-              },
-            ),
+            mode: BookViewMode(),
+            isGridOf: () => BookViewMode().isGrid,
+            setGrid: (g) => BookViewMode().set(g),
+          ),
+          const SizedBox(height: 12),
+          // 书源页视图（本轮新增：原来只有漫画/图书两项）
+          _buildViewCard(
+            isDark,
+            title: '书源页视图',
+            subtitle: '书源搜索结果的卡片布局',
+            mode: SourceViewMode(),
+            isGridOf: () => SourceViewMode().isGrid,
+            setGrid: (g) => SourceViewMode().set(g),
           ),
         ],
       ),
+    );
+  }
+
+  /// 视图卡片：右侧显示当前选择，点一下弹出与页面**共用**的「视图」选择表
+  /// （列表 / 宫格·一排 3 个 / 4 个 / 5 个）✓
+  ///
+  /// 用户 2026-10-07：「将视图按钮只在我的里面的显示设置里面就行」
+  ///   ⇒ 三个页面的顶栏都不再放视图按钮，统一到这里选 ✓
+  Widget _buildViewCard(
+    bool isDark, {
+    required String title,
+    required String subtitle,
+    required Listenable mode,
+    required bool Function() isGridOf,
+    required void Function(bool) setGrid,
+  }) {
+    return ListenableBuilder(
+      // 同时听视图模式 + 宫格列数（列数变了要立刻更新右侧文案）
+      listenable: Listenable.merge([mode, ReadingLayout()]),
+      builder: (context, _) {
+        final grid = isGridOf();
+        final label =
+            grid ? '宫格 · 一排 ${ReadingLayout().columns} 个' : '列表';
+        return _buildCard(
+          isDark,
+          title: title,
+          subtitle: subtitle,
+          trailing: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => ReadingViewToggle.showSheet(
+              context,
+              isDark: isDark,
+              isGrid: grid,
+              onChanged: (g, cols) {
+                ReadingLayout().setColumns(cols);
+                setGrid(g);
+              },
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontSubhead,
+                    color: JellyTheme.textSecondary,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(
+                  grid
+                      ? Icons.grid_view_rounded
+                      : Icons.view_list_rounded,
+                  size: 18,
+                  color: JellyTheme.primary,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

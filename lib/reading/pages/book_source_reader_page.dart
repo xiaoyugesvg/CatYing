@@ -1934,14 +1934,25 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final pageMode =
         _rs.pageMode.paginates && _pages.isNotEmpty && _images.isEmpty;
     return Container(
+      // ✅ 用户 2026-10-07：「书源的功能栏改成这种**悬浮**的」——
+      //   原来：整条**贴边**（`BorderRadius.vertical(top:…)` 只有上两角是圆角，
+      //         左右/下都顶到屏幕边）⇒ 看着就是"底部工具条" ✗
+      //   现在：四周留白 + **四角全圆** + 向下投影 ⇒ 一张**悬浮卡片** ✓
+      //   ⚠️ 用 `margin`（而不是改成 `Positioned` 覆盖）：本页这个功能栏是
+      //     **常驻**的（不随 `_showBar` 一起收起），若改成覆盖式，
+      //     正文最后几行会被**永久压在面板下面** ✗ —— 留白式同样有悬浮观感，
+      //     又不吃正文 ✓
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
       decoration: BoxDecoration(
         color: bgTop.withValues(alpha: 0.97),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+        // 四角全圆（原来是 `BorderRadius.vertical(top: …)`，只有上两角）
+        borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.10),
-            blurRadius: 16,
-            offset: const Offset(0, -4),
+            color: Colors.black.withValues(alpha: 0.16),
+            blurRadius: 20,
+            // 投影朝**下**（原来朝上 `Offset(0, -4)`，因为贴边只能往上打影）
+            offset: const Offset(0, 6),
           ),
         ],
       ),

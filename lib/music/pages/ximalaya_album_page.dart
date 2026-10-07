@@ -5,6 +5,7 @@ import '../services/music_api.dart';
 import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../../common/theme.dart';
+import '../widgets/listen_episode_list.dart';
 
 /// 喜马拉雅专辑页（有声书/播客）——「专辑 = 影片，单集 = 剧集」。
 ///
@@ -155,61 +156,15 @@ class _XimalayaAlbumPageState extends State<XimalayaAlbumPage> {
         Expanded(
           // ── 🔴 必须监听 player（修"点歌后行号不变色"）────────────────
           //
-          // 下面 `playing` 读的是 `_player.currentSong`，而本页原来
-          // **没有任何 player 监听**、`onTap` 也不 `setState` →
-          // 点了第 5 集开始播放，第 5 行的序号/标题**不会**变成主题色 ✗
-          //（要等页面因别的原因重建才更新）
-          //
-          // `Listenable.merge([_svc, _player])` 是项目里的标准解法
-          //（`local_music_page.dart` 的注释专门写了这一条），
-          // `ListenableBuilder` 与 `AnimatedBuilder` 等价。
+          // `ListenableBuilder` 与 `AnimatedBuilder` 等价，保证切歌后
+          // 当前集高亮即时刷新；单集列表自带搜索/视图/定位/排序。
           child: ListenableBuilder(
             listenable: _player,
-            builder: (context, _) => ListView.separated(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            itemCount: _songs.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
-            itemBuilder: (_, i) {
-              final s = _songs[i];
-              final playing =
-                  _player.currentSong?.identityKey == s.identityKey;
-              return ListTile(
-                leading: SizedBox(
-                  width: 28,
-                  child: Text('${i + 1}',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                          color: playing
-                              ? MusicTheme.tint
-                              : MusicTheme.secondary,
-                          fontSize: AppTheme.fontFootnote)),
-                ),
-                title: Row(
-                  children: [
-                    Icon(
-                      Icons.audiotrack_rounded,
-                      size: 15,
-                      color: playing ? MusicTheme.tint : MusicTheme.secondary,
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        s.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: playing ? MusicTheme.tint : MusicTheme.label,
-                          fontWeight:
-                              playing ? FontWeight.w600 : FontWeight.w400,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                // 单集：只播放（方案 C）—— 反馈由**悬浮播放球**提供，不打断浏览
-                onTap: () => _player.playQueue(_songs, index: i),
-              );
-            },
+            builder: (context, _) => ListenEpisodeList(
+              songs: _songs,
+              sourceLabel: '喜雅',
+              currentIdentityKey: _player.currentSong?.identityKey,
+              onPlay: (index) => _player.playQueue(_songs, index: index),
             ),
           ),
         ),

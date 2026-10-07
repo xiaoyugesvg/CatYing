@@ -33,6 +33,10 @@ class BookSiteConfig {
   final String? bookDescDom;
   final String? bookLastChapterDom;
 
+  /// 详情页里"目录页链接"的选择器（legado `ruleBookInfo.tocUrl`）。
+  /// 空 = 目录页即详情页本身（详情页里直接含章节列表）。
+  final String? tocUrlDom;
+
   // ── 目录 ─────────────────────────────────────────────────────
   final String? tocNameDom;
   final String? tocLinkDom;
@@ -72,6 +76,7 @@ class BookSiteConfig {
     this.bookAuthorDom,
     this.bookDescDom,
     this.bookLastChapterDom,
+    this.tocUrlDom,
     this.tocNameDom,
     this.tocLinkDom,
     this.tocUrlPattern,
@@ -107,6 +112,7 @@ class BookSiteConfig {
     bookAuthorDom: j['book_author_dom'] as String?,
     bookDescDom: j['book_desc_dom'] as String?,
     bookLastChapterDom: j['book_last_chapter_dom'] as String?,
+    tocUrlDom: j['toc_url_dom'] as String?,
     tocNameDom: j['toc_name_dom'] as String?,
     tocLinkDom: j['toc_link_dom'] as String?,
     tocUrlPattern: j['toc_url_pattern'] as String?,
@@ -144,6 +150,7 @@ class BookSiteConfig {
     'book_author_dom': bookAuthorDom,
     'book_desc_dom': bookDescDom,
     'book_last_chapter_dom': bookLastChapterDom,
+    'toc_url_dom': tocUrlDom,
     'toc_name_dom': tocNameDom,
     'toc_link_dom': tocLinkDom,
     'toc_url_pattern': tocUrlPattern,

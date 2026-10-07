@@ -109,7 +109,23 @@ class _TVBoxAppState extends State<TVBoxApp> with WidgetsBindingObserver {
         final platformLight =
             View.of(context).platformDispatcher.platformBrightness ==
                 Brightness.light;
-        ThemeModeStore.syncFromPlatform(platformLight);
+        // ⚠️ **不能在 build 里同步改 notifier**（用户 2026-10-07：
+        //   「点击保存后整个界面像多了一层遮罩」，浅色/深色都会发生）✗→✓
+        //
+        // 原因 ✗：`ThemeModeStore.syncFromPlatform()` 会**直接写**
+        //   `AppBrightness.isLight`；而 `AppBrightness.isLight` 正是
+        //   **全局背景层**（`BackgroundService.buildBackground`）和
+        //   `AppTheme.*` 取色的唯一判据 ⇒ 在 build 期间改它 = 同一帧里
+        //   背景层可能先用**另一套场景**（浅色套 = 宣纸米白渐变 + 0.35 白遮罩）
+        //   画了一遍，于是整屏被洗白成"多了一层遮罩"✗ ——
+        //   而设置子页又都是**透明 Scaffold**，这层白就整屏透出来 ✓
+        //   （与截图吻合：系统状态栏 / 悬浮播放球清晰，其余全白 ✓）。
+        //
+        // 平台亮度变化本来就有 `didChangePlatformBrightness()` 兜底，
+        // 这里改成**帧后**同步 ⇒ 不再有"构建中就翻明暗"的中间帧 ✓
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) ThemeModeStore.syncFromPlatform(platformLight);
+        });
         // AppTheme 玻璃色等随 isLight 变化，必须监听后整体重建
         return ValueListenableBuilder<bool>(
           valueListenable: ThemeModeStore.brightnessListenable,

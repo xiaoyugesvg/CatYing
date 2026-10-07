@@ -179,8 +179,11 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
         ),
         const SizedBox(height: AppTheme.spacingLG),
 
-        // ================= 自定义远程服务 =================
-        if (_source == DanmuSource.remote) ...[
+        // ================= 弹幕服务地址（三种来源共用一个地址栏）=================
+        // ⚠️ 原来这块只在「自定义远程」时才显示 ✗ ⇒ 选了本地/订阅自带后
+        //    用户**看不到当前实际用的是哪个地址** ✗（弹幕不显示也无从排查）。
+        //    现在三种来源都显示，直接看到/编辑 `danmu_api_url` ✓
+        ...[
           AppCard(
             dense: true,
             child: Column(
@@ -215,7 +218,7 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              '自定义远程服务',
+                              '弹幕服务地址',
                               style: TextStyle(
                                 color: AppTheme.textPrimary,
                                 fontSize: AppTheme.fontHeadline,
@@ -546,8 +549,13 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
   // ============================================================
 
   /// 三段服务来源选择（本地服务 / 订阅自带 / 自定义远程）
-  /// 订阅自带弹幕服务的默认地址（公开 Dandanplay / 弹弹play API）
-  static const String _builtinDanmuUrl = 'https://api.dandanplay.net';
+  ///
+  /// ⚠️ 原来这里还有个 `_builtinDanmuUrl = 'https://api.dandanplay.net'` ✗ ——
+  /// 已删除：播放器的弹幕请求是 **`{地址}/api/v2/comment?url=...` 的普通 GET**
+  /// （`video_player._danmuGetText`，只带 UA，没有 AppId/签名），
+  /// 弹弹play 的公网接口要 episodeId + X-AppId/X-Signature，两者根本不兼容 ⇒
+  /// 选「订阅自带」只会拉到 0 条弹幕 ✗（"弹幕看不到了"的来源之一）。
+  /// 「订阅自带」的地址应由视频源/订阅下发，不再写死。
   /// 本地服务默认地址
   static const String _localDanmuUrl = 'http://127.0.0.1:11402';
 
@@ -575,17 +583,23 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
                   setState(() => _source = src);
                   final p = await SharedPreferences.getInstance();
                   await p.setString('danmu_source', src.id);
-                  // 切换源时同步更新 danmu_api_url，确保播放器实际用到
-                  switch (src) {
-                    case DanmuSource.local:
-                      await p.setString('danmu_api_url', _localDanmuUrl);
-                      _apiUrl = _localDanmuUrl;
-                    case DanmuSource.builtin:
-                      await p.setString('danmu_api_url', _builtinDanmuUrl);
-                      _apiUrl = _builtinDanmuUrl;
-                    case DanmuSource.remote:
-                      // 自定义模式保留用户输入的地址，不覆盖
-                      break;
+                  // ⚠️ **切换来源不再覆盖已经填好的地址**（修「为啥弹幕看不到了」）
+                  //
+                  // 这里原来是「点一下就改写 danmu_api_url」✗ —— 用户原本能用的
+                  // 地址（自定义远程）只要手滑点一下「本地服务 / 订阅自带」就被
+                  // 冲掉了 ✓ ⇒ 播放器 `_danmuApiUrl` 变成无效地址 ⇒
+                  // `_danmus` 恒为空 ⇒ 弹幕层根本不渲染（`_danmuOn && _danmus.isNotEmpty`）。
+                  //
+                  // 而且原来给「订阅自带」写死的是 `https://api.dandanplay.net` ✗：
+                  // 播放器请求的是 **`{base}/api/v2/comment?url=...` 的普通 GET**
+                  // （见 video_player 的 `_danmuGetText`，只带 UA、不带 AppId/签名），
+                  // 而弹弹play 那个接口要 episodeId + X-AppId/X-Signature ⇒
+                  // 必然拉回 0 条 ⇒ 看起来就是"弹幕没了" ✗。
+                  //
+                  // 现在：只在**地址还空着**时填本地预设，已有地址一律不动 ✓
+                  if (_apiUrl.trim().isEmpty && src == DanmuSource.local) {
+                    await p.setString('danmu_api_url', _localDanmuUrl);
+                    _apiUrl = _localDanmuUrl;
                   }
                 },
                 child: Container(

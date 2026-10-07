@@ -2252,17 +2252,34 @@ class _BookReaderPageState extends State<BookReaderPage> {
                 child: const SizedBox.expand(),
               ),
             ),
-            // 底部栏
-            Container(
-              color: barColor,
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              child: SafeArea(
-                top: false,
+            // 底部功能面板（**悬浮卡片**，对齐参考图 IMG_8582 小说阅读器：
+            // 页码行 + 两行带文字标签的图标）
+            SafeArea(
+              top: false,
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
+                decoration: BoxDecoration(
+                  color: barColor,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.14)
+                        : Colors.black.withValues(alpha: 0.08),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.30),
+                      blurRadius: 20,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // 页码行：上一章 < 页码 > 下一章
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         TextButton(
                           onPressed: _chapterStarts.isNotEmpty
@@ -2270,9 +2287,15 @@ class _BookReaderPageState extends State<BookReaderPage> {
                               : null,
                           child: Icon(Icons.chevron_left, color: iconColor),
                         ),
-                        Text(
-                          _indicatorText(),
-                          style: TextStyle(fontSize: AppTheme.fontFootnote, color: iconColor),
+                        Expanded(
+                          child: Text(
+                            _indicatorText(),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: AppTheme.fontFootnote,
+                              color: iconColor,
+                            ),
+                          ),
                         ),
                         TextButton(
                           onPressed: _chapterStarts.isNotEmpty
@@ -2282,78 +2305,122 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 4),
+                    // 第一行图标：AI 听书 / 图片版式 / 笔记 / 排版
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
-                        // 左组：图片/文本 + 排版
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // PDF（懒加载）强制进图片模式，故切换按钮对 PDF 始终可用；
-                            // 其余格式沿用 >=10 启发式（仅图片书显示）。
-                            if (_imageBlockIndices.length >= 10 ||
-                                _content?.imageLoader != null)
-                              TextButton(
-                                onPressed: _toggleImageMode,
-                                child: Icon(
-                                  _isImageMode
-                                      ? Icons.article_rounded
-                                      : Icons.image_rounded,
-                                  color: iconColor,
-                                ),
-                              ),
-                            if (!_isImageMode)
-                              TextButton(
-                                onPressed: _showTypoSheet,
-                                child: Icon(
-                                  Icons.text_fields_rounded,
-                                  color: iconColor,
-                                ),
-                              ),
-                            // 听书：cmbok 原版没有，按需求补的。
-                            // 走原生 tts_engine（系统 AVSpeechSynthesizer），零插件。
-                            if (!_isImageMode)
-                              TextButton(
-                                onPressed: _toggleTts,
-                                child: Icon(
-                                  _tts.isSpeaking.value
-                                      ? Icons.pause_circle_outline_rounded
-                                      : (_tts.isPaused.value
-                                          ? Icons.play_circle_outline_rounded
-                                          : Icons.headphones_rounded),
-                                  color: _tts.isSpeaking.value
-                                      ? JellyTheme.accent
-                                      : iconColor,
-                                ),
-                              ),
-                          ],
+                        _panelAction(
+                          icon: Icons.auto_awesome_rounded,
+                          label: 'AI',
+                          active: _tts.isSpeaking.value,
+                          iconColor: iconColor,
+                          onTap: _toggleTts,
                         ),
-                        // 中间：番茄钟
-                        const PomodoroButton(),
-                        // 右组：设置 + 目录
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            TextButton(
-                              onPressed: _showReaderSettingsSheet,
-                              child: Icon(
-                                Icons.settings_rounded,
-                                color: iconColor,
+                        if (_imageBlockIndices.length >= 10 ||
+                            _content?.imageLoader != null)
+                          _panelAction(
+                            icon: _isImageMode
+                                ? Icons.article_rounded
+                                : Icons.image_rounded,
+                            label: '图片版式',
+                            iconColor: iconColor,
+                            onTap: _toggleImageMode,
+                          ),
+                        _panelAction(
+                          icon: Icons.edit_note_rounded,
+                          label: '笔记',
+                          iconColor: iconColor,
+                          onTap: _showEditPlaceholder,
+                        ),
+                        if (!_isImageMode)
+                          _panelAction(
+                            icon: Icons.text_fields_rounded,
+                            label: '排版',
+                            iconColor: iconColor,
+                            onTap: _showTypoSheet,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    // 第二行图标：亮度 / 设置 / 目录 / 重置钟
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _panelAction(
+                          icon: Icons.brightness_6_rounded,
+                          label: '亮度',
+                          iconColor: iconColor,
+                          onTap: _showBrightnessSheet,
+                        ),
+                        _panelAction(
+                          icon: Icons.settings_rounded,
+                          label: '设置',
+                          iconColor: iconColor,
+                          onTap: _showReaderSettingsSheet,
+                        ),
+                        _panelAction(
+                          icon: Icons.menu_book_rounded,
+                          label: '目录',
+                          iconColor: iconColor,
+                          onTap: _showToc,
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const PomodoroButton(),
+                              const SizedBox(height: 2),
+                              Text(
+                                '重置钟',
+                                style: TextStyle(
+                                  fontSize: AppTheme.fontCaption,
+                                  color: iconColor,
+                                ),
                               ),
-                            ),
-                            TextButton(
-                              onPressed: _showToc,
-                              child: Icon(
-                                Icons.menu_book_rounded,
-                                color: iconColor,
-                              ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ],
                     ),
                   ],
                 ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 悬浮面板里的图标项（图标 + 下方小字标签，对齐参考图）。
+  Widget _panelAction({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    required Color iconColor,
+    bool active = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 22,
+              color: active ? JellyTheme.accent : iconColor,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: AppTheme.fontCaption,
+                color: iconColor,
               ),
             ),
           ],

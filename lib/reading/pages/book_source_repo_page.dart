@@ -641,18 +641,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
           icon: Icon(Icons.ios_share_rounded, size: 20, color: _titleColor),
           onPressed: store.isEmpty ? null : _shareAll,
         ),
-        // 体检（截图右上第二个，盾牌带 +）：V2.0.7 的「书源体检」
-        IconButton(
-          tooltip: '书源体检',
-          icon: _healthChecking
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : Icon(Icons.verified_user_rounded, size: 20, color: _titleColor),
-          onPressed:
-              (store.isEmpty || _healthChecking) ? null : _runHealthCheck,
-        ),
+        // ✅ 用户 2026-10-07：「去掉一个重复的检测按钮」——
+        //   这里原来还有**第二个**「书源体检」按钮（同一个 `verified_user_rounded`
+        //   图标 + 同一个 `_runHealthCheck`），和上面 `JellySlidingActions` 里那个
+        //   完全重复 ⇒ **已移除** ✓，只保留滑动作栏里的那一个 ✓
         // 搜索 + 多选放在体检之后（截图里没有，但少了不好用）
         IconButton(
           tooltip: _searching ? '关闭搜索' : '搜索书源',

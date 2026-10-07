@@ -209,7 +209,7 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
 
         // 展开时：控制条宽度 ≈ 3 键各 40 + 间距
         // 收起时：只有球本身（54）
-        final contentWidth = _open ? 150.0 : _size;
+        // （定位只按球宽 _size 算右缘，见下方 Positioned 注释）
 
         return Stack(
           children: [
@@ -224,7 +224,16 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
             Positioned(
               // 贴左时按 left 定位；贴右时按 right 定位
               left: toLeft ? x : null,
-              right: toLeft ? null : (screen.width - x - contentWidth),
+              // 🔴 展开条右缘必须对齐**球的右缘**（= screen.width - x - _size），
+              //    而不是按展开条宽度（contentWidth）算：
+              //    原来写 `screen.width - x - contentWidth`，贴右展开时
+              //    150px 的控制条 right = 70 - 150 = **-80** → 溢出屏幕右缘 80px，
+              //    用户看到的"展开条贴边/只露出左半截"就是这个 bug。
+              //    用球宽（54）算 → right 恒等于球的右边距（16px），
+              //    控制条从球的位置**向左**完整展开 ✓
+              right: toLeft
+                  ? null
+                  : (screen.width - x - _size).clamp(pad.right + 4, screen.width),
               top: y,
               // 🔴 展开条在极窄屏 / 系统大字号下会超出屏幕 →
               // 用 `FittedBox(scaleDown)` 整体等比缩小。

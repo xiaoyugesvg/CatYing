@@ -220,6 +220,13 @@ class MusicBottomChrome extends StatelessWidget {
               MiniPlayer(
                 // 子页面（没有导航栏）→ 紧凑贴底，别留那 26 的空档
                 tightBottom: !onRoot,
+                // 🔴 子页面还必须把**底部安全区**垫上：本组件挂在
+                // `app.dart` 的全局 Stack（`Positioned(bottom: 0)`），
+                // **没有 SafeArea** —— 之前 `tightBottom` 只留 8px，
+                // 播放条直接压到 Home 指示条上（用户反馈"太贴底"）。
+                // 这里补 `MediaQuery.padding.bottom`，播放条整体抬到
+                // 安全区之上；主页有导航栏自己垫底（bottomMargin），不受影响。
+                bottomInset: !onRoot ? MediaQuery.paddingOf(context).bottom : 0,
                 // ⚠️ **不能**用 `openMusicPlayer(context)`：本组件在
                 //    Navigator 子树之外，`Navigator.of(context)` 会抛。
                 //    走全局 navigatorKey（与悬浮球的 `_openPlayer` 同款）。

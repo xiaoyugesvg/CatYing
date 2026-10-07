@@ -934,9 +934,18 @@ class MusicApi {
   }
 
   /// GET 275 页面文本（带 cookie 记忆 + 403/429 重试一次）
+  static DateTime? _b275LastReqAt;
   Future<String> _b275Get(String path, {Map<String, String>? extraHeaders}) async {
     final url = _b275Abs(path);
     final cookie = _b275CurrentCookie(url);
+    // 站点对连续请求有限流（实测高频请求会 SSL/超时拒绝）：
+    // 相邻请求至少间隔 500ms，缓解"点书时拿到无章节残页"的问题。
+    final now = DateTime.now();
+    final since = now.difference(_b275LastReqAt ?? now);
+    if (_b275LastReqAt != null && since < const Duration(milliseconds: 500)) {
+      await Future<void>.delayed(const Duration(milliseconds: 500) - since);
+    }
+    _b275LastReqAt = DateTime.now();
     var lastStatus = 0;
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
@@ -1096,7 +1105,7 @@ class MusicApi {
         String? speaker,
         List<Song> songs,
       })> book275Album(String bookId) async {
-    final html = await _b275Get('/book/$bookId.html');
+    var html = await _b275Get('/book/$bookId.html');
     if (html.isEmpty) {
       return (ok: false, message: '275 详情页无数据', albumName: '',
           coverUrl: null as String?, author: null as String?,
@@ -1123,30 +1132,16 @@ class MusicApi {
     final speaker = field('演播');
     final cover = _b275ExtractCover(html);
 
-    final songs = <Song>[];
-    // 章节列表：<a href="/play/{bookId}/{chapterId}.html">...<span class="text-sm text-gray-700 truncate">章节名</span>
-    // 对齐 JS 版的 chapterPattern。注意 [\s\S]*? 是非贪婪，
-    // 必须确保 href 和 span 在同一个 <a> 标签内部匹配。
-    final chapterRe = RegExp(
-        r'''href=["']/play/(\d+)/(\d+)\.html["'][\s\S]*?<span[^>]+class=["'][^"']*truncate[^"']*["'][^>]*>([\s\S]*?)</span>''',
-        caseSensitive: false);
-    var i = 0;
-    for (final m in chapterRe.allMatches(html)) {
-      final playUrl = '$_b275Site/play/${m.group(1)}/${m.group(2)}.html';
-      final name = _b275Clean(m.group(3) ?? '')
-          .replaceAll('\$', '￥')
-          .replaceAll('#', '﹟');
-      if (name.isEmpty) continue;
-      i++;
-      songs.add(Song(
-        id: (int.tryParse(bookId) ?? bookId.hashCode) * 100000 + i,
-        name: name,
-        artists: speaker.isNotEmpty ? speaker : (author ?? ''),
-        album: albumName,
-        coverUrl: cover ?? _b275DefaultCover,
-        source: SongSource.book275,
-        directUrl: playUrl,
-      ));
+    var songs = _b275ParseEpisodes(html, bookId, albumName,
+        cover: cover, speaker: speaker, author: author);
+    // 限流/异常页兜底：短页面 + 0 章节 → 等 1.5s 重抓一次再试。
+    if (songs.isEmpty && html.length < 5000) {
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+      html = await _b275Get('/book/$bookId.html');
+      if (html.isNotEmpty) {
+        songs = _b275ParseEpisodes(html, bookId, albumName,
+            cover: cover, speaker: speaker, author: author);
+      }
     }
     if (songs.isEmpty) {
       return (ok: false, message: '这本书没有解析到章节', albumName: albumName,
@@ -1155,6 +1150,83 @@ class MusicApi {
     }
     return (ok: true, message: '', albumName: albumName, coverUrl: cover,
         author: author as String?, speaker: speaker as String?, songs: songs);
+  }
+
+  /// 解析 275 详情页章节（双正则：truncate span 优先，结构级 a 块兜底）
+  List<Song> _b275ParseEpisodes(
+    String html,
+    String bookId,
+    String albumName, {
+    String? cover,
+    String? speaker,
+    String? author,
+  }) {
+    final out = <Song>[];
+    final seen = <String>{};
+    // 优先：章节名 span 带 truncate（原逻辑，精匹配）。
+    final reTruncate = RegExp(
+        r'''href=["']/play/(\d+)/(\d+)\.html["'][\s\S]*?<span[^>]+class=["'][^"']*truncate[^"']*["'][^>]*>([\s\S]*?)</span>''',
+        caseSensitive: false);
+    for (final m in reTruncate.allMatches(html)) {
+      final key = '${m.group(1)}/${m.group(2)}';
+      final name = _b275Clean(m.group(3) ?? '');
+      if (name.isEmpty || name == '立即开始收听' || name == '开始收听') continue;
+      if (seen.contains(key)) continue;
+      seen.add(key);
+      out.add(_b275MakeEpisode(
+          bookId, m.group(1)!, m.group(2)!, name,
+          albumName: albumName,
+          cover: cover, speaker: speaker, author: author, index: out.length));
+    }
+    if (out.isNotEmpty) return out;
+    // 兜底：结构级解析 —— <a href="/play/{book}/{cid}.html">…</a> 块内文本。
+    // 不依赖 span class（class 变化/页面改版也能解析；"立即开始收听"按钮
+    // 文本被过滤，避免污染第一集）。
+    final reBlock = RegExp(
+        r'''<a[^>]+href=["']/play/(\d+)/(\d+)\.html["'][^>]*>([\s\S]*?)</a>''',
+        caseSensitive: false);
+    for (final m in reBlock.allMatches(html)) {
+      final key = '${m.group(1)}/${m.group(2)}';
+      var name = _b275Clean(m.group(3) ?? '')
+          // 去掉"1."/"1、"式序号前缀（数字序号是列表项装饰，非标题）
+          .replaceFirst(RegExp(r'^\d+[\.、．]\s*'), '');
+      if (name.isEmpty ||
+          name == '立即开始收听' ||
+          name == '开始收听' ||
+          name.contains('svg')) continue;
+      if (seen.contains(key)) continue;
+      seen.add(key);
+      out.add(_b275MakeEpisode(
+          bookId, m.group(1)!, m.group(2)!, name,
+          albumName: albumName,
+          cover: cover, speaker: speaker, author: author, index: out.length));
+    }
+    return out;
+  }
+
+  Song _b275MakeEpisode(
+    String bookId,
+    String book,
+    String cid,
+    String name, {
+    required String albumName,
+    String? cover,
+    String? speaker,
+    String? author,
+    required int index,
+  }) {
+    final playUrl = '$_b275Site/play/$book/$cid.html';
+    return Song(
+      id: (int.tryParse(bookId) ?? bookId.hashCode) * 100000 + index + 1,
+      name: name.replaceAll('\$', '￥').replaceAll('#', '﹟'),
+      artists: speaker?.isNotEmpty == true
+          ? speaker!
+          : (author ?? ''),
+      album: albumName,
+      coverUrl: cover ?? _b275DefaultCover,
+      source: SongSource.book275,
+      directUrl: playUrl,
+    );
   }
 
   static String? _b275ExtractCover(String html) {

@@ -171,6 +171,34 @@ class SettingsSubPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // ⚠️ **必修：本页必须监听「明暗 + 配色版本」并重建**（用户 2026-10-07：
+    //   「点击了保存后，整个界面像是蒙了一层白」）✗→✓
+    //
+    // 根因 ✗：本页（AppBar 标题/图标 + 各分组）的颜色全部来自 `AppTheme.*`
+    //   —— 那是**静态 getter**，读的是 `AppBrightness.isLight` / `_palette`，
+    //   **改颜色时不会通知任何 widget**；
+    //   而"全局背景层"恰好**监听了** `AppBrightness`（见
+    //   `BackgroundService.buildBackground` 外层的 ValueListenableBuilder）⇒
+    //   明暗一变：**背景当场换成浅色（浅色模式的白色蒙版 + 亮壁纸）**，
+    //   本页却**停在旧色**（深色那套的白字/深控件色）⇒ 浅底 + 白字 ⇒
+    //   整页看起来就是"蒙了一层白、字还看不清"✗（用户实测截图完全吻合 ✓）。
+    //
+    // 这一层监听补上后：外观一变，**11 个设置子页一起立刻跟着换色** ✓
+    //   （外观/播放/数据源/元数据/缓存/弹幕/主页页面/关于/统一主题 + 2 个内部页）
+    //
+    // ⚠️ 这也是 `app.dart` 注释里写明的「已知残留」：先前靠"换 key 重建整棵树"
+    //   来兜底，但那样会把 7 个 tab 的 State 全销毁（切主题卡顿/跳回首页）；
+    //   改成在**真正需要变色的容器**上逐个监听后，设置子页这一处漏了 ✓
+    return ValueListenableBuilder<bool>(
+      valueListenable: AppBrightness.isLight,
+      builder: (context, _, __) => ValueListenableBuilder<int>(
+        valueListenable: AppTheme.paletteRevision,
+        builder: (context, ___, ____) => _buildPage(context),
+      ),
+    );
+  }
+
+  Widget _buildPage(BuildContext context) {
     // ── 背景透明：透出全局壁纸层（与阅读模块一致）────────────────
     //
     // 三模块视觉统一：**以阅读为准，页面透出壁纸**。

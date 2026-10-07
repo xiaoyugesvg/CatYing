@@ -116,10 +116,11 @@ class _JellyExpandableSearchState extends State<JellyExpandableSearch> {
         decoration: BoxDecoration(
           color: Colors.transparent,
           borderRadius: BorderRadius.circular(h / 2),
+          // 边框走 JellyTheme 主题语义色（随明暗外观），与阅读模块外观系统一致
           border: Border.all(
             color: isDark
-                ? Colors.white.withValues(alpha: 0.18)
-                : Colors.black.withValues(alpha: 0.12),
+                ? JellyTheme.textPrimaryDark.withValues(alpha: 0.22)
+                : JellyTheme.textPrimaryLight.withValues(alpha: 0.22),
             width: 1,
           ),
         ),
