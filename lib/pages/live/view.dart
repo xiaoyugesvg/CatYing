@@ -25,6 +25,7 @@ import 'controller.dart';
 import '../../services/audio_focus.dart';
 import '../../widgets/app_empty_view.dart';
 import '../../widgets/app_toast.dart';
+import '../../music/services/route_observer.dart' show MusicRouteObserver;
 
 /// 直播主界面（对照参考图）
 /// 上：视频区 + LIVE 角标 + 小窗/全屏
@@ -83,6 +84,9 @@ class _LivePageState extends State<LivePage> {
   StreamSubscription<bool>? _playSub;
   Worker? _tabWorker;
 
+  /// 直播子页面路由监听（push 时暂停 / pop 时恢复）
+  VoidCallback? _liveRouteUnlisten;
+
   /// 是否已成功开过流（切回直播 tab 时用于"恢复播放"而非重新拉流）
   bool _everOpened = false;
 
@@ -118,6 +122,10 @@ class _LivePageState extends State<LivePage> {
       } else {
         // 切回直播：已在播就不动；已开过流但被暂停 → 直接恢复播放
         //（避免每次切回都重新 open 拉流闪断）；从没开过流才自动开播。
+        //
+        // ⚠️ 如果直播子页面还开着（push 进去没回来），不要恢复播放 ——
+        //    用户还在子页面里，直播不该自己响起来。
+        if (MusicRouteObserver.livePushedFrom.value > 0) return;
         final pPlaying = _player?.state.playing ?? false;
         final avPlaying = _avPlayer?.state.playing ?? false;
         if (pPlaying || avPlaying) return;
@@ -165,11 +173,51 @@ class _LivePageState extends State<LivePage> {
         /* 暂停失败不影响其它方，AudioFocus 会记日志 */
       }
     });
+    // 直播子页面 push/pop 监听：
+    //   · push 进子页面 → 暂停直播（界面切走了还响着很烦）
+    //   · pop 回直播根 → 恢复播放
+    // 用 `addListener` + 手动移除，避免 ValueNotifier 泄漏。
+    void onLiveRouteChanged() {
+      if (!mounted) return;
+      final pushed = MusicRouteObserver.livePushedFrom.value;
+      if (pushed > 0) {
+        // 进了子页面 → 暂停（PiP 激活时豁免）
+        if (VideoPlayerPip.instance.isIosActive) return;
+        try { _player?.pause(); } catch (_) {}
+        try { _avPlayer?.pause(); } catch (_) {}
+      } else {
+        // 回到直播根 → 恢复播放
+        // 注意：只在"开过流且当前被暂停"时恢复，
+        // 别在"本来就没开播"的状态下自动开播。
+        if (!_everOpened) return;
+        final pPlaying = _player?.state.playing ?? false;
+        final avPlaying = _avPlayer?.state.playing ?? false;
+        if (pPlaying || avPlaying) return;
+        final useAv = Platform.isIOS && !_iosUseMpv && _avPlayer != null;
+        if (useAv) {
+          // iOS 共享 AVPlayer：子页面里可能被点播/音乐覆盖了 item，
+          // 直接 play 会播别人的内容 → 重新 open 直播流
+          final want = _controller.currentChannel?.playUrl ?? '';
+          if (want.isNotEmpty) {
+            _playChannel(want);
+            return;
+          }
+          try { _avPlayer?.play(); } catch (_) { _autoplayCurrent(); }
+        } else {
+          unawaited(AudioFocus.request('live'));
+          try { _player?.play(); } catch (_) { _autoplayCurrent(); }
+        }
+      }
+    }
+    MusicRouteObserver.livePushedFrom.addListener(onLiveRouteChanged);
+    _liveRouteUnlisten = () =>
+        MusicRouteObserver.livePushedFrom.removeListener(onLiveRouteChanged);
   }
 
   @override
   void dispose() {
     AudioFocus.unregister('live');
+    _liveRouteUnlisten?.call();
     _tabWorker?.dispose();
     _errSub?.cancel();
     _switchReadySub?.cancel();

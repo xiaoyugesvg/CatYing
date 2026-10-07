@@ -36,6 +36,11 @@ import 'package:flutter/material.dart';
 ///
 /// ⚠️ 用 `ValueNotifier` 而不是裸 `int`：底栏那层是
 /// `AnimatedBuilder` + `Listenable.merge`，裸 int 变了**不会触发重建**。
+///
+/// ── 直播模块复用 ────────────────────────────────────────────────
+/// 直播页也用同一个 observer 监听自己子页面的 push/pop：
+/// push 进直播子页面时自动暂停直播、pop 回来时恢复。
+/// 直播子页面路由名以 [liveRouteTag] 开头，与音乐互不干扰。
 class MusicRouteObserver extends NavigatorObserver {
   MusicRouteObserver();
 
@@ -78,14 +83,30 @@ class MusicRouteObserver extends NavigatorObserver {
   /// ⚠️ 只统计带 [musicRouteTag] 标记的子页面（见 [isOnRoot]）。
   static final ValueNotifier<int> pushedFrom = ValueNotifier<int>(0);
 
+  /// 直播子页面 push 层数（与 [pushedFrom] 独立统计）。
+  ///
+  /// 直播页用它来判断"是不是 push 进了子页面"：
+  ///   · > 0 → 有直播子页面压在上面 → 暂停直播
+  ///   · = 0 → 回到直播根 → 恢复播放
+  /// 只统计带 [liveRouteTag] 标记的路由。
+  static final ValueNotifier<int> livePushedFrom = ValueNotifier<int>(0);
+
   /// 音乐子页面路由标记：push 时给 `MaterialPageRoute` 传
   /// `settings: const RouteSettings(name: MusicRouteObserver.musicRouteTag)`，
   /// observer 只统计**这些**路由 —— 其他模块（影视/阅读）的深推
-  /// 不会污染音乐主页的判定。
+  /// 不会污染音乐主页判定。
   static const String musicRouteTag = 'music:page';
+
+  /// 直播子页面路由标记（与音乐 tag 互不干扰）。
+  /// 直播模块内 push 的页面用这个前缀，observer 会统计到
+  /// [livePushedFrom]，供直播页做"push 时暂停 / pop 时恢复"。
+  static const String liveRouteTag = 'live:page';
 
   bool _isMusicRoute(Route<dynamic> route) =>
       route.settings.name?.startsWith(musicRouteTag) ?? false;
+
+  bool _isLiveRoute(Route<dynamic> route) =>
+      route.settings.name?.startsWith(liveRouteTag) ?? false;
 
   /// 路由**总数**。只用于日志/调试 —— **不要**拿它判"在不在根页面"
   ///（见 [isOnRoot] 的说明）。
@@ -99,6 +120,10 @@ class MusicRouteObserver extends NavigatorObserver {
     if (previousRoute != null && _isMusicRoute(route)) {
       pushedFrom.value = pushedFrom.value + 1;
     }
+    // 直播子页面同理，独立计数
+    if (previousRoute != null && _isLiveRoute(route)) {
+      livePushedFrom.value = livePushedFrom.value + 1;
+    }
   }
 
   @override
@@ -107,6 +132,9 @@ class MusicRouteObserver extends NavigatorObserver {
     // 被 pop 的这条原本"压在别的路由之上" → 少一层
     if (previousRoute != null && _isMusicRoute(route) && pushedFrom.value > 0) {
       pushedFrom.value = pushedFrom.value - 1;
+    }
+    if (previousRoute != null && _isLiveRoute(route) && livePushedFrom.value > 0) {
+      livePushedFrom.value = livePushedFrom.value - 1;
     }
   }
 
@@ -118,6 +146,9 @@ class MusicRouteObserver extends NavigatorObserver {
     //    那不是"退出子页面"，不该 -> decrement
     if (previousRoute != null && _isMusicRoute(route) && pushedFrom.value > 0) {
       pushedFrom.value = pushedFrom.value - 1;
+    }
+    if (previousRoute != null && _isLiveRoute(route) && livePushedFrom.value > 0) {
+      livePushedFrom.value = livePushedFrom.value - 1;
     }
   }
 
@@ -134,6 +165,7 @@ class MusicRouteObserver extends NavigatorObserver {
   static void resetForTest() {
     pushedCount.value = 1;
     pushedFrom.value = 0;
+    livePushedFrom.value = 0;
   }
 
   /// **仅测试用**：模拟"进了子页面"（等价于一次 `didPush(sub, root)`）。

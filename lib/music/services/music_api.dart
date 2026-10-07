@@ -1003,6 +1003,7 @@ class MusicApi {
   List<Song> _b275ParseBooks(String html) {
     final out = <Song>[];
     final seen = <String>{};
+    // 对齐 JS 版正则：<a href="/book/{id}.html" ...>...</a>
     final re = RegExp(
         r'''<a\s+href=["']/book/(\d+)\.html["'][^>]*>([\s\S]*?)</a>''',
         caseSensitive: false);
@@ -1010,31 +1011,40 @@ class MusicApi {
       final id = m.group(1)!;
       final block = m.group(2) ?? '';
       if (seen.contains(id)) continue;
+      // 封面图：<img src="...">
       final img = RegExp(r'''<img[^>]+src=["']([^"']+)["']''', caseSensitive: false)
           .firstMatch(block);
-      if (img == null) continue;
+      // 标题：优先 <h3>，回退 "font-medium text-sm" 类名，再回退 img alt
       final titleM = RegExp(r'<h3[^>]*>([\s\S]*?)</h3>', caseSensitive: false)
               .firstMatch(block) ??
           RegExp(
-                  r'''<div class=["']font-medium text-sm[^"']*["'][^>]*>([\s\S]*?)</div>''',
+                  r'''<div[^>]+class=["'][^"']*font-medium[^"']*["'][^>]*>([\s\S]*?)</div>''',
                   caseSensitive: false)
               .firstMatch(block);
       final altM = RegExp(r'''<img[^>]+alt=["']([^"']+)["']''', caseSensitive: false)
           .firstMatch(block);
       final title = _b275Clean(titleM?.group(1) ?? altM?.group(1) ?? '');
       if (title.isEmpty) continue;
-      final speakerM = RegExp(r'>演播</span>\s*([^<\r\n]+)', caseSensitive: false)
+      // 演播者：优先 ">演播</span> xxx"，回退 "text-xs text-gray-500" 类名
+      final speakerM = RegExp(r'>演播<\/span>\s*([^<\r\n]+)', caseSensitive: false)
               .firstMatch(block) ??
-          RegExp(r'''<div class=["']text-xs text-gray-500[^"']*["'][^>]*>([\s\S]*?)</div>''',
+          RegExp(
+                  r'''<div[^>]+class=["'][^"']*text-xs[^"']*["'][^>]*>([\s\S]*?)</div>''',
                   caseSensitive: false)
               .firstMatch(block);
       seen.add(id);
+      // 封面：有图用图，没图用默认占位（JS 版 parseBooks 会跳过无图的，
+      // 但 275 列表页有些书只有文字没图，全跳过就啥也不剩了）。
+      // 这里改为：有图用真实图，无图用站点默认封面兜底。
+      final cover = img != null
+          ? _b275CoverOrNull(img.group(1)!)
+          : null;
       out.add(Song(
-        id: int.parse(id),
+        id: int.tryParse(id) ?? id.hashCode,
         name: title,
         artists: _b275Clean(speakerM?.group(1) ?? ''),
         album: title,
-        coverUrl: _b275CoverOrNull(img.group(1)!),
+        coverUrl: cover ?? _b275DefaultCover,
         source: SongSource.book275,
       ));
     }
@@ -1092,13 +1102,13 @@ class MusicApi {
           coverUrl: null as String?, author: null as String?,
           speaker: null as String?, songs: const <Song>[]);
     }
+    // 标题：<h1 class="text-2xl font-bold text-gray-800">
+    // （Tailwind 类名顺序可能变，用"包含关键字"匹配）
     final titleM = RegExp(
-            r'''<h1 class=["']text-2xl font-bold text-gray-800["']>([\s\S]*?)</h1>''',
+            r'''<h1[^>]+class=["'][^"']*text-2xl[^"']*["'][^>]*>([\s\S]*?)</h1>''',
             caseSensitive: false)
         .firstMatch(html);
-    final albumName = _b275Clean(titleM?.group(1) ?? '') == ''
-        ? ''
-        : _b275Clean(titleM!.group(1)!);
+    final albumName = _b275Clean(titleM?.group(1) ?? '');
 
     String field(String label) {
       final esc = RegExp.escape(label);
@@ -1111,25 +1121,29 @@ class MusicApi {
 
     final author = field('作者');
     final speaker = field('演播');
-    final status = field('状态');
     final cover = _b275ExtractCover(html);
 
     final songs = <Song>[];
+    // 章节列表：<a href="/play/{bookId}/{chapterId}.html">...<span class="text-sm text-gray-700 truncate">章节名</span>
+    // 对齐 JS 版的 chapterPattern。注意 [\s\S]*? 是非贪婪，
+    // 必须确保 href 和 span 在同一个 <a> 标签内部匹配。
     final chapterRe = RegExp(
-        r'''href=["'](/play/(\d+)/(\d+)\.html)["'][\s\S]*?<span class=["']text-sm text-gray-700 truncate["']>([\s\S]*?)</span>''',
+        r'''href=["']/play/(\d+)/(\d+)\.html["'][\s\S]*?<span[^>]+class=["'][^"']*truncate[^"']*["'][^>]*>([\s\S]*?)</span>''',
         caseSensitive: false);
     var i = 0;
     for (final m in chapterRe.allMatches(html)) {
-      final playUrl = '$_b275Site${m.group(1)}';
-      final name = _b275Clean(m.group(4) ?? '').replaceAll('\$', '￥').replaceAll('#', '﹟');
+      final playUrl = '$_b275Site/play/${m.group(1)}/${m.group(2)}.html';
+      final name = _b275Clean(m.group(3) ?? '')
+          .replaceAll('\$', '￥')
+          .replaceAll('#', '﹟');
       if (name.isEmpty) continue;
       i++;
       songs.add(Song(
-        id: int.parse(bookId) * 100000 + i,
+        id: (int.tryParse(bookId) ?? bookId.hashCode) * 100000 + i,
         name: name,
         artists: speaker.isNotEmpty ? speaker : (author ?? ''),
         album: albumName,
-        coverUrl: cover,
+        coverUrl: cover ?? _b275DefaultCover,
         source: SongSource.book275,
         directUrl: playUrl,
       ));
@@ -1206,40 +1220,85 @@ class MusicApi {
     final html = await _b275Get(playUrl,
         extraHeaders: {'Referer': _b275BookReferer(playUrl)});
     if (html.isEmpty) {
-      return const MusicUrlInfo(ok: false, message: '275 播放页解析失败');
+      return const MusicUrlInfo(ok: false, message: '275 播放页加载失败');
     }
-    final audioM = RegExp(
-            r'''\baudio\s*:\s*\[\s*\{[\s\S]*?\burl\s*:\s*["']([^"']+)["']''',
+
+    // 按优先级尝试多种音频 URL 提取模式（对齐 JS 版 + 额外兜底）：
+    //   1. audio: [{ url: "..." }] （标准 JS 版模式）
+    //   2. "url":"..." 附近有 .mp3/.m4a/.aac 后缀
+    //   3. <audio src="..."> 标签
+    //   4. 任何 "https://...mp3" / "https://...m4a" 直链
+    String? audioUrl;
+
+    // 模式 1：audio: [{ ... url: "..." }]（JS 原版模式）
+    final m1 = RegExp(
+            r'''audio\s*:\s*\[\s*\{[\s\S]*?url\s*:\s*["']([^"']+)["']''',
             caseSensitive: false)
         .firstMatch(html);
-    if (audioM == null) {
-      return const MusicUrlInfo(ok: false, message: '播放页没有音频地址');
+    if (m1 != null) audioUrl = m1.group(1);
+
+    // 模式 2：找 url 字段值里带音频后缀的
+    if (audioUrl == null || audioUrl!.isEmpty) {
+      final m2 = RegExp(
+              r'''url\s*:\s*["']([^"']+\.(?:mp3|m4a|aac|wav|ogg|flac)[^"']*)["']''',
+              caseSensitive: false)
+          .firstMatch(html);
+      if (m2 != null) audioUrl = m2.group(1);
     }
-    var audioUrl = audioM.group(1)!.replaceAll('\\/', '/');
-    audioUrl = audioUrl
+
+    // 模式 3：<audio src="...">
+    if (audioUrl == null || audioUrl!.isEmpty) {
+      final m3 = RegExp(
+              r'''<audio[^>]+src=["']([^"']+)["']''',
+              caseSensitive: false)
+          .firstMatch(html);
+      if (m3 != null) audioUrl = m3.group(1);
+    }
+
+    // 模式 4：兜底抓 https 音频直链
+    if (audioUrl == null || audioUrl!.isEmpty) {
+      final m4 = RegExp(
+              r'''(https?://[^"'\s<>]+\.(?:mp3|m4a|aac)(?:\?[^"'\s<>]*)?)''',
+              caseSensitive: false)
+          .firstMatch(html);
+      if (m4 != null) audioUrl = m4.group(1);
+    }
+
+    if (audioUrl == null || audioUrl!.isEmpty) {
+      return const MusicUrlInfo(ok: false, message: '播放页没有找到音频地址');
+    }
+
+    // HTML 实体解码 + JS 转义的斜杠还原
+    var url = audioUrl!
+        .replaceAll(r'\/', '/')
         .replaceAll('&amp;', '&')
         .replaceAll('&#39;', "'")
         .replaceAll('&quot;', '"')
         .replaceAll('&lt;', '<')
         .replaceAll('&gt;', '>');
+    url = _b275Clean(url);
+
     var referer = playUrl;
-    if (audioUrl.startsWith('lrts\$')) {
-      final real = await _b275ResolveLrts(audioUrl);
+    // lrts 懒人听书 token 解析
+    if (url.startsWith('lrts\$')) {
+      final real = await _b275ResolveLrts(url);
       if (real.isEmpty) {
         return const MusicUrlInfo(ok: false, message: '懒人听书音频解析失败');
       }
-      audioUrl = real;
+      url = real;
       referer = 'https://m.lrts.me/';
     }
-    if (audioUrl.startsWith('http://')) {
-      audioUrl = 'https://${audioUrl.substring(7)}';
+    // http → https 升级
+    if (url.startsWith('http://')) {
+      url = 'https://${url.substring(7)}';
     }
-    if (!RegExp(r'^https://').hasMatch(audioUrl)) {
-      return const MusicUrlInfo(ok: false, message: '播放地址不是有效的 HTTPS 音频链接');
+    if (!RegExp(r'^https?://').hasMatch(url)) {
+      return MusicUrlInfo(
+          ok: false, message: '解析出的地址不是有效链接: $url');
     }
     return MusicUrlInfo(
       ok: true,
-      url: audioUrl,
+      url: url,
       type: '275听书',
       headers: {'User-Agent': _b275Ua, 'Referer': referer},
     );

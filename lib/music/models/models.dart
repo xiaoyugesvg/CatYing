@@ -94,22 +94,22 @@ enum AudioQuality {
 
 /// 歌曲来源（多平台）。`key` 会作为 `source` 字段发给 Node 侧做分派。
 enum SongSource {
-  netease('netease', '网易云'),
-  qq('qq', 'QQ音乐'),
+  netease('netease', '网易'),
+  qq('qq', 'QQ'),
   kugou('kugou', '酷狗'),
   // 喜马拉雅：有声书 / 播客。
   // 映射：**专辑 → Album，单集 → Song**（`id`=trackId、`artists`=专辑名/主播）。
   // 播放时 Node 侧返回的是集自带直链，但**必须带 User-Agent 才能播**
   //（所以 `MusicUrlInfo` 还要把 headers 透传给播放器）。
-  ximalaya('ximalaya', '喜马拉雅'),
+  ximalaya('ximalaya', '喜雅'),
   // 博看听书：有声书 / 听书（与喜马拉雅同形态：专辑 → 单集）。
   // 与喜马拉雅的差别：**纯 Dart 直连博看官方接口**（不走 Node），
   // 单集直链在 `bookanAlbum()` 时直接填进 `Song.directUrl`。
-  bookan('bookan', '博看听书'),
+  bookan('bookan', '博看'),
   // 275听书：HTML 站 + PHP 会话。专辑/单集来自页面解析，
   // 单集 `directUrl` 填**播放页 URL**，播放时由 `book275Resolve`
   // 解析出真实音频直链（含 lrts 懒人听书 token 解析）。
-  book275('book275', '275听书');
+  book275('book275', '七五');
 
   const SongSource(this.key, this.displayName);
   final String key;

@@ -18,6 +18,8 @@ import 'danmaku.dart';
 import '../services/audio_focus.dart';
 import 'app_toast.dart';
 import '../pages/settings/sub/danmu_settings_page.dart';
+import '../models/player_engine.dart';
+import '../services/player_prefs.dart';
 part 'video_player_helpers.dart';
 
 /// 视频画面比例 - 对应 Swift VideoFitType
@@ -220,7 +222,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   bool _danmuBlockBottom = false;
 
   /// 显示区域：弹幕可见高度占播放器的比例（0.25 / 0.5 / 0.75 / 1.0）
+  /// 弹幕显示区域：弹幕可用高度占整个播放器的比例（0.25 ~ 1.0）。
+  /// 由外层用 FractionallySizedBox 限制高度，这里只用于轨道数推算。
   double _danmuAreaRatio = 1.0;
+
+  /// 弹幕顶部间距（占视频高度百分比）—— 避开顶部标题栏
+  double _danmuTopPadding = 0.0;
+  /// 弹幕底部间距（占视频高度百分比）—— 避开底部控制栏
+  double _danmuBottomPadding = 0.0;
 
   /// 行间距系数（1.0 ~ 3.0），影响轨道纵向间距
   double _danmuLineSpacing = 1.6;
@@ -233,6 +242,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   /// 弹幕延迟（秒）：正数=晚出现，负数=提前
   double _danmuDelaySeconds = 0.0;
+
+  /// 弹幕颜色模式：'builtin' 自带色 / 'white' 统一白色 / 'custom' 自定义
+  String _danmuColorMode = 'builtin';
+  /// 自定义弹幕颜色（colorMode='custom' 时生效）
+  Color _danmuCustomColor = Colors.white;
 
   // ============================================================
   // 「设置 → 播放器」读入的行为开关（原先只存不读）
@@ -918,6 +932,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         0.25,
         1.0,
       );
+      // 弹幕上下边距（避开功能栏）
+      _danmuTopPadding =
+          (prefs.getDouble('danmu_top_padding') ?? 0.0).clamp(0.0, 0.5);
+      _danmuBottomPadding =
+          (prefs.getDouble('danmu_bottom_padding') ?? 0.0).clamp(0.0, 0.5);
       _danmuSyncSpeed = prefs.getBool('danmu_sync_speed') ?? false;
       // 新增样式项
       _danmuLineSpacing = (prefs.getDouble('danmu_line_spacing') ?? 1.6).clamp(
@@ -930,6 +949,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       );
       _danmuDelaySeconds = (prefs.getDouble('danmu_delay_seconds') ?? 0.0)
           .clamp(-5.0, 5.0);
+      // 弹幕颜色模式：builtin / white / custom（默认自带色）
+      _danmuColorMode = prefs.getString('danmu_color_mode') ?? 'builtin';
+      final customColorVal = prefs.getInt('danmu_custom_color');
+      if (customColorVal != null) {
+        _danmuCustomColor = Color(customColorVal);
+      }
       // 字体粗细存 weight 数值（400/500/600/700），未知值回落 w500
       final w = prefs.getInt('danmu_font_weight') ?? 500;
       _danmuFontWeight = switch (w) {
@@ -1185,7 +1210,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       await prefs.setBool('danmu_block_top', _danmuBlockTop);
       await prefs.setBool('danmu_block_bottom', _danmuBlockBottom);
       await prefs.setDouble('danmu_area_ratio', _danmuAreaRatio);
+      await prefs.setDouble('danmu_top_padding', _danmuTopPadding);
+      await prefs.setDouble('danmu_bottom_padding', _danmuBottomPadding);
       await prefs.setBool('danmu_sync_speed', _danmuSyncSpeed);
+      await prefs.setString('danmu_color_mode', _danmuColorMode);
+      await prefs.setInt('danmu_custom_color', _danmuCustomColor.value);
+      await prefs.setDouble('danmu_line_spacing', _danmuLineSpacing);
+      await prefs.setDouble('danmu_stroke_width', _danmuStrokeWidth);
+      await prefs.setInt('danmu_font_weight', _danmuFontWeight.value);
+      await prefs.setDouble('danmu_delay_seconds', _danmuDelaySeconds);
     } catch (e) {
       AppLog.instance.log('[video_player] persist danmu style: $e');
     }
@@ -2102,6 +2135,130 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
   }
 
+  /// 弹幕颜色选择 chip（播放内设置面板用）
+  Widget _danmuColorChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+    Color? colorDot,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppTheme.accentColor.withValues(alpha: 0.2)
+              : Colors.white.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: selected
+                ? AppTheme.accentColor
+                : Colors.white.withValues(alpha: 0.12),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (colorDot != null) ...[
+              Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: colorDot,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white30, width: 1),
+                ),
+              ),
+              const SizedBox(width: 6),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? Colors.white : Colors.white70,
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 弹出自定义颜色选择器（播放内设置面板用，与设置页同一套调色板）
+  Future<Color?> _pickCustomDanmuColor() async {
+    const palette = [
+      Colors.white,
+      Colors.red,
+      Colors.orange,
+      Colors.amber,
+      Colors.yellow,
+      Colors.green,
+      Colors.cyan,
+      Colors.blue,
+      Colors.purpleAccent,
+      Colors.pink,
+    ];
+    Color selected = _danmuCustomColor;
+    return showDialog<Color>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          title: const Text('选择弹幕颜色',
+              style: TextStyle(color: Colors.white)),
+          content: SizedBox(
+            width: 260,
+            child: GridView.builder(
+              shrinkWrap: true,
+              gridDelegate:
+                  const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 5,
+                    crossAxisSpacing: 10,
+                    mainAxisSpacing: 10,
+                  ),
+              itemCount: palette.length,
+              itemBuilder: (_, i) {
+                final c = palette[i];
+                final isSel = c.value == selected.value;
+                return GestureDetector(
+                  onTap: () => setDialogState(() => selected = c),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: c,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isSel
+                            ? AppTheme.accentColor
+                            : Colors.white10,
+                        width: isSel ? 3 : 1,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('取消',
+                  style: TextStyle(color: Colors.white60)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(selected),
+              child: Text('确定',
+                  style: TextStyle(color: AppTheme.accentColor)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildDanmuLayer() {
     // 同步视频速度：倍速播放时弹幕滚动同比缩放，保持与画面节奏一致
     final speed = _danmuSyncSpeed
@@ -2126,8 +2283,23 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       strokeWidth: _danmuStrokeWidth,
       fontWeight: _danmuFontWeight,
       delaySeconds: _danmuDelaySeconds,
+      topPadding: _danmuTopPadding,
+      bottomPadding: _danmuBottomPadding,
+      // 弹幕颜色：builtin=null(自带), white=白, custom=自定义
+      forceColor: switch (_danmuColorMode) {
+        'white' => Colors.white,
+        'custom' => _danmuCustomColor,
+        _ => null,
+      },
     );
-    // 显示区域：把弹幕层限制在顶部若干比例内（其余区域不显示弹幕）
+    // 显示区域：
+    //   · 有 topPadding/bottomPadding 时 → 外层铺满，DanmuLayer 内部按比例定位
+    //     （弹幕严格限制在上下功能栏之间）
+    //   · 否则回退到旧的 areaRatio（只从顶部往下算）
+    final usePadding = _danmuTopPadding > 0.001 || _danmuBottomPadding > 0.001;
+    if (usePadding) {
+      return Positioned.fill(child: IgnorePointer(child: layer));
+    }
     if (_danmuAreaRatio >= 0.99) {
       return Positioned.fill(child: IgnorePointer(child: layer));
     }
@@ -2664,6 +2836,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   // 弹幕开关：已在底部功能栏（**常显**，不再按是否配置弹幕源隐藏 ——
                   // 隐藏会让用户完全看不到这个功能。未配置时点击会引导去设置页）
                   _danmuToggleButton(),
+                  // 播放器核心切换（循环切换当前平台可用的引擎）
+                  _engineSwitchButton(),
                   // 短剧模式：纯竖屏全屏
                   _dramaModeButton(),
                   _douyinModeButton(),
@@ -3224,6 +3398,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   // ============================================================
 
   Widget _buildEpisodeOverlay() {
+    // 横屏时面板更紧凑：屏幕宽但纵向空间少，面板占比太大会压视频。
+    // 竖屏保持原尺寸；横屏：列数+2、字号略小、整体收窄。
+    final orientation = MediaQuery.of(context).orientation;
+    final isLandscape = orientation == Orientation.landscape;
+    final crossAxisCount = isLandscape ? 7 : 5;
+    final gridHeight = isLandscape ? 64.0 : 84.0;
+    final titleFont = isLandscape ? 13.0 : AppTheme.fontHeadline;
+    final itemFont = isLandscape ? 11.0 : AppTheme.fontSubhead;
+    final panelMaxHeight = isLandscape ? 104.0 : 130.0;
+    final titlePadTop = isLandscape ? 10.0 : 16.0;
+    final gridPadTop = isLandscape ? 2.0 : 4.0;
+    final gridPadBottom = isLandscape ? 8.0 : 10.0;
+
     return Positioned.fill(
       child: ColoredBox(
         color: Colors.black.withValues(alpha: 0.6),
@@ -3236,8 +3423,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               child: const SizedBox(height: 1, width: double.infinity),
             ),
             Container(
-              // 与内部网格高度配套（网格 84 + 标题行约 46）
-              constraints: const BoxConstraints(maxHeight: 130),
+              constraints: BoxConstraints(maxHeight: panelMaxHeight),
               margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               decoration: BoxDecoration(
                 color: const Color(0xFF1E1E1E),
@@ -3247,14 +3433,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    padding: EdgeInsets.fromLTRB(16, titlePadTop, 16, 8),
                     child: Row(
                       children: [
-                        const Text(
+                        Text(
                           '选集',
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: AppTheme.fontHeadline,
+                            fontSize: titleFont,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -3275,18 +3461,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                       ],
                     ),
                   ),
-                  // 高度按"约一半"收紧：原来固定 168（面板总高约 249），
-                  // 现在 84（面板总高约 130）。
-                  // 集数多时不再显示滚动条，改为直接上下滑动（GridView 默认行为）。
                   SizedBox(
-                    height: 84,
+                    height: gridHeight,
                     child: GridView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+                      padding: EdgeInsets.fromLTRB(16, gridPadTop, 16, gridPadBottom),
                       gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 5,
-                            crossAxisSpacing: 8,
-                            mainAxisSpacing: 8,
+                          SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: crossAxisCount,
+                            crossAxisSpacing: 6,
+                            mainAxisSpacing: 6,
                             childAspectRatio: 2.5,
                           ),
                       itemCount: widget.episodeNames.length,
@@ -3312,7 +3495,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                 color: isSelected
                                     ? Colors.white
                                     : Colors.white70,
-                                fontSize: AppTheme.fontSubhead,
+                                fontSize: itemFont,
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -3506,6 +3689,48 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                 ],
                               ),
 
+                              // ---- 弹幕颜色 ----
+                              const SizedBox(height: 14),
+                              Row(
+                                children: [
+                                  _danmuColorChip(
+                                    label: '自带色',
+                                    selected: _danmuColorMode == 'builtin',
+                                    onTap: () {
+                                      refresh(() =>
+                                          _danmuColorMode = 'builtin');
+                                      _persistDanmuStyle();
+                                    },
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _danmuColorChip(
+                                    label: '白色',
+                                    selected: _danmuColorMode == 'white',
+                                    onTap: () {
+                                      refresh(
+                                          () => _danmuColorMode = 'white');
+                                      _persistDanmuStyle();
+                                    },
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _danmuColorChip(
+                                    label: '自定义',
+                                    selected: _danmuColorMode == 'custom',
+                                    colorDot: _danmuCustomColor,
+                                    onTap: () async {
+                                      final c =
+                                          await _pickCustomDanmuColor();
+                                      if (c == null) return;
+                                      refresh(() {
+                                        _danmuColorMode = 'custom';
+                                        _danmuCustomColor = c;
+                                      });
+                                      _persistDanmuStyle();
+                                    },
+                                  ),
+                                ],
+                              ),
+
                               // ---- 不透明度 ----
                               _DanmuSliderRow(
                                 label: '不透明度',
@@ -3530,6 +3755,36 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                                 ticks: const ['1/4', '半屏', '3/4', '满屏'],
                                 onChanged: (v) {
                                   refresh(() => _danmuAreaRatio = v);
+                                  _persistDanmuStyle();
+                                },
+                              ),
+
+                              // ---- 顶部间距（避开标题栏）----
+                              _DanmuSliderRow(
+                                label: '顶部间距',
+                                valueText:
+                                    '${(_danmuTopPadding * 100).round()}%',
+                                value: _danmuTopPadding,
+                                min: 0.0,
+                                max: 0.3,
+                                divisions: 30,
+                                onChanged: (v) {
+                                  refresh(() => _danmuTopPadding = v);
+                                  _persistDanmuStyle();
+                                },
+                              ),
+
+                              // ---- 底部间距（避开控制栏）----
+                              _DanmuSliderRow(
+                                label: '底部间距',
+                                valueText:
+                                    '${(_danmuBottomPadding * 100).round()}%',
+                                value: _danmuBottomPadding,
+                                min: 0.0,
+                                max: 0.3,
+                                divisions: 30,
+                                onChanged: (v) {
+                                  refresh(() => _danmuBottomPadding = v);
                                   _persistDanmuStyle();
                                 },
                               ),
@@ -4135,6 +4390,46 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         ],
       ),
     );
+  }
+
+  /// 播放器核心切换按钮 —— 点击循环切换当前平台可用的引擎（AVPlayer / MPV / Webview）。
+  /// 切换后保存偏好，下次播放/下一集生效。
+  /// （运行时热切换内核代价太高：不同引擎的 player 实例类型完全不同，
+  ///  硬切会导致状态/流监听器错乱，得不偿失。）
+  Widget _engineSwitchButton() {
+    final available = PlayerEngine.availableEngines;
+    if (available.length <= 1) return const SizedBox.shrink();
+    return Obx(() {
+      final current = PlayerPrefs.instance.vodEngine.value;
+      final shortLabel = switch (current) {
+        PlayerEngine.avplayer => 'AV',
+        PlayerEngine.mpv => 'MPV',
+        PlayerEngine.webview => 'WEB',
+      };
+      return _iconButton(
+        icon: Icons.memory,
+        size: 20,
+        width: 42,
+        onTap: () => _safeTap(() async {
+          final idx = available.indexOf(current);
+          final next = available[(idx + 1) % available.length];
+          await PlayerPrefs.instance.setEngine(next);
+          AppToast.message(
+            '已切换到 ${next.title}，下一集或重新播放生效',
+            duration: const Duration(seconds: 2),
+          );
+        }),
+        child: Text(
+          shortLabel,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            height: 1.0,
+          ),
+        ),
+      );
+    });
   }
 
   /// 短剧模式按钮 —— 样式参考弹幕按钮：圆角方块内一个「短」字，

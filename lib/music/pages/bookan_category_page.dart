@@ -55,7 +55,7 @@ class _BookanCategoryPageState extends State<BookanCategoryPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: MusicTheme.background,
-      appBar: AppBar(title: const Text('博看听书')),
+      appBar: AppBar(title: const Text('博看')),
       body: _loading
           ? Center(
               child: SizedBox(

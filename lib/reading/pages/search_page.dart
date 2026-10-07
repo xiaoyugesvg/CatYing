@@ -11,6 +11,7 @@ import '../source/source_manager.dart';
 import '../services/browse_history_service.dart';
 import '../services/search_history_service.dart';
 import '../services/view_mode.dart';
+import '../services/reading_layout.dart';
 import '../theme/jelly_theme.dart';
 import '../services/settings_service.dart';
 import '../widgets/jelly_comic_card.dart';
@@ -24,6 +25,7 @@ import '../widgets/jelly_icon_menu_button.dart';
 import '../widgets/jelly_search_bar.dart';
 import '../widgets/guide_overlay.dart';
 import '../widgets/jelly_sliding_actions.dart';
+import '../widgets/reading_view_toggle.dart';
 import '../widgets/staggered_entrance.dart';
 import 'browse_history_page.dart';
 import 'comic_detail_page.dart';
@@ -142,6 +144,8 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     _gridScrollController.addListener(() => _onScroll(_gridScrollController));
     _listScrollController.addListener(() => _onScroll(_listScrollController));
     ViewMode().addListener(_onViewModeChangedExternal);
+    // 宫格列数变化（3/4/5）→ 重建网格；列数偏好是跨页面共享的（ReadingLayout）
+    ReadingLayout().addListener(_onLayoutChanged);
     // 监听源变化：无源空状态下，云端更新 reload 后自动切回正常搜索界面。
     SourceManager().addListener(_onSourcesChanged);
     _loadHistory();
@@ -188,6 +192,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   void dispose() {
     _log('页面销毁');
     ViewMode().removeListener(_onViewModeChangedExternal);
+    ReadingLayout().removeListener(_onLayoutChanged);
     SourceManager().removeListener(_onSourcesChanged);
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
@@ -688,6 +693,11 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     }
   }
 
+  /// 宫格列数变化（3/4/5）→ 重建（网格 crossAxisCount 读 ReadingLayout）
+  void _onLayoutChanged() {
+    if (mounted) setState(() {});
+  }
+
   /// 源变化（云端更新 reload 等）-> 重建：无源空状态与正常搜索界面互切。
   void _onSourcesChanged() {
     if (!mounted) return;
@@ -781,8 +791,8 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     return JellyExpandableSearch(
       controller: _searchController,
       hintText: '搜索漫画',
-      // 用户要求"搜索框再缩短点"：200 → 160，右侧按钮排整体更靠右
-      maxWidth: 160,
+      // 用户 2026-10-07：宽度改成原来的三分之二（160 → 107）
+      maxWidth: 107,
       onFocusChange: (f) => setState(() {
         if (f) {
           if (_searchController.text.isEmpty) {
@@ -837,9 +847,10 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             child: SizedBox(
               width: 32,
               height: 32,
+              // ✅ 用户 2026-10-07：与书源页统一成**向下箭头**（原来是 view_list ✗）
               child: Icon(
-                Icons.view_list_rounded,
-                size: 18,
+                Icons.keyboard_arrow_down_rounded,
+                size: 22,
                 color: JellyTheme.textPrimaryLight,
               ),
             ),
@@ -850,6 +861,9 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
   }
 
   /// 「聚搜」chip：跨所有启用漫画源并发聚合搜索
+  ///
+  /// ✅ 用户 2026-10-07：按钮**只留图标**（去掉"聚搜"文字），
+  ///   与书源页的聚搜按钮同款；尺寸对齐同排的 32 圆钮。
   Widget _buildAggregateChip(bool isDark) {
     return GestureDetector(
       onTap: () => Navigator.push(
@@ -857,7 +871,9 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         MaterialPageRoute(builder: (_) => const ComicAggregateSearchPage()),
       ),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        width: 32,
+        height: 32,
+        alignment: Alignment.center,
         decoration: BoxDecoration(
           color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
           borderRadius: BorderRadius.circular(16),
@@ -869,24 +885,10 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             ),
           ],
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.auto_awesome_rounded,
-              size: 14,
-              color: JellyTheme.primary,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              '聚搜',
-              style: TextStyle(
-                fontSize: AppTheme.fontFootnote,
-                fontWeight: FontWeight.w700,
-                color: JellyTheme.primary,
-              ),
-            ),
-          ],
+        child: Icon(
+          Icons.auto_awesome_rounded,
+          size: 16,
+          color: JellyTheme.primary,
         ),
       ),
     );
@@ -1095,48 +1097,26 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       );
   }
 
-  /// 视图切换独立按钮（右上角）：点一下切网格/列表，图标显示目标视图。
-  /// 样式与 JellyIconMenuButton / JellyRingButton 一致（圆形描边）。
+  /// 视图切换按钮（右上角）—— 统一控件：列表 / 宫格·3列 / 宫格·4列 / 宫格·5列。
+  /// （用户 2026-10-07 要求三页统一，且宫格支持 3/4/5 列）
   Widget _buildViewToggleButton(bool isDark) {
     // 动画进行中用插值判断当前视图，避免动画中点击误判方向"切不回来"
     final isGrid = _tabController.indexIsChanging
         ? (_tabController.animation?.value.round() ?? 0) == 0
         : _tabController.index == 0;
-    return Tooltip(
-      message: isGrid ? '切换到列表视图' : '切换到网格视图',
-      child: Material(
-        color: Colors.transparent,
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: () {
-            FocusScope.of(context).unfocus();
-            _tabController.animateTo(isGrid ? 1 : 0);
-          },
-          child: Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              // 参考样式：黑色实心圆 + 白色图标；深色模式反转为白圆 + 深色图标
-              color: isDark ? Colors.white : const Color(0xFF17181C),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.14),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Center(
-              child: Icon(
-                isGrid ? Icons.view_list_rounded : Icons.grid_view_rounded,
-                size: 20,
-                color: isDark ? const Color(0xFF17181C) : Colors.white,
-              ),
-            ),
-          ),
-        ),
-      ),
+    return ReadingViewToggle(
+      isDark: isDark,
+      isGrid: isGrid,
+      onChanged: (grid, columns) {
+        FocusScope.of(context).unfocus();
+        if (!grid) {
+          ReadingLayout().setColumns(columns);
+          _tabController.animateTo(1);
+        } else {
+          ReadingLayout().setColumns(columns);
+          _tabController.animateTo(0);
+        }
+      },
     );
   }
 
@@ -1966,15 +1946,13 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     return cols;
   }
 
-  /// 网格视图（瀑布流，列数自适应，默认 2 列）
+  /// 网格视图（瀑布流；列数由用户偏好决定：一排 3 / 4 / 5 个）
   Widget _buildGridView() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final cols = _adaptiveColumns(
-          constraints.maxWidth,
-          min: 3,
-          target: 118,
-        );
+        // 用户偏好列数（ReadingLayout，默认 3）；不再按宽度自适应，
+        // 保证"一排 3/4/5 个"所见即所得（用户 2026-10-07）
+        final cols = ReadingLayout().columns;
         return MasonryGridView.count(
           controller: _gridScrollController,
           padding: EdgeInsets.only(

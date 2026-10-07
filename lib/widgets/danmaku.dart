@@ -186,9 +186,20 @@ class DanmuLayer extends StatefulWidget {
   final bool blockTop;
   final bool blockBottom;
 
-  /// 显示区域：弹幕可用高度占整个播放器的比例（0.25 ~ 1.0）。
-  /// 由外层用 FractionallySizedBox 限制高度，这里只用于轨道数推算。
+  /// 显示区域占比：1.0 = 全屏；越小越靠上（从顶部往下排）
+  /// ⚠️ 已被 [topPadding] / [bottomPadding] 取代，保留仅为向后兼容。
+  /// 新代码请直接用 [topPadding] / [bottomPadding] 分别控制上下边距。
   final double areaRatio;
+
+  /// 弹幕区域顶部间距（占视频高度的百分比，0.0 ~ 0.5）。
+  /// 比如 0.08 = 弹幕从视频顶部往下 8% 的位置开始，
+  /// 用来避开播放器顶部的标题/返回栏。
+  final double topPadding;
+
+  /// 弹幕区域底部间距（占视频高度的百分比，0.0 ~ 0.5）。
+  /// 比如 0.12 = 弹幕在视频底部往上 12% 的位置结束，
+  /// 用来避开播放器底部的进度条/控制栏。
+  final double bottomPadding;
 
   /// 行间距系数（1.0 ~ 3.0）：轨道间距 = 字号 × 本系数 + 基础间距
   final double lineSpacing;
@@ -202,6 +213,10 @@ class DanmuLayer extends StatefulWidget {
   /// 弹幕延迟（秒）：正数 = 弹幕比画面晚出现，负数 = 提前
   final double delaySeconds;
 
+  /// 强制统一颜色：null = 使用弹幕自带色；有值 = 所有弹幕都显示这个颜色
+  /// （对应设置页「弹幕颜色」的「统一白色」「自定义」）。
+  final Color? forceColor;
+
   const DanmuLayer({
     super.key,
     required this.danmus,
@@ -214,10 +229,13 @@ class DanmuLayer extends StatefulWidget {
     this.blockTop = false,
     this.blockBottom = false,
     this.areaRatio = 1.0,
+    this.topPadding = 0.0,
+    this.bottomPadding = 0.0,
     this.lineSpacing = 1.6,
     this.strokeWidth = 1.5,
     this.fontWeight = FontWeight.w500,
     this.delaySeconds = 0.0,
+    this.forceColor,
   });
 
   @override
@@ -307,11 +325,21 @@ class DanmuLayerState extends State<DanmuLayer> {
         .toList();
   }
 
-  /// 显示区域越小，可用轨道数越少（避免弹幕挤在窄条里重叠）
+  /// 可用高度越少，轨道数越少（避免弹幕挤在窄条里重叠）。
+  /// 同时考虑 areaRatio（旧 API）和 topPadding/bottomPadding（新 API）。
   int get _effectiveTrackCount {
     final base = _trackCount;
-    if (widget.areaRatio >= 0.99) return base;
-    final scaled = (base * widget.areaRatio).floor();
+    // 新参数优先：topPadding + bottomPadding 决定可用比例
+    final padTop = widget.topPadding.clamp(0.0, 0.5);
+    final padBottom = widget.bottomPadding.clamp(0.0, 0.5);
+    final available = 1.0 - padTop - padBottom;
+    if (available <= 0) return 1;
+    // 兼容旧 areaRatio：取更小的那个（更保守）
+    final effectiveRatio = available < widget.areaRatio
+        ? available
+        : widget.areaRatio;
+    if (effectiveRatio >= 0.99) return base;
+    final scaled = (base * effectiveRatio).floor();
     return scaled.clamp(1, base);
   }
 
@@ -486,33 +514,53 @@ class DanmuLayerState extends State<DanmuLayer> {
               a.positioned = true;
             }
           }
-          return Stack(
-            clipBehavior: Clip.none,
-            children: [
-              for (final a in _active)
-                Positioned(
-                  left: a.item.mode == 1 ? a.x : 0,
-                  top: a.item.mode == 1
-                      ? 12.0 + a.track * _trackStep
-                      : (a.topFixed
-                          ? 12.0 + a.track * _trackStep
-                          : h - 34.0 - a.track * _trackStep),
-                  child: Text(
-                    a.item.text,
-                    // 弹幕字号由用户单独设置，豁免全局字号缩放，
-                    // 避免 textScaler 放大后与实际渲染宽度不一致
-                    textScaler: TextScaler.noScaling,
-                    style: TextStyle(
-                      color: a.item.color.withValues(alpha: widget.opacity),
-                      fontSize: widget.fontSize,
-                      fontWeight: widget.fontWeight,
-                      shadows: _strokeShadows(),
+          // 弹幕区域的上下边距（px）：
+          //   · topPadding / bottomPadding 是用户设置的百分比
+          //   · 再叠加 24px 基础安全距（防止贴边）
+          final topPx = h * widget.topPadding.clamp(0.0, 0.5) + 24.0;
+          final bottomPx = h * widget.bottomPadding.clamp(0.0, 0.5) + 24.0;
+          // ⚠️ 必须 Clip.hardEdge：否则弹幕会飘到视频画面外面
+          // （原来 Clip.none 是为了"不裁掉进场/出场边缘"，但实际上
+          //  Positioned 子项超出 Stack 边界时真的会漏到视频外面，
+          // 表现就是"弹幕跑到播放器黑边外面去了"）。
+          // 进场从右边界进入时，右边界本身就是视频边缘，裁掉很自然。
+          return ClipRect(
+            child: Stack(
+              children: [
+                for (final a in _active)
+                  Positioned(
+                    left: a.item.mode == 1 ? a.x : null,
+                    right: a.item.mode != 1 ? 0 : null,
+                    // 滚动弹幕 + 顶部固定：从 topPx 往下排
+                    // 底部固定：从 bottomPx 往上排
+                    top: a.bottomFixed ? null : topPx + a.track * _trackStep,
+                    bottom: a.bottomFixed
+                        ? bottomPx + a.track * _trackStep
+                        : null,
+                    child: Text(
+                      a.item.text,
+                      // 弹幕字号由用户单独设置，豁免全局字号缩放，
+                      // 避免 textScaler 放大后与实际渲染宽度不一致
+                      textScaler: TextScaler.noScaling,
+                      style: TextStyle(
+                        // 颜色：forceColor 不为 null 时统一用它（统一白色/自定义），
+                        // 否则用弹幕自带的颜色（「自带色」模式）。
+                        // 描边已在 _strokeShadows 里做，彩色弹幕颜色能透出来。
+                        color: (widget.forceColor ?? a.item.color)
+                            .withValues(alpha: widget.opacity),
+                        fontSize: widget.fontSize,
+                        fontWeight: widget.fontWeight,
+                        shadows: _strokeShadows(),
+                      ),
+                      maxLines: 1,
+                      softWrap: false,
+                      textAlign:
+                          a.item.mode != 1 ? TextAlign.center : TextAlign.start,
                     ),
-                    maxLines: 1,
-                    softWrap: false,
+                    width: a.item.mode != 1 ? w : null,
                   ),
-                ),
-            ],
+              ],
+            ),
           );
         },
       ),

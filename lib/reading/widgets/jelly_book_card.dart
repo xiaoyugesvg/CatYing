@@ -161,41 +161,49 @@ class _JellyBookCardState extends State<JellyBookCard>
             },
       child: AnimatedBuilder(
         animation: _scaleAnimation,
-        builder: (context, child) {
-          return Transform.scale(
-            scale: _scaleAnimation.value,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-                boxShadow: _isPressed
-                    ? [
-                        BoxShadow(
-                          color: JellyTheme.primary.withValues(alpha: 0.2),
-                          blurRadius: 10,
-                          spreadRadius: 1,
-                          offset: const Offset(0, 3),
-                        ),
-                      ]
-                    : [
-                        BoxShadow(
-                          color: JellyTheme.primary.withValues(alpha: 0.15),
-                          blurRadius: 15,
-                          spreadRadius: 2,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-              ),
-              child: child,
-            ),
-          );
-        },
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: widget.isGrid ? _buildGrid(isDark) : _buildList(isDark),
+        builder: (context, child) => Transform.scale(
+          scale: _scaleAnimation.value,
+          child: child,
         ),
+        // ── 用户 2026-10-07：「名称不要纳入进卡片，只有封面才是卡片」──
+        //   宫格：卡片外壳只包封面，书名/作者/收藏落在卡片**外面** ✓；
+        //   列表：本来就是"一整行一张卡"，保持不变 ✓
+        child: widget.isGrid
+            ? _buildGrid(isDark)
+            : _card(isDark, _buildList(isDark)),
+      ),
+    );
+  }
+
+  /// 卡片外壳（底色 + 阴影 + 圆角 + 裁剪）。宫格只包封面，列表包整行。
+  Widget _card(bool isDark, Widget child) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+        boxShadow: _isPressed
+            ? [
+                BoxShadow(
+                  color: JellyTheme.primary.withValues(alpha: 0.2),
+                  blurRadius: 10,
+                  spreadRadius: 1,
+                  offset: const Offset(0, 3),
+                ),
+              ]
+            : [
+                BoxShadow(
+                  color: JellyTheme.primary.withValues(alpha: 0.15),
+                  blurRadius: 15,
+                  spreadRadius: 2,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: child,
       ),
     );
   }
@@ -272,10 +280,13 @@ class _JellyBookCardState extends State<JellyBookCard>
 
   Widget _buildGrid(bool isDark) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        AspectRatio(
+        // ── 卡片本体 = 只有封面（名称等落在卡片外面，用户 2026-10-07）──
+        _card(
+          isDark,
+          AspectRatio(
           aspectRatio: 3 / 4,
           child: Stack(
             fit: StackFit.expand,
@@ -325,6 +336,8 @@ class _JellyBookCardState extends State<JellyBookCard>
             ],
           ),
         ),
+        ),
+        // 名称 / 元信息：放在卡片**外面**
         Padding(
           padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
           child: SizedBox(

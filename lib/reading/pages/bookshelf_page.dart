@@ -1198,7 +1198,8 @@ class _BookshelfPageState extends State<BookshelfPage>
                                   child: JellyExpandableSearch(
                                     controller: _searchController,
                                     hintText: '搜索书架',
-                                    maxWidth: 200,
+                                    // 用户 2026-10-07：宽度改成原来的三分之二（200 → 133）
+                                    maxWidth: 133,
                                     onSubmitted: (v) => _openSearch(v),
                                     onChanged: (v) => setState(() {}),
                                   ),

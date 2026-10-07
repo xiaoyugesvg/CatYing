@@ -56,6 +56,10 @@ class BuiltinSourcesService {
   /// 不覆盖用户的修改，也不把用户关掉的开关重新打开。
   /// [force] 为 true 时无条件用出厂版覆盖重写全部内置源（"恢复默认"）。
   Future<void> init({bool force = false}) async {
+    // ✅ 用户 2026-10-07：名称带 dj/DJ 的 MusicFree 源**全部去掉** ——
+    //   已有设备上 store 里可能还留着（init 只补"缺失"、不删"已存在"），
+    //   所以每次启动先显式清一遍 ✓
+    await _purgeDjMusicFreeSources();
     final lx = await _loadLxSources();
     final mf = await _loadMusicFreeSources();
     final all = [...lx, ...mf];
@@ -251,6 +255,8 @@ class BuiltinSourcesService {
     final out = <ThirdPartySource>[];
     for (final entry in index) {
       final name = entry['name']!;
+      // ✅ 用户 2026-10-07：名称带 dj/DJ 的源不注册（远端索引也走这道闸）
+      if (_isDjName(name)) continue;
       final url = entry['url']!;
       final fileName = _fileNameFromUrl(url);
       // 稳定 id：用插件文件名作为 id 的一部分
@@ -328,6 +334,8 @@ class BuiltinSourcesService {
 
     for (final entry in remoteIndex) {
       final name = entry['name']!;
+      // ✅ 用户 2026-10-07：名称带 dj/DJ 的源既不升级也不新增
+      if (_isDjName(name)) continue;
       final url = entry['url']!;
       final fileName = _fileNameFromUrl(url);
       final id = 'builtin_mf_$fileName';
@@ -398,5 +406,39 @@ class BuiltinSourcesService {
   static String _fileNameFromUrl(String url) {
     final seg = Uri.tryParse(url)?.pathSegments ?? const [];
     return seg.isEmpty ? 'unknown' : seg.last;
+  }
+
+  /// 名称里是否带 `dj`（不区分大小写）—— 用户 2026-10-07 要求把
+  /// 这类 MusicFree 源**全部去掉**（DJ 类音源）。
+  ///
+  /// 判据按**名称**（不是 url）：`DJ多多 / 火龙DJ / djuu DJ / SpaceDJ …`
+  /// 一律命中；像 `水晶舞曲`（url 里含 dj14 但名字没有）保持保留 ✓。
+  static bool _isDjName(String name) => name.toLowerCase().contains('dj');
+
+  /// 清掉**已经注册过**的 DJ 类 MusicFree 内置源 + 它们的脚本文件缓存。
+  ///
+  /// 为什么必须单独做这一步：上面的过滤只能挡住"**之后**注册"的源 ✗，
+  /// 而已经装过 App 的设备里那些 DJ 源**还在 store 里** ✓
+  /// （`init` 只为"缺失的"补源 ✓、不会删除"已存在的" ✗）
+  /// ⇒ 不显式删一次，用户删不干净 ✓。
+  Future<void> _purgeDjMusicFreeSources() async {
+    try {
+      final store = ThirdPartySourceStore.instance;
+      final doomed = store.all
+          .where((s) => s.isMusicFree && _isDjName(s.name))
+          .toList();
+      if (doomed.isEmpty) return;
+      for (final s in doomed) {
+        // 顺带删掉落盘的插件脚本（否则文件缓存会一直留着）
+        final url = s.updateUrl.trim();
+        if (url.isNotEmpty) {
+          await PluginScriptCache.instance.delete(_fileNameFromUrl(url));
+        }
+        await store.remove(s.id);
+      }
+      debugPrint('[BuiltinSources] 已移除 DJ 类 MusicFree 源 ${doomed.length} 个');
+    } catch (e) {
+      debugPrint('[BuiltinSources] 移除 DJ 类 MusicFree 源失败: $e');
+    }
   }
 }

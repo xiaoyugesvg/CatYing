@@ -495,6 +495,13 @@ class MusicPlayerManager extends ChangeNotifier {
       notifyListeners();
       AppLog.instance.log('[Music] 已恢复上次队列: ${_queue.length} 首，'
           '当前第 ${_index + 1} 首《${_currentSong!.name}》（未自动播放）');
+
+      // 启动自动播放：用户在设置里打开了才自动播
+      //（默认关，避免揣兜里误触解锁时突然出声）
+      if (SettingsStore.instance.autoPlayOnLaunch.value) {
+        AppLog.instance.log('[Music] 启动自动播放已开启，开始播放');
+        await _load(_index, autoplay: true);
+      }
     } catch (e) {
       AppLog.instance.log('[Music] 恢复队列失败: $e');
     }

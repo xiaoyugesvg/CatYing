@@ -90,6 +90,13 @@ class ProfilePage extends StatelessWidget {
             listen: store.bottomBarOnSubPages,
             onChanged: (v) => store.setBottomBarOnSubPages(v),
           ),
+          _switchTile(
+            label: '启动自动播放',
+            subtitle: '打开 App 后自动接着上次的歌继续播放',
+            value: store.autoPlayOnLaunch.value,
+            listen: store.autoPlayOnLaunch,
+            onChanged: (v) => store.setAutoPlayOnLaunch(v),
+          ),
           // ⚠️ 「跨平台匹配」开关**已移除**（用户 2026 决定：不要跨平台）。
           //
           // 实测它救不了 VIP 歌（QQ《晴天》在酷狗同名 9 条全 no_free_source，

@@ -23,7 +23,7 @@ class _Book275CategoryPageState extends State<Book275CategoryPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: MusicTheme.background,
-      appBar: AppBar(title: const Text('275听书')),
+      appBar: AppBar(title: const Text('七五听书')),
       body: ListView.separated(
         padding: const EdgeInsets.symmetric(vertical: 6),
         itemCount: MusicApi.book275Categories.length,

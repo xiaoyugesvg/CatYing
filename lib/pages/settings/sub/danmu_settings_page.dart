@@ -39,7 +39,6 @@ class DanmuSettingsPage extends StatefulWidget {
 class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
   // ---- 服务 ----
   bool _enabled = true;
-  bool _preferVideoDanmu = false;
   DanmuSource _source = DanmuSource.remote;
   String _apiUrl = '';
 
@@ -49,6 +48,7 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
   bool _showScroll = true;
   bool _syncSpeed = false;
   String _colorMode = 'builtin'; // builtin=自带色 / white / custom
+  Color _customColor = Colors.white;
   List<String> _blockWords = [];
 
   // ---- 样式数值 ----
@@ -56,6 +56,8 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
   double _lineSpacing = 1.6;
   double _opacity = 1.0;
   double _areaRatio = 1.0;
+  double _topPadding = 0.0;
+  double _bottomPadding = 0.0;
   double _speed = 150;
   double _strokeWidth = 1.5;
   int _fontWeight = 500;
@@ -72,7 +74,6 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
     if (!mounted) return;
     setState(() {
       _enabled = p.getBool('danmu_enabled') ?? true;
-      _preferVideoDanmu = p.getBool('danmu_prefer_video') ?? false;
       _source = DanmuSource.fromId(p.getString('danmu_source'));
       _apiUrl = (p.getString('danmu_api_url') ?? '').trim();
 
@@ -81,12 +82,18 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
       _showScroll = !(p.getBool('danmu_block_scroll') ?? false);
       _syncSpeed = p.getBool('danmu_sync_speed') ?? false;
       _colorMode = p.getString('danmu_color_mode') ?? 'builtin';
+      final customColorVal = p.getInt('danmu_custom_color');
+      if (customColorVal != null) _customColor = Color(customColorVal);
       _blockWords = p.getStringList('danmu_block_words') ?? const [];
 
       _fontSize = (p.getDouble('danmu_font_size') ?? 16).clamp(10.0, 28.0);
       _lineSpacing = (p.getDouble('danmu_line_spacing') ?? 1.6).clamp(1.0, 3.0);
       _opacity = (p.getDouble('danmu_opacity') ?? 1.0).clamp(0.2, 1.0);
       _areaRatio = (p.getDouble('danmu_area_ratio') ?? 1.0).clamp(0.25, 1.0);
+      _topPadding =
+          (p.getDouble('danmu_top_padding') ?? 0.0).clamp(0.0, 0.5);
+      _bottomPadding =
+          (p.getDouble('danmu_bottom_padding') ?? 0.0).clamp(0.0, 0.5);
       _speed = (p.getDouble('danmu_speed') ?? 150).clamp(60.0, 300.0);
       _strokeWidth = (p.getDouble('danmu_stroke_width') ?? 1.5).clamp(0.0, 3.0);
       _fontWeight = p.getInt('danmu_font_weight') ?? 500;
@@ -144,15 +151,6 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
               onChanged: (v) async {
                 setState(() => _enabled = v);
                 await _saveBool('danmu_enabled', v);
-              },
-            ),
-            unifiedSwitchRow(
-              icon: Icons.video_settings,
-              title: '优先使用视频返回弹幕数据',
-              value: _preferVideoDanmu,
-              onChanged: (v) async {
-                setState(() => _preferVideoDanmu = v);
-                await _saveBool('danmu_prefer_video', v);
               },
             ),
             const SizedBox(height: 6),
@@ -363,6 +361,22 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
               icon: Icons.palette_outlined,
               title: '弹幕颜色',
               value: _colorModeText,
+              // 自定义模式下在文字前加个颜色预览小圆点
+              trailing: _colorMode == 'custom'
+                  ? Container(
+                      width: 14,
+                      height: 14,
+                      margin: const EdgeInsets.only(right: 4),
+                      decoration: BoxDecoration(
+                        color: _customColor,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white24,
+                          width: 1,
+                        ),
+                      ),
+                    )
+                  : null,
               onTap: _pickColorMode,
             ),
             SettingsRow(
@@ -426,6 +440,30 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
                 onChanged: (v) async {
                   setState(() => _areaRatio = v);
                   await _saveDouble('danmu_area_ratio', v);
+                },
+              ),
+              _sliderRow(
+                label: '顶部间距',
+                value: _topPadding,
+                min: 0.0,
+                max: 0.3,
+                divisions: 30,
+                text: '${(_topPadding * 100).round()}%',
+                onChanged: (v) async {
+                  setState(() => _topPadding = v);
+                  await _saveDouble('danmu_top_padding', v);
+                },
+              ),
+              _sliderRow(
+                label: '底部间距',
+                value: _bottomPadding,
+                min: 0.0,
+                max: 0.3,
+                divisions: 30,
+                text: '${(_bottomPadding * 100).round()}%',
+                onChanged: (v) async {
+                  setState(() => _bottomPadding = v);
+                  await _saveDouble('danmu_bottom_padding', v);
                 },
               ),
               _sliderRow(
@@ -508,6 +546,11 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
   // ============================================================
 
   /// 三段服务来源选择（本地服务 / 订阅自带 / 自定义远程）
+  /// 订阅自带弹幕服务的默认地址（公开 Dandanplay / 弹弹play API）
+  static const String _builtinDanmuUrl = 'https://api.dandanplay.net';
+  /// 本地服务默认地址
+  static const String _localDanmuUrl = 'http://127.0.0.1:11402';
+
   Widget _sourceSelector() {
     return Container(
       height: 40,
@@ -528,9 +571,22 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () async {
-                  setState(() => _source = DanmuSource.values[i]);
+                  final src = DanmuSource.values[i];
+                  setState(() => _source = src);
                   final p = await SharedPreferences.getInstance();
-                  await p.setString('danmu_source', DanmuSource.values[i].id);
+                  await p.setString('danmu_source', src.id);
+                  // 切换源时同步更新 danmu_api_url，确保播放器实际用到
+                  switch (src) {
+                    case DanmuSource.local:
+                      await p.setString('danmu_api_url', _localDanmuUrl);
+                      _apiUrl = _localDanmuUrl;
+                    case DanmuSource.builtin:
+                      await p.setString('danmu_api_url', _builtinDanmuUrl);
+                      _apiUrl = _builtinDanmuUrl;
+                    case DanmuSource.remote:
+                      // 自定义模式保留用户输入的地址，不覆盖
+                      break;
+                  }
                 },
                 child: Container(
                   alignment: Alignment.center,
@@ -720,9 +776,89 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
       },
     );
     if (v == null) return;
-    setState(() => _colorMode = v);
     final p = await SharedPreferences.getInstance();
     await p.setString('danmu_color_mode', v);
+    // 选了"自定义"但还没选过颜色 → 弹颜色选择器
+    Color? pickedColor;
+    if (v == 'custom') {
+      pickedColor = await _showColorPicker(initial: _customColor);
+      if (pickedColor == null) return; // 用户取消 → 不切换模式
+      await p.setInt('danmu_custom_color', pickedColor.value);
+    }
+    setState(() {
+      _colorMode = v;
+      if (pickedColor != null) _customColor = pickedColor!;
+    });
+  }
+
+  /// 简易颜色选择器：9 个常用色 + 当前色预览
+  Future<Color?> _showColorPicker({required Color initial}) async {
+    const palette = [
+      Colors.white,
+      Colors.red,
+      Colors.orange,
+      Colors.amber,
+      Colors.yellow,
+      Colors.green,
+      Colors.cyan,
+      Colors.blue,
+      Colors.purpleAccent,
+      Colors.pink,
+    ];
+    Color selected = initial;
+    return showDialog<Color>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: AppTheme.backgroundElevated,
+          title: const Text('选择弹幕颜色'),
+          content: SizedBox(
+            width: 280,
+            child: GridView.builder(
+              shrinkWrap: true,
+              gridDelegate:
+                  const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 5,
+                    crossAxisSpacing: 10,
+                    mainAxisSpacing: 10,
+                  ),
+              itemCount: palette.length,
+              itemBuilder: (_, i) {
+                final c = palette[i];
+                final isSel = c.value == selected.value;
+                return GestureDetector(
+                  onTap: () => setDialogState(() => selected = c),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: c,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isSel
+                            ? AppTheme.accentColor
+                            : Colors.white10,
+                        width: isSel ? 3 : 1,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text('取消',
+                  style: TextStyle(color: AppTheme.textSecondary)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(selected),
+              child: Text('确定',
+                  style: TextStyle(color: AppTheme.accentColor)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// 屏蔽词编辑（多词，逗号/换行分隔）

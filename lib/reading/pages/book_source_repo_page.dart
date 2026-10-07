@@ -15,7 +15,7 @@ import '../services/qread_api.dart';
 import 'book_source_editor_page.dart';
 import 'book_source_health_page.dart';
 import 'book_source_login_page.dart';
-import 'cloud_book_source_page.dart';
+// cloud_book_source_page 的 import 已移除（云端网页入口迁到书源页）
 // ✅ **补齐缺失的 import** ✗✓（本轮修的 8 条 error 全因它们 ✗）：
 //   · `JellySearchBar` / `JellyExpandableSearch` / `JellySlidingActions`(+`JellyAction`)
 //     这三个是**共用组件** ✓ —— 我之前误以为"能被传递导出"✗，那是因为**闸门跑错了目录** ✗✗
@@ -428,24 +428,10 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                     ],
                   ],
                 ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      if (mounted) {
-                        Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const CloudBookSourcePage(),
-                          ),
-                        );
-                      }
-                    },
-                    icon: const Icon(Icons.language, size: 18),
-                    label: const Text('打开云端网页版（源分类/详情/目录/阅读器）'),
-                  ),
-                ),
+                // 「打开云端网页版」按钮已移除（用户 2026-10-07）：
+                // 该入口现在放在**书源页**顶栏（cloud_outlined 图标按钮），
+                // 而不是书源仓库里 —— 云端网页是"看书"的入口，
+                // 放书源页更顺手；仓库页只保留书源的管理能力。
                 if (cfg.isLoggedIn) ...[
                   const SizedBox(height: 8),
                   SizedBox(
@@ -581,7 +567,8 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
           ? JellyExpandableSearch(
             controller: _searchCtrl,
             hintText: '搜索书源',
-            maxWidth: 210,
+            // 用户 2026-10-07：宽度改成原来的三分之二（210 → 140）
+            maxWidth: 140,
             height: 32,
             // ⚠️ **这里原来写了 `autofocus: true` ✗ —— 该组件没有这个参数** ✓（我凭记忆写错了 ✗）。
             //   组件注释 `jelly_expandable_search.dart:14` 自己写明：`autofocus` 是

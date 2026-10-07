@@ -594,12 +594,12 @@ class _DiscoverPageState extends State<DiscoverPage>
   /// 不引入任何写死的色值。
   Widget _sourceTabs(DiscoverStyle style) {
     final tabs = const [
-      _SourceTab(source: SongSource.netease, label: '网易云'),
-      _SourceTab(source: SongSource.qq, label: 'QQ音乐'),
+      _SourceTab(source: SongSource.netease, label: '网易'),
+      _SourceTab(source: SongSource.qq, label: 'QQ'),
       _SourceTab(source: SongSource.kugou, label: '酷狗'),
-      _SourceTab(source: SongSource.ximalaya, label: '喜马拉雅'),
+      _SourceTab(source: SongSource.ximalaya, label: '喜雅'),
       _SourceTab(source: SongSource.bookan, label: '博看'),
-      _SourceTab(source: SongSource.book275, label: '275'),
+      _SourceTab(source: SongSource.book275, label: '七五'),
     ];
     final isPaper = style.preset == DiscoverPreset.paper;
     return Padding(

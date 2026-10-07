@@ -50,8 +50,13 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
   /// 拖动后的位置；null = 用默认位置（右下、迷你播放器上方）
   Offset? _pos;
 
-  /// 是否展开出「上一首 / 播放暂停 / 下一首」三个键
+  /// 是否展开出「上一首 / 播放暂停 / 下一首 / 关闭」四个键
   bool _open = false;
+
+  /// 用户手动关闭悬浮球后设为 true，球整体隐藏；
+  /// 切到新歌（currentSong 变化）时自动重置为 false，球重新出现。
+  bool _dismissed = false;
+  String? _lastSongKey;
 
   /// **C 方案**：贴边且收起时把球"半藏"进屏幕边缘（露出约 62%），
   /// 此时**封面不旋转**（静止的半圆在边上更安静）；
@@ -64,6 +69,19 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
     nav.push<void>(
       MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),builder: (_) => const MusicPlayerPage()),
     );
+  }
+
+  /// 关闭悬浮球：暂停播放 + 收起展开条 + 整体隐藏。
+  ///
+  /// 球被手动关闭后，**切到新歌时会自动重新出现**
+  /// （比如点了另一首歌、队列自动切下一首）——
+  /// 这样不会出现"关了之后再也找不到播放器"的情况。
+  void _closeFloating() {
+    MusicPlayerManager.instance.pause();
+    setState(() {
+      _open = false;
+      _dismissed = true;
+    });
   }
 
   @override
@@ -119,6 +137,21 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
         final song = player.currentSong;
         if (song == null) return const SizedBox.shrink();
 
+        // 歌曲变化（切歌 / 点了新歌）→ 重置手动关闭状态，球重新出现
+        final key = '${song.name}|${song.artists}|${song.coverUrl}';
+        if (key != _lastSongKey) {
+          _lastSongKey = key;
+          if (_dismissed) {
+            // 在下一帧 setState，避免 build 过程中修改状态
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() => _dismissed = false);
+            });
+          }
+        }
+
+        // 用户手动关闭 → 整体隐藏
+        if (_dismissed) return const SizedBox.shrink();
+
         final screen = MediaQuery.of(context).size;
         final pad = MediaQuery.of(context).padding;
         final maxX = (screen.width - _size - pad.right - 4).clamp(pad.left + 4, screen.width);
@@ -142,9 +175,10 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
         // 迷你条只在本页有正在播放的歌时出现 —— 而本组件同样是
         // "没有正在播放的歌就整体隐藏"（见上面 `song == null`），
         // 所以**两者同生同灭**，不需要再判断一次。
-        final defaultY = screen.height -
-            pad.bottom -
-            (MusicMiniPlayerLayout.topFromBottom + _bottomGap);
+        // 默认位置：屏幕右侧中间（右侧 16px 边距，垂直居中）。
+        // 之前默认在底部迷你条上方，现在改到右侧中间，
+        // 避免挡歌词/控制区，也更醒目。
+        final defaultY = screen.height / 2 - _size / 2;
         final pos = _pos ?? Offset(screen.width - _size - 16, defaultY);
         // 用 `pos` 判断贴哪一侧（不能用 x —— 半藏后 x 可能为负）
         final toLeft = pos.dx + _size / 2 < screen.width / 2;
@@ -158,10 +192,7 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
             : pos.dx.clamp(pad.left + 4, maxX);
         final y = pos.dy.clamp(80.0, maxY);
 
-        // 展开的控制条**横向**长出来（朝屏幕中间），所以球的垂直位置不变 ——
-        // 这正是为了避免"一展开球就往下跑"。
-        // 展开条：**只保留三个键**（用户要求）——
-        // 收藏/下载/历史已抽到 `quick_actions.dart`，供迷你播放器等复用。
+        // 展开时的控制条：上一首 / 播放暂停 / 下一首（共 3 键）
         final controls = <Widget>[
           _ctrl(Icons.skip_previous_rounded, player.previous),
           _ctrl(
@@ -176,10 +207,13 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
           _ctrl(Icons.skip_next_rounded, () => player.next()),
         ];
 
+        // 展开时：控制条宽度 ≈ 3 键各 40 + 间距
+        // 收起时：只有球本身（54）
+        final contentWidth = _open ? 150.0 : _size;
+
         return Stack(
           children: [
-            // 展开时：整屏透明点击层 —— 点任意空白处收起（再点同处才透传）。
-            // 这样"收起"不再依赖那个显眼的大 × 关闭按钮。
+            // 展开时：整屏透明点击层 —— 点任意空白处收起
             if (_open)
               Positioned.fill(
                 child: GestureDetector(
@@ -188,27 +222,76 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
                 ),
               ),
             Positioned(
-              // 贴左时按 left 定位（右侧长出来）；贴右时按 right 定位（左侧长出来）
+              // 贴左时按 left 定位；贴右时按 right 定位
               left: toLeft ? x : null,
-              right: toLeft ? null : (screen.width - x - _size),
+              right: toLeft ? null : (screen.width - x - contentWidth),
               top: y,
-              // 🔴 展开条宽度 ≈ 球(54) + 3 个键(各 ~40) ✗ → 在**极窄屏 /
-              // 系统大字号**下会超出屏幕，报 RenderFlex overflow ✗。
-              // 用 `FittedBox(scaleDown)` 让它在放不下时**整体等比缩小** ✓
-              //（比硬编码宽度稳：宽屏原样、窄屏自动缩小 ✓）。
+              // 🔴 展开条在极窄屏 / 系统大字号下会超出屏幕 →
+              // 用 `FittedBox(scaleDown)` 整体等比缩小。
               child: FittedBox(
                 fit: BoxFit.scaleDown,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: toLeft
-                      ? [_ballCircle(player), if (_open) ...controls]
-                      : [if (_open) ...controls, _ballCircle(player)],
-                ),
+                child: _open
+                    // 展开态：控制条 + 右上角关闭按钮；不显示主球
+                    ? _buildExpandedPanel(controls)
+                    // 收起态：只显示主球
+                    : _ballCircle(player),
               ),
             ),
           ],
         );
       },
+    );
+  }
+
+  /// 展开态面板：控制条（上一首 / 播放暂停 / 下一首）+ 右上角关闭按钮。
+  ///
+  /// 布局：关闭按钮浮在右上角，控制条水平居中排布。
+  /// 展开时**不显示主球**（用户要求：点击展开后就不要那个悬浮图标了）。
+  Widget _buildExpandedPanel(List<Widget> controls) {
+    return SizedBox(
+      width: 150,
+      height: _size + 18, // 给关闭按钮留上方空间
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          // 关闭按钮（×）：右上角
+          Positioned(
+            top: 0,
+            right: 0,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _closeFloating,
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.black.withValues(alpha: 0.5),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.3),
+                    width: 0.8,
+                  ),
+                ),
+                child: const Icon(
+                  Icons.close_rounded,
+                  color: Colors.white,
+                  size: 14,
+                ),
+              ),
+            ),
+          ),
+          // 控制条：水平居中，垂直靠下（与球的中心 y 对齐）
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: controls,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

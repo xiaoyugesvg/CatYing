@@ -10,6 +10,7 @@ import '../models/search_result.dart';
 import '../services/book_download_service.dart';
 import '../services/book_view_mode.dart';
 import '../services/browse_history_service.dart';
+import '../services/reading_layout.dart';
 import '../services/search_history_service.dart';
 import '../services/zlibrary_service.dart';
 import '../theme/jelly_theme.dart';
@@ -21,7 +22,7 @@ import '../widgets/jelly_ring_button.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_pull_cord.dart';
 import '../widgets/guide_overlay.dart';
-import '../widgets/jelly_segmented_toggle.dart';
+import '../widgets/reading_view_toggle.dart';
 import '../widgets/staggered_entrance.dart';
 import 'book_detail_page.dart';
 import 'book_source_search_page.dart';
@@ -121,6 +122,8 @@ class _BookSearchPageState extends State<BookSearchPage>
     _gridScrollController.addListener(() => _onScroll(_gridScrollController));
     _listScrollController.addListener(() => _onScroll(_listScrollController));
     BookViewMode().addListener(_onViewModeChangedExternal);
+    // 宫格列数变化（3/4/5）→ 重建网格（跨页面共享偏好）
+    ReadingLayout().addListener(_onLayoutChanged);
     ZlibraryService().addListener(_onServiceChanged);
     BookDownloadService().addListener(_onServiceChanged);
     _wasUnavailable = ZlibraryService().isUnavailable;
@@ -158,6 +161,7 @@ class _BookSearchPageState extends State<BookSearchPage>
   void dispose() {
     _log('页面销毁');
     BookViewMode().removeListener(_onViewModeChangedExternal);
+    ReadingLayout().removeListener(_onLayoutChanged);
     ZlibraryService().removeListener(_onServiceChanged);
     BookDownloadService().removeListener(_onServiceChanged);
     _tabController.removeListener(_onTabChanged);
@@ -629,6 +633,11 @@ class _BookSearchPageState extends State<BookSearchPage>
     }
   }
 
+  /// 宫格列数变化（3/4/5）→ 重建网格（_buildGridView 读 ReadingLayout）
+  void _onLayoutChanged() {
+    if (mounted) setState(() {});
+  }
+
   void _openDetail(Book book) async {
     FocusScope.of(context).unfocus(); // 进详情前先收起键盘与历史弹层
     // 分类页来源（hash 是 dl/{slug}，无 eapi hash）：先搜索匹配 bookId 拿 eapi hash
@@ -893,8 +902,17 @@ class _BookSearchPageState extends State<BookSearchPage>
                   // 第二行（搜索框 + 视图切换 + 分类按钮）已删除 ——
                   // 它们都并进了上面那一个标题行（按用户截图的一行布局）。
                   const SizedBox(height: 6),
-                  // 格式小标签（常见类型）
-                  _buildFormatChips(isDark),
+                  // ── 推荐（固定左侧）+ 格式小标签 ─────────────────────
+                  // 用户 2026-10-07：图书页要一个「推荐」按钮，
+                  // **固定在漫画页「聚搜」按钮那个位置**（标签行最左、不随滚动）；
+                  // 点它显示的内容 = 图书自身的推荐内容（z-library「最受欢迎」）✓
+                  Row(
+                    children: [
+                      _recommendChip(isDark),
+                      const SizedBox(width: 8),
+                      Expanded(child: _buildFormatChips(isDark)),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -917,7 +935,8 @@ class _BookSearchPageState extends State<BookSearchPage>
     return JellyExpandableSearch(
       controller: _searchController,
       hintText: '搜索图书',
-      maxWidth: 200,
+      // 用户 2026-10-07：宽度改成原来的三分之二（200 → 133）
+      maxWidth: 133,
       onFocusChange: (f) => setState(() {
         if (f && _searchController.text.isEmpty) {
           _historyVisible = true;
@@ -928,27 +947,76 @@ class _BookSearchPageState extends State<BookSearchPage>
     );
   }
 
-  /// 网格 / 列表 视图切换。
+  /// 视图切换（统一控件）：列表 / 宫格·3列 / 宫格·4列 / 宫格·5列。
   ///
-  /// ⚠️ 这里原来接的是 `_tabController` —— **那是分类标签的控制器**
-  /// （推荐/全部/EPUB…，length 2）。点视图切换只会让分类标签换一个，
-  /// 网格/列表**根本没变**（真 bug）。
-  ///
-  /// 视图模式有独立的状态与持久化：`BookViewMode().isGrid`
-  /// （services/book_view_mode.dart）。这里改接它，并且用
-  /// ListenableBuilder 监听 —— 否则别处改了模式本按钮不会跟着动。
+  /// 宫格/列表状态走 `BookViewMode().isGrid`（services/book_view_mode.dart，
+  /// 与图书收藏页联动）；宫格列数走跨页面共享的 `ReadingLayout()`。
+  /// （用户 2026-10-07：三页统一，宫格支持 3/4/5 列）
   Widget _buildViewToggle(bool isDark) {
     return ListenableBuilder(
       listenable: BookViewMode(),
-      builder: (context, _) => JellySegmentedToggle(
-        index: BookViewMode().isGrid ? 0 : 1,
-        onChanged: (i) => BookViewMode().set(i == 0),
-        segments: const [
-          JellySegmentData(icon: Icons.grid_view_rounded),
-          JellySegmentData(icon: Icons.view_list_rounded),
-        ],
+      builder: (context, _) => ReadingViewToggle(
+        isDark: isDark,
+        isGrid: BookViewMode().isGrid,
+        onChanged: (grid, columns) {
+          FocusScope.of(context).unfocus();
+          ReadingLayout().setColumns(columns);
+          BookViewMode().set(grid);
+        },
       ),
     );
+  }
+
+  /// 「推荐」按钮 —— 固定在格式标签行**最左侧**（与漫画页「聚搜」按钮同款
+  /// 位置与样式：32 圆钮、卡片底、主色图标，选中态用主色实心）。
+  ///
+  /// 用户 2026-10-07：「图书里面的那个要增加一个推荐按钮，要和漫画里面的
+  /// 聚搜按钮一样固定在那里；推荐里面的就是图书的那个推荐内容」——
+  /// 所以点它就是**回到推荐流**（z-library「最受欢迎」，与打开图书页默认加载的
+  /// 是同一份数据 `_loadHome()`）。
+  Widget _recommendChip(bool isDark) {
+    final active = !_categoryMode && _keyword.isEmpty && _result.items.isNotEmpty;
+    return GestureDetector(
+      onTap: _showRecommendations,
+      child: Container(
+        width: 32,
+        height: 32,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: active
+              ? JellyTheme.primary
+              : (isDark ? JellyTheme.cardDark : JellyTheme.cardLight),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Icon(
+          Icons.local_fire_department_rounded,
+          size: 17,
+          color: active ? Colors.white : JellyTheme.primary,
+        ),
+      ),
+    );
+  }
+
+  /// 回到「推荐」：清掉关键词 / 分类态，重新加载推荐流（z-library 最受欢迎）。
+  Future<void> _showRecommendations() async {
+    FocusScope.of(context).unfocus();
+    _searchController.clear();
+    setState(() {
+      _result = SearchResult.empty();
+      _keyword = '';
+      _categoryMode = false;
+      _selectedCategory = null;
+      _errorMsg = null;
+      _historyVisible = false;
+    });
+    await _loadHome();
   }
 
   /// 格式小标签（常见类型，整体水平居中；超出可横向滚动）
@@ -1289,11 +1357,8 @@ class _BookSearchPageState extends State<BookSearchPage>
   Widget _buildGridView() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final cols = _adaptiveColumns(
-          constraints.maxWidth,
-          min: 3,
-          target: 118,
-        );
+        // 用户偏好列数（ReadingLayout，默认 3）：一排 3 / 4 / 5 个
+        final cols = ReadingLayout().columns;
         return MasonryGridView.count(
           controller: _gridScrollController,
           padding: EdgeInsets.only(

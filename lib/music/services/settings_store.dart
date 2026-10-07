@@ -21,6 +21,7 @@ class SettingsStore {
   static const _kQuality = AudioQuality.storageKey;
   static const _kSourceEnabled = 'music.sourceEnabled';
   static const String _kCrossPlatform = 'music.crossPlatformMatch';
+  static const String _kAutoPlayOnLaunch = 'music.autoPlayOnLaunch';
 
   /// 发现页视觉预设（aurora / paper / midnight）。
   ///
@@ -74,6 +75,13 @@ class SettingsStore {
 
   /// 发现页视觉预设（默认 aurora = 青碧玻璃，对齐 Beans 默认）
   DiscoverPreset discoverPreset = DiscoverPreset.aurora;
+
+  /// 启动 App 时自动恢复播放（从上次退出时的队列与位置接着播）。
+  ///
+  /// 默认 **关**：大多数场景用户希望"打开 App 是静音的"，
+  /// 尤其手机揣兜里误触解锁时不应该突然出声。
+  /// 车载 / 耳机习惯的用户可在设置里打开。
+  final autoPlayOnLaunch = ValueNotifier<bool>(false);
 
   /// 当前音乐**平台**（搜索/发现用哪个内置数据源）。
   ///
@@ -143,6 +151,8 @@ class SettingsStore {
       musicSource.value = SongSource.fromKey(prefs.getString(_kMusicSource));
       // 子页面底栏开关：**没存过就是 false**（默认关，见字段注释的理由）
       bottomBarOnSubPages.value = prefs.getBool(_kBottomBarSubPages) ?? false;
+      // 启动自动播放：默认关
+      autoPlayOnLaunch.value = prefs.getBool(_kAutoPlayOnLaunch) ?? false;
     }
 
     // ── 以下三步是**关键路径**：各自独立 try/catch，互不拖累 ─────────
@@ -230,6 +240,12 @@ class SettingsStore {
     final old = bottomBarOnSubPages.value;
     bottomBarOnSubPages.value = v;
     await _write(_kBottomBarSubPages, v, () => bottomBarOnSubPages.value = old);
+  }
+
+  Future<void> setAutoPlayOnLaunch(bool v) async {
+    final old = autoPlayOnLaunch.value;
+    autoPlayOnLaunch.value = v;
+    await _write(_kAutoPlayOnLaunch, v, () => autoPlayOnLaunch.value = old);
   }
 
   /// 切换音乐平台（搜索/发现用哪个内置数据源）。

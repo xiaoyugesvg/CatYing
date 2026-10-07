@@ -228,9 +228,16 @@ class BookSourceStore {
   // 用户增删改不受影响。与漫画源 SourceConfigStore 同一套语义。
   static const _kBundledFp = 'book_sources_bundled_fp';
   // 旧内置残留清理标记：一次性。删除本地 prefs 里不在「当前内置」
-  // （legado 224 + book_sources 空）中的旧源（旧版 763 精选包残留），
-  // 仓库回到仅当前内置（224）。之后用户手动导入的新源不受影响。
-  static const _kLegacyPruneDone = 'book_sources_legacy_prune_done';
+  // （`book_sources.json` 里那批精选源）中的旧源
+  //（旧版 224 条 legado 源包 / 更早的 763 精选包残留），
+  // 仓库回到「只有当前内置」。
+  //
+  // ⚠️ 2026-10-07：**key 从 v1 换成 v2** ✓ —— 用户要求"其余书源去掉"：
+  //   老设备上 `v1` 那次清理**早就跑过了** ✗ ⇒ 不换 key 就**永远不会再清** ✗
+  //   ⇒ 那 224 条会一直留在仓库里 ✓。换成 v2 后本机制**再跑一次** ✓，
+  //   把不在当前内置里的源全部清掉（清理前照旧先整份备份进 prefs ✓ 可人工恢复 ✓）。
+  // 之后用户手动导入的新源不受影响。
+  static const _kLegacyPruneDone = 'book_sources_legacy_prune_v2';
 
   final List<BookSource> _items = [];
   List<BookSource> get all => List.unmodifiable(_items);

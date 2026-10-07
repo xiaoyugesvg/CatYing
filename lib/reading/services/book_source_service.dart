@@ -464,10 +464,18 @@ class BookSourceService {
   /// [source] 未传 categoryUrl → Node 侧解析 exploreUrl 返回分类数组。
   Future<({bool ok, String? error, List<ExploreCategory> categories})>
       exploreCategories(BookSource source) async {
-    if (_canUseDart(source)) {
+    // 🔴 **只有 config 明文源真的没有分类浏览** ✓（它的 CSS 配置体里压根没有
+    //   explore 这一类字段 ✓）。**Legado 源要走 Node 引擎的 explore** ✓——
+    //   Node 侧 `explore()` 支持 `exploreUrl` / `ruleExploreUrl` /
+    //   `ruleExplore.url` ✓，甚至**没配 exploreUrl 时会自动抓站点首页导航**
+    //   探测真实分类 ✓（book_source.js:841-864 ✓）。
+    //   原来这里用 `_canUseDart` 当门槛 ✗ ⇒ 不含 `@js:` 的 Legado 源全被
+    //   拦在这里 ✗ ⇒ 用户点分类**永远**看到「未配置分类浏览」✗（= 用户报的
+    //   那个报错 ✓）—— 而把 Legado 源交给 Node 就能真出分类 ✓。
+    if (source.isConfig) {
       return (
         ok: false,
-        error: '该源未配置分类浏览（config 源无 exploreUrl）：可直接搜索找书',
+        error: '该源为 config 明文源，未配置分类浏览：可直接用搜索找书',
         categories: const <ExploreCategory>[],
       );
     }
@@ -503,10 +511,12 @@ class BookSourceService {
   /// 分类页的书籍列表（ruleExplore 解析，对应分类网格内容）
   Future<({bool ok, String? error, List<BookSourceResult> list})>
       exploreBooks(BookSource source, String categoryUrl) async {
-    if (_canUseDart(source)) {
+    // 同 exploreCategories：只有 config 明文源才真的没有分类浏览 ✓，
+    // Legado 源一律交给 Node 引擎（它有完整的 ruleExplore 解析 ✓）。
+    if (source.isConfig) {
       return (
         ok: false,
-        error: '该源未配置分类浏览（config 源无 exploreUrl）：可直接搜索找书',
+        error: '该源为 config 明文源，未配置分类浏览：可直接用搜索找书',
         list: const <BookSourceResult>[],
       );
     }

@@ -87,6 +87,23 @@ class PluginScriptCache {
     }
   }
 
+  /// 删掉单个插件的文件缓存（源被移除时同步清理）。
+  ///
+  /// 为什么需要：`builtin_sources_service` 移除"名称带 dj/DJ"的 MusicFree 源时
+  /// 也要把这几个插件文件删掉 ✗ 否则 `<Documents>/musicfree_plugins/` 里会
+  /// 一直留着孤儿脚本（用户看不到，但白占空间）。
+  /// 失败静默（缓存本来就是可再生的）。
+  Future<void> delete(String fileName) async {
+    if (fileName.trim().isEmpty) return;
+    try {
+      final d = await _ensureDir();
+      final f = File('${d.path}/$fileName');
+      if (await f.exists()) await f.delete();
+    } catch (e) {
+      debugPrint('[PluginCache] 删 $fileName 失败: $e');
+    }
+  }
+
   /// 清除全部缓存（"恢复默认"/清理缓存时用）。
   Future<void> clear() async {
     try {

@@ -155,7 +155,7 @@ class AppState extends GetxController {
     configLoadError.value = null;
     currentSourceKey.value =
         ApiConfig.instance.homeSourceBean.value?.key ?? '';
-    showAboutOnLaunch.value = true;
+    // 不再弹免责声明（用户要求去掉首次打开的责任弹窗）
   }
 
   // ============================================================

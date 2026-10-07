@@ -45,6 +45,7 @@ import 'reading/services/reading_progress_service.dart';
 import 'reading/services/trim_preset_service.dart';
 import 'reading/services/view_mode.dart';
 import 'reading/services/book_view_mode.dart';
+import 'reading/services/reading_layout.dart';
 import 'reading/source/source_manager.dart';
 import 'services/player_prefs.dart';
 import 'services/tmdb_service.dart';
@@ -127,6 +128,9 @@ void main() async {
   }
   await ViewMode().init();
   await BookViewMode().init();
+  // 阅读模块宫格列数（3/4/5）+ 书源页视图模式（用户 2026-10-07）
+  await ReadingLayout().init();
+  await SourceViewMode().init();
   await FavoritesService().init();
   await BookFavoritesService().init();
   await BrowseHistoryService().init();

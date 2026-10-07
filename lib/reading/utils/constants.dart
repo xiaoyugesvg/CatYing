@@ -117,10 +117,43 @@ class CmbokConstants {
     //   article.sk   /eapi/book/most-popular → 200 2.3s books=100，/eapi/info → books=33577617
     //   articles.sk  /eapi/book/most-popular → 200 2.7s books=100，/eapi/info → books=33577617
     //   z-library.sk / 1lib.sk → 307 重定向（由 _maybeRedirect 接管，故不列入默认但会由自愈拉回）
-    'article.sk',
-    'articles.sk',
-    'zh.zlib.li',
-    'zlib.li',
+    //
+    // ── [用户 2026-10-07]「Z-Library 的中文入口，检测下内置镜像域名」──
+    //
+    // ✅ **实测结论（本轮逐域名探测，见下）**：
+    //   z-library 的**中文入口是 `zh.` 前缀（子域）**，**不是路径 `/zh`** ——
+    //   `https://<域名>/zh` 与 `https://<域名>/` 返回的是同一套**英文**站内容 ✗。
+    //   同一批 Cloudflare 镜像，加了 `zh.` 与不加，`/eapi/book/most-popular`
+    //   返回的推荐流**完全不同**（这批镜像就是靠子域分语言的）：
+    //     · `zh.loves.works` → 被讨厌的勇气 / 毛泽东选集 / 窄门 / 认知觉醒 / 置身事内 …
+    //     · `loves.works`    → The Love Hypothesis / Project Hail Mary / Thinking, Fast and Slow …
+    //   搜索同样：`zh.*` 上搜「三体」返回《三体》《球状闪电》《三体全集》(中文) ✓。
+    //   ⇒ 所以**只把 `zh.` 入口放进默认列表**，中文界面/中文推荐/中文搜索一次到位 ✓
+    //
+    // 📋 逐域名实测（GET /eapi/book/most-popular，2026-10-07）：
+    //   ✅ zh.26h2.tech      eapi 200  books=100  **中文书**   ← 默认首选
+    //   ✅ zh.86110101.xyz   eapi 200  books=100  **中文书**
+    //   ✅ zh.loves.works    eapi 200  books=100  **中文书**
+    //   ✅ zh.toffeeboba.com eapi 200  books=100  **中文书**
+    //   ✅ zh.zlib.bz        eapi 200  books=100  **中文书**
+    //   ⚠️ 26h2.tech / 86110101.xyz / loves.works / toffeeboba.com / zlib.bz
+    //        eapi 同样 200、books=100 —— **但推荐流是英文书** ⇒ 只留作兜底
+    //   ❌ 已失效（连接超时 / DNS 被污染到 Facebook·Twitter 的 IP）：
+    //        zh.zlib.li · zh.article.sk · zh.articles.sk · zh.z-lib.gd
+    //        zh.z-library.sk · zh.101su.ru · article.sk · articles.sk · zlib.li
+    //        z-library.website · z-lib.fm · z-lib.sk · z-library.qa · z-library.gy
+    //        z-lib.by · 1lib.sk · z-library.sk · z-lib.io · free2read.cc(TLS)
+    //   ⚠️ 返回 503（Cloudflare "web server is down"）：zh.z-lib.rest · intl.su
+    //   ⚠️ 假站/非 eapi 主机：z-library.my（首页 200 但 eapi 404）、
+    //        zh.intcn.online（首页 200、eapi 不是 JSON）
+    //   ℹ️ 失效节点想加回：设置里的「节点管理 → 添加节点」即可，无需改代码
+    // ── ✅ 中文入口（实测 eapi 可用 + 返回中文书）────────────────
+    'zh.26h2.tech',
+    'zh.86110101.xyz',
+    'zh.loves.works',
+    'zh.toffeeboba.com',
+    'zh.zlib.bz',
+    // ── 同批镜像的非中文入口（可用但推荐流是英文）→ 仅在前 5 个全挂时兜底 ──
     '26h2.tech',
     '86110101.xyz',
     'loves.works',

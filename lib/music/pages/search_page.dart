@@ -226,7 +226,7 @@ class _SearchPageState extends State<SearchPage>
                   Icon(Icons.headphones_rounded,
                       size: 13, color: MusicTheme.secondary),
                   const SizedBox(width: 4),
-                  Text('喜马拉雅',
+                  Text('喜雅',
                       style: TextStyle(
                           color: MusicTheme.label,
                           fontSize: AppTheme.fontCaption)),

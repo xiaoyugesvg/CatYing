@@ -107,10 +107,19 @@ class _JellyComicCardState extends State<JellyComicCard>
             },
       child: AnimatedBuilder(
         animation: _scaleAnimation,
-        builder: (context, child) {
-          return Transform.scale(
-            scale: _scaleAnimation.value,
-            child: AnimatedContainer(
+        builder: (context, child) => Transform.scale(
+          scale: _scaleAnimation.value,
+          child: child,
+        ),
+        // ── 用户 2026-10-07：「名称不要纳入进卡片，只有封面才是卡片」──
+        //   所以最外层是**无装饰**的 Column；卡片底色/阴影/圆角**只包封面**，
+        //   书名等一律落在卡片**外面**（原来整块 Column 一起进卡片 ✗）
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 卡片本体 = 只有封面
+            AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               curve: Curves.easeOut,
               decoration: BoxDecoration(
@@ -134,18 +143,10 @@ class _JellyComicCardState extends State<JellyComicCard>
                         ),
                       ],
               ),
-              child: child,
-            ),
-          );
-        },
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 封面（果冻风渐变遮罩）
-              AspectRatio(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                // 封面（果冻风渐变遮罩）
+                child: AspectRatio(
                 aspectRatio: 3 / 4,
                 child: Stack(
                   fit: StackFit.expand,
@@ -226,7 +227,9 @@ class _JellyComicCardState extends State<JellyComicCard>
                   ],
                 ),
               ),
-              // 信息区
+              ),
+            ),
+            // 信息区（在卡片外面）
               if (widget.compact)
                 // 紧凑模式：仅名称（参考图样式，无收藏/热度/作者胶囊）
                 // ✅ 名称栏固定 36 高 + 文字均匀填满 + 标题单行省略：
@@ -358,7 +361,6 @@ class _JellyComicCardState extends State<JellyComicCard>
             ],
           ),
         ),
-      ),
     );
   }
 }

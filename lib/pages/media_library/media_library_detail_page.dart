@@ -58,6 +58,13 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
   String _episodeSelectedFlag = '';
   bool _episodeDesc = false;
 
+  /// 选集面板：列表 / 4 宫格视图切换
+  bool _epGridMode = false;
+
+  /// 选集面板：分页大小（每 50 集一页）
+  static const int _epPageSize = 50;
+  int _epPageIndex = 0;
+
   /// 当前选中的集（剧集横条高亮；默认源当前集）
   int _selectedIndex = 0;
 
@@ -406,6 +413,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
             ? _controller.selectedFlag.value
             : flags.first;
     _episodeDesc = false;
+    _epPageIndex = 0;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -457,8 +465,12 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                   ),
                 ),
               ),
-              // 第一排：选集 + 线路名（点击下拉切换）+ 集数 + 排序 + 定位（去掉右上角关闭）
+              // 第一排：选集 + 线路名（点击下拉切换）+ 集数 + 视图切换 + 排序 + 定位
+              // ⚠️ Stack 必须 `clipBehavior: Clip.none`：
+              //    线路下拉菜单是 Positioned(top:46)，超出了 Stack 自身高度（≈50）。
+              //    默认 Clip.hardEdge 会把菜单剪掉 → 看着像"弹出来了"但实际点不到 ✗
               Stack(
+                clipBehavior: Clip.none,
                 children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 12, 4),
@@ -530,13 +542,25 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                         ),
                         const Spacer(),
                         _sheetAction(
+                          icon: _epGridMode
+                              ? Icons.grid_view_rounded
+                              : Icons.view_list_rounded,
+                          label: _epGridMode ? '宫格' : '列表',
+                          active: false,
+                          onTap: () =>
+                              setSheetState(() => _epGridMode = !_epGridMode),
+                        ),
+                        const SizedBox(width: 8),
+                        _sheetAction(
                           icon: _episodeDesc
                               ? Icons.arrow_downward
                               : Icons.arrow_upward,
                           label: _episodeDesc ? '倒序' : '正序',
                           active: _episodeDesc,
-                          onTap: () => setSheetState(
-                              () => _episodeDesc = !_episodeDesc),
+                          onTap: () => setSheetState(() {
+                                _episodeDesc = !_episodeDesc;
+                                _epPageIndex = 0;
+                              }),
                         ),
                         const SizedBox(width: 8),
                         _sheetAction(
@@ -544,29 +568,37 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                           label: '定位当前集',
                           active: false,
                           onTap: () {
-                            setSheetState(() {});
-                            WidgetsBinding.instance
-                                .addPostFrameCallback((_) {
-                              final qNow = query.trim();
-                              var targetIdx = _episodeDesc
+                            final qNow = query.trim();
+                            var targetInList = _episodeDesc
+                                ? (eps.length - 1 - current)
+                                : current;
+                            if (qNow.isNotEmpty) {
+                              final curOrdered = _episodeDesc
                                   ? (eps.length - 1 - current)
                                   : current;
-                              if (qNow.isNotEmpty) {
-                                final curOrdered = _episodeDesc
-                                    ? (eps.length - 1 - current)
-                                    : current;
-                                final fi = indexed
-                                    .indexWhere((e) => e.key == curOrdered);
-                                targetIdx = fi < 0 ? 0 : fi;
-                              }
-                              if (_episodeListScroll.hasClients) {
-                                _episodeListScroll.animateTo(
-                                  targetIdx * 48.0,
-                                  duration:
-                                      const Duration(milliseconds: 260),
-                                  curve: Curves.easeOut,
-                                );
-                              }
+                              final fi = indexed
+                                  .indexWhere((e) => e.key == curOrdered);
+                              targetInList = fi < 0 ? 0 : fi;
+                            }
+                            // 先切到目标所在页，再滚到具体位置
+                            final page = targetInList ~/ _epPageSize;
+                            setSheetState(() => _epPageIndex = page);
+                            WidgetsBinding.instance
+                                .addPostFrameCallback((_) {
+                              if (!_episodeListScroll.hasClients) return;
+                              final idxInPage =
+                                  targetInList % _epPageSize;
+                              final offset = _epGridMode
+                                  ? (idxInPage ~/ 4) *
+                                      80.0 // 宫格：每行约 80px
+                                  : idxInPage *
+                                      48.0; // 列表：每行约 48px
+                              _episodeListScroll.animateTo(
+                                offset,
+                                duration:
+                                    const Duration(milliseconds: 260),
+                                curve: Curves.easeOut,
+                              );
                             });
                           },
                         ),
@@ -605,6 +637,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                               _controller.selectFlag(flags[i]);
                               setSheetState(() {
                                 _episodeSelectedFlag = flags[i];
+                                _epPageIndex = 0; // 切线路回到第 1 页
                                 flagMenuOpen = false;
                               });
                             },
@@ -638,7 +671,10 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: TextField(
-                  onChanged: (v) => setSheetState(() => query = v),
+                  onChanged: (v) => setSheetState(() {
+                    query = v;
+                    _epPageIndex = 0; // 搜索变化时回到第 1 页
+                  }),
                   style:
                       TextStyle(color: AppTheme.textPrimary, fontSize: 12),
                   decoration: InputDecoration(
@@ -651,7 +687,10 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                         ? GestureDetector(
                             behavior: HitTestBehavior.opaque,
                             onTap: () =>
-                                setSheetState(() => query = ''),
+                                setSheetState(() {
+                                  query = '';
+                                  _epPageIndex = 0;
+                                }),
                             child: Padding(
                               padding: const EdgeInsets.all(8),
                               child: Icon(Icons.close,
@@ -673,90 +712,180 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                   ),
                 ),
               ),
+              // 第三排：分页 tab（1-50 / 51-100 / …），集数多时才显示
+              if (indexed.length > _epPageSize)
+                _buildEpisodePagination(indexed.length, setSheetState),
               Divider(height: 1, color: AppTheme.borderLight),
-              // 播放列表（可滑动；支持搜索过滤，过滤索引见 builder 顶层 indexed）
+              // 播放列表（支持搜索过滤 + 分页 + 列表/宫格切换）
               Expanded(
-                child: ListView.separated(
-                  controller: _episodeListScroll,
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  itemCount: indexed.length,
-                  separatorBuilder: (_, __) =>
-                      Divider(height: 1, color: AppTheme.borderLight),
-                  itemBuilder: (_, i) {
-                    final orderedIdx = indexed[i].key;
-                    final ep = indexed[i].value;
-                    final realIndex = _episodeDesc
-                        ? eps.length - 1 - orderedIdx
-                        : orderedIdx;
-                    final selected = realIndex == current;
-                    return InkWell(
-                      onTap: () {
-                        _controller.selectEpisode(realIndex);
-                        Navigator.pop(ctx);
-                        setState(() => _selectedIndex = realIndex);
-                        _playAt(realIndex);
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 9,
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 30,
-                              height: 30,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
+                child: () {
+                  // 当前页数据
+                  final total = indexed.length;
+                  final pageCount = (total / _epPageSize).ceil();
+                  final page = _epPageIndex.clamp(0, pageCount - 1);
+                  final start = page * _epPageSize;
+                  final end = (start + _epPageSize).clamp(0, total);
+                  final pageItems = indexed.sublist(start, end);
+
+                  if (_epGridMode) {
+                    return GridView.builder(
+                      controller: _episodeListScroll,
+                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 4,
+                        mainAxisSpacing: 8,
+                        crossAxisSpacing: 8,
+                        childAspectRatio: 1.0,
+                      ),
+                      itemCount: pageItems.length,
+                      itemBuilder: (_, i) {
+                        final orderedIdx = pageItems[i].key;
+                        final ep = pageItems[i].value;
+                        final realIndex = _episodeDesc
+                            ? eps.length - 1 - orderedIdx
+                            : orderedIdx;
+                        final selected = realIndex == current;
+                        final epNo = _episodeNoAt(info, eps, realIndex);
+                        return InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () {
+                            _controller.selectEpisode(realIndex);
+                            Navigator.pop(ctx);
+                            setState(() => _selectedIndex = realIndex);
+                            _playAt(realIndex);
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: selected
+                                  ? accent.withValues(alpha: 0.18)
+                                  : AppTheme.backgroundTertiary,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
                                 color: selected
                                     ? accent
-                                    : AppTheme.backgroundTertiary,
-                                borderRadius: BorderRadius.circular(9),
-                              ),
-                              child: Text(
-                                // 角标用**真实集号**（不再是列表位置）：源顺序不同
-                                // 或缺集时，位置号会和剧照/标题对不上
-                                '${_episodeNoAt(info, eps, realIndex)}',
-                                style: TextStyle(
-                                  color: selected
-                                      ? Colors.white
-                                      : AppTheme.textSecondary,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                ),
+                                    : AppTheme.borderLight,
+                                width: selected ? 1.2 : 0.5,
                               ),
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                // 方案 B：集号做成"第一集 "前缀放在**标题**上
-                                //（左侧角标保持数字，两者不再互相挤）
-                                _epTitleDisplay(
-                                  ep.name,
-                                  _episodeNoAt(info, eps, realIndex),
+                            alignment: Alignment.center,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  '$epNo',
+                                  style: TextStyle(
+                                    color: selected
+                                        ? accent
+                                        : AppTheme.textPrimary,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w800,
+                                  ),
                                 ),
-                                style: TextStyle(
-                                  color: selected
-                                      ? AppTheme.textPrimary
-                                      : AppTheme.textSecondary,
-                                  fontSize: 13,
+                                const SizedBox(height: 3),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 4),
+                                  child: Text(
+                                    ep.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: selected
+                                          ? AppTheme.textPrimary
+                                          : AppTheme.textSecondary,
+                                      fontSize: 10,
+                                    ),
+                                  ),
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                              ],
                             ),
-                            if (selected)
-                              Icon(
-                                Icons.check_circle_rounded,
-                                size: 17,
-                                color: accent,
-                              ),
-                          ],
-                        ),
-                      ),
+                          ),
+                        );
+                      },
                     );
-                  },
-                ),
+                  }
+
+                  // 列表模式
+                  return ListView.separated(
+                    controller: _episodeListScroll,
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    itemCount: pageItems.length,
+                    separatorBuilder: (_, __) =>
+                        Divider(height: 1, color: AppTheme.borderLight),
+                    itemBuilder: (_, i) {
+                      final orderedIdx = pageItems[i].key;
+                      final ep = pageItems[i].value;
+                      final realIndex = _episodeDesc
+                          ? eps.length - 1 - orderedIdx
+                          : orderedIdx;
+                      final selected = realIndex == current;
+                      return InkWell(
+                        onTap: () {
+                          _controller.selectEpisode(realIndex);
+                          Navigator.pop(ctx);
+                          setState(() => _selectedIndex = realIndex);
+                          _playAt(realIndex);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 9,
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 30,
+                                height: 30,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: selected
+                                      ? accent
+                                      : AppTheme.backgroundTertiary,
+                                  borderRadius: BorderRadius.circular(9),
+                                ),
+                                child: Text(
+                                  '${_episodeNoAt(info, eps, realIndex)}',
+                                  style: TextStyle(
+                                    color: selected
+                                        ? Colors.white
+                                        : AppTheme.textSecondary,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  _epTitleDisplay(
+                                    ep.name,
+                                    _episodeNoAt(info, eps, realIndex),
+                                  ),
+                                  style: TextStyle(
+                                    color: selected
+                                        ? AppTheme.textPrimary
+                                        : AppTheme.textSecondary,
+                                    fontSize: 13,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (selected)
+                                Icon(
+                                  Icons.check_circle_rounded,
+                                  size: 17,
+                                  color: accent,
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                }(),
               ),
             ],
           );
@@ -808,6 +937,68 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 选集面板：分页 tab 栏（1-50 / 51-100 / …）。
+  ///
+  /// 总集数 ≤ 50 时不显示（调用方控制）。
+  /// 横滑 tab，当前页高亮；点击即切换并滚到顶部。
+  Widget _buildEpisodePagination(int total, StateSetter setSheetState) {
+    final pageCount = (total / _epPageSize).ceil();
+    if (pageCount <= 1) return const SizedBox.shrink();
+    final cur = _epPageIndex.clamp(0, pageCount - 1);
+    return SizedBox(
+      height: 34,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        itemCount: pageCount,
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
+        itemBuilder: (_, i) {
+          final from = i * _epPageSize + 1;
+          final to = ((i + 1) * _epPageSize).clamp(0, total);
+          final selected = i == cur;
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              setSheetState(() => _epPageIndex = i);
+              // 切页后滚回顶部
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (_episodeListScroll.hasClients) {
+                  _episodeListScroll.jumpTo(0);
+                }
+              });
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected
+                    ? AppTheme.accentColor.withValues(alpha: 0.18)
+                    : AppTheme.backgroundTertiary,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: selected
+                      ? AppTheme.accentColor
+                      : Colors.transparent,
+                  width: 1,
+                ),
+              ),
+              child: Text(
+                '$from-$to',
+                style: TextStyle(
+                  color: selected
+                      ? AppTheme.accentColor
+                      : AppTheme.textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
