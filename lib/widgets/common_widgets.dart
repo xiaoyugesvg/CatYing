@@ -373,6 +373,9 @@ class SettingsRow extends StatelessWidget {
   /// 开关是否可交互（false 时置灰，用于必需页面）
   final bool switchEnabled;
 
+  /// 行尾自定义组件（可选）：渲染在 value/开关/箭头之后
+  final Widget? trailing;
+
   const SettingsRow({
     super.key,
     required this.icon,
@@ -386,6 +389,7 @@ class SettingsRow extends StatelessWidget {
     this.switchValue = false,
     this.onSwitchChanged,
     this.switchEnabled = true,
+    this.trailing,
   });
 
   @override
@@ -472,6 +476,10 @@ class SettingsRow extends StatelessWidget {
               size: 17,
               color: AppTheme.textTertiary.withValues(alpha: 0.7),
             ),
+          ],
+          if (trailing != null) ...[
+            const SizedBox(width: AppTheme.spacingSM),
+            trailing!,
           ],
         ],
       ),
