@@ -108,10 +108,10 @@ class CrossPlatformMatcher {
 
     final targets = order
         .where((s) => includeOwnPlatform || s != song.source)
-        // 喜马拉雅 / 博看 / 275 是有声书，不是"同一首歌"的候选
+        // 喜马拉雅 / 博看 / 一五 是有声书，不是"同一首歌"的候选
         .where((s) => s != SongSource.ximalaya)
         .where((s) => s != SongSource.bookan)
-        .where((s) => s != SongSource.book275)
+        .where((s) => s != SongSource.ting15)
         .toList();
     if (targets.isEmpty) return const [];
 

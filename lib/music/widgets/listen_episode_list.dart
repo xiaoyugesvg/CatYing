@@ -10,7 +10,7 @@ import 'music_components.dart';
 
 /// 听书专辑单集列表（公共）。
 ///
-/// 博看 / 喜雅 / 七五的专辑单集列表共用一个实现，内置：
+/// 博看 / 喜雅 / 一五的专辑单集列表共用一个实现，内置：
 ///   · 搜索集数（按标题 / 序号过滤，本地）
 ///   · 视图切换（列表 / 2 列宫格，持久化到 `SettingsStore.albumGrid`）
 ///   · 定位（滚到当前播放集，`Scrollable.ensureVisible`）

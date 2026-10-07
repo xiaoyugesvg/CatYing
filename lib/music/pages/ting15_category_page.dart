@@ -5,27 +5,27 @@ import '../models/models.dart';
 import '../services/music_api.dart';
 import '../theme/music_theme.dart';
 import '../widgets/listen_category_content_page.dart';
-import 'book275_album_page.dart';
+import 'ting15_album_page.dart';
 
-/// 275听书的**分类浏览**（最近上架 / 玄幻 / 修仙 …共 20 类）。
+/// 一五听书的**分类浏览**（武侠玄幻 / 恐怖灵异 / 推理悬疑 …共 10 类）。
 ///
 /// 分类以**宫格**展示（与发现页"全部分类"同款），点击分类直接进入
 /// 该分类的**专辑内容页**（搜索 + 视图切换），不再"把分类再列表一次"。
-/// 数据是**纯 Dart 直连 i275.com**：HTML 站 + PHPSESSID 会话。
-class Book275CategoryPage extends StatefulWidget {
-  const Book275CategoryPage({super.key});
+/// 数据是**纯 Dart 直连 ting15.com**：HTML 站，分类即站内 URL 路径。
+class Ting15CategoryPage extends StatefulWidget {
+  const Ting15CategoryPage({super.key});
 
   @override
-  State<Book275CategoryPage> createState() => _Book275CategoryPageState();
+  State<Ting15CategoryPage> createState() => _Ting15CategoryPageState();
 }
 
-class _Book275CategoryPageState extends State<Book275CategoryPage> {
+class _Ting15CategoryPageState extends State<Ting15CategoryPage> {
   @override
   Widget build(BuildContext context) {
-    final cats = MusicApi.book275Categories;
+    final cats = MusicApi.ting15Categories;
     return Scaffold(
       backgroundColor: MusicTheme.background,
-      appBar: AppBar(title: const Text('七五听书')),
+      appBar: AppBar(title: const Text('一五听书')),
       body: GridView.builder(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -50,20 +50,17 @@ class _Book275CategoryPageState extends State<Book275CategoryPage> {
                 settings: const RouteSettings(name: 'music:page'),
                 builder: (_) => ListenCategoryContentPage(
                   title: c.name,
-                  sourceLabel: '七五',
-                  // 275 分类是"搜索词聚合"，一页即全部：第 2 页起返回空列表停分页
+                  sourceLabel: '一五',
+                  // 一五分页：第 1 页 BASE+分类路径，第 2 页起 +indexN.html
                   loader: (page) async {
-                    if (page > 1) {
-                      return const MusicListResult(ok: true, list: []);
-                    }
-                    return MusicApi.instance.book275Category(c.id, page: 1);
+                    return MusicApi.instance.ting15Category(c.id, page: page);
                   },
                   onOpenAlbum: (ctx, song) =>
                       Navigator.of(ctx).push<void>(
                     MaterialPageRoute(
                       settings: const RouteSettings(name: 'music:page'),
-                      builder: (_) => Book275AlbumPage(
-                        bookId: '${song.id}',
+                      builder: (_) => Ting15AlbumPage(
+                        detailUrl: song.directUrl ?? '',
                         albumName: song.name,
                       ),
                     ),

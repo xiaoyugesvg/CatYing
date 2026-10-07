@@ -565,14 +565,14 @@ class MusicPlayerManager extends ChangeNotifier {
     // `bookanAlbum()` 已经把单集 `file` 直链填进 `Song.directUrl`，
     // 本地文件之下、记忆/内置/第三方之上直接播 —— 不查任何取址链路。
     // UA 是博看服务端要求的，必须带（否则 403 / 空流）。
-    // 275听书的 `directUrl` 是**播放页 URL**（HTML），需先由
-    // `book275Resolve()` 解析出真实音频直链再播。
+    // 一五听书的 `directUrl` 是**章节页 URL**（HTML），需先由
+    // `ting15Resolve()` 解析出真实音频直链再播。
     final direct = localPath.isEmpty && song.directUrl.isNotEmpty;
-    // 275听书的 `directUrl` 是**播放页 URL**（HTML），先解析成真实音频直链
+    // 一五听书的 `directUrl` 是**章节页 URL**（HTML），先解析成真实音频直链
     MusicUrlInfo? directResolved;
     if (direct) {
-      if (song.source == SongSource.book275) {
-        directResolved = await MusicApi.instance.book275Resolve(song.directUrl);
+      if (song.source == SongSource.ting15) {
+        directResolved = await MusicApi.instance.ting15Resolve(song.directUrl);
         if (directResolved!.ok && directResolved.url.isNotEmpty) {
           sourceHeaders = directResolved.headers;
         }

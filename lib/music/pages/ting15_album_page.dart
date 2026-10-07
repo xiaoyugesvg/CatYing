@@ -7,22 +7,23 @@ import '../theme/music_theme.dart';
 import '../../common/theme.dart';
 import '../widgets/listen_episode_list.dart';
 
-/// 275听书专辑页（有声小说）——「专辑 = 影片，单集 = 剧集」。
+/// 一五听书专辑页（有声小说）——「专辑 = 影片，单集 = 剧集」。
 ///
-/// 单集 `directUrl` 填的是**播放页 URL**（`/play/{book}/{cid}.html`），
-/// 点击播放时由 `player_manager` 调 `book275Resolve()` 解析出真实音频
-/// 直链（含 PHPSESSID 会话 + lrts 懒人听书 token）。
-class Book275AlbumPage extends StatefulWidget {
-  const Book275AlbumPage({super.key, required this.bookId, this.albumName});
+/// 单集 `directUrl` 填的是**章节页 URL**（`/{bookId}/0-{page}.html`），
+/// 点击播放时由 `player_manager` 调 `ting15Resolve()` 调站点播放 API
+/// 解析出真实音频直链。
+class Ting15AlbumPage extends StatefulWidget {
+  const Ting15AlbumPage({super.key, required this.detailUrl, this.albumName});
 
-  final String bookId;
+  /// 书籍详情页 URL（打开专辑的数据来源）
+  final String detailUrl;
   final String? albumName;
 
   @override
-  State<Book275AlbumPage> createState() => _Book275AlbumPageState();
+  State<Ting15AlbumPage> createState() => _Ting15AlbumPageState();
 }
 
-class _Book275AlbumPageState extends State<Book275AlbumPage> {
+class _Ting15AlbumPageState extends State<Ting15AlbumPage> {
   final _player = MusicPlayerManager.instance;
 
   bool _loading = true;
@@ -41,7 +42,7 @@ class _Book275AlbumPageState extends State<Book275AlbumPage> {
       _loading = true;
       _error = '';
     });
-    final r = await MusicApi.instance.book275Album(widget.bookId);
+    final r = await MusicApi.instance.ting15Album(widget.detailUrl);
     if (!mounted) return;
     setState(() {
       _loading = false;
@@ -127,7 +128,7 @@ class _Book275AlbumPageState extends State<Book275AlbumPage> {
       listenable: _player,
       builder: (context, _) => ListenEpisodeList(
         songs: _songs,
-        sourceLabel: '七五',
+        sourceLabel: '一五',
         currentIdentityKey: _player.currentSong?.identityKey,
         onPlay: (index) => _player.playQueue(_songs, index: index),
       ),

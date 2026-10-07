@@ -10,12 +10,12 @@ import 'music_components.dart';
 
 /// 听书分类内容页（公共）。
 ///
-/// 博看 / 喜雅 / 七五三个源的"分类 → 专辑列表"共用一个实现：
+/// 博看 / 喜雅 / 一五三个源的"分类 → 专辑列表"共用一个实现：
 /// 顶部搜索框（本地过滤名称/作者）+ 视图切换（列表 / 宫格 2~5 列）+ 分页加载。
 ///
 /// [loader] 返回第 [page] 页的专辑列表（page 从 1 起）；
 /// [onOpenAlbum] 点击专辑卡时跳对应专辑单集页；
-/// [sourceLabel] 网格卡副标题里的来源名（博看 / 喜雅 / 七五）。
+/// [sourceLabel] 网格卡副标题里的来源名（博看 / 喜雅 / 一五）。
 class ListenCategoryContentPage extends StatefulWidget {
   const ListenCategoryContentPage({
     super.key,

@@ -13,7 +13,7 @@ import '../widgets/discover_sections.dart';
 import 'playlist_detail_page.dart';
 import 'ximalaya_album_page.dart';
 import 'bookan_album_page.dart';
-import 'book275_album_page.dart';
+import 'ting15_album_page.dart';
 import '../widgets/listen_category_content_page.dart';
 import '../../widgets/app_page_loading.dart';
 import '../../widgets/app_toast.dart';
@@ -97,8 +97,8 @@ class _DiscoverPageState extends State<DiscoverPage>
   // 博看听书数据（纯 Dart 直连，见 MusicApi.bookan*）
   List<Song> _bkFeatured = const []; // 热门推荐（各分类头部合并）
 
-  // 275听书数据（纯 Dart 直连，见 MusicApi.book275*）
-  List<Song> _b275Featured = const []; // 最近上架（首页）
+  // 一五听书数据（纯 Dart 直连，见 MusicApi.ting15*）
+  List<Song> _t15Featured = const []; // 最近上架（首页）
 
   bool _loading = true;
   String _error = '';
@@ -137,8 +137,8 @@ class _DiscoverPageState extends State<DiscoverPage>
         await _loadXimalaya();
       } else if (_source == SongSource.bookan) {
         await _loadBookan();
-      } else if (_source == SongSource.book275) {
-        await _loadBook275();
+      } else if (_source == SongSource.ting15) {
+        await _loadTing15();
       } else if (_source == SongSource.qq) {
         await _loadQQ();
       } else {
@@ -272,13 +272,13 @@ class _DiscoverPageState extends State<DiscoverPage>
     setState(() => _bkFeatured = r);
   }
 
-  // ── 275听书 ──────────────────────────────────────────────────
+  // ── 一五听书 ──────────────────────────────────────────────────
 
-  Future<void> _loadBook275() async {
+  Future<void> _loadTing15() async {
     // 最近上架 = 首页卡片
-    final r = await api.book275Home();
+    final r = await api.ting15Home();
     if (!mounted) return;
-    setState(() => _b275Featured = r);
+    setState(() => _t15Featured = r);
   }
 
   @override
@@ -598,7 +598,7 @@ class _DiscoverPageState extends State<DiscoverPage>
       _SourceTab(source: SongSource.kugou, label: '酷狗'),
       _SourceTab(source: SongSource.ximalaya, label: '喜雅'),
       _SourceTab(source: SongSource.bookan, label: '博看'),
-      _SourceTab(source: SongSource.book275, label: '七五'),
+      _SourceTab(source: SongSource.ting15, label: '一五听书'),
     ];
     final isPaper = style.preset == DiscoverPreset.paper;
     return Padding(
@@ -772,8 +772,8 @@ class _DiscoverPageState extends State<DiscoverPage>
     if (_source == SongSource.bookan) {
       return _buildBookanSections();
     }
-    if (_source == SongSource.book275) {
-      return _buildBook275Sections();
+    if (_source == SongSource.ting15) {
+      return _buildTing15Sections();
     }
     if (_source == SongSource.qq) {
       return _buildQQSections();
@@ -1494,21 +1494,21 @@ class _DiscoverPageState extends State<DiscoverPage>
     return out;
   }
 
-  /// 275听书板块：最近上架（首页）+ 全部分类。
-  List<Widget> _buildBook275Sections() {
+  /// 一五听书板块：最近上架（首页）+ 全部分类。
+  List<Widget> _buildTing15Sections() {
     final out = <Widget>[];
 
     // 最近上架
-    if (_b275Featured.isNotEmpty) {
+    if (_t15Featured.isNotEmpty) {
       out.add(const SliverToBoxAdapter(
           child: SectionTitle(title: '最近上架')));
       out.add(SliverToBoxAdapter(
         child: HorizontalCards(
-          itemCount: _b275Featured.length,
+          itemCount: _t15Featured.length,
           height: 212,
           itemWidth: 152,
           itemBuilder: (c, i) {
-            final s = _b275Featured[i];
+            final s = _t15Featured[i];
             return CoverCard(
               coverUrl: s.coverUrl,
               title: s.name,
@@ -1516,8 +1516,8 @@ class _DiscoverPageState extends State<DiscoverPage>
               width: 152,
               onTap: () => Navigator.of(context).push<void>(
                 MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
-                  builder: (_) => Book275AlbumPage(
-                    bookId: s.id.toString(),
+                  builder: (_) => Ting15AlbumPage(
+                    detailUrl: s.directUrl ?? '',
                     albumName: s.name,
                   ),
                 ),
@@ -1529,7 +1529,7 @@ class _DiscoverPageState extends State<DiscoverPage>
     }
 
     // 全部分类（275 分类是固定配置，无需网络）
-    final cats = MusicApi.book275Categories;
+    final cats = MusicApi.ting15Categories;
     if (cats.isNotEmpty) {
       out.add(const SliverToBoxAdapter(
           child: SectionTitle(title: '全部分类')));
@@ -1557,20 +1557,17 @@ class _DiscoverPageState extends State<DiscoverPage>
                   MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
                     builder: (_) => ListenCategoryContentPage(
                       title: cat.name,
-                      sourceLabel: '七五',
-                      // 275 分类是"搜索词聚合"，一页即全部：第 2 页起返回空列表停分页
+                      sourceLabel: '一五',
+                      // 一五分页：第 1 页 BASE+分类路径，第 2 页起 +indexN.html
                       loader: (page) async {
-                        if (page > 1) {
-                          return const MusicListResult(ok: true, list: []);
-                        }
-                        return MusicApi.instance.book275Category(cat.id, page: 1);
+                        return MusicApi.instance.ting15Category(cat.id, page: page);
                       },
                       onOpenAlbum: (ctx, song) =>
                           Navigator.of(ctx).push<void>(
                         MaterialPageRoute(
                           settings: const RouteSettings(name: 'music:page'),
-                          builder: (_) => Book275AlbumPage(
-                            bookId: '${song.id}',
+                          builder: (_) => Ting15AlbumPage(
+                            detailUrl: song.directUrl ?? '',
                             albumName: song.name,
                           ),
                         ),

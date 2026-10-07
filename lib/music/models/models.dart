@@ -106,10 +106,10 @@ enum SongSource {
   // 与喜马拉雅的差别：**纯 Dart 直连博看官方接口**（不走 Node），
   // 单集直链在 `bookanAlbum()` 时直接填进 `Song.directUrl`。
   bookan('bookan', '博看'),
-  // 275听书：HTML 站 + PHP 会话。专辑/单集来自页面解析，
-  // 单集 `directUrl` 填**播放页 URL**，播放时由 `book275Resolve`
-  // 解析出真实音频直链（含 lrts 懒人听书 token 解析）。
-  book275('book275', '七五');
+  // 一五听书（ting15.com）：HTML 站 + 播放 API。专辑/单集来自页面解析，
+  // 单集 `directUrl` 填**章节页 URL**，播放时由 `ting15Resolve`
+  // 调站点播放 API 解析出真实音频直链。
+  ting15('ting15', '一五听书');
 
   const SongSource(this.key, this.displayName);
   final String key;

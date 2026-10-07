@@ -822,99 +822,55 @@ class MusicApi {
   }
 
   // ============================================================
-  // 275听书（i275.com）：HTML 站 + PHP 会话 + lrts 懒人听书解析
+  // 一五听书（ting15.com）：HTML 站 + 播放 API 直链
   // ============================================================
   //
-  // 与博看不同：275 是**页面站点**，需要：
-  //   1. **PHPSESSID 会话** —— 首次访问首页拿 Set-Cookie，后续请求带 Cookie
-  //   2. **HTML 正则解析** —— 首页/搜索/分类/详情/播放页全是页面
-  //   3. **lrts token 解析** —— 播放页 `audio.url` 可能是 `lrts$…`，
-  //      需调 m.lrts.me 的 getPlayPath/getListenPath 换真实音频直链
-  // ⚠️ 275 的 TLS 证书链含自签名证书（本机实测 verify 失败）→ 专用
-  //    Dio **跳过证书校验**（只对这一个源生效，其余请求不受影响）。
+  // 对齐 JS 源（@name Ting15有声 / 一五听书）：
+  //   1. 分类 = 站内 URL 路径（/wuxiaxuanhuan/ … 共 10 类）
+  //   2. 分类/搜索/详情全是 HTML 页面：列表 `<li> > div.img a` 卡片解析
+  //   3. 播放：章节页 `/bookId/0-page.html` → POST `/?s=api-getneoplay`
+  //      （bookId & isPay=0 & page）→ JSON `{url: mp3 直链}`
+  //   4. API 失败 → 返回失败（不回落嗅探：音乐播放器无嗅探能力）
 
-  static const _b275Site = 'https://www.i275.com';
-  static const _b275Host = 'www.i275.com';
-  static const _b275DefaultCover = '$_b275Site/uploads/bookcover.png';
-  static const _b275Ua =
-      'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 '
-      '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+  static const _t15Site = 'https://www.ting15.com';
+  static const _t15Ua =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-  /// 275 固定分类（latest=最近上架，其余按站内搜索词映射）
-  static const book275Categories = <({String id, String name})>[
-    (id: 'latest', name: '最近上架'),
-    (id: 'xuanhuan', name: '玄幻'),
-    (id: 'xiuxian', name: '修仙'),
-    (id: 'dushi', name: '都市'),
-    (id: 'yanqing', name: '言情'),
-    (id: 'chuanyue', name: '穿越'),
-    (id: 'chongsheng', name: '重生'),
-    (id: 'xuanyi', name: '悬疑'),
-    (id: 'lingyi', name: '灵异'),
-    (id: 'lishi', name: '历史'),
-    (id: 'wuxia', name: '武侠'),
-    (id: 'kehuan', name: '科幻'),
-    (id: 'wangyou', name: '网游'),
-    (id: 'guanchang', name: '官场'),
-    (id: 'junshi', name: '军事'),
-    (id: 'pingshu', name: '评书'),
-    (id: 'ertong', name: '儿童'),
-    (id: 'xiangsheng', name: '相声'),
-    (id: 'guangboju', name: '广播剧'),
-    (id: 'qita', name: '其他'),
+  /// 一五固定分类（站内 URL 路径，与 JS 源一致）
+  static const ting15Categories = <({String id, String name})>[
+    (id: '/wuxiaxuanhuan/', name: '武侠玄幻'),
+    (id: '/kongbulingyi/', name: '恐怖灵异'),
+    (id: '/tuilixuanyi/', name: '推理悬疑'),
+    (id: '/dushiyanqing/', name: '都市言情'),
+    (id: '/jiatinglunli/', name: '家庭伦理'),
+    (id: '/wenxuemingzhu/', name: '官场职场'),
+    (id: '/jingdianpingshu/', name: '经典评书'),
+    (id: '/quyixiqu/', name: '曲艺戏曲'),
+    (id: '/xiangshengxiaopin/', name: '相声小品'),
+    (id: '/yinyue/', name: '助眠音频'),
   ];
 
-  static const _b275CatQuery = <String, String>{
-    'xuanhuan': '玄幻', 'xiuxian': '修仙', 'dushi': '都市',
-    'yanqing': '言情', 'chuanyue': '穿越', 'chongsheng': '重生',
-    'xuanyi': '悬疑', 'lingyi': '灵异', 'lishi': '历史',
-    'wuxia': '武侠', 'kehuan': '科幻', 'wangyou': '网游',
-    'guanchang': '官场', 'junshi': '军事', 'pingshu': '评书',
-    'ertong': '儿童', 'xiangsheng': '相声', 'guangboju': '广播剧',
-    'qita': '其他',
-  };
+  static Dio? _t15Dio;
+  static Dio get _ting15Dio => _t15Dio ??= Dio(BaseOptions(
+        headers: {'User-Agent': _t15Ua, 'Referer': _t15Site},
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 25),
+      ));
 
-  /// PHPSESSID 等会话 cookie（只存 275 域名的）
-  static final Map<String, String> _b275CookieJar = {};
-
-  static Dio? _b275Dio;
-  static Dio get _book275Dio => _b275Dio ??= _build275Dio();
-
-  static Dio _build275Dio() {
-    final d = Dio(BaseOptions(
-      headers: {
-        'User-Agent': _b275Ua,
-        'Accept':
-            'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Referer': '$_b275Site/',
-      },
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 25),
-    ));
-    // 275 证书链含自签名 → 跳过校验（仅此源；其余请求仍走默认信任链）
-    final adapter = d.httpClientAdapter;
-    if (adapter is IOHttpClientAdapter) {
-      adapter.createHttpClient = () {
-        final client = HttpClient(context: SecurityContext(withTrustedRoots: false));
-        client.badCertificateCallback = (cert, host, port) => true;
-        return client;
-      };
-    }
-    return d;
-  }
-
-  static String _b275Abs(String value, [String base = '$_b275Site/']) {
-    final text = (value ?? '').toString().trim();
-    if (text.isEmpty) return '';
+  static String _t15Abs(String value) {
+    final u = (value ?? '').toString().trim();
+    if (u.isEmpty) return '';
     try {
-      return Uri.parse(text).resolve(base).toString();
+      return RegExp(r'^https?://', caseSensitive: false).hasMatch(u)
+          ? u
+          : Uri.parse('$_t15Site$u').toString();
     } catch (_) {
-      return text;
+      return u;
     }
   }
 
-  static String _b275Clean(String value) {
+  static String _t15Clean(String value) {
     final s = (value ?? '').toString()
         .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
         .replaceAll(RegExp(r'<[^>]+>'), '');
@@ -933,168 +889,105 @@ class MusicApi {
         .trim();
   }
 
-  /// GET 275 页面文本（带 cookie 记忆 + 403/429 重试一次）
-  static DateTime? _b275LastReqAt;
-  Future<String> _b275Get(String path, {Map<String, String>? extraHeaders}) async {
-    final url = _b275Abs(path);
-    final cookie = _b275CurrentCookie(url);
-    // 站点对连续请求有限流（实测高频请求会 SSL/超时拒绝）：
-    // 相邻请求至少间隔 500ms，缓解"点书时拿到无章节残页"的问题。
-    final now = DateTime.now();
-    final since = now.difference(_b275LastReqAt ?? now);
-    if (_b275LastReqAt != null && since < const Duration(milliseconds: 500)) {
-      await Future<void>.delayed(const Duration(milliseconds: 500) - since);
-    }
-    _b275LastReqAt = DateTime.now();
-    var lastStatus = 0;
+  /// GET 一五页面文本（失败重试一次）
+  Future<String> _t15Get(String url) async {
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
-        final r = await _book275Dio.get<String>(
-          url,
-          options: Options(
-            headers: {
-              ...?extraHeaders,
-              if (cookie.isNotEmpty) 'Cookie': cookie,
-            },
-            responseType: ResponseType.plain,
-          ),
-        );
-        lastStatus = r.statusCode ?? 0;
-        _b275RememberCookies(r.headers, url);
-        if ((lastStatus == 403 || lastStatus == 429) && attempt == 0) {
-          await Future<void>.delayed(const Duration(milliseconds: 1100));
-          continue;
-        }
-        if (lastStatus != 200) return '';
-        return r.data ?? '';
+        final r = await _ting15Dio.get<String>(url,
+            options: Options(responseType: ResponseType.plain));
+        if (r.statusCode == 200) return r.data ?? '';
       } catch (_) {
         if (attempt == 0) {
-          await Future<void>.delayed(const Duration(milliseconds: 1100));
+          await Future<void>.delayed(const Duration(milliseconds: 800));
           continue;
         }
-        return '';
       }
     }
     return '';
   }
 
-  static void _b275RememberCookies(Headers headers, String url) {
-    try {
-      if (Uri.parse(url).host != _b275Host) return;
-    } catch (_) {
-      return;
-    }
-    final raw = headers['set-cookie'];
-    if (raw == null) return;
-    for (final item in raw) {
-      for (final part in item.split(RegExp(r',(?=\s*[^;,=\s]+=[^;]*)'))) {
-        final first = part.split(';').first.trim();
-        final idx = first.indexOf('=');
-        if (idx <= 0) continue;
-        _b275CookieJar[first.substring(0, idx).trim()] =
-            first.substring(idx + 1).trim();
-      }
-    }
-  }
-
-  static String _b275CurrentCookie(String url) {
-    try {
-      if (Uri.parse(url).host != _b275Host) return '';
-    } catch (_) {
-      return '';
-    }
-    return _b275CookieJar.entries
-        .map((e) => '${e.key}=${e.value}')
-        .join('; ');
-  }
-
-  /// 首页/搜索/分类共用的卡片解析：`<a href="/book/(id).html">…<img src>…`
-  List<Song> _b275ParseBooks(String html) {
+  /// 列表卡片解析（分类/搜索/首页共用）：`<li> > div.img a` + img + 最后 p。
+  /// 对齐 JS 源：`vod_id = 详情页 URL`、`vod_remarks = 最后一段 p`。
+  List<Song> _t15ParseBooks(String html) {
     final out = <Song>[];
     final seen = <String>{};
-    // 对齐 JS 版正则：<a href="/book/{id}.html" ...>...</a>
-    final re = RegExp(
-        r'''<a\s+href=["']/book/(\d+)\.html["'][^>]*>([\s\S]*?)</a>''',
-        caseSensitive: false);
-    for (final m in re.allMatches(html ?? '')) {
-      final id = m.group(1)!;
-      final block = m.group(2) ?? '';
-      if (seen.contains(id)) continue;
-      // 封面图：<img src="...">
-      final img = RegExp(r'''<img[^>]+src=["']([^"']+)["']''', caseSensitive: false)
+    final reLi = RegExp(r'<li[\s\S]*?</li>', caseSensitive: false);
+    for (final li in reLi.allMatches(html ?? '')) {
+      final block = li.group(0)!;
+      final aM = RegExp(
+              r'''<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)</a>''',
+              caseSensitive: false)
           .firstMatch(block);
-      // 标题：优先 <h3>，回退 "font-medium text-sm" 类名，再回退 img alt
-      final titleM = RegExp(r'<h3[^>]*>([\s\S]*?)</h3>', caseSensitive: false)
-              .firstMatch(block) ??
-          RegExp(
-                  r'''<div[^>]+class=["'][^"']*font-medium[^"']*["'][^>]*>([\s\S]*?)</div>''',
-                  caseSensitive: false)
-              .firstMatch(block);
-      final altM = RegExp(r'''<img[^>]+alt=["']([^"']+)["']''', caseSensitive: false)
+      if (aM == null) continue;
+      final href = _t15Abs(aM.group(1)!);
+      if (href.isEmpty ||
+          href == _t15Site ||
+          href == '$_t15Site/' ||
+          href.contains('/?s=')) continue;
+      if (seen.contains(href)) continue;
+      // 标题：a 的 title 属性，回退 li 内 h4 > a 文本
+      final titleAttr = RegExp(r'''<a[^>]+title=["']([^"']+)["']''',
+              caseSensitive: false)
           .firstMatch(block);
-      final title = _b275Clean(titleM?.group(1) ?? altM?.group(1) ?? '');
+      final h4M = RegExp(r'''<h4[^>]*>\s*<a[^>]*>([\s\S]*?)</a>''',
+              caseSensitive: false)
+          .firstMatch(block);
+      final title = _t15Clean(titleAttr?.group(1) ?? h4M?.group(1) ?? '');
       if (title.isEmpty) continue;
-      // 演播者：优先 ">演播</span> xxx"，回退 "text-xs text-gray-500" 类名
-      final speakerM = RegExp(r'>演播<\/span>\s*([^<\r\n]+)', caseSensitive: false)
-              .firstMatch(block) ??
-          RegExp(
-                  r'''<div[^>]+class=["'][^"']*text-xs[^"']*["'][^>]*>([\s\S]*?)</div>''',
-                  caseSensitive: false)
-              .firstMatch(block);
-      seen.add(id);
-      // 封面：有图用图，没图用默认占位（JS 版 parseBooks 会跳过无图的，
-      // 但 275 列表页有些书只有文字没图，全跳过就啥也不剩了）。
-      // 这里改为：有图用真实图，无图用站点默认封面兜底。
-      final cover = img != null
-          ? _b275CoverOrNull(img.group(1)!)
-          : null;
+      // 封面：li 内 img src（// 开头补 https:）
+      final imgM = RegExp(r'''<img[^>]+src=["']([^"']+)["']''',
+              caseSensitive: false)
+          .firstMatch(block);
+      var cover = _t15Clean(imgM?.group(1) ?? '');
+      if (cover.startsWith('//')) cover = 'https:$cover';
+      // 备注：li 内最后一个 p
+      final pList = RegExp(r'<p[^>]*>([\s\S]*?)</p>', caseSensitive: false)
+          .allMatches(block)
+          .toList();
+      final remark = pList.isEmpty ? '' : _t15Clean(pList.last.group(1)!);
+      seen.add(href);
       out.add(Song(
-        id: int.tryParse(id) ?? id.hashCode,
+        id: href.hashCode,
         name: title,
-        artists: _b275Clean(speakerM?.group(1) ?? ''),
+        artists: remark,
         album: title,
-        coverUrl: cover ?? _b275DefaultCover,
-        source: SongSource.book275,
+        coverUrl: cover.isEmpty ? null : cover,
+        source: SongSource.ting15,
+        // 列表歌 directUrl = 详情页 URL（打开专辑用）
+        directUrl: href,
       ));
     }
     return out;
   }
 
-  String? _b275CoverOrNull(String src) {
-    final u = _b275Abs(src);
-    if (u.contains('bookcover.png')) return null;
-    return u;
+  /// 一五首页（最近上架 = 首页列表）
+  Future<List<Song>> ting15Home() async {
+    final html = await _t15Get('$_t15Site/');
+    return _t15ParseBooks(html);
   }
 
-  /// 275 首页（最近上架 + 分类）
-  Future<List<Song>> book275Home() async {
-    final html = await _b275Get('/');
-    return _b275ParseBooks(html);
-  }
-
-  /// 275 分类（latest=首页，其余走站内搜索词）
-  Future<MusicListResult<Song>> book275Category(
+  /// 一五分类内容（第 1 页 BASE+分类路径，第 2 页起 +indexN.html）
+  Future<MusicListResult<Song>> ting15Category(
     String categoryId, {
     int page = 1,
   }) async {
-    final html = categoryId == 'latest'
-        ? await _b275Get('/')
-        : await _b275Get('$_b275Site/search.php?q=${Uri.encodeQueryComponent(_b275CatQuery[categoryId] ?? categoryId)}');
-    final list = _b275ParseBooks(html);
-    return MusicListResult(ok: true, list: list);
+    final url = page == 1
+        ? '$_t15Site$categoryId'
+        : '$_t15Site$categoryId/index$page.html';
+    final html = await _t15Get(url);
+    return MusicListResult(ok: true, list: _t15ParseBooks(html));
   }
 
-  /// 275 搜索
-  Future<MusicListResult<Song>> book275Search(String keyword) async {
-    if (keyword.trim().isEmpty) {
-      return const MusicListResult(ok: true, list: []);
-    }
-    final html =
-        await _b275Get('$_b275Site/search.php?q=${Uri.encodeQueryComponent(keyword)}');
-    return MusicListResult(ok: true, list: _b275ParseBooks(html));
+  /// 一五搜索
+  Future<MusicListResult<Song>> ting15Search(String keyword) async {
+    final kw = keyword.trim();
+    if (kw.isEmpty) return const MusicListResult(ok: true, list: []);
+    final url = '$_t15Site/?s=ting-search-wd-${Uri.encodeComponent(kw)}';
+    final html = await _t15Get(url);
+    return MusicListResult(ok: true, list: _t15ParseBooks(html));
   }
 
-  /// 275 专辑详情 → 单集列表（directUrl = 播放页 URL）。
+  /// 一五专辑详情 → 单集列表（directUrl = 章节页 URL，播放用）。
   Future<
       ({
         bool ok,
@@ -1104,275 +997,116 @@ class MusicApi {
         String? author,
         String? speaker,
         List<Song> songs,
-      })> book275Album(String bookId) async {
-    var html = await _b275Get('/book/$bookId.html');
+      })> ting15Album(String detailUrl) async {
+    final html = await _t15Get(detailUrl);
     if (html.isEmpty) {
-      return (ok: false, message: '275 详情页无数据', albumName: '',
+      return (ok: false, message: '一五听书详情页无数据', albumName: '',
           coverUrl: null as String?, author: null as String?,
           speaker: null as String?, songs: const <Song>[]);
     }
-    // 标题：<h1 class="text-2xl font-bold text-gray-800">
-    // （Tailwind 类名顺序可能变，用"包含关键字"匹配）
-    final titleM = RegExp(
-            r'''<h1[^>]+class=["'][^"']*text-2xl[^"']*["'][^>]*>([\s\S]*?)</h1>''',
+    // 标题：h1，回退 h4 > a
+    final titleM = RegExp(r'<h1[^>]*>([\s\S]*?)</h1>', caseSensitive: false)
+            .firstMatch(html) ??
+        RegExp(r'''<h4[^>]*>\s*<a[^>]*>([\s\S]*?)</a>''', caseSensitive: false)
+            .firstMatch(html);
+    final albumName = _t15Clean(titleM?.group(1) ?? '');
+    // 封面：img[alt]，回退第一个 img
+    final imgM = RegExp(
+            r'''<img[^>]+alt=["'][^"']+["'][^>]*src=["']([^"']+)["']''',
+            caseSensitive: false)
+            .firstMatch(html) ??
+        RegExp(r'''<img[^>]+src=["']([^"']+)["']''', caseSensitive: false)
+            .firstMatch(html);
+    var cover = _t15Clean(imgM?.group(1) ?? '');
+    if (cover.startsWith('//')) cover = 'https:$cover';
+    // 简介：.intro
+    final introM = RegExp(
+            r'''<div[^>]+class=["'][^"']*intro[^"']*["'][^>]*>([\s\S]*?)</div>''',
             caseSensitive: false)
         .firstMatch(html);
-    final albumName = _b275Clean(titleM?.group(1) ?? '');
+    final content = _t15Clean(introM?.group(1) ?? '');
 
-    String field(String label) {
-      final esc = RegExp.escape(label);
-      final m = RegExp(
-              '<p>\\s*$esc：\\s*<span[^>]*>([\\s\\S]*?)</span>',
-              caseSensitive: false)
-          .firstMatch(html);
-      return _b275Clean(m?.group(1) ?? '');
-    }
-
-    final author = field('作者');
-    final speaker = field('演播');
-    final cover = _b275ExtractCover(html);
-
-    var songs = _b275ParseEpisodes(html, bookId, albumName,
-        cover: cover, speaker: speaker, author: author);
-    // 限流/异常页兜底：短页面 + 0 章节 → 等 1.5s 重抓一次再试。
-    if (songs.isEmpty && html.length < 5000) {
-      await Future<void>.delayed(const Duration(milliseconds: 1500));
-      html = await _b275Get('/book/$bookId.html');
-      if (html.isNotEmpty) {
-        songs = _b275ParseEpisodes(html, bookId, albumName,
-            cover: cover, speaker: speaker, author: author);
-      }
+    // 集数：.plist 容器内的 a（href = 章节页 URL /bookId/0-page.html）
+    var scope = '';
+    final plistM = RegExp(
+            r'''<div[^>]+class=["'][^"']*plist[^"']*["'][^>]*>([\s\S]*?)</div>''',
+            caseSensitive: false)
+        .firstMatch(html);
+    if (plistM != null) scope = plistM.group(1)!;
+    if (scope.isEmpty) scope = html;
+    final songs = <Song>[];
+    final seen = <String>{};
+    final reA = RegExp(r'''<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)</a>''',
+        caseSensitive: false);
+    for (final m in reA.allMatches(scope)) {
+      final href = _t15Abs(m.group(1)!);
+      if (!RegExp(r'/\d+/0-\d+\.html$').hasMatch(href)) continue;
+      if (seen.contains(href)) continue;
+      seen.add(href);
+      final name = _t15Clean(m.group(2) ?? '');
+      if (name.isEmpty) continue;
+      songs.add(Song(
+        id: href.hashCode,
+        name: name,
+        artists: content,
+        album: albumName,
+        coverUrl: cover.isEmpty ? null : cover,
+        source: SongSource.ting15,
+        directUrl: href,
+      ));
     }
     if (songs.isEmpty) {
       return (ok: false, message: '这本书没有解析到章节', albumName: albumName,
-          coverUrl: cover, author: author as String?, speaker: speaker as String?,
-          songs: const <Song>[]);
+          coverUrl: cover.isEmpty ? null : cover, author: null as String?,
+          speaker: null as String?, songs: const <Song>[]);
     }
-    return (ok: true, message: '', albumName: albumName, coverUrl: cover,
-        author: author as String?, speaker: speaker as String?, songs: songs);
+    return (ok: true, message: '', albumName: albumName,
+        coverUrl: cover.isEmpty ? null : cover, author: null as String?,
+        speaker: null as String?, songs: songs);
   }
 
-  /// 解析 275 详情页章节（双正则：truncate span 优先，结构级 a 块兜底）
-  List<Song> _b275ParseEpisodes(
-    String html,
-    String bookId,
-    String albumName, {
-    String? cover,
-    String? speaker,
-    String? author,
-  }) {
-    final out = <Song>[];
-    final seen = <String>{};
-    // 优先：章节名 span 带 truncate（原逻辑，精匹配）。
-    final reTruncate = RegExp(
-        r'''href=["']/play/(\d+)/(\d+)\.html["'][\s\S]*?<span[^>]+class=["'][^"']*truncate[^"']*["'][^>]*>([\s\S]*?)</span>''',
-        caseSensitive: false);
-    for (final m in reTruncate.allMatches(html)) {
-      final key = '${m.group(1)}/${m.group(2)}';
-      final name = _b275Clean(m.group(3) ?? '');
-      if (name.isEmpty || name == '立即开始收听' || name == '开始收听') continue;
-      if (seen.contains(key)) continue;
-      seen.add(key);
-      out.add(_b275MakeEpisode(
-          bookId, m.group(1)!, m.group(2)!, name,
-          albumName: albumName,
-          cover: cover, speaker: speaker, author: author, index: out.length));
+  /// 解析一五章节页 → 真实音频直链（POST 播放 API）
+  Future<MusicUrlInfo> ting15Resolve(String playUrl) async {
+    final m = RegExp(r'/(\d+)/0-(\d+)\.html$').firstMatch(playUrl);
+    if (m == null) {
+      return const MusicUrlInfo(ok: false, message: '无法识别的章节链接');
     }
-    if (out.isNotEmpty) return out;
-    // 兜底：结构级解析 —— <a href="/play/{book}/{cid}.html">…</a> 块内文本。
-    // 不依赖 span class（class 变化/页面改版也能解析；"立即开始收听"按钮
-    // 文本被过滤，避免污染第一集）。
-    final reBlock = RegExp(
-        r'''<a[^>]+href=["']/play/(\d+)/(\d+)\.html["'][^>]*>([\s\S]*?)</a>''',
-        caseSensitive: false);
-    for (final m in reBlock.allMatches(html)) {
-      final key = '${m.group(1)}/${m.group(2)}';
-      var name = _b275Clean(m.group(3) ?? '')
-          // 去掉"1."/"1、"式序号前缀（数字序号是列表项装饰，非标题）
-          .replaceFirst(RegExp(r'^\d+[\.、．]\s*'), '');
-      if (name.isEmpty ||
-          name == '立即开始收听' ||
-          name == '开始收听' ||
-          name.contains('svg')) continue;
-      if (seen.contains(key)) continue;
-      seen.add(key);
-      out.add(_b275MakeEpisode(
-          bookId, m.group(1)!, m.group(2)!, name,
-          albumName: albumName,
-          cover: cover, speaker: speaker, author: author, index: out.length));
-    }
-    return out;
-  }
-
-  Song _b275MakeEpisode(
-    String bookId,
-    String book,
-    String cid,
-    String name, {
-    required String albumName,
-    String? cover,
-    String? speaker,
-    String? author,
-    required int index,
-  }) {
-    final playUrl = '$_b275Site/play/$book/$cid.html';
-    return Song(
-      id: (int.tryParse(bookId) ?? bookId.hashCode) * 100000 + index + 1,
-      name: name.replaceAll('\$', '￥').replaceAll('#', '﹟'),
-      artists: speaker?.isNotEmpty == true
-          ? speaker!
-          : (author ?? ''),
-      album: albumName,
-      coverUrl: cover ?? _b275DefaultCover,
-      source: SongSource.book275,
-      directUrl: playUrl,
-    );
-  }
-
-  static String? _b275ExtractCover(String html) {
-    final m = RegExp(
-            r'''<div class=["']w-32 h-44[\s\S]*?<img[^>]+src=["']([^"']+)''', caseSensitive: false)
-            .firstMatch(html) ??
-        RegExp(r'''<img[^>]+src=["']([^"']*/uploads/[^"']+)["']''', caseSensitive: false)
-            .firstMatch(html);
-    if (m == null) return null;
-    final u = _b275Abs(m.group(1)!);
-    return u.contains('bookcover.png') ? null : u;
-  }
-
-  static String _b275BookReferer(String playUrl) {
-    final m = RegExp(r'/play/(\d+)/').firstMatch(playUrl);
-    return m == null ? '$_b275Site/' : '$_b275Site/book/${m.group(1)}.html';
-  }
-
-  /// 解析 lrts 懒人听书 token → 真实音频直链
-  Future<String> _b275ResolveLrts(String token) async {
-    final parts = token.split('#');
-    final entityM = RegExp(r'^lrts\$(\d+)$').firstMatch(parts.first);
-    if (entityM == null || parts.length < 3) return '';
-    final entityId = entityM.group(1)!;
-    final id = parts[1];
-    final section = parts[2];
-    if (!RegExp(r'^\d+$').hasMatch(id) || !RegExp(r'^\d+$').hasMatch(section)) {
-      return '';
-    }
-    for (final endpoint in ['getPlayPath', 'getListenPath']) {
-      final query = 'entityId=$entityId&entityType=3&opType=1&sections=[$section]&type=0&id=$id&section=$section';
-      try {
-        final r = await _book275Dio.get<String>(
-          'https://m.lrts.me/ajax/$endpoint?$query',
-          options: Options(
-            headers: {'Referer': 'https://m.lrts.me/', 'User-Agent': _b275Ua},
-            responseType: ResponseType.plain,
-          ),
+    final bookId = m.group(1)!;
+    final page = m.group(2)!;
+    try {
+      final resp = await _ting15Dio.post<String>(
+        '$_t15Site/?s=api-getneoplay',
+        data: 'bookId=$bookId&isPay=0&page=$page',
+        options: Options(
+          headers: {
+            'Content-Type':
+                'application/x-www-form-urlencoded; charset=UTF-8',
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+          responseType: ResponseType.plain,
+        ),
+      );
+      final payload = (resp.data ?? '').toString();
+      // JSON: { "url": "https://…mp3" }（兼容单/双引号）
+      final urlM = RegExp(r'''"url"\s*:\s*"([^"]+)"''').firstMatch(payload) ??
+          RegExp(r"""'url'\s*:\s*'([^']+)'""").firstMatch(payload);
+      var url = urlM?.group(1) ?? '';
+      url = url.replaceAll(r'\/', '/');
+      if (url.startsWith('http://')) url = 'https://${url.substring(7)}';
+      if (RegExp(r'^https?://').hasMatch(url)) {
+        return MusicUrlInfo(
+          ok: true,
+          url: url,
+          type: '一五听书',
+          headers: {'User-Agent': _t15Ua, 'Referer': playUrl},
         );
-        final payload = r.data ?? '';
-        final status = RegExp(r'"status"\s*:\s*(\d+)').firstMatch(payload);
-        final path = endpoint == 'getPlayPath'
-            ? RegExp(r'"path"\s*:\s*"([^"]+)"').firstMatch(payload)?.group(1)
-            : RegExp(r'"data"\s*:\s*\{[\s\S]*?"path"\s*:\s*"([^"]+)"').firstMatch(payload)?.group(1);
-        if (status != null && status.group(1) == '0' && path != null &&
-            RegExp(r'^https?://').hasMatch(path)) {
-          return path;
-        }
-      } catch (_) {
-        continue;
       }
-    }
-    return '';
-  }
-
-  /// 解析 275 播放页 → 真实音频直链（含会话初始化 + lrts token）
-  Future<MusicUrlInfo> book275Resolve(String playUrl) async {
-    // 会话未初始化时先访问首页拿 PHPSESSID
-    if (_b275CookieJar['PHPSESSID'] == null) {
-      await _b275Get('/');
-      await Future<void>.delayed(const Duration(milliseconds: 1050));
-    }
-    final html = await _b275Get(playUrl,
-        extraHeaders: {'Referer': _b275BookReferer(playUrl)});
-    if (html.isEmpty) {
-      return const MusicUrlInfo(ok: false, message: '275 播放页加载失败');
-    }
-
-    // 按优先级尝试多种音频 URL 提取模式（对齐 JS 版 + 额外兜底）：
-    //   1. audio: [{ url: "..." }] （标准 JS 版模式）
-    //   2. "url":"..." 附近有 .mp3/.m4a/.aac 后缀
-    //   3. <audio src="..."> 标签
-    //   4. 任何 "https://...mp3" / "https://...m4a" 直链
-    String? audioUrl;
-
-    // 模式 1：audio: [{ ... url: "..." }]（JS 原版模式）
-    final m1 = RegExp(
-            r'''audio\s*:\s*\[\s*\{[\s\S]*?url\s*:\s*["']([^"']+)["']''',
-            caseSensitive: false)
-        .firstMatch(html);
-    if (m1 != null) audioUrl = m1.group(1);
-
-    // 模式 2：找 url 字段值里带音频后缀的
-    if (audioUrl == null || audioUrl!.isEmpty) {
-      final m2 = RegExp(
-              r'''url\s*:\s*["']([^"']+\.(?:mp3|m4a|aac|wav|ogg|flac)[^"']*)["']''',
-              caseSensitive: false)
-          .firstMatch(html);
-      if (m2 != null) audioUrl = m2.group(1);
-    }
-
-    // 模式 3：<audio src="...">
-    if (audioUrl == null || audioUrl!.isEmpty) {
-      final m3 = RegExp(
-              r'''<audio[^>]+src=["']([^"']+)["']''',
-              caseSensitive: false)
-          .firstMatch(html);
-      if (m3 != null) audioUrl = m3.group(1);
-    }
-
-    // 模式 4：兜底抓 https 音频直链
-    if (audioUrl == null || audioUrl!.isEmpty) {
-      final m4 = RegExp(
-              r'''(https?://[^"'\s<>]+\.(?:mp3|m4a|aac)(?:\?[^"'\s<>]*)?)''',
-              caseSensitive: false)
-          .firstMatch(html);
-      if (m4 != null) audioUrl = m4.group(1);
-    }
-
-    if (audioUrl == null || audioUrl!.isEmpty) {
-      return const MusicUrlInfo(ok: false, message: '播放页没有找到音频地址');
-    }
-
-    // HTML 实体解码 + JS 转义的斜杠还原
-    var url = audioUrl!
-        .replaceAll(r'\/', '/')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&#39;', "'")
-        .replaceAll('&quot;', '"')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>');
-    url = _b275Clean(url);
-
-    var referer = playUrl;
-    // lrts 懒人听书 token 解析
-    if (url.startsWith('lrts\$')) {
-      final real = await _b275ResolveLrts(url);
-      if (real.isEmpty) {
-        return const MusicUrlInfo(ok: false, message: '懒人听书音频解析失败');
-      }
-      url = real;
-      referer = 'https://m.lrts.me/';
-    }
-    // http → https 升级
-    if (url.startsWith('http://')) {
-      url = 'https://${url.substring(7)}';
-    }
-    if (!RegExp(r'^https?://').hasMatch(url)) {
-      return MusicUrlInfo(
-          ok: false, message: '解析出的地址不是有效链接: $url');
+    } catch (_) {
+      // API 失败 → 回落客户端嗅探（把章节页交给播放器解析）
     }
     return MusicUrlInfo(
-      ok: true,
-      url: url,
-      type: '275听书',
-      headers: {'User-Agent': _b275Ua, 'Referer': referer},
+      ok: false,
+      message: '一五听书播放地址解析失败',
     );
   }
 

@@ -253,11 +253,21 @@ class DanmuLayerState extends State<DanmuLayer> {
   double get _speed => widget.speed;
   int get _trackCount => widget.trackCount.clamp(2, 8);
 
-  /// Previous tick position in seconds; used to detect seek jumps.
+  /// 上一次的播放位置（秒）。既用来检测 seek 跳变，**也是动画时钟**。
   double? _lastPosSec;
-  /// Real elapsed clock so UI jank does not slow scrolling.
-  final Stopwatch _clock = Stopwatch();
-  double _lastTickSec = 0;
+
+  /// 上一帧累计到的播放位置。**动画推进量 = 播放位置的前进量**。
+  ///
+  /// ── 🔴 为什么不用 `Stopwatch`（真实时钟）──────────────────────────
+  /// 原实现用 `Stopwatch` 做动画时钟，于是它**完全不知道播放器是否在播**：
+  /// `positionOf()` 在暂停时是冻结的，但真实时间还在流逝 →
+  /// **暂停后弹幕继续往前飘** ✗（实测：暂停 600ms 后 left 从 400 → 396.33）
+  ///
+  /// 改用播放位置驱动后，**暂停 = 位置不动 = 弹幕冻结**，
+  /// 而且"倍速播放时弹幕同比变快"这件事**天然成立**
+  ///（位置前进得快，弹幕也走得快），不需要 `_danmuSyncSpeed` 那套额外补偿。
+  double _lastTickPos = 0;
+  bool _lastTickPosInit = false;
   /// Viewport width from LayoutBuilder; used for track collision checks.
   double _viewportWidth = 0;
 
@@ -265,13 +275,20 @@ class DanmuLayerState extends State<DanmuLayer> {
   void initState() {
     super.initState();
     _sorted = _sortedOf(widget.danmus);
-    _clock.start();
-    _timer = Timer.periodic(const Duration(milliseconds: 100), _onTick);
+    // ⚠️ 定时器只做两件事：
+    //   ① 位置驱动之外的兜底刷新（固定弹幕到期、seek 清屏）
+    //   ② 在播放位置停止更新时（暂停）让"该消失的"仍能消失
+    // **动画推进量取自播放位置**，不取自这个定时器（见 `_lastTickPos` 的说明）。
+    _timer = Timer.periodic(const Duration(milliseconds: 100), (_) => _tick());
   }
 
   @override
   void didUpdateWidget(covariant DanmuLayer oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    // ⚠️ 位置驱动：父级（播放器）每次重建都顺带推进一帧弹幕。
+    //    放在最前，这样即使后面因为"列表变了"而清屏，本帧也算推进过了。
+    _onPositionChanged();
 
     // 「按类型屏蔽」变化 → 立刻按新过滤重建（清屏避免已上屏的类型残留）
     final filtersChanged = oldWidget.blockScroll != widget.blockScroll ||
@@ -343,50 +360,90 @@ class DanmuLayerState extends State<DanmuLayer> {
     return scaled.clamp(1, base);
   }
 
-  void _onTick(Timer _) {
+  /// 由 `didUpdateWidget`（位置变化）与兜底定时器共同驱动。
+  void _tick() {
     if (!mounted) return;
-    final nowSec = _clock.elapsedMicroseconds / 1e6;
-    var dt = nowSec - _lastTickSec;
-    _lastTickSec = nowSec;
-    // Clamp: debugger pauses / background stalls must not teleport danmaku.
-    if (dt <= 0) dt = 0.1;
-    if (dt > 0.5) dt = 0.5;
 
     final pos = widget.positionOf().inMilliseconds / 1000.0;
-
-    // Seek jump -> reset cursor and clear on-screen items.
     final last = _lastPosSec;
+
+    // ── ① seek 跳变 → 清屏 + 重定位游标 ──────────────────────────
+    //
+    // 阈值 0.4s：正常播放相邻两次位置差远小于它，
+    // 而用户拖动/跳转至少是这个量级。
     if (last != null && (pos - last).abs() > 0.4) {
+      // `_resetToPosition` 内部已把 `_lastTickPos` / `_lastTickPosInit` 对齐，
+      // 这里只需补 `_lastPosSec`（seek 检测用的基准）
       _resetToPosition(pos);
+      _lastPosSec = pos;
+      setState(() {});
+      return;
     }
+
+    // ── ② 动画推进量 = **播放位置的前进量**（这是修暂停飘动的关键）──
+    var dt = 0.0;
+    if (_lastTickPosInit) {
+      dt = pos - _lastTickPos;
+      // 位置倒退（小幅回跳）/ 停滞 → 不推进。
+      // ⚠️ 这里是"暂停时弹幕冻结"的实现点：位置不变 → dt = 0 → 什么都不动。
+      if (dt < 0) dt = 0;
+      // 卡顿保护：单帧最多按 0.5s 推进，避免一次跳一大截
+      if (dt > 0.5) dt = 0.5;
+    }
+    _lastTickPos = pos;
+    _lastTickPosInit = true;
     _lastPosSec = pos;
 
+    // ── ③ 生成到期的弹幕 ────────────────────────────────────────
     var spawned = false;
     while (_nextIndex < _sorted.length &&
         _sorted[_nextIndex].time <= pos + 0.25) {
-      // Do not dump the whole past after a forward seek.
+      // 前跳后不"补播"已经过去的那批（否则 seek 会把历史弹幕一次性倒出来）
       if (_sorted[_nextIndex].time >= pos - 0.6) {
         _spawn(_sorted[_nextIndex]);
         spawned = true;
       }
       _nextIndex++;
     }
-    if (_active.isEmpty && !spawned) return;
-    for (final a in _active) {
-      if (a.item.mode == 1) {
-        a.x -= _speed * dt;
-      } else {
-        a.remaining -= dt;
+
+    // ── ④ 推进 / 回收 ───────────────────────────────────────────
+    //
+    // ⚠️ 即使 `_active` 为空也要走完并可能 `setState`：
+    //    最后一帧"移除"必须真正重建一次，否则最后一条弹幕会**残留在屏上**
+    //    （`_active` 已空 → 下次 tick 直接 return → 那帧就不刷新了）。
+    if (dt > 0) {
+      for (final a in _active) {
+        if (a.item.mode == 1) {
+          a.x -= _speed * dt;
+        } else {
+          a.remaining -= dt;
+        }
       }
     }
     final before = _active.length;
     _active.removeWhere(
         (a) => a.item.mode == 1 ? a.x + a.width < -16 : a.remaining <= 0);
-    if (spawned || _active.isNotEmpty || before != _active.length) {
+
+    // 位置在前进（dt>0）说明画面还在动 → 需要重绘；
+    // 或本帧有增减（生成/回收）→ 也需要重绘。
+    if (spawned || dt > 0 || before != _active.length) {
       setState(() {});
     }
   }
 
+  /// 位置变化时被调用（父级每帧重建）→ 让弹幕动画跟上，而不是等 100ms 定时器。
+  ///
+  /// 这样弹幕是**每帧**推进的（60fps 顺滑），而定时器只作兜底
+  ///（处理"暂停时固定弹幕到期"这类位置不变但仍需刷新的情况）。
+  void _onPositionChanged() => _tick();
+
+  /// seek 后把游标重定位到 `pos`，并清空屏上弹幕。
+  ///
+  /// ⚠️ 游标停在"**第一条时间 > pos** 的弹幕"，所以**恰好等于 pos 的那条
+  ///    不会补播**（它算"已经过去"）。
+  ///    这是有意的：否则用户每拖动一次进度条，目标点上那条就会被重播一次。
+  ///    代价是"seek 到某条弹幕的精确时刻"时它不显示 —— 但相邻的照常出现，
+  ///    用户感知不到（生成窗口本来就向前看 0.25s）。
   void _resetToPosition(double pos) {
     _active.clear();
     var i = 0;
@@ -394,10 +451,17 @@ class DanmuLayerState extends State<DanmuLayer> {
       i++;
     }
     _nextIndex = i;
+    _lastTickPos = pos;
+    _lastTickPosInit = true;
   }
 
   void _spawn(DanmuItem item) {
     final width = _textWidth(item.text, widget.fontSize);
+    // ⚠️ 滚动弹幕的**初始 x 必须立刻置为右边缘**（且标记已定位）：
+    //    原实现把 x 留成 0，指望 build 里的 `positioned=false` 去补写 ——
+    //    但本帧稍后的推进循环会先把它从 0 往左推，
+    //    于是它**从屏幕左外侧进场**（等于第一条弹幕凭空少一段行程）✗
+    final startX = _viewportWidth > 0 ? _viewportWidth : 0.0;
     if (item.mode == 4) {
       final lane = _pickFixedLane(top: true);
       _active.add(_ActiveDanmu(item,
@@ -408,7 +472,11 @@ class DanmuLayerState extends State<DanmuLayer> {
           bottomFixed: true, width: width, track: lane));
     } else {
       final track = _pickTrack();
-      _active.add(_ActiveDanmu(item, track: track, width: width));
+      _active.add(_ActiveDanmu(item,
+          track: track,
+          width: width,
+          x: startX,
+          positioned: true));
     }
   }
 
