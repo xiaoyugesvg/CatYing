@@ -185,11 +185,15 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
         // C 方案：**贴边且收起** → 半藏（露出约 62%）；拖动中/展开 → 全露
         final tucked = _tucked && !_open;
         final tuck = _size * 0.38;
-        final x = tucked
-            ? (toLeft
-                ? pad.left - tuck
-                : screen.width - _size - pad.right + tuck)
-            : pos.dx.clamp(pad.left + 4, maxX);
+        // 展开时：长条**贴边**（吸附到最近边，4px 边距）——
+        // 用户要求"操作后化成长条贴边"，不论球之前在中间还是边上。
+        final x = _open
+            ? (toLeft ? pad.left + 4 : maxX)
+            : tucked
+                ? (toLeft
+                    ? pad.left - tuck
+                    : screen.width - _size - pad.right + tuck)
+                : pos.dx.clamp(pad.left + 4, maxX);
         final y = pos.dy.clamp(80.0, maxY);
 
         // 展开时的控制条：上一首 / 播放暂停 / 下一首（共 3 键）
@@ -231,9 +235,12 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
               //    用户看到的"展开条贴边/只露出左半截"就是这个 bug。
               //    用球宽（54）算 → right 恒等于球的右边距（16px），
               //    控制条从球的位置**向左**完整展开 ✓
-              right: toLeft
-                  ? null
-                  : (screen.width - x - _size).clamp(pad.right + 4, screen.width),
+              // 🔴 去掉 clamp：收起半藏时 right 需要是**负值**
+              // （球右缘藏进屏幕外露出约 62% 贴边）；上一轮加的
+              // `clamp(pad.right + 4, …)` 把负值抬成 4 → 球整个露在
+              // 屏幕里、半藏贴边失效（用户反馈"不贴边"就是它）。
+              // 全露/展开时 x ≤ maxX → right ≥ pad.right + 4，天然不溢出。
+              right: toLeft ? null : screen.width - x - _size,
               top: y,
               // 🔴 展开条在极窄屏 / 系统大字号下会超出屏幕 →
               // 用 `FittedBox(scaleDown)` 整体等比缩小。
@@ -363,21 +370,18 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
           );
         });
       },
-      // 松手吸附到最近的左右边（**贴着安全区边缘 4px**）
+      // 松手：**停在当前位置**（拖动自由、随意停留），
+      // 靠边（球中心离左右缘约 40px 内）则半藏贴边。
       onPanEnd: (_) {
         final screen = MediaQuery.of(context).size;
         final pad = MediaQuery.of(context).padding;
-        final minX = pad.left + 4;
-        final maxX = (screen.width - _size - pad.right - 4).clamp(minX, screen.width);
-        final cur = _pos ??
-            Offset(screen.width - _size - 16,
-            screen.height - pad.bottom - (MusicMiniPlayerLayout.topFromBottom + _bottomGap));
+        final cur = _pos;
+        if (cur == null) return;
         final toLeft = cur.dx + _size / 2 < screen.width / 2;
-        setState(() {
-          _pos = Offset(toLeft ? minX : maxX, cur.dy);
-          // 松手 → 贴边并**半藏**（C 方案）；封面随之停止旋转
-          _tucked = true;
-        });
+        final nearEdge = toLeft
+            ? cur.dx < pad.left + _size + 40
+            : cur.dx > screen.width - _size - pad.right - 40;
+        setState(() => _tucked = nearEdge);
       },
       // 点击 = 展开/收起控制键（用户要求：点一下要能播放/暂停/上下首）
       onTap: () => setState(() => _open = !_open),
