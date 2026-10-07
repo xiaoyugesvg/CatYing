@@ -17,7 +17,7 @@ import '../theme/jelly_theme.dart';
 import '../services/settings_service.dart';
 import '../widgets/jelly_book_card.dart';
 import '../widgets/jelly_nav_bar.dart';
-import '../widgets/jelly_sliding_actions.dart';
+import '../widgets/jelly_icon_deck.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_pull_cord.dart';
 import '../widgets/guide_overlay.dart';
@@ -848,56 +848,50 @@ class _BookSearchPageState extends State<BookSearchPage>
                         //   · 其余 4 个动作叠在一起、左右滑动轮换 ✓
                         _buildCategoryButton(isDark),
                         const SizedBox(width: 6),
-                        JellySlidingActions(
-                          isDark: isDark,
-                          actions: [
-                            JellyAction(
-                              icon: Icons.history_rounded,
-                              tooltip: '浏览记录',
-                              onPressed: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  // 历史统一界面：漫画/图书聚合（showTabs 默认 true）
-                                  builder: (_) => const BrowseHistoryPage(),
-                                ),
-                              ),
-                            ),
-                            JellyAction(
-                              icon: Icons.favorite_rounded,
-                              tooltip: '收藏',
-                              onPressed: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  // 收藏统一界面：漫画/图书聚合 + 返回按钮
-                                  builder: (_) =>
-                                      const FavoritesPage(showBackButton: true),
-                                ),
-                              ),
-                            ),
-                            JellyAction(
-                              icon: Icons.file_download_rounded,
-                              tooltip: '下载',
-                              onPressed: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  // 下载记录页（参考图 IMG_8397：5 状态 tab）
-                                  builder: (_) =>
-                                      const BookDownloadRecordsPage(),
-                                ),
-                              ),
-                            ),
-                            JellyAction(
-                              icon: Icons.leaderboard_rounded,
-                              tooltip: '豆瓣排行',
-                              onPressed: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const DoubanRankingPage(),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                        // ⚠️ 用户要求（本轮）：右上角由「并排滑动动作栏」改成**叠图标控件** ——
+//   · 最前的**完整可见**（深色圆底 + `emphasized: true`）
+//   · 后面各露出一部分，**左右滑动**循环切换最前
+//   · **长按**竖向展开全部
+//   原来的 `JellySlidingActions` 已整体替换（筛选按钮仍单独保留在它左边）。
+JellyIconDeck(
+  items: [
+      JellyIconDeckItem(
+        icon: Icons.history_rounded,
+        tooltip: '浏览记录',
+      emphasized: true,
+        onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const BrowseHistoryPage()),
+      ),
+      ),
+      JellyIconDeckItem(
+        icon: Icons.favorite_rounded,
+        tooltip: '收藏',
+        onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const FavoritesPage(showBackButton: true),
+        ),
+      ),
+      ),
+      JellyIconDeckItem(
+        icon: Icons.file_download_rounded,
+        tooltip: '下载',
+        onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const BookDownloadRecordsPage()),
+      ),
+      ),
+      JellyIconDeckItem(
+        icon: Icons.leaderboard_rounded,
+        tooltip: '豆瓣排行',
+        onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const DoubanRankingPage()),
+      ),
+      ),
+  ],
+),
                       ],
                     ),
                   // 第二行（搜索框 + 视图切换 + 分类按钮）已删除 ——

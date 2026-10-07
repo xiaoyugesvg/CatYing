@@ -33,10 +33,113 @@ class JsEngine {
   /// 是否已注入全局预置脚本（繁简转换 t2s()/s2t()）。
   bool _preludeInjected = false;
 
+  // ── 按源注入 `jsLib`（修一个真缺陷）──────────────────────────────
+  //
+  // 现象（真机日志）：
+  //   `ReferenceError: qmSearch is not defined`
+  //   `ReferenceError: wrCredentials is not defined`
+  //   `ReferenceError: getSign is not defined`
+  //
+  // 根因：书源的 `jsLib` 字段（模型里有，`book_source.dart:21`）
+  // **全项目从来没有任何地方使用过它** ⇒ 书源作者写在 jsLib 里的工具函数
+  // （搜索签名、凭据计算、解密等）**从来没有进入 JS 上下文** ✗
+  // ⇒ 规则里一调用就是 ReferenceError，被 `eval` 吞成空串，表现为"规则不生效"。
+  //
+  // 修法：**按源维度**把 jsLib 注入同一个 runtime。
+  //   · 源变了 → **重建 runtime**（避免 A 源的 jsLib 污染 B 源）✓
+  //   · 同一个源重复进入 → **不重复注入** ✓
+  //   · jsLib 为空 → 什么都不做（绝大多数源没写 jsLib）✓
+
+  /// 已注入 jsLib 的**源标识**（`bookSourceUrl`，退化时用 `bookSourceName`）
+  String? _jsLibSourceId;
+
+  /// 下一次取 [runtime] 时待注入的 jsLib（由 [setActiveSource] 填入）
+  String? _pendingJsLib;
+
+  /// 当前生效的源标识（供 `source.getKey()` 之类查询，也便于排查）
+  String? get activeSourceId => _jsLibSourceId;
+
+  /// 声明"接下来要解析的书源"。
+  ///
+  /// ⚠️ **必须在开始解析该源之前调用**（`WebBook` 的 search/bookInfo/toc/content
+  ///    四个入口各调一次）—— 只有这样 jsLib 才会**先于**规则执行进入上下文 ✓
+  ///
+  /// [sourceId] 用 `bookSourceUrl`（同源稳定、跨会话稳定）；
+  /// [jsLib] 就是源的 `jsLib` 字段原文。
+  void setActiveSource(String? sourceId, String? jsLib) {
+    final id = (sourceId ?? '').trim();
+    final lib = (jsLib ?? '').trim();
+
+    // ① 同源且已注入过 → 什么都不用做（不重复注入、不重建）
+    if (id == _jsLibSourceId && _pendingJsLib == null) return;
+
+    // ② 换源 → 必须重建 runtime，否则上一个源的 jsLib 会**跨源污染** ✗
+    final sourceChanged = id != _jsLibSourceId;
+    _jsLibSourceId = id;
+    _pendingJsLib = lib.isEmpty ? null : lib;
+
+    if (sourceChanged) {
+      // 重建：清掉旧 runtime（其全局函数、变量、缓存全部丢弃）
+      try {
+        _runtime?.dispose();
+      } catch (_) {/* dispose 失败不影响后续重建 */}
+      _runtime = null;
+      _preludeInjected = false;
+    }
+
+    // ③ **立即**注入（此时通常还没建 runtime，会顺带建好并注入）
+    //    这样即使调用方随后走了不经过 `runtime` getter 的路径，jsLib 也已就位。
+    if (_pendingJsLib != null) {
+      _applyPendingJsLib();
+    }
+  }
+
+  /// 把 [_pendingJsLib] 注入运行时，成功后清空 pending。
+  void _applyPendingJsLib() {
+    final lib = _pendingJsLib;
+    if (lib == null) return;
+    try {
+      final r = runtime; // 确保 runtime + 预置脚本已就绪
+
+      // ── 🔴 必须**在全局作用域**求值（我第一版写错了）──────────────
+      //
+      // 第一版包成 `(function(){ <jsLib> })();` ✗ ——
+      // 于是 jsLib 里的 `function qmSearch(){}` 变成了**该函数作用域的局部声明**，
+      // 规则里再调 `qmSearch(key, page)` 就是 `ReferenceError: qmSearch is not defined` ✗
+      //（实测日志：注入"成功"了，但规则照样报 is not defined —— 正是这个原因。）
+      //
+      // 现在**直接顶层求值** ✓：jsLib 里的 `var`/`function` 都是顶层声明，
+      // 后续 eval 共享同一个 QuickJS 全局上下文，规则即可直接调用 ✓
+      final res = r.evaluate(lib);
+      if (res.isError) {
+        final msg = res.stringResult;
+        // ⚠️ `Packages.*`（Legado/Rhino 的 Java 互操作）在 QuickJS 里**天然不存在** ——
+        //    这类 jsLib 不是"我们注入错了"，而是**引擎能力边界**。
+        //    单独给一条更准确的日志，免得把排查方向带偏 ✗
+        final isJavaInterop = msg.contains('Packages') || msg.contains('java.');
+        AppLog.instance.w(isJavaInterop
+            ? '[书源JS] jsLib 用到了 Java 互操作（Packages/java.*），'
+                'QuickJS 不支持（源=$_jsLibSourceId）: $msg'
+            : '[书源JS] jsLib 注入失败（源=$_jsLibSourceId）: $msg');
+        // **不清 pending** 没意义（重试还会失败），但要避免每次 eval 都重试：
+        // 注入失败也清掉，只报一次错，避免日志刷屏。
+      } else {
+        AppLog.instance.d('[书源JS] jsLib 已注入（源=$_jsLibSourceId，'
+            '${lib.length} 字符）');
+      }
+    } catch (e) {
+      AppLog.instance.w('[书源JS] jsLib 注入异常（源=$_jsLibSourceId）: $e');
+    } finally {
+      _pendingJsLib = null;
+    }
+  }
+
   JavascriptRuntime get runtime {
     if (_runtime == null) {
       _runtime = getJavascriptRuntime();
       _injectPrelude();
+      // 预置脚本就绪后补注入 jsLib（首次取 runtime 时 pending 还没消费）
+      _applyPendingJsLib();
     }
     return _runtime!;
   }

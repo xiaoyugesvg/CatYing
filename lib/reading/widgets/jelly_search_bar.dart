@@ -78,11 +78,17 @@ class _JellySearchBarState extends State<JellySearchBar> {
         // 随明暗外观），底色永远是"页面背景"，不再出现灰色块 ✓。
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(25), // 胶囊形状（半径=高度的一半）
+        // [对齐影视] 影视搜索框（lib/widgets/home_search_bar.dart）的"背景适配"手法是
+        // **透明底 + 一根发丝边框**（`Border.all(AppTheme.borderLight, 0.5)` ✓），
+        // 这样它贴在任何页面背景上都自适应、不会出现一块灰色底 ✓。
+        // 阅读这边原来用 `textPrimary × 0.22 + width 1`：明显更粗更重 ✗ ⇒ 现在与
+        // **阅读主题自己的边框配方**（jelly_theme.dart 的 `borderAlpha = 0.1`：
+        // 深色 white@0.1 / 浅色 primary@0.2 ✓）一致，宽度取影视同款 0.5 ✓。
         border: Border.all(
           color: isDark
-              ? JellyTheme.textPrimaryDark.withValues(alpha: 0.22)
-              : JellyTheme.textPrimaryLight.withValues(alpha: 0.22),
-          width: 1,
+              ? Colors.white.withValues(alpha: 0.1)
+              : JellyTheme.primary.withValues(alpha: 0.2),
+          width: 0.5,
         ),
       ),
       child: Listener(

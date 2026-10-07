@@ -235,6 +235,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   bool _danmuSettingsReady = false;
   String _danmuApiUrl = '';
 
+  /// 弹幕服务来源（设置页「弹幕服务来源」）：local / builtin / remote。
+  /// 播放器按来源解析最终地址（见 `_resolveDanmuUrl`）。
+  String _danmuSource = 'remote';
+
+  /// 按来源解析最终弹幕地址：
+  ///   · local   → 本机弹幕服务（固定地址）
+  ///   · builtin → 订阅下发的弹幕地址（目前订阅无下发机制，回退远程）
+  ///   · remote  → 用户在设置页填的地址
+  String _resolveDanmuUrl(String raw, String source) {
+    if (source == 'local') return 'http://127.0.0.1:11402';
+    return raw;
+  }
+
   /// 弹幕拉取代次：换集时递增，过期响应直接丢弃
   int _danmuLoadGen = 0;
   double _danmuFontSize = 14;
@@ -1026,7 +1039,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   Future<void> _refreshDanmuApiUrlIfNeeded() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final latest = (prefs.getString('danmu_api_url') ?? '').trim();
+      final src = prefs.getString('danmu_source') ?? 'remote';
+      _danmuSource = src;
+      final latest = _resolveDanmuUrl(
+          (prefs.getString('danmu_api_url') ?? '').trim(), src);
       if (latest == _danmuApiUrl) return;
       _danmuApiUrl = latest;
       // 地址变了 → 之前"已加载过"的结论作废，允许重新拉
@@ -1042,7 +1058,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   Future<void> _loadDanmuSettings() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      _danmuApiUrl = (prefs.getString('danmu_api_url') ?? '').trim();
+      _danmuSource = prefs.getString('danmu_source') ?? 'remote';
+      _danmuApiUrl = _resolveDanmuUrl(
+          (prefs.getString('danmu_api_url') ?? '').trim(), _danmuSource);
       _danmuOn = prefs.getBool('danmu_enabled') ?? true;
       _danmuFontSize = (prefs.getDouble('danmu_font_size') ?? 14).clamp(
         10.0,

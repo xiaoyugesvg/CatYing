@@ -583,24 +583,16 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
                   setState(() => _source = src);
                   final p = await SharedPreferences.getInstance();
                   await p.setString('danmu_source', src.id);
-                  // ⚠️ **切换来源不再覆盖已经填好的地址**（修「为啥弹幕看不到了」）
-                  //
-                  // 这里原来是「点一下就改写 danmu_api_url」✗ —— 用户原本能用的
-                  // 地址（自定义远程）只要手滑点一下「本地服务 / 订阅自带」就被
-                  // 冲掉了 ✓ ⇒ 播放器 `_danmuApiUrl` 变成无效地址 ⇒
-                  // `_danmus` 恒为空 ⇒ 弹幕层根本不渲染（`_danmuOn && _danmus.isNotEmpty`）。
-                  //
-                  // 而且原来给「订阅自带」写死的是 `https://api.dandanplay.net` ✗：
-                  // 播放器请求的是 **`{base}/api/v2/comment?url=...` 的普通 GET**
-                  // （见 video_player 的 `_danmuGetText`，只带 UA、不带 AppId/签名），
-                  // 而弹弹play 那个接口要 episodeId + X-AppId/X-Signature ⇒
-                  // 必然拉回 0 条 ⇒ 看起来就是"弹幕没了" ✗。
-                  //
-                  // 现在：只在**地址还空着**时填本地预设，已有地址一律不动 ✓
-                  if (_apiUrl.trim().isEmpty && src == DanmuSource.local) {
-                    await p.setString('danmu_api_url', _localDanmuUrl);
+                  // 🔄 切换来源 → 地址栏同步显示该来源当前实际会用的地址
+                  //（local = 本机固定地址；builtin / remote = danmu_api_url）
+                  if (src == DanmuSource.local) {
+                    // 本地服务：固定本机地址。只改显示，**不覆盖**
+                    // `danmu_api_url` 里已填的远程地址（切回远程还在）。
                     _apiUrl = _localDanmuUrl;
+                  } else {
+                    _apiUrl = (p.getString('danmu_api_url') ?? '').trim();
                   }
+                  if (mounted) setState(() {});
                 },
                 child: Container(
                   alignment: Alignment.center,
@@ -669,6 +661,8 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
           Expanded(
             child: TextField(
               controller: ctrl,
+              // 本地服务：地址固定，不可编辑（避免手滑把本地地址存进远程槽）
+              readOnly: _source == DanmuSource.local,
               cursorColor: AppTheme.accentColor,
               style: TextStyle(
                 color: AppTheme.textPrimary,
@@ -687,7 +681,7 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
               ),
             ),
           ),
-          if (_apiUrl.isNotEmpty)
+          if (_apiUrl.isNotEmpty && _source != DanmuSource.local)
             GestureDetector(
               onTap: () {
                 ctrl.clear();
@@ -760,6 +754,11 @@ class _DanmuSettingsPageState extends State<DanmuSettingsPage> {
   // ============================================================
 
   Future<void> _saveUrl() async {
+    // 本地服务：地址固定，不需要保存（也不该污染 danmu_api_url）
+    if (_source == DanmuSource.local) {
+      AppToast.message('本地服务地址固定，无需保存');
+      return;
+    }
     final p = await SharedPreferences.getInstance();
     await p.setString('danmu_api_url', _apiUrl.trim());
     _apiUrl = _apiUrl.trim();

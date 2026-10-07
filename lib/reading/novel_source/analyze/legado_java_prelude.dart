@@ -294,6 +294,62 @@ var source = {
   putConcurrent: function (k, v) { return _legadoHostCall('source.putConcurrent', [k, v]); },
   getLoginInfo: function () { return _legadoHostCall('source.getLoginInfo', []); },
   putLoginInfo: function (v) { return _legadoHostCall('source.putLoginInfo', [v]); },
+  // ── 🔴 `getLoginInfoMap()`：Legado 的登录信息 **Map 视图** ──────────
+  //
+  // 实测缺失导致真实书源直接失效：
+  //   书源 jsLib 里（如"微信读书二合一本地源"）：
+  //     function wrValue(src, name) {
+  //         var info = src.getLoginInfoMap();      // ← 原来是个 undefined ✗
+  //         var value = info == null ? null : info.get(name);
+  //         return value == null ? "" : String(value).trim();
+  //     }
+  //   ⇒ `TypeError: not a function` ⇒ 整个 searchUrl 求值失败 ⇒ 搜索不可用 ✗
+  //
+  // ⚠️ Dart 侧 `source.getLoginInfo` 存的是**字符串**
+  //   （`_sourceVariables['__login__']`），所以这里不能只转一道手，
+  //   必须把字符串**解析成带 `.get(name)` 的视图**再返回 ✓
+  //
+  // 兼容三种落盘形态：JSON 对象（`{"k":"v"}`）/ URL 编码（`k=v&k2=v2`）/ 空。
+  getLoginInfoMap: function () {
+    var raw = _legadoHostCall('source.getLoginInfo', []);
+    var obj = {};
+    if (raw !== null && raw !== undefined && raw !== '') {
+      var s = String(raw);
+      var parsed = null;
+      // ① JSON 形态
+      try { parsed = JSON.parse(s); } catch (e) { parsed = null; }
+      if (parsed && typeof parsed === 'object' && !(parsed instanceof Array)) {
+        obj = parsed;
+      } else {
+        // ② URL 编码形态（k=v&k2=v2）；③ 其它情况按空处理
+        var parts = s.split('&');
+        for (var i = 0; i < parts.length; i++) {
+          var seg = parts[i];
+          if (!seg) continue;
+          var eq = seg.indexOf('=');
+          var k = eq < 0 ? seg : seg.substring(0, eq);
+          var v = eq < 0 ? '' : seg.substring(eq + 1);
+          try { k = decodeURIComponent(k); v = decodeURIComponent(v); } catch (e) {}
+          if (k) obj[k] = v;
+        }
+      }
+    }
+    // ⚠️ 必须给 `.get(name)` —— jsLib 用的就是它（不是 `obj[name]`）✓
+    return {
+      get: function (name) {
+        var key = String(name);
+        if (Object.prototype.hasOwnProperty.call(obj, key)) return obj[key];
+        try {
+          if (typeof Map !== 'undefined' && obj instanceof Map) return obj.get(key);
+        } catch (e) {}
+        return null;
+      },
+      has: function (name) {
+        return Object.prototype.hasOwnProperty.call(obj, String(name));
+      },
+      raw: obj
+    };
+  },
   getKey: function () { return _legadoHostCall('source.getKey', []); },
   key: function () { return _legadoHostCall('source.getKey', []); },
   get bookSourceUrl() { return _legadoHostCall('source.bookSourceUrl', []); },

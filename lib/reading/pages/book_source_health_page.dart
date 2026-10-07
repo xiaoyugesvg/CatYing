@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
 import '../models/book_source.dart';
+import '../services/book_source_health_service.dart';
 import '../services/book_source_service.dart';
 import '../theme/jelly_theme.dart';
 import '../utils/source_fail_text.dart';
@@ -22,15 +23,29 @@ enum _Phase { idle, running, done }
 enum _ItemState { untested, healthy, networkFail, parseFail }
 
 class BookSourceHealthPage extends StatefulWidget {
-  const BookSourceHealthPage({super.key});
+  const BookSourceHealthPage({
+    super.key,
+    this.healthService,
+    this.store,
+  });
+
+  /// 体检服务（**默认进程级单例** ✓；单测/widget 测试可注入假实现 ✓）。
+  final BookSourceHealthService? healthService;
+
+  /// 书源仓库（默认 [BookSourceStore.instance] ✓）。
+  final BookSourceStore? store;
 
   @override
   State<BookSourceHealthPage> createState() => _BookSourceHealthPageState();
 }
 
 class _BookSourceHealthPageState extends State<BookSourceHealthPage> {
-  final store = BookSourceStore.instance;
-  final service = BookSourceService.instance;
+  // ✅ 体检逻辑已抽到 `services/book_source_health_service.dart` ✓ ——
+  //   本页**只负责 UI** ✓：进度条 / 列表 / 确认弹窗 ✓，
+  //   逐条真跑（含 Dart 引擎优先 → Node 回落 ✓）、并发、超时、取消全在服务里 ✓。
+  late final BookSourceHealthService service =
+      widget.healthService ?? BookSourceHealthService.instance;
+  late final BookSourceStore store = widget.store ?? BookSourceStore.instance;
 
   _Phase _phase = _Phase.idle;
   int _concurrency = 12;

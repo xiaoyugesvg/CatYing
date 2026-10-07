@@ -25,12 +25,22 @@ class ListenEpisodeList extends StatefulWidget {
     required this.onPlay,
     this.currentIdentityKey,
     this.sourceLabel = '听书',
+    this.albumCoverUrl,
+    this.albumName,
+    this.albumIntro,
+    this.albumProgress,
   });
 
   final List<Song> songs;
   final void Function(int index) onPlay;
   final String? currentIdentityKey;
   final String sourceLabel;
+
+  /// 专辑头部卡片（封面 / 名称 / 简介 / 更新进展），任一字段有值即显示。
+  final String? albumCoverUrl;
+  final String? albumName;
+  final String? albumIntro;
+  final String? albumProgress;
 
   @override
   State<ListenEpisodeList> createState() => _ListenEpisodeListState();
@@ -134,8 +144,13 @@ class _ListenEpisodeListState extends State<ListenEpisodeList> {
   }
 
   Widget _body() {
+    final hasHeader = (widget.albumName ?? '').isNotEmpty ||
+        (widget.albumCoverUrl ?? '').isNotEmpty ||
+        (widget.albumIntro ?? '').isNotEmpty ||
+        (widget.albumProgress ?? '').isNotEmpty;
     return Column(
       children: [
+        if (hasHeader) _albumHeader(),
         _toolbar(),
         Expanded(
           child: ValueListenableBuilder<int>(
@@ -160,6 +175,75 @@ class _ListenEpisodeListState extends State<ListenEpisodeList> {
           ),
         ),
       ],
+    );
+  }
+
+  /// 专辑详情卡片：封面 + 名称 + 更新进展 + 简介（任一字段有值才显示）。
+  Widget _albumHeader() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 2),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: MusicTheme.fill,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+            color: MusicTheme.secondary.withValues(alpha: 0.22)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CoverImage(url: widget.albumCoverUrl, size: 96, cornerRadius: 12),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if ((widget.albumName ?? '').isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      widget.albumName!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: MusicTheme.label,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w600,
+                        height: 1.25,
+                      ),
+                    ),
+                  ),
+                if ((widget.albumProgress ?? '').isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      widget.albumProgress!,
+                      style: TextStyle(
+                        color: MusicTheme.tint,
+                        fontSize: AppTheme.fontFootnote,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                if ((widget.albumIntro ?? '').isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      widget.albumIntro!,
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: MusicTheme.secondary,
+                        fontSize: AppTheme.fontFootnote,
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 

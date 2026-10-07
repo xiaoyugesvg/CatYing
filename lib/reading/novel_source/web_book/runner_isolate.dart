@@ -47,6 +47,17 @@ import '../model/xiaoshuo_book.dart';
 import '../model/xiaoshuo_book_chapter.dart';
 import '../novel_block.dart';
 import 'web_book.dart';   // 已 export 'web_book_types.dart'
+import 'dart:ui' show DartPluginRegistrant, RootIsolateToken;
+import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/services.dart'
+    show BackgroundIsolateBinaryMessenger, rootBundle;
+// [FIX-JS-ISOLATE] worker 里 quickjs 的 fetch 扩展要读 JS 资源，而
+// `rootBundle` 走 `ServicesBinding.instance`（binding 是 per-isolate 的）
+// ⇒ 后台 isolate 里必然抛「Binding has not yet been initialized」✗
+// 正解：**主 isolate 先把字符串读出来**，经 spawn 参数带进去，
+// worker 侧用 `preloadFetchJs` 填进那个包的静态字段（见 fetch.dart 的说明）。
+import 'package:quickjs_engine/extensions/fetch.dart'
+    show kFetchJsAssetPath, preloadFetchJs;
 
 /// 一次 isolate 执行的返回。
 class RunnerResult {
@@ -94,9 +105,42 @@ class BookSourceRunner {
       // 代理必须在**主 isolate**（= 本方法所在）启动：worker 里发起同步请求会
       // 阻塞自身事件循环，代理若同在 worker 就永远无法响应（死锁）。
       final proxyPort = await LegadoHttpProxy.ensureStarted();
+
+      // ── [FIX-JS-ISOLATE 步骤①] 主 isolate 先把 fetch.js **读成字符串** ──
+      //
+      // ⚠️ 这一步是"能不能用 @js 规则"的**决定性环节**：
+      //    worker 里 `rootBundle` 会因为"后台 isolate 没有 ServicesBinding"
+      //    而抛异常（实测量 16 次 Unhandled exception）✗
+      // ⇒ 老办法（传 RootIsolateToken + BackgroundIsolateBinaryMessenger
+      //    + DartPluginRegistrant）**都绕不过**，因为 `rootBundle` 用的是
+      //    binding **对象本身**，不是 messenger ✗
+      // ⇒ 只有"主 isolate 读好、把字符串传进去"才成立 ✓
+      //
+      // ⚠️ 读失败**不能影响主流程**：这里 catch 住，worker 侧还有
+      //    "磁盘兜底 / 内置常量"两级（见 fetch.dart）✓
+      String? fetchJs;
+      try {
+        fetchJs = await rootBundle.loadString(kFetchJsAssetPath);
+      } catch (e) {
+        // 桌面/测试环境偶发取不到，交给 worker 的兜底路径
+        // ignore: avoid_print
+        debugPrint('[BookSourceRunner] 预加载 fetch.js 失败（有兜底）: $e');
+      }
+
       isolate = await Isolate.spawn<List<Object?>>(
         _runnerMain,
-        <Object?>[receive.sendPort, action, payload, proxyPort],
+        <Object?>[
+          receive.sendPort,
+          action,
+          payload,
+          proxyPort,
+          // [FIX-JS-ISOLATE] 仍然带上 token：万一将来还有别的插件通道
+          // 需要它（`BackgroundIsolateBinaryMessenger`），留着无副作用；
+          // 但**fetch.js 的资源问题不靠它解决**（见上面的说明）。
+          RootIsolateToken.instance,
+          // 步骤①的产物：fetch.js 源码字符串（可能为 null → worker 走兜底）
+          fetchJs,
+        ],
         debugName: 'book-source-runner',
       );
       final msg = await receive.first.timeout(
@@ -227,6 +271,37 @@ void _runnerMain(List<Object?> args) async {
   SyncHttpBridge.allowBlockingOnCurrentIsolate = true;
   // 本机同步代理端口（主 isolate 启动，经 spawn 参数传入 —— 静态变量 per-isolate）
   SyncHttpBridge.proxyPort = args.length > 3 ? (args[3] as int? ?? 0) : 0;
+
+  // [FIX-JS-ISOLATE] 打通本 isolate 的资源访问：quickjs 的 fetch 扩展会
+  // `rootBundle.loadString(...)` 读 JS，而 `ServicesBinding.instance` 是
+  // **per-isolate** 的 ✗ ⇒ 之前这里抛「Binding has not yet been initialized」，
+  // 导致**所有 `@js` 规则（搜索 / 目录 / 正文）失败** ✗（发现页能用是因为它跑在主 isolate）。
+  // 官方做法：主 isolate 取 `RootIsolateToken` 经 spawn 传进来，这里 ensureInitialized ✓。
+  // ── [FIX-JS-ISOLATE 步骤①b] 把主 isolate 传来的 fetch.js 源码存好 ──
+  //
+  // ⚠️ 必须在**创建 runtime 之前**做：`getJavascriptRuntime()` 内部会
+  //    `runtime.enableFetch()`，那时就要用这个静态字段了。
+  // ⚠️ **静态字段是 per-isolate 的** ⇒ 每个 worker 都必须自己 preload 一次 ✓
+  final preloaded = args.length > 5 ? args[5] as String? : null;
+  final preloadOk = preloadFetchJs(preloaded);
+  if (!preloadOk) {
+    // 不崩：包的 fetch 扩展有磁盘/内置常量兜底
+    // ignore: avoid_print
+    debugPrint('[BookSourceRunner] 未收到预加载的 fetch.js，将走兜底路径');
+  }
+
+  if (args.length > 4 && args[4] is RootIsolateToken) {
+    try {
+      // ⚠️ 这两句**必须配套**：只调 messenger 不够 ✗ —— `rootBundle` 走的是
+      // `ServicesBinding.instance`（binding 本身 ✗），实测只加 messenger 时
+      // quickjs 的 fetch 扩展仍抛「Binding has not yet been initialized」✗。
+      BackgroundIsolateBinaryMessenger.ensureInitialized(args[4] as RootIsolateToken);
+      DartPluginRegistrant.ensureInitialized();
+    } catch (_) {
+      // 拿不到绑定（纯 dart:io / flutter test 环境）时**不能崩** ✗：
+      // JsEngine 侧另有兜底（从磁盘读 fetch.js / 用内置常量）。
+    }
+  }
 
   void sendBack(Map<String, Object?> msg) {
     try {

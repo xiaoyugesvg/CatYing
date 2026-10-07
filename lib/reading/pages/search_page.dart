@@ -23,7 +23,7 @@ import '../widgets/jelly_comic_list_tile.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_search_bar.dart';
 import '../widgets/guide_overlay.dart';
-import '../widgets/jelly_sliding_actions.dart';
+import '../widgets/jelly_icon_deck.dart';
 import '../widgets/staggered_entrance.dart';
 import 'browse_history_page.dart';
 import 'comic_detail_page.dart';
@@ -1494,53 +1494,50 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                 _buildCategoryButton(
                     Theme.of(context).brightness == Brightness.dark),
                 const SizedBox(width: 6),
-                JellySlidingActions(
-                  isDark: Theme.of(context).brightness == Brightness.dark,
-                  actions: [
-                    JellyAction(
-                      icon: Icons.history_rounded,
-                      tooltip: '浏览记录',
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              const BrowseHistoryPage(showTabs: false),
-                        ),
-                      ),
-                    ),
-                    JellyAction(
-                      icon: Icons.favorite_rounded,
-                      tooltip: '收藏',
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              const FavoritesPage(comicOnly: true),
-                        ),
-                      ),
-                    ),
-                    JellyAction(
-                      icon: Icons.file_download_rounded,
-                      tooltip: '下载',
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const ComicDownloadRecordsPage(),
-                        ),
-                      ),
-                    ),
-                    JellyAction(
-                      icon: Icons.source_rounded,
-                      tooltip: '漫画源仓库',
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const SourceRepoPage(),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                // ⚠️ 用户要求（本轮）：右上角由「并排滑动动作栏」改成**叠图标控件** ——
+//   · 最前的**完整可见**（深色圆底 + `emphasized: true`）
+//   · 后面各露出一部分，**左右滑动**循环切换最前
+//   · **长按**竖向展开全部
+//   原来的 `JellySlidingActions`（4 个并排）已整体替换，不再保留。
+JellyIconDeck(
+  items: [
+    JellyIconDeckItem(
+      icon: Icons.history_rounded,
+      tooltip: '浏览记录',
+      emphasized: true,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const BrowseHistoryPage()),
+      ),
+    ),
+    JellyIconDeckItem(
+      icon: Icons.favorite_rounded,
+      tooltip: '收藏',
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const FavoritesPage(showBackButton: true),
+        ),
+      ),
+    ),
+    JellyIconDeckItem(
+      icon: Icons.file_download_rounded,
+      tooltip: '下载',
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const ComicDownloadRecordsPage()),
+      ),
+    ),
+    JellyIconDeckItem(
+      icon: Icons.source_rounded,
+      tooltip: '漫画源仓库',
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const SourceRepoPage()),
+      ),
+    ),
+  ],
+),
                 const SizedBox(width: 12),
               ],
             )
@@ -1591,61 +1588,70 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                         children: [
                           AppPageTitle('漫画', isDark: isDark),
                           const SizedBox(width: AppTheme.headerTitleGap),
-                          // 搜索框占满中间（原来固定屏宽 40% 且居中）
-                          Expanded(child: _searchField()),
+                          // ── 🔴 `Spacer` 而不是 `Expanded`（修"叠图标被裁"）──
+                          //
+                          // 原来包在 `Expanded` 里 ✗。`Expanded` 给的是 **tight 满宽**：
+                          //   · 它把中间那一大段宽度**全占掉**（约 230px），
+                          //   · 而 `_searchField()` 内部 `maxWidth: 107`，
+                          //     于是胶囊只画 107px，**剩下的是空白**（用户截图里那大片空 ✓）
+                          //   · 但"名额"已经被 `Expanded` 吃掉 ⇒ 右侧叠图标只能用零头
+                          //     ⇒ 一路顶到屏幕边缘、后面的卡片被裁掉 ✗
+                          //
+                          // 改 `Spacer` 后：搜索框只占内容宽（107），
+                          // `Spacer` 吃掉左侧空白，右侧图标组拿回足够宽度 ✓
+                          //（图书页/书源页上一轮已是这个写法，漫画页当时漏了。）
+                          const Spacer(),
+                          _searchField(),
                           const SizedBox(width: 8),
                           // ⚠️ 用户 2026-10-07（第二轮修正）：
                           //   · **筛选按钮单独拉出来** ✓（不塞进滑动栏）
                           //   · 其余 4 个动作叠在一起、左右滑动轮换 ✓
                           _buildCategoryButton(isDark),
                           const SizedBox(width: 6),
-                          JellySlidingActions(
-                            isDark: isDark,
-                            actions: [
-                              JellyAction(
-                                icon: Icons.source_rounded,
-                                tooltip: '漫画源仓库',
-                                onPressed: () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => const SourceRepoPage(),
-                                  ),
-                                ),
-                              ),
-                              JellyAction(
-                                icon: Icons.history_rounded,
-                                tooltip: '浏览记录',
-                                onPressed: () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => const BrowseHistoryPage(),
-                                  ),
-                                ),
-                              ),
-                              JellyAction(
-                                icon: Icons.favorite_rounded,
-                                tooltip: '收藏',
-                                onPressed: () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        const FavoritesPage(showBackButton: true),
-                                  ),
-                                ),
-                              ),
-                              JellyAction(
-                                icon: Icons.file_download_rounded,
-                                tooltip: '下载',
-                                onPressed: () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        const ComicDownloadRecordsPage(),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                          // ⚠️ 用户要求（本轮）：右上角由「并排滑动动作栏」改成**叠图标控件** ——
+//   · 最前的**完整可见**（深色圆底 + `emphasized: true`）
+//   · 后面各露出一部分，**左右滑动**循环切换最前
+//   · **长按**竖向展开全部
+//   原来的 `JellySlidingActions`（4 个并排）已整体替换，不再保留。
+JellyIconDeck(
+  items: [
+    JellyIconDeckItem(
+      icon: Icons.history_rounded,
+      tooltip: '浏览记录',
+      emphasized: true,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const BrowseHistoryPage()),
+      ),
+    ),
+    JellyIconDeckItem(
+      icon: Icons.favorite_rounded,
+      tooltip: '收藏',
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const FavoritesPage(showBackButton: true),
+        ),
+      ),
+    ),
+    JellyIconDeckItem(
+      icon: Icons.file_download_rounded,
+      tooltip: '下载',
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const ComicDownloadRecordsPage()),
+      ),
+    ),
+    JellyIconDeckItem(
+      icon: Icons.source_rounded,
+      tooltip: '漫画源仓库',
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const SourceRepoPage()),
+      ),
+    ),
+  ],
+),
                         ],
                       ),
                     ),

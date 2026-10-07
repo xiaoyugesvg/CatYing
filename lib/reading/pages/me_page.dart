@@ -9,6 +9,7 @@ import 'general_settings_page.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/bookshelf_icon.dart';
 import '../widgets/jelly_nav_bar.dart';
+import '../widgets/me_account_quick_entries.dart';
 import '../widgets/staggered_entrance.dart';
 import '../widgets/guide_overlay.dart';
 import 'book_search_page.dart';
@@ -139,55 +140,15 @@ class _MePageState extends State<MePage> {
                 ],
               ),
             ),
+            // ── 我的笔记 / 阅读经历 / 阅读计划 ─────────────────────
+            //    原来是登录卡下方**独立一行**（图标 + 常驻文字 label）。
+            //    用户 2026 反馈：「那三个（我的笔记、阅读经历、阅读计划**只留图标**）
+            //    图标**并排放在那个登录（也就是第一个卡片）的右上角**」✓
+            //    ⇒ 三个入口已**只留图标**、去掉文字，并搬进 [ _buildAccountCard ]
+            //      的卡片右上角（`Stack` + `Positioned`），
+            //      实现在 `widgets/me_account_quick_entries.dart`。
+            //    这里删掉的正是原来那一整块 `Padding + Row + _iconEntry×3`。
             _buildAccountCard(isDark),
-            // ── 我的笔记 / 阅读经历 / 阅读计划（三个图标入口，
-            //    不是卡片；对齐参考图「我的」页样式）────────────
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Row(
-                children: [
-                  _iconEntry(
-                    isDark,
-                    icon: Icons.edit_note_rounded,
-                    label: '我的笔记',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const NotesAndJourneyPage(),
-                      ),
-                    ),
-                  ),
-                  _iconEntry(
-                    isDark,
-                    icon: Icons.route_rounded,
-                    label: '阅读经历',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const BrowseHistoryPage(
-                            showTabs: false),
-                      ),
-                    ),
-                  ),
-                  _iconEntry(
-                    isDark,
-                    icon: Icons.event_available_rounded,
-                    label: '阅读计划',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        // ✅ **修掉一个真接线错误** ✗✓：这里原来指向
-                        //   `NotesAndJourneyPage()` ✓ —— 与上面「我的笔记」(`:155`) **同一个页面** ✗✗，
-                        //   于是"阅读计划"点开看到的其实是笔记/经历页 ✓。
-                        //   本仓库此前**根本没有阅读计划页** ✗（`阅读计划` 只作入口标签存在 ✓），
-                        //   现已新建 `ReadingPlanPage` ✓（照截图 IMG_8634/8635 ✓）。
-                        builder: (_) => const ReadingPlanPage(),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
             LayoutBuilder(
               builder: (context, constraints) {
                 final cols = _adaptiveCols(constraints.maxWidth);
@@ -476,8 +437,28 @@ class _MePageState extends State<MePage> {
   /// 顶部账号卡（参考 IMG_8564）：
   ///   左：圆形头像（右下角相机编辑角标）
   ///   中：「还未登录」+「登录后可下载更多图书」（已登录显示邮箱/管理）
-  ///   右：箭头
-  ///   下：进度条 + 右侧「每日可下载 N 本」
+  ///   右上：**三个纯图标入口**（我的笔记 / 阅读经历 / 阅读计划）
+  ///   右下：箭头；下：进度条 + 右侧「每日可下载 N 本」
+  ///
+  /// ── 用户在 2026 反馈里的两点（都已落在这张卡里）────────────────
+  ///   1. 三个入口**只留图标**：文字 label 已删（见
+  ///      `widgets/me_account_quick_entries.dart`，语义改由 Tooltip 承载）
+  ///   2. 三个图标**并排放在这张登录卡的右上角**：
+  ///      用 `Stack` + `Positioned(top/right)` 钉在**卡片内**（不是卡片外面），
+  ///      所以未登录 / 已登录两套文案下位置**完全一致**、不会跳 ——
+  ///      图标行是 `Stack` 里的绝对定位层，**不参与**卡片主体的 Column 布局。
+  ///
+  /// ── 为什么上行要"右侧预留"（`_quickRowReserve`）─────────────────
+  /// 图标行只有 40 高（`top:16` ⇒ 占 y≈22..62，正对"右上角"），
+  /// 钉的是 `Stack` 的绝对定位层，**不参与**卡片主体的 Column/Row 布局，
+  /// 所以未登录 / 已登录两套文案下**位置完全一致**、不会跳 ✓。
+  ///
+  /// 代价是：主体上行的文字默认会一路排到卡片右内边（x≈296），
+  /// 而图标行从 x≈204 起 —— 实测（360 宽屏）副标题「登录后可下载更多图书」
+  /// 右缘 238.5 > 204，**被第三个圆盖住 34.5px** ✗。
+  /// ⇒ 上行 `Padding(right: _quickRowReserve)`，把「还未登录 + 副标题」这列
+  ///   文字**卡在图标行左侧**：文字要么正常排完、要么自己省略号收尾，
+  ///   永远不会钻到圆底下面 ✓（头像、进度条、箭头都在图标行覆盖范围之外）。
   Widget _buildAccountCard(bool isDark) {
     return ListenableBuilder(
       listenable: ZlibraryService(),
@@ -493,6 +474,10 @@ class _MePageState extends State<MePage> {
             ? Colors.white.withValues(alpha: 0.55)
             : JellyTheme.textSecondary;
         final progress = limit <= 0 ? 0.0 : (used / limit).clamp(0.0, 1.0);
+        const chevronSize = 24.0;
+        // 图标热区高 44 + 顶部留白 16 = 60；自底向上留 44 ⇒ 箭头右缘外再留 16
+        final chevronRight =
+            16.0 + (MeAccountQuickEntries.tapSize - chevronSize) / 2;
         return Padding(
           padding: const EdgeInsets.only(bottom: 14),
           child: Material(
@@ -506,141 +491,173 @@ class _MePageState extends State<MePage> {
                   builder: (_) => const ZlibraryAuthPage(),
                 ),
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ── 上行：头像 + 文字 + 箭头 ──
-                    Row(
+              child: Stack(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // 圆形头像（右下角相机编辑角标）
-                        Stack(
-                          clipBehavior: Clip.none,
+                        // ── 上行：头像 + 文字（箭头已挪到 Stack 右下角）──
+                        Row(
                           children: [
-                            Container(
-                              width: 64,
-                              height: 64,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: logged
-                                    ? JellyTheme.primary
-                                    : (isDark
-                                        ? Colors.white.withValues(alpha: 0.10)
-                                        : const Color(0xFFEDEEF0)),
-                              ),
-                              child: logged
-                                  ? Image.asset(
-                                      'assets/icons/user.png',
-                                      width: 52,
-                                      height: 52,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (_, _, _) => Icon(
-                                        Icons.person_rounded,
-                                        color: Colors.white,
-                                        size: 28,
+                            // 圆形头像（右下角相机编辑角标）
+                            Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Container(
+                                  width: 64,
+                                  height: 64,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: logged
+                                        ? JellyTheme.primary
+                                        : (isDark
+                                            ? Colors.white.withValues(
+                                                alpha: 0.10)
+                                            : const Color(0xFFEDEEF0)),
+                                  ),
+                                  child: logged
+                                      ? Image.asset(
+                                          'assets/icons/user.png',
+                                          width: 52,
+                                          height: 52,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, _, _) => Icon(
+                                            Icons.person_rounded,
+                                            color: Colors.white,
+                                            size: 28,
+                                          ),
+                                        )
+                                      : Icon(
+                                          Icons.person_rounded,
+                                          color: sub,
+                                          size: 32,
+                                        ),
+                                ),
+                                // 相机角标（编辑头像入口）
+                                Positioned(
+                                  right: 0,
+                                  bottom: 0,
+                                  child: Container(
+                                    width: 22,
+                                    height: 22,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: JellyTheme.primary,
+                                      border: Border.all(
+                                        color: isDark
+                                            ? JellyTheme.cardDark
+                                            : JellyTheme.cardLight,
+                                        width: 2,
                                       ),
-                                    )
-                                  : Icon(
-                                      Icons.person_rounded,
-                                      color: sub,
-                                      size: 32,
                                     ),
-                            ),
-                            // 相机角标（编辑头像入口）
-                            Positioned(
-                              right: 0,
-                              bottom: 0,
-                              child: Container(
-                                width: 22,
-                                height: 22,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: JellyTheme.primary,
-                                  border: Border.all(
-                                    color: isDark
-                                        ? JellyTheme.cardDark
-                                        : JellyTheme.cardLight,
-                                    width: 2,
+                                    child: const Icon(
+                                      Icons.photo_camera_rounded,
+                                      size: 12,
+                                      color: Colors.white,
+                                    ),
                                   ),
                                 ),
-                                child: const Icon(
-                                  Icons.photo_camera_rounded,
-                                  size: 12,
-                                  color: Colors.white,
-                                ),
+                              ],
+                            ),
+                            const SizedBox(width: 14),
+                            // 账号信息
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    logged
+                                        ? (z.email.isNotEmpty ? z.email : '已登录')
+                                        : '还未登录',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      color: fg,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    logged
+                                        ? '登录后可下载更多图书 · 点击管理'
+                                        : '登录后可下载更多图书',
+                                    style: TextStyle(fontSize: 13, color: sub),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(width: 14),
-                        // 账号信息
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                logged ? (z.email.isNotEmpty ? z.email : '已登录') : '还未登录',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                  color: fg,
+                        const SizedBox(height: 14),
+                        // ── 下行：进度条 + 每日可下载 N 本 ──
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(3),
+                                child: LinearProgressIndicator(
+                                  value: progress,
+                                  minHeight: 6,
+                                  backgroundColor: isDark
+                                      ? Colors.white.withValues(alpha: 0.10)
+                                      : const Color(0xFFE7E8EB),
+                                  valueColor: AlwaysStoppedAnimation(
+                                    JellyTheme.primary,
+                                  ),
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                logged
-                                    ? '登录后可下载更多图书 · 点击管理'
-                                    : '登录后可下载更多图书',
-                                style: TextStyle(fontSize: 13, color: sub),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          color: sub,
-                          size: 24,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    // ── 下行：进度条 + 每日可下载 N 本 ──
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(3),
-                            child: LinearProgressIndicator(
-                              value: progress,
-                              minHeight: 6,
-                              backgroundColor: isDark
-                                  ? Colors.white.withValues(alpha: 0.10)
-                                  : const Color(0xFFE7E8EB),
-                              valueColor:
-                                  AlwaysStoppedAnimation(JellyTheme.primary),
                             ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          logged
-                              ? '今日已下 $used/$limit 本'
-                              : '每日可下载 $limit 本',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: fg,
-                          ),
+                            const SizedBox(width: 12),
+                            Text(
+                              logged
+                                  ? '今日已下 $used/$limit 本'
+                                  : '每日可下载 $limit 本',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: fg,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
-                ),
+                  ),
+                  // ── 卡片右上角：三个纯图标入口（并排，无文字）──────
+                  Positioned(
+                    top: 16,
+                    right: 16,
+                    child: MeAccountQuickEntries(
+                      // 测试用的稳定锚点（`find.byKey`）
+                      key: const ValueKey('me_account_quick_entries'),
+                      isDark: isDark,
+                      onNotes: () => _push(const NotesAndJourneyPage()),
+                      onJourney: () => _push(
+                        const BrowseHistoryPage(showTabs: false),
+                      ),
+                      // ⚠️ 「阅读计划」原来的接线错误已在上一轮修掉（曾指向
+                      //   `NotesAndJourneyPage`），这里保持指向 `ReadingPlanPage`
+                      //   —— 三个入口的**跳转目标一个都没丢** ✓
+                      onPlan: () => _push(const ReadingPlanPage()),
+                    ),
+                  ),
+                  // ── 卡片右下角：箭头（原来在上行 Row 的最右，会和右上角图标
+                  //    挤同一块地方，所以下移到底部右侧；两种登录态都只是这一处）
+                  Positioned(
+                    right: chevronRight,
+                    bottom: 16,
+                    child: Icon(
+                      Icons.chevron_right_rounded,
+                      color: sub,
+                      size: chevronSize,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -649,38 +666,9 @@ class _MePageState extends State<MePage> {
     );
   }
 
-  // -------------------- 图标入口 / 暗色模式切换 --------------------
-
-  /// 登录卡下方的图标入口（我的笔记 / 阅读经历 / 阅读计划）
-  Widget _iconEntry(
-    bool isDark, {
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    final fg = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: JellyTheme.primary.withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: JellyTheme.primary, size: 20),
-            ),
-            const SizedBox(height: 6),
-            Text(label, style: TextStyle(fontSize: 12, color: fg)),
-          ],
-        ),
-      ),
-    );
+  /// 卡片内跳转（三个图标入口共用）
+  void _push(Widget page) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => page));
   }
 
   // -------------------- 暗色模式切换 --------------------

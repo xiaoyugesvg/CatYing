@@ -27,6 +27,8 @@ class _BookanAlbumPageState extends State<BookanAlbumPage> {
   bool _loading = true;
   String _error = '';
   String _albumName = '';
+  String? _coverUrl;
+  String _author = '';
   List<Song> _songs = const [];
 
   @override
@@ -48,6 +50,8 @@ class _BookanAlbumPageState extends State<BookanAlbumPage> {
       _albumName = r.albumName.isNotEmpty
           ? r.albumName
           : (widget.albumName ?? '专辑');
+      _coverUrl = r.coverUrl;
+      _author = r.author ?? '';
       if (!r.ok) _error = r.message;
     });
   }
@@ -127,6 +131,10 @@ class _BookanAlbumPageState extends State<BookanAlbumPage> {
       builder: (context, _) => ListenEpisodeList(
         songs: _songs,
         sourceLabel: '博看',
+        albumCoverUrl: _coverUrl,
+        albumName: _albumName,
+        albumIntro: _author.isNotEmpty ? '作者：$_author' : null,
+        albumProgress: '共 ${_songs.length} 集',
         currentIdentityKey: _player.currentSong?.identityKey,
         onPlay: (index) => _player.playQueue(_songs, index: index),
       ),

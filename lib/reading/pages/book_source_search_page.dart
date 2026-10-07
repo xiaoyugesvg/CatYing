@@ -7,7 +7,7 @@ import '../services/book_source_service.dart';
 import '../services/qread_api.dart';
 import '../services/reading_layout.dart';
 import '../theme/jelly_theme.dart';
-import '../widgets/jelly_sliding_actions.dart';
+import '../widgets/jelly_icon_deck.dart';
 import '../widgets/jelly_pull_cord.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_search_bar.dart';
@@ -711,56 +711,53 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
           //   · **筛选按钮单独拉出来** ✓（上面那个 tune 按钮保持不动）
           //   · 其余 4 个动作叠在一起、左右滑动轮换 ✓
           //     （原来是 ··· 下拉菜单，现在换成滑动动作栏同款）
-          JellySlidingActions(
-            isDark: _isDark,
-            actions: [
-              JellyAction(
-                icon: Icons.history_rounded,
-                tooltip: '浏览记录',
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    // 历史统一界面：漫画/图书聚合（showTabs 默认 true）
-                    builder: (_) => const BrowseHistoryPage(),
-                  ),
-                ),
-              ),
-              JellyAction(
-                icon: Icons.favorite_rounded,
-                tooltip: '收藏',
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    // 收藏统一界面：漫画/图书聚合 + 返回按钮
-                    builder: (_) => const FavoritesPage(showBackButton: true),
-                  ),
-                ),
-              ),
-              JellyAction(
-                icon: Icons.file_download_rounded,
-                tooltip: '下载',
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    // 与图书共用的下载记录页
-                    builder: (_) => const BookDownloadRecordsPage(),
-                  ),
-                ),
-              ),
-              JellyAction(
-                icon: Icons.manage_search_rounded,
-                tooltip: '书源仓库',
-                onPressed: () async {
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const BookSourceRepoPage()),
-                  );
-                  if (mounted) setState(() {});
-                },
-              ),
-            ],
-          ),
+          // ⚠️ 用户要求（本轮）：右上角由「并排滑动动作栏」改成**叠图标控件** ——
+//   · 最前的**完整可见**（深色圆底 + `emphasized: true`）
+//   · 后面各露出一部分，**左右滑动**循环切换最前
+//   · **长按**竖向展开全部
+//   原来的 `JellySlidingActions` 已整体替换（筛选按钮仍单独保留在它左边）。
+JellyIconDeck(
+  items: [
+      JellyIconDeckItem(
+        icon: Icons.history_rounded,
+        tooltip: '浏览记录',
+      emphasized: true,
+        onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const BrowseHistoryPage()),
+      ),
+      ),
+      JellyIconDeckItem(
+        icon: Icons.favorite_rounded,
+        tooltip: '收藏',
+        onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const FavoritesPage(showBackButton: true),
+        ),
+      ),
+      ),
+      JellyIconDeckItem(
+        icon: Icons.file_download_rounded,
+        tooltip: '下载',
+        onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const BookDownloadRecordsPage()),
+      ),
+      ),
+      JellyIconDeckItem(
+        icon: Icons.manage_search_rounded,
+        tooltip: '书源仓库',
+        onTap: () async {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const BookSourceRepoPage()),
+        );
+        if (mounted) setState(() {});
+      },
+      ),
+  ],
+),
           const SizedBox(width: 12),
         ],
       ),

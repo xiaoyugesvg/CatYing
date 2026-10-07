@@ -32,6 +32,8 @@ class _XimalayaAlbumPageState extends State<XimalayaAlbumPage> {
   String _message = ''; // 整张专辑不可播时的原因
   int _skipped = 0;
   String _albumName = '';
+  String? _coverUrl;
+  String _intro = '';
   List<Song> _songs = const [];
 
   @override
@@ -55,6 +57,8 @@ class _XimalayaAlbumPageState extends State<XimalayaAlbumPage> {
       _albumName = r.albumName.isNotEmpty
           ? r.albumName
           : (widget.albumName ?? '专辑');
+      _coverUrl = r.coverUrl;
+      _intro = r.intro;
       if (!r.ok) _error = r.message;
     });
   }
@@ -163,6 +167,10 @@ class _XimalayaAlbumPageState extends State<XimalayaAlbumPage> {
             builder: (context, _) => ListenEpisodeList(
               songs: _songs,
               sourceLabel: '喜雅',
+              albumCoverUrl: _coverUrl,
+              albumName: _albumName,
+              albumIntro: _intro.isEmpty ? null : _intro,
+              albumProgress: '共 ${_songs.length} 集可播放',
               currentIdentityKey: _player.currentSong?.identityKey,
               onPlay: (index) => _player.playQueue(_songs, index: index),
             ),

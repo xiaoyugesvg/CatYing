@@ -10,7 +10,9 @@ import 'dart:convert';
 
 import '../novel_block.dart';
 import '../novel_chinese_converter.dart';
+import '../../../services/app_log.dart';
 import '../analyze/analyze_rule.dart';
+import '../analyze/js_engine.dart';
 import '../analyze/analyze_url.dart';
 import '../model/book_source.dart';
 import '../model/search_book.dart';
@@ -26,6 +28,32 @@ import 'runner_isolate.dart';
 export 'web_book_types.dart';
 
 class WebBook {
+  /// 把「当前要解析的书源」告诉共享 JS 引擎，**在解析前注入该源的 `jsLib`**。
+  ///
+  /// ── 为什么需要（修一个真缺陷）──────────────────────────────────
+  /// 日志里出现 `ReferenceError: qmSearch / wrCredentials / getSign is not defined`
+  /// —— 那些函数是书源作者写在源的 **`jsLib`** 字段里的。
+  ///
+  /// 而 `jsLib` 在模型里有字段（`book_source.dart:21`），
+  /// **全项目却没有任何地方使用它** ⇒ 工具函数从未进入 JS 上下文 ✗
+  /// ⇒ 规则一调用就 ReferenceError，被 `eval` 吞成空串（表现为"规则不生效"）。
+  ///
+  /// 修法：四个解析入口各调一次本方法；
+  /// `JsEngine.setActiveSource` 内部**按源缓存**：同源不重复注入、换源重建 runtime ✓
+  ///
+  /// ⚠️ 必须在**开始解析前**调用（jsLib 要先于规则执行进入上下文）。
+  static void _bindJsLib(XiaoshuoBookSource source) {
+    try {
+      JsEngine.shared.setActiveSource(
+        source.bookSourceUrl.isNotEmpty ? source.bookSourceUrl : source.bookSourceName,
+        source.jsLib,
+      );
+    } catch (e) {
+      // 注入失败不能影响解析主流程（规则本身仍可跑）
+      AppLog.instance.w('[WebBook] 绑定 jsLib 失败: $e');
+    }
+  }
+
   /// 搜索书籍：按 `source.searchUrl` 模板抓取并通过 `ruleSearch` 解析。
   ///
   /// 简繁转换：用户输入简体却搜繁体源（或反之）时，自动以另一字形补搜一次并
@@ -42,6 +70,7 @@ class WebBook {
     if (BookSourceRunner.enabled) {
       return BookSourceRunner.instance.searchBook(source: source, key: key, page: page);
     }
+    _bindJsLib(source); // 先注入该源的 jsLib，再解析规则
     final searchUrl = source.searchUrl;
     if (searchUrl == null || searchUrl.isEmpty) {
       throw Exception('书源未配置 searchUrl');
@@ -275,6 +304,7 @@ class WebBook {
     if (BookSourceRunner.enabled) {
       return BookSourceRunner.instance.getBookInfo(source: source, bookUrl: bookUrl);
     }
+    _bindJsLib(source); // 先注入该源的 jsLib，再解析规则
     final analyzeUrl = AnalyzeUrl(
       url: bookUrl,
       baseUrl: source.bookSourceUrl,
@@ -319,6 +349,7 @@ class WebBook {
     if (BookSourceRunner.enabled) {
       return BookSourceRunner.instance.getChapterList(source: source, book: book);
     }
+    _bindJsLib(source); // 先注入该源的 jsLib，再解析规则
     // 注意：onBatch 回调无法跨 isolate，isolate 路径只返回最终完整列表。
     final tocRule = source.getTocRule();
     var tocUrl = (book.tocUrl != null && book.tocUrl!.isNotEmpty)
@@ -465,6 +496,7 @@ class WebBook {
     if (BookSourceRunner.enabled) {
       return BookSourceRunner.instance.getContent(source: source, chapterUrl: chapterUrl, originalBook: originalBook);
     }
+    _bindJsLib(source); // 先注入该源的 jsLib，再解析规则
     final contentRule = source.getContentRule();
     final book = originalBook ?? XiaoshuoBook(bookUrl: '', name: '');
 

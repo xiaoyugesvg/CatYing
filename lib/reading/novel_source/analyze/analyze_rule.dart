@@ -726,6 +726,27 @@ class AnalyzeRule {
               HostBridge.normalize(_dispatchHostCall(call.op, call.args));
           continue;
         }
+        // ── 🔴 失败必须可见（修"静默空串"）──────────────────────────
+        //
+        // 原实现：走到这里就 `return out`，而 `out` 可能是空串 ——
+        // 此时 `lastError` 里的**真实原因被完全丢掉** ✗ ⇒
+        // 日志里既没有报错、结果又是空，于是：
+        //   · "JS 引擎根本不可用"（如原生库没加载上）
+        //   · "规则语法错误 / 找不到变量"
+        //   · "规则正常但确实没匹配到内容"
+        // 这三件事**看起来一模一样** ✗✗
+        //
+        // 代价是实测出来的：曾把"缺 quickjs 原生库导致所有 @js 返回空"
+        // 误判成"某条 @js 规则没被求值"，白查很久。
+        //
+        // 现在：**只要 JS 报了错且结果为空，就写一条 warn**（附带规则片段）。
+        // ⚠️ 只加日志、**不改返回值**（返回空串维持既有行为，避免影响调用方）。
+        if (out.isEmpty && lastError != null && lastError.isNotEmpty) {
+          final brief = expanded.replaceAll('\n', ' ').trim();
+          AppLog.instance.w('[书源JS] 求值失败，返回空串: '
+              '${brief.length > 120 ? '${brief.substring(0, 120)}…' : brief} '
+              '→ $lastError');
+        }
         return out;
       }
       AppLog.instance.w('[书源JS] 宿主调用/同步抓取重放超过 8 轮，放弃');

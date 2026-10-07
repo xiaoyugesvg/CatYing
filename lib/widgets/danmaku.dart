@@ -250,6 +250,17 @@ class DanmuLayerState extends State<DanmuLayer> {
   /// Minimum gap between two scrolling danmaku on the same track (px).
   static const double _trackGap = 24.0;
 
+  /// 同时活跃弹幕上限：超过后从最旧的开始丢。
+  /// 高密度弹幕源（一集上千条）每帧可能 spawn 十几条，
+  /// 不设上限的话 Stack 里 Positioned 越来越多 → 渲染越来越卡。
+  static const int _maxActive = 60;
+
+  /// 文本宽度缓存：同一条文本（同字号）只 layout 一次。
+  /// `TextPainter.layout()` 是弹幕热路径里最贵的单点开销，
+  /// 高密度时同一句弹幕会反复出现，缓存能省掉绝大部分。
+  final Map<String, double> _widthCache = {};
+  static const int _widthCacheLimit = 500;
+
   double get _speed => widget.speed;
   int get _trackCount => widget.trackCount.clamp(2, 8);
 
@@ -270,6 +281,9 @@ class DanmuLayerState extends State<DanmuLayer> {
   bool _lastTickPosInit = false;
   /// Viewport width from LayoutBuilder; used for track collision checks.
   double _viewportWidth = 0;
+  /// Viewport height from LayoutBuilder; used to shrink track count on
+  /// short players (embedded detail player) so danmaku never overlap.
+  double _viewportHeight = 0;
 
   @override
   void initState() {
@@ -343,7 +357,8 @@ class DanmuLayerState extends State<DanmuLayer> {
   }
 
   /// 可用高度越少，轨道数越少（避免弹幕挤在窄条里重叠）。
-  /// 同时考虑 areaRatio（旧 API）和 topPadding/bottomPadding（新 API）。
+  /// 同时考虑 areaRatio（旧 API）、topPadding/bottomPadding（新 API）
+  /// 和**实际可用高度**（详情页内嵌播放器等高不够的场景）。
   int get _effectiveTrackCount {
     final base = _trackCount;
     // 新参数优先：topPadding + bottomPadding 决定可用比例
@@ -355,8 +370,25 @@ class DanmuLayerState extends State<DanmuLayer> {
     final effectiveRatio = available < widget.areaRatio
         ? available
         : widget.areaRatio;
-    if (effectiveRatio >= 0.99) return base;
-    final scaled = (base * effectiveRatio).floor();
+    int scaled;
+    if (effectiveRatio >= 0.99) {
+      scaled = base;
+    } else {
+      scaled = (base * effectiveRatio).floor();
+    }
+    // 🔴 按实际可用高度再压一遍（px 级）：
+    //    比如详情页内嵌播放器 4:3、屏宽 390 → 高约 292，
+    //    减去上下安全距后只剩 ~244px，字号 14 时行距 22px 只能放 11 行；
+    //    但用户设了 8 轨道时若不压，行与行直接叠在一起 ✗。
+    if (_viewportHeight > 0) {
+      final topPx = _viewportHeight * padTop + 24.0;
+      final bottomPx = _viewportHeight * padBottom + 24.0;
+      final usableH = _viewportHeight - topPx - bottomPx;
+      if (usableH > 0) {
+        final byHeight = (usableH / _trackStep).floor().clamp(1, base);
+        if (byHeight < scaled) scaled = byHeight;
+      }
+    }
     return scaled.clamp(1, base);
   }
 
@@ -472,11 +504,18 @@ class DanmuLayerState extends State<DanmuLayer> {
           bottomFixed: true, width: width, track: lane));
     } else {
       final track = _pickTrack();
+      // 轨道全忙且都会重叠 → 丢弃本条（宁可少一条，不让弹幕叠在一起）
+      if (track < 0) return;
       _active.add(_ActiveDanmu(item,
           track: track,
           width: width,
           x: startX,
           positioned: true));
+    }
+    // 🔴 活跃数量上限：超出后从最旧的开始丢（滚动弹幕先上屏，先丢它们）。
+    //    不设上限时高密度源能把 _active 堆到几百条，每帧全量重建直接卡死。
+    if (_active.length > _maxActive) {
+      _active.removeRange(0, _active.length - _maxActive);
     }
   }
 
@@ -495,6 +534,7 @@ class DanmuLayerState extends State<DanmuLayer> {
   /// Choose a scrolling track where the previous item has cleared enough
   /// that a new item entering at x=_viewportWidth will not collide.
   /// Same speed => relative gap stays constant, so we only check spawn time.
+  /// Returns -1 when every track would overlap the incoming item.
   int _pickTrack() {
     final w = _viewportWidth;
     // 用 effective（受「显示区域」压缩），避免弹幕落到被裁掉的高度上
@@ -525,18 +565,31 @@ class DanmuLayerState extends State<DanmuLayer> {
         best = t;
       }
     }
+    // 🔴 所有轨道上最近一条的右边缘都还没让出足够的间隙 →
+    //    新弹幕进场必然追尾重叠。返回 -1 让 _spawn 丢弃本条。
+    //    （原实现直接返回 best，密集弹幕源下同帧多条挤进同一轨道 ✗）
+    if (bestRight + _trackGap > w) return -1;
     return best;
   }
 
   double _textWidth(String text, double fontSize) {
+    final key = '$fontSize|$text';
+    final cached = _widthCache[key];
+    if (cached != null) return cached;
     final tp = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w500),
+        // 🔴 必须用**实际渲染的字重**：原实现写死 w500，
+        //    用户把弹幕设为 w600/w700 时渲染更宽、而宽度被低估 →
+        //    轨道避让判断失真 → 弹幕追尾重叠 ✗
+        style: TextStyle(fontSize: fontSize, fontWeight: widget.fontWeight),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
-    return tp.width;
+    final w = tp.width;
+    if (_widthCache.length >= _widthCacheLimit) _widthCache.clear();
+    _widthCache[key] = w;
+    return w;
   }
 
   @override
@@ -575,6 +628,7 @@ class DanmuLayerState extends State<DanmuLayer> {
           final w = constraints.maxWidth;
           final h = constraints.maxHeight;
           _viewportWidth = w;
+          _viewportHeight = h;
           // Seed initial x once width is known (not x==0 sentinel).
           for (final a in _active) {
             if (a.item.mode == 1 && !a.positioned) {

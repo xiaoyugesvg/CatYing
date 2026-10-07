@@ -598,7 +598,7 @@ class _DiscoverPageState extends State<DiscoverPage>
       _SourceTab(source: SongSource.kugou, label: '酷狗'),
       _SourceTab(source: SongSource.ximalaya, label: '喜雅'),
       _SourceTab(source: SongSource.bookan, label: '博看'),
-      _SourceTab(source: SongSource.ting15, label: '一五听书'),
+      _SourceTab(source: SongSource.ting15, label: '一五'),
     ];
     final isPaper = style.preset == DiscoverPreset.paper;
     return Padding(

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -534,6 +535,8 @@ class MusicApi {
         List<Song> songs,
         int skipped,
         String albumName,
+        String? coverUrl,
+        String intro,
       })> ximalayaAlbum(String albumId) async {
     final r = await _call({
       'action': 'ximalayaAlbum',
@@ -548,17 +551,22 @@ class MusicApi {
         songs: const <Song>[],
         skipped: 0,
         albumName: '',
+        coverUrl: null as String?,
+        intro: '',
       );
     }
     final album = m['album'] is Map
         ? (m['album'] as Map).cast<String, dynamic>()
         : <String, dynamic>{};
+    final cover = (album['cover'] ?? '').toString();
     return (
       ok: true,
       message: (m['message'] ?? '').toString(),
       songs: _listOf(r, 'list').map(_xmSong).toList(),
       skipped: asInt(m['skipped']),
       albumName: (album['name'] ?? '').toString(),
+      coverUrl: cover.isEmpty ? null : cover,
+      intro: (album['intro'] ?? '').toString(),
     );
   }
 
@@ -1000,7 +1008,7 @@ class MusicApi {
       })> ting15Album(String detailUrl) async {
     final html = await _t15Get(detailUrl);
     if (html.isEmpty) {
-      return (ok: false, message: '一五听书详情页无数据', albumName: '',
+      return (ok: false, message: '一五详情页无数据', albumName: '',
           coverUrl: null as String?, author: null as String?,
           speaker: null as String?, songs: const <Song>[]);
     }
@@ -1087,18 +1095,38 @@ class MusicApi {
         ),
       );
       final payload = (resp.data ?? '').toString();
-      // JSON: { "url": "https://…mp3" }（兼容单/双引号）
-      final urlM = RegExp(r'''"url"\s*:\s*"([^"]+)"''').firstMatch(payload) ??
-          RegExp(r"""'url'\s*:\s*'([^']+)'""").firstMatch(payload);
-      var url = urlM?.group(1) ?? '';
-      url = url.replaceAll(r'\/', '/');
+
+      // 优先整体 JSON 解析（拿干净值），非纯 JSON 再正则兜底
+      var url = '';
+      try {
+        final decoded = jsonDecode(payload);
+        if (decoded is Map) {
+          final u = decoded['url'];
+          if (u is String) url = u;
+        }
+      } catch (_) {
+        final urlM = RegExp(r'''"url"\s*:\s*"([^"]+)"''').firstMatch(payload) ??
+            RegExp(r"""'url'\s*:\s*'([^']+)'""").firstMatch(payload);
+        url = urlM?.group(1) ?? '';
+      }
+
+      // JSON/HTML 转义还原（\uXXXX、\/、&amp; 等）——OSS 直链常见带转义
+      url = url
+          .replaceAllMapped(
+              RegExp(r'\\u([0-9a-fA-F]{4})'),
+              (m) => String.fromCharCode(int.parse(m.group(1)!, radix: 16)))
+          .replaceAll(r'\/', '/')
+          .replaceAll('&amp;', '&')
+          .replaceAll('&quot;', '"')
+          .replaceAll('&#39;', "'")
+          .trim();
       if (url.startsWith('http://')) url = 'https://${url.substring(7)}';
       if (RegExp(r'^https?://').hasMatch(url)) {
         return MusicUrlInfo(
           ok: true,
           url: url,
-          type: '一五听书',
-          headers: {'User-Agent': _t15Ua, 'Referer': playUrl},
+          type: '一五',
+          headers: {'User-Agent': _t15Ua, 'Referer': _t15Site},
         );
       }
     } catch (_) {
@@ -1106,7 +1134,7 @@ class MusicApi {
     }
     return MusicUrlInfo(
       ok: false,
-      message: '一五听书播放地址解析失败',
+      message: '一五播放地址解析失败',
     );
   }
 

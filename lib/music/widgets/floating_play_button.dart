@@ -149,6 +149,15 @@ class _MusicFloatingPlayButtonState extends State<MusicFloatingPlayButton> {
           }
         }
 
+        // 手动关闭后**重新开始播放**（同一首歌）→ 球重新出现
+        // （`_closeFloating` 会先暂停，用户再次点播放时 isPlaying 变为 true，
+        //   此时 currentSong 没变、上面的 key 分支不会触发，需要这里补上）
+        if (_dismissed && player.isPlaying.value) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() => _dismissed = false);
+          });
+        }
+
         // 用户手动关闭 → 整体隐藏
         if (_dismissed) return const SizedBox.shrink();
 

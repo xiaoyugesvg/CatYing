@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import '../../services/nodejs_manager.dart';
+
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -157,6 +159,32 @@ class BookSourceService {
 
   final _dio = _createDio();
 
+  /// 本地 Node mgmt 调用专用 Dio：**永不挂全局代理**（127.0.0.1 回环请求若走用户
+  /// 代理会被劫持到 HTTPS 端口 ⇒ 返回 Cloudflare 400，表现为"接口 500/节点不可用"）。
+  /// [PATCH-24-REVERT] 恢复：Dart 引擎未接管/空结果时回落到 Node 用它。
+  static Dio _createLocalDio() {
+    return Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 5),
+      // 大书源目录/正文经 Node 传 JSON 很慢：实测 QQ阅读 13221 章要 32 秒 ⇒ 120s
+      receiveTimeout: const Duration(seconds: 120),
+    ));
+  }
+
+  final _localDio = _createLocalDio();
+
+  bool _portWarned = false;
+
+  /// 把异常压成一行可读文本（回退路径的错误要能显示给用户）。
+  String _short(Object e) {
+    if (e is DioException) {
+      final code = e.response?.statusCode;
+      final msg = e.message ?? '';
+      return code != null ? 'HTTP $code $msg'.trim() : msg;
+    }
+    final s = '$e';
+    return s.length > 160 ? '${s.substring(0, 160)}…' : s;
+  }
+
   /// 本地 Node mgmt 调用专用 Dio：**永不挂全局代理**。
   ///
   /// 🔴 为什么必须独立 ✗：[_createDio] 给所有请求挂上了 `applyGlobalProxy` ✗，
@@ -252,14 +280,35 @@ class BookSourceService {
     // 而 Dart 侧现在已有 quickjs 引擎与宿主方法表（补丁 0005/0007/0008）。
     final dartHandled = await BookSourceDartEngine.instance.handle(body);
     if (dartHandled != null) return dartHandled;
-    // [PATCH-24] 旧 Node 引擎回退已移除：书源现在**只**由本地 Dart legado 引擎执行
-    //（含 `@js:` 规则 —— quickjs 原生库已随包编出）。云端壳模式（QreadApi）与
-    // config 转换引擎（ConfigBookSource/legadoToConfig）的调用点也已删除。
-    // ⚠️ Node 侧车本身仍保留给 视频/音乐/直播（36 处调用），这里只断了"书源回落"。
-    return {
-      'ok': false,
-      'error': '本地引擎未接管该动作（动作：${body['action']}）——旧 Node 书源引擎已移除',
-    };
+    // ── [PATCH-24-REVERT] 恢复 **Node 回退** ─────────────────────────────
+    // 背景（实机证据）：我一度把这里改成"只走 Dart 引擎"，结果用户手机上
+    // 《校花的贴身高手》(QQ阅读) 与《不死神王书城》的**目录直接报错**：
+    //   「本地引擎未接管该动作（动作：bsToc）——旧 Node 书源引擎已移除」。
+    // 原因：Dart 引擎在"没解析出章节/详情"时会返回 null（原语义 = **交给 Node**），
+    //       而回退被我删了 ⇒ 原本能用的源变成硬失败 ✗。
+    // ⇒ 结论：Dart 引擎目前**还不是**所有书源的完全替代，回退必须保留。
+    //   现行策略 = **Dart 优先**（含 @js，快）→ 未接管/空结果 → 回落 Node（兜底）。
+    // 仍然保留的删除（那两处是真冗余，已验证无副作用）：
+    //   · 云端壳模式 QreadApi（规则在服务端执行）✗
+    //   · config 转换引擎 ConfigBookSource/legadoToConfig ✗
+    final port = NodeJSManager.instance.managementPort;
+    if (port <= 0) {
+      if (!_portWarned) {
+        _portWarned = true;
+        debugPrint('[BookSource] Node 管理端口未就绪');
+      }
+      return {'ok': false, 'error': '后台服务未就绪，请稍后重试'};
+    }
+    try {
+      final res = await _localDio.post(
+        'http://127.0.0.1:$port/book/source',
+        data: body,
+        options: Options(contentType: Headers.jsonContentType),
+      );
+      return res.data;
+    } catch (e) {
+      return {'ok': false, 'error': '请求失败：${_short(e)}'};
+    }
   }
 
  

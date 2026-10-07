@@ -29,6 +29,8 @@ class _Ting15AlbumPageState extends State<Ting15AlbumPage> {
   bool _loading = true;
   String _error = '';
   String _albumName = '';
+  String? _coverUrl;
+  String _intro = '';
   List<Song> _songs = const [];
 
   @override
@@ -50,6 +52,8 @@ class _Ting15AlbumPageState extends State<Ting15AlbumPage> {
       _albumName = r.albumName.isNotEmpty
           ? r.albumName
           : (widget.albumName ?? '专辑');
+      _coverUrl = r.coverUrl;
+      _intro = r.songs.isEmpty ? '' : (r.songs.first.artists ?? '');
       if (!r.ok) _error = r.message;
     });
   }
@@ -129,6 +133,10 @@ class _Ting15AlbumPageState extends State<Ting15AlbumPage> {
       builder: (context, _) => ListenEpisodeList(
         songs: _songs,
         sourceLabel: '一五',
+        albumCoverUrl: _coverUrl,
+        albumName: _albumName,
+        albumIntro: _intro.isEmpty ? null : _intro,
+        albumProgress: '共 ${_songs.length} 集',
         currentIdentityKey: _player.currentSong?.identityKey,
         onPlay: (index) => _player.playQueue(_songs, index: index),
       ),
