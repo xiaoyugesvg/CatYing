@@ -1452,7 +1452,13 @@ class ZlibraryService extends ChangeNotifier {
   /// 走**候选镜像域名**（当前域名优先，失败自动切下一个镜像），由 WebView
   /// 自动过 CF 挑战；任一镜像成功即把该节点写回 `_domain` 并持久化。
   /// 全部镜像都失败才抛 [ZlibraryException]（unavailable / fail）。
-  Future<SearchResult<Book>> fetchHomeRecommendations({int page = 1}) async {
+  /// [languages] 非空时（图书页默认传 `['chinese']`）按目标语言过滤推荐：
+  /// ① eapi 中文搜索（最稳）→ ② 榜单端点客户端按 [Book.language] 过滤
+  /// → ③ WebView HTML /s/ 路由带 languages%5B%5D（站内行为，确定支持）。
+  Future<SearchResult<Book>> fetchHomeRecommendations({
+    int page = 1,
+    List<String>? languages,
+  }) async {
     // ✅ **先走 eapi 接口**（本轮 ✓ —— 与「搜索」同一套传输与解析 ✓✓）
     //
     // 为什么必须改 ✗：原来这里**只有** WebView 抓 `/s/?page=N&dsource=mostpopular` 的
@@ -1477,6 +1483,30 @@ class ZlibraryService extends ChangeNotifier {
     //         真实是 `most-popular` ✓ 与 `recently` ✓（差一个字母 ✓）
     //   ℹ️ 文档另注 ✓：请求**必须带 User-Agent** ✓（本服务已有 ✓）；
     //      账号类端点需 `remix-userid`/`remix-userkey` 头 ✓（本服务 `_cookies(...)` 已处理 ✓）
+    // ✅ 用户 2026-10-10「默认推荐是中文」——[languages] 非空时三级策略：
+    //   ① eapi 中文搜索（内置账号 + 空关键词 + languages[]，中文区量最大最稳）
+    //   ② 榜单端点命中后按 Book.language 客户端过滤（全球榜里挑目标语言）
+    //   ③ WebView HTML /s/ 路由带 languages%5B%5D（确定支持）
+    //   全部落空维持原异常 —— 不静默回退英文榜充数，保持"默认中文"语义 ✓。
+    if (languages != null && languages.isNotEmpty) {
+      try {
+        // eapi search 的 languages[] 是单值参数：取第一个
+        //（默认场景只有 'chinese'；'traditional+chinese' 的 + 为字面量，
+        //  与分类搜索的拼法一致）
+        final res = await _searchWithBuiltin(
+            '', null, languages.first, null, null, page, 30);
+        if (_isSuccess(res)) {
+          final parsed = _parseSearch(res);
+          if (parsed.items.isNotEmpty) {
+            _log('首页推荐：语言搜索命中 ${parsed.items.length} 条（eapi ✓）');
+            return parsed;
+          }
+          _log('首页推荐：语言搜索返回 0 条');
+        }
+      } catch (e) {
+        _log('首页推荐：语言搜索失败 -> $e（继续榜单链路）');
+      }
+    }
     for (final path in const [
       '/eapi/book/most-popular',
       '/eapi/book/recently',
@@ -1484,7 +1514,24 @@ class ZlibraryService extends ChangeNotifier {
     ]) {
       try {
         final res = await _get(path); // ← **GET**（不是 _post ✗）
-        final parsed = _parseSearch(res);
+        var parsed = _parseSearch(res);
+        // 榜单端点的语言参数支持未经验证 → 客户端按 Book.language 过滤。
+        // 过滤后为空视为该端点没有目标语言内容，继续下一端点（不用英文充数）。
+        if (languages != null && languages.isNotEmpty) {
+          final matched = parsed.items
+              .where((b) => _bookLangMatch(b, languages))
+              .toList();
+          if (matched.isEmpty) {
+            _log('首页推荐：接口 $path 命中 ${parsed.items.length} 条但无目标语言');
+            continue;
+          }
+          parsed = SearchResult<Book>(
+            items: matched,
+            total: matched.length,
+            currentPage: parsed.currentPage,
+            totalPages: parsed.totalPages,
+          );
+        }
         if (parsed.items.isNotEmpty) {
           _log('首页推荐：接口 $path 命中 ${parsed.items.length} 条（走 eapi ✓）');
           return parsed;
@@ -1509,8 +1556,14 @@ class ZlibraryService extends ChangeNotifier {
     //   /s/?page=N&dsource=mostpopular
     // 对应站内排序参数 dsource=mostpopular；解析端 _parseHomeHtml 优先取
     // z-bookcard[dsource="mostpopular"]，缺省回退全量卡片（结构容错）。
+    // 语言过滤参数（站内 /s/ 路由确定支持 languages%5B%5D；
+    // 'traditional+chinese' 的 + 为字面量不编码，与分类搜索一致）
+    final langQuery = (languages == null || languages.isEmpty)
+        ? ''
+        : languages.map((l) => '&languages%5B%5D=$l').join();
     for (final domain in order.take(3)) {
-      final url = 'https://$domain/s/?page=$page&dsource=mostpopular';
+      final url =
+          'https://$domain/s/?page=$page&dsource=mostpopular$langQuery';
       _log('抓取最受欢迎分类页: $url');
       String? htmlStr;
       for (var attempt = 1; attempt <= 2; attempt++) {
@@ -1568,6 +1621,18 @@ class ZlibraryService extends ChangeNotifier {
     _log('首页推荐全部失败（节点可达性未知，可能是解析失效）: $lastError');
     throw ZlibraryException(
         'fail', '推荐解析为空：页面结构可能已变更（可稍后重试，或检查节点）');
+  }
+
+  /// 客户端语言匹配：[Book.language]（如 'chinese'/'english'）与目标语言值
+  /// （'chinese' / 'traditional+chinese' → 按 + 拆分后逐段包含）匹配。
+  bool _bookLangMatch(Book book, List<String> langs) {
+    final bl = (book.language ?? '').toLowerCase();
+    if (bl.isEmpty) return false;
+    for (final l in langs) {
+      final parts = l.toLowerCase().split('+');
+      if (parts.every(bl.contains)) return true;
+    }
+    return false;
   }
 
   /// 解析 z-library 首页 HTML（推荐区块，卡片结构与分类页相同）。

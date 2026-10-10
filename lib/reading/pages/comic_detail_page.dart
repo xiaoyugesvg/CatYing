@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import '../../widgets/common_widgets.dart';
 
@@ -9,6 +10,7 @@ import '../source/source_manager.dart';
 import '../services/download_service.dart';
 import '../models/bookshelf.dart';
 import '../services/bookshelf_service.dart';
+import '../services/shelf_update_service.dart';
 import '../services/favorites_service.dart';
 import '../services/reading_progress_service.dart';
 import '../theme/jelly_theme.dart';
@@ -184,6 +186,13 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
         _comic.pathWord,
         BookshelfItemType.comic,
         jsonEncode(_comic.toJson()),
+      );
+      // 用户打开详情 = 已阅当前全部章节 → 更新角标清零
+      unawaited(
+        ShelfUpdateService.instance.ack(
+          ShelfUpdateService.keyForComic(_comic.pathWord),
+          _totalChapters,
+        ),
       );
     } catch (e) {
       _log('加载失败: $e');

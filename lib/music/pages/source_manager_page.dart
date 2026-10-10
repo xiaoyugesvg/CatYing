@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../models/third_party_source.dart';
 import '../models/models.dart';
 import '../services/music_api.dart';
+import '../services/settings_store.dart';
 import '../services/source_import_parser.dart';
 import '../services/unblock_service.dart';
 import '../theme/music_theme.dart';
@@ -625,7 +626,9 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
     // MusicFree 插件也是"脚本型"，用 isScript 会显示成 KEYWORD
     // 内置源加「内置」标记，让用户一眼认出"这是 App 自带的"
     final builtinTag = s.isBuiltin ? '内置' : null;
-    final tagText = [builtinTag, s.kindLabel, s.quality]
+    // 固定平台徽标：该源被绑定为哪些平台的固定第三方源（如 固定:酷狗/QQ）
+    final boundLabel = _boundPlatformsLabel(s.id);
+    final tagText = [builtinTag, s.kindLabel, s.quality, boundLabel]
         .where((t) => t != null && t.isNotEmpty)
         .join('·');
     // 有脚本的再把脚本类型也拼上（保留原来的 urlPath 信息）
@@ -692,6 +695,8 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                   () => _showDetail(context, s)),
               _action(Icons.swap_vert, '排序',
                   () => _sortMenu(context, store, s)),
+              _action(Icons.push_pin_outlined, '固定平台',
+                  () => _platformBindingSheet(context, s)),
               _action(Icons.delete_outline, '删除',
                   () => _confirmDelete(context, store, s)),
             ],
@@ -728,6 +733,95 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
             style: TextStyle(
                 color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
       );
+
+  /// 该源被绑定的平台名列表（如 ['酷狗','QQ']；无绑定 → null）
+  String? _boundPlatformsLabel(String sourceId) {
+    final names = SongSource.values
+        .where((p) => SettingsStore.instance.boundSourceIdFor(p) == sourceId)
+        .map((p) => p.displayName)
+        .toList();
+    return names.isEmpty ? null : '固定:${names.join('/')}';
+  }
+
+  /// 「固定平台」弹层：勾选哪些平台，就把本源绑定为它们的固定第三方源。
+  ///
+  /// 绑定后播放该平台的歌会**自动优先用本源**（解析失败仍回退其它启用源）。
+  Future<void> _platformBindingSheet(BuildContext context, ThirdPartySource s) async {
+    final initial = <String, bool>{
+      for (final p in SongSource.values)
+        p.key: SettingsStore.instance.boundSourceIdFor(p) == s.id,
+    };
+    final result = await showMusicSheet<Map<String, bool>>(
+      context: context,
+      backgroundColor: MusicTheme.card,
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('「${s.name}」固定用于',
+                    style: TextStyle(
+                        color: MusicTheme.label,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w600)),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('勾选后播放该平台的歌自动优先用此源（失败回退其它源）',
+                    style: TextStyle(
+                        color: MusicTheme.secondary,
+                        fontSize: AppTheme.fontFootnote)),
+              ),
+            ),
+            for (final p in SongSource.values)
+              CheckboxListTile(
+                value: initial[p.key] ?? false,
+                controlAffinity: ListTileControlAffinity.leading,
+                activeColor: MusicTheme.tint,
+                title: Text(p.displayName,
+                    style: TextStyle(
+                        color: MusicTheme.label,
+                        fontSize: AppTheme.fontSubhead)),
+                onChanged: (v) =>
+                    setState(() => initial[p.key] = v ?? false),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                      backgroundColor: MusicTheme.tint),
+                  onPressed: () => Navigator.pop(ctx, initial),
+                  child: const Text('保存',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == null) return;
+    for (final p in SongSource.values) {
+      final nowBound = result[p.key] ?? false;
+      final wasBound =
+          SettingsStore.instance.boundSourceIdFor(p) == s.id;
+      if (nowBound && !wasBound) {
+        await SettingsStore.instance.setPlatformSourceBinding(p, s.id);
+      } else if (!nowBound && wasBound) {
+        await SettingsStore.instance.setPlatformSourceBinding(p, null);
+      }
+    }
+    if (context.mounted) setState(() {}); // 刷新卡片上的「固定:xx」徽标
+  }
 
   Future<void> _sortMenu(BuildContext context,
       ThirdPartySourceStore store, ThirdPartySource s) async {
@@ -786,7 +880,11 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
         ],
       ),
     );
-    if (ok == true) await store.remove(s.id);
+    if (ok == true) {
+      // 该源被某平台固定绑定时一并解绑（避免绑定指向已删源）
+      await SettingsStore.instance.clearBindingsForSource(s.id);
+      await store.remove(s.id);
+    }
   }
 
   /// 点击「编辑」：弹窗里可直接修改名称与内容（模板/脚本），保存后写回存储

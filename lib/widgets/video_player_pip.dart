@@ -44,6 +44,12 @@ class VideoPlayerPip {
   /// iOS 系统 PiP 通道（对应 ios/Runner/PipManager.swift）
   static const MethodChannel _iosChannel = MethodChannel('pip_manager');
 
+  /// KSPlayer（FF 核心）的 PiP 通道（对应 ios/Runner/KSEngine.swift）。
+  /// KS 用自带的 sample-buffer 小窗，不走 AVPlayer 的 startPip；
+  /// 但 onPipStarted/onPipStopped 事件原生侧仍通过 "pip_manager" 通道名
+  /// 回调，与 AV 路径共用下面同一套状态机。
+  static const MethodChannel _ksChannel = MethodChannel('ks_player');
+
   // ========== 桌面端状态 ==========
   bool _isActive = false;
   Rect? _savedBounds;
@@ -57,6 +63,8 @@ class VideoPlayerPip {
 
   // ========== iOS 系统 PiP 状态 ==========
   bool _iosActive = false;
+  /// 当前小窗是否走 KSPlayer 通道（exitIos 据此分流 stopPip / exitPip）
+  bool _iosViaKs = false;
   double _iosLastPosition = 0;
   VoidCallback? _iosOnStopped;
   VoidCallback? _iosOnStarted;
@@ -81,6 +89,7 @@ class VideoPlayerPip {
         final cb = _iosOnStopped;
         _iosOnStopped = null;
         _iosActive = false;
+        _iosViaKs = false;
         cb?.call();
         break;
       default:
@@ -163,15 +172,55 @@ class VideoPlayerPip {
     }
   }
 
-  /// iOS：退出系统画中画
+  /// iOS：进入 KSPlayer 自带小窗（FF 核心）。
+  /// 与 [enterIos] 的差异：KS 的 sample-buffer 小窗与前台播放共用**同一个**
+  /// 播放器实例（画面被系统小窗接管，不另起 AVPlayer），无需预热。
+  /// onStarted/onStopped 回调与 AV 路径共用（原生通过 "pip_manager" 通道名回调）。
+  Future<bool> enterIosKs({
+    required String url,
+    Map<String, String>? headers,
+    Duration? position,
+    VoidCallback? onStopped,
+    VoidCallback? onStarted,
+  }) async {
+    if (!Platform.isIOS) return false;
+    if (_iosActive) return true;
+
+    _iosViaKs = true;
+    _iosOnStopped = onStopped;
+    _iosOnStarted = onStarted;
+    try {
+      await _ksChannel.invokeMethod<void>('enterPip', {
+        'url': url,
+        'headers': headers ?? const <String, String>{},
+        'position': position?.inMilliseconds ?? 0,
+      });
+      return true;
+    } catch (e) {
+      _iosViaKs = false;
+      _iosOnStopped = null;
+      _iosOnStarted = null;
+      _iosActive = false;
+      final msg = (e is PlatformException) ? '${e.code}: ${e.message}' : e.toString();
+      AppLog.instance.log('[VideoPlayerPip] iOS enter(KS) failed: $msg');
+      return false;
+    }
+  }
+
+  /// iOS：退出系统画中画（按进入时的通道分流）
   Future<void> exitIos() async {
     if (!Platform.isIOS) return;
     try {
-      await _iosChannel.invokeMethod<void>('stopPip');
+      if (_iosViaKs) {
+        await _ksChannel.invokeMethod<void>('exitPip');
+      } else {
+        await _iosChannel.invokeMethod<void>('stopPip');
+      }
     } catch (e) { /* ignore */ }
     // 无论原生是否在 PiP，都清掉 Dart 状态，避免卡在 isIosActive=true
     // 导致之后无法再进入小窗
     _iosActive = false;
+    _iosViaKs = false;
     final cb = _iosOnStopped;
     _iosOnStopped = null;
     _iosOnStarted = null;
@@ -181,6 +230,7 @@ class VideoPlayerPip {
   /// 强制复位（onPipStopped 丢失 / 二次进入失败时用）
   void resetIosState() {
     _iosActive = false;
+    _iosViaKs = false;
     _iosOnStopped = null;
     _iosOnStarted = null;
   }

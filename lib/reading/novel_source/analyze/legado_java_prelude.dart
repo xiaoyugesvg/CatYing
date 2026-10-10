@@ -175,12 +175,28 @@ var java = (function () {
 
   function base64Decode(str) { return _bytesToStr(_b64ToBytes(str)); }
 
+  // ⚠️ legado 语义：hex 是 **UTF-8 字节流**（中文一字 3 字节），必须先转字节数组
+  // 再走 _bytesToStr（UTF-8 → UTF-16）。逐字节 String.fromCharCode 会把
+  // 中文解成 3 个 Latin-1 乱码字符 —— 聚合源（如"光遇聚合"）的 token/内容
+  // 编解码必炸，所以这里不能偷懒。
   function hexDecodeToString(str) {
-    var s = String(str), out = '';
+    var s = String(str).replace(/\s+/g, '');
+    var bytes = [];
     for (var i = 0; i + 1 < s.length; i += 2) {
-      out += String.fromCharCode(parseInt(s.substr(i, 2), 16));
+      var b = parseInt(s.substr(i, 2), 16);
+      if (isNaN(b)) return '';
+      bytes.push(b);
     }
-    return out;
+    return _bytesToStr(bytes);
+  }
+
+  // java.sleep(ms)：阻塞当前求值 ms 毫秒（legado 语义，同步 JS 环境只能忙等）。
+  // 求值跑在 worker isolate，外层 60s 硬超时兜底；负数/非法入参按 0 处理。
+  function sleep(ms) {
+    var n = Number(ms);
+    if (!isFinite(n) || n <= 0) return;
+    var end = Date.now() + Math.floor(n);
+    while (Date.now() < end) { /* busy-wait */ }
   }
 
   function _pad2(n) { return n < 10 ? '0' + n : '' + n; }
@@ -230,12 +246,52 @@ var java = (function () {
       return (v === undefined || v === null) ? '' : v;
     },
     androidId: 'cmbok-port-android-id',
+    // ── Rhino Java 互操作命名空间（polyfill 在本脚本末尾的全局区）──
+    // jsLib 里 `java.util.Base64.encodeToString(...)` 这类深层调用在此接住；
+    // getter 惰性求值，避免全局 var 尚未赋值时对象字面量拿到 undefined。
+    get util() { return { Base64: JavaBase64 }; },
+    get security() { return { MessageDigest: JavaMessageDigest }; },
+    // java.lang.String 兼容两种用法：new java.lang.String(bytes,'UTF-8')（Rhino
+    // 源最常见）与直接调用 —— 惰性引用全局 JavaLangString（new 时返回包装对象，
+    // toString/valueOf 委托字符串，字符串拼接语义与 Java 一致）
+    get lang() {
+      return {
+        String: JavaLangString,
+        Integer: {
+          parseInt: function (s) {
+            var n = parseInt(s, 10);
+            if (isNaN(n)) _err('java.lang.Integer.parseInt: ' + s);
+            return n;
+          }
+        },
+        Long: {
+          parseLong: function (s) {
+            var n = parseInt(s, 10);
+            return isNaN(n) ? 0 : n;
+          }
+        }
+      };
+    },
+    get net() {
+      return {
+        URLEncoder: {
+          // Java URLEncoder 是表单编码（空格→+）；与 encodeURIComponent 的差异
+          // 对参数值场景可忽略，%20→+ 保证与 Java 行为一致
+          encode: function (s) { return encodeURIComponent(String(s)).replace(/%20/g, '+'); }
+        },
+        URLDecoder: {
+          decode: function (s) { return decodeURIComponent(String(s).replace(/\+/g, '%20')); }
+        }
+      };
+    },
     // ── 纯 JS 编解码 ──
     base64Encode: base64Encode,
     base64Decode: base64Decode,
     base64DecodeToByteArray: function (s) { return _b64ToBytes(s); },
     hexDecodeToString: hexDecodeToString,
     hexDecode: hexDecodeToString,
+    // ── 阻塞 ──
+    sleep: sleep,
     // ── 时间 ──
     timeFormat: timeFormat,
     timeFormatUTC: function (ts, fmt, sh) { return _call('timeFormatUTC', [ts, fmt, sh]); },
@@ -422,5 +478,227 @@ var cookie = {
   setCookie: function (url, c) { return _legadoHostCall('cookie.setCookie', [url, c]); },
   getKey: function (url) { return _legadoHostCall('cookie.getKey', [url]); },
   removeCookie: function (url, name) { return _legadoHostCall('cookie.removeCookie', [url, name]); }
-};
-""";
+    };
+
+    // ════ Rhino Java 互操作 polyfill（全局区）════
+    // legado 跑在 Rhino（JVM），聚合源 jsLib 里常直接调 Java 类库：
+    // java.util.Base64 / java.security.MessageDigest / javax.crypto.Mac|Cipher
+    // （HMAC 签名、AES 加解密）/ DigestUtils / android.util.Base64。
+    // QuickJS 无 JVM —— byte[] 用 JS 数组模拟，算法走宿主 'java.crypto'
+    // （Dart crypto/encrypt 包实现）；认识不了的用 Proxy 捕获并抛清晰错误。
+    function _cryptoBytesOf(v) {
+      if (Array.isArray(v)) {
+        var a = [];
+        for (var i = 0; i < v.length; i++) a.push(v[i] & 255);
+        return a;
+      }
+      var s = String(v), out = [];
+      for (var i2 = 0; i2 < s.length; i2++) {
+        var c = s.charCodeAt(i2);
+        if (c < 0x80) { out.push(c); }
+        else if (c < 0x800) { out.push(0xc0 | (c >> 6), 0x80 | (c & 63)); }
+        else if (c >= 0xd800 && c < 0xdc00 && i2 + 1 < s.length) {
+          var c2 = s.charCodeAt(++i2);
+          var cp = 0x10000 + ((c - 0xd800) << 10) + (c2 - 0xdc00);
+          out.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 63), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63));
+        } else { out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63)); }
+      }
+      return out;
+    }
+    function _cryptoB64FromBytes(arr) {
+      var s = '';
+      for (var i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i] & 255);
+      var b64 = '', A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+      for (var j = 0; j < s.length; j += 3) {
+        var b0 = s.charCodeAt(j),
+          b1 = j + 1 < s.length ? s.charCodeAt(j + 1) : NaN,
+          b2 = j + 2 < s.length ? s.charCodeAt(j + 2) : NaN;
+        b64 += A.charAt(b0 >> 2);
+        b64 += A.charAt(((b0 & 3) << 4) | ((isNaN(b1) ? 0 : b1) >> 4));
+        b64 += isNaN(b1) ? '=' : A.charAt(((b1 & 15) << 2) | ((isNaN(b2) ? 0 : b2) >> 6));
+        b64 += isNaN(b2) ? '=' : A.charAt(b2 & 63);
+      }
+      return b64;
+    }
+    function _cryptoB64ToBytes(s) {
+      var A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+      s = String(s).replace(/-/g, '+').replace(/_/g, '/').replace(/[^A-Za-z0-9+/=]/g, '');
+      var out = [];
+      for (var i = 0; i < s.length; i += 4) {
+        var e0 = A.indexOf(s.charAt(i)), e1 = A.indexOf(s.charAt(i + 1)),
+          e2 = A.indexOf(s.charAt(i + 2)), e3 = A.indexOf(s.charAt(i + 3));
+        out.push((e0 << 2) | (e1 >> 4));
+        if (e2 >= 0 && s.charAt(i + 2) !== '=') out.push(((e1 & 15) << 4) | (e2 >> 2));
+        if (e3 >= 0 && s.charAt(i + 3) !== '=') out.push(((e2 & 3) << 6) | e3);
+      }
+      return out;
+    }
+    function _cryptoHexToBytes(hex) {
+      var s = String(hex), out = [];
+      for (var i = 0; i + 1 < s.length; i += 2) out.push(parseInt(s.substr(i, 2), 16));
+      return out;
+    }
+    var JavaBase64 = {
+      getEncoder: function () {
+        return {
+          encode: function (b) { return _cryptoB64FromBytes(_cryptoBytesOf(b)); },
+          encodeToString: function (b) { return _cryptoB64FromBytes(_cryptoBytesOf(b)); }
+        };
+      },
+      getDecoder: function () {
+        return { decode: function (s) { return _cryptoB64ToBytes(s); } };
+      },
+      getUrlEncoder: function () {
+        var ue = {
+          encode: function (b) {
+            return _cryptoB64FromBytes(_cryptoBytesOf(b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+          }
+        };
+        ue.encodeToString = ue.encode;
+        return ue;
+      },
+      getUrlDecoder: function () {
+        return {
+          decode: function (s) { return _cryptoB64ToBytes(String(s).replace(/-/g, '+').replace(/_/g, '/')); }
+        };
+      }
+    };
+    function SecretKeySpec(key, alg) { this._raw = _cryptoBytesOf(key); this.algorithm = alg || ''; }
+    SecretKeySpec.prototype.getEncoded = function () { return this._raw.slice(); };
+    function IvParameterSpec(iv) { this._raw = Array.isArray(iv) ? iv : _cryptoBytesOf(String(iv)); }
+    var JavaMessageDigest = {
+      getInstance: function (alg) {
+        var a = String(alg).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        var op = a === 'MD5' ? 'md5' : a === 'SHA1' ? 'sha1'
+          : a === 'SHA256' ? 'sha256' : a === 'SHA512' ? 'sha512' : null;
+        return {
+          digest: function (data) {
+            if (!op) { throw new Error('MessageDigest 不支持算法: ' + alg + '（仅 MD5/SHA1/SHA256/SHA512）'); }
+            var hex = _legadoHostCall('java.crypto', [op, _cryptoB64FromBytes(_cryptoBytesOf(data))]);
+            return _cryptoHexToBytes(hex);
+          }
+        };
+      }
+    };
+    var DigestUtils = {
+      md5Hex: function (d) { return _legadoHostCall('java.crypto', ['md5', _cryptoB64FromBytes(_cryptoBytesOf(d))]); },
+      sha1Hex: function (d) { return _legadoHostCall('java.crypto', ['sha1', _cryptoB64FromBytes(_cryptoBytesOf(d))]); },
+      sha256Hex: function (d) { return _legadoHostCall('java.crypto', ['sha256', _cryptoB64FromBytes(_cryptoBytesOf(d))]); },
+      sha512Hex: function (d) { return _legadoHostCall('java.crypto', ['sha512', _cryptoB64FromBytes(_cryptoBytesOf(d))]); }
+    };
+    var javax = {
+      crypto: {
+        spec: { SecretKeySpec: SecretKeySpec, IvParameterSpec: IvParameterSpec },
+        Mac: {
+          getInstance: function (alg) {
+            var a = String(alg).toUpperCase().replace(/[^A-Z0-9]/g, '');
+            var op = a.indexOf('HMACSHA256') >= 0 ? 'hmacsha256' : a.indexOf('HMACSHA1') >= 0 ? 'hmacsha1'
+              : a.indexOf('HMACSHA512') >= 0 ? 'hmacsha512' : a.indexOf('HMACMD5') >= 0 ? 'hmacmd5' : null;
+            var keyRaw = null;
+            return {
+              init: function (k) {
+                keyRaw = (k instanceof SecretKeySpec) ? k._raw : _cryptoBytesOf(k);
+                return this;
+              },
+              doFinal: function (data) {
+                if (!op) { throw new Error('javax.crypto.Mac 不支持算法: ' + alg + '（仅 HmacSHA1/256/512、HmacMD5）'); }
+                if (keyRaw === null) { throw new Error('javax.crypto.Mac 未 init 密钥'); }
+                var hex = _legadoHostCall('java.crypto', [op,
+                  _cryptoB64FromBytes(keyRaw), _cryptoB64FromBytes(_cryptoBytesOf(data))]);
+                return _cryptoHexToBytes(hex);
+              }
+            };
+          }
+        },
+        Cipher: {
+          ENCRYPT_MODE: 1,
+          DECRYPT_MODE: 2,
+          getInstance: function (transform) {
+            var t = String(transform).toUpperCase();
+            var parts = t.split('/');
+            var mode = (parts[1] || 'ECB').replace(/[^A-Z]/g, '');
+            var keyRaw = null, ivRaw = null, enc = true;
+            return {
+              init: function (opMode, key, spec) {
+                enc = opMode === 1 || String(opMode).toUpperCase().indexOf('ENCRYPT') >= 0;
+                keyRaw = (key instanceof SecretKeySpec) ? key._raw : _cryptoBytesOf(key);
+                ivRaw = spec ? (spec._raw || _cryptoBytesOf(String(spec))) : null;
+                return this;
+              },
+              doFinal: function (data) {
+                if (t.indexOf('AES') < 0) { throw new Error('javax.crypto.Cipher 仅支持 AES，收到: ' + transform); }
+                if (keyRaw === null) { throw new Error('javax.crypto.Cipher 未 init 密钥'); }
+                var out = _legadoHostCall('java.crypto', ['aes', mode.toLowerCase(), enc ? 'encrypt' : 'decrypt',
+                  _cryptoB64FromBytes(keyRaw), ivRaw ? _cryptoB64FromBytes(ivRaw) : '',
+                  _cryptoB64FromBytes(_cryptoBytesOf(data))]);
+                return _cryptoB64ToBytes(out);
+              }
+            };
+          }
+        }
+      }
+    };
+    var android = {
+      util: {
+        Base64: {
+          DEFAULT: 0,
+          NO_WRAP: 2,
+          NO_CLOSE: 16,
+          encodeToString: function (b, flags) { return _cryptoB64FromBytes(_cryptoBytesOf(b)); },
+          encode: function (b, flags) { return _cryptoB64FromBytes(_cryptoBytesOf(b)); },
+          decode: function (s, flags) { return _cryptoB64ToBytes(s); }
+        }
+      }
+    };
+    // 兜底：Packages.* / com.* / org.* 等未知 Java 命名空间 —— Proxy 捕获，
+    // 调用时抛清晰错误（而非莫名 ReferenceError），便于按报错逐个补齐
+    function _javaProxy(root) {
+      try {
+        return new Proxy(function () {}, {
+          get: function (t, p) {
+            if (typeof p !== 'string' || p === 'toString' || p === 'Symbol.toPrimitive') {
+              return function () { return root; };
+            }
+            return _javaProxy(root ? root + '.' + p : p);
+          },
+          apply: function () {
+            throw new Error('该源使用了未支持的 Java 互操作: ' + root + '(...)（QuickJS 无 JVM，需补等价实现）');
+          }
+        });
+      } catch (e) { return function () {}; }
+    }
+    var Packages = _javaProxy('Packages');
+    var com = _javaProxy('com');
+    var org = _javaProxy('org');
+    // java.lang.String：直接调用返回字符串；new 调用返回包装对象（toString/
+    // valueOf 委托），保证 `new java.lang.String(bytes,'UTF-8') + 'x'` 与 Java 一致
+    function _cryptoBytesToStr(bytes) {
+      var out = '', i = 0;
+      while (i < bytes.length) {
+        var b = bytes[i] & 255, cp;
+        if (b < 0x80) { cp = b; i += 1; }
+        else if (b < 0xe0) { cp = ((b & 31) << 6) | (bytes[i + 1] & 63); i += 2; }
+        else if (b < 0xf0) {
+          cp = ((b & 15) << 12) | ((bytes[i + 1] & 63) << 6) | (bytes[i + 2] & 63);
+          i += 3;
+        } else {
+          cp = ((b & 7) << 18) | ((bytes[i + 1] & 63) << 12) | ((bytes[i + 2] & 63) << 6) | (bytes[i + 3] & 63);
+          i += 4;
+        }
+        if (cp > 0xffff) {
+          cp -= 0x10000;
+          out += String.fromCharCode(0xd800 | (cp >> 10), 0xdc00 | (cp & 0x3ff));
+        } else {
+          out += String.fromCharCode(cp);
+        }
+      }
+      return out;
+    }
+    function JavaLangString(bytes, enc) {
+      var s = _cryptoBytesToStr(Array.isArray(bytes) ? bytes : _cryptoBytesOf(bytes));
+      if (!(this instanceof JavaLangString)) return s;
+      this.__s = s;
+      this.toString = function () { return this.__s; };
+      this.valueOf = function () { return this.__s; };
+    }
+    """;

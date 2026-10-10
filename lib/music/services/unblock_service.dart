@@ -7,7 +7,7 @@ import '../models/third_party_source.dart';
 import '../../services/app_log.dart';
 import 'music_api.dart';
 import 'semaphore.dart';
-import 'source_memory.dart';
+import 'settings_store.dart';
 
 /// 音源解析结果
 class SourceResolveResult {
@@ -163,12 +163,15 @@ class UnblockService {
     // ⚠️ 只是**排序**，不删其它源 —— 记忆失效时用户还能选别的
     //（那正是他重新走到这个弹窗的原因）。
     final all = ThirdPartySourceStore.instance.enabled;
-    final memId = SourceMemory.instance.sourceIdFor(song);
-    final sources = memId == null
+    // ✅ 2026-10-10 用户：平台固定第三方源（源管理页给酷狗/QQ 等平台绑定的源）
+    //    排**最前** —— 播放该平台歌曲时自动直接用它；失败仍回退其余源。
+    //    （歌曲粒度源记忆已移除，绑定源是唯一的高优先级来源。）
+    final boundId = SettingsStore.instance.boundSourceIdFor(song.source);
+    final sources = (boundId == null || boundId.isEmpty)
         ? all
         : ([
-            ...all.where((s) => s.id == memId),
-            ...all.where((s) => s.id != memId),
+            ...all.where((s) => s.id == boundId),
+            ...all.where((s) => s.id != boundId),
           ]);
     if (sources.isEmpty) {
       return const SourceResolveResult(ok: false, error: '没有启用中的音源');

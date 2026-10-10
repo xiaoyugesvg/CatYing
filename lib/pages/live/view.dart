@@ -20,6 +20,7 @@ import '../../services/player_fullscreen_controller.dart';
 import '../../services/player_prefs.dart';
 import '../../widgets/app_player.dart';
 import '../../widgets/ios_av_player.dart';
+import '../../widgets/ks_player.dart';
 import '../../widgets/video_player_pip.dart';
 import 'controller.dart';
 import '../../services/audio_focus.dart';
@@ -45,10 +46,31 @@ class _LivePageState extends State<LivePage> {
   /// iOS：与点播共用 IosAvPlayer（AvEngine）
   IosAvPlayer? _avPlayer;
 
-  /// iOS 是否启用 mpv 备用内核（设置里可切换；默认 AVPlayer，
-  /// 遇到 flv/ts/rtmp 等 AVPlayer 不支持的流时可切到 mpv）
+  /// iOS：KSPlayer（FF 核心）备用内核
+  KSPlayer? _ksPlayer;
+
+  /// iOS 是否启用 mpv 备用内核（播放器右上「核心」按钮可选；默认 AVPlayer，
+  /// 遇到 flv/ts/rtmp 等 AVPlayer 不支持的流时可切到 mpv）。
+  /// ⚠️ 读独立的 liveEngine 偏好 —— 不再与点播共用 vodEngine，
+  /// 直播切内核不影响影视的内核选择。
   bool get _iosUseMpv =>
-      Platform.isIOS && PlayerPrefs.instance.vodEngine.value == PlayerEngine.mpv;
+      Platform.isIOS &&
+      PlayerPrefs.instance.liveEngine.value == PlayerEngine.mpv;
+
+  /// iOS 是否启用 KSPlayer（FF）内核（全格式兼容：MKV/ASS 等）
+  bool get _iosUseKs =>
+      Platform.isIOS &&
+      PlayerPrefs.instance.liveEngine.value == PlayerEngine.ksplayer;
+
+  /// 直播可用内核：iOS = AVPlayer / KSPlayer / MPV（直播页没有 webview 播放路径）；
+  /// 其它平台仅 mpv（media_kit），无可切换项。
+  List<PlayerEngine> get _liveEngines {
+    if (Platform.isIOS) {
+      return const [PlayerEngine.avplayer, PlayerEngine.ksplayer, PlayerEngine.mpv];
+    }
+    return const [PlayerEngine.mpv];
+  }
+
   bool _fullscreen = false;
 
   /// 短剧模式：纯竖屏全屏（复用 _fullscreen 全屏布局，方向锁 portraitUp）
@@ -133,7 +155,7 @@ class _LivePageState extends State<LivePage> {
           _autoplayCurrent();
           return;
         }
-        final useAv = Platform.isIOS && !_iosUseMpv && _avPlayer != null;
+        final useAv = Platform.isIOS && !_iosUseMpv && !_iosUseKs && _avPlayer != null;
         if (useAv) {
           // ⚠️ iOS 共享原生 AvEngine（AVPlayer 单例）：点播/音乐最后
           // open 过的话，原生 item 已被它们的内容覆盖，直接 play() 恢复的
@@ -146,7 +168,11 @@ class _LivePageState extends State<LivePage> {
           }
           unawaited(AudioFocus.request('live'));
           try {
-            _avPlayer?.play();
+            if (_iosUseKs) {
+              _ksPlayer?.play();
+            } else {
+              _avPlayer?.play();
+            }
           } catch (e) {
             _autoplayCurrent();
           }
@@ -193,7 +219,7 @@ class _LivePageState extends State<LivePage> {
         final pPlaying = _player?.state.playing ?? false;
         final avPlaying = _avPlayer?.state.playing ?? false;
         if (pPlaying || avPlaying) return;
-        final useAv = Platform.isIOS && !_iosUseMpv && _avPlayer != null;
+        final useAv = Platform.isIOS && !_iosUseMpv && !_iosUseKs && _avPlayer != null;
         if (useAv) {
           // iOS 共享 AVPlayer：子页面里可能被点播/音乐覆盖了 item，
           // 直接 play 会播别人的内容 → 重新 open 直播流
@@ -229,6 +255,8 @@ class _LivePageState extends State<LivePage> {
     _player = null;
     _avPlayer?.dispose();
     _avPlayer = null;
+    _ksPlayer?.dispose();
+    _ksPlayer = null;
     _videoController = null;
     super.dispose();
   }
@@ -286,18 +314,27 @@ class _LivePageState extends State<LivePage> {
       if (referer.isNotEmpty) 'Referer': referer,
       if (origin.isNotEmpty) 'Origin': origin,
     };
-    if (Platform.isIOS && !_iosUseMpv) {
+    if (_iosUseKs) {
+      // KSPlayer（FF 核心，全格式）：与点播共用同一个 KSEngine 单例
+      _player?.pause();
+      _avPlayer?.pause();
+      _ksPlayer ??= KSPlayer(config: const AppConfig(title: '猫影直播'));
+      _ksPlayer!.open(AppMedia(url, httpHeaders: headers));
+    } else if (Platform.isIOS && !_iosUseMpv) {
       // 默认 AVPlayer 内核（与点播一致，进出小窗/手势一致）
       _player?.pause(); // 若之前用 mpv 在播，先停掉避免双声
+      _ksPlayer?.pause(); // 若之前用 KS 在播，先停掉避免双声
       _avPlayer ??= IosAvPlayer(config: const AppConfig(title: '猫影直播'));
       _avPlayer!.open(AppMedia(url, httpHeaders: headers));
     } else {
       // 桌面/Android，或 iOS 切到 mpv 备用内核（通吃 flv/ts/rtmp）
       _avPlayer?.pause(); // iOS 切回 mpv 时停掉 AVPlayer 避免双声
+      _ksPlayer?.pause(); // iOS 切回 mpv 时停掉 KS 避免双声
       _player!.open(Media(url, httpHeaders: headers));
     }
     // 预热原生 PiP，否则点小窗时 AVPlayer 冷启动易失败/黑屏
-    if (Platform.isIOS) {
+    // （KSPlayer 小窗与前台共用同一实例，无需预热）
+    if (Platform.isIOS && !_iosUseKs) {
       VideoPlayerPip.instance.prepareIos(url: url, headers: headers);
     }
     // 订阅播放错误，避免一直转圈无提示。
@@ -310,13 +347,17 @@ class _LivePageState extends State<LivePage> {
     _playSub?.cancel();
     _switchTimer?.cancel();
     _playingConfirmTimer?.cancel();
-    final useAv = Platform.isIOS && !_iosUseMpv && _avPlayer != null;
+    final useAv = Platform.isIOS && !_iosUseMpv && !_iosUseKs && _avPlayer != null;
     // ⚠️ 不能用 `useAv ? _avPlayer!.stream : _player!.stream` 三元：
     // AppPlayerStreams（video_player）与 PlayerStream（media_kit）没有公共基类，
     // 三元会把它俩推断成 Object，.error/.position/.playing 全部 undefined（编译失败）。
     // 按实际在播内核分派，两个内核的 error=Stream<String> / position=Stream<Duration> /
     // playing=Stream<bool> 类型一致，共用同一套监听逻辑。
-    if (useAv) {
+    final useKs = _iosUseKs && _ksPlayer != null;
+    if (useKs) {
+      final s = _ksPlayer!.stream;
+      _bindPlaybackStreams(s.error, s.position, s.playing);
+    } else if (useAv) {
       final s = _avPlayer!.stream;
       _bindPlaybackStreams(s.error, s.position, s.playing);
     } else {
@@ -360,10 +401,11 @@ class _LivePageState extends State<LivePage> {
         _playingConfirmTimer = Timer(const Duration(milliseconds: 2500), () {
           _playingConfirmTimer = null;
           if (!mounted || !_switching) return;
-          final useAvNow = Platform.isIOS && !_iosUseMpv && _avPlayer != null;
+          final useAvNow = Platform.isIOS && !_iosUseMpv && !_iosUseKs && _avPlayer != null;
           final pos = useAvNow
               ? (_avPlayer?.state.position ?? Duration.zero)
-              : (_player?.state.position ?? Duration.zero);
+              : (_ksPlayer?.state.position ??
+                  (_player?.state.position ?? Duration.zero));
           if (pos > Duration.zero) {
             _switchTimer?.cancel();
             setState(() => _switching = false);
@@ -372,6 +414,93 @@ class _LivePageState extends State<LivePage> {
         });
       }
     });
+  }
+
+  /// 播放器核心选择菜单 —— 底部弹层列出直播可用的内核（iOS：AVPlayer / MPV），
+  /// 当前使用中的内核打勾；点击某一项即切换。
+  /// 直播没有 webview 播放路径，故列表不含 webview。
+  /// 切换后**立即用新内核重新拉流**（直播是持续流，无需像点播那样等下一集）。
+  Future<void> _showLiveEnginePicker() async {
+    final engines = _liveEngines;
+    if (engines.length <= 1) return;
+    _showControls();
+    final current = PlayerPrefs.instance.liveEngine.value;
+    final picked = await showModalBottomSheet<PlayerEngine>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+              child: Row(
+                children: [
+                  Text(
+                    '播放器核心',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontHeadline,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            for (final engine in engines)
+              ListTile(
+                dense: true,
+                leading: Icon(
+                  Icons.memory,
+                  color: AppTheme.textSecondary,
+                  size: 20,
+                ),
+                title: Text(
+                  engine.title,
+                  style: TextStyle(
+                    color: engine == current
+                        ? AppTheme.accentColor
+                        : AppTheme.textPrimary,
+                    fontSize: AppTheme.fontSubhead,
+                    fontWeight:
+                        engine == current ? FontWeight.w600 : FontWeight.w400,
+                  ),
+                ),
+                subtitle: Text(
+                  switch (engine) {
+                    PlayerEngine.avplayer => '系统内核，HLS/MP4 兼容性好',
+                    PlayerEngine.ksplayer => 'FFmpeg 内核，MKV 等全格式兼容',
+                    _ => '支持 flv/ts/rtmp 等更多直播流',
+                  },
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption,
+                  ),
+                ),
+                trailing: engine == current
+                    ? Icon(Icons.check, color: AppTheme.accentColor, size: 20)
+                    : null,
+                onTap: () => Navigator.pop(ctx, engine),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || picked == current) return;
+    await PlayerPrefs.instance.setLiveEngine(picked);
+    if (!mounted) return;
+    setState(() {}); // 刷新右上按钮的内核短标签
+    // 立即用新内核重新拉流（无正在播放的频道时仅保存偏好）
+    final url = _controller.currentChannel?.playUrl ?? '';
+    if (url.isNotEmpty) {
+      _playChannel(url);
+    }
+    AppToast.message('已切换到 ${picked.title}');
   }
 
   /// 控制栏显隐包装：隐藏时不可点击 + 200ms 淡出
@@ -1135,7 +1264,8 @@ class _LivePageState extends State<LivePage> {
     //（引擎不再提交该平台视图的图层 → 原生视图被移除）。
     // 只隐藏画面，**不 dispose 播放器**，音频与播放进度都保留。
     final routeIsCurrent = ModalRoute.of(context)?.isCurrent ?? true;
-    final isIosAv = Platform.isIOS && !_iosUseMpv && _avPlayer != null;
+    final isIosAv = Platform.isIOS && !_iosUseMpv && !_iosUseKs && _avPlayer != null;
+    final isIosKs = _iosUseKs && _ksPlayer != null;
 
     return Container(
       color: Colors.black,
@@ -1148,17 +1278,19 @@ class _LivePageState extends State<LivePage> {
           fit: StackFit.expand,
           children: [
           // 视频层常驻（听剧时透明隐藏，不从树上摘掉，保证音轨不断、退出听剧能恢复画面）
-          if (isIosAv || (_videoController != null && current != null))
+          if (isIosAv || isIosKs || (_videoController != null && current != null))
             Offstage(
               offstage: !routeIsCurrent,
               child: Opacity(
                 opacity: _audioMode ? 0.0 : 1.0,
                 child: isIosAv
                     ? AppVideoView(player: _avPlayer!)
-                    : Video(
-                        controller: _videoController!,
-                        controls: AdaptiveVideoControls,
-                      ),
+                    : isIosKs
+                        ? AppVideoView(player: _ksPlayer!)
+                        : Video(
+                            controller: _videoController!,
+                            controls: AdaptiveVideoControls,
+                          ),
               ),
             )
           else
@@ -1248,7 +1380,7 @@ class _LivePageState extends State<LivePage> {
           // iOS 直播：补上原生平台视图**缺失的底部工具栏**
           //（进度条 / 「直播」标记 + 播放暂停 + 静音）。理由见
           // `_buildIosLiveControls` 的注释。
-          if (isIosAv && !_audioMode && routeIsCurrent)
+          if ((isIosAv || isIosKs) && !_audioMode && routeIsCurrent)
             Positioned(
               left: 0,
               right: 0,
@@ -1377,6 +1509,45 @@ class _LivePageState extends State<LivePage> {
                     onTap: _toggleCast,
                     tooltip: '投屏',
                   ),
+                  // 播放器核心切换：点击弹出菜单由用户选择（iOS：AVPlayer/MPV），
+                  // 只有一个可用内核（Android/桌面）时不显示。样式同「短」「抖」按钮。
+                  if (_liveEngines.length > 1)
+                    Tooltip(
+                      message: '播放器核心',
+                      preferBelow: false,
+                      child: GestureDetector(
+                        onTap: _showLiveEnginePicker,
+                        behavior: HitTestBehavior.opaque,
+                        child: Container(
+                          width: 38,
+                          height: 38,
+                          alignment: Alignment.center,
+                          // 与右上功能钮同款背景：半透明黑圆底 + 细白描边
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.22),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.14),
+                            ),
+                          ),
+                          child: Text(
+                            switch (PlayerPrefs
+                                .instance.liveEngine.value) {
+                              PlayerEngine.avplayer => 'AV',
+                              PlayerEngine.ksplayer => 'FF',
+                              PlayerEngine.mpv => 'MPV',
+                              PlayerEngine.webview => 'WEB',
+                            },
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              height: 1.0,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   // 短剧模式：纯竖屏全屏（样式参考弹幕按钮「短」字）
                   Tooltip(
                     message: _dramaMode ? '退出短剧' : '短剧模式',

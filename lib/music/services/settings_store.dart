@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,7 +8,6 @@ import '../models/models.dart';
 import '../models/third_party_source.dart';
 import '../theme/discover_preset.dart';
 import 'builtin_sources_service.dart';
-import 'source_memory.dart';
 import '../../services/app_log.dart';
 
 /// 音乐模块的设置存储 —— 对应 Beans 的 `@AppStorage` / `PlatformPreferenceStore`。
@@ -101,6 +101,14 @@ class SettingsStore {
   static const String _kAlbumSortDesc = 'music.albumSortDesc';
   final albumSortDesc = ValueNotifier<bool>(false);
 
+  /// **平台固定第三方源**（用户 2026-10-10 需求）。
+  ///
+  /// key = `SongSource.key`（netease/qq/kugou/...），value = `ThirdPartySource.id`。
+  /// 绑定后：解析该平台的歌时**绑定源排最前**（自动直接用它），
+  /// 失败仍回退其它启用源，保证可播性。一个平台只绑一个源；一个源可服务多个平台。
+  static const String _kPlatformSources = 'music.platformSourceBindings';
+  final platformSourceBindings = ValueNotifier<Map<String, String>>({});
+
   /// 加载全部音乐偏好，并**连带初始化音源相关的东西**。
   ///
   /// ── 🔴 整体 try/catch（修"prefs 一次失败就拖垮音源列表"）──────────
@@ -169,6 +177,17 @@ class SettingsStore {
       listenGrid.value = (prefs.getInt(_kListenGrid) ?? 2).clamp(0, 5);
       albumGrid.value = (prefs.getInt(_kAlbumGrid) ?? 0).clamp(0, 2);
       albumSortDesc.value = prefs.getBool(_kAlbumSortDesc) ?? false;
+      // 平台固定第三方源（没存过 = 空表，无绑定）
+      try {
+        final raw = prefs.getString(_kPlatformSources);
+        if (raw != null && raw.isNotEmpty) {
+          final decoded = jsonDecode(raw) as Map<String, dynamic>;
+          platformSourceBindings.value = decoded
+              .map((k, v) => MapEntry(k, v.toString()));
+        }
+      } catch (_) {
+        // 损坏的 JSON 当作无绑定处理，不拖垮启动
+      }
     }
 
     // ── 以下三步是**关键路径**：各自独立 try/catch，互不拖累 ─────────
@@ -178,12 +197,6 @@ class SettingsStore {
       await ThirdPartySourceStore.instance.init();
     } catch (e) {
       AppLog.instance.log('[Music] 音源列表初始化失败: $e');
-    }
-    // 音源记忆（"这首歌上次用哪个源" —— 见 SourceMemory）
-    try {
-      await SourceMemory.instance.init();
-    } catch (e) {
-      AppLog.instance.log('[Music] 音源记忆初始化失败: $e');
     }
     // 内置源注册 + 自动更新（静默：失败不影响启动）
     // 先注册出厂内置源，再异步拉远端看有没有新版本
@@ -290,5 +303,58 @@ class SettingsStore {
     final old = albumSortDesc.value;
     albumSortDesc.value = v;
     await _write(_kAlbumSortDesc, v, () => albumSortDesc.value = old);
+  }
+
+  /// 某平台当前绑定的第三方源 id（未绑定 → null）
+  String? boundSourceIdFor(SongSource platform) =>
+      platformSourceBindings.value[platform.key];
+
+  /// 绑定/解绑某平台的固定第三方源（sourceId = null 解绑）。
+  ///
+  /// 🔴 直接写盘并检查返回值（不走 `_write`：它只支持标量，这里存 JSON 对象）。
+  Future<void> setPlatformSourceBinding(
+      SongSource platform, String? sourceId) async {
+    final old = platformSourceBindings.value;
+    final next = Map<String, String>.from(old);
+    if (sourceId == null) {
+      next.remove(platform.key);
+    } else {
+      next[platform.key] = sourceId;
+    }
+    platformSourceBindings.value = next;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ok = next.isEmpty
+          ? await prefs.remove(_kPlatformSources)
+          : await prefs.setString(
+              _kPlatformSources, jsonEncode(next));
+      if (!ok) {
+        platformSourceBindings.value = old;
+        AppLog.instance.log('[Music] 平台音源绑定写入返回 false（已回滚）');
+      }
+    } catch (e) {
+      platformSourceBindings.value = old;
+      AppLog.instance.log('[Music] 平台音源绑定写入失败（已回滚）: $e');
+    }
+  }
+
+  /// 解绑某源在所有平台上的固定绑定（删除音源时调用，避免指向已删源）
+  Future<void> clearBindingsForSource(String sourceId) async {
+    final old = platformSourceBindings.value;
+    final next = Map<String, String>.from(old)
+      ..removeWhere((_, v) => v == sourceId);
+    if (next.length == old.length) return;
+    platformSourceBindings.value = next;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (next.isEmpty) {
+        await prefs.remove(_kPlatformSources);
+      } else {
+        await prefs.setString(_kPlatformSources, jsonEncode(next));
+      }
+    } catch (e) {
+      platformSourceBindings.value = old;
+      AppLog.instance.log('[Music] 清理平台音源绑定失败（已回滚）: $e');
+    }
   }
 }

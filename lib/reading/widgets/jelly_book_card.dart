@@ -339,9 +339,11 @@ class _JellyBookCardState extends State<JellyBookCard>
         ),
         // 名称 / 元信息：放在卡片**外面**
         Padding(
-          padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+          // ✅ 2026-10-10 用户："封面和名称间距大了"：上边距 8->5、
+          //    名称区 50->44（标题+元信息的垂直富余同步收小）
+          padding: const EdgeInsets.fromLTRB(10, 5, 4, 6),
           child: SizedBox(
-            height: 50,
+            height: 44,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [

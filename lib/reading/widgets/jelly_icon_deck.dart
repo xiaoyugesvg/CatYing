@@ -22,7 +22,7 @@
 /// ```dart
 /// JellyIconDeck(items: [
 ///   JellyIconDeckItem(icon: Icons.history_rounded, tooltip: '历史',
-///       onTap: () => _openHistory(), emphasized: true),
+///       onTap: () => _openHistory()),
 ///   JellyIconDeckItem(icon: Icons.download_rounded, tooltip: '下载', onTap: ...),
 ///   JellyIconDeckItem(icon: Icons.more_horiz_rounded, tooltip: '更多', onTap: ...),
 /// ])
@@ -39,15 +39,11 @@ class JellyIconDeckItem {
     required this.icon,
     required this.tooltip,
     required this.onTap,
-    this.emphasized = false,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback onTap;
-
-  /// 是否用「深色圆底」强调（通常给最常用的那个，如历史 ✓）。
-  final bool emphasized;
 }
 
 class JellyIconDeck extends StatefulWidget {
@@ -237,6 +233,9 @@ class _JellyIconDeckState extends State<JellyIconDeck> {
     required bool isFront,
     required VoidCallback onTap,
   }) {
+    // 🔴 选中态**只看 `isFront`** ✗ —— 原来写成 `isFront || item.emphasized`，
+    //   而调用方给第一项传了 `emphasized: true` ⇒ **它永远是选中外观** ✗，
+    //   滑动切到别的项时前项也亮着 ⇒ 看起来「两个都选中」✗。
     // 深色圆底（截图里最前那个的样子 ✓）：深色外观下用白，浅色外观下用墨黑
     final frontBg = isDark ? Colors.white : const Color(0xFF2B2B2B);
     final frontFg = isDark ? const Color(0xFF1B1B1B) : Colors.white;
@@ -248,7 +247,7 @@ class _JellyIconDeckState extends State<JellyIconDeck> {
     return Tooltip(
       message: item.tooltip,
       child: Material(
-        color: (isFront || item.emphasized) ? frontBg : backBg,
+        color: isFront ? frontBg : backBg,
         shape: const CircleBorder(),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -260,7 +259,7 @@ class _JellyIconDeckState extends State<JellyIconDeck> {
             child: Icon(
               item.icon,
               size: widget.size * 0.5,
-              color: (isFront || item.emphasized) ? frontFg : backFg,
+              color: isFront ? frontFg : backFg,
             ),
           ),
         ),

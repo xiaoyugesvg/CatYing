@@ -158,7 +158,7 @@ class Song {
   /// `bookanAlbum()` 时把单集 `file` 直链直接填进来，播放器解析地址时
   /// 优先用它，不再调用 Node 的 `url` action。
   ///
-  /// 空串 = 走常规取址链路（内置接口 / 音源记忆 / 第三方源）。
+  /// 空串 = 走常规取址链路（内置接口 / 平台固定源 / 第三方源）。
   final String directUrl;
 
   /// 直链需要带的请求头（如博听的 UA）。与 [directUrl] 配合使用。

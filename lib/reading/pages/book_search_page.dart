@@ -218,7 +218,10 @@ class _BookSearchPageState extends State<BookSearchPage>
       _homeError = null;
     });
     try {
-      final r = await ZlibraryService().fetchHomeRecommendations();
+      // ✅ 用户 2026-10-10「默认推荐是中文」：推荐流默认带中文语言过滤，
+      //    打开图书页看到的就是中文书（三级策略见 fetchHomeRecommendations）。
+      final r = await ZlibraryService()
+          .fetchHomeRecommendations(languages: const ['chinese']);
       if (!mounted) return;
       setState(() {
         _result = r;
@@ -450,28 +453,19 @@ class _BookSearchPageState extends State<BookSearchPage>
     );
   }
 
-  /// 打开分类筛选弹窗（主分类 → 子分类两级，底部重置/确定）。
   /// 打开分类筛选弹窗（主分类 -> 子分类 + 年份/语言/格式过滤，底部重置/确定）。
-  /// 打开分类筛选弹窗（主分类 -> 子分类 + 年份/语言/格式过滤，底部重置/确定）。
+  ///
+  /// ✅ 用户 2026-10-10「点击筛选按钮没反应」——
+  /// 原来点按钮后**先拉分类表再弹窗**：分类表走 WebView 抓取（串行队列、
+  /// 单次 30s 超时 × 3 次重试，最坏一分多钟），期间 UI 只有 2 秒就消失的
+  /// SnackBar → 观感就是"点了没反应" ✗。失败时同样只闪一条提示 ✗。
+  /// 现在**点击立即弹窗**：加载中转圈 / 失败显示原因并可重试，全部在
+  /// 弹窗内可见（见 [_CategorySheetGate]）✓。
   Future<void> _openCategorySheet(bool isDark) async {
     if (_categorySheetOpening) return;
     _categorySheetOpening = true;
     FocusScope.of(context).unfocus();
     try {
-      if (!BookCategories.supported) {
-        // 缓存为空：先拉取一次（首拉失败的重试入口）
-        _showTip('正在加载分类...');
-        try {
-          await ZlibraryService().fetchCategories(force: true);
-        } catch (e) {
-          _log('打开分类弹窗前拉取失败: $e');
-        }
-        if (!mounted) return;
-        if (!BookCategories.supported) {
-          _showTip('分类加载失败，请稍后重试');
-          return;
-        }
-      }
       final result = await showModalBottomSheet<_BookCategorySheetResult?>(
         context: context,
         isScrollControlled: true,
@@ -480,7 +474,7 @@ class _BookSearchPageState extends State<BookSearchPage>
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
-        builder: (ctx) => kbSheet(_BookCategorySheet(
+        builder: (ctx) => kbSheet(_CategorySheetGate(
           isDark: isDark,
           initialCategory: _selectedCategory,
           initialYearFrom: _filterYearFrom,
@@ -804,7 +798,8 @@ class _BookSearchPageState extends State<BookSearchPage>
                     Row(
                       children: [
                         AppPageTitle('图书', isDark: isDark),
-                        const SizedBox(width: 4),
+                        // ✅ 2026-10-10 用户："拉绳离字间距大一些"：4 -> 10
+                        const SizedBox(width: 10),
                         // 「拉绳」：标题右边那根挂着的小绳。
                         // 点它**直接进入书源界面（书源搜索页）**——
                         // 原来是弹出「切换书源」两层弹层，按用户要求改成直进书源页；
@@ -839,16 +834,16 @@ class _BookSearchPageState extends State<BookSearchPage>
                         // 与右侧图标空 46.8px ✗；`Spacer` 时间距正好 12px ✓
                         const Spacer(),
                         _buildSearchBar(isDark),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 10),
                         // ⚠️ 用户 2026-10-07（第二轮修正）：
                         //   · **筛选按钮单独拉出来** ✓ —— 与漫画页/书源页一致，
                         //     直接是那个 tune 按钮（原来藏在「视图与分类」指环菜单里 ✗）
                         //   · 视图（列表/宫格）已统一收到「我的 → 显示设置」✓
                         //   · 其余 4 个动作叠在一起、左右滑动轮换 ✓
                         _buildCategoryButton(isDark),
-                        const SizedBox(width: 6),
+                        const SizedBox(width: 10),
                         // ⚠️ 用户要求（本轮）：右上角由「并排滑动动作栏」改成**叠图标控件** ——
-//   · 最前的**完整可见**（深色圆底 + `emphasized: true`）
+//   · 最前的**完整可见**（深色圆底）
 //   · 后面各露出一部分，**左右滑动**循环切换最前
 //   · **长按**竖向展开全部
 //   原来的 `JellySlidingActions` 已整体替换（筛选按钮仍单独保留在它左边）。
@@ -857,7 +852,6 @@ JellyIconDeck(
       JellyIconDeckItem(
         icon: Icons.history_rounded,
         tooltip: '浏览记录',
-      emphasized: true,
         onTap: () => Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const BrowseHistoryPage()),
@@ -1362,7 +1356,7 @@ JellyIconDeck(
             bottom: 12 + JellyNavBar.contentBottomAvoid,
           ),
           crossAxisCount: cols,
-          mainAxisSpacing: 12,
+          mainAxisSpacing: 8,
           crossAxisSpacing: 12,
           itemCount: _result.items.length + (_result.hasMore ? 1 : 0),
           itemBuilder: (context, index) {
@@ -1411,7 +1405,7 @@ JellyIconDeck(
             bottom: 12 + JellyNavBar.contentBottomAvoid,
           ),
           crossAxisCount: cols,
-          mainAxisSpacing: 12,
+          mainAxisSpacing: 8,
           crossAxisSpacing: 12,
           itemCount: _result.items.length + (_result.hasMore ? 1 : 0),
           itemBuilder: (context, index) {
@@ -1454,6 +1448,122 @@ JellyIconDeck(
 /// 分类筛选弹窗内容（独立 StatefulWidget，管理 TextEditingController 生命周期）。
 /// 控制器在 initState 创建、dispose 销毁，避免弹窗退出动画期间过早 dispose
 /// 触发 InheritedElement._dependents 非空断言。
+/// 分类弹窗的「装载门」：把分类表的加载状态装进弹窗里。
+///
+/// ✅ 用户 2026-10-10「点击筛选按钮没反应」——
+/// 原来先 `fetchCategories` 再弹窗，WebView 抓取（串行队列 + 30s 超时 ×
+/// 3 重试）期间只有 2 秒的 SnackBar，用户感知不到在加载 ✗。
+/// 现在点击**立即弹窗**：
+///   · 加载中 → 转圈 + 「正在加载分类...」（不再一闪而过）
+///   · 失败   → 错误原因 + 「重试」按钮（不用退出弹窗重开）
+///   · 成功   → 原地渲染 [_BookCategorySheet] ✓
+class _CategorySheetGate extends StatefulWidget {
+  final bool isDark;
+  final BookCategory? initialCategory;
+  final int? initialYearFrom;
+  final int? initialYearTo;
+  final List<String> initialLanguages;
+  final List<String> initialExtensions;
+
+  const _CategorySheetGate({
+    required this.isDark,
+    required this.initialCategory,
+    required this.initialYearFrom,
+    required this.initialYearTo,
+    required this.initialLanguages,
+    required this.initialExtensions,
+  });
+
+  @override
+  State<_CategorySheetGate> createState() => _CategorySheetGateState();
+}
+
+class _CategorySheetGateState extends State<_CategorySheetGate> {
+  bool _loading = false;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _ensureCategories();
+  }
+
+  Future<void> _ensureCategories() async {
+    if (BookCategories.supported) return; // 缓存可用，直接展示
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await ZlibraryService().fetchCategories(force: true);
+    } catch (e) {
+      if (mounted) setState(() => _error = e);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  String get _errorText {
+    final e = _error;
+    if (e is ZlibraryException) return e.message;
+    return '分类加载失败，请检查网络后重试';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return SizedBox(
+        height: 240,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const CircularProgressIndicator(strokeWidth: 2.5),
+            const SizedBox(height: 16),
+            Text('正在加载分类...',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: JellyTheme.textSecondary,
+                )),
+          ],
+        ),
+      );
+    }
+    if (_error != null) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(24, 32, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.wifi_off_rounded,
+                size: 36, color: JellyTheme.textSecondary),
+            const SizedBox(height: 12),
+            Text(_errorText,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: JellyTheme.textSecondary,
+                )),
+            const SizedBox(height: 16),
+            TextButton.icon(
+              onPressed: _ensureCategories,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('重试'),
+            ),
+          ],
+        ),
+      );
+    }
+    return _BookCategorySheet(
+      isDark: widget.isDark,
+      initialCategory: widget.initialCategory,
+      initialYearFrom: widget.initialYearFrom,
+      initialYearTo: widget.initialYearTo,
+      initialLanguages: widget.initialLanguages,
+      initialExtensions: widget.initialExtensions,
+    );
+  }
+}
+
 class _BookCategorySheet extends StatefulWidget {
   final bool isDark;
   final BookCategory? initialCategory;

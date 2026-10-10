@@ -519,7 +519,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 3,
-              mainAxisSpacing: 12,
+              mainAxisSpacing: 8,
               crossAxisSpacing: 12,
               childAspectRatio: 0.56,
             ),
@@ -1540,7 +1540,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                     Theme.of(context).brightness == Brightness.dark),
                 const SizedBox(width: 6),
                 // ⚠️ 用户要求（本轮）：右上角由「并排滑动动作栏」改成**叠图标控件** ——
-//   · 最前的**完整可见**（深色圆底 + `emphasized: true`）
+//   · 最前的**完整可见**（深色圆底）
 //   · 后面各露出一部分，**左右滑动**循环切换最前
 //   · **长按**竖向展开全部
 //   原来的 `JellySlidingActions`（4 个并排）已整体替换，不再保留。
@@ -1549,7 +1549,6 @@ JellyIconDeck(
     JellyIconDeckItem(
       icon: Icons.history_rounded,
       tooltip: '浏览记录',
-      emphasized: true,
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const BrowseHistoryPage()),
@@ -1647,14 +1646,14 @@ JellyIconDeck(
                           //（图书页/书源页上一轮已是这个写法，漫画页当时漏了。）
                           const Spacer(),
                           _searchField(),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 10),
                           // ⚠️ 用户 2026-10-07（第二轮修正）：
                           //   · **筛选按钮单独拉出来** ✓（不塞进滑动栏）
                           //   · 其余 4 个动作叠在一起、左右滑动轮换 ✓
                           _buildCategoryButton(isDark),
-                          const SizedBox(width: 6),
+                          const SizedBox(width: 10),
                           // ⚠️ 用户要求（本轮）：右上角由「并排滑动动作栏」改成**叠图标控件** ——
-//   · 最前的**完整可见**（深色圆底 + `emphasized: true`）
+//   · 最前的**完整可见**（深色圆底）
 //   · 后面各露出一部分，**左右滑动**循环切换最前
 //   · **长按**竖向展开全部
 //   原来的 `JellySlidingActions`（4 个并排）已整体替换，不再保留。
@@ -1663,7 +1662,6 @@ JellyIconDeck(
     JellyIconDeckItem(
       icon: Icons.history_rounded,
       tooltip: '浏览记录',
-      emphasized: true,
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const BrowseHistoryPage()),
@@ -2017,7 +2015,7 @@ JellyIconDeck(
             bottom: 12 + JellyNavBar.contentBottomAvoid,
           ),
           crossAxisCount: cols,
-          mainAxisSpacing: 12,
+          mainAxisSpacing: 8,
           crossAxisSpacing: 12,
           itemCount: _result.items.length + (_result.hasMore ? 1 : 0),
           itemBuilder: (context, index) {
@@ -2065,7 +2063,7 @@ JellyIconDeck(
             bottom: 12 + JellyNavBar.contentBottomAvoid,
           ),
           crossAxisCount: cols,
-          mainAxisSpacing: 12,
+          mainAxisSpacing: 8,
           crossAxisSpacing: 12,
           itemCount: _result.items.length + (_result.hasMore ? 1 : 0),
           itemBuilder: (context, index) {

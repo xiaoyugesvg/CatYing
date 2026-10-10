@@ -13,6 +13,10 @@ class PlayerPrefs {
   /// 当前点播内核
   final vodEngine = PlayerEngine.avplayer.obs;
 
+  /// 当前直播内核（与点播独立：直播常遇 flv/ts/rtmp 等 AVPlayer 不支持的流，
+  /// 用户需要单独把直播切到 mpv，而不影响点播的内核选择）
+  final liveEngine = PlayerEngine.avplayer.obs;
+
   /// MPV：解码方式
   final decodeMode = VideoDecodeMode.auto.obs;
 
@@ -126,6 +130,11 @@ class PlayerPrefs {
     }
     await prefs.setInt(AppConstants.playTypeVod, mapped);
     vodEngine.value = PlayerEngine.fromStoredValue(mapped);
+
+    // 直播内核（与点播独立持久化；无历史值时默认 AVPlayer，
+    // 与旧行为一致 —— 旧版本直播读的就是 vodEngine 的默认值）
+    liveEngine.value = PlayerEngine.fromStoredValue(
+        prefs.getInt('play_live_engine') ?? PlayerEngine.avplayer.value);
 
     decodeMode.value =
         VideoDecodeMode.fromStoredValue(prefs.getInt('play_decode_mode') ?? 0);
@@ -302,6 +311,13 @@ class PlayerPrefs {
     vodEngine.value = e;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(AppConstants.playTypeVod, e.value);
+  }
+
+  /// 设置直播内核（独立于点播的 [setEngine]）
+  Future<void> setLiveEngine(PlayerEngine e) async {
+    liveEngine.value = e;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('play_live_engine', e.value);
   }
 
   Future<void> setDecodeMode(VideoDecodeMode m) async {

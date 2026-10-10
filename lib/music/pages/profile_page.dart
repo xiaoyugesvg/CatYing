@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../models/third_party_source.dart';
 import '../services/settings_store.dart';
-import '../services/source_memory.dart';
 import '../theme/music_theme.dart';
 import '../widgets/floating_play_button.dart';
 import 'music_log_page.dart';
@@ -115,7 +114,6 @@ class ProfilePage extends StatelessWidget {
           // 「VIP 歌靠第三方源播成功后，退出去重新点，直接用它上次
           // 成功的那个源」—— 那是自动的；这里给用户一个**出口**，
           // 因为记忆是自动学的、用户看不见，记错了得能清掉。
-          _memoryTile(store),
           _groupCard([
           ValueListenableBuilder<int>(
             valueListenable: ThirdPartySourceStore.instance.revision,
@@ -284,35 +282,6 @@ class ProfilePage extends StatelessWidget {
   ///（设置其实**已经保存**，只是显示不动 → 用户以为"第三方源没打开"）。
   /// 这里改成直接跟随 `SettingsStore.useThirdPartySources` 这个 Notifier，
   /// 拨动后由它推新值，不会再回弹。（本页只有这一个开关，所以直接绑定。）
-  /// 「音源记忆」行：显示记住了多少首 + 一键清除。
-  ///
-  /// 用 `ValueListenableBuilder` 绑 `SourceMemory.count` ——
-  /// 本页是 `StatelessWidget`（没有 `setState`），清空后要让这行自己刷新。
-  Widget _memoryTile(SettingsStore store) => ValueListenableBuilder<int>(
-        valueListenable: SourceMemory.instance.count,
-        builder: (context, n, _) => ListTile(
-        leading: _iconBox(Icons.history_rounded),
-        title: Text('音源记忆',
-            style:
-                TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
-          subtitle: Text(
-            n == 0
-                ? '还没有记录。播放成功后会自动记住用的是哪个源'
-                : '已记住 $n 首，下次直接用它上次成功的源',
-            style:
-                TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
-          ),
-          trailing: n == 0
-              ? null
-              : TextButton(
-                  onPressed: () => SourceMemory.instance.clear(),
-                  child: Text('清除',
-                      style: TextStyle(
-                          color: MusicTheme.tint, fontSize: AppTheme.fontSubhead)),
-                ),
-        ),
-      );
-
   /// 一个开关行。
   ///
   /// ── 🔴 修的真 bug：原来**写死**监听 `useThirdPartySources` ────────

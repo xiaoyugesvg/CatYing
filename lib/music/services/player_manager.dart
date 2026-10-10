@@ -10,7 +10,6 @@ import 'music_api.dart';
 import 'download_service.dart';
 import 'settings_store.dart';
 import 'unblock_service.dart';
-import 'source_memory.dart';
 import '../../services/audio_focus.dart';
 import '../../services/app_log.dart';
 import 'library_store.dart';
@@ -526,20 +525,17 @@ class MusicPlayerManager extends ChangeNotifier {
 
     // 1) 解析播放地址
     //
-    // ── 顺序（已按用户要求调整，别再改回去）─────────────────────
+    // ── 顺序（2026-10-10：去掉歌曲粒度音源记忆，改为平台固定源）──
     //   ① **本地文件** —— 已下载的直接播沙盒文件，不走网络（离线可听）
-    //   ② **音源记忆** —— 这首上次用哪个源成功了，直接再问它一次
+    //   ② **平台固定第三方源** —— 音源管理页给该平台（酷狗/QQ/…）
+    //      绑定的源，直接再问它一次（用户原话："自动直接用这个第三方源"）
     //   ③ **内置公开接口**
     //   ④ **试全部第三方源 → 弹窗让用户选**（最后兜底）
     //
-    // ⚠️ 为什么"记忆"排在"内置"**前面**（这是修的一个真 bug）：
-    //    原来记忆是放在"内置失败"里的兜底。但内置接口**经常返回
-    //    "能用但很慢/被限速"的直链** —— 那时 `r.ok == true`，
-    //    于是**记忆根本没被查**，用户上次选好的源白记了 ✗
-    //    用户的原话是"记住从哪个源获取的，然后**直接用**"——
-    //    那意味着记忆要**优先**，不是兜底。
-    //
-    //    记忆失败会继续落到内置接口，所以**不会因为记忆而播不了**。
+    // ⚠️ 为什么"平台固定源"排在"内置"**前面**（原"记忆优先"同因）：
+    //    内置接口经常返回"能用但很慢/被限速"的直链 —— `r.ok == true`
+    //    时后面的兜底根本不会被查，绑定源形同虚设 ✗
+    //    固定源失败会继续落到内置接口，**不会因为绑定而播不了**。
     var url = '';
     var quality = '';
     var fromSource = '';
@@ -558,8 +554,8 @@ class MusicPlayerManager extends ChangeNotifier {
             : '';
     // 第三方音源要用**它自己配的** headers（UA/Referer/Cookie）。
     Map<String, String> sourceHeaders = const {};
-    // 这次是不是靠"记忆里的那个源"拿到了地址
-    var remembered = false;
+    // 这次是不是靠"平台固定源"拿到了地址
+    var fromBound = false;
 
     // ── 直链优先（博看听书等纯 Dart 数据源）──────────────────────
     // `bookanAlbum()` 已经把单集 `file` 直链填进 `Song.directUrl`，
@@ -583,51 +579,57 @@ class MusicPlayerManager extends ChangeNotifier {
 
 
     // ══════════════════════════════════════════════════════════
-    // ② 试**上次记住的那个源**（用户 2026 要求）
+    // ② 试**平台固定源**（音源管理页「固定平台」绑定的第三方源）
     // ══════════════════════════════════════════════════════════
     //
-    // ── 用户场景 ─────────────────────────────────────────────────
-    // VIP 歌靠第三方源播成功后，退出去、重新点这首歌 ——
-    // 希望**直接用上次成功的那个源**，而不是"再并发试全部源（几秒）
-    // + 弹窗选一遍"。
+    // 2026-10-10 用户需求："例如酷狗或 QQ 增加固定的第三方源设置，
+    // 自动直接用这个第三方源"。绑定关系存 `SettingsStore`（平台 → 源 id）。
     //
-    // ── 为什么命中记忆也要**验证** ──────────────────────────────
-    // 第三方源给的地址**是签名限时的**（`…/<签名>/6ac3c102/resource/…`），
-    // 会过期成 403/404。所以只能记住"**源**"，每次重新向它要新地址 ——
-    // 而"这个源现在还能不能给地址"必须当场问一次。
+    // ── 为什么命中也要**当场验证**（原"记忆验证"同因）────────────
+    // 第三方源给的地址是签名限时的，会过期成 403/404 —— 所以每次
+    // 都要重新向它要新地址，"现在还能不能给"必须当场问一次。
     //
-    // ⚠️ **本地文件优先于记忆**：已下载的歌直接播本地文件，
-    //    不该为了"记忆"白跑一次网络请求（离线时那次请求还会失败）。
+    // ⚠️ **本地文件优先于固定源**：已下载的歌直接播本地文件，
+    //    不为固定源白跑一次网络请求（离线时那次请求还会失败）。
     if (localPath.isEmpty && SettingsStore.instance.useThirdPartySources.value) {
-      final memorized = SourceMemory.instance.resolveSource(song);
-      if (memorized != null) {
-        lastError.value = '正在用「${memorized.name}」…';
-        final one = await UnblockService.instance.testOne(memorized, song);
+      final boundId = SettingsStore.instance.boundSourceIdFor(song.source);
+      ThirdPartySource? bound;
+      if (boundId != null && boundId.isNotEmpty) {
+        for (final s in ThirdPartySourceStore.instance.enabled) {
+          if (s.id == boundId) {
+            bound = s;
+            break;
+          }
+        }
+      }
+      if (bound != null) {
+        lastError.value = '正在用「${bound.name}」…';
+        final one = await UnblockService.instance.testOne(bound, song);
         switching.value = false;
         if (epoch != _loadEpoch) return;
         if (one.ok && one.url.isNotEmpty) {
-          // 命中！直接用，**不弹窗** —— 用户上次已经做过这个选择了
+          // 命中！直接用，**不弹窗** —— 这就是"固定"的意义
           url = one.url;
-          fromSource = one.source?.name ?? memorized.name;
+          fromSource = one.source?.name ?? bound.name;
           quality = one.source?.quality ?? '';
           sourceHeaders =
               one.headers.isNotEmpty ? one.headers : (one.source?.headers ?? const {});
-          remembered = true;
+          fromBound = true;
           AppLog.instance.log(
-              '[Music] 命中音源记忆：《${song.name}》→「${memorized.name}」');
+              '[Music] 命中平台固定源（${song.source.displayName}）：'
+              '《${song.name}》→「${bound.name}」');
         } else {
-          // 记住的源这次给不出地址（多半是它后端变了/歌下架了）→
-          // **顺手忘掉**，否则以后每次点这首都要白等这一次探测。
-          AppLog.instance.log('[Music] 音源记忆失效（${memorized.name}：'
+          // 绑定源这次给不出地址（后端变了/歌下架了）→ 落回内置接口，
+          // 不解绑（下一首还先试它；用户觉得不行会自己去管理页换）
+          AppLog.instance.log('[Music] 平台固定源失败（${bound.name}：'
               '${one.error}），改用内置接口');
-          unawaited(SourceMemory.instance.forget(song));
         }
       }
     }
 
     // 命中记忆时**根本不该再请求内置接口** —— 那正是"记住它、直接用"的意义
     //（既能省一次网络往返，也避免内置接口的慢直链把好地址盖掉）。
-    final r = remembered
+    final r = fromBound
         ? MusicUrlInfo(ok: false, url: '', type: '')
         : (localPath.isNotEmpty
             ? MusicUrlInfo(ok: true, url: localPath, type: '本地')
@@ -660,7 +662,7 @@ class MusicPlayerManager extends ChangeNotifier {
       // ⚠️ 跨平台匹配（CrossPlatformMatcher）已**移除出回退链**：
       //    用户明确说"不要搜索其他平台"。实现代码保留在
       //    `cross_platform_matcher.dart`，但这里不再调用。
-      if (!remembered &&
+      if (!fromBound &&
           SettingsStore.instance.useThirdPartySources.value &&
           ThirdPartySourceStore.instance.enabled.isNotEmpty) {
         switching.value = true;
@@ -722,11 +724,7 @@ class MusicPlayerManager extends ChangeNotifier {
           if (picked != null) {
             fromSource = picked.source?.name ?? '';
             quality = picked.source?.quality ?? '';
-            // 🔴 记住"这首歌用这个源成功了" —— 下次点这首直接用，不再试全部
-            final sid = picked.source?.id;
-            if (sid != null && sid.isNotEmpty) {
-              unawaited(SourceMemory.instance.remember(song, sid));
-            }
+            // 2026-10-10：歌曲粒度源记忆已移除（改为平台固定源绑定）
             AppLog.instance.log('[Music] 用户选定音源：${picked.source?.name}'
                 '（${results.length} 个可用）');
             // 展示用文案跟上（音频已由弹窗播好）
@@ -817,11 +815,7 @@ class MusicPlayerManager extends ChangeNotifier {
       _currentSong = song;
       notifyListeners();
     }
-    // 记住这个源：下次点这首歌直接用它（见 SourceMemory 的说明）
-    final rid = r.source?.id;
-    if (rid != null && rid.isNotEmpty) {
-      unawaited(SourceMemory.instance.remember(song, rid));
-    }
+    // 2026-10-10：歌曲粒度源记忆已移除（改为平台固定源绑定）
     await _startPlayback(
       song: song,
       url: r.url,

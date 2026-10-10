@@ -12,7 +12,10 @@ enum PlayerEngine {
   /// MPV 内核（media_kit + libmpv），保留备用
   mpv(1, 'MPV播放器'),
   /// Webview 内核（webview_flutter + WKWebView），用于网页播放页面
-  webview(2, 'Webview播放器');
+  webview(2, 'Webview播放器'),
+  /// KSPlayer 内核（FFmpeg + Metal），iOS 第四核心「FF」：
+  /// AVPlayer 吃不下的格式（MKV/ASS/多音轨等）全兼容，并自带小窗
+  ksplayer(3, 'KSPlayer播放器');
 
   final int value;
   final String title;
@@ -31,13 +34,22 @@ enum PlayerEngine {
   /// 实际可供用户选择的播放器列表
   ///
   /// - Apple（iOS / macOS）：avplayer 为默认主内核（与系统小窗共用同一 AVPlayer），
+  ///   ksplayer（KSPlayer/FFmpeg）为 iOS 备选内核（MKV 等全格式 + 自带小窗），
   ///   mpv（media_kit_libs_ios_video）为备用内核（支持 flv/ts/rtmp 等 AVPlayer
   ///   不支持的直播格式；默认不启用，用户在设置里切换），
   ///   webview 用于网页播放页。
   /// - Android：mpv + webview（无 AVPlayer）。
   /// - 桌面（Windows / Linux）：mpv（window_manager 小窗路径）。
   static List<PlayerEngine> get availableEngines {
-    if (Platform.isIOS || Platform.isMacOS) {
+    if (Platform.isIOS) {
+      return const [
+        PlayerEngine.avplayer,
+        PlayerEngine.ksplayer,
+        PlayerEngine.mpv,
+        PlayerEngine.webview,
+      ];
+    }
+    if (Platform.isMacOS) {
       return const [PlayerEngine.avplayer, PlayerEngine.mpv, PlayerEngine.webview];
     }
     if (Platform.isAndroid) {

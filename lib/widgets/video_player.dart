@@ -8,6 +8,7 @@ import 'package:get/get.dart';
 import '../services/app_log.dart';
 import '../services/tmdb_service.dart';
 import 'app_player.dart';
+import 'ks_player.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart' show DragToMoveArea;
 import '../common/theme.dart';
@@ -580,8 +581,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               });
             }
             // iOS：前台预热原生 AVPlayer（静音预缓冲常驻），退后台/点 PiP 时
-            // 原生立即启动系统悬浮窗，避免"后台等缓冲"导致 PiP 时灵时不灵
-            if (Platform.isIOS) {
+            // 原生立即启动系统悬浮窗，避免"后台等缓冲"导致 PiP 时灵时不灵。
+            // （KSPlayer 自带小窗与前台共用同一实例，无需预热）
+            if (Platform.isIOS && _player is! KSPlayer) {
               final u = _player.state.playlist.medias.isNotEmpty
                   ? _player.state.playlist.medias.last.uri
                   : widget.url;
@@ -3159,7 +3161,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                   // 弹幕开关：已在底部功能栏（**常显**，不再按是否配置弹幕源隐藏 ——
                   // 隐藏会让用户完全看不到这个功能。未配置时点击会引导去设置页）
                   _danmuToggleButton(),
-                  // 播放器核心切换（循环切换当前平台可用的引擎）
+                  // 播放器核心切换（点击弹出菜单，由用户选择当前平台可用的引擎）
                   _engineSwitchButton(),
                   // 短剧模式：纯竖屏全屏
                   _dramaModeButton(),
@@ -4330,8 +4332,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         AppLog.instance.log('[video_player] resume after pip failed: $e');
       }
     }
-    // 为下次进小窗保持 layer 就绪
-    if (Platform.isIOS && playUrl.isNotEmpty) {
+    // 为下次进小窗保持 layer 就绪（KSPlayer 小窗共用同一实例，无需预热）
+    if (Platform.isIOS && _player is! KSPlayer && playUrl.isNotEmpty) {
       VideoPlayerPip.instance.prepareIos(
         url: playUrl,
         headers: widget.headers,
@@ -4374,12 +4376,31 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         return;
       }
       final currentPos = _player.state.position;
-      // 单实例 AVPlayer：进小窗不暂停，画面交给系统 PiP，视频连续
-      if (Platform.isIOS && !_player.isSharedIosAv) {
+      // AVPlayer/KSPlayer 单实例：进小窗不暂停，画面交给系统 PiP，视频连续
+      // （MPV/Webview 没有系统小窗路径，提示切内核）
+      final isKsCore = _player is KSPlayer;
+      if (Platform.isIOS && !_player.isSharedIosAv && !isKsCore) {
         _showMessage('请把点播内核切换为「AVPlayer」后再使用小窗');
         return;
       }
-      final entered = await VideoPlayerPip.instance.enterIos(
+      // KSPlayer 走自带的 sample-buffer 小窗（与前台同一播放器实例），
+      // 其余走 AVPlayer 的系统小窗
+      final entered = isKsCore
+          ? await VideoPlayerPip.instance.enterIosKs(
+              url: playUrl,
+              headers: widget.headers,
+              position: currentPos,
+              onStarted: () {
+                if (!mounted) return;
+                // 单实例：不暂停，画面由系统小窗接管
+                setState(() => _pipActive = true);
+              },
+              onStopped: () {
+                final resume = VideoPlayerPip.instance.iosLastPosition;
+                _resumeAfterPip(resume, playUrl);
+              },
+            )
+          : await VideoPlayerPip.instance.enterIos(
         url: playUrl,
         headers: widget.headers,
         position: currentPos,
@@ -4453,9 +4474,25 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (!supported) return;
 
       final currentPos = _player.state.position;
-      // 单实例：进小窗不暂停，与手动 PiP 相同
-      if (!_player.isSharedIosAv) return;
-      final entered = await VideoPlayerPip.instance.enterIos(
+      // 单实例（AVPlayer / KSPlayer）：进小窗不暂停，与手动 PiP 相同
+      final isKsCore = _player is KSPlayer;
+      if (!_player.isSharedIosAv && !isKsCore) return;
+      final entered = isKsCore
+          ? await VideoPlayerPip.instance.enterIosKs(
+              url: playUrl,
+              headers: widget.headers,
+              position: currentPos,
+              onStarted: () {
+                if (!mounted) return;
+                // 单实例：不暂停，画面由系统小窗接管
+                setState(() => _pipActive = true);
+              },
+              onStopped: () {
+                final resume = VideoPlayerPip.instance.iosLastPosition;
+                _resumeAfterPip(resume, playUrl);
+              },
+            )
+          : await VideoPlayerPip.instance.enterIos(
         url: playUrl,
         headers: widget.headers,
         position: currentPos,
@@ -4715,8 +4752,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
   }
 
-  /// 播放器核心切换按钮 —— 点击循环切换当前平台可用的引擎（AVPlayer / MPV / Webview）。
-  /// 切换后保存偏好，下次播放/下一集生效。
+  /// 播放器核心切换按钮 —— 点击弹出**核心选择菜单**（底部弹层），
+  /// 由用户从当前平台可用的引擎（AVPlayer / MPV / Webview）中挑选，
+  /// 而不是点击循环换下一个。选中后保存偏好，下次播放/下一集生效。
   /// （运行时热切换内核代价太高：不同引擎的 player 实例类型完全不同，
   ///  硬切会导致状态/流监听器错乱，得不偿失。）
   Widget _engineSwitchButton() {
@@ -4726,6 +4764,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       final current = PlayerPrefs.instance.vodEngine.value;
       final shortLabel = switch (current) {
         PlayerEngine.avplayer => 'AV',
+        PlayerEngine.ksplayer => 'FF',
         PlayerEngine.mpv => 'MPV',
         PlayerEngine.webview => 'WEB',
       };
@@ -4733,15 +4772,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         icon: Icons.memory,
         size: 20,
         width: 42,
-        onTap: () => _safeTap(() async {
-          final idx = available.indexOf(current);
-          final next = available[(idx + 1) % available.length];
-          await PlayerPrefs.instance.setEngine(next);
-          AppToast.message(
-            '已切换到 ${next.title}，下一集或重新播放生效',
-            duration: const Duration(seconds: 2),
-          );
-        }),
+        onTap: () => _safeTap(_showEnginePickerSheet),
         child: Text(
           shortLabel,
           style: const TextStyle(
@@ -4753,6 +4784,91 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         ),
       );
     });
+  }
+
+  /// 播放器核心选择菜单 —— 底部弹层列出当前平台可用的引擎，
+  /// 当前使用中的引擎打勾；点击某一项即切换到该引擎。
+  /// 弹层样式与「播放设置」面板一致（深色、上圆角、拖拽条）。
+  Future<void> _showEnginePickerSheet() async {
+    final available = PlayerEngine.availableEngines;
+    final current = PlayerPrefs.instance.vodEngine.value;
+    final picked = await showModalBottomSheet<PlayerEngine>(
+      context: context,
+      // 面板本体不透明；遮罩用 barrierColor（与播放设置面板一致）
+      backgroundColor: const Color(0xFF1E1E1E),
+      barrierColor: Colors.black.withValues(alpha: 0.55),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 拖拽条
+              const SizedBox(height: 8),
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: Row(
+                  children: [
+                    Text(
+                      '播放器核心',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // 引擎列表：当前项打勾，点击即选中
+              for (final engine in available)
+                ListTile(
+                  dense: true,
+                  leading: const Icon(
+                    Icons.memory,
+                    color: Colors.white70,
+                    size: 20,
+                  ),
+                  title: Text(
+                    engine.title,
+                    style: TextStyle(
+                      color: engine == current
+                          ? AppTheme.accentColor
+                          : Colors.white,
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: engine == current
+                          ? FontWeight.w600
+                          : FontWeight.w400,
+                    ),
+                  ),
+                  trailing: engine == current
+                      ? Icon(Icons.check, color: AppTheme.accentColor, size: 20)
+                      : null,
+                  onTap: () => Navigator.of(sheetContext).pop(engine),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+    if (picked == null || picked == current) return;
+    await PlayerPrefs.instance.setEngine(picked);
+    AppToast.message(
+      '已切换到 ${picked.title}，下一集或重新播放生效',
+      duration: const Duration(seconds: 2),
+    );
   }
 
   /// 短剧模式按钮 —— 样式参考弹幕按钮：圆角方块内一个「短」字，

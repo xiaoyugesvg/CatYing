@@ -1,8 +1,8 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart'; // compute（弹幕解析丢 isolate）
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart'; // Ticker（每帧推进弹幕）
 
 // ============================================================
 
@@ -287,11 +287,30 @@ class DanmuLayer extends StatefulWidget {
   State<DanmuLayer> createState() => _DanmuLayerState();
 }
 
-class _DanmuLayerState extends State<DanmuLayer> {
+/// 仅用于驱动 `CustomPaint` 重绘的 `Listenable` —— 弹幕每帧都在动，
+/// 用 `setState` 会**整棵子树重建** ✗；`CustomPaint(repaint:)` 只重跑 paint ✓。
+class _Repaint extends ChangeNotifier {
+  void notify() => notifyListeners();
+}
+
+class _DanmuLayerState extends State<DanmuLayer>
+    with SingleTickerProviderStateMixin {
   late List<DanmuItem> _sorted;
   final List<_ActiveDanmu> _active = [];
   int _nextIndex = 0;
-  Timer? _timer;
+
+  /// 🟢 **每帧推进弹幕**。
+  ///
+  /// ── 为什么需要它（修“卡卡卡卡”）────────────────────────────
+  /// 原来只靠 `Timer.periodic(100ms)` 推进 ⇒ 弹幕约 **10fps** ✗。
+  /// 之所以不能指望父级每帧重建：播放位置走 `ValueNotifier` **局部重建**，
+  /// 播放器的 `build` 基本不跑 ⇒ `didUpdateWidget` 不触发 ✗。
+  /// 现在用 `Ticker`（每帧回调）驱动，且推进量仍取自**播放位置**
+  ///（见 `_lastTickPos`）⇒ 暂停冻结 / 倍速同步两个特性都不受影响 ✓。
+  late final Ticker _ticker;
+
+  /// 重绘通知器（见 [_Repaint]）。
+  final _Repaint _repaint = _Repaint();
   /// Minimum gap between two scrolling danmaku on the same track (px).
   static const double _trackGap = 24.0;
 
@@ -299,6 +318,12 @@ class _DanmuLayerState extends State<DanmuLayer> {
   /// 高密度弹幕源（一集上千条）每帧可能 spawn 十几条，
   /// 不设上限的话 Stack 里 Positioned 越来越多 → 渲染越来越卡。
   static const int _maxActive = 60;
+
+  /// 补播队列 + 每帧铺设上限：把"列表就绪瞬间几十条弹幕的文本布局"
+  /// 分摊到连续几帧（每帧 10 条 ≈ 1-2ms），消除单次掉帧。
+  /// 位置在铺设那一刻按当前播放位置现算，视觉上 ~100ms 内铺满，不可感知。
+  final List<DanmuItem> _pendingCatchup = [];
+  static const int _catchupPerFrame = 10;
 
   /// 文本宽度缓存：同一条文本（同字号）只 layout 一次。
   /// `TextPainter.layout()` 是弹幕热路径里最贵的单点开销，
@@ -339,11 +364,25 @@ class _DanmuLayerState extends State<DanmuLayer> {
   void initState() {
     super.initState();
     _sorted = _sortedOf(widget.danmus);
-    // ⚠️ 定时器只做两件事：
-    //   ① 位置驱动之外的兜底刷新（固定弹幕到期、seek 清屏）
-    //   ② 在播放位置停止更新时（暂停）让"该消失的"仍能消失
-    // **动画推进量取自播放位置**，不取自这个定时器（见 `_lastTickPos` 的说明）。
-    _timer = Timer.periodic(const Duration(milliseconds: 100), (_) => _tick());
+    // ✅ 用户 2026-10-10：「弹幕要视频一开始就出现」——
+    //    弹幕列表是**异步加载**的，就绪时视频往往已经播了几秒；
+    //    而正常生成逻辑会丢弃"过去超过 0.6s"的弹幕（防 seek 倒历史），
+    //    于是首屏要空等到下一条到点 ⇒ 观感「半天没有弹幕」✗。
+    //    首帧后（视口宽度已知）补播一次：把刚过去一小段窗口内的弹幕
+    //    按"仿佛按时上屏"的虚拟位置直接摆上屏 ✓。
+    if (_sorted.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _resetToPosition(
+          widget.positionOf().inMilliseconds / 1000.0,
+          catchup: true,
+        );
+        _repaint.notify();
+      });
+    }
+    // 每帧推进（动画量取自播放位置，见 `_lastTickPos` 的说明）。
+    // ⚠️ 暂停时 `dt == 0` ⇒ 不通知重绘 ⇒ 零额外开销 ✓。
+    _ticker = createTicker((_) => _tick())..start();
   }
 
   @override
@@ -361,6 +400,7 @@ class _DanmuLayerState extends State<DanmuLayer> {
     if (filtersChanged) {
       _sorted = _sortedOf(widget.danmus);
       _active.clear();
+      _pendingCatchup.clear();
       _nextIndex = 0;
       _lastPosSec = null;
       return;
@@ -377,9 +417,13 @@ class _DanmuLayerState extends State<DanmuLayer> {
           oldHead?.time != newHead?.time;
       if (contentChanged) {
         _sorted = newSorted;
-        _active.clear();
-        _nextIndex = 0;
+        // 换集/重新加载：同样补播，让新列表立刻铺满屏幕（不等下一条到点）
+        _resetToPosition(
+          widget.positionOf().inMilliseconds / 1000.0,
+          catchup: true,
+        );
         _lastPosSec = null;
+        _repaint.notify();
       }
     }
   }
@@ -458,7 +502,7 @@ class _DanmuLayerState extends State<DanmuLayer> {
       // 这里只需补 `_lastPosSec`（seek 检测用的基准）
       _resetToPosition(pos);
       _lastPosSec = pos;
-      setState(() {});
+      _repaint.notify();
       return;
     }
 
@@ -512,10 +556,14 @@ class _DanmuLayerState extends State<DanmuLayer> {
     _active.removeWhere(
         (a) => a.item.mode == 1 ? a.x + a.width < -16 : a.remaining <= 0);
 
+    // 补播队列分帧铺开：每帧最多 `_catchupPerFrame` 条，
+    // 避免"列表就绪瞬间几十条文本布局"挤在同一帧造成单次掉帧。
+    final drained = _pendingCatchup.isNotEmpty ? _drainCatchup(pos) : 0;
+
     // 位置在前进（dt>0）说明画面还在动 → 需要重绘；
-    // 或本帧有增减（生成/回收）→ 也需要重绘。
-    if (spawned || dt > 0 || before != _active.length) {
-      setState(() {});
+    // 或本帧有增减（生成/回收/补播）→ 也需要重绘。
+    if (spawned || drained > 0 || dt > 0 || before != _active.length) {
+      _repaint.notify();
     }
   }
 
@@ -532,9 +580,10 @@ class _DanmuLayerState extends State<DanmuLayer> {
   ///    这是有意的：否则用户每拖动一次进度条，目标点上那条就会被重播一次。
   ///    代价是"seek 到某条弹幕的精确时刻"时它不显示 —— 但相邻的照常出现，
   ///    用户感知不到（生成窗口本来就向前看 0.25s）。
-  void _resetToPosition(double pos) {
+  void _resetToPosition(double pos, {bool catchup = false}) {
     _active.clear();
     _trackRightEdge.clear(); // 清屏后轨道全空，重建一次即可
+    _pendingCatchup.clear(); // seek/换集时丢弃未铺完的补播
     var i = 0;
     while (i < _sorted.length && _sorted[i].time <= pos) {
       i++;
@@ -542,6 +591,94 @@ class _DanmuLayerState extends State<DanmuLayer> {
     _nextIndex = i;
     _lastTickPos = pos;
     _lastTickPosInit = true;
+    if (catchup) _enqueueCatchup(pos);
+  }
+
+  /// 把"刚过去一小段窗口"内的弹幕收进补播队列（时间正序）。
+  ///
+  /// ── 为什么用队列分帧铺 ─────────────────────────────────
+  /// 一次性同步上屏几十条 ⇒ 同帧几十次文本布局 ⇒ 单次掉帧 ✗。
+  /// 这里只**扫描收集**（不测宽度、零布局），由 `_drainCatchup`
+  /// 每帧铺 `_catchupPerFrame` 条 ✓；布局成本被分摊到几帧里。
+  void _enqueueCatchup(double pos) {
+    _pendingCatchup.clear();
+    if (_sorted.isEmpty || _nextIndex <= 0) return;
+    final startX = _viewportWidth > 0 ? _viewportWidth : 0.0;
+    // 补播窗口：速度越慢/屏越宽，弹幕在屏内停留越久，能补的窗口越长。
+    // 封顶 12s 防止往历史里扫太深（且受 `_maxActive` 总量限制）。
+    final window =
+        _speed > 0 ? ((startX + 240) / _speed).clamp(3.0, 12.0) : 6.0;
+    // 从游标往前扫（时间倒序），超窗即停；头插 ⇒ 收完即时间正序
+    for (var i = _nextIndex - 1; i >= 0; i--) {
+      final d = _sorted[i];
+      if (pos - d.time > window) break;
+      if (_pendingCatchup.length >= _maxActive) break;
+      _pendingCatchup.insert(0, d);
+    }
+  }
+
+  /// 每帧从补播队列铺最多 `_catchupPerFrame` 条上屏。
+  /// 位置按**当前**播放位置现算（队列等待期间播放仍在走）✓。
+  /// 返回本帧铺上屏的条数（>0 时需要重绘）。
+  int _drainCatchup(double pos) {
+    final startX = _viewportWidth > 0 ? _viewportWidth : 0.0;
+    var done = 0;
+    var idx = 0;
+    while (idx < _pendingCatchup.length && done < _catchupPerFrame) {
+      if (_active.length >= _maxActive) break;
+      final d = _pendingCatchup[idx++];
+      final elapsed = pos - d.time;
+      if (d.mode == 4 || d.mode == 5) {
+        final remaining = 4.0 - elapsed;
+        if (remaining <= 0.5) continue; // 马上消失的没必要补
+        final lane = _pickFixedLane(top: d.mode == 4);
+        if (lane < 0) continue;
+        _active.add(_ActiveDanmu(d,
+            topFixed: d.mode == 4,
+            bottomFixed: d.mode == 5,
+            width: _textWidth(d.text, widget.fontSize),
+            track: lane,
+            remaining: remaining));
+        done++;
+      } else {
+        final width = _textWidth(d.text, widget.fontSize);
+        final x = startX - _speed * elapsed;
+        if (x + width < -16) continue; // 已飘出屏
+        final track = _pickCatchupTrack(x, width);
+        if (track < 0) continue; // 放哪都重叠 → 宁可少一条
+        _active.add(_ActiveDanmu(d,
+            track: track, width: width, x: x, positioned: true));
+        done++;
+      }
+    }
+    if (idx >= _pendingCatchup.length) {
+      _pendingCatchup.clear();
+    } else {
+      _pendingCatchup.removeRange(0, idx);
+    }
+    return done;
+  }
+
+  /// 补播专用的轨道选择：候选弹幕在虚拟位置 [x, x+width]，
+  /// 找一条**当前不与其重叠**（含安全间隙）的滚动轨道。
+  /// 同速滚动 ⇒ 相对位置不变 ⇒ 现在不重叠就永远不重叠 ✓。
+  int _pickCatchupTrack(double x, double width) {
+    final tracks = _effectiveTrackCount;
+    while (_trackRightEdge.length < tracks) {
+      _trackRightEdge.add(double.negativeInfinity);
+    }
+    for (var t = 0; t < tracks; t++) {
+      var free = true;
+      for (final a in _active) {
+        if (a.item.mode != 1 || a.track != t) continue;
+        if (x < a.x + a.width + _trackGap && x + width + _trackGap > a.x) {
+          free = false;
+          break;
+        }
+      }
+      if (free) return t;
+    }
+    return -1;
   }
 
   void _spawn(DanmuItem item) {
@@ -685,7 +822,8 @@ class _DanmuLayerState extends State<DanmuLayer> {
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _ticker.dispose();
+    _repaint.dispose();
     super.dispose();
   }
 
@@ -743,7 +881,10 @@ class _DanmuLayerState extends State<DanmuLayer> {
           return ClipRect(
             child: CustomPaint(
               size: Size(w, h),
+              // ✅ 只重绘、不重建 widget 树（每帧都会动）
+              willChange: true,
               painter: _DanmuPainter(
+                repaint: _repaint,
                 active: _active,
                 topPx: topPx,
                 bottomPx: bottomPx,
@@ -788,6 +929,7 @@ class _DanmuPainter extends CustomPainter {
   final List<Shadow> strokeShadows;
 
   _DanmuPainter({
+    required Listenable repaint,
     required this.active,
     required this.topPx,
     required this.bottomPx,
@@ -799,7 +941,7 @@ class _DanmuPainter extends CustomPainter {
     required this.fontWeight,
     required this.strokeWidth,
     required this.strokeShadows,
-  });
+  }) : super(repaint: repaint);
 
   @override
   void paint(Canvas canvas, Size size) {

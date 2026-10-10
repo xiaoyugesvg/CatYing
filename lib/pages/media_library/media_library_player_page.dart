@@ -11,6 +11,7 @@ import '../../pages/detail/controller.dart';
 import '../../services/player_prefs.dart';
 import '../../widgets/app_player.dart';
 import '../../widgets/ios_av_player.dart';
+import '../../widgets/ks_player.dart';
 import '../../widgets/mpv_app_player.dart';
 import '../../widgets/video_player.dart';
 
@@ -67,6 +68,9 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
     final engine = PlayerPrefs.instance.vodEngine.value;
     if (engine == PlayerEngine.mpv) {
       return MpvAppPlayer(config: const AppConfig(title: 'TVBox'));
+    }
+    if (engine == PlayerEngine.ksplayer && Platform.isIOS) {
+      return KSPlayer(config: const AppConfig(title: 'TVBox'));
     }
     if (Platform.isIOS) {
       return IosAvPlayer(config: const AppConfig(title: 'TVBox'));

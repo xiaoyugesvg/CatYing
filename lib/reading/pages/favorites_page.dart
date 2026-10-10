@@ -9,6 +9,7 @@ import '../models/comic.dart';
 import '../services/book_favorites_service.dart';
 import '../services/book_view_mode.dart';
 import '../services/favorites_service.dart';
+import '../services/shelf_update_service.dart';
 import '../services/view_mode.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/jelly_book_card.dart';
@@ -862,6 +863,10 @@ class _ComicFavoritesTabState extends State<_ComicFavoritesTab> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    // 设置开启「启动时检查书架更新」时后台扫描收藏漫画（服务内有冷却与互斥）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ShelfUpdateService.instance.scanShelfAndFavorites();
+    });
   }
 
   @override
@@ -908,7 +913,11 @@ class _ComicFavoritesTabState extends State<_ComicFavoritesTab> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: Listenable.merge([FavoritesService(), ViewMode()]),
+      listenable: Listenable.merge([
+        FavoritesService(),
+        ViewMode(),
+        ShelfUpdateService.instance,
+      ]),
       builder: (context, _) {
         final all = FavoritesService().comics;
         final kw = widget.keyword.trim().toLowerCase();
@@ -958,7 +967,7 @@ class _ComicFavoritesTabState extends State<_ComicFavoritesTab> {
                           bottom: 12 + JellyNavBar.contentBottomAvoid,
                         ),
                         crossAxisCount: cols,
-                        mainAxisSpacing: 12,
+                        mainAxisSpacing: 8,
                         crossAxisSpacing: 12,
                         itemCount: min(comics.length, _displayCount),
                         itemBuilder: (context, index) {
@@ -975,6 +984,10 @@ class _ComicFavoritesTabState extends State<_ComicFavoritesTab> {
                                       : () => _openDetail(context, comic),
                                   onLongPress: () => widget.onSelect(comic.id),
                                   showSourceBadge: true,
+                                  updateCount: ShelfUpdateService.instance
+                                      .newChapters(
+                                          ShelfUpdateService.keyForComic(
+                                              comic.pathWord)),
                                 )
                               : JellyComicListTile(
                                   comic: comic,
@@ -1212,7 +1225,7 @@ class _BookFavoritesTabState extends State<_BookFavoritesTab> {
                           bottom: 12 + JellyNavBar.contentBottomAvoid,
                         ),
                         crossAxisCount: cols,
-                        mainAxisSpacing: 12,
+                        mainAxisSpacing: 8,
                         crossAxisSpacing: 12,
                         itemCount: min(books.length, _displayCount),
                         itemBuilder: (context, index) {

@@ -297,6 +297,62 @@ class AnalyzeRule {
     return {'__handle': id};
   }
 
+  /// java.crypto —— Rhino Java 互操作 polyfill 的 Dart 后端。
+  /// JS 侧把 byte[] 用 base64 打包传参，返回 hex（摘要/HMAC）或 base64（AES）。
+  /// 算法：MD5/SHA1/SHA256/SHA512、HmacMD5/SHA1/SHA256/SHA512、AES（ECB/CBC/CTR + PKCS7）。
+  Object? _dispatchCryptoPolyfill(List<Object?> args) {
+    String s(int i) => args.length > i && args[i] != null ? '${args[i]}' : '';
+    Uint8List b(int i) => base64.decode(s(i));
+    switch (s(0)) {
+      case 'md5':
+        return dkcrypto.md5.convert(b(1)).toString();
+      case 'sha1':
+        return dkcrypto.sha1.convert(b(1)).toString();
+      case 'sha256':
+        return dkcrypto.sha256.convert(b(1)).toString();
+      case 'sha512':
+        return dkcrypto.sha512.convert(b(1)).toString();
+      case 'hmacmd5':
+        return dkcrypto.Hmac(dkcrypto.md5, b(1)).convert(b(2)).toString();
+      case 'hmacsha1':
+        return dkcrypto.Hmac(dkcrypto.sha1, b(1)).convert(b(2)).toString();
+      case 'hmacsha256':
+        return dkcrypto.Hmac(dkcrypto.sha256, b(1)).convert(b(2)).toString();
+      case 'hmacsha512':
+        return dkcrypto.Hmac(dkcrypto.sha512, b(1)).convert(b(2)).toString();
+      case 'aes':
+        final mode = s(1);
+        final encrypting = s(2) == 'encrypt';
+        final key = dkenc.Key(b(3));
+        final ivStr = s(4);
+        final data = b(5);
+        late final dkenc.Encrypter enc;
+        dkenc.IV? iv;
+        switch (mode) {
+          case 'cbc':
+          case 'cfb64':
+            iv = dkenc.IV(ivStr.isEmpty ? Uint8List(16) : base64.decode(ivStr));
+            enc = dkenc.Encrypter(
+              dkenc.AES(key, mode: mode == 'cbc' ? dkenc.AESMode.cbc : dkenc.AESMode.cfb64),
+            );
+          case 'ctr':
+            iv = dkenc.IV(ivStr.isEmpty ? Uint8List(16) : base64.decode(ivStr));
+            enc = dkenc.Encrypter(dkenc.AES(key, mode: dkenc.AESMode.ctr));
+          default: // ecb
+            enc = dkenc.Encrypter(dkenc.AES(key, mode: dkenc.AESMode.ecb));
+        }
+        try {
+          if (encrypting) {
+            return base64.encode(enc.encryptBytes(data, iv: iv).bytes);
+          }
+          return base64.encode(enc.decryptBytes(dkenc.Encrypted(data), iv: iv));
+        } catch (e) {
+          throw Exception('java.crypto AES($mode ${encrypting ? '加密' : '解密'})失败: $e');
+        }
+    }
+    throw Exception('java.crypto 不支持的操作: ${s(0)}');
+  }
+
   /// java.cryptoOp(handle, op, data)
   /// op：Base64Decode / Base64Encode / HexDecode / HexEncode / String（原样）
   String cryptoOp(int handle, String op, String data) {
@@ -833,6 +889,9 @@ class AnalyzeRule {
           args.length > 1 ? '${args[1]}' : '',
           args.length > 2 ? '${args[2]}' : '',
         );
+      // ── Rhino Java 互操作 polyfill 后端（javax.crypto / MessageDigest）──
+      case 'java.crypto':
+        return _dispatchCryptoPolyfill(args);
       case 'aesBase64DecodeToString':
         return aesBase64DecodeToString(
           a0,

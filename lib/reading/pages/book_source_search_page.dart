@@ -8,6 +8,7 @@ import '../services/qread_api.dart';
 import '../services/reading_layout.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/jelly_icon_deck.dart';
+import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_pull_cord.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_search_bar.dart';
@@ -16,6 +17,7 @@ import 'book_source_detail_page.dart';
 import 'book_source_repo_page.dart';
 import 'browse_history_page.dart';
 import 'favorites_page.dart';
+import 'webview_page.dart';
 import '../../common/theme.dart';
 import '../utils/source_fail_text.dart';
 // ✅ **外壳内嵌子页**（本轮重构 ✓）：本页由 `home_page.dart` 的外壳渲染 ✓
@@ -70,6 +72,11 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
   List<BookSourceResult> _exploreList = [];
   bool _exploreLoading = false;
   String? _exploreError;
+
+  /// 最近一次发起分类浏览的源 —— explore 出错时错误卡据此提供
+  /// 「打开书源网站」降级（legado 语义：无分类的源点击 → 打开主站，
+  /// 见 dickwin2003/legado《书源显示问题修复总结》openBookSource）
+  BookSource? _lastExploreSource;
 
   /// 板块流模式（参考图 IMG_8581/8582）：exploreUrl 全部分类逐板块展示
   bool _exploreHomeMode = true;
@@ -392,6 +399,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
       }
     }
     if (source == null) return;
+    _lastExploreSource = source;
 
     setState(() {
       _exploreLoading = true;
@@ -650,7 +658,8 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                       fontSize: AppTheme.fontTitle2,
                       fontWeight: FontWeight.w700,
                       color: _titleColor)),
-              const SizedBox(width: 4),
+              // ✅ 2026-10-10 用户："拉绳离字间距大一些"：4 -> 10
+              const SizedBox(width: 10),
               JellyPullCord(
                 // ⚠️ 限高，否则绳子会把整行撑高导致同排控件错位。
                 // ⚠️ 2026-10-09：拉绳整体减半（绳自然高 20）⇒ 这里同步 40→20。
@@ -671,12 +680,16 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                   }
                 },
               ),
-              const SizedBox(width: 10),
-              Expanded(child: _searchField()),
             ],
           ),
         ),
         actions: [
+          // ✅ 2026-10-10 间距统一：搜索圆钮从 title 的 Expanded(tight 满宽)挪到
+          //    actions 首位 —— 原来展开式搜索框收起成 32 圆钮后被 tight 满宽
+          //    强行撑开、圆钮贴左，与右侧筛选/叠图标之间空一大截 ✗；
+          //    挪过来后三页结构一致：[搜索] 10 [筛选] 10 [叠图标] ✓
+          _searchField(),
+          const SizedBox(width: 10),
           // ✅ 用户 2026-10-07 要求：
           //   ① 右上角**去掉刷新按钮**（原来那个 refresh ✗ 已删）；
           //   ② 原来是「搜索源」(view_list) 按钮 ✗ —— 它和**下面源标签行最右侧**
@@ -713,7 +726,7 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
           //   · 其余 4 个动作叠在一起、左右滑动轮换 ✓
           //     （原来是 ··· 下拉菜单，现在换成滑动动作栏同款）
           // ⚠️ 用户要求（本轮）：右上角由「并排滑动动作栏」改成**叠图标控件** ——
-//   · 最前的**完整可见**（深色圆底 + `emphasized: true`）
+//   · 最前的**完整可见**（深色圆底）
 //   · 后面各露出一部分，**左右滑动**循环切换最前
 //   · **长按**竖向展开全部
 //   原来的 `JellySlidingActions` 已整体替换（筛选按钮仍单独保留在它左边）。
@@ -722,7 +735,6 @@ JellyIconDeck(
       JellyIconDeckItem(
         icon: Icons.history_rounded,
         tooltip: '浏览记录',
-      emphasized: true,
         onTap: () => Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const BrowseHistoryPage()),
@@ -1080,7 +1092,14 @@ JellyIconDeck(
   Widget _resultsList() {
     final groups = _groups;
     return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      // ✅ 2026-10-10 内容布局统一：横向 16->12、底部 24 固定 -> 底栏避让
+      //    （与漫画/图书/收藏页的 12 + JellyNavBar.contentBottomAvoid 对齐）
+      padding: EdgeInsets.only(
+        left: 12,
+        top: 4,
+        right: 12,
+        bottom: 12 + JellyNavBar.contentBottomAvoid,
+      ),
       physics: const AlwaysScrollableScrollPhysics(),
       itemCount: groups.length,
       itemBuilder: (c, i) => _bookTile(groups[i]),
@@ -1092,13 +1111,19 @@ JellyIconDeck(
     final groups = _groups;
     final cols = ReadingLayout().columns;
     return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+      padding: EdgeInsets.only(
+        left: 12,
+        top: 4,
+        right: 12,
+        bottom: 12 + JellyNavBar.contentBottomAvoid,
+      ),
       physics: const AlwaysScrollableScrollPhysics(),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        // ✅ 2026-10-10 卡片去掉作者行后内容变矮，ratio 0.52/0.56 -> 0.56/0.61
         crossAxisCount: cols,
-        mainAxisSpacing: 14,
+        mainAxisSpacing: 8,
         crossAxisSpacing: 12,
-        childAspectRatio: cols >= 5 ? 0.52 : 0.56,
+        childAspectRatio: cols >= 5 ? 0.56 : 0.61,
       ),
       itemCount: groups.length,
       itemBuilder: (c, i) => _bookGridTile(groups[i]),
@@ -1107,48 +1132,10 @@ JellyIconDeck(
 
   /// 分类浏览主体：源名·分类名标题行 + 分类弹窗按钮 + 封面网格
   Widget _exploreBody() {
-    final src = store.enabled.firstWhere(
-      (s) => s.id == _selectedSourceId,
-      orElse: () => store.enabled.first,
-    );
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 8, 2),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  // 板块流模式只显示源名（参考图 8581/8582 主体直接是分类板块）；
-                  // 单分类视图显示「源名·分类名」
-                  _exploreHomeMode
-                      ? src.name
-                      : '${src.name}·${_activeCat?.title ?? '分类'}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: AppTheme.fontTitle3,
-                    fontWeight: FontWeight.w700,
-                    color: _titleColor,
-                  ),
-                ),
-              ),
-              // 分类弹窗按钮（参考图 IMG_8428/8429：「xx·分类」标签云）
-              TextButton.icon(
-                onPressed: _showCategorySheet,
-                icon: const Icon(Icons.grid_view_rounded, size: 18),
-                label: const Text('分类'),
-                style: TextButton.styleFrom(
-                  foregroundColor: JellyTheme.primary,
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(child: _exploreGrid()),
-      ],
-    );
+    // ✅ 2026-10-10 用户：「源名称和分类去掉，筛选按钮本身就有分类」
+    //    → 整行删掉（源名/分类按钮都不留），主体直接是分类板块流；
+    //    分类入口保留在顶栏筛选弹窗（_showCategorySheet 仍被其调用）
+    return _exploreGrid();
   }
 
   Widget _exploreGrid() {
@@ -1202,15 +1189,27 @@ JellyIconDeck(
       );
     }
     if (_exploreList.isEmpty) {
+      // explore 出错（含"该源没有配置分类浏览"）→ 提供降级入口：
+      // 直接用内置浏览器打开书源主站（legado openBookSource 的语义）
+      if (_exploreError != null && _lastExploreSource != null) {
+        return _exploreFallback(_lastExploreSource!, _exploreError!);
+      }
       return _hint(_exploreError ?? '该分类暂时没有内容', Icons.auto_stories_outlined);
     }
     return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      // ✅ 2026-10-10 内容布局统一：横向 16->12、底部 24 固定 -> 底栏避让
+      //    （与漫画/图书/收藏页的 12 + JellyNavBar.contentBottomAvoid 对齐）
+      padding: EdgeInsets.only(
+        left: 12,
+        top: 4,
+        right: 12,
+        bottom: 12 + JellyNavBar.contentBottomAvoid,
+      ),
       physics: const AlwaysScrollableScrollPhysics(),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         // 分类浏览网格也跟随用户偏好列数（3/4/5）
         crossAxisCount: ReadingLayout().columns,
-        mainAxisSpacing: 14,
+        mainAxisSpacing: 8,
         crossAxisSpacing: 12,
         childAspectRatio: 0.56,
       ),
@@ -1321,16 +1320,33 @@ JellyIconDeck(
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               // 板块网格跟随用户偏好列数（3/4/5）
+              // ✅ 2026-10-10 卡片去掉作者/章节两行后内容变矮，ratio 0.56 -> 0.62/0.58
               crossAxisCount: ReadingLayout().columns,
-              mainAxisSpacing: 14,
+              mainAxisSpacing: 8,
               crossAxisSpacing: 12,
-              childAspectRatio: 0.56,
+              childAspectRatio: ReadingLayout().columns >= 5 ? 0.58 : 0.62,
             ),
             itemCount: items.length,
             itemBuilder: (context, i) => _exploreTile(items[i]),
           ),
       ],
     );
+  }
+
+  /// 从「最新章节」标题解析角标文本：`第 123 章…` / `Chapter 45` 等
+  /// → `123 章`；解析不出数字 → null（不显示角标）。纯本地正则，零网络。
+  static final RegExp _chNumRe = RegExp(
+    r'(?:第\s*(\d+)\s*[章话]|Chapter\s*#?\s*(\d+)|CH\.?\s*#?\s*(\d+))',
+    caseSensitive: false,
+  );
+
+  String? _chapterBadgeText(String lastChapter) {
+    if (lastChapter.isEmpty) return null;
+    final m = _chNumRe.firstMatch(lastChapter);
+    if (m == null) return null;
+    final n = m.group(1) ?? m.group(2) ?? m.group(3);
+    if (n == null || n.isEmpty) return null;
+    return '$n 章';
   }
 
   /// 分类网格条目：竖版封面 + 书名 + 作者（点击直接进详情）
@@ -1348,26 +1364,95 @@ JellyIconDeck(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: AspectRatio(
-              aspectRatio: 0.7, // 高 : 宽
-              child: r.coverUrl.isEmpty
-                  ? Container(
-                      color: JellyTheme.primary.withValues(alpha: 0.1),
-                      child: Icon(Icons.menu_book_rounded,
-                          size: 26, color: JellyTheme.primary),
-                    )
-                  : CachedNetworkImage(
-                      imageUrl: r.coverUrl,
-                      fit: BoxFit.cover,
-                      errorWidget: (_, __, ___) => Container(
-                        color: JellyTheme.primary.withValues(alpha: 0.1),
-                        child: Icon(Icons.menu_book_rounded,
-                            size: 26, color: JellyTheme.primary),
+          // 封面 + 左上角作者角标 + 右上角「N 章」更新角标
+          // （✅ 2026-10-10 用户：名称下的作者/最新章节行去掉，作者上封面左上角）
+          Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: AspectRatio(
+                  aspectRatio: 0.7, // 高 : 宽
+                  child: r.coverUrl.isEmpty
+                      ? Container(
+                          color: JellyTheme.primary.withValues(alpha: 0.1),
+                          child: Icon(Icons.menu_book_rounded,
+                              size: 26, color: JellyTheme.primary),
+                        )
+                      : CachedNetworkImage(
+                          imageUrl: r.coverUrl,
+                          fit: BoxFit.cover,
+                          errorWidget: (_, __, ___) => Container(
+                            color: JellyTheme.primary.withValues(alpha: 0.1),
+                            child: Icon(Icons.menu_book_rounded,
+                                size: 26, color: JellyTheme.primary),
+                          ),
+                        ),
+                ),
+              ),
+              if (r.author.trim().isNotEmpty)
+                Positioned(
+                  top: 4,
+                  left: 4,
+                  right: 36,
+                  child: Text(
+                    r.author,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: AppTheme.fontCaption,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      shadows: [
+                        Shadow(blurRadius: 4, color: Colors.black87),
+                        Shadow(blurRadius: 1, color: Colors.black),
+                      ],
+                    ),
+                  ),
+                ),
+              if (r.author.trim().isNotEmpty)
+                Positioned(
+                  top: 4,
+                  left: 4,
+                  right: 36,
+                  child: Text(
+                    r.author,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: AppTheme.fontCaption,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      shadows: [
+                        Shadow(blurRadius: 4, color: Colors.black87),
+                        Shadow(blurRadius: 1, color: Colors.black),
+                      ],
+                    ),
+                  ),
+                ),
+              if (_chapterBadgeText(r.lastChapter) != null)
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE5484D).withValues(alpha: 0.92),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      _chapterBadgeText(r.lastChapter)!,
+                      style: const TextStyle(
+                        fontSize: AppTheme.fontCaption,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-            ),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 6),
           // ✅ ① **书名居中** ✓（原来走默认左对齐 ✗）
@@ -1388,44 +1473,6 @@ JellyIconDeck(
               ),
             ),
           ),
-          if (r.author.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(
-                r.author,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: AppTheme.fontCaption,
-                    color: JellyTheme.textSecondary),
-              ),
-            ),
-          // ✅ ② **右下角：更新到哪 / 字数** ✓ —— 数据**搜索结果里本来就有** ✓✓
-          //   （`BookSourceResult.lastChapter` ✓ / `wordCount` ✓，见
-          //     `book_source_service.dart:29-30` ✓）→ **零额外网络请求** ✓✓
-          //   优先"最新章节" ✓（正是你要的"更新多少"✓）；为空退回字数 ✓；
-          //   两者都空则**不渲染** ✓（不编造"完本"✗ —— 模型里没有该字段 ✓）
-          if (r.lastChapter.isNotEmpty || r.wordCount.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Flexible(
-                    child: Text(
-                      r.lastChapter.isNotEmpty ? r.lastChapter : r.wordCount,
-                      textAlign: TextAlign.right,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: AppTheme.fontCaption,
-                        color: JellyTheme.textSecondary,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
         ],
       ),
     );
@@ -1638,8 +1685,49 @@ JellyIconDeck(
     );
   }
 
+  /// explore 错误降级卡：错误文案 + 「打开书源网站」按钮
+  /// （legado《书源显示问题修复总结》openBookSource：没有发现分类的源
+  /// 点击 → 打开书源主站；这里在错误场景提供同样出路）
+  Widget _exploreFallback(BookSource source, String error) {
+    final siteUrl = source.url.trim();
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.auto_stories_outlined,
+              size: 48, color: JellyTheme.textSecondary.withValues(alpha: 0.5)),
+          const SizedBox(height: 14),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: Text(error,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: AppTheme.fontSubhead,
+                    color: JellyTheme.textSecondary)),
+          ),
+          if (siteUrl.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        OnlineReaderPage(url: siteUrl, title: source.name),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.public_rounded, size: 18),
+              label: const Text('打开书源网站'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _hint(String text, IconData icon) => Center(
-        child: Column(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon,
@@ -1839,6 +1927,48 @@ JellyIconDeck(
                           placeholder: (_, __) => _bookCoverPlaceholder(),
                           errorWidget: (_, __, ___) => _bookCoverPlaceholder(),
                         ),
+                  // 左上角作者角标（✅ 2026-10-10 用户：作者行去掉，上封面左上角）
+                  if (first.author.trim().isNotEmpty)
+                    Positioned(
+                      top: 4,
+                      left: 4,
+                      right: 36,
+                      child: Text(
+                        first.author,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: AppTheme.fontCaption,
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          shadows: [
+                            Shadow(blurRadius: 4, color: Colors.black87),
+                            Shadow(blurRadius: 1, color: Colors.black),
+                          ],
+                        ),
+                      ),
+                    ),
+                  // 左上角作者角标（✅ 2026-10-10 用户：作者行去掉，上封面左上角）
+                  if (first.author.trim().isNotEmpty)
+                    Positioned(
+                      top: 4,
+                      left: 4,
+                      right: 36,
+                      child: Text(
+                        first.author,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: AppTheme.fontCaption,
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          shadows: [
+                            Shadow(blurRadius: 4, color: Colors.black87),
+                            Shadow(blurRadius: 1, color: Colors.black),
+                          ],
+                        ),
+                      ),
+                    ),
                   // 多源角标（>1 个来源才显示，提示可换源）
                   if (g.items.length > 1)
                     Positioned(
@@ -1881,23 +2011,6 @@ JellyIconDeck(
               ),
             ),
           ),
-          if (first.author.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: SizedBox(
-                width: double.infinity,
-                child: Text(
-                  first.author,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: AppTheme.fontCaption,
-                    color: JellyTheme.textSecondary,
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
     );

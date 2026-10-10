@@ -254,33 +254,78 @@ class AnalyzeUrl {
     validateStatus: (_) => true,
   ));
 
+  /// 普通 Dio 请求：发请求 → 按源声明 charset 解码 → 状态码/重定向收尾。
+  /// 正文作为返回值（重定向时同步更新本实例的 [url]）。
+  Future<String> _requestViaDio(Dio dio, Options options) async {
+    final Response<List<int>> response;
+    if (method?.toUpperCase() == 'POST') {
+      response = await dio.post<List<int>>(
+        url,
+        data: body,
+        options: options,
+      );
+    } else {
+      response = await dio.get<List<int>>(
+        url,
+        options: options,
+      );
+    }
+
+    final bytes = Uint8List.fromList(response.data ?? <int>[]);
+    final contentType = _extractHeaderValue(
+      response.headers['content-type'],
+    );
+    final effectiveCs = _normalizeCharset(charset) ??
+        _extractCharsetFromContentType(contentType) ??
+        _extractCharsetFromMeta(bytes);
+    final decoded = _decodeBody(bytes, charset, contentType);
+    AppLog.instance.d(
+        '[书源HTTP] ← ${response.statusCode} ${decoded.length}字符 '
+        'charset=${effectiveCs ?? 'utf8-容错'}');
+
+    if (response.statusCode != null && response.statusCode! >= 400) {
+      throw Exception('请求失败：HTTP ${response.statusCode}，URL：$url');
+    }
+    if (response.redirects.isNotEmpty) {
+      url = response.redirects.last.location.toString();
+    }
+    return decoded;
+  }
+
   /// 经**主 isolate 的本机代理**用真浏览器栈抓「渲染后 HTML」。
   ///
   /// 为什么不能直接调 `WebViewImageFetcher`：本类跑在 worker isolate，
   /// 而 WebView 是平台视图（只能在主 isolate 创建/驱动）⇒ 必须转一手。
   /// 通道与 `java.ajax` 完全一致（见 `sync_http_bridge.dart` / `http_proxy.dart`）。
+  /// ⚠️ **不抛异常**：任何失败都返回空串，由调用方回退普通请求 ✓
+  ///（见请求处的回退分支 —— WebView 不可用不该让整章没内容）。
   Future<String> _fetchViaWebView(String target) async {
     final port = SyncHttpBridge.proxyPort;
     if (port <= 0) {
-      throw Exception(
-          'WebView 抓取不可用：本机代理未就绪（需主 isolate 先启动 LegadoHttpProxy）');
+      AppLog.instance.w('[书源HTTP] webView 跳过：本机代理未就绪');
+      return '';
     }
-    final resp = await _localDio.get<String>(
-      'http://127.0.0.1:$port/',
-      options: Options(headers: <String, String>{
-        'x-legado-url': target,
-        'x-legado-method': 'GET',
-        'x-legado-browser': 'fetch',
-      }),
-    );
-    // 代理把失败原因放在 `x-legado-error-b64`（纯 ASCII 头）⇒ 转成异常，
-    // 不要静默返回空正文（会让上层以为是“页面没内容”而不是失败）。
-    final errB64 = resp.headers.value('x-legado-error-b64');
-    if (errB64 != null && errB64.isNotEmpty) {
-      final msg = utf8.decode(base64.decode(errB64), allowMalformed: true);
-      throw Exception('WebView 抓取失败：$msg');
+    try {
+      final resp = await _localDio.get<String>(
+        'http://127.0.0.1:$port/',
+        options: Options(headers: <String, String>{
+          'x-legado-url': target,
+          'x-legado-method': 'GET',
+          'x-legado-browser': 'fetch',
+        }),
+      );
+      // 代理把失败原因放在 `x-legado-error-b64`（纯 ASCII 头）
+      final errB64 = resp.headers.value('x-legado-error-b64');
+      if (errB64 != null && errB64.isNotEmpty) {
+        final msg = utf8.decode(base64.decode(errB64), allowMalformed: true);
+        AppLog.instance.w('[书源HTTP] webView 失败: $msg');
+        return '';
+      }
+      return resp.data ?? '';
+    } catch (e) {
+      AppLog.instance.w('[书源HTTP] webView 异常: $e');
+      return '';
     }
-    return resp.data ?? '';
   }
 
   void analyzeUrl() {
@@ -493,10 +538,17 @@ class AnalyzeUrl {
   String _getAbsoluteUrl(String urlStr) {
     if (urlStr.isEmpty) return baseUrl ?? '';
     if (urlStr.startsWith('http')) return urlStr;
-    if (baseUrl == null || baseUrl!.isEmpty) return urlStr;
+    final base = baseUrl;
+    if (base == null || base.isEmpty) return urlStr;
+    // ── 伪 URL base（如"光遇聚合"，bookSourceUrl 仅作源标识非真实地址）──
+    // 无 scheme 时 `Uri.parse(base).resolve(rel)` 会拼出"光遇聚合/search?..."
+    // 这种非法请求。JS 聚合源在规则里自己构造完整 URL，相对路径本就无处
+    // 可拼 —— 原样返回，让请求层报清晰错误，而不是拼出四不像的 URL。
+    if (!base.startsWith('http://') && !base.startsWith('https://')) {
+      return urlStr;
+    }
     try {
-      final base = Uri.parse(baseUrl!);
-      return base.resolve(urlStr).toString();
+      return Uri.parse(base).resolve(urlStr).toString();
     } catch (_) {
       return urlStr;
     }
@@ -607,46 +659,22 @@ class AnalyzeUrl {
       );
 
       if (useWebView) {
-        // ✅ 源声明了 `,{'webView': true}` ⇒ 改用**真浏览器栈**抓渲染后的 HTML
+        // ✅ 源声明了 `,{'webView': true}` ⇒ 先用**真浏览器栈**抓渲染后的 HTML
         //   （Cloudflare / 反爬站用 Dio 直连只能拿到挑战页）。
         //   ⚠️ 本类运行在 **worker isolate**，而 WebView 是平台视图（只能主 isolate
         //   驱动）⇒ 转经本机代理（主 isolate），与 `java.ajax` **同一条通道**
         //   （见 http_proxy.dart 的 `x-legado-browser`）。
         body = await _fetchViaWebView(url);
         AppLog.instance.d('[书源HTTP] ← webView ${body.length}字符 $url');
+        // 🔴 **WebView 是增强、不是必需**：未挂载 / 超时 / 失败 / 回空正文时
+        //   必须回退普通请求 ✗ —— 否则会把「本来用 Dio 能拿到内容」的站
+        //   也一起弄成“无内容”（= 在线阅读白屏）✗
+        if (body.trim().isEmpty) {
+          AppLog.instance.w('[书源HTTP] webView 无内容，回退普通请求: $url');
+          body = await _requestViaDio(dio, options);
+        }
       } else {
-        final Response<List<int>> response;
-        if (method?.toUpperCase() == 'POST') {
-          response = await dio.post<List<int>>(
-            url,
-            data: this.body,
-            options: options,
-          );
-        } else {
-          response = await dio.get<List<int>>(
-            url,
-            options: options,
-          );
-        }
-
-        final bytes = Uint8List.fromList(response.data ?? <int>[]);
-        final contentType = _extractHeaderValue(
-          response.headers['content-type'],
-        );
-        final effectiveCs = _normalizeCharset(charset) ??
-            _extractCharsetFromContentType(contentType) ??
-            _extractCharsetFromMeta(bytes);
-        body = _decodeBody(bytes, charset, contentType);
-        AppLog.instance.d(
-            '[书源HTTP] ← ${response.statusCode} ${body.length}字符 '
-            'charset=${effectiveCs ?? 'utf8-容错'}');
-
-        if (response.statusCode != null && response.statusCode! >= 400) {
-          throw Exception('请求失败：HTTP ${response.statusCode}，URL：$url');
-        }
-        if (response.redirects.isNotEmpty) {
-          url = response.redirects.last.location.toString();
-        }
+        body = await _requestViaDio(dio, options);
       }
 
       // 解码后统一检测「验证/反爬挑战页」（覆盖 Cloudflare、以及 PTCMS 等站点

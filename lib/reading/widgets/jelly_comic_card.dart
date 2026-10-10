@@ -25,6 +25,10 @@ class JellyComicCard extends StatefulWidget {
   /// 去掉收藏按钮、热度徽标与作者胶囊——名称位置不加收藏）
   final bool compact;
 
+  /// 更新角标：待看新章节数（>0 显示右上角红底 +N；null/0 不显示）。
+  /// 由 ShelfUpdateService（书架/收藏检查更新）计算后传入。
+  final int? updateCount;
+
   const JellyComicCard({
     super.key,
     required this.comic,
@@ -33,6 +37,7 @@ class JellyComicCard extends StatefulWidget {
     this.heroTag,
     this.showSourceBadge = false,
     this.compact = false,
+    this.updateCount,
   });
 
   @override
@@ -224,6 +229,30 @@ class _JellyComicCardState extends State<JellyComicCard>
                           ),
                         ),
                       ),
+                    // 右上角：更新角标（红底白字 +N，与左上源徽标错开）
+                    if ((widget.updateCount ?? 0) > 0)
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE5484D).withValues(alpha: 0.92),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '+${widget.updateCount}',
+                            style: const TextStyle(
+                              fontSize: AppTheme.fontCaption,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -236,9 +265,11 @@ class _JellyComicCardState extends State<JellyComicCard>
                 //   同一行卡片高度统一、不留底部空白（用户 2026-10-06 反馈
                 //   "名称栏太高、底下文字不满"）
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+                  // ✅ 2026-10-10 用户："封面和名称间距大了"：上边距 6->4、
+                  //    名称区 36->30（单行文字垂直富余同步收小）
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
                   child: SizedBox(
-                    height: 36,
+                    height: 30,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       // spaceEvenly：单标题时垂直居中；有章节时上下均匀分布

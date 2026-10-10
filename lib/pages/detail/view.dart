@@ -24,6 +24,7 @@ import '../../services/player_prefs.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/app_player.dart';
 import '../../widgets/ios_av_player.dart';
+import '../../widgets/ks_player.dart';
 import '../../widgets/mpv_app_player.dart';
 import '../../widgets/video_player.dart';
 import '../../widgets/video_player_pip.dart';
@@ -604,7 +605,7 @@ class _DetailPageState extends State<DetailPage> {
       _player!.open(AppMedia(url, httpHeaders: headers, start: start));
       return;
     }
-    // 按引擎创建：iOS 默认 IosAvPlayer（与小窗共用 AVPlayer）；MPV 备用
+    // 按引擎创建：iOS 默认 IosAvPlayer（与小窗共用 AVPlayer）；KSPlayer 备用（全格式）；MPV 兜底
     final engine = PlayerPrefs.instance.vodEngine.value;
     if (engine == PlayerEngine.mpv) {
       final mpv = MpvAppPlayer(config: const AppConfig(title: 'TVBox'));
@@ -613,6 +614,8 @@ class _DetailPageState extends State<DetailPage> {
         buffer: PlayerPrefs.instance.bufferMode.value,
       );
       _player = mpv;
+    } else if (engine == PlayerEngine.ksplayer && Platform.isIOS) {
+      _player = KSPlayer(config: const AppConfig(title: 'TVBox'));
     } else if (Platform.isIOS) {
       _player = IosAvPlayer(config: const AppConfig(title: 'TVBox'));
     } else {

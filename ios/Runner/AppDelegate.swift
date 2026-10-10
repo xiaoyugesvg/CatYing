@@ -83,6 +83,17 @@ import AVFoundation
       print("[AppDelegate] ❌ 无法获取 AvEngine 的 registrar")
     }
 
+    // 注册全局唯一 KSPlayer（第四播放核心「FF」：FFmpeg + Metal，MKV 等全格式）
+    if let ksRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "KSEngine") {
+      KSEngine.shared.register(messenger: ksRegistrar.messenger())
+      ksRegistrar.register(
+        KSPlayerViewFactory(messenger: ksRegistrar.messenger()),
+        withId: "ks_player_view"
+      )
+    } else {
+      print("[AppDelegate] ❌ 无法获取 KSEngine 的 registrar")
+    }
+
     // 注册 TTS（听书朗读）
     //
     // 用系统自带的 AVSpeechSynthesizer，**不引第三方插件**：

@@ -16,6 +16,7 @@ import '../services/sync_service.dart';
 import '../services/book_favorites_service.dart';
 import '../services/book_reading_progress_service.dart';
 import '../services/bookshelf_service.dart';
+import '../services/shelf_update_service.dart';
 import '../source/adapter.dart';
 import '../source/source_manager.dart';
 import '../services/download_service.dart';
@@ -149,6 +150,8 @@ class _BookshelfPageState extends State<BookshelfPage>
       }
     });
     _maybeTriggerGuide();
+    // 设置开启「启动时检查书架更新」时后台扫描（服务内有冷却与互斥）
+    ShelfUpdateService.instance.scanShelfAndFavorites();
     // 监听外部多选触发（底部导航「书架」上滑）
     widget.selectTrigger?.addListener(_onExternalSelectTrigger);
   }
@@ -3225,6 +3228,7 @@ class _ComicShelfTab extends StatelessWidget {
       listenable: Listenable.merge([
         BookshelfService(),
         ReadingProgressService(),
+        ShelfUpdateService.instance,
       ]),
       builder: (context, _) {
         final items = resolveShelfItems(
@@ -3286,6 +3290,8 @@ class _ComicShelfTab extends StatelessWidget {
                 progressLabel: progressLabel,
                 sourceLabel: sourceLabel,
                 sourceId: sourceId,
+                updateCount: ShelfUpdateService.instance.newChapters(
+                    ShelfUpdateService.keyForComic(c.pathWord)),
               ),
             );
           }
@@ -3752,6 +3758,7 @@ class _ShelfEntry {
   final String? formatLabel; // 图书格式角标（EPUB/MOBI/PDF…），漫画为 null
   final String? sourceLabel; // 漫画下载源名角标（如「拷贝漫画」），图书/未下载为 null
   final String? sourceId; // 漫画所属源 id（封面防盗链头用），图书为 null
+  final int? updateCount; // 更新角标（新话数），仅漫画条目有值
 
   _ShelfEntry({
     required this.id,
@@ -3768,6 +3775,7 @@ class _ShelfEntry {
     this.formatLabel,
     this.sourceLabel,
     this.sourceId,
+    this.updateCount,
   });
 }
 
@@ -3846,6 +3854,7 @@ class _BookshelfRow extends StatelessWidget {
               formatLabel: e.formatLabel,
               sourceLabel: e.sourceLabel,
               sourceId: e.sourceId,
+              updateCount: e.updateCount,
               isSelecting: isSelecting,
               selected: selectedIds.contains(e.itemId),
             ),
@@ -3935,6 +3944,7 @@ class _ShelfCover extends StatefulWidget {
   final String? formatLabel;
   final String? sourceLabel;
   final String? sourceId; // 封面防盗链头用
+  final int? updateCount; // 更新角标（新话数），仅漫画条目有值
   final bool isSelecting;
   final bool selected;
 
@@ -3948,6 +3958,7 @@ class _ShelfCover extends StatefulWidget {
     this.formatLabel,
     this.sourceLabel,
     this.sourceId,
+    this.updateCount,
     this.isSelecting = false,
     this.selected = false,
   });
@@ -4036,6 +4047,30 @@ class _ShelfCoverState extends State<_ShelfCover> {
                     ),
                     child: Text(
                       widget.formatLabel ?? widget.sourceLabel!,
+                      style: const TextStyle(
+                        fontSize: AppTheme.fontCaption,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              // 右上角：更新角标（红底白字 +N，与左上格式/源徽标错开）
+              if ((widget.updateCount ?? 0) > 0 && !widget.isSelecting)
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE5484D).withValues(alpha: 0.92),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '+${widget.updateCount}',
                       style: const TextStyle(
                         fontSize: AppTheme.fontCaption,
                         color: Colors.white,
