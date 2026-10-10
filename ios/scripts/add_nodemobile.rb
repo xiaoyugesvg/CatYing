@@ -181,7 +181,9 @@ puts "💾 已保存 #{pbxproj_file}"
 puts ''
 puts '🔍 最终状态：'
 puts "  - Runner target sources: #{runner_target.source_build_phase.files_references.map(&:path).compact.uniq.join(', ')}"
-puts "  - Runner target frameworks: #{runner_target.frameworks_build_phase.files_references.map(&:path).compact.uniq.join(', ')}"
+# 注意：SPM product 引用（如 KSPlayer in Frameworks）只有 productRef 没有 fileRef，
+# files_references 里会混入 nil，必须先 compact 再取 path
+puts "  - Runner target frameworks: #{runner_target.frameworks_build_phase.files_references.compact.map(&:path).compact.uniq.join(', ')}"
 embed_phase&.files_references&.each do |f|
   puts "  - Embed: #{f.path}"
 end
