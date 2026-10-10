@@ -208,8 +208,11 @@ jobs:
           # 全部手写 Swift 源都要在 target 里。
           # 早期只查了 TtsEngine/BackgroundAudio —— NodeJSBridge/PipManager/
           # AvEngine/AvPlayerViewFactory 漏了没查，将来谁改名或漏登记都发现不了。
+          # KSEngine.swift（KSPlayer 第四核心）是直接手动登记进 pbxproj 的，
+          # 不走上面 add_nodemobile.rb 的 --extra-swift，同样纳入兜底校验。
           for F in TtsEngine.swift ExceptionGuard.m BackgroundAudio.swift AppDelegate.swift \
-                   NodeJSBridge.swift PipManager.swift AvEngine.swift AvPlayerViewFactory.swift; do
+                   NodeJSBridge.swift PipManager.swift AvEngine.swift AvPlayerViewFactory.swift \
+                   KSEngine.swift; do
             if grep -q "$F in Sources" "$PBX"; then
               echo "✅ $F 已在 Sources build phase"
             else
@@ -217,6 +220,14 @@ jobs:
               MISSING=1
             fi
           done
+          # KSPlayer 是 SPM 包依赖（XCRemoteSwiftPackageReference 固定 revision），
+          # 只有 productRef 没有 fileRef —— 丢了会报 "No such module 'KSPlayer'"
+          if grep -q "KSPlayer in Frameworks" "$PBX"; then
+            echo "✅ KSPlayer SPM 依赖已在 Frameworks build phase"
+          else
+            echo "❌ KSPlayer in Frameworks 丢失 —— Xcode 编译报 No such module 'KSPlayer'"
+            MISSING=1
+          fi
           for F in ExceptionGuard.h; do
             if grep -q "$F" "$PBX"; then
               echo "✅ $F 已登记"

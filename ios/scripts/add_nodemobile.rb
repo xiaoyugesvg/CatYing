@@ -184,6 +184,6 @@ puts "  - Runner target sources: #{runner_target.source_build_phase.files_refere
 # 注意：SPM product 引用（如 KSPlayer in Frameworks）只有 productRef 没有 fileRef，
 # files_references 里会混入 nil，必须先 compact 再取 path
 puts "  - Runner target frameworks: #{runner_target.frameworks_build_phase.files_references.compact.map(&:path).compact.uniq.join(', ')}"
-embed_phase&.files_references&.each do |f|
+embed_phase&.files_references&.compact&.each do |f|
   puts "  - Embed: #{f.path}"
 end
