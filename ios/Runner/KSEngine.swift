@@ -178,7 +178,9 @@ final class KSEngine: NSObject {
     pipKvo = nil
     pipSink = nil
     if pipEventActive, let l = playerLayer {
-      l.player.pipController?.stop(restoreUserInterface: false)
+      // KS 的 pipController.stop(restoreUserInterface:) 是 internal，跨模块不可调；
+      // 它内部就是设恢复标志 + 调 AVKit 公开 API，传 false 语义下直接调公开 API 等价
+      l.player.pipController?.stopPictureInPicture()
       pipEventActive = false
     }
     playerLayer?.removeFromSuperview()
@@ -354,7 +356,8 @@ final class KSEngine: NSObject {
       l.isPipActive = false
     } else if pipEventActive {
       // 系统自动小窗（isPipActive 未被置 true 的路径）：直接停
-      l.player.pipController?.stop(restoreUserInterface: false)
+      // 同上：KS 的 stop(restoreUserInterface:) internal，用 AVKit 公开 API 替代
+      l.player.pipController?.stopPictureInPicture()
     }
   }
 }
