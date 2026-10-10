@@ -19,6 +19,7 @@
 		A1B2C3D4000000000000000C /* TtsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4000000000000000B /* TtsEngine.swift */; };
 		A1B2C3D40000000000000010 /* MusicNowPlaying.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000011 /* MusicNowPlaying.swift */; };
 		A1B2C3D40000000000000012 /* KSEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000013 /* KSEngine.swift */; };
+		A1B2C3D40000000000000016 /* KSPlayer in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000015 /* KSPlayer */; };
 		A1B2C3D4000000000000000E /* ExceptionGuard.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4000000000000000D /* ExceptionGuard.m */; };
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
@@ -72,6 +73,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				2431C9E3151C7449D0D1C0F4 /* Pods_Runner.framework in Frameworks */,
+				A1B2C3D40000000000000016 /* KSPlayer in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -171,6 +173,9 @@
 			);
 			dependencies = (
 			);
+			packageProductDependencies = (
+				A1B2C3D40000000000000015 /* KSPlayer */,
+			);
 			name = Runner;
 			productName = Runner;
 			productReference = 97C146EE1CF9000F007C117D /* Runner.app */;
@@ -203,6 +208,9 @@
 			productRefGroup = 97C146EF1CF9000F007C117D /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
+			packageReferences = (
+				A1B2C3D40000000000000014 /* XCRemoteSwiftPackageReference "KSPlayer" */,
+			);
 			targets = (
 				97C146ED1CF9000F007C117D /* Runner */,
 			);
@@ -599,6 +607,23 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-	};
-	rootObject = 97C146E61CF9000F007C117D /* Project object */;
+/* Begin XCRemoteSwiftPackageReference section */
+		A1B2C3D40000000000000014 /* XCRemoteSwiftPackageReference "KSPlayer" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/kingslay/KSPlayer.git";
+			requirement = {
+				kind = revision;
+				revision = 95e6e6137428050eba57c88590af24e524a3f048;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+/* Begin XCSwiftPackageProductDependency section */
+		A1B2C3D40000000000000015 /* KSPlayer */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D40000000000000014 /* XCRemoteSwiftPackageReference "KSPlayer" */;
+			productName = KSPlayer;
+		};
+/* End XCSwiftPackageProductDependency section */
+        };
+        rootObject = 97C146E61CF9000F007C117D /* Project object */;
 }
