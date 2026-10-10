@@ -132,7 +132,14 @@ class _JellyIconDeckState extends State<JellyIconDeck> {
       final item = widget.items[i];
       final isFront = i == _front;
       children.add(
-        Positioned(
+        // 用 AnimatedPositioned：`_front` 变化（滑动/点击切换）时
+        // 每个图标**动画**滑到新位置 ⇒ "丝滑切换" ✓（原来是 `Positioned`，
+        // 换张是"啪"地跳过去 ✗）。拖动中时长设为 0，保证**跟手**不滞后 ✓。
+        AnimatedPositioned(
+          duration: _dragging
+              ? Duration.zero
+              : const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
           left: _leftOf(i),
           top: 3,
           child: _button(
@@ -156,7 +163,11 @@ class _JellyIconDeckState extends State<JellyIconDeck> {
         _dragDx = 0;
       }),
       onHorizontalDragUpdate: (d) => setState(() {
-        _dragDx += d.delta.dx;
+        // 🔴 **限制跟手位移**：原来 `_dragDx` 无上限 ⇒ 一划就把整叠
+        // 拖出屏幕（用户实测："能整个滑动走" ✗）。这里夹在半个图标宽内，
+        // 只做"跟手反馈"；松手后由 `AnimatedPositioned` 丝滑归位/换张 ✓。
+        final maxFollow = widget.size * 0.5;
+        _dragDx = (_dragDx + d.delta.dx).clamp(-maxFollow, maxFollow);
       }),
       onHorizontalDragEnd: (d) {
         final v = d.primaryVelocity ?? 0;

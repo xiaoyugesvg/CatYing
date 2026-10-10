@@ -19,6 +19,7 @@ import '../source/source_manager.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/bookshelf_icon.dart';
 import '../widgets/jelly_nav_bar.dart';
+import '../widgets/jelly_nav_rail.dart';
 import '../widgets/notification_popup.dart';
 import '../widgets/theme_background.dart';
 import 'shell_embedded_page.dart';
@@ -38,8 +39,17 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage>
+    with SingleTickerProviderStateMixin {
   late NavTab _currentTab; // 当前选中的 tab
+
+  /// 切 tab 的进场动画（0→1）：新 tab 内容**淡入 + 从点击方向轻微滑入** ✓
+  /// ⚠️ 动画只作用在内容整块上，`IndexedStack` 本身不重建
+  ///   ⇒ 各 tab 的状态（滚动位置 / 播放等）照常保留 ✓
+  late final AnimationController _tabAnim;
+
+  /// 进场方向：+1 = 从右滑入（切到右边的 tab），-1 = 从左滑入 ✓
+  double _tabDir = 1;
 
   /// 书架页外部触发多选（底部导航「书架」上滑时自增，书架页监听进入多选模式）
   final ValueNotifier<int> _shelfSelectTrigger = ValueNotifier(0);
@@ -60,6 +70,11 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _currentTab = SettingsService().defaultHomePage.toNavTab();
+    // 切 tab 动画：初始即"已落位"（value = 1），避免首帧就先淡入一次 ✓
+    _tabAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 240),
+    )..value = 1;
     // 监听设置变化（默认首页、可见 tab 变化时响应）
     SettingsService().addListener(_onSettingsChanged);
   }
@@ -68,6 +83,7 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     SettingsService().removeListener(_onSettingsChanged);
     _shelfSelectTrigger.dispose();
+    _tabAnim.dispose();
     super.dispose();
   }
 
@@ -79,7 +95,90 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// tab 内容：`IndexedStack` **保各 tab 状态**（滚动位置等 ✓）+
+  /// 切换时给整块内容一个**淡入 + 从点击方向轻微滑入**的进场动画 ✓。
+  /// 内嵌子页（书源页 ↔ 图书页）与 tab 内容之间的**滑入 / 滑出**切换。
+  /// 从 `build` 里抽出来：宽屏左侧竖栏与窄屏底部栏**两条路径共用同一份内容** ✓。
+  Widget _embeddedOrTabs(int currentIndex, List<Widget> pages) {
+    return ValueListenableBuilder<Widget?>(
+      valueListenable: shellEmbeddedPage,
+      builder: (_, embedded, __) {
+        // ✅ 内嵌子页（书源页 ↔ 图书页）**滑入 / 滑出**，不再是"瞬间替换" ✓
+        //   · 打开：内嵌页从右滑入，压在底下的 tab 内容**不动** ✓
+        //   · 关闭：内嵌页向右滑出，tab 内容原地露出 ✓
+        //   ⇒ 两层永不互相穿过（用户实测过"界面切换有点重叠"✗）
+        final opening = embedded != null;
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 280),
+          layoutBuilder: (current, previous) => Stack(
+            fit: StackFit.expand,
+            children: [
+              ...previous,
+              if (current != null) current,
+            ],
+          ),
+          transitionBuilder: (child, anim) {
+            // 只有**内嵌页**动：开 = 进场（正向），关 = 退场（反向）；
+            // tab 内容始终不动 ✓
+            final moves = opening
+                ? anim.status != AnimationStatus.reverse
+                : anim.status == AnimationStatus.reverse;
+            if (!moves) return child;
+            return SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(1, 0),
+                end: Offset.zero,
+              ).animate(CurvedAnimation(
+                parent: anim,
+                curve: Curves.easeOutCubic,
+                reverseCurve: Curves.easeInCubic,
+              )),
+              child: child,
+            );
+          },
+          child: embedded ?? _tabContent(currentIndex, pages),
+        );
+      },
+    );
+  }
+
+  Widget _tabContent(int currentIndex, List<Widget> pages) {
+    return AnimatedBuilder(
+      animation: _tabAnim,
+      builder: (context, child) {
+        final t = Curves.easeOutCubic.transform(_tabAnim.value);
+        return Opacity(
+          // 从 0.2 淡入（不从 0 —— 全透明会先闪一下空白 ✗）
+          opacity: 0.2 + 0.8 * t,
+          child: Transform.translate(
+            offset: Offset(_tabDir * 24 * (1 - t), 0),
+            child: child,
+          ),
+        );
+      },
+      child: IndexedStack(index: currentIndex, children: pages),
+    );
+  }
+
   /// 底部导航栏上滑回调：书架 tab 上滑唤起批量多选（参考 cmbok 引导）
+  /// 导航项点击（底部胶囊栏 + 宽屏左侧竖栏**共用** ✓，避免两处逻辑各写一遍）
+  void _onNavTap(int index, List<NavTab> visible, int currentIndex) {
+    setState(() {
+      // 切 tab 进场动画：按"往左 / 往右"给个方向 ✓
+      if (index != currentIndex) {
+        _tabDir = index > currentIndex ? 1 : -1;
+        _tabAnim.forward(from: 0);
+      }
+      _currentTab = visible[index];
+      // 内嵌页（书源页等）打开时，点导航栏要先退出内嵌页：
+      // 否则 body 一直被 embedded 占据，界面切不过去
+      // （用户 2026-10-06 反馈"书源页悬浮导航栏点击没反应"）
+      if (shellEmbeddedPage.value != null) {
+        shellEmbeddedPage.value = null;
+      }
+    });
+  }
+
   void _onNavSlideUp(int index) {
     final visible = SettingsService().visibleNavTabs;
     if (index < 0 || index >= visible.length) return;
@@ -365,6 +464,12 @@ class _HomePageState extends State<HomePage> {
 
         // 背景置于 Scaffold 外层全屏：键盘弹出时只压缩 Scaffold（前景避让），
         // 背景保持原尺寸被键盘自然遮挡，避免底部动画被顶到键盘上方、且随键盘逐帧重排卡顿
+        // ✅ 宽屏（**只在 iPad 触发**：宽 ≥ 800 且短边 ≥ 600）→ 底部胶囊栏换成
+        //   **左侧竖向悬浮栏**（参考 cmbok 的宽屏形态 ✓）。
+        //   ⚠️ 为什么还要判短边：iPhone 横屏最宽能到 932（≥800 ✗ 会误触发），
+        //   但它短边只有 ~430 ⇒ 用短边 ≥ 600 把 iPhone 排除掉，**只在 iPad 生效** ✓。
+        final size = MediaQuery.sizeOf(context);
+        final useRail = size.width >= 800 && size.shortestSide >= 600;
         return Stack(
           fit: StackFit.expand,
           children: [
@@ -379,36 +484,37 @@ class _HomePageState extends State<HomePage> {
                 children: [
                   const NotificationPopup(),
                   Expanded(
-                    // ✅ **内嵌子页优先，且底栏始终由外壳渲染**（本轮重构 ✓）
-                    //   来源 = `shell_embedded_page.dart` 的全局 `ValueNotifier` ✓
-                    //   ⇒ 书源页 / 搜索页用它打开（不再 `Navigator.push` 全屏 ✗）
-                    //     ⇒ **底部胶囊导航栏照常显示** ✓✓（与漫画/图书页一致 ✓）
-                    child: ValueListenableBuilder<Widget?>(
-                      valueListenable: shellEmbeddedPage,
-                      builder: (_, embedded, __) =>
-                          embedded ??
-                          IndexedStack(index: currentIndex, children: pages),
-                    ),
+                    child: useRail
+                        // ✅ iPad（宽 ≥ 800 且短边 ≥ 600）：左侧竖栏 + 内容（内容自动让位 ✓）
+                        ? Row(
+                            children: [
+                              JellyNavRail(
+                                currentIndex: currentIndex,
+                                onTap: (i) => _onNavTap(i, visible, currentIndex),
+                                onLongPress: _onNavLongPress,
+                                items: navItems,
+                              ),
+                              Expanded(
+                                child: _embeddedOrTabs(currentIndex, pages),
+                              ),
+                            ],
+                          )
+                        : _embeddedOrTabs(currentIndex, pages),
                   ),
                 ],
               ),
               // 果冻风底部导航（支持悬浮胶囊样式）
-              bottomNavigationBar: JellyNavBar(
-                currentIndex: currentIndex,
-                floating: floating,
-                onTap: (index) => setState(() {
-                  _currentTab = visible[index];
-                  // 内嵌页（书源页等）打开时，点导航栏要先退出内嵌页：
-                  // 否则 body 一直被 embedded 占据，界面切不过去
-                  // （用户 2026-10-06 反馈"书源页悬浮导航栏点击没反应"）
-                  if (shellEmbeddedPage.value != null) {
-                    shellEmbeddedPage.value = null;
-                  }
-                }),
-                onLongPress: _onNavLongPress,
-                onSlideUp: _onNavSlideUp,
-                items: navItems,
-              ),
+              // ✅ iPad 宽屏已改用左侧竖栏 ⇒ 这里返回 null（两者只显示一个 ✓）
+              bottomNavigationBar: useRail
+                  ? null
+                  : JellyNavBar(
+                      currentIndex: currentIndex,
+                      floating: floating,
+                      onTap: (index) => _onNavTap(index, visible, currentIndex),
+                      onLongPress: _onNavLongPress,
+                      onSlideUp: _onNavSlideUp,
+                      items: navItems,
+                    ),
             ),
           ],
         );

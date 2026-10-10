@@ -652,8 +652,9 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
                       color: _titleColor)),
               const SizedBox(width: 4),
               JellyPullCord(
-                // ⚠️ 限高，否则绳子把整行撑到 50px 导致同排控件错位
-                height: 40,
+                // ⚠️ 限高，否则绳子会把整行撑高导致同排控件错位。
+                // ⚠️ 2026-10-09：拉绳整体减半（绳自然高 20）⇒ 这里同步 40→20。
+                height: 20,
                 tooltip: '切换到图书',
                 // 书源页是 push 进来的，所以"切回图书"就是 pop。
                 // ✅ **内嵌模式下的返回**（本轮重构 ✓）：本页现在由**外壳**渲染 ✓

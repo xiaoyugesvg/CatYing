@@ -130,11 +130,20 @@ class AppLog {
   /// 敏感信息（URL 里的 api_key/token）已由 [redactUrl] 脱敏。
   static const bool kLogEnabled = true;
 
-  File? _logFile; // app.log
-  File? _jsonlFile; // app.jsonl
+  File? _logFile; // app_YYYY-MM-DD.log
+  File? _jsonlFile; // app_YYYY-MM-DD.jsonl
   String _logPath = '';
   String _jsonlPath = '';
   bool _initialized = false;
+
+  /// 日志目录（按天分文件后，要在这里找超期文件清理）
+  Directory? _runtimeDir;
+
+  /// 当前文件对应的日期戳（`YYYY-MM-DD`）—— 跨天时自动换新文件 ✓
+  String _dateStamp = '';
+
+  /// 日志保留天数：按天分文件后，超期的自动删除（原来单文件只能靠 2MB 滚动）
+  static const int _keepDays = 7;
 
   /// 写文件串行化: 所有写操作挂到 chain 末尾, 保证 UTF-8 不截断 + 顺序不乱
   Future<void> _writeChain = Future<void>.value();
@@ -160,10 +169,11 @@ class AppLog {
       if (!await runtimeDir.exists()) {
         await runtimeDir.create(recursive: true);
       }
-      _logFile = File('${runtimeDir.path}/app.log');
-      _logPath = _logFile!.path;
-      _jsonlFile = File('${runtimeDir.path}/app.jsonl');
-      _jsonlPath = _jsonlFile!.path;
+      _runtimeDir = runtimeDir;
+      // ✅ 改成**按天分文件**：`app_2026-10-09.log` / `app_2026-10-09.jsonl`
+      //   （cmbok 就是这个写法，清理 / 归档都方便 ✓）。
+      //   跨天不用重启 App —— `_writeBoth` 每次写之前会 `_ensureToday()` 自动换文件 ✓。
+      await _ensureToday(runtimeDir);
       _initialized = true;
 
       // 启动标记
@@ -587,9 +597,12 @@ class AppLog {
 
   /// 串行化双写 (human 格式 + JSON 格式)
   void _writeBoth(String humanLine, String jsonLine) {
-    _writeChain = _writeChain.then((_) async {
-      try {
-        await _maybeRotate(_logFile);
+  _writeChain = _writeChain.then((_) async {
+  try {
+  // 跨天 → 换成当天的文件（每天一个，方便清理 / 归档 ✓）
+  final dir = _runtimeDir;
+  if (dir != null) await _ensureToday(dir);
+  await _maybeRotate(_logFile);
         await _logFile?.writeAsString('$humanLine\n',
             mode: FileMode.append, flush: true);
         await _maybeRotate(_jsonlFile);
@@ -614,6 +627,42 @@ class AppLog {
       } catch (e) { /* ignore */ }
     });
     await _writeChain;
+  }
+
+  /// 当前日期戳 `YYYY-MM-DD`。
+  String _stamp() {
+    final n = DateTime.now();
+    final m = n.month.toString().padLeft(2, '0');
+    final d = n.day.toString().padLeft(2, '0');
+    return '${n.year}-$m-$d';
+  }
+
+  /// 保证"正在写的文件"是**今天**的（跨天自动换新文件 ✓），并顺手清理超期日志。
+  Future<void> _ensureToday(Directory dir) async {
+    final stamp = _stamp();
+    if (stamp == _dateStamp && _logFile != null) return;
+    _dateStamp = stamp;
+    _logFile = File('${dir.path}/app_$stamp.log');
+    _jsonlFile = File('${dir.path}/app_$stamp.jsonl');
+    _logPath = _logFile!.path;
+    _jsonlPath = _jsonlFile!.path;
+    await _pruneOldLogs(dir);
+  }
+
+  /// 删掉超过 [_keepDays] 天的 `app_*`（含 `.log` / `.jsonl` / 滚动出来的 `.1`）。
+  /// ⚠️ 只碰 `app_` 前缀：Node.js 端写的 `node.log` 不归这里管 ✗。
+  Future<void> _pruneOldLogs(Directory dir) async {
+    try {
+      final cutoff = DateTime.now().subtract(const Duration(days: _keepDays));
+      for (final e in dir.listSync()) {
+        if (e is! File) continue;
+        final name = e.uri.pathSegments.last;
+        if (!name.startsWith('app_')) continue;
+        try {
+        if (e.statSync().modified.isBefore(cutoff)) e.deleteSync();
+        } catch (_) {}
+      }
+    } catch (_) {}
   }
 
   /// 文件大小超限滚动 (rename .log -> .log.1, 保留最近 1 个备份)

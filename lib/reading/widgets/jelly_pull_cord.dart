@@ -20,8 +20,9 @@ import '../theme/jelly_theme.dart';
 /// 直接 CustomPaint 画：一条线 + 一个环，天然对齐、随尺寸缩放。
 ///
 /// ── 尺寸依据 ──────────────────────────────────────────────────
-/// 从用户截图放大后量得（原图 1284px 宽，3x 屏）：
-///   绳长约 50 逻辑像素、绳粗约 2、圆环外径约 16、环描边约 1.5。
+/// 初版按截图量得：绳长约 50、绳粗约 2、环外径约 16、环描边约 1.5；
+/// 之后按用户要求**逐次缩小**（详见文件末尾的尺寸常量）。
+/// 当前值约为初版的一半：绳高 20、绳粗 1、环外径 6、环描边 0.75。
 class JellyPullCord extends StatefulWidget {
   const JellyPullCord({
     super.key,
@@ -116,10 +117,12 @@ class _JellyPullCordState extends State<JellyPullCord> {
 }
 
 // 尺寸常量（用户多次要求"拉绳图标再小点"：环 16→12、绳高 50→40）
-const double _cordHeight = 40;
-const double _lineWidth = 2;
-const double _ringSize = 12;
-const double _ringStroke = 1.5;
+// ⚠️ 2026-10-09 用户再次要求"太大，变成现在的一半大小"
+//   ⇒ 整体减半：绳高 40→20、绳粗 2→1、环外径 12→6、环描边 1.5→0.75
+const double _cordHeight = 20;
+const double _lineWidth = 1;
+const double _ringSize = 6;
+const double _ringStroke = 0.75;
 
 /// 组件宽度 = 绳粗与环外径的较大者（环比线粗，所以实际就是环宽）。
 /// 单独抽成常量是为了让测试能直接断言，避免以后再写成"两者相加"。

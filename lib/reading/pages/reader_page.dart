@@ -97,6 +97,9 @@ class _ReaderPageState extends State<ReaderPage> {
   /// 是否首次加载（仅首次加载恢复续读页码，切章节不恢复）
   bool _isInitialLoad = true;
 
+  /// 记住的缩放倍率（rememberZoom 开启时恢复）
+  double _savedZoomScale = 1.0;
+
   /// 每次加载自增，作为列表 key 的一部分，确保 ScrollablePositionedList
   /// 每次加载都是全新实例（不复用 PageStorage 历史偏移），切章节/切回已读
   /// 章节都从第 0 页开始，避免连点切章节时页码停留在旧位置。
@@ -245,6 +248,9 @@ class _ReaderPageState extends State<ReaderPage> {
     SettingsService().addListener(_onReaderSettingsChanged);
     ReaderOverrideService().addListener(_onReaderSettingsChanged);
     _builtInkMode = SettingsService().inkScreenMode;
+    // 恢复记住的缩放倍率（仅 rememberZoom 开启时生效于 initialScale）
+    _savedZoomScale = ReadingProgressService()
+        .getZoomScale(widget.comic.pathWord);
     // 沉浸阅读：延后到路由转场结束再隐藏顶部状态栏（保留底部导航栏），
     // 避免系统栏切换与 MaterialPageRoute 转场叠加造成进入卡顿。
     Future.delayed(const Duration(milliseconds: 350), () {
@@ -2503,12 +2509,24 @@ class _ReaderPageState extends State<ReaderPage> {
                 : _images[index].startsWith('data:')
                     ? _dataProviderOf(_images[index])
                     : _imageProviderOf(_images[index]),
-            initialScale: PhotoViewComputedScale.contained,
+            initialScale: (SettingsService().rememberZoom && _savedZoomScale > 1.0)
+                ? _savedZoomScale
+                : PhotoViewComputedScale.contained,
             minScale: PhotoViewComputedScale.contained,
             // 关掉开关时 maxScale 与 contained 相同 → 无法放大。
             maxScale: allowZoom
                 ? PhotoViewComputedScale.covered * 2
                 : PhotoViewComputedScale.contained,
+            onScaleEnd: (context, details, controllerValue) {
+              if (!SettingsService().rememberZoom) return;
+              final scale = controllerValue.scale ?? 1.0;
+              if (scale > 1.0) {
+                ReadingProgressService().setZoomScale(
+                  widget.comic.pathWord,
+                  scale,
+                );
+              }
+            },
             heroAttributes: PhotoViewHeroAttributes(tag: 'image_$index'),
             errorBuilder: (context, error, stackTrace) => Center(
               child: Column(

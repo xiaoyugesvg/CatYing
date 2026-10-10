@@ -32,9 +32,8 @@
 /// ── 已知取舍（如实标注）──────────────────────────────────────
 /// · `bsExplore`（发现页）**暂未接管** ⇒ 返回 null 走 Node（其分类/列表契约
 ///   与 `ExploreResult` 的映射还需单独核对）。
-/// · `bsContent` 的契约无法表达"图文混排"（服务端见 images 非空就只渲染图片）
-///   ⇒ 有文字时只回 `content`（内联插图会丢，已在代码处注明）；纯图源回
-///   `type:'images'`。
+/// · `bsContent` **同时回 `content` 与 `images`**（不再二选一）✓ ——
+///   客户端按「正文是否为空」（漫画源则「有没有图」）判定是否进图片模式 ✓。
 /// · 目录字段名差异已处理：引擎给 `title`，服务契约要 `name`。
 library;
 
@@ -177,19 +176,18 @@ class BookSourceDartEngine {
               .map((b) => b.url)
               .where((u) => u.isNotEmpty)
               .toList();
-          // ⚠️ 服务端契约见 images 非空就只渲染图片（`book_source_service.dart`
-          //    的 `content()`）⇒ 有文字时**只回文字**，避免图文混排退化成纯图。
-          if (text.isNotEmpty) {
-            return <String, dynamic>{'ok': true, 'content': text};
-          }
-          if (imgs.isNotEmpty) {
-            return <String, dynamic>{
-              'ok': true,
-              'type': 'images',
-              'images': imgs,
-            };
-          }
-          return null; // 空正文 ⇒ 交给 Node
+          // ✅ **同时回 content 与 images**（不再二选一）：
+          //   原来「有文字就丢图、纯图才回 images」✗ ⇒ 契约无法表达图文混排，
+          //   且客户端只能靠「images 非空」猜是否图片章 ⇒ 有插图的文字章被
+          //   整章渲染成图片、正文全丢 ✗。
+          //   现在由**客户端**按「正文是否为空」判定纯图（见阅读器 `_loadChapter`）✓
+          if (text.isEmpty && imgs.isEmpty) return null; // 空正文 ⇒ 交给 Node
+          return <String, dynamic>{
+            'ok': true,
+            'content': text,
+            if (imgs.isNotEmpty) 'type': 'images',
+            if (imgs.isNotEmpty) 'images': imgs,
+          };
       }
     } catch (e) {
       debugPrint('[书源/Dart引擎] $action 失败，回落 Node：$e');

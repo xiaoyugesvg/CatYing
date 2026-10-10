@@ -4,6 +4,7 @@
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -27,6 +28,9 @@ class _OnlineReaderPageState extends State<OnlineReaderPage> {
   @override
   void initState() {
     super.initState();
+    // ✅ 「在线阅读」要**全屏**（用户要求 ✓）：进页隐藏系统状态栏 / 导航条；
+    //    退出时在 `dispose` 里恢复 ✓ —— 否则整个 App 会一直没有状态栏 ✗
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     // 桌面端无 webview_flutter 平台实现，降级到外部浏览器（无 cookie，可能需重登）
     if (!Platform.isAndroid && !Platform.isIOS) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _openExternal());
@@ -106,6 +110,13 @@ class _OnlineReaderPageState extends State<OnlineReaderPage> {
   }
 
   @override
+  void dispose() {
+    // 退出时把系统栏恢复回来（`immersiveSticky` 是全局的，不清会一直全屏 ✗）
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     // 桌面端占位（initState 已调度外部浏览器打开）
     if (!Platform.isAndroid && !Platform.isIOS) {
@@ -115,7 +126,8 @@ class _OnlineReaderPageState extends State<OnlineReaderPage> {
       );
     }
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title ?? '在线阅读')),
+      // ✅ 不要顶栏、要**全屏**（用户要求）：Web 内容铺满整屏 ✓
+      //    返回改由左上角那个**悬浮**小圆按钮（不占内容高度 ✓）
       body: Stack(
         children: [
           WebViewWidget(controller: _controller),
@@ -129,6 +141,28 @@ class _OnlineReaderPageState extends State<OnlineReaderPage> {
                 minHeight: 2,
               ),
             ),
+          // 全屏后没有顶栏了 ⇒ 必须留一个能返回的入口 ✓
+          Positioned(
+            top: 0,
+            left: 0,
+            child: SafeArea(
+              minimum: const EdgeInsets.all(8),
+              child: Material(
+                color: Colors.black.withValues(alpha: 0.35),
+                shape: const CircleBorder(),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () => Navigator.of(context).maybePop(),
+                  child: const SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: Icon(Icons.arrow_back_rounded,
+                        size: 22, color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );

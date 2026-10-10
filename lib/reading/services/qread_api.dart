@@ -192,7 +192,6 @@ class QreadApi {
   static final QreadApi instance = QreadApi._();
 
   static const int apiVersion = 5;
-  static const int _pageSize = 50;
 
   Dio? _dio;
   Dio get _client {

@@ -3300,7 +3300,12 @@ class _ComicShelfTab extends StatelessWidget {
           showBackToTop: showBackToTop,
           onBackToTop: onBackToTop,
           session: session,
-          onLongPress: (e) => _showShelfItemMenu(context, shelfId, e),
+          onLongPress: (e) => _showShelfItemMenu(
+            context,
+            shelfId,
+            e,
+            onEdit: () => onSelect(e.itemId),
+          ),
           isSelecting: isSelecting,
           selectedIds: selectedIds,
           onSelect: onSelect,
@@ -3674,7 +3679,12 @@ class _BookShelfTab extends StatelessWidget {
           showBackToTop: showBackToTop,
           onBackToTop: onBackToTop,
           session: session,
-          onLongPress: (e) => _showShelfItemMenu(context, shelfId, e),
+          onLongPress: (e) => _showShelfItemMenu(
+            context,
+            shelfId,
+            e,
+            onEdit: () => onSelect(e.itemId),
+          ),
           isSelecting: isSelecting,
           selectedIds: selectedIds,
           onSelect: onSelect,
@@ -3823,7 +3833,14 @@ class _BookshelfRow extends StatelessWidget {
               coverUrl: e.coverUrl,
               type: e.type,
               onTap: isSelecting ? () => onSelect(e.itemId) : e.onTap,
-              onLongPress: () => onSelect(e.itemId),
+              // 长按 → **条目菜单**（多选编辑 / 移出当前书架 / 移到其他书架）。
+              // ⚠️ 原来这里接的是 `onSelect`（长按直接进多选）⇒ `_BookshelfRow`
+              //   收到的 `onLongPress`（单项菜单）成了**死代码** ✗ 调不出来。
+              //   现在长按弹菜单 ✓，进多选改由菜单里的「多选编辑」承担 ✓
+              //   （处于多选模式时，长按仍等于选中/取消 ✓）。
+              onLongPress: isSelecting
+                  ? () => onSelect(e.itemId)
+                  : () => onLongPress(e),
               progress: e.progress,
               progressLabel: e.progressLabel,
               formatLabel: e.formatLabel,
@@ -4205,8 +4222,16 @@ Widget _buildShelfContent({
   );
 }
 
-/// 长按书架条目：移出当前书架 / 移到其他书架
-void _showShelfItemMenu(BuildContext context, String shelfId, _ShelfEntry e) {
+/// 长按书架条目：多选编辑 / 移出当前书架 / 移到其他书架。
+///
+/// ⚠️ 「移出 / 移到」在「全部」汇总视图下**没有明确的目标书架** ✗
+///   ⇒ 与批量移除（`_removeSelectedFromShelf`）同口径：提示先进具体书架 ✓。
+void _showShelfItemMenu(
+  BuildContext context,
+  String shelfId,
+  _ShelfEntry e, {
+  VoidCallback? onEdit,
+}) {
   final isDark = Theme.of(context).brightness == Brightness.dark;
   showModalBottomSheet(
     context: context,
@@ -4233,48 +4258,155 @@ void _showShelfItemMenu(BuildContext context, String shelfId, _ShelfEntry e) {
                 ),
               ),
             ),
-            ListTile(
-              leading: Icon(
-                Icons.remove_circle_outline_rounded,
-                color: JellyTheme.error,
+            // ① 多选编辑：进入批量模式并选中本条（跨书架批量操作的入口）
+            if (onEdit != null)
+              ListTile(
+                leading: Icon(
+                  Icons.checklist_rounded,
+                  color: JellyTheme.primary,
+                ),
+                title: const Text('多选编辑'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  onEdit();
+                },
               ),
-              title: const Text('移出当前书架'),
-              onTap: () async {
-                await BookshelfService().removeFromBookshelf(
-                  shelfId,
-                  e.itemId,
-                  e.type,
-                );
-                if (e.type == BookshelfItemType.book) {
-                  await BookDownloadService().cleanupOrphanedImport(e.itemId);
-                }
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
-            ),
-            ListTile(
-              leading: Icon(
-                Icons.swap_horiz_rounded,
-                color: JellyTheme.primary,
+            // ② / ③ 移出 / 移到其他书架（「全部」为汇总视图时不可用）
+            if (shelfId != kAllShelfId) ...[
+              ListTile(
+                leading: Icon(
+                  Icons.remove_circle_outline_rounded,
+                  color: JellyTheme.error,
+                ),
+                title: const Text('移出当前书架'),
+                onTap: () async {
+                  await BookshelfService().removeFromBookshelf(
+                    shelfId,
+                    e.itemId,
+                    e.type,
+                  );
+                  // 🔴 原来**无条件**删本地导入文件 ✗ —— 而「移除同时删除本地文件」
+                  //   是可选项、默认关 ⇒ 与批量移除同口径（见 _removeSelectedFromShelf）
+                  if (e.type == BookshelfItemType.book &&
+                      SettingsService().shelfRemoveDeletesFile) {
+                    await BookDownloadService()
+                        .cleanupOrphanedImport(e.itemId);
+                  }
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
               ),
-              title: const Text('移到其他书架'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                await showBookshelfDialog(
-                  context,
-                  itemId: e.itemId,
-                  type: e.type,
-                  title: '移到其他书架',
-                  meta: e.meta,
-                  singleSelect: true,
-                );
-              },
-            ),
+              ListTile(
+                leading: Icon(
+                  Icons.swap_horiz_rounded,
+                  color: JellyTheme.primary,
+                ),
+                title: const Text('移到其他书架'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await showBookshelfDialog(
+                    context,
+                    itemId: e.itemId,
+                    type: e.type,
+                    title: '移到其他书架',
+                    meta: e.meta,
+                    singleSelect: true,
+                  );
+                },
+              ),
+            ] else
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text(
+                  '「全部」为汇总视图，请进入具体书架后管理',
+                  style: TextStyle(fontSize: AppTheme.fontFootnote),
+                ),
+              ),
+            // ④ 硬删除：删掉本地已下载内容（不可恢复）。
+            //    只在**确实有本地文件**时才出现 ✓（否则点了没反应会让人困惑）
+            //    不依赖当前书架 ⇒ 「全部」视图下也提供 ✓
+            if (_hasLocalFiles(e))
+              ListTile(
+                leading: Icon(
+                  Icons.delete_forever_rounded,
+                  color: JellyTheme.error,
+                ),
+                title: Text(
+                  '删除本地文件',
+                  style: TextStyle(color: JellyTheme.error),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _deleteLocalFiles(context, e);
+                },
+              ),
             const SizedBox(height: 8),
           ],
         ),
       ),
     )),
   );
+}
+
+/// 该书架条目**是否有本地文件可删**：
+///   · 漫画 → 有已下载章节（`DownloadService.downloadedChapters`）
+///   · 图书 → 有下载/导入任务（`BookDownloadService.task`）
+bool _hasLocalFiles(_ShelfEntry e) {
+  if (e.type == BookshelfItemType.comic) {
+    return DownloadService().downloadedChapters(e.itemId).isNotEmpty;
+  }
+  return BookDownloadService().task(e.itemId) != null;
+}
+
+/// **硬删除**本地文件（不可恢复）：菜单「删除本地文件」的实现。
+///
+///   · 漫画 → 删整本已下载章节（文件 + 记录）；书架条目**保留**
+///     （还能在线阅读 / 重新下载）✓
+///   · 图书 → 删本地文件 + 下载记录；**本地导入**的图书其条目本身
+///     就是那个文件 ⇒ 删完会变成打不开的死卡片 ⇒ 一并从所有书架移除 ✓
+///     （在线书源下载的书保留条目，可重新下载 ✓）
+Future<void> _deleteLocalFiles(BuildContext context, _ShelfEntry e) async {
+  final isComic = e.type == BookshelfItemType.comic;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('删除本地文件'),
+      content: Text(
+        isComic
+            ? '将删除《${e.title}》已下载的全部章节，删除后不可恢复。\n'
+                '书架条目会保留，可重新下载或在线阅读。'
+            : '将删除《${e.title}》的本地文件与下载记录，删除后不可恢复。',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          style: FilledButton.styleFrom(
+            backgroundColor: JellyTheme.error,
+          ),
+          child: const Text('删除'),
+        ),
+      ],
+    ),
+  );
+  if (ok != true) return;
+
+  if (isComic) {
+    await DownloadService().deleteComic(e.itemId);
+    return;
+  }
+  final task = BookDownloadService().task(e.itemId);
+  await BookDownloadService().deleteTask(e.itemId);
+  // 本地导入书：删文件后条目已无内容可读 ⇒ 一并从所有书架移除
+  if (task != null && task.isLocalImport) {
+    await BookshelfService().setBookshelvesForItem(
+      const <String>[],
+      e.itemId,
+      BookshelfItemType.book,
+    );
+  }
 }
 
 // ============================================================

@@ -3699,7 +3699,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
     final entries = <(String label, String family)>[
       ('跟随模式', BookFontService.autoFamily),
       ('系统默认', BookFontService.systemFamily),
-      ('水墨楷体', 'inkReadingKai'),
+      // 随包内置（pubspec `fonts:` 段已注册 ✓）
+      ('MiSans（内置）', 'MiSans'),
+      // ⚠️ 'inkReadingKai'（水墨楷体）**没有字体文件、pubspec 也没声明** ✗
+      //   ⇒ 选它只会静默回落默认字体；这里标注"未内置"避免误选 ✓
+      ('水墨楷体（未内置）', 'inkReadingKai'),
       for (final f in fontService.userFamilies) (f, f),
     ];
     // 同步可能缺失：当前选择既不在内置列表也不在用户字体列表

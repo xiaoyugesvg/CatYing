@@ -38,9 +38,15 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:fast_gbk/fast_gbk.dart';
+import 'package:get/get.dart';
+
+import '../../../services/app_log.dart';
+import '../../pages/webview_page.dart';
+import '../../source/webview_image_fetcher.dart';
 
 /// 本机同步 HTTP 代理（进程级单例）。
 class LegadoHttpProxy {
@@ -87,9 +93,18 @@ class LegadoHttpProxy {
     try {
       final target = req.headers.value('x-legado-url');
       if (target == null || target.isEmpty) {
-        return _fail(res, 400, 'x-legado-url 头缺失');
+        return await _fail(res, 400, 'x-legado-url 头缺失');
       }
       final method = req.headers.value('x-legado-method') ?? 'GET';
+
+      // ── 浏览器栈模式（`x-legado-browser`）──────────────────────
+      // 真浏览器栈只能在**主 isolate** 驱动 WebView ⇒ 由本代理代劳 ✓
+      //（worker isolate 里的 `AnalyzeUrl` / `java.webView` 只发请求 ✓）
+      final browserMode = req.headers.value('x-legado-browser');
+      if (browserMode != null && browserMode.isNotEmpty) {
+        await _handleBrowser(res, target, browserMode);
+        return;
+      }
 
       // 透传业务头（去掉我们自己的协议头与逐跳头）
       // HttpHeaders 没有 `names`（那是 package:http 的 API）⇒ 用 forEach
@@ -156,6 +171,53 @@ class LegadoHttpProxy {
       await res.close();
     } catch (e) {
       await _fail(res, 502, '$e');
+    }
+  }
+
+  /// 浏览器栈模式的三种用法：
+  ///   · `fetch`      → 真浏览器栈加载目标页，回**渲染后 HTML**（`{webView:true}` /
+  ///                    `java.webView` 用；Cloudflare 等反爬站 Dio 拿不到内容）
+  ///   · `open`       → 在内置浏览器打开，**立即返回**（`startBrowser`）
+  ///   · `open-await` → 同上；语义上应等用户关闭页面，但见下方超时说明
+  ///
+  /// ⚠️ `open-await` 当前**不真正阻塞**：书源求值跑在 worker isolate 上，
+  ///   而 worker 有 **60s 硬超时且超时即杀**（`runner_isolate.defaultTimeout`）✗
+  ///   —— 等用户手动登录/过验证很容易超过 60s ⇒ 会把整次求值杀掉、
+  ///   连已拿到的结果一起丢 ✗。所以这里只负责“把页面打开给用户”，
+  ///   登录完成后的 Cookie 已由 WebView 自身的 Cookie 罐持有（同域请求复用它）✓。
+  static Future<void> _handleBrowser(
+    HttpResponse res,
+    String target,
+    String mode,
+  ) async {
+    try {
+      String text = '';
+      if (mode == 'fetch') {
+        text = await WebViewImageFetcher().fetchHtml(target);
+      } else {
+        _openInAppBrowser(target);
+      }
+      final out = utf8.encode(text);
+      res.persistentConnection = false; // sync_http 不支持 keep-alive
+      res.statusCode = 200;
+      res.contentLength = out.length;
+      res.add(out);
+      await res.close();
+    } catch (e) {
+      await _fail(res, 502, '$e');
+    }
+  }
+
+  /// 在内置浏览器（全屏 WebView + 左上角返回）打开 [url]，供用户手动登录 /
+  /// 通过人机验证。**不阻塞**（见 [_handleBrowser] 的超时说明）。
+  static void _openInAppBrowser(String url) {
+    try {
+      Get.to(
+        () => OnlineReaderPage(url: url, title: '书源浏览器'),
+      );
+      AppLog.instance.log('[书源浏览器] 已打开: $url');
+    } catch (e) {
+      AppLog.instance.w('[书源浏览器] 打开失败: $e');
     }
   }
 

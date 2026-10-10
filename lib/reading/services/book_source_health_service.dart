@@ -640,13 +640,11 @@ class BookSourceHealthService {
     var done = 0;
     var okCount = 0;
     var cancelled = false;
-    var stopping = false;
 
     _running = true;
     unawaited(_emit(onProgress, HealthProgress(done: 0, total: total, ok: 0)));
 
     bool isStopped() {
-      if (stopping) return true;
       if (_isCancelled?.call() ?? false) return true;
       if (shouldStop?.call() ?? false) return true;
       return false;

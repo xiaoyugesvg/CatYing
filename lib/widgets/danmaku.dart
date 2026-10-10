@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart'; // compute（弹幕解析丢 isolate）
 import 'package:flutter/material.dart';
 
 // ============================================================
@@ -149,6 +150,50 @@ List<DanmuItem> parseDanmuBody(String body) {
   return items;
 }
 
+/// 触发 isolate 解析的响应体长度阈值（字符）。
+///
+/// ⚠️ 不能设太小：isolate 冷启动本身有开销，几十 KB 的响应体
+///   在主线程 `jsonDecode` 只要 1~2ms，开 isolate 反而更慢。
+///   经验值：80KB ≈ 一两千条弹幕，此时主线程解析已能感知到掉帧 ✓。
+const int _parseIsolateThreshold = 80000;
+
+/// **异步解析弹幕**：响应体较大时丢到 isolate 执行，避免主线程
+/// `jsonDecode` 阻塞造成掉帧；小响应体直接同步解析（省冷启动开销）。
+///
+/// 调用方（播放器）请一律走这个入口 —— [parseDanmuBody] 保留给
+/// 单测/同步场景。
+Future<List<DanmuItem>> parseDanmuBodyAsync(String body) async {
+  if (body.length < _parseIsolateThreshold) return parseDanmuBody(body);
+  return _flatToDanmu(await compute(_parseDanmuFlat, body));
+}
+
+/// [isolate 入口] 用 [parseDanmuBody] 做**唯一**解析（不重复一套逻辑），
+/// 最后摊平成 `[[time, text, colorInt, mode], ...]` ——
+/// 纯基本类型，跨 isolate **一定可发送**，不必依赖 `Color` 的可发送性。
+List<Object?> _parseDanmuFlat(String body) {
+  final items = parseDanmuBody(body);
+  final out = <Object?>[];
+  for (final d in items) {
+    out.add(<Object?>[d.time, d.text, d.color.value, d.mode]);
+  }
+  return out;
+}
+
+/// 把 [_parseDanmuFlat] 的扁平数据还原为 [DanmuItem]（O(n) 轻量构造）。
+List<DanmuItem> _flatToDanmu(List<Object?> flat) {
+  final out = <DanmuItem>[];
+  for (final e in flat) {
+    final l = e as List;
+    out.add(DanmuItem(
+      (l[0] as num).toDouble(),
+      l[1] as String,
+      Color((l[2] as num).toInt()),
+      (l[3] as num).toInt(),
+    ));
+  }
+  return out;
+}
+
 class _ActiveDanmu {
   final DanmuItem item;
   int track;
@@ -239,10 +284,10 @@ class DanmuLayer extends StatefulWidget {
   });
 
   @override
-  State<DanmuLayer> createState() => DanmuLayerState();
+  State<DanmuLayer> createState() => _DanmuLayerState();
 }
 
-class DanmuLayerState extends State<DanmuLayer> {
+class _DanmuLayerState extends State<DanmuLayer> {
   late List<DanmuItem> _sorted;
   final List<_ActiveDanmu> _active = [];
   int _nextIndex = 0;
@@ -260,6 +305,11 @@ class DanmuLayerState extends State<DanmuLayer> {
   /// 高密度时同一句弹幕会反复出现，缓存能省掉绝大部分。
   final Map<String, double> _widthCache = {};
   static const int _widthCacheLimit = 500;
+
+  /// 绘制用 TextPainter 缓存（CustomPaint 模式）：同文案同样式只 layout 一次。
+  /// ⚠️ 跟 `_widthCache` 是两个东西：`_widthCache` 只存宽度（用于轨道碰撞），
+  ///   这里存完整的 TextPainter（用于 Canvas 绘制，含阴影/颜色）。
+  final Map<String, TextPainter> _paintCache = {};
 
   double get _speed => widget.speed;
   int get _trackCount => widget.trackCount.clamp(2, 8);
@@ -427,6 +477,12 @@ class DanmuLayerState extends State<DanmuLayer> {
     _lastPosSec = pos;
 
     // ── ③ 生成到期的弹幕 ────────────────────────────────────────
+    //
+    // ⚡ 先重建「每轨道最右边缘」数组（**一次 O(active)** ✓）——
+    //   `_pickTrack` 里再遍历全量 `_active` 的话是 O(tracks × active) ✗，
+    //   密集弹幕源下每帧 spawn 十几条会明显掉帧 ✓。
+    //   这里重建比"增量维护"简单且不会漏更新（弹幕回收是整批 `removeWhere` ✓）。
+    _rebuildTrackEdges();
     var spawned = false;
     while (_nextIndex < _sorted.length &&
         _sorted[_nextIndex].time <= pos + 0.25) {
@@ -478,6 +534,7 @@ class DanmuLayerState extends State<DanmuLayer> {
   ///    用户感知不到（生成窗口本来就向前看 0.25s）。
   void _resetToPosition(double pos) {
     _active.clear();
+    _trackRightEdge.clear(); // 清屏后轨道全空，重建一次即可
     var i = 0;
     while (i < _sorted.length && _sorted[i].time <= pos) {
       i++;
@@ -496,10 +553,14 @@ class DanmuLayerState extends State<DanmuLayer> {
     final startX = _viewportWidth > 0 ? _viewportWidth : 0.0;
     if (item.mode == 4) {
       final lane = _pickFixedLane(top: true);
+      // ✅ 修复：轨道全满时**丢弃**本条（原来返回 0 → 和第 0 条叠在一起 ✗），
+      //   与滚动弹幕"全忙就丢弃"的策略保持一致 ✓。
+      if (lane < 0) return;
       _active.add(_ActiveDanmu(item,
           topFixed: true, width: width, track: lane));
     } else if (item.mode == 5) {
       final lane = _pickFixedLane(top: false);
+      if (lane < 0) return;
       _active.add(_ActiveDanmu(item,
           bottomFixed: true, width: width, track: lane));
     } else {
@@ -511,6 +572,10 @@ class DanmuLayerState extends State<DanmuLayer> {
           width: width,
           x: startX,
           positioned: true));
+      // ⚡ 同步更新轨道最右边缘（供同帧后续 spawn 判断，见 `_rebuildTrackEdges`）
+      if (track < _trackRightEdge.length) {
+        _trackRightEdge[track] = startX + width;
+      }
     }
     // 🔴 活跃数量上限：超出后从最旧的开始丢（滚动弹幕先上屏，先丢它们）。
     //    不设上限时高密度源能把 _active 堆到几百条，每帧全量重建直接卡死。
@@ -519,17 +584,51 @@ class DanmuLayerState extends State<DanmuLayer> {
     }
   }
 
-  /// Top/bottom fixed danmaku: stack in vertical lanes (track * 28px).
-  /// Reuse a lane only when the previous item there has expired.
+  /// 重建「每轨道最右边缘」数组。
+  ///
+  /// ⚡ 性能：`_pickTrack` 需要知道每条轨道上最靠右的弹幕在哪，
+  ///   原来在 `_pickTrack` 内部**双层遍历**（O(tracks × active) ✗）；
+  ///   这里每帧**单次遍历** `_active` 建好数组（O(active) ✓），
+  ///   `_pickTrack` 只读数组（O(tracks) ✓）。
+  void _rebuildTrackEdges() {
+    final tracks = _effectiveTrackCount;
+    // 轨道数可能随视口高度变化（窄播放器会压缩），先对齐长度
+    while (_trackRightEdge.length < tracks) {
+      _trackRightEdge.add(double.negativeInfinity);
+    }
+    for (var t = 0; t < tracks; t++) {
+      _trackRightEdge[t] = double.negativeInfinity;
+    }
+    for (final a in _active) {
+      if (a.item.mode != 1) continue;
+      if (a.track < 0 || a.track >= tracks) continue;
+      final right = a.x + a.width;
+      if (right > _trackRightEdge[a.track]) {
+        _trackRightEdge[a.track] = right;
+      }
+    }
+  }
+
+  /// Top/bottom fixed danmaku: stack in vertical lanes.
+  ///
+  /// ✅ 修复：轨道数改为跟随 `_effectiveTrackCount`（原来写死 4 ✗ ——
+  ///   用户设 8 轨道时顶部/底部固定弹幕仍只有 4 条可用；
+  ///   而窄播放器下滚动轨道会被压缩到 3 条，固定弹幕却还是 4 条、会溢出 ✓）。
+  ///   全满时返回 **-1**（让调用方丢弃本条，不再叠在第 0 条上 ✗）。
   int _pickFixedLane({required bool top}) {
-    const maxLanes = 4;
+    final maxLanes = _effectiveTrackCount.clamp(1, 6);
     for (var t = 0; t < maxLanes; t++) {
       final busy = _active.any((a) =>
           (top ? a.topFixed : a.bottomFixed) && a.track == t);
       if (!busy) return t;
     }
-    return 0;
+    return -1; // 全满 → 丢弃（与滚动弹幕同策略）
   }
+
+  /// 每轨道最右边缘（滚动弹幕的 `x + width`）。
+  /// 用数组替代 `_pickTrack` 里的双层遍历，把 O(tracks × active)
+  /// 降到 O(tracks) —— 密集弹幕下省很多。
+  final List<double> _trackRightEdge = [];
 
   /// Choose a scrolling track where the previous item has cleared enough
   /// that a new item entering at x=_viewportWidth will not collide.
@@ -539,27 +638,20 @@ class DanmuLayerState extends State<DanmuLayer> {
     final w = _viewportWidth;
     // 用 effective（受「显示区域」压缩），避免弹幕落到被裁掉的高度上
     final tracks = _effectiveTrackCount;
-    // Prefer an empty track.
-    for (var t = 0; t < tracks; t++) {
-      final busy = _active.any((a) => a.item.mode == 1 && a.track == t);
-      if (!busy) return t;
+    // 确保数组长度够（轨道数可能随视口高度变化）
+    while (_trackRightEdge.length < tracks) {
+      _trackRightEdge.add(double.negativeInfinity);
     }
-    // All busy: pick the track whose last item is furthest to the left
-    // (largest free span on the right).
-    var best = 0;
+    // Prefer an empty / available track.
+    var best = -1;
     var bestRight = double.infinity;
     for (var t = 0; t < tracks; t++) {
-      double? maxRight;
-      for (final a in _active) {
-        if (a.item.mode != 1 || a.track != t) continue;
-        final right = a.x + a.width;
-        if (maxRight == null || right > maxRight) maxRight = right;
-      }
-      final right = maxRight ?? double.infinity;
-      // Free enough if last right edge + gap <= spawn x (viewport width).
-      if (w > 0 && right + _trackGap <= w) {
-        return t;
-      }
+      final right = _trackRightEdge[t];
+      // 轨道空闲（最右在左边界外）→ 直接用
+      if (right <= -16) return t;
+      // 右侧间隙够 → 可用
+      if (w > 0 && right + _trackGap <= w) return t;
+      // 都不够时，选最靠左的（稍后用来判断是否全丢）
       if (right < bestRight) {
         bestRight = right;
         best = t;
@@ -567,8 +659,7 @@ class DanmuLayerState extends State<DanmuLayer> {
     }
     // 🔴 所有轨道上最近一条的右边缘都还没让出足够的间隙 →
     //    新弹幕进场必然追尾重叠。返回 -1 让 _spawn 丢弃本条。
-    //    （原实现直接返回 best，密集弹幕源下同帧多条挤进同一轨道 ✗）
-    if (bestRight + _trackGap > w) return -1;
+    if (best < 0 || bestRight + _trackGap > w) return -1;
     return best;
   }
 
@@ -641,51 +732,125 @@ class DanmuLayerState extends State<DanmuLayer> {
           //   · 再叠加 24px 基础安全距（防止贴边）
           final topPx = h * widget.topPadding.clamp(0.0, 0.5) + 24.0;
           final bottomPx = h * widget.bottomPadding.clamp(0.0, 0.5) + 24.0;
-          // ⚠️ 必须 Clip.hardEdge：否则弹幕会飘到视频画面外面
-          // （原来 Clip.none 是为了"不裁掉进场/出场边缘"，但实际上
-          //  Positioned 子项超出 Stack 边界时真的会漏到视频外面，
-          // 表现就是"弹幕跑到播放器黑边外面去了"）。
-          // 进场从右边界进入时，右边界本身就是视频边缘，裁掉很自然。
+
+          // ✅ 用户 2026-10-08：「出来一卡一卡的」——
+          //   原来用 `Stack + for (final a in _active) Positioned + Text`，
+          //   60 条活跃弹幕 = 60 个 widget 每帧全量重建 + 60 次 layout ✗ → 严重掉帧 ✓。
+          //   现在：**单个 `CustomPaint`**，所有弹幕在同一个 Canvas 上用
+          //   预布局好的 `TextPainter` 直接画 ✓ —— widget 重建 0 个、
+          //   layout 只在新弹幕进来时做一次 ✓，帧率能稳很多。
+          //   ⚠️ ClipRect 仍然保留：弹幕进出画面时裁掉边缘 ✓。
           return ClipRect(
-            child: Stack(
-              children: [
-                for (final a in _active)
-                  Positioned(
-                    left: a.item.mode == 1 ? a.x : null,
-                    right: a.item.mode != 1 ? 0 : null,
-                    // 滚动弹幕 + 顶部固定：从 topPx 往下排
-                    // 底部固定：从 bottomPx 往上排
-                    top: a.bottomFixed ? null : topPx + a.track * _trackStep,
-                    bottom: a.bottomFixed
-                        ? bottomPx + a.track * _trackStep
-                        : null,
-                    child: Text(
-                      a.item.text,
-                      // 弹幕字号由用户单独设置，豁免全局字号缩放，
-                      // 避免 textScaler 放大后与实际渲染宽度不一致
-                      textScaler: TextScaler.noScaling,
-                      style: TextStyle(
-                        // 颜色：forceColor 不为 null 时统一用它（统一白色/自定义），
-                        // 否则用弹幕自带的颜色（「自带色」模式）。
-                        // 描边已在 _strokeShadows 里做，彩色弹幕颜色能透出来。
-                        color: (widget.forceColor ?? a.item.color)
-                            .withValues(alpha: widget.opacity),
-                        fontSize: widget.fontSize,
-                        fontWeight: widget.fontWeight,
-                        shadows: _strokeShadows(),
-                      ),
-                      maxLines: 1,
-                      softWrap: false,
-                      textAlign:
-                          a.item.mode != 1 ? TextAlign.center : TextAlign.start,
-                    ),
-                    width: a.item.mode != 1 ? w : null,
-                  ),
-              ],
+            child: CustomPaint(
+              size: Size(w, h),
+              painter: _DanmuPainter(
+                active: _active,
+                topPx: topPx,
+                bottomPx: bottomPx,
+                trackStep: _trackStep,
+                forceColor: widget.forceColor,
+                opacity: widget.opacity,
+                painterCache: _paintCache,
+                fontSize: widget.fontSize,
+                fontWeight: widget.fontWeight,
+                strokeWidth: widget.strokeWidth,
+                strokeShadows: _strokeShadows(),
+              ),
             ),
           );
         },
       ),
     );
+  }
+}
+
+/// 弹幕画布：把所有活跃弹幕一次性画到同一个 Canvas 上。
+///
+/// 为什么用 `CustomPainter` 而不是 `Stack`：
+///   · 60 条弹幕 = 60 个 `Positioned + Text` widget，每帧 setState 全量重建
+///     → widget 树 diff + layout + paint 全部重走，掉帧严重。
+///   · `CustomPainter` 只做一次 paint 调用，内部用 `TextPainter`
+///     （已预布局）直接平移绘制，开销是 1/N。
+class _DanmuPainter extends CustomPainter {
+  /// 绘制缓存上限（与 state 侧共用同一个 map，这里只读它做容量判断）
+  static const int cacheLimit = 500;
+
+  final List<_ActiveDanmu> active;
+  final double topPx;
+  final double bottomPx;
+  final double trackStep;
+  final Color? forceColor;
+  final double opacity;
+  final Map<String, TextPainter> painterCache;
+  final double fontSize;
+  final FontWeight fontWeight;
+  final double strokeWidth;
+  final List<Shadow> strokeShadows;
+
+  _DanmuPainter({
+    required this.active,
+    required this.topPx,
+    required this.bottomPx,
+    required this.trackStep,
+    required this.forceColor,
+    required this.opacity,
+    required this.painterCache,
+    required this.fontSize,
+    required this.fontWeight,
+    required this.strokeWidth,
+    required this.strokeShadows,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final a in active) {
+      final color = (forceColor ?? a.item.color).withValues(alpha: opacity);
+      final key =
+          '$fontSize|$fontWeight|$strokeWidth|${color.value}|${a.item.text}';
+      var tp = painterCache[key];
+      if (tp == null) {
+        tp = TextPainter(
+          text: TextSpan(
+            text: a.item.text,
+            style: TextStyle(
+              color: color,
+              fontSize: fontSize,
+              fontWeight: fontWeight,
+              shadows: strokeShadows,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+          maxLines: 1,
+          textScaler: TextScaler.noScaling,
+        )..layout();
+        if (painterCache.length >= _DanmuPainter.cacheLimit) {
+          painterCache.clear();
+        }
+        painterCache[key] = tp;
+      }
+
+      final double dy;
+      final double dx;
+      if (a.bottomFixed) {
+        // 底部固定：从 bottomPx 往上排
+        dy = size.height - bottomPx - trackStep * (a.track + 1);
+        dx = (size.width - tp.width) / 2;
+      } else if (a.topFixed) {
+        // 顶部固定
+        dy = topPx + a.track * trackStep;
+        dx = (size.width - tp.width) / 2;
+      } else {
+        // 滚动
+        dy = topPx + a.track * trackStep;
+        dx = a.x;
+      }
+      tp.paint(canvas, Offset(dx, dy));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DanmuPainter oldDelegate) {
+    // 任何参数变化都重绘（位置/列表都在变，每帧都要重画）
+    return true;
   }
 }

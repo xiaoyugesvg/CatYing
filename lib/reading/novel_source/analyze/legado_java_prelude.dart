@@ -24,11 +24,11 @@
 /// 的异步回调：本引擎规则求值是**同步**的，异步回调无法在同步栈里还回结果。
 ///
 /// ── 明确未实现（显式抛错，不再静默返回空串）──────────────────
-/// `createSymmetricCrypto` / `cryptoOp` / `aesBase64DecodeToString` /
-/// `desBase64DecodeToString` / `aesEncodeToString`（需句柄通道，P1）、
-/// `getByteArray`（二进制通道，P1）、`webView` / `startBrowser(Await)`（人机验证，P3）、
-/// `refreshCookie`（cookie 通道）—— `getCookie`/`setCookie` 与 JS 全局
-/// `cookie.*` 均已接到 `cookie_store.dart`（补丁 0015）。
+/// `aesEncodeToString`、`getByteArray`（二进制通道，P1）、
+/// `webView` / `startBrowser(Await)`（人机验证，P3）、`refreshCookie`。
+/// ✅ 已实现：`createSymmetricCrypto` / `cryptoOp` / `aesBase64DecodeToString` /
+///    `desBase64DecodeToString`（句柄通道，补丁 0012 —— 不再是未实现项）、
+///    `getCookie`/`setCookie` 与 JS 全局 `cookie.*`（`cookie_store.dart`，补丁 0015）。
 library;
 
 /// 注入 QuickJS 全局作用域的宿主对象脚本（一次性）。
@@ -83,6 +83,24 @@ var java = (function () {
     }
     _err(_NEED + JSON.stringify({
       k: key, m: m, u: u, h: headers || null, b: body || null
+    }));
+  }
+
+  // ════ ② 浏览器栈（协议同 java.ajax：抛标记 → 主 isolate 代理代劳 → 重放）════
+  //   mode: 'fetch' 回渲染后 HTML；'open' 打开内置浏览器（不阻塞）
+  function _browser(url, mode) {
+    var key = 'BROWSER ' + mode + ' ' + String(url);
+    var box = (typeof httpCache !== 'undefined' && httpCache) ? httpCache : {};
+    if (Object.prototype.hasOwnProperty.call(box, key)) {
+      var v = box[key];
+      if (v && typeof v === 'object' && v.__error) {
+        _err('java.浏览器调用失败: ' + v.__error);
+      }
+      return (v === null || v === undefined) ? '' : v;
+    }
+    _err(_NEED + JSON.stringify({
+      k: key, m: 'BROWSER', u: String(url),
+      h: { 'x-legado-browser': mode }, b: null
     }));
   }
 
@@ -247,6 +265,19 @@ var java = (function () {
     toNumChapter: function (s) { return _call('toNumChapter', [s]); },
     copyText: function (t) { return _call('copyText', [t]); },
     open: function (u) { return _call('open', [u]); },
+    // legado 别名（实测 2 处）：语义同 open
+    openUrl: function (u) { return _call('open', [u]); },
+    // 标准 v4 UUID（纯 JS，无需宿主）
+    randomUUID: function () {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        var r = Math.random() * 16 | 0;
+        var v = c === 'x' ? r : ((r & 0x3) | 0x8);
+        return v.toString(16);
+      });
+    },
+    // 以下两个在无 UI/登录通道时按「已忽略」处理（不再抛错中断规则）
+    refreshExplore: function () { _log('[java.refreshExplore] 已忽略'); return true; },
+    upLoginData: function () { _log('[java.upLoginData] 已忽略（无登录数据通道）'); return true; },
     // ── 同步 HTTP（协议 ①）──
     ajax: function (url) { return _http('GET', url, null, null); },
     get: function (url, headers) { return _http('GET', url, headers, null); },
@@ -256,6 +287,18 @@ var java = (function () {
     connect: function (url) { return _http('GET', url, null, null); },
     connectStr: function (url) { return _http('GET', url, null, null); },
     getResponse: function (url) { return _http('GET', url, null, null); },
+    // 并发取多个 URL 的正文数组（实测 1 处）。本引擎求值是**同步重放**的
+    //（见文件头），故按顺序发即可 —— 每次 _http 未命中都会抛
+    // __LEGADO_NEED__ 由 Dart 侧取数后重放。
+    ajaxAll: function (urls) {
+      var out = [];
+      if (urls && typeof urls.length === 'number') {
+        for (var i = 0; i < urls.length; i++) {
+          out.push(_http('GET', String(urls[i]), null, null));
+        }
+      }
+      return out;
+    },
     // ── 未实现（显式抛错，留日志线索）──
     getByteArray: _unsupported('getByteArray'),
     // ── 对称加密（句柄通道：createSymmetricCrypto → cryptoOp）──
@@ -276,9 +319,19 @@ var java = (function () {
       return _call('desBase64DecodeToString', [data, key, mode, iv]);
     },
     aesEncodeToString: _unsupported('aesEncodeToString'),
-    webView: _unsupported('webView'),
-    startBrowser: _unsupported('startBrowser'),
-    startBrowserAwait: _unsupported('startBrowserAwait'),
+    // ── 浏览器栈（实测 10 处 startBrowserAwait + 1 处 webView）──
+    // legado 语义：webView(content, url, js) 用 WebView 加载 url（可注入 js）
+    // 后返回结果；未传 content 时按 url 加载。
+    // ⚠️ 我们回的是**渲染后 HTML**（注入 js 暂不支持 —— 见 http_proxy 的说明）。
+    webView: function (content, url, js) {
+      var target = (url === null || url === undefined || url === '') ? String(content) : String(url);
+      return _browser(target, 'fetch');
+    },
+    // 打开内置浏览器（登录 / 加群 / 通过人机验证），不阻塞求值。
+    // startBrowserAwait 在 legado 里会等用户关闭页面，但本引擎的 worker
+    // 有 60s 硬超时（超时即杀）⇒ 真阻塞会把整次求值杀掉，故同样不等。
+    startBrowser: function (url, title) { return _browser(url, 'open'); },
+    startBrowserAwait: function (url, title) { return _browser(url, 'open'); },
     // 实测 0 处使用，但语义与全局 cookie 对象一致 ⇒ 一并接到同一存储
     getCookie: function (url) { return _legadoHostCall('cookie.getCookie', [url]); },
     setCookie: function (url, c) { return _legadoHostCall('cookie.setCookie', [url, c]); },
@@ -294,6 +347,10 @@ var source = {
   putConcurrent: function (k, v) { return _legadoHostCall('source.putConcurrent', [k, v]); },
   getLoginInfo: function () { return _legadoHostCall('source.getLoginInfo', []); },
   putLoginInfo: function (v) { return _legadoHostCall('source.putLoginInfo', [v]); },
+  removeLoginInfo: function () { return _legadoHostCall('source.removeLoginInfo', []); },
+  getLoginHeader: function () { return _legadoHostCall('source.getLoginHeader', []); },
+  putLoginHeader: function (v) { return _legadoHostCall('source.putLoginHeader', [v]); },
+  removeLoginHeader: function () { return _legadoHostCall('source.removeLoginHeader', []); },
   // ── 🔴 `getLoginInfoMap()`：Legado 的登录信息 **Map 视图** ──────────
   //
   // 实测缺失导致真实书源直接失效：

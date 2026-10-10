@@ -672,9 +672,13 @@ class AppTheme {
 }
 
 /// iOS 风格页面转场（自实现，零依赖）：
-/// 新页面从右侧滑入 + 轻微淡入（easeOutCubic，丝滑不僵硬），
-/// 返回时反向滑出。给 `Navigator.push(MaterialPageRoute)` 的路由用
+/// 新页面从右侧滑入（**不淡化**），被压在下面的旧页面同步向左让开一点（视差），
+/// 返回时反向。给 `Navigator.push(MaterialPageRoute)` 的路由用
 /// （Get 路由的 iOS 转场由 `GetMaterialApp.defaultTransition` 提供）。
+///
+/// ⚠️ 为什么**不能淡化**新页 ✗：新页 opacity < 1 时会**透出下面那一页** ✗，
+///   用户实测："界面切换感觉有点重叠" —— 去掉 FadeTransition 后，
+///   进 / 出的两层是"推走"关系，不会再叠在一起 ✓
 class _CupertinoLikeTransitionsBuilder extends PageTransitionsBuilder {
   const _CupertinoLikeTransitionsBuilder();
 
@@ -693,10 +697,24 @@ class _CupertinoLikeTransitionsBuilder extends PageTransitionsBuilder {
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeInCubic,
     );
+    // 本页进场：从右滑入
+    final enter = Tween<Offset>(
+      begin: const Offset(1, 0),
+      end: Offset.zero,
+    ).animate(curved);
+    // 本页被"压在下面"时（有新页推上来）：向左让开 1/4 屏（iOS 视差）
+    final parallax = CurvedAnimation(
+      parent: secondaryAnimation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    final exit = Tween<Offset>(
+      begin: Offset.zero,
+      end: const Offset(-0.25, 0),
+    ).animate(parallax);
     return SlideTransition(
-      position:
-          Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero).animate(curved),
-      child: FadeTransition(opacity: curved, child: child),
+      position: exit,
+      child: SlideTransition(position: enter, child: child),
     );
   }
 }

@@ -283,14 +283,14 @@ class PeerTransferService extends ChangeNotifier {
       final path = request.uri.path;
       final method = request.method;
       if (method == 'GET' && path == '/info') {
-        return _json(request, _infoBody());
+        return await _json(request, _infoBody());
       }
       if (method == 'POST' && path == '/transfer/offer') {
         return await _handleOffer(request);
       }
       if (method == 'GET' && path.startsWith('/transfer/offer/')) {
         final id = path.substring('/transfer/offer/'.length);
-        return _handlePoll(request, id);
+        return await _handlePoll(request, id);
       }
       if (method == 'POST' && path == '/transfer') {
         return await _handleTransfer(request);
@@ -302,7 +302,7 @@ class PeerTransferService extends ChangeNotifier {
           '/transfer/offer/'.length,
           path.length - '/done'.length,
         );
-        return _handleDone(request, id);
+        return await _handleDone(request, id);
       }
       request.response.statusCode = 404;
       await request.response.close();

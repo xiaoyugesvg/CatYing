@@ -426,22 +426,67 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     );
   }
 
+  /// 板块标题右侧的「刷新」小圆钮（参考 cmbok：它每个板块标题右侧都有 ✓）。
+  /// 加载中显示转圈并置灰不可点 ✓。
+  Widget _sectionRefreshButton(int i, _ComicHomeSection s) {
+    final busy = s.loading;
+    return IconButton(
+      tooltip: '刷新「${s.title}」',
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+      icon: busy
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Icon(
+              Icons.refresh_rounded,
+              size: 18,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white70
+                  : JellyTheme.textSecondary,
+            ),
+      onPressed: busy ? null : () => _refreshHomeSection(i),
+    );
+  }
+
+  /// 强制重拉某个板块（清空后走 `_loadHomeSection` 原有链路；**不动其它板块** ✓）
+  Future<void> _refreshHomeSection(int i) async {
+    if (i >= _homeSections.length) return;
+    final s = _homeSections[i];
+    if (s.loading) return;
+    s.items = [];
+    s.error = null;
+    if (mounted) setState(() {});
+    await _loadHomeSection(i);
+    if (mounted) setState(() {});
+  }
+
   Widget _homeSectionBlock(int i) {
     final s = _homeSections[i];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-          child: Text(
-            s.title,
-            style: TextStyle(
-              fontSize: AppTheme.fontTitle3,
-              fontWeight: FontWeight.w700,
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? Colors.white
-                  : JellyTheme.textPrimaryLight,
-            ),
+          padding: const EdgeInsets.fromLTRB(16, 14, 12, 8),
+          child: Row(
+            children: [
+              Text(
+                s.title,
+                style: TextStyle(
+                  fontSize: AppTheme.fontTitle3,
+                  fontWeight: FontWeight.w700,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.white
+                      : JellyTheme.textPrimaryLight,
+                ),
+              ),
+              const Spacer(),
+              // ✅ 分区「刷新」小圆钮（参考 cmbok ✓）
+              _sectionRefreshButton(i, s),
+            ],
           ),
         ),
         if (s.loading && s.items.isEmpty)

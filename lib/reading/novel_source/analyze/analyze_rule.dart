@@ -27,6 +27,7 @@ import 'js_engine.dart';
 import 'sync_http_bridge.dart';
 import 'host_bridge.dart';
 import 'cookie_store.dart';
+import 'source_variable_store.dart';
 import '../model/xiaoshuo_book.dart';
 import '../model/xiaoshuo_book_chapter.dart';
 
@@ -58,7 +59,22 @@ class AnalyzeRule {
   ///
   /// 与 `_variables`（`java.put/get`）分开：legado 里 `java.put/get` 是
   /// **规则级**变量，`source.*Variable` 是**书源级**（切换书源不串）。
-  final Map<String, String> _sourceVariables = {};
+  ///
+  /// ── 🔴 为什么从"实例字段"改成"进程级存储" ──────────────────
+  /// 原来它是 `AnalyzeRule` 的**实例字段** ✗ —— 而搜索 / 详情 / 目录 / 正文
+  /// **各自 new 一个 `AnalyzeRule`**（全仓 12 处构造点）⇒ 在 `searchUrl` 里
+  /// `source.setVariable(...)` 存下的值到 `bookInfo` 求值时**已经丢了** ✗
+  /// ⇒ `source.getVariable()` 永远拿到空 ⇒ 依赖该机制的源整条链路失效 ✗。
+  /// 现在按**书源身份**落到进程级存储：同一书源各步骤共享 ✓、不同书源不串 ✓。
+  Map<String, String> get _sourceVariables =>
+      SourceVariableStore.instance.box(_sourceKey);
+
+  /// 当前书源身份键（`source.*` 存储分组用）。
+  String get _sourceKey {
+    final u = bookSourceUrl;
+    if (u != null && u.isNotEmpty) return u;
+    return baseUrl ?? '';
+  }
 
   AnalyzeRule({this.book, this.chapter});
 
@@ -888,6 +904,23 @@ class AnalyzeRule {
         return _sourceVariables['__login__'] ?? '';
       case 'putLoginInfo':
         _sourceVariables['__login__'] =
+            args.isEmpty || args[0] == null ? '' : '${args[0]}';
+        return true;
+      case 'removeLoginInfo':
+        _sourceVariables.remove('__login__');
+        return true;
+      // ── 登录请求头（部分源把登录态放在 header 而不是 cookie）──
+      case 'getLoginHeader':
+        return _sourceVariables['__loginHeader__'] ?? '';
+      case 'putLoginHeader':
+        _sourceVariables['__loginHeader__'] =
+            args.isEmpty || args[0] == null ? '' : '${args[0]}';
+        return true;
+      case 'removeLoginHeader':
+        _sourceVariables.remove('__loginHeader__');
+        return true;
+      case 'putVariable':
+        _sourceVariables['__value__'] =
             args.isEmpty || args[0] == null ? '' : '${args[0]}';
         return true;
       case 'getKey':

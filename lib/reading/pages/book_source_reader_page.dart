@@ -21,6 +21,7 @@ import '../services/tts_service.dart';
 import '../services/ai_service.dart';
 import '../services/reading_time_service.dart';
 import '../services/bsr_independent_layout.dart';
+import '../widgets/book_page_cover.dart';
 import '../widgets/book_page_curl.dart';
 import '../widgets/color_picker_dialog.dart';
 import '../widgets/pomodoro_button.dart';
@@ -116,9 +117,54 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 自定义背景图片路径（「选择图片」选图后复制到应用文档目录；
   /// 非空时优先于颜色作为正文背景）
   String? _customBgPath;
+
+  /// 内置阅读背景壁纸（14 张，来自 cmbok ✓；资源在 `assets/images/reader_bg/`）。
+  /// ⚠️ 以后加壁纸：把图放进那个目录 + 这里加一行即可（pubspec 已声明该目录 ✓）。
+  static const List<String> _builtinBgImages = [
+    'assets/images/reader_bg/annie-spratt-6a3nqQ1YwBw-unsplash.jpg',
+    'assets/images/reader_bg/augustine-wong-oebTM5wHTfw-unsplash.jpg',
+    'assets/images/reader_bg/danielle-suijkerbuijk-66ydMRXW-b8-unsplash.jpg',
+    'assets/images/reader_bg/h-co-mjPs0heWsek-unsplash.jpg',
+    'assets/images/reader_bg/heather-green-1ITG8U0udqM-unsplash.jpg',
+    'assets/images/reader_bg/jacob-dyer-rtA0U8QJHSg-unsplash.jpg',
+    'assets/images/reader_bg/janke-laskowski-jz-ayLjk2nk-unsplash.jpg',
+    'assets/images/reader_bg/marjan-blan-794QUz5-cso-unsplash.jpg',
+    'assets/images/reader_bg/noita-digital-zcx5ztIjQAM-unsplash.jpg',
+    'assets/images/reader_bg/p0074_m.jpg',
+    'assets/images/reader_bg/p0087_m.jpg',
+    'assets/images/reader_bg/resource-boy-t5-DgEcAUUg-unsplash.jpg',
+    'assets/images/reader_bg/the-new-york-public-library-atDr7NECc_k-unsplash.jpg',
+    'assets/images/reader_bg/tina-dawson-Kim9COAIEGc-unsplash.jpg',
+  ];
+
+  /// 当前选中的内置壁纸（null = 不用壁纸，走 `_bgIndex` 的纯色底 ✓）
+  String? _bgImageAsset;
   /// 日夜切换时记住的浅色背景索引（从夜间切回时还原）
   int _dayBgIndex = 0;
-  bool _showBar = true;
+
+  /// 顶栏 + 「阅读设置」面板是否展开。
+  ///
+  /// ── 🔴 默认值必须是 **false**（用户实测反馈）─────────────────────
+  /// 原来是 `true` ✗ ⇒ **点「阅读」一进来看到的就是那个「阅读设置」面板**，
+  /// 而该面板 `maxHeight: 屏幕高 * 0.8`（见 [_settingsPanel]）——
+  /// 直接盖住 80% 正文，用户原话：「**整个阅读器乱七八糟的，
+  /// 点击阅读直接就有这个设置**」✗
+  ///
+  /// 副作用比"挡视线"更重：面板展开时 `onTapUp`（:868）**只做收起、不翻页** ✗
+  /// ⇒ 想翻页得先点一下把它关掉，**左/右 1/3 点击翻章完全失效** ✗
+  ///
+  /// 改成 false 后：
+  ///   · 进来是**干净的正文**（与 `book_reader_page.dart:197`
+  ///     `_showControls = false` 的既有设计一致 ✓）
+  ///   · 点屏幕中间 → 展开顶栏 + 设置面板（:880）✓
+  ///   · 双击右下悬浮球 → 同样展开（:4773）✓
+  ///   · 左/右 1/3 点击 → **一开始就能翻章** ✓
+  bool _showBar = false;
+
+  /// 「阅读设置」面板是否展开。
+  /// 从 `_showBar` 里**拆出来**：否则点中间弹面板会把底部功能栏整个盖住 ✗。
+  /// 现在只有功能栏里的「设置」项才打开它 ✓。
+  bool _showSettingsPanel = false;
 
   // ── 排版（截图 IMG_8491~8499 全文可调）───────────────────────
   double _fontWeight = 400;   // 字重
@@ -131,7 +177,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   double _headerPadH = 15, _headerPadTop = 0;
   double _footerPadH = 15, _footerPadBottom = 0;
   // 底线
-  int _underlineStyle = 3;    // 0无 1短虚线 2长虚线 3实线 4波浪
+  // ⚠️ 默认必须是 0（无）—— 用户实测："默认打开就有下划线" ✗。
+  //   原来写死 3（实线）⇒ 一进阅读器**整屏正文都带下划线** ✗。
+  int _underlineStyle = 0;    // 0无 1短虚线 2长虚线 3实线 4波浪
   Color? _underlineColor;     // null = 跟随文字（参考图 IMG_8497/8498）
   double _underlineAlpha = 0.35;
   double _underlineWidth = 1.2;
@@ -166,6 +214,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   // 理由：手机窄屏下单张漫画图通常比屏幕高，一图一页要额外缩放，
   // 而纵向滚动是主流漫画 App 的做法，也省掉分页度量。
   List<String> _images = const [];
+
+  /// **文字章附带的插图**（引擎随 `content` 一起回的 `images`）。
+  /// 纯图章不存在这里（那种章走 [_images] → 图片阅读模式）✓；
+  /// 这里只用于「图片模式」面板列图/保存 ✓，不参与正文渲染 ✓。
+  List<String> _chapterImages = const [];
   /// 当前页下标（分页模式下用，与 _index 章节下标区分）
   int _pageIndex = 0;
   /// 分页进行中
@@ -236,8 +289,25 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     Color(0xFFC88FE8), // 紫
     Color(0xFFA8B4E0), // 蓝紫
   ];
+  /// 番茄钟浮层 bottom 偏移：根据底部功能栏高度 + TTS 迷你条状态动态计算。
+  /// 底部功能栏（悬浮卡片）高度 ≈ margin(10) + padding(16) + 进度行(48)
+  ///   + SizedBox(14) + 2 行宫格(110) = 198；TTS 迷你条可见时再加 ~38。
+  double get _pomodoroBottomOffset {
+    const gap = 12.0;
+    final ttsActive = _tts.isSpeaking.value || _tts.isPaused.value;
+    // 功能栏现在只在 `_showBar` 时覆盖显示 —— 未显示时不要把番茄钟顶得太高 ✓。
+    final navHeight = _showBar ? 198.0 : 0.0;
+    return navHeight + gap + (ttsActive ? 38.0 : 0.0);
+  }
+
   /// 本章书签：段落下标 → 颜色
   final Map<int, Color> _bookmarks = {};
+  /// `_bookmarks` 当前反映的章节下标（-1 = 尚未加载）。
+  /// 修复「书签串章」：`_go` / `_jumpTo` / 目录跳转都是**先** `_index = next`
+  /// **再** `_loadChapter(next)` ⇒ 旧代码在 `_loadChapter` 里用 `if (i != _index)`
+  /// 判断"是否切章"**恒为假** ⇒ 切章从不换书签，A 章书签在每章同段落处都显示。
+  /// 这里显式记住"这批书签属于哪一章"，切章时按章换入换出。
+  int _bookmarksChapter = -1;
   /// 「不再提示」—— 下次直接用上次选的颜色
   bool _bookmarkNoAsk = false;
   int _bookmarkLastColor = 0;
@@ -419,6 +489,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   String get _progressKey =>
       'bsr.progress.${widget.source.id}.${widget.bookName}';
 
+  /// 书签的存储键（**按章**存 ✓）：同一本书不同章各存各的，
+  /// 避免"整本只存一份、重进时把上次那章的书签装到当前章"的串章。
+  String _bookmarksKey(int chapter) => 'bsr.bookmarks.$_progressKey.$chapter';
+
   /// ✅ **「独立排版」的身份键**（本会话新增 ✓）—— 与**进度 / 书签 / 笔记**用**同一个身份** ✓
   /// （`source.id` + `bookName` ✓）⇒ 用户视角"同一本书"处处一致 ✓（不会出现"进度算一本、排版算另一本"✗）
   String get _indepKey => '${widget.source.id}.${widget.bookName}';
@@ -439,6 +513,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         // ⚠️ `Color` 不能直接进 JSON ✗ → 存 `toARGB32()` 整数 ✓（读回时 `Color(...)` ✓ 与全局键同款 ✓）
         'bgCustom': _customBgColor?.toARGB32(),
         'bgCustomPath': _customBgPath,
+        'bgImage': _bgImageAsset,
         'underlineColor': _underlineColor?.toARGB32(),
         'underlineStyle': _underlineStyle,
         'focusBold': _focusBold,
@@ -499,6 +574,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         final bgPath =
             (ov?['bgCustomPath'] as String?) ?? p.getString('reading.bgCustomPath');
         if (bgPath != null && File(bgPath).existsSync()) _customBgPath = bgPath;
+        // 内置壁纸（与 `_savePrefs` 的 `reading.bgImage` 配对 ✓）
+        final bgImg =
+            (ov?['bgImage'] as String?) ?? p.getString('reading.bgImage');
+        if (bgImg != null && bgImg.isNotEmpty) _bgImageAsset = bgImg;
         // 🔴 与 `_savePrefs` 侧的 `bsr.ball.dx/dy` 配对读回 ✓
         //（原来写读两边都没有它 ✗ → 悬浮球位置"承诺持久化却从不生效" ✓）
         final bdx = p.getDouble('bsr.ball.dx');
@@ -506,9 +585,17 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         if (bdx != null && bdy != null) {
           _ballOffset = Offset(bdx, bdy);
         }
-        // 🔴 与上面的 `bsr.bookmarks.$_progressKey` 配对读回 ✓
-        //（这本书上次的书签，退出/重进不再丢 ✓）
-        final bkRaw = p.getString('bsr.bookmarks.$_progressKey');
+        // ✅ 书签**按章**读回 ✓ —— 只读"即将显示的那一章"的键 ✓，
+        // 不再把整本一份的书签装到当前章（那正是串章的根因 ✓）。
+        // 与下面 `_index = savedIdx`（:576 附近）用同一判定 ✓，保证章号一致 ✓。
+        final bmIdx = (widget.initialIndex == 0 &&
+                savedIdx != null &&
+                savedIdx > 0 &&
+                savedIdx < widget.chapters.length)
+            ? savedIdx
+            : _index;
+        _bookmarksChapter = bmIdx;
+        final bkRaw = p.getString(_bookmarksKey(bmIdx));
         if (bkRaw != null && bkRaw.isNotEmpty) {
           try {
             final m = jsonDecode(bkRaw);
@@ -605,6 +692,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         } else {
           await p.remove('reading.bgCustomPath');
         }
+        if (_bgImageAsset != null) {
+          await p.setString('reading.bgImage', _bgImageAsset!);
+        } else {
+          await p.remove('reading.bgImage');
+        }
         if (_underlineColor != null) {
           await p.setInt('reading.underlineColor', _underlineColor!.toARGB32());
         } else {
@@ -624,15 +716,15 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       // 现在两个分量真正写盘 ✓，`_restorePrefs` 侧配对读回 ✓（缺任一边都等于没做 ✓）
       await p.setDouble('bsr.ball.dx', _ballOffset.dx);
       await p.setDouble('bsr.ball.dy', _ballOffset.dy);
-      // 🔴 书签原来**只存在内存** ✗（`_savePrefs` 里没有任何书签键 ✓），
-      // 而调用点还 `await _savePrefs()` 之后提示"已加书签" ✓ → **退出即全丢** ✓。
-      // 这里按**本书**为键落盘 ✓（复用已存在的书级键 `_progressKey` ✓）
-      // ⚠️ 遗留（下一步）：键里记的是"当前章的段落下标" ✓ → 会出现**串章** ✓
-      //（A 章的书签在每章同一段都显示 ✓），那一半要连带改显示/跳转 ✓
-      await p.setString(
-        'bsr.bookmarks.$_progressKey',
-        jsonEncode(_bookmarks.map((k, v) => MapEntry('$k', v.toARGB32()))),
-      );
+      // ✅ 书签**按章**落盘 ✓（键含章号 ✓）—— 与 `_restorePrefs` 侧配对读回 ✓。
+      // 写"`_bookmarks` 当前所属的那一章"的键 ✓；加载空窗（`= -1`）跳过 ✓，
+      // 否则会拿空表覆盖某章书签 ✗。
+      if (_bookmarksChapter >= 0) {
+        await p.setString(
+          _bookmarksKey(_bookmarksChapter),
+          jsonEncode(_bookmarks.map((k, v) => MapEntry('$k', v.toARGB32()))),
+        );
+      }
       await p.setBool('reading.hideRepeatTitle', _hideRepeatTitle);
       await p.setString('reading.settings', jsonEncode(_rs.toJson()));
       await p.setString('reading.presetNames', jsonEncode(_savedPresets));
@@ -651,6 +743,41 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     } catch (_) {}
   }
 
+  /// 切章时把书签**按章换入换出**（修复串章，见 `_bookmarksChapter`）。
+  /// 先把上一章落盘，再清显示、读回新章；加载期间置 `-1`，让存盘跳过书签分支，
+  /// 避免用空表覆盖新章的键。读回后若 `_index` 已再次变化则丢弃（过期响应）。
+  Future<void> _switchBookmarksTo(int chapter) async {
+    if (_bookmarksChapter != -1 && _bookmarksChapter != chapter) {
+      await _savePrefs();
+    }
+    if (!mounted) return;
+    setState(() {
+      _bookmarks.clear();
+      _bookmarksChapter = -1;
+    });
+    final raw = (await SharedPreferences.getInstance())
+        .getString(_bookmarksKey(chapter));
+    final m = <int, Color>{};
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final d = jsonDecode(raw);
+        if (d is Map) {
+          d.forEach((k, v) {
+            final idx = int.tryParse('$k');
+            if (idx != null) m[idx] = Color((v as num).toInt());
+          });
+        }
+      } catch (_) {}
+    }
+    if (!mounted || _index != chapter) return;
+    setState(() {
+      _bookmarks
+        ..clear()
+        ..addAll(m);
+      _bookmarksChapter = chapter;
+    });
+  }
+
   // ── 章节加载 ────────────────────────────────────────────────
 
   /// "当前这一次**可见**加载"的序号（只有非预取的加载才自增 ✓）。
@@ -665,15 +792,19 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     // 只让**非预取**的加载推进序号 ✓ —— 否则后台预取会把用户正在看的这次作废 ✗
     final seq = prefetchOnly ? -1 : ++_loadSeq;
 
+    // 切章：书签按章换入换出（见 `_bookmarksChapter` 说明 ✓）。
+    // `-1`（首次、`_restorePrefs` 尚未建立章节）时跳过 ✓ —— 初始章由 `_restorePrefs` 负责 ✓。
+    if (!prefetchOnly && _bookmarksChapter != -1 && _bookmarksChapter != i) {
+      await _switchBookmarksTo(i);
+    }
+
     // 命中缓存：直接切换
     if (_cache.containsKey(i)) {
       if (!prefetchOnly) {
         setState(() {
-          // 🔴 书签按字段注释（`:183`）是"**本章**书签" ✓，却**从不随切章清空** ✗
-          // → A 章加的书签会在**每一章同一段落下标**处显示色条 ✗（串章 ✓）。
-          // 这里在**真正切到另一章**时清空 ✓（`i == _index` 的刷新/重排不清 ✓），
-          // 于是渲染、书签面板、计数三者重新自洽 ✓
-          if (i != _index) _bookmarks.clear();
+          // ✅ 书签切章换入换出已上移到 `_loadChapter` 开头（`_switchBookmarksTo` ✓）——
+          //    原来这里的 `if (i != _index) _bookmarks.clear();` **恒为假** ✗
+          //（调用方 `_go` / `_jumpTo` 都先把 `_index` 改好 ✓），是从不生效的死代码 ✓。
           // 🔴 缓存命中时原来**只换了 `_paragraphs`** ✗ —— `_images`（上一章的配图 ✗）
           // 和 `_pages`（上一章的分页 ✗）都还留在原处 ✓ → 表现就是
           //「章号/标题已经变了、**正文或配图还是上一章**」✗。
@@ -684,6 +815,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           //    在哪里按 `_paragraphs` 重算的 ✓，乱清可能让正文变空白 ✗，
           //    确认后再补 ✓
           _images = const [];
+          _chapterImages = const [];
           _paragraphs = _cache[i]!;
           _invalidateTtsSegs();
           _loading = false;
@@ -702,8 +834,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
     if (!prefetchOnly) {
       setState(() {
-        // 同上：真正切章才清（见上面缓存分支的说明 ✓）
-        if (i != _index) _bookmarks.clear();
+        // 同上：书签换章在 `_loadChapter` 开头统一处理 ✓（这里原来是死代码 ✓）
         _loading = true;
         _error = null;
         _paragraphs = const [];
@@ -727,12 +858,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         }
         return;
       }
-      // 漫画源：正文是图片列表，不是文字
-      if (r.images.isNotEmpty) {
+      // ✅ 是否**纯图**章：正文为空 + 有图片 ⇒ 图片模式。
+      //    规则：**只有全部是图片内容才能进入图片模式** ✓
+      //    （有文字 ⇒ 一律文本流；插图另存到 `_chapterImages`，
+      //      供「图片模式」面板查看/保存 ✓）
+      // ⚠️ 但 `bookSourceType=2`（漫画源）**本身就是图片源** ✓ ——
+      //   其正文常带零星文字（章节标题/“本章完”）✗，若按上面的规则会
+      //   退化成文本流、整章看不到图 ✗ ⇒ 漫画源只要有图就保持图片模式 ✓
+      // （客户端模型的类型 getter 名为 `type`，取自 raw.bookSourceType）
+      final isMangaSource = widget.source.type == '2';
+      final isPureImage = r.images.isNotEmpty &&
+          (isMangaSource || r.content.trim().isEmpty);
+      if (isPureImage) {
         _cache[i] = const []; // 文本缓存置空，避免上一本的文字残留
         if (!prefetchOnly) {
           setState(() {
             _images = r.images;
+            _chapterImages = const [];
             _paragraphs = const [];
             _invalidateTtsSegs();
             _pages = const [];
@@ -752,6 +894,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           _paragraphs = paras;
           _invalidateTtsSegs();
           _images = const []; // 切回文字章节要把漫画图清掉
+          // 文字章附带的插图（上游按 content-is-empty 已排除纯图章）
+          _chapterImages = r.images;
           _loading = false;
           _error = null;
         });
@@ -846,17 +990,28 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   @override
   Widget build(BuildContext context) {
     final bg = _bgs[_bgIndex];
-    final useImgBg =
+    // 自选图片（`_customBgPath`）：优先级最高 ✓
+    final useFileBg =
         _customBgPath != null && File(_customBgPath!).existsSync();
+    // 有任何图片背景（自选图 / 内置壁纸）⇒ Scaffold 底色透明，露出图片 ✓
+    final useImgBg = useFileBg || _bgImageAsset != null;
     return Scaffold(
       backgroundColor: useImgBg ? Colors.transparent : bg[0],
       body: Stack(
         fit: StackFit.expand,
         children: [
           // 背景层：自定义图片优先（cover 铺满），否则内置/自定义色
-          if (useImgBg)
+          if (useFileBg)
             Image.file(
               File(_customBgPath!),
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              errorBuilder: (_, __, ___) => Container(color: bg[0]),
+            )
+          else if (_bgImageAsset != null)
+            // 内置壁纸（14 张里选的一张 ✓）
+            Image.asset(
+              _bgImageAsset!,
               fit: BoxFit.cover,
               gaplessPlayback: true,
               errorBuilder: (_, __, ___) => Container(color: bg[0]),
@@ -868,14 +1023,19 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             onTapUp: (d) {
               final w = MediaQuery.of(context).size.width;
               final x = d.globalPosition.dx;
-              if (_showBar) {
-                setState(() => _showBar = false);
+              if (_showBar || _showSettingsPanel) {
+                setState(() {
+                  _showBar = false;
+                  _showSettingsPanel = false;
+                });
                 return;
               }
+              // 翻页反转同样作用于整屏左 / 右 1/3 的翻章 ✓
+              final flip = _rs.flipReverse;
               if (x < w * 0.3) {
-                _go(-1);
+                _go(flip ? 1 : -1);
               } else if (x > w * 0.7) {
-                _go(1);
+                _go(flip ? -1 : 1);
               } else {
                 setState(() => _showBar = true);
               }
@@ -887,18 +1047,33 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     children: [
                       Expanded(child: _contentArea(bg[1])),
                       _ttsMiniBar(bg[1]),
-                      _bottomNav(bg[1]),
                     ],
                   ),
                   if (_showBar) _topBar(bg[1]),
-                  if (_showBar) _settingsPanel(bg[1]),
-                  // 番茄钟浮层（复用 2.0.3 原有的 PomodoroButton）
-                  if (_showPomodoro)
+                  // ✅ 底部功能栏改为**点菜单区才显示**（跟随 `_showBar` ✓），
+                  //    并用 `Positioned` **覆盖**，不再常驻在 Column 里占正文高度 ——
+                  //    用户实测："悬浮工具栏为啥一直显示？还占位置" ✗
+                  //    （对齐漫画 / 图书两个阅读器：点中间才出上下栏 ✓）。
+                  if (_showBar)
                     Positioned(
-                      right: 12,
-                      bottom: 180,
-                      child: const PomodoroButton(),
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: _bottomNav(bg[1]),
                     ),
+                  // 右侧竖向悬浮栏（朗读 / 亮度 / 白夜 / 编辑）：与漫画阅读器同款。
+                  // 设置面板从底部盖上来时让位（否则会被面板压住 ✗）。
+                  if (_showBar && !_showSettingsPanel) _sideDock(bg[1]),
+                  // 阅读设置面板拆成**独立开关**（只有功能栏里的「设置」打开它 ✓）——
+                  // 否则点中间会连面板一起弹出、把刚出现的功能栏整个盖住 ✗。
+                  if (_showSettingsPanel) _settingsPanel(bg[1]),
+                  // 番茄钟浮层：bottom 动态计算，避免悬浮功能栏改后错位
+                  if (_showPomodoro)
+                    Obx(() => Positioned(
+                          right: 12,
+                          bottom: _pomodoroBottomOffset,
+                          child: const PomodoroButton(),
+                        )),
                   // 阅读悬浮球（截图里右下角那个球：单击翻页/双击菜单/拖动移动）
                   if (!_showBar) _readingBall(bg[1]),
                 ],
@@ -1063,7 +1238,40 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           );
         }
 
-        // 其余模式（左右 / 覆盖 / 无动画）走 PageView
+        // ✅ 覆盖翻页：复用图书阅读器的 `BookPageCover` —— 新页从侧边滑入**覆盖**，
+        //    滑入页自带不透明底色 ⇒ 不会与当前页文字**重叠** ✓。
+        //    原来「覆盖」只是把 PageView 换成 Clamping 物理 ✗ → 实际效果与「左右」
+        //    一模一样（仍是整页平移），用户实测"翻页样式太丑、还重叠" ✗
+        if (_rs.pageMode == PageMode.cover) {
+          final pi = _safePageIndex();
+          return BookPageCover(
+            backgroundColor: _customBgColor ?? _bgs[_bgIndex][0],
+            page: _pageContent(fg, _pages[pi]),
+            nextPage: pi + 1 < _pages.length
+                ? _pageContent(fg, _pages[pi + 1])
+                : null,
+            prevPage: pi > 0 ? _pageContent(fg, _pages[pi - 1]) : null,
+            canNext: pi + 1 < _pages.length,
+            canPrev: pi > 0,
+            onTurnNext: () {
+              if (pi + 1 < _pages.length) {
+                setState(() => _pageIndex = pi + 1);
+              } else {
+                _go(1);
+              }
+            },
+            onTurnPrev: () {
+              if (pi > 0) {
+                setState(() => _pageIndex = pi - 1);
+              } else {
+                _go(-1);
+              }
+            },
+            onTapCenter: () => setState(() => _showBar = !_showBar),
+          );
+        }
+
+        // 其余模式（左右 / 无动画）走 PageView
         return Stack(
           children: [
             PageView.builder(
@@ -1071,11 +1279,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               physics: _rs.pageMode == PageMode.none
                   // 无动画：直接切换（拖动仍然可用，只是没有滑动惯性）
                   ? const ClampingScrollPhysics()
-                  // 覆盖：新页从侧面盖上来（Clamping 更"贴"，
-                  // 视觉上是覆盖而非平移）
-                  : _rs.pageMode == PageMode.cover
-                      ? const ClampingScrollPhysics()
-                      : const PageScrollPhysics(),
+                  : const PageScrollPhysics(),
               itemCount: _pages.length,
               onPageChanged: (i) {
                 setState(() => _pageIndex = i);
@@ -1143,16 +1347,35 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   Widget _mangaView(Color fg) {
     final headers = _mangaHeaders;
     return GestureDetector(
-      // 点屏幕中间的 1/3 显隐工具栏；左右 1/3 翻章
+      // 点屏幕中间的 1/3 显隐工具栏；左右 1/3 翻章。
+      // ✅ 补上"工具栏/面板已展开时，任意点击先收起"——与外层 Stack 手势一致 ✓。
+      //    原来这里缺这一步 ✗ → 面板开着时左右点击会**翻页**而不是**收起面板** ✗。
       onTapUp: (d) {
         final w = MediaQuery.of(context).size.width;
         final x = d.localPosition.dx;
+        if (_showBar || _showSettingsPanel) {
+          setState(() {
+            _showBar = false;
+            _showSettingsPanel = false;
+          });
+          return;
+        }
+        // 翻页反转（左点下一页 / 右点上一页）在漫画模式同样生效 ✓
+        final flip = _rs.flipReverse;
         if (x < w / 3) {
-          _prevPageOrChapter();
+          if (flip) {
+            _nextPageOrChapter();
+          } else {
+            _prevPageOrChapter();
+          }
         } else if (x > w * 2 / 3) {
-          _nextPageOrChapter();
+          if (flip) {
+            _prevPageOrChapter();
+          } else {
+            _nextPageOrChapter();
+          }
         } else {
-          setState(() => _showBar = !_showBar);
+          setState(() => _showBar = true);
         }
       },
       child: ListView.builder(
@@ -1420,8 +1643,74 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         decorationThickness: _underlineWidth,
       );
 
+  /// 页眉 + 页脚（信息栏）占掉的高度 —— 分页度量要把它从可用高度里减掉 ✓。
+  /// 信息栏关闭（`statusItems` 为空）时两者都不渲染 ⇒ 返回 0 ✓。
+  ///
+  /// ⚠️ 状态文字没有显式 `height`，行高随字体（约 1.17~1.3 倍字号）——
+  ///   这里按 **1.3** 估：宁可多留一点（页底略空），也不能少留（会把末行裁掉 ✗）。
+  double _headerFooterHeight() {
+    if (_rs.statusItems.isEmpty) return 0;
+    final line = AppTheme.fontCaption * 1.3;
+    final header = _headerPadTop + 6 + line + 4;
+    final footer = 4 + line + _footerPadBottom + 6;
+    return header + footer;
+  }
+
   /// 一页的内容（含页眉 / 页脚信息栏）
   Widget _pageContent(Color fg, BookPage page) {
+    // ✅ 每页铺**不透明底色**（+ 页缘软投影，见下）——
+    //    原来每一页都是透明的 ✗ ⇒ 前后两页的文字叠在**同一块背景**上，
+    //    用户实测："左右滑动是切片的形式"、"感觉重叠" ✗
+    //    铺底后滑动时看到的是"两张纸在平移" ✓
+    // ⚠️ 自定义背景图时不铺（否则会把图片盖掉 ✗）
+    // 有**任何图片背景**（自选图 / 内置壁纸）时不铺页底色 ✓（否则会把图盖住 ✗）
+    final imgBg =
+        (_customBgPath != null && File(_customBgPath!).existsSync()) ||
+            _bgImageAsset != null;
+    final body = imgBg
+        ? _pageBody(fg, page)
+        : ColoredBox(
+            color: _customBgColor ?? _bgs[_bgIndex][0],
+            child: _pageBody(fg, page),
+          );
+    // 页缘投影：只在"两页并排平移"的模式（左右 / 无动画）画 —— 给两页之间
+    // 一个可见的软边界；覆盖 / 仿真各有自己的投影，不重复画 ✓
+    if (imgBg ||
+        (_rs.pageMode != PageMode.slide &&
+            _rs.pageMode != PageMode.none)) {
+      return body;
+    }
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        body,
+        Positioned(
+          top: 0,
+          bottom: 0,
+          right: 0,
+          width: 8,
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.10),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 一页的**内容本体**（页眉 / 正文 / 页脚）。
+  /// 由 [_pageContent] 包上底色（+ 页缘投影）后使用 ✓。
+  Widget _pageBody(Color fg, BookPage page) {
     final items = _rs.statusItems;
     final progress = _pages.isEmpty
         ? 0.0
@@ -1459,7 +1748,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               padding: EdgeInsets.symmetric(horizontal: 0),
               child: ListView.builder(
                 physics: const NeverScrollableScrollPhysics(),
-                padding: EdgeInsets.fromLTRB(0, 2, 0, 2),
+                // ✅ 左右 / 上下边距在这里**真正生效** —— 与 `_paginate` 的可用区域一致 ✓
+                //   （原来写死 `(0, 2, 0, 2)` ✗ ⇒「排版」里的边距滑块调了没反应 ✗）
+                padding: EdgeInsets.fromLTRB(
+                    _padLeft, _padTop + 2, _padRight, _padTop + 2),
                 itemCount: page.entries.length,
                 itemBuilder: (c, i) {
                   final e = page.entries[i];
@@ -1490,12 +1782,18 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   }
                   if (b is ParagraphBlock) {
                     // 分页后可能是半段（partialText），直接用它的文本渲染；
-                    // 段落下标用来关联书签，取第一个包含该块的段落
-                    final pi = _paragraphIndexOf(b);
-                    final paraText = _indent > 0
-                        ? '\u3000' * _indent.round() +
-                            (e.partialText ?? b.text)
-                        : (e.partialText ?? b.text);
+                    // 🔴 段落下标用**分页器带下来的全书块下标**直接换算 ✓
+                    // 本页 `blocks = [章标题, ...段落]` ⇒ 段落下标 = blockIndex - 1 ✓。
+                    // 原实现 `_paragraphs.indexOf(b.text)` 会命中**第一个同文本段** ✗：
+                    // 正文里重复段（空行、"……"、重复短句）的第 2 处及之后，
+                    // 书签/批注都会落到第 1 处 ✗（与笔记定位同源的错位 ✓）。
+                    final pi = e.blockIndex >= 0
+                        ? e.blockIndex - 1
+                        : _paragraphIndexOf(b);
+                    // ✅ 首行缩进已在**分页块**里加过（见 `_paginate`）⇒ 这里直接用 ✓
+                    //   （原来度量用原文、渲染再加 2 个全角空格 ✗ ⇒ 渲染比量出来的多占 36px 宽、
+                    //    多折行 ⇒ 页面底部溢出被裁，看着就是"文字被切片" ✗）
+                    final paraText = e.partialText ?? b.text;
                     // 满行底线（信纸）：每行拉满整行宽，用段落底边线实现（IMG_8497/8498）
                     Widget body = Text(
                       paraText,
@@ -1565,12 +1863,21 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   void _nextPageOrChapter() {
     if (_rs.pageMode.paginates && _pages.isNotEmpty) {
       if (_pageIndex < _pages.length - 1) {
-        _pageCtrl.nextPage(
-          duration: _rs.pageMode == PageMode.none
-              ? Duration.zero
-              : const Duration(milliseconds: 260),
-          curve: Curves.easeOut,
-        );
+        // 仿真 / 覆盖模式**没有挂载 PageView** ⇒ `_pageCtrl` 无 clients，
+        // 直接 `nextPage()` 会因为取不到 position 抛异常 ✗ → 这类模式直接切页 ✓
+        final noPager = _rs.pageMode == PageMode.curl ||
+            _rs.pageMode == PageMode.cover ||
+            !_pageCtrl.hasClients;
+        if (noPager) {
+          setState(() => _pageIndex = _pageIndex + 1);
+        } else {
+          _pageCtrl.nextPage(
+            duration: _rs.pageMode == PageMode.none
+                ? Duration.zero
+                : const Duration(milliseconds: 260),
+            curve: Curves.easeOut,
+          );
+        }
         return;
       }
     }
@@ -1581,12 +1888,20 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   void _prevPageOrChapter() {
     if (_rs.pageMode.paginates && _pages.isNotEmpty) {
       if (_pageIndex > 0) {
-        _pageCtrl.previousPage(
-          duration: _rs.pageMode == PageMode.none
-              ? Duration.zero
-              : const Duration(milliseconds: 260),
-          curve: Curves.easeOut,
-        );
+        // 同 `_nextPageOrChapter`：仿真 / 覆盖无 PageView，直接切页 ✓
+        final noPager = _rs.pageMode == PageMode.curl ||
+            _rs.pageMode == PageMode.cover ||
+            !_pageCtrl.hasClients;
+        if (noPager) {
+          setState(() => _pageIndex = _pageIndex - 1);
+        } else {
+          _pageCtrl.previousPage(
+            duration: _rs.pageMode == PageMode.none
+                ? Duration.zero
+                : const Duration(milliseconds: 260),
+            curve: Curves.easeOut,
+          );
+        }
         return;
       }
     }
@@ -1633,9 +1948,18 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final zones = _rs.tapZones.isEmpty
         ? ReadingSettings.defaultZones()
         : _rs.tapZones;
-    final action = _rs.oneHand
+    var action = _rs.oneHand
         ? (zone == 4 ? TapAction.menu : TapAction.next)
         : (zones[zone] ?? TapAction.menu);
+    // ✅ 接上「翻页反转」开关（原来只存不读 ✗ —— 面板里拨了毫无效果）：
+    //    左点下一页、右点上一页 = 把「上一页 / 下一页」两个动作对调 ✓
+    if (_rs.flipReverse) {
+      if (action == TapAction.prev) {
+        action = TapAction.next;
+      } else if (action == TapAction.next) {
+        action = TapAction.prev;
+      }
+    }
     switch (action) {
       case TapAction.prev:
         _prevPageOrChapter();
@@ -1743,18 +2067,28 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   Widget _topBar(Color fg) {
     return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
+      // ✅ 改成**悬浮卡片**（与底部功能栏同款：四周留白 + 四角圆 + 向下投影 ✓）——
+      //    原来是 top:0 通栏贴边（`color:` 纯色背景 ✓），与底部悬浮卡风格不统一 ✗。
+      top: 8,
+      left: 12,
+      right: 12,
       child: Container(
-        color: _bgTop.withValues(alpha: 0.96),
+        decoration: BoxDecoration(
+          color: _bgTop.withValues(alpha: 0.97),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.16),
+              blurRadius: 20,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         child: Row(
           children: [
-            IconButton(
-              icon: Icon(Icons.arrow_back_rounded, color: fg),
-              onPressed: () => Navigator.pop(context),
-            ),
+            _topIcon(Icons.arrow_back_rounded, '返回',
+                () => Navigator.pop(context), fg),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1780,60 +2114,102 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 ],
               ),
             ),
-            // 功能图标：搜索 / 刷新 / 书签 / 朗读 / 亮度 / 日夜 / 编辑
-            IconButton(
-              tooltip: '搜索全书',
-              icon: Icon(Icons.search_rounded, size: 20, color: fg),
-              onPressed: _showBookSearch,
-            ),
-            IconButton(
-              tooltip: '刷新本章',
-              icon: Icon(Icons.refresh_rounded, size: 20, color: fg),
-              onPressed: () => _loadChapter(_index),
-            ),
-            IconButton(
-              tooltip: _bookmarks.isEmpty
+            // 顶栏只留：搜索 / 刷新 / 书签
+            //（朗读 / 亮度 / 白夜 / 编辑 已挪到右侧竖向悬浮栏 —— 用户要求，顶栏放 8 个太挤）
+            _topIcon(Icons.search_rounded, '搜索全书', _showBookSearch, fg),
+            _topIcon(Icons.refresh_rounded, '刷新本章',
+                () => _loadChapter(_index), fg),
+            _topIcon(
+              _bookmarks.isEmpty
+                  ? Icons.bookmark_border_rounded
+                  : Icons.bookmark_rounded,
+              _bookmarks.isEmpty
                   ? '加书签'
                   : '本书已有 ${_bookmarks.length} 个书签',
-              icon: Icon(
-                _bookmarks.isEmpty
-                    ? Icons.bookmark_border_rounded
-                    : Icons.bookmark_rounded,
-                size: 20,
-                color: fg,
-              ),
-              onPressed: () => _showAddBookmark(0),
-            ),
-            IconButton(
-              tooltip: '朗读',
-              icon: Icon(Icons.record_voice_over_outlined,
-                  size: 20, color: fg),
-              onPressed: () => _showTtsSheet(),
-            ),
-            IconButton(
-              tooltip: '亮度',
-              icon: Icon(Icons.brightness_6_rounded, size: 20, color: fg),
-              onPressed: _showBrightnessSheet,
-            ),
-            IconButton(
-              tooltip: _bgIndex == 5 && _customBgColor == null
-                  ? '切换白天'
-                  : '切换夜间',
-              icon: Icon(
-                _bgIndex == 5 && _customBgColor == null
-                    ? Icons.light_mode_outlined
-                    : Icons.dark_mode_outlined,
-                size: 20,
-                color: fg,
-              ),
-              onPressed: _toggleDayNight,
-            ),
-            IconButton(
-              tooltip: '编辑（划线与笔记）',
-              icon: Icon(Icons.edit_outlined, size: 20, color: fg),
-              onPressed: () => _showToc(initialTab: 2),
+              () => _showAddBookmark(0),
+              fg,
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// 悬浮顶栏/卡片里的紧凑图标按钮：统一 40×40，
+  /// 避免 8 个默认 48dp 的 IconButton 把卡片挤到溢出。
+  Widget _topIcon(IconData icon, String tooltip, VoidCallback onTap, Color fg) {
+    return IconButton(
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+      icon: Icon(icon, size: 20, color: fg),
+      onPressed: onTap,
+    );
+  }
+
+  /// 右侧竖向悬浮栏：朗读 / 亮度 / 白夜 / 编辑。
+  /// 与漫画阅读器的右侧竖条同款 —— 这 4 个原来挤在顶栏里（用户要求挪出来）。
+  Widget _sideDock(Color fg) {
+    final ink = _bgIndex == 5 && _customBgColor == null;
+    return Positioned(
+      right: 12,
+      top: 0,
+      bottom: 0,
+      child: Center(
+        child: Container(
+          width: 46,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: _bgTop.withValues(alpha: 0.97),
+            borderRadius: BorderRadius.circular(23),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.16),
+                blurRadius: 20,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _dockButton(Icons.record_voice_over_outlined, '朗读',
+                  () => _showTtsSheet(), fg),
+              const SizedBox(height: 10),
+              _dockButton(Icons.brightness_6_rounded, '亮度',
+                  _showBrightnessSheet, fg),
+              const SizedBox(height: 10),
+              _dockButton(
+                  ink ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                  ink ? '切换白天' : '切换夜间',
+                  _toggleDayNight,
+                  fg),
+              const SizedBox(height: 10),
+              _dockButton(Icons.edit_outlined, '编辑（划线与笔记）',
+                  () => _showToc(initialTab: 2), fg),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 竖条里的圆形按钮。
+  Widget _dockButton(
+      IconData icon, String tooltip, VoidCallback onTap, Color fg) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: fg.withValues(alpha: 0.08),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, size: 20, color: fg.withValues(alpha: 0.9)),
         ),
       ),
     );
@@ -1852,11 +2228,19 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       final rateLabel =
           '${rate.toStringAsFixed(1).replaceAll('.0', '')}×';
       return Container(
+        // ✅ 与底部功能栏同款的**悬浮卡片**（四周留白 + 四角圆 + 向下投影 ✓）——
+        //    原来是通栏贴边（只有一条 `top` 边框分隔 ✓），与底部悬浮卡不统一 ✗。
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
         decoration: BoxDecoration(
           color: _bgTop.withValues(alpha: 0.97),
-          border: Border(
-            top: BorderSide(color: fg.withValues(alpha: 0.06)),
-          ),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.16),
+              blurRadius: 20,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         child: Row(
@@ -2157,7 +2541,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               _navItem(Icons.text_fields_rounded, '排版',
                   _showLayoutSheet, fg),
               _navItem(Icons.settings_outlined, '设置',
-                  () => setState(() => _showBar = true), fg),
+                  () => setState(() => _showSettingsPanel = true), fg),
               _navItem(Icons.menu_book_rounded, '目录', _showToc, fg),
               // 番茄钟直接复用 2.0.3 原有的 PomodoroButton（两个阅读器都在用它）
               _navItem(Icons.timer_outlined, '番茄钟',
@@ -2310,20 +2694,30 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final blocks = <BookBlock>[
       // 章标题当 heading 块，保证它自己起一页
       BookBlock.heading(widget.chapters[_index].name, 1),
-      ..._paragraphs.map(BookBlock.paragraph),
+      // ✅ 首行缩进**一并交给分页度量**（渲染侧不再重复加 ✓）
+      //   否则渲染比量出来的多占宽、多折行 ⇒ 页面底部溢出被裁 ✗
+      ..._paragraphs.map((p) => BookBlock.paragraph(
+          _indent > 0 ? '\u3000' * _indent.round() + p : p)),
     ];
+    // 🔴 分页的"可用区域"必须与**实际渲染**一致 ✗（原来两处对不上 ✓）：
+    //   · 横向：渲染侧给正文 ListView 加了 `_padLeft/_padRight`（本轮补上 ✓）
+    //   · 纵向：渲染侧上 / 下还有**页眉 + 页脚**占位 ✓
+    //     原来 `viewportHeight` 直接用整块高度 ✗ ⇒ 量出来的页比真正能放文本的
+    //     区域高约一个页眉 + 页脚 ⇒ 每页最后一行被裁 ✗
     final typo = BookTypography(
       fontSize: _fontSize,
       lineHeight: _lineHeight,
-      padding: _padLeft,
+      padding: (_padLeft + _padRight) / 2,
       verticalPadding: _padTop,
       fontFamily: null,
     );
+    final textAreaH =
+        (_viewport.height - _headerFooterHeight()).clamp(1.0, _viewport.height);
     try {
       final pg = BookPaginator(
         blocks: blocks,
         viewportWidth: _viewport.width,
-        viewportHeight: _viewport.height,
+        viewportHeight: textAreaH,
         typo: typo,
         chapterStarts: const {0},
       );
@@ -2643,12 +3037,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         Text('独立排版',
                             style: TextStyle(fontSize: AppTheme.fontFootnote, color: _fgMuted)),
                         const SizedBox(width: 4),
-                        // 🔴 这个开关是**写死的假控件** ✗：`value: false` 是**字面量** ✓
-                        //（不是任何设置的镜像 ✓），配 `onChanged: null` 让它**永远点不动** ✗
-                        // → 用户看到"独立排版"右边有个开关，却永远开不了、也无任何说明 ✓
-                        // ⚠️ 同款还有 `:3508` 与 `:4916` 附近两处 ✓ —— 逐个判断
-                        //   （其中 `:4916` 在 `_settingsPanel` 里，可能是合法的只读镜像 ✓，
-                        //    要看了才敢下结论 ✓）
+                        // ✅ 已接线（不再是假控件 ✓）：拨动即写 / 删 `BsrIndependentLayout`
+                        //   的本书记录（`enable/disable(_indepKey, _layoutSnapshot())` ✓），
+                        //   下次进这本书时 `_restorePrefs` 会把覆盖项读回来 ✓。
+                        //   ℹ️ 排版行、朗读面板、阅读设置面板三处共用同一个 `_independent` ✓。
                         Switch(
                             value: _independent,
                             onChanged: (v) async {
@@ -2792,6 +3184,35 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     ];
   }
 
+  /// 「背景图」里的一张小卡片（asset = null ⇒ 「无」= 不用壁纸）。
+  Widget _bgImageChip(String? asset, void Function(VoidCallback) upd) {
+    final selected = _bgImageAsset == asset;
+    return GestureDetector(
+      onTap: () => upd(() => _bgImageAsset = asset),
+      child: Container(
+        width: 44,
+        height: 52,
+        margin: const EdgeInsets.only(right: 8),
+        decoration: BoxDecoration(
+          color: _fg.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? _fg : _fg.withValues(alpha: 0.25),
+            width: selected ? 2.5 : 1,
+          ),
+          image: asset == null
+              ? null
+              : DecorationImage(image: AssetImage(asset), fit: BoxFit.cover),
+        ),
+        alignment: Alignment.center,
+        child: asset == null
+            ? Text('无',
+                style: TextStyle(fontSize: AppTheme.fontCaption, color: _fg))
+            : null,
+      ),
+    );
+  }
+
   /// 「主题」tab：背景 + 字色 + 图片（截图 IMG_8492/8499）
   List<Widget> _layoutThemeTab(void Function(VoidCallback) upd) {
     const bgNames = ['默认', '护眼', '牛皮纸', '米黄', '竹露', '夜间'];
@@ -2875,6 +3296,19 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             ),
           ),
         ],
+      ),
+      const SizedBox(height: 12),
+      // ── 背景图（内置壁纸：来自 cmbok 的 14 张 ✓）────────────────
+      _layoutLabel('背景图'),
+      SizedBox(
+        height: 56,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          children: [
+            _bgImageChip(null, upd),
+            for (final a in _builtinBgImages) _bgImageChip(a, upd),
+          ],
+        ),
       ),
       const SizedBox(height: 14),
       _layoutLabel('字色'),
@@ -3946,10 +4380,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                             style: TextStyle(
                                 fontSize: AppTheme.fontSubhead, color: _fgMuted)),
                         const SizedBox(width: 4),
-                        // 🔴 与排版行那个「独立排版」（`:2221` ✓）**完全同款** ✗：
-                        // `value: false` 是**字面量** ✓（不是任何设置的镜像 ✓），
-                        // `onChanged: null` 让它**永远点不动** ✓ → 用户看到"独立设置"
-                        // 右边有个开关、永远开不了、也没有说明 ✗
+                        // ✅ 与排版行的「独立排版」同源（同一个 `_independent` ✓），已接线：
+                        //   拨动即写 / 删 `BsrIndependentLayout` 的本书记录 ✓。
                         Switch(
                             value: _independent,
                             onChanged: (v) async {
@@ -4961,18 +5393,31 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                           final savedKey = keyCtrl.text.trim();
                           final savedModel =
                               modelCtrl.text.trim().isEmpty ? 'deepseek-chat' : modelCtrl.text.trim();
-                          final tmp = AiService()
+                          // AiService 是**单例** ✓ → 直接改字段会**污染已保存的配置** ✗。
+                          // 这里先快照、测完在 finally 还原 ✓（"测试连接"不该改变真实配置 ✓）。
+                          final tmp = AiService();
+                          final prevBase = tmp.baseUrl;
+                          final prevKey = tmp.apiKey;
+                          final prevModel = tmp.model;
+                          tmp
                             ..baseUrl = savedBase.isEmpty
                                 ? 'https://api.deepseek.com'
                                 : savedBase
                             ..apiKey = savedKey
                             ..model = savedModel;
-                          final r = await tmp.chat(
-                            system: '你是连接测试助手。',
-                            user: '请只回复两个字：正常',
-                            timeout: const Duration(seconds: 30),
-                          );
-                          _toast('连接成功：$r');
+                          try {
+                            final r = await tmp.chat(
+                              system: '你是连接测试助手。',
+                              user: '请只回复两个字：正常',
+                              timeout: const Duration(seconds: 30),
+                            );
+                            _toast('连接成功：$r');
+                          } finally {
+                            tmp
+                              ..baseUrl = prevBase
+                              ..apiKey = prevKey
+                              ..model = prevModel;
+                          }
                         } catch (e) {
                           _toast('连接失败：$e');
                         }
@@ -5189,15 +5634,21 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 图片模式：把本章的图片单独列出来看/保存。
   ///
-  /// 书源正文里的图片是 `<img src>` 标签，`_splitParagraphs` 会把它们
-  /// 当普通文本留下。这里把图片 URL 抽出来。
+  /// 图片来源有三处（去重合并）✓：
+  ///   · `_images` —— **纯图章**的正文图片（引擎 `type:'images'`）✓
+  ///   · `_chapterImages` —— **文字章**附带的插图（引擎与 content 一起回）✓
+  ///   · 正文里的图片 URL —— 契约为纯文本的源，`<img>` 会以文本留下 ✓
   void _showImageMode() {
     final urls = <String>[];
+    for (final u in [..._images, ..._chapterImages]) {
+      if (u.isNotEmpty && !urls.contains(u)) urls.add(u);
+    }
     for (final p in _paragraphs) {
       for (final m in RegExp(r'https?://[^\s"''<>]+\.(?:jpg|jpeg|png|gif|webp)',
               caseSensitive: false)
           .allMatches(p)) {
-        urls.add(m.group(0)!);
+        final u = m.group(0)!;
+        if (!urls.contains(u)) urls.add(u);
       }
     }
     showModalBottomSheet<void>(
@@ -5392,7 +5843,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
         decoration: BoxDecoration(
           color: _bgTop,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
         ),
         child: SafeArea(
           top: false,
@@ -5413,13 +5864,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     Text('独立设置',
                         style: TextStyle(fontSize: AppTheme.fontSubhead, color: _fgMuted)),
                     const SizedBox(width: 4),
-                    // 🔴 **本文件的第 3 处同款假开关** ✗（另两处：排版行的
-                    // 「独立排版」`:2221` ✓、朗读面板的「独立设置」`:3510` ✓）：
-                    // `value: false` 是**字面量** ✓（**不是**合法只读镜像 ✗ —— 镜像
-                    // 会读真实设置值 ✓），`onChanged: null` 让它**永远点不动** ✓。
-                    // → 三个都是"**看起来能独立设置、其实从来没实现**"的装饰 ✓
-                    // ⚠️ 遗留：要么实现（各自落盘 + 被对应逻辑读取 ✓），
-                    //   要么干脆删掉这三个开关 ✓ —— 现状最糟（有开关不能点 ✗）
+                    // ✅ 三处「独立设置 / 独立排版」共用同一个 `_independent` ✓，均已接线：
+                    //   拨动即写 / 删 `BsrIndependentLayout` 的本书记录，`_restorePrefs` 读回 ✓。
                     Switch(
                         value: _independent,
                         onChanged: (v) async {
@@ -5551,25 +5997,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   ],
                 ),
               ),
-              // 底部：取消 · 排版 · 确认
+              // 底部：取消 · 确认
+              //（原来这里还有个「排版」按钮 ✗ —— 与底部功能栏里的「排版」重复了，
+              //  用户实测："功能面板里面的设置里面还有一个排版？" ⇒ 去掉 ✓）
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
                 child: Row(
                   children: [
                     TextButton(
-                      onPressed: () => setState(() => _showBar = false),
+                      onPressed: () =>
+                          setState(() => _showSettingsPanel = false),
                       child: Text('取消',
                           style: TextStyle(fontSize: AppTheme.fontBody, color: _fg)),
                     ),
                     const Spacer(),
-                    TextButton(
-                      onPressed: _showLayoutSheet,
-                      child: Text('排版',
-                          style: TextStyle(fontSize: AppTheme.fontBody, color: _fg)),
-                    ),
-                    const SizedBox(width: 10),
                     FilledButton(
-                      onPressed: () => setState(() => _showBar = false),
+                      onPressed: () =>
+                          setState(() => _showSettingsPanel = false),
                       style: FilledButton.styleFrom(
                         backgroundColor: _fg.withValues(alpha: 0.9),
                         foregroundColor: _bgTop,
@@ -5694,7 +6138,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                           color: _bgTop,
                                           borderRadius:
                                               const BorderRadius.vertical(
-                                                  top: Radius.circular(20)),
+                                                  top: Radius.circular(22)),
                                         ),
                                         child: SafeArea(
                                           top: false,

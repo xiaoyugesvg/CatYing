@@ -112,6 +112,14 @@ flutter:
     - assets/nodejs-runtime/version.json
     # 猫爪（猫咪）Logo：用于接口配置引导页主视觉
     - assets/images/
+    # 阅读模块用到的图标（logo / 文件夹 / 魔棒）：
+    #   ⚠️ 原来**既没声明、文件也不在** ✗ ⇒ `Image.asset('assets/icons/…')` 在真机必然
+    #     加载失败（about_page / download_page / source_repo_page / search_page ✓）
+    #   2026-10-09：从 cmbok 安装目录把文件补回来 + 这里补声明 ✓
+    - assets/icons/
+    # 内置阅读背景壁纸（14 张，来自 cmbok ✓）
+    #   ⚠️ 目录式声明**不递归**，所以要单独声明这个子目录 ✓
+    - assets/images/reader_bg/
     # 出厂内置漫画源（15 个官方源明文，装上即有源；文档目录 sources.json 云端覆盖层优先）
     - assets/config/
     # ── 🔴 出厂内置**音乐源**（之前漏声明 → 从没打进包）───────────────
@@ -132,6 +140,15 @@ flutter:
     - assets/music/
     - assets/music/lx/
     - assets/music/musicfree/
+
+  # ── 内置字体 ──────────────────────────────────────────────────
+  #   ⚠️ 原来整个 pubspec **没有 `fonts:` 段** ✗ ⇒ 图书阅读器字体列表里的
+  #     「水墨楷体 / inkReadingKai」是**悬空 family**（选了静默回落默认字体）✗。
+  #   现在把随包字体真正注册进来 ⇒ 字体列表里能选中并生效 ✓。
+  fonts:
+    - family: MiSans
+      fonts:
+        - asset: assets/fonts/MiSans.ttf
 
 dependency_overrides:
   media_kit_libs_windows_video:

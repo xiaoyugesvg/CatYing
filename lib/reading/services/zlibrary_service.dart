@@ -168,8 +168,6 @@ class ZlibraryService extends ChangeNotifier {
   String _username = '';
   String _remixUserid = '';
   String _remixUserkey = '';
-  /// [PATCH-21] 网页登录原始 Cookie 串（仅留档/日志用；请求统一由 _cookies() 生成）
-  String _webSessionCookies = '';
 
   /// 自有账号服务端每日下载限额（来自 /eapi/user/profile；null=未取到，回退硬编码）
   int? _serverDownloadsLimit;
@@ -367,10 +365,6 @@ class ZlibraryService extends ChangeNotifier {
     _remixUserkey = prefs.getString(_kRemixUserkey) ?? '';
 
     // [PATCH-21] 网页登录会话（仅在登录态成立时恢复）
-
-    _webSessionCookies =
-
-        isLoggedIn ? (prefs.getString(_kWebSession) ?? '') : '';
     _candidates = _decodeCandidates(prefs.getString(_kCandidates));
 
     // [PATCH-4b] 剔除**已知失效**节点（幂等，每次启动都跑，无需迁移标志）。
@@ -601,7 +595,6 @@ class ZlibraryService extends ChangeNotifier {
     }
     _remixUserid = uid;
     _remixUserkey = key;
-    _webSessionCookies = raw;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kRemixUserid, uid);
     await prefs.setString(_kRemixUserkey, key);
@@ -748,8 +741,6 @@ class ZlibraryService extends ChangeNotifier {
     _email = '';
     _username = '';
     _remixUserid = '';
-
-    _webSessionCookies = ''; // [PATCH-21]
     _remixUserkey = '';
     _serverDownloadsLimit = null;
     _serverDownloadsToday = 0;
@@ -780,6 +771,25 @@ class ZlibraryService extends ChangeNotifier {
     int page = 1,
     int limit = 30,
   }) async {
+    // [方案A] 普通搜索优先走网页 HTML 路径（当前镜像 /s/?q=）：
+    //   eapi 返回的数字 id + hex hash 在网页上不存在（实测重定向首页），
+    //   网页路径能拿到当前镜像的短 id + slug + readOnlineUrl，
+    //   使「在线阅读」可以打开正确的书页。网页失败（CF/网络）回退 eapi。
+    if (_domain.isNotEmpty) {
+      try {
+        final web = await _searchWebHtml(
+          message,
+          extensions,
+          languages,
+          yearFrom,
+          yearTo,
+          page,
+        );
+        if (web != null && web.items.isNotEmpty) return web;
+      } catch (e) {
+        _log('网页搜索失败，回退 eapi 搜索: $e');
+      }
+    }
     if (isLoggedIn) {
       final res = await _doSearch(
         message,
@@ -841,6 +851,93 @@ class ZlibraryService extends ChangeNotifier {
       throw ZlibraryException('no_account', '没有可用的内置账号');
     }
     return _parseSearch(res);
+  }
+
+  /// [方案A] 网页 HTML 搜索（当前镜像 `/s/?q=`，WebView 过 CF 挑战）。
+  ///
+  /// 成功且解析出书返回 [SearchResult]；网页不可用/空结果/解析失败返回 null，
+  /// 由调用方回退 eapi。解析复用 [_parseCategoryHtml]（z-bookcard → 短 id + slug
+  /// + readOnlineUrl），与分类搜索同链路，保证「在线阅读」链接是当前镜像可用的。
+  Future<SearchResult<Book>?> _searchWebHtml(
+    String message,
+    List<String>? extensions,
+    String? languages,
+    int? yearFrom,
+    int? yearTo,
+    int page,
+  ) async {
+    final kw = message.trim();
+    if (_domain.isEmpty || kw.isEmpty) return null;
+    // 参照分类搜索的 /s/ 端点拼法（支持 year/language/extension 过滤）
+    final buf = StringBuffer('https://$_domain/s/?page=$page');
+    buf.write('&q=${Uri.encodeQueryComponent(kw)}');
+    if (yearFrom != null) buf.write('&yearFrom=$yearFrom');
+    if (yearTo != null) buf.write('&yearTo=$yearTo');
+    if (languages != null && languages.trim().isNotEmpty) {
+      buf.write('&languages=${Uri.encodeQueryComponent(languages.trim())}');
+    }
+    if (extensions != null) {
+      for (final ext in extensions) {
+        if (ext.isNotEmpty) buf.write('&extensions%5B%5D=$ext');
+      }
+    }
+    final url = buf.toString();
+    _log('网页搜索: $url');
+    String? htmlStr;
+    Object? lastError;
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        final html = await WebViewImageFetcher().fetchHtml(url);
+        if (html.isNotEmpty) {
+          htmlStr = html;
+          break;
+        }
+        lastError = StateError('搜索页返回空 HTML');
+      } catch (e) {
+        lastError = e;
+      }
+      _log('网页搜索第 $attempt/3 次失败: $lastError');
+      if (attempt < 3) {
+        await Future.delayed(const Duration(milliseconds: 800));
+      }
+    }
+    if (htmlStr == null) {
+      _log('网页搜索 3 次均失败: $lastError');
+      return null;
+    }
+    final result = _parseCategoryHtml(htmlStr, page);
+    if (result.items.isEmpty) {
+      _log('网页搜索解析到 0 条，交给 eapi 兜底');
+      return null;
+    }
+    return result;
+  }
+
+  /// [方案A] 取该书可用的网页在线阅读链接。
+  ///
+  /// 已有 [Book.readOnlineUrl] 直接用；否则（eapi 数据：推荐流 / 搜索兜底）
+  /// 用书名在当前镜像网页搜索，优先取书名完全一致的书，否则取第一条有
+  /// 链接的书，返回其网页链接。拿不到返回 null（调用方提示用户）。
+  Future<String?> resolveOnlineUrl(Book book) async {
+    final explicit = book.readOnlineUrl;
+    if (explicit != null && explicit.isNotEmpty) return explicit;
+    final title = book.title.trim();
+    if (_domain.isEmpty || title.isEmpty) return null;
+    try {
+      final result = await _searchWebHtml(title, null, null, null, null, 1);
+      if (result == null) return null;
+      for (final b in result.items) {
+        final r = b.readOnlineUrl;
+        if (r != null && r.isNotEmpty && b.title.trim() == title) return r;
+      }
+      for (final b in result.items) {
+        final r = b.readOnlineUrl;
+        if (r != null && r.isNotEmpty) return r;
+      }
+    } catch (e) {
+      _log('resolveOnlineUrl 失败: $e');
+    }
+    return null;
   }
 
   SearchResult<Book> _parseSearch(Map<String, dynamic> res) {
@@ -1227,6 +1324,23 @@ class ZlibraryService extends ChangeNotifier {
     final authorEl = row.querySelector('[slot="author"], [slot="authore"]');
     if (authorEl != null) author = authorEl.text.trim();
 
+    // [方案A] 网页在线阅读链接：优先 z-bookcard 自带 readOnlineUrl 属性；
+    // 否则从详情链接 `/book/<短id>/<slug>.html` 提取并拼当前镜像完整 URL。
+    // （eapi 数字 id + hex hash 在网页不存在，不能用来拼在线阅读地址。）
+    var readOnline = rowEl.attributes['readOnlineUrl'];
+    if (readOnline == null || readOnline.isEmpty) {
+      final link = row.querySelector('a[href*="/book/"]');
+      if (link != null) {
+        final h = link.attributes['href'] ?? '';
+        final m = RegExp(r'(/book/[^/?#]+/[^/?#]+\.html)').firstMatch(h);
+        if (m != null) {
+          readOnline = h.startsWith('http')
+              ? h
+              : 'https://$_domain${m.group(1)!}';
+        }
+      }
+    }
+
     return Book(
       id: id ?? '',
       hash: hash ?? '',
@@ -1237,7 +1351,8 @@ class ZlibraryService extends ChangeNotifier {
       language: language,
       extension: extension,
       filesizeString: filesizeString,
-      readOnlineUrl: rowEl.attributes['readOnlineUrl'],
+      readOnlineUrl:
+          (readOnline == null || readOnline.isEmpty) ? null : readOnline,
     );
   }
 

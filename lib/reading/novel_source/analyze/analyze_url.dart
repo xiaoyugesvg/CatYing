@@ -12,6 +12,7 @@ import 'package:dio/io.dart';
 import 'package:fast_gbk/fast_gbk.dart';
 import '../../../services/app_log.dart';
 import 'analyze_rule.dart';
+import 'sync_http_bridge.dart';
 import 'browser_faithful_adapter.dart';
 import 'verification_exception.dart';
 import '../model/xiaoshuo_book.dart';
@@ -244,6 +245,44 @@ class AnalyzeUrl {
     return sb.toString();
   }
 
+  /// 本机回环专用 Dio：**绝不挂用户代理**（127.0.0.1 若走代理会被劫持 ✗），
+  /// 且 WebView 首次加载站点可能较慢 ⇒ receiveTimeout 放宽。
+  static final Dio _localDio = Dio(BaseOptions(
+    connectTimeout: const Duration(seconds: 10),
+    receiveTimeout: const Duration(seconds: 90),
+    responseType: ResponseType.plain,
+    validateStatus: (_) => true,
+  ));
+
+  /// 经**主 isolate 的本机代理**用真浏览器栈抓「渲染后 HTML」。
+  ///
+  /// 为什么不能直接调 `WebViewImageFetcher`：本类跑在 worker isolate，
+  /// 而 WebView 是平台视图（只能在主 isolate 创建/驱动）⇒ 必须转一手。
+  /// 通道与 `java.ajax` 完全一致（见 `sync_http_bridge.dart` / `http_proxy.dart`）。
+  Future<String> _fetchViaWebView(String target) async {
+    final port = SyncHttpBridge.proxyPort;
+    if (port <= 0) {
+      throw Exception(
+          'WebView 抓取不可用：本机代理未就绪（需主 isolate 先启动 LegadoHttpProxy）');
+    }
+    final resp = await _localDio.get<String>(
+      'http://127.0.0.1:$port/',
+      options: Options(headers: <String, String>{
+        'x-legado-url': target,
+        'x-legado-method': 'GET',
+        'x-legado-browser': 'fetch',
+      }),
+    );
+    // 代理把失败原因放在 `x-legado-error-b64`（纯 ASCII 头）⇒ 转成异常，
+    // 不要静默返回空正文（会让上层以为是“页面没内容”而不是失败）。
+    final errB64 = resp.headers.value('x-legado-error-b64');
+    if (errB64 != null && errB64.isNotEmpty) {
+      final msg = utf8.decode(base64.decode(errB64), allowMalformed: true);
+      throw Exception('WebView 抓取失败：$msg');
+    }
+    return resp.data ?? '';
+  }
+
   void analyzeUrl() {
     final originalUrl = url;
     final paramPattern = RegExp(r',\s*\{');
@@ -271,7 +310,13 @@ class AnalyzeUrl {
           }
           charset = option['charset']?.toString();
           retry = option['retry'] ?? 0;
-          useWebView = option['useWebView'] ?? false;
+          // 🔴 legado 的键是 **`webView`**（不是 `useWebView`）—— 实测内置源都写
+          //   `,{'webView': true}` / `,{'webView':true}` ✗，原来只读 `useWebView`
+          //   ⇒ 这个声明**从未生效**（WebView 抓取形同虚设）✗。两个键都认 ✓
+          final wv = option['webView'] ?? option['useWebView'];
+          useWebView = wv == true || '${wv ?? ''}'.toLowerCase() == 'true';
+          webViewDelayTime =
+              int.tryParse('${option['webViewDelayTime'] ?? ''}') ?? 0;
           webJs = option['webJs']?.toString();
           bodyJs = option['bodyJs']?.toString();
           dnsIp = option['dnsIp']?.toString();
@@ -561,31 +606,48 @@ class AnalyzeUrl {
         validateStatus: (status) => status != null && status >= 200 && status < 300,
       );
 
-      final Response<List<int>> response;
-      if (method?.toUpperCase() == 'POST') {
-        response = await dio.post<List<int>>(
-          url,
-          data: this.body,
-          options: options,
-        );
+      if (useWebView) {
+        // ✅ 源声明了 `,{'webView': true}` ⇒ 改用**真浏览器栈**抓渲染后的 HTML
+        //   （Cloudflare / 反爬站用 Dio 直连只能拿到挑战页）。
+        //   ⚠️ 本类运行在 **worker isolate**，而 WebView 是平台视图（只能主 isolate
+        //   驱动）⇒ 转经本机代理（主 isolate），与 `java.ajax` **同一条通道**
+        //   （见 http_proxy.dart 的 `x-legado-browser`）。
+        body = await _fetchViaWebView(url);
+        AppLog.instance.d('[书源HTTP] ← webView ${body.length}字符 $url');
       } else {
-        response = await dio.get<List<int>>(
-          url,
-          options: options,
-        );
-      }
+        final Response<List<int>> response;
+        if (method?.toUpperCase() == 'POST') {
+          response = await dio.post<List<int>>(
+            url,
+            data: this.body,
+            options: options,
+          );
+        } else {
+          response = await dio.get<List<int>>(
+            url,
+            options: options,
+          );
+        }
 
-      final bytes = Uint8List.fromList(response.data ?? <int>[]);
-      final contentType = _extractHeaderValue(
-        response.headers['content-type'],
-      );
-      final effectiveCs = _normalizeCharset(charset) ??
-          _extractCharsetFromContentType(contentType) ??
-          _extractCharsetFromMeta(bytes);
-      body = _decodeBody(bytes, charset, contentType);
-      AppLog.instance.d(
-          '[书源HTTP] ← ${response.statusCode} ${body.length}字符 '
-          'charset=${effectiveCs ?? 'utf8-容错'}');
+        final bytes = Uint8List.fromList(response.data ?? <int>[]);
+        final contentType = _extractHeaderValue(
+          response.headers['content-type'],
+        );
+        final effectiveCs = _normalizeCharset(charset) ??
+            _extractCharsetFromContentType(contentType) ??
+            _extractCharsetFromMeta(bytes);
+        body = _decodeBody(bytes, charset, contentType);
+        AppLog.instance.d(
+            '[书源HTTP] ← ${response.statusCode} ${body.length}字符 '
+            'charset=${effectiveCs ?? 'utf8-容错'}');
+
+        if (response.statusCode != null && response.statusCode! >= 400) {
+          throw Exception('请求失败：HTTP ${response.statusCode}，URL：$url');
+        }
+        if (response.redirects.isNotEmpty) {
+          url = response.redirects.last.location.toString();
+        }
+      }
 
       // 解码后统一检测「验证/反爬挑战页」（覆盖 Cloudflare、以及 PTCMS 等站点
       // 自带的「系统安全验证」等）。命中则抛 [VerificationRequiredException]，
@@ -594,15 +656,8 @@ class AnalyzeUrl {
         throw VerificationRequiredException(
           url: url,
           body: body,
-          statusCode: response.statusCode,
+          statusCode: 200,
         );
-      }
-
-      if (response.statusCode != null && response.statusCode! >= 400) {
-        throw Exception('请求失败：HTTP ${response.statusCode}，URL：$url');
-      }
-      if (response.redirects.isNotEmpty) {
-        url = response.redirects.last.location.toString();
       }
     } on DioException catch (e) {
       AppLog.instance.w('[书源HTTP] Dio异常 ${e.response?.statusCode} $url');

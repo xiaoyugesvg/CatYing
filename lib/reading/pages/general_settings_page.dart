@@ -40,8 +40,7 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
       body: ListenableBuilder(
         listenable: SettingsService(),
         builder: (context, _) {
-          final s = SettingsService();
-          return ListView(
+        return ListView(
             padding: const EdgeInsets.all(16),
             children: [
               // ── 通用 ────────────────────────────────────────
@@ -58,7 +57,7 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
                 subtitle: '查看 / 清理运行日志',
                 onTap: () => Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const _AppLogPage()),
+                  MaterialPageRoute(builder: (_) => const AppLogPage()),
                 ),
               ),
               const SizedBox(height: 12),
@@ -379,14 +378,17 @@ class _GeneralSettingsPageState extends State<GeneralSettingsPage> {
 // 软件日志页
 // ============================================================
 
-class _AppLogPage extends StatefulWidget {
-  const _AppLogPage();
+/// 软件日志页。
+/// ✅ 改成**公开**（`AppLogPage`）——「通用设置」和**「阅读设置」两处入口复用** ✓
+///   （原来私有 ⇒ 别的页面要用只能再抄一份，音乐模块就是这么抄出来的 ✗）。
+class AppLogPage extends StatefulWidget {
+  const AppLogPage({super.key});
 
   @override
-  State<_AppLogPage> createState() => _AppLogPageState();
+  State<AppLogPage> createState() => _AppLogPageState();
 }
 
-class _AppLogPageState extends State<_AppLogPage> {
+class _AppLogPageState extends State<AppLogPage> {
   String _content = '';
   bool _loading = true;
 

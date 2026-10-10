@@ -290,7 +290,6 @@ class _JellyIconMenuPanelState extends State<_JellyIconMenuPanel> {
   /// 竖排一列：菜单项从上到下对齐（对齐「⋯」按钮所在列）
   Widget _buildColumn() {
     final actions = widget.actions;
-    final fg = _fg;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [

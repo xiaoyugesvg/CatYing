@@ -79,7 +79,12 @@ class BookInfo {
       try {
         final intro = analyzeRule.getString(bookInfoRule.intro!);
         if (intro.isNotEmpty) {
-          book.intro = intro.length > 5000 ? intro.substring(0, 5000) : intro;
+          // 🔴 还原源站简介里的**字面 `\n`**（实测「📂无极书院」：
+          //    `intro = "class.nrjj@class.e@text"` 抓到的原文含 `\n　`，
+          //    直接显示出来就是"…妖魔横行！\n林长青一朝穿越…" ✗
+          //    —— 详情页那个 `intro.contains('\n')` 判断本就假设有真换行 ✓）
+          final clean = unescapeLineBreaks(intro);
+          book.intro = clean.length > 5000 ? clean.substring(0, 5000) : clean;
         }
       } catch (_) {}
     }
@@ -176,4 +181,32 @@ class BookInfo {
         .replaceAll(RegExp(r'[\-_—–]+\s*$'), '')
         .trim();
   }
+}
+
+/// 把文本里**明确是转义**的换行还原为真实换行。
+///
+/// ── 为什么要做 ──────────────────────────────────────────────────
+/// 部分书源站的简介在 HTML 里就存成**转义形态**（实测 `📂无极书院`
+/// 的 `class.nrjj@class.e@text`），抓下来带的是字面的 `\n`。
+/// 详情页直接 `Text(intro)` 渲染 ⇒ 用户看到"…妖魔横行！\n林长青…" ✗
+///
+/// ── ⚠️ 必须防的坑 ───────────────────────────────────────────────
+/// 天真的 `replaceAll(r'\n', '\n')` 会**破坏含反斜杠的正常文本**：
+/// ```
+/// C:\Users\abc\docs\readme.txt  →  C:\Users\abc\docs<换行>eadme.txt  ✗✗
+/// ```
+/// （`readme` 里的 `\r` 被当成回车。）
+///
+/// ⇒ 判据：`\n` / `\r\n` 之后**不能紧跟字母或数字**（即处于词边界），
+///    这样 `C:\new`、`C:\readme` 这类真实路径不会被误伤 ✓
+///    （有对应回归测试：`test/reading_intro_unescape_test.dart`）
+String unescapeLineBreaks(String s) {
+  if (!s.contains(r'\')) return s;
+  return s
+      // \r\n → \n（先处理，避免变成两次换行）
+      .replaceAll(RegExp(r'\\r\\n(?![A-Za-z0-9])'), '\n')
+      // \n → 真换行（后面不能跟字母/数字）
+      .replaceAll(RegExp(r'\\n(?![A-Za-z0-9])'), '\n')
+      // 单独的 \r → 换行（同样要求词边界）
+      .replaceAll(RegExp(r'\\r(?![A-Za-z0-9])'), '\n');
 }

@@ -263,7 +263,7 @@ class SettingsService extends ChangeNotifier {
   double _comicBrightness = 1.0; // 漫画阅读器页面亮度（0.35~1.0，独立叠加层）
   // ── 下面 6 项对应 cmbok「阅读设置」里的开关（截图逐项对齐）──
   /// 启动时自动检查书架/收藏是否有新章节（有更新在封面/导航角标提示）
-  bool _checkShelfUpdateOnStart = true;
+  bool _checkShelfUpdateOnStart = false;
   /// 翻页时保留当前缩放（需先开双指缩放）
   bool _rememberZoom = false;
   /// 双指缩放（拼页模式除外；图书仅图片模式）
@@ -284,14 +284,14 @@ class SettingsService extends ChangeNotifier {
   double _comicFooterRight = 16;
   double _comicFooterBottom = 8;
   /// 端侧 AI 漫画超分设置（仅 UI 面板，不做真实推理）
-  bool _upscaleAutoClean = true;
+  bool _upscaleAutoClean = false;
   double _upscaleCleanLimitGb = 1.0;
   int _upscaleDenoise = 0; // 0 保守 / 1 中等 / 2 强力
   bool _upscaleModelDownloaded = false;
   /// 漫画在线阅读满 N 话后自动加入「正在读」
-  bool _autoAddShelfForManga = true;
+  bool _autoAddShelfForManga = false;
   /// 图书在线阅读满 N 章后自动加入「正在读」
-  bool _autoAddShelfForBook = true;
+  bool _autoAddShelfForBook = false;
   /// 书架排序方式。
   ///
   /// 取值（与用户截图的排序面板一一对应）：
@@ -649,7 +649,7 @@ class SettingsService extends ChangeNotifier {
       _showReaderHud = prefs.getBool(_kShowReaderHudKey) ?? true;
       _volumeKeyTurn = prefs.getBool(_kVolumeKeyTurnKey) ?? false;
     _checkShelfUpdateOnStart =
-        prefs.getBool(_kCheckShelfUpdateKey) ?? true;
+        prefs.getBool(_kCheckShelfUpdateKey) ?? false;
     _rememberZoom = prefs.getBool(_kRememberZoomKey) ?? false;
     _pinchZoom = prefs.getBool(_kPinchZoomKey) ?? true;
     _singleHand = prefs.getBool(_kSingleHandKey) ?? false;
@@ -672,10 +672,10 @@ class SettingsService extends ChangeNotifier {
       } catch (_) {}
     }
     _autoAddShelfForManga =
-        prefs.getBool(_kAutoAddShelfKey) ?? true;
+        prefs.getBool(_kAutoAddShelfKey) ?? false;
     _autoAddShelfForBook =
-        prefs.getBool(_kAutoAddShelfForBookKey) ?? true;
-    _upscaleAutoClean = prefs.getBool(_kUpscaleAutoCleanKey) ?? true;
+        prefs.getBool(_kAutoAddShelfForBookKey) ?? false;
+    _upscaleAutoClean = prefs.getBool(_kUpscaleAutoCleanKey) ?? false;
     _upscaleCleanLimitGb = _clampDouble(
       asDoubleOrNull(prefs.getDouble(_kUpscaleCleanLimitKey)) ?? 1.0,
       0.1,
@@ -1644,6 +1644,44 @@ class SettingsService extends ChangeNotifier {
     } catch (e) {
       _log('保存翻页反转开关失败: $e');
     }
+  }
+
+  /// 恢复阅读设置为出厂默认：清空所有阅读相关偏好后重新加载默认值，
+  /// 并通知监听方刷新 UI。不影响下载/网络/主题等非阅读设置。
+  Future<void> resetReadingDefaults() async {
+    final prefs = await SharedPreferences.getInstance();
+    const keys = [
+      _readingModeKey,
+      _kBookReadingModeKey,
+      _kReverseTapKey,
+      _kDoublePageKey,
+      _kShowReaderHudKey,
+      _kVolumeKeyTurnKey,
+      _kCheckShelfUpdateKey,
+      _kRememberZoomKey,
+      _kPinchZoomKey,
+      _kSingleHandKey,
+      _kScreenSleepKey,
+      _kReaderBackgroundStyleKey,
+      _kComicMarginKey,
+      _kUpscaleAutoCleanKey,
+      _kUpscaleCleanLimitKey,
+      _kUpscaleDenoiseKey,
+      _kAutoAddShelfKey,
+      _kAutoAddShelfForBookKey,
+      _kInkScreenModeKey,
+      _kComicBrightnessKey,
+      _kBookFontSizeKey,
+      _kBookLineHeightKey,
+      _kBookHorizontalPaddingKey,
+      _kBookVerticalPaddingKey,
+      _kBookFontFamilyKey,
+    ];
+    for (final k in keys) {
+      await prefs.remove(k);
+    }
+    await init();
+    notifyListeners();
   }
 
   /// 设置：墨水屏模式开关（漫画黑白 + 柔和浅灰底）

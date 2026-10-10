@@ -48,6 +48,8 @@ class BookFontService extends ChangeNotifier {
   static const builtinOptions = <(String, String)>[
     (autoFamily, '跟随主题'),
     (systemFamily, '系统默认'),
+    // 随包内置字体（已在 pubspec 的 `fonts:` 段注册 ⇒ 装完就能选 ✓）
+    ('MiSans', 'MiSans（内置）'),
   ];
 
   final Map<String, UserFont> _fontByFamily = {};
@@ -89,14 +91,20 @@ class BookFontService extends ChangeNotifier {
         return;
       }
 
-      final loader = FontLoader('book_fonts');
       final list = <UserFont>[];
       for (final e in files) {
         final name = e.uri.pathSegments.last;
         final base = _stripExt(name);
         try {
           final bytes = await e.readAsBytes();
+          // 🔴 必须**每个字体一个 family**（family 名 = 文件名去后缀）✗✓：
+          //   原来把所有文件都塞进同一个 `FontLoader('book_fonts')` ✗ ⇒
+          //   Flutter 会把这些字体**全注册成 family = `book_fonts`** ✓，
+          //   而 UI 里选的是 `MiSans` 这种**文件名** ⇒ 永远匹配不上 ✗
+          //   ⇒ 表现为"选了自定义字体，正文却没变"（静默回落默认字体）。
+          final loader = FontLoader(base);
           loader.addFont(Future.value(ByteData.sublistView(bytes)));
+          await loader.load();
           list.add(UserFont(
             family: base,
             displayName: base,
@@ -107,7 +115,6 @@ class BookFontService extends ChangeNotifier {
         }
       }
       if (list.isNotEmpty) {
-        await loader.load();
         for (final f in list) {
           _fontByFamily[f.family] = f;
         }

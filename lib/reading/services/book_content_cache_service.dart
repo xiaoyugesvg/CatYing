@@ -90,7 +90,7 @@ class BookContentCacheService {
       final raw = await f.readAsString();
       final args = _DecodeArgs(raw, fingerprint);
       if (raw.length > _isolateThreshold) {
-        return compute(_decodeContentCache, args);
+        return await compute(_decodeContentCache, args);
       }
       return _decodeContentCache(args);
     } catch (_) {

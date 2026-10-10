@@ -16,6 +16,7 @@ import '../services/book_favorites_service.dart';
 import '../models/book.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/jelly_bookshelf_dialog.dart';
+import '../widgets/theme_background_animation.dart';
 import 'book_source_reader_page.dart';
 import 'book_source_switch_page.dart';
 import '../../common/theme.dart';
@@ -122,9 +123,18 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     return Scaffold(
       backgroundColor:
           _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
+      // ✅ 与图书 / 漫画详情页统一：透明 AppBar（标题=书名）+ 主题动态背景
+      //（原来是不透明 AppBar 直接盖住背景 ✗，标题还写死「书籍详情」✗）
       appBar: AppBar(
-        title: Text('书籍详情',
-            style: TextStyle(fontSize: AppTheme.fontTitle3, color: _titleColor)),
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: Text(_name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+                fontSize: AppTheme.fontHeadline, color: _titleColor)),
         actions: [
           IconButton(
             tooltip: '换源',
@@ -134,11 +144,17 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
           const SizedBox(width: 4),
         ],
       ),
-      body: Column(
+      body: Stack(
+        fit: StackFit.expand,
         children: [
-          _header(),
-          const Divider(height: 1),
-          Expanded(child: _tocArea()),
+          const RepaintBoundary(child: ThemeBackgroundAnimation()),
+          Column(
+            children: [
+              _header(),
+              const Divider(height: 1),
+              Expanded(child: _tocArea()),
+            ],
+          ),
         ],
       ),
     );
@@ -151,10 +167,13 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── 左信息 + 右封面 ──
+          // ── 左封面 + 右信息 ──
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // 封面挪到左侧（与漫画详情页一致）
+              _coverBox(),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -221,29 +240,7 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                   ],
                 ),
               ),
-              const SizedBox(width: 14),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: SizedBox(
-                  width: 84,
-                  height: 112,
-                  child: _cover.isEmpty
-                      ? Container(
-                          color: JellyTheme.primary.withValues(alpha: 0.1),
-                          child: Icon(Icons.menu_book_rounded,
-                              size: 30, color: JellyTheme.primary),
-                        )
-                      : CachedNetworkImage(
-                          imageUrl: _cover,
-                          fit: BoxFit.cover,
-                          errorWidget: (_, __, ___) => Container(
-                            color: JellyTheme.primary.withValues(alpha: 0.1),
-                            child: Icon(Icons.menu_book_rounded,
-                                size: 30, color: JellyTheme.primary),
-                          ),
-                        ),
-                ),
-              ),
+
             ],
           ),
           // ── 四按钮：收藏 / 加入书架 / 阅读 / 下载 ──
@@ -254,8 +251,10 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
               const SizedBox(width: 8),
               _actionCapsule(Icons.library_add_rounded, '加入书架', _addToBookshelf),
               const SizedBox(width: 8),
-              _actionCapsule(Icons.play_arrow_rounded, '阅读',
-                  _chapters.isEmpty ? null : () => _openReader(0)),
+              // ✅ 「阅读」→「在线阅读」并用主色突出（与图书详情页的在线阅读入口一致）
+              _actionCapsule(Icons.play_arrow_rounded, '在线阅读',
+                  _chapters.isEmpty ? null : () => _openReader(0),
+                  highlight: true),
               const SizedBox(width: 8),
               _actionCapsule(Icons.download_for_offline_rounded, '下载',
                   _chapters.isEmpty ? null : _downloadBook),
@@ -300,6 +299,33 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     );
   }
 
+  /// 封面（110×147，圆角 12）—— 与漫画详情页封面同尺寸。
+  /// 原来封面在信息行的**右侧**、只有 84×112 ✗；抽成方法是为了挪到左侧 ✓。
+  Widget _coverBox() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        width: 110,
+        height: 147,
+        child: _cover.isEmpty
+            ? Container(
+                color: JellyTheme.primary.withValues(alpha: 0.1),
+                child: Icon(Icons.menu_book_rounded,
+                    size: 40, color: JellyTheme.primary),
+              )
+            : CachedNetworkImage(
+                imageUrl: _cover,
+                fit: BoxFit.cover,
+                errorWidget: (_, __, ___) => Container(
+                  color: JellyTheme.primary.withValues(alpha: 0.1),
+                  child: Icon(Icons.menu_book_rounded,
+                      size: 40, color: JellyTheme.primary),
+                ),
+              ),
+      ),
+    );
+  }
+
   String get _wordCountText {
     final raw = (_info['wordCount'] ?? '').toString();
     if (raw.isEmpty) return '';
@@ -311,14 +337,19 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     return '$n字';
   }
 
-  /// 四按钮之一（参考图 IMG_8481 深灰胶囊）
-  Widget _actionCapsule(IconData icon, String label, VoidCallback? onTap) {
+  /// 四按钮之一（参考图 IMG_8481 深灰胶囊）。
+  /// [highlight] = true 用主色实心（如「在线阅读」），与图书详情页的入口一致。
+  Widget _actionCapsule(IconData icon, String label, VoidCallback? onTap,
+      {bool highlight = false}) {
+    final fg = highlight ? Colors.white : _titleColor.withValues(alpha: 0.85);
     return Expanded(
       child: Material(
-        color: _isDark
-            ? Colors.white.withValues(alpha: 0.12)
-            : Colors.black.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(18),
+        color: highlight
+            ? JellyTheme.primary
+            : (_isDark
+                ? Colors.white.withValues(alpha: 0.12)
+                : Colors.black.withValues(alpha: 0.06)),
+        borderRadius: BorderRadius.circular(20),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
@@ -327,12 +358,12 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(icon, size: 15, color: _titleColor.withValues(alpha: 0.85)),
+                Icon(icon, size: 15, color: fg),
                 const SizedBox(width: 4),
                 Text(label,
                     style: TextStyle(
                         fontSize: AppTheme.fontFootnote,
-                        color: _titleColor.withValues(alpha: 0.85),
+                        color: fg,
                         fontWeight: FontWeight.w600)),
               ],
             ),

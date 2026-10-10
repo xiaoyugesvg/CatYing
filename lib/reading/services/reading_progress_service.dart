@@ -31,6 +31,9 @@ class ComicReadingProgress {
   /// 已读（至少打开过）的章节 id 集合
   final Set<String> seenChapterIds;
 
+  /// 记住的缩放倍率（1.0 = 适应屏幕；仅 rememberZoom 开启时使用）
+  final double zoomScale;
+
   /// 最近更新时间戳（ms）
   final int updatedAt;
 
@@ -42,6 +45,7 @@ class ComicReadingProgress {
     required this.lastPageIndex,
     required this.finished,
     required this.seenChapterIds,
+    this.zoomScale = 1.0,
     required this.updatedAt,
   });
 
@@ -61,6 +65,7 @@ class ComicReadingProgress {
       lastPageIndex: j['lastPageIndex'] as int? ?? 0,
       finished: j['finished'] as bool? ?? false,
       seenChapterIds: seen,
+      zoomScale: (j['zoomScale'] as num?)?.toDouble() ?? 1.0,
       updatedAt: j['updatedAt'] as int? ?? 0,
     );
   }
@@ -73,6 +78,7 @@ class ComicReadingProgress {
     'lastPageIndex': lastPageIndex,
     'finished': finished,
     'seenChapterIds': seenChapterIds.toList(),
+    'zoomScale': zoomScale,
     'updatedAt': updatedAt,
   };
 
@@ -84,6 +90,7 @@ class ComicReadingProgress {
     int? lastPageIndex,
     bool? finished,
     Set<String>? seenChapterIds,
+    double? zoomScale,
     int? updatedAt,
   }) {
     return ComicReadingProgress(
@@ -94,6 +101,7 @@ class ComicReadingProgress {
       lastPageIndex: lastPageIndex ?? this.lastPageIndex,
       finished: finished ?? this.finished,
       seenChapterIds: seenChapterIds ?? this.seenChapterIds,
+      zoomScale: zoomScale ?? this.zoomScale,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
@@ -232,6 +240,7 @@ class ReadingProgressService extends ChangeNotifier {
       lastPageIndex: pageIndex,
       finished: existing?.finished ?? false,
       seenChapterIds: seen,
+      zoomScale: existing?.zoomScale ?? 1.0,
       updatedAt: DateTime.now().millisecondsSinceEpoch,
     );
     _persist();
@@ -252,6 +261,20 @@ class ReadingProgressService extends ChangeNotifier {
       _lastPageNotifyAt = now;
       notifyListeners();
     }
+  }
+
+
+  /// 获取某本漫画记住的缩放倍率（无记录返回 1.0）
+  double getZoomScale(String pathWord) => _map[pathWord]?.zoomScale ?? 1.0;
+
+  /// 记住某本漫画的缩放倍率（rememberZoom 开启时由阅读器在缩放结束时调用）。
+  /// 仅当已有阅读记录时才保存（避免为没读过的漫画创建空进度条目）。
+  void setZoomScale(String pathWord, double scale) {
+    final existing = _map[pathWord];
+    if (existing == null) return;
+    if ((existing.zoomScale - scale).abs() < 0.01) return;
+    _map[pathWord] = existing.copyWith(zoomScale: scale);
+    _persist();
   }
 
   /// 该漫画是否在"已下载的书"书架中。

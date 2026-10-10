@@ -304,7 +304,7 @@ class BookChapterList {
       final result = <XiaoshuoBookChapter>[];
       for (final item in decoded) {
         if (item is! Map) continue;
-        final m = item as Map<dynamic, dynamic>;
+        final m = item;
         final url = _jsStr(m['url']);
         if (url == null || url.isEmpty) continue;
         final ch = XiaoshuoBookChapter(bookUrl: _jsStr(m['bookUrl']) ?? '');

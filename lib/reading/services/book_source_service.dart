@@ -174,15 +174,69 @@ class BookSourceService {
 
   bool _portWarned = false;
 
-  /// 把异常压成一行可读文本（回退路径的错误要能显示给用户）。
+  /// 把异常压成**一行、给人看**的文本（回退路径的错误会直接显示在详情页）。
+  ///
+  /// ── 🔴 修一个实测出来的 UI 事故 ──────────────────────────────
+  /// 原实现对 [DioException] 直接拼 `e.message` ✗ —— 而 Dio 的 message
+  /// 本身就是**整段英文说明**，于是详情页上出现的是：
+  ///
+  /// ```
+  /// 请求失败：HTTP 500 This exception was thrown because the response has
+  /// a status code of 500 and RequestOptions.validateStatus was configured to
+  /// throw for this status code. The status code of 500 has the following
+  /// meaning: "Server error - the server failed to fulfil an apparently valid
+  /// request" Read more about status codes at https://developer.mozilla.org/…
+  /// In order to resolve this exception you typically have either to verify and
+  /// fix your request code or you have to fix the server code.
+  /// ```
+  ///
+  /// 用户看到这一屏完全不知道发生了什么 ✗，也不知道该干什么 ✗。
+  ///
+  /// 现在按**最能说明问题的那一条**生成短文案：
+  ///   · 连接类（超时/DNS/拒绝）→ 「连接失败」
+  ///   · 有 HTTP 状态码 → 「HTTP 500 服务器错误（换源试试）」
+  ///   · 其余 → 截断的原始信息
+  ///
+  /// ⚠️ 仍保留**状态码**（排查必需）✓，只是不再贴 Dio 的英文长文。
   String _short(Object e) {
     if (e is DioException) {
       final code = e.response?.statusCode;
-      final msg = e.message ?? '';
-      return code != null ? 'HTTP $code $msg'.trim() : msg;
+      if (code != null) {
+        return 'HTTP $code ${_httpHint(code)}';
+      }
+      switch (e.type) {
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.sendTimeout:
+        case DioExceptionType.receiveTimeout:
+          return '连接超时（源站无响应）';
+        case DioExceptionType.connectionError:
+          return '连接失败（无法访问源站，可能被墙或已停站）';
+        case DioExceptionType.badCertificate:
+          return '证书错误';
+        case DioExceptionType.cancel:
+          return '请求已取消';
+        case DioExceptionType.transformTimeout:
+          return '响应解析超时';
+        case DioExceptionType.badResponse:
+        case DioExceptionType.unknown:
+          break;
+      }
+      final msg = (e.message ?? '').split('\n').first.trim();
+      return msg.isEmpty ? '网络请求失败' : msg;
     }
-    final s = '$e';
-    return s.length > 160 ? '${s.substring(0, 160)}…' : s;
+    // 非 Dio 异常：压成一行 + 截断（原文里可能有换行，会把 UI 撑成一大坨）
+    final s = '$e'.replaceAll('\n', ' ').trim();
+    return s.length > 120 ? '${s.substring(0, 120)}…' : s;
+  }
+
+  /// HTTP 状态码 → 一句人话（书源站常见状态）。
+  static String _httpHint(int code) {
+    if (code == 403) return '源站拒绝访问（可能需要登录或已封禁）';
+    if (code == 404) return '源站找不到该页面（书源规则可能已失效）';
+    if (code >= 500) return '源站服务器错误（换源试试）';
+    if (code == 429) return '请求过于频繁（稍后再试）';
+    if (code >= 400) return '源站拒绝了请求';
+    return '';
   }
 
   /// 本地 Node mgmt 调用专用 Dio：**永不挂全局代理**。
@@ -569,26 +623,20 @@ class BookSourceService {
       );
     }
 
-    // ⚠️ 漫画书源（bookSourceType=2）的正文是**图片列表**，不是文字。
-    // 引擎返回 `{ok:true, type:'images', images:[...]}` ——
-    // 我原来只读 `m['content']`，把 images 直接丢掉了，
-    // 于是所有漫画源在阅读器里都是一片空白（还不报错）。
-    final imgs = m['images'];
-    if (imgs is List && imgs.isNotEmpty) {
-      return (
-        ok: true,
-        error: null,
-        content: '',
-        images: imgs.map((e) => e.toString()).where((e) => e.isNotEmpty).toList(),
-      );
-    }
-
+    // ✅ **content 与 images 都带回**（不再「见 images 非空就丢文字」）：
+    //   漫画源（bookSourceType=2）正文是图片列表 ✓；但**有插图的文字章**
+    //   也带着 images ✓ —— 由阅读器按「正文是否为空」判定是否纯图 ✓，
+    //   否则会把有插图的文字章整章渲染成图片、正文全丢 ✗。
     final c = m['content'] ?? m['text'] ?? '';
+    final imgs = m['images'];
+    final imageList = imgs is List
+        ? imgs.map((e) => e.toString()).where((e) => e.isNotEmpty).toList()
+        : const <String>[];
     return (
       ok: true,
       error: null,
       content: c.toString(),
-      images: const <String>[],
+      images: imageList,
     );
   }
 

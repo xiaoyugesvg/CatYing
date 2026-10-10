@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
 import '../../common/theme.dart';
+import 'general_settings_page.dart';
 
 /// 漫画阅读模式分段选项顺序（对齐参考图 IMG_8567 的 5 段 chips：
 /// 右左 / 左右 / 消散 / 无动画 / 拼页；枚举末尾保持旧持久化 index 不变）
@@ -182,6 +183,84 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
               _buildPreloadCard(isDark, s),
               const SizedBox(height: 12),
               _buildInkScreenCard(isDark, s),
+              const SizedBox(height: 16),
+              // ── 运行维护（日志入口 —— 原来只藏在「通用设置」里 ✓）────────
+              _sectionTitle('运行维护', isDark),
+              const SizedBox(height: 8),
+              Container(
+                decoration: BoxDecoration(
+                  color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: ListTile(
+                  leading: Icon(Icons.receipt_long_rounded, color: JellyTheme.primary),
+                  title: Text('软件日志',
+                      style: TextStyle(
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : JellyTheme.textPrimaryLight)),
+                  subtitle: Text('查看 / 清空运行日志（按天分文件）',
+                      style: TextStyle(
+                          fontSize: AppTheme.fontFootnote,
+                          color: JellyTheme.textSecondary)),
+                  trailing: Icon(Icons.chevron_right_rounded,
+                      color: JellyTheme.textSecondary),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const AppLogPage()),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+              _sectionTitle('数据', isDark),
+              const SizedBox(height: 8),
+              Container(
+                decoration: BoxDecoration(
+                  color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: ListTile(
+                  leading: Icon(Icons.restart_alt_rounded, color: JellyTheme.primary),
+                  title: Text('恢复阅读设置为出厂默认',
+                      style: TextStyle(
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : JellyTheme.textPrimaryLight)),
+                  subtitle: Text('清空所有阅读偏好（翻页/缩放/字号/边距等），恢复为默认值',
+                      style: TextStyle(
+                          fontSize: AppTheme.fontFootnote,
+                          color: JellyTheme.textSecondary)),
+                  trailing: Icon(Icons.chevron_right_rounded,
+                      color: JellyTheme.textSecondary),
+                  onTap: () async {
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('恢复出厂默认'),
+                        content: const Text('将清空所有阅读设置并恢复默认值，确定继续？'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: const Text('取消'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: const Text('确定'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (ok != true) return;
+                    await SettingsService().resetReadingDefaults();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('已恢复阅读设置为出厂默认')),
+                      );
+                    }
+                  },
+                ),
+              ),
             ],
           );
         },
