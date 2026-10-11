@@ -621,7 +621,18 @@ class SettingsService extends ChangeNotifier {
       _navFloating = prefs.getBool(_kNavFloatingKey) ?? true;
       _navIconOnly = prefs.getBool(_kNavIconOnlyKey) ?? false;
       // 当前漫画源
-      _currentSourceId = prefs.getString(_currentSourceKey) ?? 'copymanga';
+      // 🔴 历史版本这里默认值硬编码成 'copymanga'：拷贝漫画在内置源列表里只排第
+      // 14 个，从没主动选过源的用户打开漫画也被钉在拷贝，而不是列表第一个源。
+      // 一次性迁移：老用户保存值若恰好是历史默认值 copymanga，清掉它，让
+      // SourceManager 回退到「第一个启用源」；迁移只跑一次，之后用户手动选的源
+      // （包括主动再选回拷贝）都会照常持久化。
+      if (prefs.getBool(_kMangaDefaultMigratedKey) != true) {
+        if (prefs.getString(_currentSourceKey) == 'copymanga') {
+          await prefs.remove(_currentSourceKey);
+        }
+        await prefs.setBool(_kMangaDefaultMigratedKey, true);
+      }
+      _currentSourceId = prefs.getString(_currentSourceKey) ?? '';
       // 禁用漫画源列表
       _disabledSourceIds = prefs.getStringList(_disabledSourceIdsKey) ?? [];
       // 漫画源仓库云端 URL
@@ -1977,7 +1988,10 @@ class SettingsService extends ChangeNotifier {
 
   // === 漫画源 ===
   static const _currentSourceKey = 'current_source_id';
-  String _currentSourceId = 'copymanga'; // 当前漫画源 id（默认拷贝漫画）
+  /// 历史默认源硬编码迁移标记（见 init()）：清掉被钉死的 copymanga，回归列表第一个
+  static const _kMangaDefaultMigratedKey = 'manga_default_source_migrated_v1';
+  // 当前漫画源 id；空 = 未主动选择，SourceManager 自动取列表第一个启用源
+  String _currentSourceId = '';
   String get currentSourceId => _currentSourceId;
 
   /// 设置当前漫画源 id

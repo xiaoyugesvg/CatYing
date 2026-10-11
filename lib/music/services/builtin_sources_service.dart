@@ -140,6 +140,13 @@ class BuiltinSourcesService {
     //   不是 MusicFree 插件）⇒ 走本列表而非 MusicFree 索引 ✓
     (path: 'dujia', name: '独家音源'),
     (path: 'quandouyao', name: '全豆要聚合'),
+    // ✅ 2026-10-11 Node 沙箱实测验真（真实 HTTP + Range 首包 magic bytes 判定）：
+    //   stellarwave 聚合源 tx 通道连续返回 QQ 官方 CDN 真 MP3（206/audio/mpeg）；
+    //   HYWMusic 经自建 API 跳念心链路可出真 MP3（206，响应偶发偏慢，置后作备选）。
+    //   同批送测的长青"修复版"(haitangw 全 404)、非常刀 v5(多平台全后端失败)、
+    //   墨澜(返回 .mgg 加密格式普通播放器解不了) 均不可用，未内置。
+    (path: 'stellarwave', name: 'StellarWave星澜'),
+    (path: 'hywmusic', name: 'HYWMusic'),
   ];
 
   Future<List<ThirdPartySource>> _loadLxSources() async {

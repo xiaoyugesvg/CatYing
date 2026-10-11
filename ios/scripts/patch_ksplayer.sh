@@ -10,6 +10,8 @@
 #   只能在构建前对本地检出打补丁。补丁内容：ios/scripts/patches/*.patch
 #   guard1 = 类型过滤/side data/extradata/sample format/profile name
 #   guard2 = AVCodecDescriptor.name 与 metadata key/value 的 NULL 防护
+#   guard3 = close 时先 join 解码线程再 avformat_close_input，根治切台 UAF
+#            （Runner-2026-10-11-154210.ips：av_display_rotation_get 读到 0x7c8）
 #
 # 调用方式：
 #   1) CI 独立步骤（resolve 之后、build 之前）：
@@ -101,22 +103,31 @@ fi
 echo "==> 发现 ${#candidates[@]} 个 KSPlayer 检出"
 
 # ── 逐个补丁独立幂等应用 + 标记强校验 ────────────────────────────
-# 每个补丁约定一个唯一标记（guard1=[NewTV]，guard2=[NewTV2]），
+# 每个补丁约定一个唯一标记（guard1=[NewTV]，guard2=[NewTV2]，guard3=[NewTV3]），
 # 标记命中 = 该补丁已打；不同补丁互不干扰。
+# ⚠️ 必须用 grep -F：标记含 []，不加 -F 会被当成正则字符类（匹配 N/e/w/T/V 中
+#    任意单字符），任何 Swift 文件都命中 → 补丁被永远跳过（2026-10-11 CI 实锤：
+#    guard1/guard2 在全新 runner 上全部"此前已应用，跳过"，根本没打进包里）。
 apply_one_patch() {
   local PATCH_FILE="$1"
   local PATCH_MARK="$2"
   local name
   name="$(basename "$PATCH_FILE")"
   local patched_any=0
-  local CHECKOUT TARGET AVEXT
+  local CHECKOUT TARGET AVEXT TRACK ITEM
 
   for CHECKOUT in "${candidates[@]}"; do
     echo "==> [$name] 处理: $CHECKOUT"
     TARGET="$CHECKOUT/Sources/KSPlayer/MEPlayer/FFmpegAssetTrack.swift"
     AVEXT="$CHECKOUT/Sources/KSPlayer/MEPlayer/AVFFmpegExtension.swift"
+    # guard3 改的是 close/解码线程生命周期两个文件，标记校验也要覆盖到
+    TRACK="$CHECKOUT/Sources/KSPlayer/MEPlayer/MEPlayerItemTrack.swift"
+    ITEM="$CHECKOUT/Sources/KSPlayer/MEPlayer/MEPlayerItem.swift"
 
-    if grep -q "$PATCH_MARK" "$TARGET" 2>/dev/null || grep -q "$PATCH_MARK" "$AVEXT" 2>/dev/null; then
+    if grep -qF "$PATCH_MARK" "$TARGET" 2>/dev/null \
+       || grep -qF "$PATCH_MARK" "$AVEXT" 2>/dev/null \
+       || grep -qF "$PATCH_MARK" "$TRACK" 2>/dev/null \
+       || grep -qF "$PATCH_MARK" "$ITEM" 2>/dev/null; then
       echo "   ✅ [$name] 此前已应用，跳过"
       patched_any=1
       continue
@@ -134,7 +145,10 @@ apply_one_patch() {
     fi
 
     # 打完必须验证标记真的在文件里（防止"apply 报成功但内容不对"的静默失败）
-    if ! (grep -q "$PATCH_MARK" "$TARGET" 2>/dev/null || grep -q "$PATCH_MARK" "$AVEXT" 2>/dev/null); then
+    if ! (grep -qF "$PATCH_MARK" "$TARGET" 2>/dev/null \
+          || grep -qF "$PATCH_MARK" "$AVEXT" 2>/dev/null \
+          || grep -qF "$PATCH_MARK" "$TRACK" 2>/dev/null \
+          || grep -qF "$PATCH_MARK" "$ITEM" 2>/dev/null); then
       echo "   ❌ [$name] 补丁命令成功但标记校验失败 —— 产物不可信，中止构建"
       exit 1
     fi
@@ -147,6 +161,7 @@ apply_one_patch() {
 
 for patch in "$PATCH_DIR"/*.patch; do
   case "$(basename "$patch")" in
+    *guard3*) MARK='[NewTV3]' ;;
     *guard2*) MARK='[NewTV2]' ;;
     *)        MARK='[NewTV]' ;;
   esac
