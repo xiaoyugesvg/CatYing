@@ -610,7 +610,7 @@
 /* Begin XCRemoteSwiftPackageReference section */
 		A1B2C3D40000000000000014 /* XCRemoteSwiftPackageReference "KSPlayer" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/CxiaoyuN/KSPlayer.git";
+			repositoryURL = "https://github.com/xiaoyugesvg/KSPlayer.git";
 			requirement = {
 				kind = revision;
 				revision = d21803f3c4f105cfafe51ac27cb1d562d6286aaa; /* NewTV: fork newtv-patched，源码已含 guard1/2/3/4 防御补丁 */
