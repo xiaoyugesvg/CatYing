@@ -205,6 +205,10 @@ class _ActiveDanmu {
   /// Whether initial x has been written. Do NOT use x==0 as sentinel:
   /// a scrolling item's x can land exactly on 0 mid-flight.
   bool positioned;
+  /// 预解析好的绘制对（fill + 可选描边），spawn 时从缓存取，
+  /// paint 帧直接用 —— 避免每帧每条拼 key 查 map（60 条 × 60fps 的
+  /// 字符串拼接都在热路径上）。样式参数变化时由 didUpdateWidget 置空重建。
+  _DanmuPaint? paint;
   _ActiveDanmu(
     this.item, {
     this.track = 0,
@@ -214,7 +218,59 @@ class _ActiveDanmu {
     this.bottomFixed = false,
     this.remaining = 4.0,
     this.positioned = false,
+    this.paint,
   });
+}
+
+/// 一条弹幕的绘制对：填充层 + 可选描边层（描边画在填充下面）。
+///
+/// ── 为什么不是 TextStyle.shadows（旧方案）────────────────────────
+/// 旧实现用 4 向投影模拟描边：Skia 对带 N 个 shadow 的文本要
+/// **N+1 次全量光栅化**（4 shadow + 1 主体，且 shadow 带 blur 更贵），
+/// 60 条弹幕 = 每帧 ~300 次文本绘制 —— 这是弹幕卡顿的最大单点。
+/// 改成 stroke（PaintingStyle.stroke）画一遍黑边 + fill 画一遍主体，
+/// 每条固定 **2 次无 blur 绘制**，视觉等效、开销约降 60%。
+class _DanmuPaint {
+  final TextPainter fill;
+  final TextPainter? stroke; // null = 无描边（strokeWidth=0）
+  const _DanmuPaint(this.fill, this.stroke);
+
+  /// 构造一条弹幕的绘制对：填充层 + 可选描边层（黑边画在填充下面）。
+  ///
+  /// 描边用 `PaintingStyle.stroke` 一次画成（替代旧 4 向阴影投影的
+  /// 5 次光栅化）；`strokeWidth` ×2 等效原投影外扩的视觉粗细。
+  static _DanmuPaint build({
+    required DanmuItem item,
+    required Color color,
+    required double fontSize,
+    required FontWeight fontWeight,
+    required double strokeWidth,
+  }) {
+    final base = TextStyle(fontSize: fontSize, fontWeight: fontWeight);
+    final fill = TextPainter(
+      text: TextSpan(text: item.text, style: base.copyWith(color: color)),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+      textScaler: TextScaler.noScaling,
+    )..layout();
+    TextPainter? stroke;
+    if (strokeWidth > 0.01) {
+      final paint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth * 2
+        ..strokeJoin = StrokeJoin.round
+        ..strokeCap = StrokeCap.round
+        ..color = Colors.black;
+      stroke = TextPainter(
+        text:
+            TextSpan(text: item.text, style: base.copyWith(foreground: paint)),
+        textDirection: TextDirection.ltr,
+        maxLines: 1,
+        textScaler: TextScaler.noScaling,
+      )..layout();
+    }
+    return _DanmuPaint(fill, stroke);
+  }
 }
 
 /// Danmaku layer: emit by playback position; scroll / top / bottom.
@@ -325,16 +381,43 @@ class _DanmuLayerState extends State<DanmuLayer>
   final List<DanmuItem> _pendingCatchup = [];
   static const int _catchupPerFrame = 10;
 
-  /// 文本宽度缓存：同一条文本（同字号）只 layout 一次。
-  /// `TextPainter.layout()` 是弹幕热路径里最贵的单点开销，
-  /// 高密度时同一句弹幕会反复出现，缓存能省掉绝大部分。
-  final Map<String, double> _widthCache = {};
-  static const int _widthCacheLimit = 500;
-
   /// 绘制用 TextPainter 缓存（CustomPaint 模式）：同文案同样式只 layout 一次。
-  /// ⚠️ 跟 `_widthCache` 是两个东西：`_widthCache` 只存宽度（用于轨道碰撞），
-  ///   这里存完整的 TextPainter（用于 Canvas 绘制，含阴影/颜色）。
-  final Map<String, TextPainter> _paintCache = {};
+  /// ⚠️ 与旧 `_widthCache` 合并：现在宽度直接取缓存里 fill 层的 `.width`，
+  ///   一份缓存同时服务「轨道碰撞测宽」和「Canvas 绘制」两处。
+  final Map<String, _DanmuPaint> _paintCache = {};
+  static const int _paintCacheLimit = 500;
+
+  /// 解析（或命中缓存）一条弹幕的绘制对。
+  ///
+  /// 🔴 只在 spawn / 补播 / 样式失效时调用 —— **绝不在 paint 帧里拼 key**
+  ///   （paint 帧直接读 `_ActiveDanmu.paint`，见 [_DanmuPainter.paint]）。
+  _DanmuPaint _painterFor(DanmuItem item) {
+    final color =
+        (widget.forceColor ?? item.color).withValues(alpha: widget.opacity);
+    final key = '${widget.fontSize}|${widget.fontWeight}|'
+        '${widget.strokeWidth}|${color.toARGB32()}|${item.text}';
+    final hit = _paintCache[key];
+    if (hit != null) return hit;
+    final p = _DanmuPaint.build(
+      item: item,
+      color: color,
+      fontSize: widget.fontSize,
+      fontWeight: widget.fontWeight,
+      strokeWidth: widget.strokeWidth,
+    );
+    if (_paintCache.length >= _paintCacheLimit) _paintCache.clear();
+    _paintCache[key] = p;
+    return p;
+  }
+
+  /// 样式参数（字号/字重/描边/颜色/透明度）变化时：清缓存 + 置空已上屏
+  /// 弹幕的绘制对，让下一帧按新参数惰性重建。
+  void _invalidatePaints() {
+    _paintCache.clear();
+    for (final a in _active) {
+      a.paint = null;
+    }
+  }
 
   double get _speed => widget.speed;
   int get _trackCount => widget.trackCount.clamp(2, 8);
@@ -404,6 +487,15 @@ class _DanmuLayerState extends State<DanmuLayer>
       _nextIndex = 0;
       _lastPosSec = null;
       return;
+    }
+
+    // 绘制样式变化 → 已上屏弹幕的绘制对全部失效（按新样式惰性重建）
+    if (oldWidget.fontSize != widget.fontSize ||
+        oldWidget.fontWeight != widget.fontWeight ||
+        oldWidget.strokeWidth != widget.strokeWidth ||
+        oldWidget.forceColor != widget.forceColor ||
+        oldWidget.opacity != widget.opacity) {
+      _invalidatePaints();
     }
 
     // Episode / reload changed the list: rebuild index and clear screen.
@@ -633,21 +725,24 @@ class _DanmuLayerState extends State<DanmuLayer>
         if (remaining <= 0.5) continue; // 马上消失的没必要补
         final lane = _pickFixedLane(top: d.mode == 4);
         if (lane < 0) continue;
+        final p = _painterFor(d);
         _active.add(_ActiveDanmu(d,
             topFixed: d.mode == 4,
             bottomFixed: d.mode == 5,
-            width: _textWidth(d.text, widget.fontSize),
+            width: p.fill.width,
             track: lane,
-            remaining: remaining));
+            remaining: remaining,
+            paint: p));
         done++;
       } else {
-        final width = _textWidth(d.text, widget.fontSize);
+        final p = _painterFor(d);
+        final width = p.fill.width;
         final x = startX - _speed * elapsed;
         if (x + width < -16) continue; // 已飘出屏
         final track = _pickCatchupTrack(x, width);
         if (track < 0) continue; // 放哪都重叠 → 宁可少一条
         _active.add(_ActiveDanmu(d,
-            track: track, width: width, x: x, positioned: true));
+            track: track, width: width, x: x, positioned: true, paint: p));
         done++;
       }
     }
@@ -682,7 +777,8 @@ class _DanmuLayerState extends State<DanmuLayer>
   }
 
   void _spawn(DanmuItem item) {
-    final width = _textWidth(item.text, widget.fontSize);
+    final p = _painterFor(item);
+    final width = p.fill.width;
     // ⚠️ 滚动弹幕的**初始 x 必须立刻置为右边缘**（且标记已定位）：
     //    原实现把 x 留成 0，指望 build 里的 `positioned=false` 去补写 ——
     //    但本帧稍后的推进循环会先把它从 0 往左推，
@@ -694,12 +790,12 @@ class _DanmuLayerState extends State<DanmuLayer>
       //   与滚动弹幕"全忙就丢弃"的策略保持一致 ✓。
       if (lane < 0) return;
       _active.add(_ActiveDanmu(item,
-          topFixed: true, width: width, track: lane));
+          topFixed: true, width: width, track: lane, paint: p));
     } else if (item.mode == 5) {
       final lane = _pickFixedLane(top: false);
       if (lane < 0) return;
       _active.add(_ActiveDanmu(item,
-          bottomFixed: true, width: width, track: lane));
+          bottomFixed: true, width: width, track: lane, paint: p));
     } else {
       final track = _pickTrack();
       // 轨道全忙且都会重叠 → 丢弃本条（宁可少一条，不让弹幕叠在一起）
@@ -708,7 +804,8 @@ class _DanmuLayerState extends State<DanmuLayer>
           track: track,
           width: width,
           x: startX,
-          positioned: true));
+          positioned: true,
+          paint: p));
       // ⚡ 同步更新轨道最右边缘（供同帧后续 spawn 判断，见 `_rebuildTrackEdges`）
       if (track < _trackRightEdge.length) {
         _trackRightEdge[track] = startX + width;
@@ -800,26 +897,6 @@ class _DanmuLayerState extends State<DanmuLayer>
     return best;
   }
 
-  double _textWidth(String text, double fontSize) {
-    final key = '$fontSize|$text';
-    final cached = _widthCache[key];
-    if (cached != null) return cached;
-    final tp = TextPainter(
-      text: TextSpan(
-        text: text,
-        // 🔴 必须用**实际渲染的字重**：原实现写死 w500，
-        //    用户把弹幕设为 w600/w700 时渲染更宽、而宽度被低估 →
-        //    轨道避让判断失真 → 弹幕追尾重叠 ✗
-        style: TextStyle(fontSize: fontSize, fontWeight: widget.fontWeight),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    final w = tp.width;
-    if (_widthCache.length >= _widthCacheLimit) _widthCache.clear();
-    _widthCache[key] = w;
-    return w;
-  }
-
   @override
   void dispose() {
     _ticker.dispose();
@@ -831,22 +908,6 @@ class _DanmuLayerState extends State<DanmuLayer>
   double get _trackStep {
     final v = widget.fontSize * widget.lineSpacing;
     return v < 22 ? 22 : v;
-  }
-
-  /// 用 4 向投影模拟描边（Flutter 的 TextStyle 没有 stroke 属性）。
-  /// strokeWidth 为 0 时退化为一点柔和阴影，保证暗色画面下仍可读。
-  List<Shadow> _strokeShadows() {
-    final w = widget.strokeWidth;
-    if (w <= 0.01) {
-      return const [Shadow(blurRadius: 2, color: Colors.black87)];
-    }
-    // 偏移量越大显得描边越粗；blurRadius 保持 0 才是实边
-    return [
-      Shadow(offset: Offset(-w, 0), color: Colors.black),
-      Shadow(offset: Offset(w, 0), color: Colors.black),
-      Shadow(offset: Offset(0, -w), color: Colors.black),
-      Shadow(offset: Offset(0, w), color: Colors.black),
-    ];
   }
 
   @override
@@ -889,13 +950,11 @@ class _DanmuLayerState extends State<DanmuLayer>
                 topPx: topPx,
                 bottomPx: bottomPx,
                 trackStep: _trackStep,
-                forceColor: widget.forceColor,
-                opacity: widget.opacity,
-                painterCache: _paintCache,
                 fontSize: widget.fontSize,
                 fontWeight: widget.fontWeight,
                 strokeWidth: widget.strokeWidth,
-                strokeShadows: _strokeShadows(),
+                forceColor: widget.forceColor,
+                opacity: widget.opacity,
               ),
             ),
           );
@@ -913,20 +972,15 @@ class _DanmuLayerState extends State<DanmuLayer>
 ///   · `CustomPainter` 只做一次 paint 调用，内部用 `TextPainter`
 ///     （已预布局）直接平移绘制，开销是 1/N。
 class _DanmuPainter extends CustomPainter {
-  /// 绘制缓存上限（与 state 侧共用同一个 map，这里只读它做容量判断）
-  static const int cacheLimit = 500;
-
   final List<_ActiveDanmu> active;
   final double topPx;
   final double bottomPx;
   final double trackStep;
-  final Color? forceColor;
-  final double opacity;
-  final Map<String, TextPainter> painterCache;
   final double fontSize;
   final FontWeight fontWeight;
   final double strokeWidth;
-  final List<Shadow> strokeShadows;
+  final Color? forceColor;
+  final double opacity;
 
   _DanmuPainter({
     required Listenable repaint,
@@ -934,59 +988,56 @@ class _DanmuPainter extends CustomPainter {
     required this.topPx,
     required this.bottomPx,
     required this.trackStep,
-    required this.forceColor,
-    required this.opacity,
-    required this.painterCache,
     required this.fontSize,
     required this.fontWeight,
     required this.strokeWidth,
-    required this.strokeShadows,
+    required this.forceColor,
+    required this.opacity,
   }) : super(repaint: repaint);
+
+  /// 兜底：条目没有预解析的绘制对时（样式失效后的头一帧）就地重建并写回。
+  /// 🔴 不走字符串 key 查缓存 —— 那是每帧 × 每条的热路径，直接省掉。
+  _DanmuPaint _ensurePaint(_ActiveDanmu a) {
+    var p = a.paint;
+    if (p == null) {
+      final color =
+          (forceColor ?? a.item.color).withValues(alpha: opacity);
+      p = _DanmuPaint.build(
+        item: a.item,
+        color: color,
+        fontSize: fontSize,
+        fontWeight: fontWeight,
+        strokeWidth: strokeWidth,
+      );
+      a.paint = p;
+    }
+    return p;
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
     for (final a in active) {
-      final color = (forceColor ?? a.item.color).withValues(alpha: opacity);
-      final key =
-          '$fontSize|$fontWeight|$strokeWidth|${color.value}|${a.item.text}';
-      var tp = painterCache[key];
-      if (tp == null) {
-        tp = TextPainter(
-          text: TextSpan(
-            text: a.item.text,
-            style: TextStyle(
-              color: color,
-              fontSize: fontSize,
-              fontWeight: fontWeight,
-              shadows: strokeShadows,
-            ),
-          ),
-          textDirection: TextDirection.ltr,
-          maxLines: 1,
-          textScaler: TextScaler.noScaling,
-        )..layout();
-        if (painterCache.length >= _DanmuPainter.cacheLimit) {
-          painterCache.clear();
-        }
-        painterCache[key] = tp;
-      }
+      final p = _ensurePaint(a);
 
       final double dy;
       final double dx;
       if (a.bottomFixed) {
         // 底部固定：从 bottomPx 往上排
         dy = size.height - bottomPx - trackStep * (a.track + 1);
-        dx = (size.width - tp.width) / 2;
+        dx = (size.width - p.fill.width) / 2;
       } else if (a.topFixed) {
         // 顶部固定
         dy = topPx + a.track * trackStep;
-        dx = (size.width - tp.width) / 2;
+        dx = (size.width - p.fill.width) / 2;
       } else {
         // 滚动
         dy = topPx + a.track * trackStep;
         dx = a.x;
       }
-      tp.paint(canvas, Offset(dx, dy));
+      final offset = Offset(dx, dy);
+      // 先描边后填充（描边在中线外扩，会被填充盖住内半圈）
+      p.stroke?.paint(canvas, offset);
+      p.fill.paint(canvas, offset);
     }
   }
 
