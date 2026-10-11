@@ -172,6 +172,12 @@ else
   puts "✅ #{framework_basename} 已在 Embed Frameworks"
 end
 
+# 注：KSPlayer 野指针补丁的构建期钩子放在 **scheme 的 BuildAction
+# PreAction**（Runner.xcscheme，已随仓库提交），而不是 target 的 Run Script
+# 阶段 —— SPM 包目标作为 Runner 的依赖，在 Runner 任何构建阶段之前就已编译，
+# target 级脚本跑的时候 KSPlayer 早就编完了。scheme pre-action 在一切编译
+# （含 SPM 依赖）之前执行，CI 与本地 Xcode 都会跑。
+
 # ============================================================
 # 保存
 # ============================================================
