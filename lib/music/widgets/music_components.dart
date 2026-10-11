@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../models/models.dart';
+import '../services/library_store.dart';
 import '../services/player_manager.dart';
 import '../theme/music_theme.dart';
 import '../../common/theme.dart';
@@ -347,8 +348,11 @@ class SongCell extends StatelessWidget {
   }
 }
 
-/// 歌曲操作菜单（Beans 的行内菜单含"下一首/加队列/收藏/下载"，
-/// 账号相关的收藏/下载本项目不做）
+/// 歌曲操作菜单（播放页右上角三个点 / 歌曲行尾部的「更多」共用）。
+///
+/// 布局：头部（封面+歌名歌手）+ **动作网格**（图标块+小字，5 列两行）。
+/// 旧版是 9 个 ListTile 纵向平铺，在"中间弹出、约 1/3 屏高"的容器里
+/// 必然内部滚动、末尾项看不全；网格两行一屏放完，一眼选完。
 Future<void> showSongActions(
   BuildContext context,
   Song song, [
@@ -358,21 +362,6 @@ Future<void> showSongActions(
   return showMusicSheet<void>(
     context: context,
     backgroundColor: MusicTheme.card,
-    // ── 🔴 必须 `isScrollControlled: true`（修一个"末尾项点不到"）──────
-    //
-    // 不加这个参数时，`showModalBottomSheet` 的高度上限是
-    // **屏高 × 9/16**。而本菜单有 **9 个 ListTile**：
-    //   8×56 + 1×72（「查看歌手」带 subtitle）= 520
-    //   + 头部（16+44+8=68）+ Divider(1) + SizedBox(8) ≈ **597**
-    // 对照 iPhone 14（844pt 屏）：上限只有 ≈474 → **超出约 120px**。
-    //
-    // 表现：debug 下报 `RenderFlex overflowed`；release 下末尾的
-    // 「下载」「分享」（小屏还有「评论」）被裁掉且**点不到** ✗
-    // iPhone SE（568pt 屏）上限才 ≈319 → 只能看到约 5 项。
-    //
-    // 开 `isScrollControlled` 后上限放到全屏，再用 `SingleChildScrollView`
-    // 兜住"屏幕很矮"的极端情况（同时保留 `mainAxisSize: min`，
-    // 内容少时弹层**依然只有内容那么高**，不会变成全屏大白板）。
     isScrollControlled: true,
     builder: (ctx) => SafeArea(
       top: false,
@@ -380,151 +369,193 @@ Future<void> showSongActions(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Row(
-              children: [
-                CoverImage(url: song.coverUrl, size: 44, cornerRadius: 10),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(song.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: MusicTheme.label,
-                              fontSize: AppTheme.fontHeadline,
-                              fontWeight: FontWeight.w600)),
-                      Text(song.artists,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
-                    ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 2),
+              child: Row(
+                children: [
+                  CoverImage(url: song.coverUrl, size: 44, cornerRadius: 10),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(song.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                color: MusicTheme.label,
+                                fontSize: AppTheme.fontHeadline,
+                                fontWeight: FontWeight.w600)),
+                        Text(song.artists,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                color: MusicTheme.secondary,
+                                fontSize: AppTheme.fontFootnote)),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const Divider(height: 1),
-          // 🔴 收藏：**菜单里原来根本没有这一项**，而音乐库的空态文案却写着
-          // "在歌曲右侧菜单里可以收藏" → 用户按提示找不到入口 ✗
-          // 现在补上，并复用共用动作（与迷你播放器快捷条、播放页红心同一套逻辑）。
-          ListTile(
-            leading:
-                Icon(Icons.favorite_border_rounded, color: MusicTheme.tint),
-            title: Text('收藏', style: TextStyle(color: MusicTheme.label)),
-            onTap: () {
-              Navigator.pop(ctx);
-              musicToggleFavorite(song);
-            },
-          ),
-          ListTile(
-            leading: Icon(Icons.playlist_play_rounded, color: MusicTheme.tint),
-            title: Text('下一首播放', style: TextStyle(color: MusicTheme.label)),
-            onTap: () {
-              player.playNext(song);
-              Navigator.pop(ctx);
-            },
-          ),
-          ListTile(
-            leading: Icon(Icons.queue_music_rounded, color: MusicTheme.tint),
-            title: Text('加入播放队列', style: TextStyle(color: MusicTheme.label)),
-            onTap: () {
-              player.addToQueue(song);
-              Navigator.pop(ctx);
-            },
-          ),
-          ListTile(
-            leading: Icon(Icons.person_outline_rounded, color: MusicTheme.tint),
-            title: Text('查看歌手', style: TextStyle(color: MusicTheme.label)),
-            subtitle: Text(song.artists,
-                style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
-            onTap: () => Navigator.pop(ctx),
-          ),
-          ListTile(
-            leading: Icon(Icons.playlist_add_rounded, color: MusicTheme.tint),
-            title: Text('添加到歌单', style: TextStyle(color: MusicTheme.label)),
-            onTap: () {
-              Navigator.pop(ctx);
-              showAddToPlaylistSheet(context, song);
-            },
-          ),
-          ListTile(
-            leading: Icon(Icons.queue_music_rounded, color: MusicTheme.tint),
-            title: Text('我的歌单', style: TextStyle(color: MusicTheme.label)),
-            onTap: () {
-              Navigator.pop(ctx);
-              Navigator.of(context).push<void>(
-                MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),builder: (_) => const PlaylistListPage()),
-              );
-            },
-          ),
-          ListTile(
-            leading: Icon(Icons.mode_comment_outlined, color: MusicTheme.tint),
-            title: Text('评论', style: TextStyle(color: MusicTheme.label)),
-            subtitle: song.source == SongSource.netease
-                ? null
-                : Text('${song.source.displayName}暂无评论接口',
-                    style: TextStyle(
-                        color: MusicTheme.secondary,
-                        fontSize: AppTheme.fontFootnote)),
-            onTap: () {
-              Navigator.pop(ctx);
-              // ⚠️ 既有 `MusicApi.comments()` 只走网易云（没有 source 参数）。
-              // 对酷狗的歌必须挡住 —— 否则会拿酷狗的 id 去查网易云，必然空。
-              if (song.source != SongSource.netease) {
-                AppToast.show('${song.source.displayName}暂无评论接口', '');
-                return;
-              }
-              showCommentSheet(context, song);
-            },
-          ),
-          // 下载：入队到 App 沙盒（`Documents/music/`）。
-          // 已下载/下载中的会被服务自动忽略；下载完播放会**本地优先**（离线可听）。
-          //
-          // ── 🔴 必须走 `musicEnqueueDownload()`，不要直接 enqueue ──────
-          //
-          // 这里原来自己写了一遍：
-          // ```dart
-          //   MusicDownloadService.instance.enqueue(song);
-          //   AppToast.show('已加入下载', song.name);   // ← 无条件
-          // ```
-          // `musicEnqueueDownload`（`quick_actions.dart`）存在的**理由**
-          // 就是修这个：`enqueue` 对"已在清单里"的歌是**静默忽略**的
-          //（`download_service.dart` 里去重后直接 return），
-          // 而无条件提示会让用户以为下了第二遍 —— 去下载列表又找不到新任务。
-          // 它还负责 `isDownloaded`（已下好 → 提示"已经下载过了"）
-          // 和 `failed 可重来` 这两个分支。
-          //
-          // 直接把那条逻辑写回来 = 把已经修掉的 bug 又种回去。
-          ListTile(
-            leading: Icon(Icons.download_rounded, color: MusicTheme.tint),
-            title: Text('下载', style: TextStyle(color: MusicTheme.label)),
-            onTap: () {
-              Navigator.pop(ctx);
-              // ⚠️ `unawaited`：Fire-and-forget，但**显式**声明意图
-              //（直接丢弃 Future 时，服务内抛异常会变成 unhandled async error）
-              unawaited(musicEnqueueDownload(song));
-            },
-          ),
-          ListTile(
-            leading: Icon(Icons.ios_share_rounded, color: MusicTheme.tint),
-            title: Text('分享', style: TextStyle(color: MusicTheme.label)),
-            onTap: () {
-              Navigator.pop(ctx);
-              unawaited(_shareSong(song));
-            },
-          ),
-          const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 10, 10, 14),
+              child: GridView.count(
+                crossAxisCount: 5,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: EdgeInsets.zero,
+                mainAxisSpacing: 12,
+                childAspectRatio: 0.86,
+                children: [
+                  // 收藏：实时反映状态（实心 = 已收藏），与播放页红心一致
+                  ListenableBuilder(
+                    listenable: MusicLibraryStore.instance,
+                    builder: (context, _) {
+                      final fav = MusicLibraryStore.instance.isFavorite(song);
+                      return _SongActionTile(
+                        icon: fav
+                            ? Icons.favorite_rounded
+                            : Icons.favorite_border_rounded,
+                        label: fav ? '已收藏' : '收藏',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          musicToggleFavorite(song);
+                        },
+                      );
+                    },
+                  ),
+                  _SongActionTile(
+                    icon: Icons.playlist_play_rounded,
+                    label: '下一首播放',
+                    onTap: () {
+                      player.playNext(song);
+                      Navigator.pop(ctx);
+                    },
+                  ),
+                  _SongActionTile(
+                    icon: Icons.queue_music_rounded,
+                    label: '加入队列',
+                    onTap: () {
+                      player.addToQueue(song);
+                      Navigator.pop(ctx);
+                    },
+                  ),
+                  _SongActionTile(
+                    icon: Icons.playlist_add_rounded,
+                    label: '添加到歌单',
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      showAddToPlaylistSheet(context, song);
+                    },
+                  ),
+                  _SongActionTile(
+                    icon: Icons.library_music_rounded,
+                    label: '我的歌单',
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      Navigator.of(context).push<void>(
+                        MaterialPageRoute(
+                          settings: const RouteSettings(name: 'music:page'),
+                          builder: (_) => const PlaylistListPage(),
+                        ),
+                      );
+                    },
+                  ),
+                  _SongActionTile(
+                    icon: Icons.mode_comment_outlined,
+                    label: '评论',
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      // ⚠️ 既有 `MusicApi.comments()` 只走网易云。
+                      // 对酷狗的歌必须挡住，否则拿酷狗 id 查网易云必然空。
+                      if (song.source != SongSource.netease) {
+                        AppToast.show(
+                            '${song.source.displayName}暂无评论接口', '');
+                        return;
+                      }
+                      showCommentSheet(context, song);
+                    },
+                  ),
+                  _SongActionTile(
+                    icon: Icons.download_rounded,
+                    label: '下载',
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      // 走 musicEnqueueDownload：去重 + "已下载"提示，
+                      // 不要直接 enqueue（会"以为下了第二遍"）。
+                      unawaited(musicEnqueueDownload(song));
+                    },
+                  ),
+                  _SongActionTile(
+                    icon: Icons.ios_share_rounded,
+                    label: '分享',
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      unawaited(_shareSong(song));
+                    },
+                  ),
+                  _SongActionTile(
+                    icon: Icons.person_outline_rounded,
+                    label: '查看歌手',
+                    onTap: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
     ),
   );
+}
+
+/// 动作网格的单个块：圆角图标容器 + 小字标签。
+class _SongActionTile extends StatelessWidget {
+  const _SongActionTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: MusicTheme.glassFill,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: MusicTheme.label.withValues(alpha: 0.06),
+                width: 0.5,
+              ),
+            ),
+            child: Icon(icon, size: 20, color: MusicTheme.tint),
+          ),
+          const SizedBox(height: 5),
+          Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: MusicTheme.secondary,
+                  fontSize: AppTheme.fontCaption)),
+        ],
+      ),
+    );
+  }
 }
 
 /// 分享：把「歌名 - 歌手」复制到剪贴板并提示。

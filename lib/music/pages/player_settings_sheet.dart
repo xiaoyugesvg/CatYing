@@ -10,6 +10,10 @@ import '../../common/theme.dart';
 ///
 /// 原版把这些散在 `PlayerView` 的多个 sheet 里；这里收成一个面板，
 /// 减少跳转层级。改动即时生效并持久化。
+///
+/// 布局：分节「图标 + 标题」+ 玻璃卡片容器，代替旧版的
+/// Divider 平铺 —— 中间弹出弹窗高度有限，分组卡片让每节边界清晰，
+/// 滑杆/开关/胶囊选项收纳在各自卡片里不再互相挤压。
 class PlayerSettingsSheet extends StatefulWidget {
   const PlayerSettingsSheet({super.key});
 
@@ -28,7 +32,7 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Container(
               width: 40,
               height: 4,
@@ -37,97 +41,115 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
                 borderRadius: BorderRadius.circular(10),
               ),
             ),
-            const SizedBox(height: 14),
-            _title('播放'),
-            _slider(
-              label: '音量',
-              value: player.volume.value,
-              min: 0,
-              max: 100,
-              display: '${player.volume.value.round()}',
-              onChanged: (v) => setState(() => player.setVolume(v)),
-            ),
-            _slider(
-              label: '歌词偏移',
-              value: player.lyricOffset.value.toDouble(),
-              min: -3000,
-              max: 3000,
-              display: '${player.lyricOffset.value >= 0 ? "+" : ""}${player.lyricOffset.value} ms',
-              onChanged: (v) => setState(() => player.setLyricOffset(v.round())),
-            ),
-            const Divider(height: 24),
-            _title('外观'),
-            // ── 🔴 这里原来用 `setState` 刷新，是个**会崩**的写法 ──────────
-            //
-            // 原文：
-            //   onChanged: (v) async {
-            //     await MusicPlayerSkin.instance.setShowLyricFirst(v);
-            //     setState(() {});          // ← await 之后 **没有 mounted 检查**
-            //   },
-            //
-            // 为什么是硬崩（不只是 debug 断言）：`await` 的是 SharedPreferences
-            // 的平台通道写盘，期间事件循环会处理其它平台消息，用户完全可能
-            // 同时**下滑关闭这个弹层**。`State` 一旦 unmount，框架会把
-            // `_element` 置 null，而 `setState()` 内部是
-            // `_element!.markNeedsBuild()` → **release 下也抛**
-            // `Null check operator used on a null value`。
-            //
-            // ── 修法：干脆不用 `setState` ──────────────────────────────
-            // 这几个值**本来就是 `ValueNotifier`**（见 `MusicPlayerSkin` /
-            // `SettingsStore`），所以让每行自己 `ValueListenableBuilder`
-            // 监听就行 —— 一举两得：
-            //   · 不再有"await 后 setState"的崩溃路径
-            //   · 面板打开期间**别处**改了同一个值，这里也会跟着刷新
-            //    （原来"调用时快照 + onChanged 里 setState"做不到这点）
-            ValueListenableBuilder<bool>(
-              valueListenable: MusicPlayerSkin.instance.showLyricFirst,
-              builder: (context, v, _) => _switchRow(
-                label: '进播放器先看歌词',
-                value: v,
-                onChanged: (nv) =>
-                    MusicPlayerSkin.instance.setShowLyricFirst(nv),
+            const SizedBox(height: 6),
+            _section(
+              icon: Icons.graphic_eq_rounded,
+              title: '播放',
+              child: Column(
+                children: [
+                  _slider(
+                    label: '音量',
+                    value: player.volume.value,
+                    min: 0,
+                    max: 100,
+                    display: '${player.volume.value.round()}',
+                    onChanged: (v) => setState(() => player.setVolume(v)),
+                  ),
+                  _slider(
+                    label: '歌词偏移',
+                    value: player.lyricOffset.value.toDouble(),
+                    min: -3000,
+                    max: 3000,
+                    display:
+                        '${player.lyricOffset.value >= 0 ? "+" : ""}${player.lyricOffset.value} ms',
+                    onChanged: (v) =>
+                        setState(() => player.setLyricOffset(v.round())),
+                  ),
+                ],
               ),
             ),
-            ValueListenableBuilder<MusicCoverStyle>(
-              valueListenable: MusicPlayerSkin.instance.coverStyle,
-              builder: (context, cur, _) => _enumRow<MusicCoverStyle>(
-                label: '封面形态',
-                values: MusicCoverStyle.values,
-                current: cur,
-                labelOf: (e) => e.label,
-                onPick: (e) => MusicPlayerSkin.instance.setCoverStyle(e),
+            _section(
+              icon: Icons.palette_outlined,
+              title: '外观',
+              child: Column(
+                children: [
+                  // ── 🔴 这里原来用 `setState` 刷新，是个**会崩**的写法 ──────
+                  //
+                  // 原文：
+                  //   onChanged: (v) async {
+                  //     await MusicPlayerSkin.instance.setShowLyricFirst(v);
+                  //     setState(() {});          // ← await 之后 **没有 mounted 检查**
+                  //   },
+                  //
+                  // 为什么是硬崩（不只是 debug 断言）：`await` 的是 SharedPreferences
+                  // 的平台通道写盘，期间事件循环会处理其它平台消息，用户完全可能
+                  // 同时**下滑关闭这个弹层**。`State` 一旦 unmount，框架会把
+                  // `_element` 置 null，而 `setState()` 内部是
+                  // `_element!.markNeedsBuild()` → **release 下也抛**
+                  // `Null check operator used on a null value`。
+                  //
+                  // ── 修法：干脆不用 `setState` ────────────────────────────
+                  // 这几个值**本来就是 `ValueNotifier`**（见 `MusicPlayerSkin` /
+                  // `SettingsStore`），所以让每行自己 `ValueListenableBuilder`
+                  // 监听就行 —— 一举两得：
+                  //   · 不再有"await 后 setState"的崩溃路径
+                  //   · 面板打开期间**别处**改了同一个值，这里也会跟着刷新
+                  //    （原来"调用时快照 + onChanged 里 setState"做不到这点）
+                  ValueListenableBuilder<bool>(
+                    valueListenable: MusicPlayerSkin.instance.showLyricFirst,
+                    builder: (context, v, _) => _switchRow(
+                      label: '进播放器先看歌词',
+                      value: v,
+                      onChanged: (nv) =>
+                          MusicPlayerSkin.instance.setShowLyricFirst(nv),
+                    ),
+                  ),
+                  ValueListenableBuilder<MusicCoverStyle>(
+                    valueListenable: MusicPlayerSkin.instance.coverStyle,
+                    builder: (context, cur, _) => _enumRow<MusicCoverStyle>(
+                      label: '封面形态',
+                      values: MusicCoverStyle.values,
+                      current: cur,
+                      labelOf: (e) => e.label,
+                      onPick: (e) => MusicPlayerSkin.instance.setCoverStyle(e),
+                    ),
+                  ),
+                  ValueListenableBuilder<MusicDustMode>(
+                    valueListenable: MusicPlayerSkin.instance.dustMode,
+                    builder: (context, cur, _) => _enumRow<MusicDustMode>(
+                      label: '背景氛围',
+                      values: MusicDustMode.values,
+                      current: cur,
+                      labelOf: (e) => e.label,
+                      onPick: (e) => MusicPlayerSkin.instance.setDustMode(e),
+                    ),
+                  ),
+                ],
               ),
             ),
-            ValueListenableBuilder<MusicDustMode>(
-              valueListenable: MusicPlayerSkin.instance.dustMode,
-              builder: (context, cur, _) => _enumRow<MusicDustMode>(
-                label: '背景氛围',
-                values: MusicDustMode.values,
-                current: cur,
-                labelOf: (e) => e.label,
-                onPick: (e) => MusicPlayerSkin.instance.setDustMode(e),
+            _section(
+              icon: Icons.high_quality_outlined,
+              title: '音质',
+              child: ValueListenableBuilder<AudioQuality>(
+                valueListenable: SettingsStore.instance.audioQuality,
+                builder: (context, cur, _) => _enumRow<AudioQuality>(
+                  label: '优先音质',
+                  values: AudioQuality.values,
+                  current: cur,
+                  labelOf: (e) => e.displayName,
+                  onPick: (e) => SettingsStore.instance.setAudioQuality(e),
+                ),
               ),
             ),
-            const Divider(height: 24),
-            _title('音质'),
-            ValueListenableBuilder<AudioQuality>(
-              valueListenable: SettingsStore.instance.audioQuality,
-              builder: (context, cur, _) => _enumRow<AudioQuality>(
-                label: '优先音质',
-                values: AudioQuality.values,
-                current: cur,
-                labelOf: (e) => e.displayName,
-                onPick: (e) => SettingsStore.instance.setAudioQuality(e),
-              ),
-            ),
-            const SizedBox(height: 8),
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
               child: Text(
                 '音质以「公开可用的最高档」为准；会员/独家曲目可能拿不到音源，'
                 '播放器会明确提示而不是静默失败。',
                 style: TextStyle(
-                    color: MusicTheme.secondary, fontSize: AppTheme.fontCaption, height: 1.5),
+                    color: MusicTheme.secondary,
+                    fontSize: AppTheme.fontCaption,
+                    height: 1.5),
               ),
             ),
           ],
@@ -136,17 +158,47 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
     );
   }
 
-  Widget _title(String t) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 6),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: Text(t,
-              style: TextStyle(
-                  color: MusicTheme.tint,
-                  fontSize: AppTheme.fontSubhead,
-                  fontWeight: FontWeight.w700)),
-        ),
-      );
+  /// 分节容器：图标 + 标题 + 玻璃卡片。
+  Widget _section({
+    required IconData icon,
+    required String title,
+    required Widget child,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 15, color: MusicTheme.tint),
+              const SizedBox(width: 6),
+              Text(title,
+                  style: TextStyle(
+                      color: MusicTheme.tint,
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: FontWeight.w700)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+            decoration: BoxDecoration(
+              color: MusicTheme.glassFill,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: MusicTheme.label.withValues(alpha: 0.06),
+                width: 0.5,
+              ),
+            ),
+            child: child,
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _slider({
     required String label,
@@ -157,13 +209,14 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
     required ValueChanged<double> onChanged,
   }) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
         children: [
           SizedBox(
-            width: 64,
+            width: 60,
             child: Text(label,
-                style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontSubhead)),
+                style: TextStyle(
+                    color: MusicTheme.label, fontSize: AppTheme.fontSubhead)),
           ),
           Expanded(
             child: SliderTheme(
@@ -183,11 +236,19 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
               ),
             ),
           ),
-          SizedBox(
-            width: 66,
+          Container(
+            constraints: const BoxConstraints(minWidth: 52),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: MusicTheme.label.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(8),
+            ),
             child: Text(display,
-                textAlign: TextAlign.right,
-                style: TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote)),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: MusicTheme.tint,
+                    fontSize: AppTheme.fontFootnote,
+                    fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -201,9 +262,11 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
   }) {
     return SwitchListTile(
       dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+      visualDensity: VisualDensity.compact,
+      contentPadding: EdgeInsets.zero,
       title: Text(label,
-          style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontBody)),
+          style:
+              TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontBody)),
       activeThumbColor: MusicTheme.tint,
       value: value,
       onChanged: onChanged,
@@ -218,13 +281,14 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
     required ValueChanged<T> onPick,
   }) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+      padding: const EdgeInsets.symmetric(vertical: 5),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label,
-              style: TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontBody)),
-          const SizedBox(height: 8),
+              style: TextStyle(
+                  color: MusicTheme.label, fontSize: AppTheme.fontBody)),
+          const SizedBox(height: 7),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -234,15 +298,15 @@ class _PlayerSettingsSheetState extends State<PlayerSettingsSheet> {
                 onTap: () => onPick(e),
                 child: Container(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
                   decoration: BoxDecoration(
                     color: active
-                        ? MusicTheme.tint.withValues(alpha: 0.16)
-                        : MusicTheme.label.withValues(alpha: 0.05),
+                        ? MusicTheme.tint.withValues(alpha: 0.18)
+                        : MusicTheme.label.withValues(alpha: 0.07),
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(
                       color: active
-                          ? MusicTheme.tint.withValues(alpha: 0.6)
+                          ? MusicTheme.tint.withValues(alpha: 0.65)
                           : Colors.transparent,
                       width: 0.8,
                     ),
