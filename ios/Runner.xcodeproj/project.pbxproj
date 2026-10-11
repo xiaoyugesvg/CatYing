@@ -613,7 +613,7 @@
 			repositoryURL = "https://github.com/CxiaoyuN/KSPlayer.git";
 			requirement = {
 				kind = revision;
-				revision = a353bb9922079fd314aea907c7ecda70879eb308; /* NewTV: fork newtv-patched，源码已含 guard1/2/3 防御补丁 */
+				revision = d21803f3c4f105cfafe51ac27cb1d562d6286aaa; /* NewTV: fork newtv-patched，源码已含 guard1/2/3/4 防御补丁 */
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

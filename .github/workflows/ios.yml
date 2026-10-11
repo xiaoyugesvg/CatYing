@@ -96,7 +96,7 @@ jobs:
 
       - name: Resolve SPM packages (KSPlayer = 已打补丁的 fork)
         # KSPlayer 已改为指向 **CxiaoyuN/KSPlayer 的 `newtv-patched` 分支**
-        # （pbxproj 里 revision 固定为 a353bb9，源码内直接含 guard1/2/3 防御补丁）
+        # （pbxproj 里 revision 固定为 d21803f，源码内直接含 guard1/2/3/4 防御补丁）
         # ⇒ 不再需要构建期打补丁，也就没有「补丁打到 A 目录、编译用 B 目录」的漂移
         #   问题（这正是之前"补丁打不进去"的根因：patch_ksplayer.sh 打在默认
         #   DerivedData，而 flutter build ios 用 <项目>/build/ios 的检出编译）。
@@ -108,9 +108,9 @@ jobs:
           PBX=ios/Runner.xcodeproj/project.pbxproj
           grep -q 'CxiaoyuN/KSPlayer' "$PBX" \
             || { echo "❌ KSPlayer 未指向打过补丁的 fork"; exit 1; }
-          grep -q 'a353bb9922079fd314aea907c7ecda70879eb308' "$PBX" \
+          grep -q 'd21803f3c4f105cfafe51ac27cb1d562d6286aaa' "$PBX" \
             || { echo "❌ KSPlayer revision 不是打过补丁的提交"; exit 1; }
-          echo "✅ KSPlayer pin = fork newtv-patched（源码已含 guard1/2/3）"
+          echo "✅ KSPlayer pin = fork newtv-patched（源码已含 guard1/2/3/4）"
 
       - name: Static analysis (errors only)
         # 只把 error 当失败：仓库既有 500+ 条 info 级 lint（风格），不应阻塞构建。
@@ -454,3 +454,16 @@ jobs:
           path: build/ipa/*.ipa
           retention-days: 30
           if-no-files-found: error
+
+      - name: Upload dSYM (崩溃精确定位用)
+        # 崩在 KSPlayer 的 FFmpeg 核心时，.ips 里只有「函数名 + 函数内偏移」
+        # （如 FFmpegAssetTrack.init(codecpar:) +1256）。有 dSYM 才能用 atos 把它
+        # 精确映射回源码行，避免下一刀靠猜。拿不到也不算构建失败，不影响出包。
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-dsym
+          path: build/ios/iphoneos/*.dSYM
+          retention-days: 30
+          if-no-files-found: warn
