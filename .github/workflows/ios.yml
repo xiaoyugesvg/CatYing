@@ -467,3 +467,23 @@ jobs:
           path: build/ios/iphoneos/*.dSYM
           retention-days: 30
           if-no-files-found: warn
+
+      - name: Dump KSPlayer 行号表 (崩溃定位, 诊断用)
+        # 崩溃 .ips 只给「函数名 + 函数内偏移」（如 FFmpegAssetTrack.init +1116），
+        # 拿不到源码行。这里用 atos 把该函数附近地址逐条映射成「文件:行号」贴进日志，
+        # 与 .ips 的 symbolLocation 对照即可精确定位到行。纯诊断，失败不影响出包。
+        if: always()
+        continue-on-error: true
+        run: |
+          DWARF=build/ios/iphoneos/Runner.app.dSYM/Contents/Resources/DWARF/Runner
+          if [ ! -f "$DWARF" ]; then echo "⚠️ 没有 dSYM，跳过"; exit 0; fi
+          echo "=== dSYM uuid (应与 .ips 的 slice_uuid 一致) ==="
+          xcrun dwarfdump --uuid "$DWARF" || true
+          # 崩点换算（链址 = 0x100000000 + imageOffset）：
+          #   imageOffset=555496(0x87A68), symbolLocation=+1116 → 函数起始 = 0x100000000+555496-1116
+          FNSTART=$((0x100000000 + 555496 - 1116))
+          for off in $(seq 900 4 1400); do
+            ADDR=$(printf '0x%x' $((FNSTART + off)))
+            printf 'OFF=+%s %s ' "$off" "$ADDR"
+            xcrun atos -o "$DWARF" -arch arm64 "$ADDR" 2>/dev/null | head -1
+          done
