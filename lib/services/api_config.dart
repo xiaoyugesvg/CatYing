@@ -446,23 +446,29 @@ class ApiConfig extends GetxController {
       try {
         final lives = config.lives;
         if (lives != null && lives.isNotEmpty) {
-          final raw = lives
-              .map((e) => {
-                    'name': e.name,
-                    'url': e.url,
-                    'ua': e.ua,
-                    'type': e.type?.value,
-                    'channels': e.channels
-                        ?.map((ch) => {
-                              'name': ch.name,
-                              'urls': ch.urls,
-                              'group': ch.group,
-                              'logo': ch.logo,
-                            })
-                        .toList(),
-                  })
-              .toList();
-          await LiveService.instance.loadFromLivesJson(raw);
+          // 用户手动增删改过直播源后以本地为准，接口下发的 lives 不再覆盖，
+          // 否则「设置页删了源，重启又被接口配置整个灌回来」。
+          if (await LiveService.instance.livesUserManaged) {
+            AppLog.instance.log('[ApiConfig] 用户已手动管理直播源，跳过接口 lives 覆盖');
+          } else {
+            final raw = lives
+                .map((e) => {
+                      'name': e.name,
+                      'url': e.url,
+                      'ua': e.ua,
+                      'type': e.type?.value,
+                      'channels': e.channels
+                          ?.map((ch) => {
+                                'name': ch.name,
+                                'urls': ch.urls,
+                                'group': ch.group,
+                                'logo': ch.logo,
+                              })
+                          .toList(),
+                    })
+                .toList();
+            await LiveService.instance.loadFromLivesJson(raw);
+          }
         }
       } catch (e) {
         AppLog.instance.log('[ApiConfig] lives 解析失败: $e');

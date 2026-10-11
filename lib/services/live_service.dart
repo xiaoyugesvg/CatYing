@@ -334,6 +334,7 @@ class LiveService extends GetxService {
   /// 删除单个直播源（设置页）：多源从 lives 移除并重建，自定义单源清空全部
   Future<void> removeSource(int index) async {
     if (index < 0 || index >= sources.length) return;
+    await _markLivesManaged();
     if (_rawLives != null) {
       if (index < _rawLives!.length) _rawLives!.removeAt(index);
       if (_rawLives!.isEmpty) {
@@ -361,6 +362,7 @@ class LiveService extends GetxService {
   Future<void> addSource(String url, {String? name}) async {
     url = url.trim();
     if (url.isEmpty) return;
+    await _markLivesManaged();
     isLoading.value = true;
     error.value = null;
     try {
@@ -444,6 +446,7 @@ class LiveService extends GetxService {
         (trimmedUrl == null || trimmedUrl.isEmpty)) {
       return;
     }
+    await _markLivesManaged();
     isLoading.value = true;
     error.value = null;
     try {
@@ -733,6 +736,28 @@ class LiveService extends GetxService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('live_name', name);
       _persistedName = name;
+    } catch (e) { /* ignore */ }
+  }
+
+  /// 用户是否手动增删改过直播源。
+  /// 手动管理过后，接口配置（api_config）下发的 lives 不再覆盖本地列表 ——
+  /// 否则「设置页删了源，重启又被接口配置整个灌回来」。
+  Future<bool> get livesUserManaged async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool('live_lives_managed') == true) return true;
+      // 兼容老用户：本地已有 live_lives 多源配置，直接视为已管理
+      final saved = prefs.getString('live_lives');
+      return saved != null && saved.isNotEmpty;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<void> _markLivesManaged() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('live_lives_managed', true);
     } catch (e) { /* ignore */ }
   }
 
