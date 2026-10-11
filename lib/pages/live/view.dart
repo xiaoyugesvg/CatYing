@@ -319,19 +319,24 @@ class _LivePageState extends State<LivePage> {
       _player?.pause();
       _avPlayer?.pause();
       _ksPlayer ??= KSPlayer(config: const AppConfig(title: '猫影直播'));
-      // live: true → 原生侧 AVPlayer 优先（FFmpeg 拆直播 DVB 数据轨会闪退，
-      // HLS 直播 AVPlayer 原生就能播；rtmp/flv 打不开会自动回退 FFmpeg）
+      // live: true → 原生侧按格式路由内核（m3u8/mp4 走 AVPlayer，
+      // flv/mkv/ts/rtmp 走打了野指针防御补丁的 FFmpeg）
       _ksPlayer!.open(AppMedia(url, httpHeaders: headers), live: true);
     } else if (Platform.isIOS && !_iosUseMpv) {
       // 默认 AVPlayer 内核（与点播一致，进出小窗/手势一致）
       _player?.pause(); // 若之前用 mpv 在播，先停掉避免双声
-      _ksPlayer?.pause(); // 若之前用 KS 在播，先停掉避免双声
+      // 切走 FF 核心不能只 pause：KS 层背后的 MEPlayer 拆流线程可能还在跑
+      //（DVB 野流拆到一半），层不释放它会一直跑到崩。dispose 掉原生层，
+      // 下次切回 FF 时 ??= 重建即可。
+      _ksPlayer?.dispose();
+      _ksPlayer = null;
       _avPlayer ??= IosAvPlayer(config: const AppConfig(title: '猫影直播'));
       _avPlayer!.open(AppMedia(url, httpHeaders: headers));
     } else {
       // 桌面/Android，或 iOS 切到 mpv 备用内核（通吃 flv/ts/rtmp）
       _avPlayer?.pause(); // iOS 切回 mpv 时停掉 AVPlayer 避免双声
-      _ksPlayer?.pause(); // iOS 切回 mpv 时停掉 KS 避免双声
+      _ksPlayer?.dispose(); // 同上：连层一起释放，别留拆流线程在后台裸奔
+      _ksPlayer = null;
       _player!.open(Media(url, httpHeaders: headers));
     }
     // 预热原生 PiP，否则点小窗时 AVPlayer 冷启动易失败/黑屏

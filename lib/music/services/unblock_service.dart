@@ -227,9 +227,16 @@ class UnblockService {
   Future<List<SourceResolveResult>> resolveAll(
     Song song, {
     void Function(int done, int total)? onProgress,
+
+    /// 已经在前置阶段（平台固定源逐个试）刚试过、确认失败的源 id ——
+    /// 全源回退时跳过，避免对同一个源几秒内连打两次。
+    Set<String>? excludeIds,
   }) async {
     attempts.clear();
-    final sources = ThirdPartySourceStore.instance.enabled.take(_maxTriesAll).toList();
+    final sources = ThirdPartySourceStore.instance.enabled
+        .where((s) => !(excludeIds?.contains(s.id) ?? false))
+        .take(_maxTriesAll)
+        .toList();
     if (sources.isEmpty) return const [];
 
     // ── 🔴 并发上限必须是**全局跨调用**的（修"连点两首歌 = 8 个沙箱"）──

@@ -556,6 +556,13 @@ class MusicPlayerManager extends ChangeNotifier {
     Map<String, String> sourceHeaders = const {};
     // 这次是不是靠"平台固定源"拿到了地址
     var fromBound = false;
+    // 该平台**配过**固定源且这一轮已经逐个试过（不管最终中没中）。
+    // 命中时 fromBound=true 直接播；全失败时本标志仍为 true —— 后续全源
+    // 回退自动播第一个可用源，不再弹窗（用户 2026-10-11：选了固定源就
+    // 别再让我手选）。
+    var boundTried = false;
+    // 本轮试过的固定源 id（全源回退时排除，不重复试）
+    var triedBoundIds = <String>{};
 
     // ── 直链优先（博看听书等纯 Dart 数据源）──────────────────────
     // `bookanAlbum()` 已经把单集 `file` 直链填进 `Song.directUrl`，
@@ -594,7 +601,11 @@ class MusicPlayerManager extends ChangeNotifier {
     //    不为固定源白跑一次网络请求（离线时那次请求还会失败）。
     if (localPath.isEmpty && SettingsStore.instance.useThirdPartySources.value) {
       final boundIds = SettingsStore.instance.boundSourceIdsFor(song.source);
+      // 提到外层：全源回退 resolveAll 时要排除这批刚试过的固定源
+      triedBoundIds = boundIds.toSet();
       if (boundIds.isNotEmpty) {
+        // 配过固定源：无论成败，下面的全源回退都不再弹窗（自动直出第一个）
+        boundTried = true;
         final enabled = ThirdPartySourceStore.instance.enabled;
         // 按绑定顺序逐个试，第一个给出地址的直接用（不弹窗——这就是"固定"的意义）
         for (final boundId in boundIds) {
@@ -673,6 +684,8 @@ class MusicPlayerManager extends ChangeNotifier {
         notifyListeners();
         final results = await UnblockService.instance.resolveAll(
           song,
+          // 固定源刚试过的不再重复试（它们这一轮都给不出地址）
+          excludeIds: triedBoundIds.isEmpty ? null : triedBoundIds,
           onProgress: (done, total) {
             // 全试要几秒，必须反馈进度，否则用户以为卡死了
             lastError.value = '正在试音源 $done/$total…';
@@ -682,23 +695,18 @@ class MusicPlayerManager extends ChangeNotifier {
         if (epoch != _loadEpoch) return; // 期间用户又点了别的歌
 
         if (results.isNotEmpty) {
-          // ── 🔴 先看**有没有 context 能弹窗**（修一个崩溃）──────────
-          //
-          // `SourcePickerSheet.show` 需要 `BuildContext`。而
-          // **冷启动恢复队列后自动播放**、或**从通知栏/耳机按键触发的播放**
-          // 都没有页面调用过 `attachContext` → `_pickerContext` 为 null。
-          // 原来那里是 `VideoPlayerPip.navigatorKey.currentContext!`
-          //（强制解包）→ 拿不到就**抛异常**，用户连声音都没有 ✗
-          //
-          // 现在：拿不到 context 就**不弹窗**，直接用**第一个能用的源**播
-          //（`resolveAll` 的返回已按"用户导入顺序 / 记忆优先"排好序，
-          //  第一个就是最该用的那个），并用 toast 告诉用户用了哪个源 ——
-          // "没得选但能听" 明显好过 "崩掉"。
+          // 配过固定源的模式：固定源全挂后自动用全源回退的第一个结果直出，
+          // **不弹窗**（用户 2026-10-11：选了固定源就直接播，别让我再选）。
+          // 没 context（冷启动/耳机线控）同理直出。
           final ctx = _pickerCtxOrNull;
-          if (ctx == null) {
+          if (boundTried || ctx == null) {
             final first = results.first;
-            AppLog.instance.log('[Music] 没拿到 context，无法弹选源窗 → '
-                '直接用第一个可用源：${first.source?.name}（${results.length} 个可用）');
+            AppLog.instance.log(
+                '[Music] ${boundTried ? "平台固定源均失败，全源回退" : "无弹窗 context"} → '
+                '直接用第一个可用源：${first.source?.name}'
+                '（${results.length} 个可用）');
+            // 让用户知道这次没走固定源、实际用了谁；开播成功后会被清掉
+            lastError.value = '固定源暂不可用，已改用「${first.source?.name ?? ''}」';
             // `playResolved` 内部会 remember + 开播（含歌词/最近播放/落盘）
             await playResolved(song, first);
             return;
@@ -764,11 +772,26 @@ class MusicPlayerManager extends ChangeNotifier {
           return;
         }
       } else {
-        // 没有可用音源时，明确告知 —— 这是正常业务结果（VIP/独家），不是异常
-        final msg = r.noFreeSource ? '这首没有免费音源（可能需要会员）' : builtinMsg;
+        // 没有可用音源时，明确告知 —— 这是正常业务结果（VIP/独家），不是异常。
+        // 🔴 按"为什么没走第三方源回退"区分原因（用户 2026-10-11：内置失败后
+        //    只看到"内置接口取地址失败"，以为没有自动走第三方源的逻辑）：
+        //    总开关关了 / 一个启用的源都没有，两种情况各给可操作提示。
+        final thirdPartyOn =
+            SettingsStore.instance.useThirdPartySources.value;
+        final enabledCount = ThirdPartySourceStore.instance.enabled.length;
+        final String msg;
+        if (!thirdPartyOn) {
+          msg = '内置接口取地址失败；「使用第三方音源」开关已关闭，'
+              '去音乐「我的」页打开后会自动重试全部音源';
+        } else if (enabledCount == 0) {
+          msg = '内置接口取地址失败；还没有已启用的第三方音源，'
+              '去音乐「我的 → 音乐源管理」添加/启用后会自动试播';
+        } else {
+          msg = r.noFreeSource ? '这首没有免费音源（可能需要会员）' : builtinMsg;
+        }
         AppLog.instance.log('[Music] 取播放地址失败（${song.name}）: $msg'
-            '（导入的音乐源开关=${SettingsStore.instance.useThirdPartySources.value}，'
-            '已启用 ${ThirdPartySourceStore.instance.enabled.length} 个）');
+            '（导入的音乐源开关=$thirdPartyOn，'
+            '已启用 $enabledCount 个）');
         // 同一条失败连续出现时也要能弹（见上面那段注释）
         lastError.value = msg == lastError.value ? '$msg ' : msg;
         await _silenceForFailure(song);
@@ -857,6 +880,10 @@ class MusicPlayerManager extends ChangeNotifier {
   }) async {
     // 代次校验的封装：`epoch == null`（换源路径）时永远通过
     bool stale() => epoch != null && epoch != _loadEpoch;
+
+    // 真正拿到地址开播 → 清掉沿途的进度/兜底提示
+    //（"正在试音源 n/N"、"固定源暂不可用，已改用…" 都不该留在播放页）
+    lastError.value = '';
 
     qualityText.value = fromSource.isNotEmpty
         ? (quality.isEmpty ? fromSource : '$quality · $fromSource')
