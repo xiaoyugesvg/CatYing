@@ -262,6 +262,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   bool _ttsFollowSystem = true;
   /// 番茄钟浮层是否显示
   bool _showPomodoro = false;
+  /// 听书迷你条已收成光碟（向左快滑收起 ✓，点光碟展开 ✓，朗读不停 ✓）
+  bool _ttsDiscCollapsed = false;
+  /// 光碟位置（Stack 内左上角坐标，null = 首次收起时按右下角初始化）
+  Offset? _ttsDiscPos;
 
   // ✅ **TTS 面板的两个真实设置**（本轮新增 ✓）——此前那两个开关是**纯装饰** ✗：
   //   `_ttsSwitch` 写死 `onChanged: null` ✗ + `value` 写死 `false` ✗ → 永远显示关闭、且点不动 ✗✗。
@@ -312,6 +316,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 「不再提示」—— 下次直接用上次选的颜色
   bool _bookmarkNoAsk = false;
   int _bookmarkLastColor = 0;
+  /// 按住下滑一键书签（Cmbok 同款手势）：长按触发后本次拖动是否待消费
+  bool _bookmarkPressArmed = false;
+  /// 长按触发时的起始 Y（判定"向下拖过阈值"用）
+  double _bookmarkPressStartDy = 0;
 
   /// 当前背景下的前景色（正文/图标用）。
   /// 「主题」tab 选了自定义字色就以它为准；
@@ -1075,6 +1083,79 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                           bottom: _pomodoroBottomOffset,
                           child: const PomodoroButton(),
                         )),
+                  // 听书光碟（Cmbok 同款）：迷你条左滑收起后悬浮，点按展开回迷你条、
+                  // 拖动换位置，朗读不停 ✓。封面用本书 coverUrl（缺省回退占位底色）。
+                  if (_ttsDiscCollapsed)
+                    Obx(() {
+                      final active =
+                          _tts.isSpeaking.value || _tts.isPaused.value;
+                      if (!active) {
+                        // 朗读已停止 → 自动还原迷你条状态（否则下次朗读迷你条被藏住 ✗）
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted && _ttsDiscCollapsed) {
+                            setState(() => _ttsDiscCollapsed = false);
+                          }
+                        });
+                        return const SizedBox.shrink();
+                      }
+                      final size = MediaQuery.of(context).size;
+                      final pos = _ttsDiscPos ??
+                          Offset(size.width - 76, size.height - 210);
+                      final cover = widget.coverUrl ??
+                          widget.source.raw['coverUrl']?.toString();
+                      return Positioned(
+                        left: pos.dx.clamp(0.0, size.width - 60),
+                        top: pos.dy.clamp(0.0, size.height - 60),
+                        child: GestureDetector(
+                          onTap: () =>
+                              setState(() => _ttsDiscCollapsed = false),
+                          onPanUpdate: (d) => setState(() {
+                            _ttsDiscPos = Offset(
+                              ((_ttsDiscPos?.dx ?? pos.dx) + d.delta.dx)
+                                  .clamp(0.0, size.width - 60),
+                              ((_ttsDiscPos?.dy ?? pos.dy) + d.delta.dy)
+                                  .clamp(0.0, size.height - 60),
+                            );
+                          }),
+                          child: Container(
+                            width: 54,
+                            height: 54,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: bg[1].withValues(alpha: 0.12),
+                              border: Border.all(
+                                color: bg[1].withValues(alpha: 0.3),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.28),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                              image: cover != null && cover.isNotEmpty
+                                  ? DecorationImage(
+                                      image: NetworkImage(cover),
+                                      fit: BoxFit.cover,
+                                      onError: (_, __) {},
+                                    )
+                                  : null,
+                            ),
+                            // 光碟中孔
+                            child: Center(
+                              child: Container(
+                                width: 14,
+                                height: 14,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: bg[0],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
                   // 阅读悬浮球（截图里右下角那个球：单击翻页/双击菜单/拖动移动）
                   if (!_showBar) _readingBall(bg[1]),
                 ],
@@ -1245,48 +1326,52 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         //    一模一样（仍是整页平移），用户实测"翻页样式太丑、还重叠" ✗
         if (_rs.pageMode == PageMode.cover) {
           final pi = _safePageIndex();
-          return BookPageCover(
-            backgroundColor: _customBgColor ?? _bgs[_bgIndex][0],
-            page: _pageContent(fg, _pages[pi]),
-            nextPage: pi + 1 < _pages.length
-                ? _pageContent(fg, _pages[pi + 1])
-                : null,
-            prevPage: pi > 0 ? _pageContent(fg, _pages[pi - 1]) : null,
-            canNext: pi + 1 < _pages.length,
-            canPrev: pi > 0,
-            onTurnNext: () {
-              if (pi + 1 < _pages.length) {
-                setState(() => _pageIndex = pi + 1);
-              } else {
-                _go(1);
-              }
-            },
-            onTurnPrev: () {
-              if (pi > 0) {
-                setState(() => _pageIndex = pi - 1);
-              } else {
-                _go(-1);
-              }
-            },
-            onTapCenter: () => setState(() => _showBar = !_showBar),
+          return withPressDownBookmark(
+            BookPageCover(
+              backgroundColor: _customBgColor ?? _bgs[_bgIndex][0],
+              page: _pageContent(fg, _pages[pi]),
+              nextPage: pi + 1 < _pages.length
+                  ? _pageContent(fg, _pages[pi + 1])
+                  : null,
+              prevPage: pi > 0 ? _pageContent(fg, _pages[pi - 1]) : null,
+              canNext: pi + 1 < _pages.length,
+              canPrev: pi > 0,
+              onTurnNext: () {
+                if (pi + 1 < _pages.length) {
+                  setState(() => _pageIndex = pi + 1);
+                } else {
+                  _go(1);
+                }
+              },
+              onTurnPrev: () {
+                if (pi > 0) {
+                  setState(() => _pageIndex = pi - 1);
+                } else {
+                  _go(-1);
+                }
+              },
+              onTapCenter: () => setState(() => _showBar = !_showBar),
+            ),
           );
         }
 
         // 其余模式（左右 / 无动画）走 PageView
         return Stack(
           children: [
-            PageView.builder(
-              controller: _pageCtrl,
-              physics: _rs.pageMode == PageMode.none
-                  // 无动画：直接切换（拖动仍然可用，只是没有滑动惯性）
-                  ? const ClampingScrollPhysics()
-                  : const PageScrollPhysics(),
-              itemCount: _pages.length,
-              onPageChanged: (i) {
-                setState(() => _pageIndex = i);
-                _saveProgress();
-              },
-              itemBuilder: (context, i) => _pageContent(fg, _pages[i]),
+            withPressDownBookmark(
+              PageView.builder(
+                controller: _pageCtrl,
+                physics: _rs.pageMode == PageMode.none
+                    // 无动画：直接切换（拖动仍然可用，只是没有滑动惯性）
+                    ? const ClampingScrollPhysics()
+                    : const PageScrollPhysics(),
+                itemCount: _pages.length,
+                onPageChanged: (i) {
+                  setState(() => _pageIndex = i);
+                  _saveProgress();
+                },
+                itemBuilder: (context, i) => _pageContent(fg, _pages[i]),
+              ),
             ),
             if (_paginating)
               Positioned(
@@ -2235,12 +2320,26 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       final speaking = _tts.isSpeaking.value;
       final paused = _tts.isPaused.value;
       if (!speaking && !paused) return const SizedBox.shrink();
+      // 已收成光碟：迷你条隐藏（光碟在 Stack 层渲染 ✓），朗读不停 ✓
+      if (_ttsDiscCollapsed) return const SizedBox.shrink();
       final i = _tts.currentIndex.value;
       final n = _ttsSegments.length;
       final rate = _tts.rate.value;
       final rateLabel =
           '${rate.toStringAsFixed(1).replaceAll('.0', '')}×';
-      return Container(
+      return GestureDetector(
+        // 向左快滑 → 收成右下角封面光碟（Cmbok 同款 ✓）
+        onHorizontalDragEnd: (d) {
+          final v = d.primaryVelocity ?? 0;
+          if (v < -250) {
+            final size = MediaQuery.of(context).size;
+            setState(() {
+              _ttsDiscPos ??= Offset(size.width - 76, size.height - 210);
+              _ttsDiscCollapsed = true;
+            });
+          }
+        },
+        child: Container(
         // ✅ 与底部功能栏同款的**悬浮卡片**（四周留白 + 四角圆 + 向下投影 ✓）——
         //    原来是通栏贴边（只有一条 `top` 边框分隔 ✓），与底部悬浮卡不统一 ✗。
         margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
@@ -2340,6 +2439,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               icon: Icon(Icons.fullscreen_rounded, size: 20, color: fg.withValues(alpha: 0.85)),
             ),
           ],
+        ),
         ),
       );
     });
@@ -3877,6 +3977,51 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             style:
                 TextStyle(fontSize: AppTheme.fontBody, fontWeight: FontWeight.w600, color: _fg)),
       );
+
+  /// 当前页首段下标（按住下滑书签的锚点 ✓）：blocks = [章标题, ...段落] ⇒
+  /// 段落下标 = blockIndex - 1（见本文件 :1787 同款换算 ✓）。空页 / 漫画回退 0。
+  int _currentPageAnchorParagraph() {
+    if (_images.isNotEmpty || _pages.isEmpty) return 0;
+    final p = _pages[_safePageIndex()];
+    if (p.entries.isEmpty) return 0;
+    final e = p.entries.first;
+    final bi = e.blockIndex >= 0 ? e.blockIndex : p.firstBlockIndex;
+    return bi > 0 ? bi - 1 : 0;
+  }
+
+  /// 按住下滑一键书签（对齐 Cmbok）：当前页已有书签 → 直接取消；
+  /// 没有 → 走「添加书签」流程（未勾"不再提示"时先弹选色面板 ✓）。
+  Future<void> _gestureToggleBookmark() async {
+    final anchor = _currentPageAnchorParagraph();
+    if (_bookmarks.containsKey(anchor)) {
+      setState(() => _bookmarks.remove(anchor));
+      await _savePrefs();
+      _toast('已取消书签');
+    } else {
+      await _showAddBookmark(anchor);
+    }
+  }
+
+  /// 包一层「按住稍作停顿再向下拖」手势 → 一键书签（Cmbok 同款 ✓）。
+  /// 仅包裹分页平移 / 覆盖 / 无动画三种模式；上下滚动 / 仿真翻页禁用 ✓。
+  Widget withPressDownBookmark(Widget child) {
+    return GestureDetector(
+      onLongPressStart: (d) {
+        _bookmarkPressArmed = true;
+        _bookmarkPressStartDy = d.globalPosition.dy;
+      },
+      onLongPressMoveUpdate: (d) {
+        if (_bookmarkPressArmed &&
+            d.globalPosition.dy - _bookmarkPressStartDy > 56) {
+          _bookmarkPressArmed = false;
+          _gestureToggleBookmark();
+        }
+      },
+      onLongPressEnd: (_) => _bookmarkPressArmed = false,
+      onLongPressCancel: () => _bookmarkPressArmed = false,
+      child: child,
+    );
+  }
 
   /// 「添加书签」弹层（截图 IMG_8100）：
   ///   标题「添加书签」+ 6 个颜色圆点 + 「不再提示」勾选框
@@ -6302,6 +6447,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     var asc = true;
     Color? filterColor; // 书签/笔记颜色筛选（null = 全部）
     const tabNames = ['目录', '书签', '笔记'];
+    // 目录 tab 右缘快速拖动定位（Cmbok 同款）：拖动只滚动列表不跳转 ✓，
+    // 拖动时浮现章节标题提示 ✓，搜索状态不可用 ✓。
+    final tocCtrl = ScrollController();
+    var showDragTip = false;
+    var dragTipName = '';
+    var dragTipY = 0.0;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -6318,6 +6469,17 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             chapters
               ..clear()
               ..addAll(rev);
+          }
+          // 右缘拖动 → 按比例滚动章节列表（只滚动不跳转 ✓），并记录提示章节名
+          void dragTocTo(double localY, double stripH) {
+            if (!tocCtrl.hasClients || chapters.isEmpty) return;
+            final m = tocCtrl.position.maxScrollExtent;
+            if (m <= 0) return;
+            final ratio = (localY / stripH).clamp(0.0, 1.0);
+            tocCtrl.jumpTo(ratio * m);
+            final idx = (ratio * (chapters.length - 1)).round();
+            dragTipName = widget.chapters[chapters[idx]].name;
+            dragTipY = localY;
           }
           return Container(
             constraints:
@@ -6447,6 +6609,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       child: Stack(
                         children: [
                           ListView.builder(
+                            controller: tocCtrl,
                             itemCount: chapters.length,
                             itemBuilder: (c, i) {
                               final ci = chapters[i];
@@ -6495,28 +6658,107 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                               );
                             },
                           ),
-                          Positioned(
-                            right: 6,
-                            top: 40,
-                            bottom: 40,
-                            child: Container(
-                              width: 26,
-                              decoration: BoxDecoration(
-                                color: _fg.withValues(alpha: 0.07),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Column(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceEvenly,
-                                children: [
-                                  Icon(Icons.keyboard_arrow_up_rounded,
-                                      size: 18, color: _fgMuted),
-                                  Icon(Icons.keyboard_arrow_down_rounded,
-                                      size: 18, color: _fgMuted),
-                                ],
+                          // 右缘快速拖动定位条（Cmbok 同款）：按住上下拖动 →
+                          // 列表按比例滚动，浮现章节标题提示；搜索状态隐藏 ✓
+                          if (kwToc.isEmpty)
+                            Positioned(
+                              right: 6,
+                              top: 40,
+                              bottom: 40,
+                              child: LayoutBuilder(
+                                builder: (c, cons) {
+                                  final h = cons.maxHeight;
+                                  return GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onVerticalDragStart: (d) {
+                                      setSheet(() {
+                                        showDragTip = true;
+                                        dragTocTo(d.localPosition.dy, h);
+                                      });
+                                    },
+                                    onVerticalDragUpdate: (d) {
+                                      setSheet(
+                                          () => dragTocTo(d.localPosition.dy, h));
+                                    },
+                                    onVerticalDragEnd: (_) {
+                                      Future.delayed(
+                                          const Duration(milliseconds: 700),
+                                          () {
+                                        if (ctx.mounted) {
+                                          setSheet(() => showDragTip = false);
+                                        }
+                                      });
+                                    },
+                                    child: Stack(
+                                      children: [
+                                        Container(
+                                          width: 26,
+                                          decoration: BoxDecoration(
+                                            color: _fg.withValues(alpha: 0.07),
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                          ),
+                                          alignment: Alignment.center,
+                                          child: Icon(
+                                            Icons.unfold_more_rounded,
+                                            size: 18,
+                                            color: _fgMuted,
+                                          ),
+                                        ),
+                                        // 拖动指示块（按滚动比例定位）
+                                        if (tocCtrl.hasClients &&
+                                            tocCtrl.position.maxScrollExtent >
+                                                0)
+                                          Positioned(
+                                            top: (tocCtrl.offset /
+                                                    tocCtrl.position
+                                                        .maxScrollExtent *
+                                                    (h - 34))
+                                                .clamp(0.0, h - 34),
+                                            left: 3,
+                                            child: Container(
+                                              width: 20,
+                                              height: 34,
+                                              decoration: BoxDecoration(
+                                                color: _fg
+                                                    .withValues(alpha: 0.35),
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  );
+                                },
                               ),
                             ),
-                          ),
+                          // 拖动时浮现的章节标题提示（只读 ✓）
+                          if (showDragTip && dragTipName.isNotEmpty)
+                            Positioned(
+                              right: 40,
+                              top: (40 + dragTipY - 20)
+                                  .clamp(0.0, double.infinity),
+                              child: Container(
+                                constraints: BoxConstraints(
+                                    maxWidth:
+                                        MediaQuery.of(ctx).size.width * 0.62),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: _fg.withValues(alpha: 0.85),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  dragTipName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: AppTheme.fontFootnote,
+                                      color: _bgTop),
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -6912,6 +7154,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         },
       ),
     );
+    tocCtrl.dispose();
   }
 
   /// 段落 → 所在页下标（书签跳转用）

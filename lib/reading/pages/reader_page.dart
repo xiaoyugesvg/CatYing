@@ -56,6 +56,8 @@ class _ReaderPageState extends State<ReaderPage> {
   /// 最近一次归位的书架状态（presetReading/presetFinished），避免频繁移动
   String? _lastAppliedStatus;
   bool _showControls = true;
+  /// 番茄钟悬浮倒计时是否显示（与书源阅读器同款交互：底栏图标开关悬浮层）
+  bool _showPomodoro = false;
   bool _useLocal = false; // 是否使用本地已下载图片
 
   /// 在线图片请求头（防盗链/UA，随当前源 imageHeaders+referer）
@@ -3275,7 +3277,28 @@ class _ReaderPageState extends State<ReaderPage> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
-                          const PomodoroButton(),
+                          // 番茄钟入口：与书源阅读器右侧竖条同款的圆形 timer 图标，
+                          // 点按开关悬浮倒计时（原先是直接内嵌 🍅 emoji 按钮 ✗ 风格不统一）
+                          Tooltip(
+                            message: '番茄钟',
+                            child: GestureDetector(
+                              onTap: () =>
+                                  setState(() => _showPomodoro = !_showPomodoro),
+                              child: Container(
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons.timer_outlined,
+                                  size: 20,
+                                  color: Colors.white.withValues(alpha: 0.9),
+                                ),
+                              ),
+                            ),
+                          ),
                           TextButton(
                             onPressed: _showReaderSettingsSheet,
                             child: const Icon(
@@ -3299,6 +3322,13 @@ class _ReaderPageState extends State<ReaderPage> {
             ),
           ],
         ),
+        // 番茄钟悬浮倒计时（与书源阅读器同款）：悬浮在底部功能卡上方
+        if (_showPomodoro)
+          Positioned(
+            right: 12,
+            bottom: MediaQuery.of(context).padding.bottom + 210,
+            child: const PomodoroButton(),
+          ),
         // 右侧悬浮竖条：设置圆钮 / 亮度滑块 / 黑白切换（对齐参考图
         // "竖排阅读侧边悬浮栏"：上=圆形图标，中=亮度滑杆，下=月亮）
         _buildSideDock(),
