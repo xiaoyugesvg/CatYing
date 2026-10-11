@@ -96,7 +96,7 @@ jobs:
 
       - name: Resolve SPM packages (KSPlayer = 已打补丁的 fork)
         # KSPlayer 已改为指向 **xiaoyugesvg/KSPlayer 的 `newtv-patched` 分支**
-        # （public 仓库；pbxproj 里 revision 固定为 20543f7，源码内直接含 guard1~5）
+        # （public 仓库；pbxproj 里 revision 固定为 f016106，源码内直接含 guard1~6）
         # ⇒ 不再需要构建期打补丁，也就没有「补丁打到 A 目录、编译用 B 目录」的漂移
         #   问题（这正是之前"补丁打不进去"的根因：patch_ksplayer.sh 打在默认
         #   DerivedData，而 flutter build ios 用 <项目>/build/ios 的检出编译）。
@@ -108,9 +108,9 @@ jobs:
           PBX=ios/Runner.xcodeproj/project.pbxproj
           grep -q 'xiaoyugesvg/KSPlayer' "$PBX" \
             || { echo "❌ KSPlayer 未指向打过补丁的 fork"; exit 1; }
-          grep -q '20543f708d9a1e3d4ebe254e87be24c50b09362e' "$PBX" \
+          grep -q 'f016106441c0c9abaa0517c0507778a49a68227f' "$PBX" \
             || { echo "❌ KSPlayer revision 不是打过补丁的提交"; exit 1; }
-          echo "✅ KSPlayer pin = fork newtv-patched（源码已含 guard1~5）"
+          echo "✅ KSPlayer pin = fork newtv-patched（源码已含 guard1~6）"
 
       - name: Static analysis (errors only)
         # 只把 error 当失败：仓库既有 500+ 条 info 级 lint（风格），不应阻塞构建。

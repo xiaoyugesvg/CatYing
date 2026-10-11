@@ -481,6 +481,23 @@ class _DetailPageState extends State<DetailPage> {
         DetailPageController.instance.exit();
       }
     } catch (_) {}
+    // 🔴 停播放器必须放在 dispose 最前面：后面任何一步抛异常都不允许
+    // 留下"页面没了、声音还在放"。尤其 FF(KSPlayer) 核心：原生 close
+    // 之后还有异步收尾，越早发越好。
+    _player?.dispose();
+    _player = null;
+    // 全屏（横屏锁）态被 iOS 边缘滑动手势直接 pop 时，_handleHeaderBack
+    // 的"先退全屏"不会执行 → 'videoFullscreen' 的横屏锁没人解 → 整个
+    // App 滞留横屏（用户反馈"突然整个界面横屏过来"）。dispose 兜底：
+    // 解锁并强制回竖屏（App 常态就是竖屏，全屏才横）。
+    if (Platform.isIOS) {
+      try {
+        SystemUiController.unlockOrientations('videoFullscreen');
+        SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+        ]);
+      } catch (_) {}
+    }
     // 退出页先落一次进度，避免暂停中返回丢进度（_persistHistoryIfNeeded 只在播放中写）
     try {
       _persistHistoryIfNeeded(force: true);
@@ -503,8 +520,7 @@ class _DetailPageState extends State<DetailPage> {
     VideoPlayerPip.instance.detachPlayer();
     _playerErrorTimer?.cancel();
     _playerErrorTimer = null;
-    _player?.dispose();
-    _player = null;
+    // （_player 的 dispose 已提前到本函数最前面 —— 任何后续异常都不能拦住它）
 
     // 快搜 tab 的临时资源：输入框控制器 + 独立搜索控制器（含其 Rx 与历史加载）
     _quickSearchInput.dispose();

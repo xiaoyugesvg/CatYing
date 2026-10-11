@@ -264,6 +264,22 @@ class _LivePageState extends State<LivePage> {
     _avPlayer = null;
     _ksPlayer?.dispose();
     _ksPlayer = null;
+    // 全屏（横屏锁）态下页面被直接销毁（iOS 边缘滑动手势 pop、异常路径）时，
+    // _leaveFullscreenUi 不会执行 → 横屏锁与底栏隐藏没人解 → 整个 App 滞留
+    // 横屏（与影视详情页同源的问题）。dispose 兜底：退出全屏态并强制回竖屏。
+    // 用 _fullscreen 守卫：非全屏销毁时不动全局状态，避免误清上层页面的锁。
+    if (_fullscreen) {
+      _fullscreen = false;
+      _dramaMode = false;
+      _douyinMode = false;
+      PlayerFullscreenController.instance.exit('live');
+      try {
+        unawaited(SystemUiController.exit('live'));
+        SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+        ]);
+      } catch (_) {}
+    }
     _videoController = null;
     super.dispose();
   }
