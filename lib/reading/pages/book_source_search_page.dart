@@ -136,7 +136,10 @@ class _BookSourceSearchPageState extends State<BookSourceSearchPage> {
   ///      （assets/config/book_sources.json）带负 customOrder，会排在最前，
   ///      所以默认命中的是实测能出分类/目录/正文的那个源 ✓。
   Future<void> _autoSelectInitialSource() async {
-    final enabled = store.sorted().where((s) => s.enabled).toList();
+    // ✅ 自动选中只考虑开启「发现」的源（与源 chips 同一过滤）：
+    //   上次选过的源若后来关了发现，也跳过——否则进来就是"没有配置分类浏览"。
+    final enabled =
+        store.sorted().where((s) => s.enabled && s.enabledExplore).toList();
     if (enabled.isEmpty) return;
     String? last;
     try {
@@ -794,7 +797,11 @@ JellyIconDeck(
     // 按 customOrder 排序展示（内置的 5 个修复版书源排最前）——
     // 与进入页面时自动选中的那个源保持一致，否则默认选中的 chip 跑到最右，
     // 用户看不出"当前选中了哪个源"。
-    final sources = store.sorted().where((s) => s.enabled).toList();
+    // ✅ 过滤掉关闭「发现」的源（用户 2026-10-11）：书源页主体是发现页，
+    //   关了发现的源点进去只会报"没有配置分类浏览"，不如不展示。
+    //   聚搜/单源搜索不受影响（enabledExplore 只管发现）。
+    final sources =
+        store.sorted().where((s) => s.enabled && s.enabledExplore).toList();
     return SizedBox(
       height: 40,
       child: Row(
@@ -916,7 +923,9 @@ JellyIconDeck(
 
   /// 快速书源列表弹窗（参考图 IMG_8430：「搜索源」输入框 + 快速书源列表 + 收起）
   Future<void> _showQuickSources() async {
-    final sources = store.all;
+    // ✅ 与源 chips 同一过滤：关闭「发现」的源不在书源页展示（2026-10-11）
+    final sources =
+        store.all.where((s) => s.enabled && s.enabledExplore).toList();
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,

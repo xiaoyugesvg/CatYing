@@ -69,6 +69,12 @@ class BookSource {
 
   bool get enabled => raw['enabled'] != false;
 
+  /// 是否启用「发现」（Legado 的 enabledExplore：缺省 true，显式 false = 关闭）。
+  /// 关闭发现的源**不在书源页展示**（书源页主体是发现页，点进去只会报
+  /// "没有配置分类浏览"——用户 2026-10-11：「关闭了源的发现，源就不要再书源页展示」）。
+  /// 搜索/聚搜不受此开关影响。
+  bool get enabledExplore => raw['enabledExplore'] != false;
+
   /// 书源类型（Legado 有小说/漫画/音源等；config 源一律 0=小说）
   String get type {
     if (isConfig) return '0';

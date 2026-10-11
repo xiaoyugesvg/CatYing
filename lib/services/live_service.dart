@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -257,6 +258,8 @@ class LiveService extends GetxService {
           return '加载直播源失败，请稍后重试。';
       }
     }
+    // 体积超限（多半是直播流直链当节目单填了）：直接说明，别当普通网络失败
+    if (e is _NotPlaylistException) return '$e';
     final s = '$e';
     if (s.contains('SocketException') || s.contains('Failed host lookup')) {
       return '无法连接直播源，请检查网络或源地址。';
@@ -511,6 +514,20 @@ class LiveService extends GetxService {
     } catch (e) { /* ignore */ }
   }
 
+  /// 播放列表正文的体积上限（超过即判定"这不是节目单"）。
+  ///
+  /// ⚠️ 用户把 **FLV 直播流直链**当"直播源"填进来时（添加框 hint 写的是
+  /// m3u/txt，但用户会填 `http://…/xxx.flv`），这个 GET 拿到的是**永不结束**
+  /// 的流：`receiveTimeout` 只管"两次数据之间的间隔"，而直播流一直在发数据
+  /// ⇒ 永不触发 ⇒ Dio 把整条无限流读进内存，`isLoading` 也永远为 true
+  /// （设置页的转圈动画一直转）⇒ 内存持续上涨、主线程被动画 + 收包拖满。
+  /// 用户 2026-10-11 的 `Runner.wakeups_resource-17:57:06.ips` 正是这一刻：
+  /// 200s 内内存 233MB→367MB、平均 224 次/秒唤醒（超 150 上限）、主线程持续渲染。
+  /// ⇒ 读到 [_maxListBytes] 立即取消请求，并判定"这不是节目单"。
+  static const int _maxListBytes = 4 * 1024 * 1024;
+
+  /// 拉取播放列表正文（受 [_maxListBytes] 与 20s 总时长双重约束，
+  /// 保证无限直播流也不可能把 App 拖死）。
   Future<String> _fetch(String url, {String? ua}) async {
     final dio = Dio(BaseOptions(
       // 收紧超时：慢源不要卡住整个直播页 20s
@@ -522,8 +539,30 @@ class LiveService extends GetxService {
           HttpHeaders.userAgentHeader: 'Mozilla/5.0 (NewTv Live)',
       },
     ));
-    final res = await dio.get<String>(url);
-    return res.data ?? '';
+    final cancelToken = CancelToken();
+    var tooLarge = false;
+    // receiveTimeout 挡不住无限流（数据一直在来），再加一道总时长硬闸
+    final hardTimeout = Timer(const Duration(seconds: 20), () {
+      if (!cancelToken.isCancelled) cancelToken.cancel('hard-timeout');
+    });
+    try {
+      final res = await dio.get<String>(
+        url,
+        cancelToken: cancelToken,
+        onReceiveProgress: (received, total) {
+          if (received > _maxListBytes && !cancelToken.isCancelled) {
+            tooLarge = true;
+            cancelToken.cancel('oversize');
+          }
+        },
+      );
+      return res.data ?? '';
+    } on DioException {
+      if (tooLarge) throw const _NotPlaylistException(_maxListBytes);
+      rethrow;
+    } finally {
+      hardTimeout.cancel();
+    }
   }
 
   // ============================================================
@@ -763,4 +802,17 @@ class LiveSource {
     }
     return '${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}';
   }
+}
+
+/// [_fetch] 读满 [LiveService._maxListBytes] 仍未结束：该地址不像播放列表
+/// （多半是直播流直链或媒体文件直链）。
+///
+/// 用自定义 `toString` 让 `'$e'` 直接就是人话（不带 "Exception:" 前缀），
+/// 这样 [LiveService.humanizeLiveError] 与 `loadFromUrl` 的兜底文案都能直接用。
+class _NotPlaylistException implements Exception {
+  final int bytes;
+  const _NotPlaylistException(this.bytes);
+  @override
+  String toString() =>
+      '该地址不是 m3u/txt 节目单（像是直播流直链，已读取超过 ${bytes ~/ (1024 * 1024)}MB）';
 }

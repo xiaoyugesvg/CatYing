@@ -220,6 +220,7 @@ class ZlibraryService extends ChangeNotifier {
     var s = raw.trim();
     if (s.isEmpty) {
       _domain = '';
+      _domainPersisted = false; // 清空 = 回到未配置，允许自动选优接管
       await _persistDomain();
       notifyListeners();
       return true;
@@ -238,6 +239,11 @@ class ZlibraryService extends ChangeNotifier {
       return false; // 明显不是域名
     }
     _domain = s;
+    // ✅ 用户手动选择 → 标记为"已持久化的用户设定"：
+    //   请求层 failover 借道其它节点时**不得回写** _domain（见 _request 的
+    //   !_domainPersisted 条件），否则 CF/404 一借道就被偷偷切回去，
+    //   表现为"节点管理里切换了、过会儿又变回旧节点"（用户 2026-10-11 实锤）。
+    _domainPersisted = true;
     await _persistDomain();
     notifyListeners();
     return true;
@@ -312,6 +318,10 @@ class ZlibraryService extends ChangeNotifier {
     _candidates.remove(d);
     if (_domain == d) {
       _domain = _candidates.isNotEmpty ? _candidates.first : '';
+      // ✅ 删当前节点自动切到剩余第一个 = 用户删除动作的直接结果，
+      //   视同手动选择（_domainPersisted=true），防止被 failover 借道冲掉；
+      //   全删光则回到未配置态，交由自动选优/重启兜底。
+      _domainPersisted = _domain.isNotEmpty;
       await _persistDomain();
     }
     await _persistCandidates();
@@ -1613,7 +1623,8 @@ class ZlibraryService extends ChangeNotifier {
         continue;
       }
       // 节点可用 → 写回 _domain 并持久化
-      if (domain != _domain) {
+      // ✅ 同 _request：用户手动设定的节点不被自动回写覆盖（借道≠切换）
+      if (!_domainPersisted && domain != _domain) {
         _domain = domain;
         await _persistDomain();
       }
@@ -2110,7 +2121,11 @@ class ZlibraryService extends ChangeNotifier {
               continue;
             }
             // 业务响应（含已跟随重定向/非重定向）
-            if (domain != _domain) {
+            // ✅ failover 借道成功后，仅当 _domain **不是用户手动设定**时才回写——
+            //   用户在节点管理里选的节点（_domainPersisted=true）即使对本请求
+            //   403/404/超时而借了别的节点的道，也保持不变（下次请求仍先试它）；
+            //   否则一次借道就把用户选择持久化覆盖 =「切换不管用」（2026-10-11 修复）。
+            if (!_domainPersisted && domain != _domain) {
               _domain = domain;
               await _persistDomain();
             }
@@ -2489,11 +2504,13 @@ class ZlibraryService extends ChangeNotifier {
       }
     }
     // 当前不可用：从候选重新探测选最优
+    // ✅ 用户手动设定的节点失效时：本次会话临时借道最优节点（不落盘），
+    //   重启后仍回到用户选择；非用户设定（自动选优产物）才照旧落盘自愈。
     final best = await _pickBestCandidate(_candidates);
     if (best != null) {
       if (best != _domain) {
         _domain = best;
-        await _persistDomain();
+        if (!_domainPersisted) await _persistDomain();
       }
       _setUnavailable(false);
     } else {

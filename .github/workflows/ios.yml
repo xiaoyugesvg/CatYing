@@ -94,17 +94,23 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
-      - name: Resolve SPM packages + patch KSPlayer
-        # KSPlayer be7f60d3 的 FFmpegAssetTrack.init 对直播流有裸指针解引用闪退
-        # （Runner-2026-10-11-120910.ips）。远程 SPM 包改不了源码，上游 HEAD
-        # 已转闭源 xcframework —— 只能在构建前给本地检出打防御补丁。
-        # 先显式 resolve 让 checkout 落地，再打补丁；后面的 flutter build ios
-        # 会复用同一份检出（Package.resolved 不变就不会重新拉取覆盖）。
+      - name: Resolve SPM packages (KSPlayer = 已打补丁的 fork)
+        # KSPlayer 已改为指向 **CxiaoyuN/KSPlayer 的 `newtv-patched` 分支**
+        # （pbxproj 里 revision 固定为 a353bb9，源码内直接含 guard1/2/3 防御补丁）
+        # ⇒ 不再需要构建期打补丁，也就没有「补丁打到 A 目录、编译用 B 目录」的漂移
+        #   问题（这正是之前"补丁打不进去"的根因：patch_ksplayer.sh 打在默认
+        #   DerivedData，而 flutter build ios 用 <项目>/build/ios 的检出编译）。
+        # 这里保留 resolve 只为预热检出，并显式校验 pin 的就是那个打过补丁的提交。
         run: |
           set -e
           xcodebuild -resolvePackageDependencies \
             -workspace ios/Runner.xcworkspace -scheme Runner
-          bash ios/scripts/patch_ksplayer.sh
+          PBX=ios/Runner.xcodeproj/project.pbxproj
+          grep -q 'CxiaoyuN/KSPlayer' "$PBX" \
+            || { echo "❌ KSPlayer 未指向打过补丁的 fork"; exit 1; }
+          grep -q 'a353bb9922079fd314aea907c7ecda70879eb308' "$PBX" \
+            || { echo "❌ KSPlayer revision 不是打过补丁的提交"; exit 1; }
+          echo "✅ KSPlayer pin = fork newtv-patched（源码已含 guard1/2/3）"
 
       - name: Static analysis (errors only)
         # 只把 error 当失败：仓库既有 500+ 条 info 级 lint（风格），不应阻塞构建。

@@ -610,10 +610,10 @@
 /* Begin XCRemoteSwiftPackageReference section */
 		A1B2C3D40000000000000014 /* XCRemoteSwiftPackageReference "KSPlayer" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/kingslay/KSPlayer.git";
+			repositoryURL = "https://github.com/CxiaoyuN/KSPlayer.git";
 			requirement = {
 				kind = revision;
-				revision = be7f60d3b94a0941c643fe8699113cfce4f08e83;
+				revision = a353bb9922079fd314aea907c7ecda70879eb308; /* NewTV: fork newtv-patched，源码已含 guard1/2/3 防御补丁 */
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
