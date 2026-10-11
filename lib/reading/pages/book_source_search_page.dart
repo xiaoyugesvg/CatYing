@@ -9,6 +9,7 @@ import '../services/reading_layout.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/jelly_icon_deck.dart';
 import '../widgets/jelly_nav_bar.dart';
+import '../widgets/jelly_filter_sheet.dart';
 import '../widgets/jelly_pull_cord.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_search_bar.dart';
@@ -1499,40 +1500,42 @@ JellyIconDeck(
     }
     await showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
       backgroundColor: _isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      shape: jellySheetShape,
       builder: (ctx) => SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          padding: const EdgeInsets.fromLTRB(20, 0, 16, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // 自绘把手（showModalBottomSheet 无 dragHandleColor 参数）
+              const JellySheetHandle(),
               Row(
                 children: [
                   Expanded(
                     child: Text(
                       '${src.name}·分类',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: AppTheme.fontHeadline,
+                        fontSize: AppTheme.fontTitle3,
                         fontWeight: FontWeight.w700,
                         color: _titleColor,
                       ),
                     ),
                   ),
-                  IconButton(
+                  const SizedBox(width: 8),
+                  JellySheetCircleButton(
+                    isDark: _isDark,
+                    icon: Icons.close_rounded,
                     tooltip: '关闭',
-                    icon: Icon(Icons.close_rounded,
-                        color: JellyTheme.textSecondary),
-                    onPressed: () => Navigator.pop(ctx),
+                    onTap: () => Navigator.pop(ctx),
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 10),
               Flexible(
                 child: SingleChildScrollView(
                   child: Wrap(
@@ -1540,38 +1543,13 @@ JellyIconDeck(
                     runSpacing: 8,
                     children: _cats.map((c) {
                       final active = _activeCat?.url == c.url;
-                      return GestureDetector(
+                      return JellyFilterChip(
+                        label: c.title,
+                        selected: active,
                         onTap: () {
                           Navigator.pop(ctx);
                           _loadCatBooks(src, c);
                         },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 160),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 7),
-                          decoration: BoxDecoration(
-                            color: active
-                                ? JellyTheme.primary
-                                : (_isDark
-                                    ? JellyTheme.backgroundDark
-                                    : JellyTheme.primary
-                                        .withValues(alpha: 0.08)),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Text(
-                            c.title,
-                            style: TextStyle(
-                              fontSize: AppTheme.fontSubhead,
-                              fontWeight:
-                                  active ? FontWeight.w700 : FontWeight.w500,
-                              color: active
-                                  ? Colors.white
-                                  : (_isDark
-                                      ? Colors.white70
-                                      : JellyTheme.textPrimaryLight),
-                            ),
-                          ),
-                        ),
                       );
                     }).toList(),
                   ),

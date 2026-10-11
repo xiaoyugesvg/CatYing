@@ -16,6 +16,7 @@ import '../theme/jelly_theme.dart';
 import '../services/settings_service.dart';
 import '../widgets/jelly_comic_card.dart';
 import '../widgets/jelly_nav_bar.dart';
+import '../widgets/jelly_filter_sheet.dart';
 // 删掉 3 个"从未被使用"的 import ✓（analyze 一直在报 unused_import ✗）：
 // `jelly_ring_button.dart` · `jelly_segmented_toggle.dart` · `download_page.dart`
 // → 删除后 `lib/reading` 的 warning 从 14 降到 **11** ✓
@@ -1252,19 +1253,11 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         context: context,
         isScrollControlled: true,
         backgroundColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
+        shape: jellySheetShape,
         builder: (ctx) {
           final labelColor = isDark
               ? Colors.white
               : JellyTheme.textPrimaryLight;
-          final chipColor = isDark
-              ? JellyTheme.cardDark
-              : JellyTheme.primary.withValues(alpha: 0.08);
-          final chipTextColor = isDark
-              ? Colors.white70
-              : JellyTheme.textSecondary;
           return StatefulBuilder(
             builder: (ctx, setSheetState) {
               // bottom: true（默认）→ 键盘弹起时按 viewInsets 避让输入框
@@ -1276,107 +1269,69 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // 标题栏
+                      // 自绘把手（showModalBottomSheet 无 dragHandleColor 参数）
+                      const JellySheetHandle(),
+                      // 标题栏（顶部自带把手，不再压 Divider）
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 14, 8, 4),
+                        padding: const EdgeInsets.fromLTRB(20, 0, 16, 10),
                         child: Row(
                           children: [
                             Text(
                               '分类筛选',
                               style: TextStyle(
-                                fontSize: AppTheme.fontHeadline,
-                                fontWeight: FontWeight.bold,
+                                fontSize: AppTheme.fontTitle3,
+                                fontWeight: FontWeight.w700,
                                 color: labelColor,
                               ),
                             ),
                             const Spacer(),
-                            IconButton(
-                              icon: const Icon(Icons.close_rounded),
-                              onPressed: () => Navigator.pop(ctx),
+                            JellySheetCircleButton(
+                              isDark: isDark,
+                              icon: Icons.close_rounded,
+                              onTap: () => Navigator.pop(ctx),
                             ),
                           ],
                         ),
                       ),
-                      const Divider(height: 1),
-                      // 维度列表
+                      // 维度列表：每个维度一个小节（标题竖条 + 选项 chips）
                       Flexible(
                         child: ListView.builder(
                           shrinkWrap: true,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
                           itemCount: draft.length,
                           itemBuilder: (_, gi) {
                             final g = draft[gi];
                             return Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: Row(
+                              padding: const EdgeInsets.only(bottom: 14),
+                              child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  // 左标签（固定宽度，对齐参考样式：左标签右选项）
-                                  SizedBox(
-                                    width: 56,
-                                    child: Padding(
-                                      padding: const EdgeInsets.only(top: 6),
-                                      child: Text(
-                                        g.title,
-                                        style: TextStyle(
-                                          fontSize: AppTheme.fontSubhead,
-                                          fontWeight: FontWeight.w600,
-                                          color: labelColor,
-                                        ),
-                                      ),
-                                    ),
+                                  JellySheetSectionTitle(
+                                    title: g.title,
+                                    isDark: isDark,
                                   ),
-                                  // 右侧选项 chips（横排换行）
-                                  Expanded(
-                                    child: Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: g.options.map((o) {
-                                        final selected =
-                                            g.selected?.value == o.value ||
-                                            (g.selected == null && o.isAll);
-                                        return GestureDetector(
-                                          onTap: () {
-                                            setSheetState(() {
-                                              draft[gi] = o.isAll
-                                                  ? g.copyWith(
-                                                      clearSelected: true,
-                                                    )
-                                                  : g.copyWith(selected: o);
-                                            });
-                                          },
-                                          child: Container(
-                                            padding:
-                                                const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 6,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: selected
-                                                  ? JellyTheme.primary
-                                                  : chipColor,
-                                              borderRadius:
-                                                  BorderRadius.circular(14),
-                                            ),
-                                            child: Text(
-                                              o.name,
-                                              style: TextStyle(
-                                                fontSize: AppTheme.fontFootnote,
-                                                fontWeight: selected
-                                                    ? FontWeight.w600
-                                                    : FontWeight.normal,
-                                                color: selected
-                                                    ? Colors.white
-                                                    : chipTextColor,
-                                              ),
-                                            ),
-                                          ),
-                                        );
-                                      }).toList(),
-                                    ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: g.options.map((o) {
+                                      final selected =
+                                          g.selected?.value == o.value ||
+                                              (g.selected == null && o.isAll);
+                                      return JellyFilterChip(
+                                        label: o.name,
+                                        selected: selected,
+                                        onTap: () {
+                                          setSheetState(() {
+                                            draft[gi] = o.isAll
+                                                ? g.copyWith(
+                                                    clearSelected: true,
+                                                  )
+                                                : g.copyWith(selected: o);
+                                          });
+                                        },
+                                      );
+                                    }).toList(),
                                   ),
                                 ],
                               ),
@@ -1384,33 +1339,51 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                           },
                         ),
                       ),
-                      const Divider(height: 1),
-                      // 底部按钮：重置 / 确定
+                      // 底部按钮：重置 / 确定（等宽并排，与图书页同款）
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 6, 12, 6),
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
                         child: Row(
                           children: [
-                            TextButton(
-                              onPressed: () {
-                                setSheetState(() {
-                                  for (var i = 0; i < draft.length; i++) {
-                                    draft[i] = draft[i].copyWith(
-                                      clearSelected: true,
-                                    );
-                                  }
-                                });
-                              },
-                              child: const Text('重置'),
-                            ),
-                            const Spacer(),
-                            FilledButton(
-                              onPressed: () => Navigator.pop(ctx, draft),
-                              child: const Padding(
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: 24,
-                                  vertical: 4,
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () {
+                                  setSheetState(() {
+                                    for (var i = 0; i < draft.length; i++) {
+                                      draft[i] = draft[i].copyWith(
+                                        clearSelected: true,
+                                      );
+                                    }
+                                  });
+                                },
+                                style: OutlinedButton.styleFrom(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 13),
+                                  side: BorderSide(
+                                    color: isDark
+                                        ? Colors.white.withValues(alpha: 0.22)
+                                        : Colors.black.withValues(alpha: 0.16),
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(14)),
+                                  foregroundColor: labelColor,
                                 ),
-                                child: Text('确定'),
+                                child: const Text('重置'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: FilledButton(
+                                onPressed: () => Navigator.pop(ctx, draft),
+                                style: FilledButton.styleFrom(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 13),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(14)),
+                                  backgroundColor: JellyTheme.primary,
+                                ),
+                                child: const Text('确定'),
                               ),
                             ),
                           ],

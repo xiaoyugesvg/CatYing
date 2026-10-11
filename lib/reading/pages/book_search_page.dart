@@ -17,6 +17,7 @@ import '../theme/jelly_theme.dart';
 import '../services/settings_service.dart';
 import '../widgets/jelly_book_card.dart';
 import '../widgets/jelly_nav_bar.dart';
+import '../widgets/jelly_filter_sheet.dart';
 import '../widgets/jelly_icon_deck.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_pull_cord.dart';
@@ -471,16 +472,21 @@ class _BookSearchPageState extends State<BookSearchPage>
         isScrollControlled: true,
         backgroundColor:
             isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        builder: (ctx) => kbSheet(_CategorySheetGate(
-          isDark: isDark,
-          initialCategory: _selectedCategory,
-          initialYearFrom: _filterYearFrom,
-          initialYearTo: _filterYearTo,
-          initialLanguages: _filterLanguages,
-          initialExtensions: _filterExtensions,
+        shape: jellySheetShape,
+        builder: (ctx) => kbSheet(Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 自绘把手（showModalBottomSheet 无 dragHandleColor 参数）
+            const JellySheetHandle(),
+            _CategorySheetGate(
+              isDark: isDark,
+              initialCategory: _selectedCategory,
+              initialYearFrom: _filterYearFrom,
+              initialYearTo: _filterYearTo,
+              initialLanguages: _filterLanguages,
+              initialExtensions: _filterExtensions,
+            ),
+          ],
         )),
       );
       if (result is _BookCategorySheetResult && mounted) {
@@ -1739,30 +1745,9 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
   Widget build(BuildContext context) {
     final isDark = widget.isDark;
     final labelColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-    final chipColor = isDark
-        ? JellyTheme.cardDark
-        : JellyTheme.primary.withValues(alpha: 0.08);
-    final chipTextColor = isDark ? Colors.white70 : JellyTheme.textSecondary;
-    // 通用 chip（子分类/语言/格式复用）
+    // 通用 chip（子分类/语言/格式复用）—— 统一视觉件（见 jelly_filter_sheet.dart）
     Widget chip(String label, bool selected, VoidCallback onTap) =>
-        GestureDetector(
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: selected ? JellyTheme.primary : chipColor,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: AppTheme.fontFootnote,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-                color: selected ? Colors.white : chipTextColor,
-              ),
-            ),
-          ),
-        );
+        JellyFilterChip(label: label, selected: selected, onTap: onTap);
     return SafeArea(
       child: ConstrainedBox(
         constraints: BoxConstraints(
@@ -1771,33 +1756,45 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 标题栏
+            // 标题栏（顶部自带把手，不再压 Divider）
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 8, 4),
+              padding: const EdgeInsets.fromLTRB(20, 4, 16, 10),
               child: Row(
                 children: [
                   Text(
                     '分类筛选',
                     style: TextStyle(
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.bold,
+                      fontSize: AppTheme.fontTitle3,
+                      fontWeight: FontWeight.w700,
                       color: labelColor,
                     ),
                   ),
                   const Spacer(),
-                  IconButton(
-                    icon: _refreshing
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.refresh_rounded),
-                    onPressed: _refreshing ? null : _refresh,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded),
-                    onPressed: () {
+                  // 刷新：转动时用同尺寸圆形容器装 spinner，保持按钮位不跳
+                  if (_refreshing)
+                    Container(
+                      width: 32,
+                      height: 32,
+                      alignment: Alignment.center,
+                      child: const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  else
+                    JellySheetCircleButton(
+                      isDark: isDark,
+                      icon: Icons.refresh_rounded,
+                      tooltip: '刷新分类',
+                      onTap: _refresh,
+                    ),
+                  const SizedBox(width: 8),
+                  JellySheetCircleButton(
+                    isDark: isDark,
+                    icon: Icons.close_rounded,
+                    tooltip: '关闭',
+                    onTap: () {
                       FocusScope.of(context).unfocus();
                       Navigator.pop(context);
                     },
@@ -1805,8 +1802,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                 ],
               ),
             ),
-            const Divider(height: 1),
-            const SizedBox(height: 10),
+            const SizedBox(height: 2),
             // 主分类标签栏（横向滚动，单选）
             SizedBox(
               height: 44,
@@ -1830,14 +1826,35 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                         _selectedChild = null;
                       }
                     }),
+                    // 主分类 tab：比子选项 chip 大一号（fontSubhead），
+                    // 选中态/未选中态与统一 chip 同语言
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 8,
+                        horizontal: 16,
+                        vertical: 9,
                       ),
                       decoration: BoxDecoration(
-                        color: selected ? JellyTheme.primary : chipColor,
-                        borderRadius: BorderRadius.circular(14),
+                        color: selected
+                            ? JellyTheme.primary
+                            : jellyChipColor(isDark),
+                        borderRadius: BorderRadius.circular(13),
+                        border: selected
+                            ? null
+                            : Border.fromBorderSide(BorderSide(
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.12)
+                                    : Colors.black.withValues(alpha: 0.07),
+                              )),
+                        boxShadow: selected
+                            ? [
+                                BoxShadow(
+                                  color:
+                                      JellyTheme.primary.withValues(alpha: 0.3),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ]
+                            : null,
                       ),
                       child: Center(
                         child: Text(
@@ -1846,8 +1863,10 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                             fontSize: AppTheme.fontSubhead,
                             fontWeight: selected
                                 ? FontWeight.w600
-                                : FontWeight.normal,
-                            color: selected ? Colors.white : chipTextColor,
+                                : FontWeight.w500,
+                            color: selected
+                                ? Colors.white
+                                : jellyChipTextColor(isDark),
                           ),
                         ),
                       ),
@@ -1856,27 +1875,19 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                 },
               ),
             ),
-            const SizedBox(height: 10),
-            const Divider(height: 1),
+            const SizedBox(height: 12),
             // 子分类 + 年份/语言/格式过滤条件（整体可滚动，过滤条件始终常驻）
             Flexible(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
+                  horizontal: 20,
                   vertical: 12,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      '子分类',
-                      style: TextStyle(
-                        fontSize: AppTheme.fontSubhead,
-                        fontWeight: FontWeight.w600,
-                        color: labelColor,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
+                    JellySheetSectionTitle(title: '子分类', isDark: isDark),
+                    const SizedBox(height: 8),
                     _selectedGroupIdx < 0
                         ? Padding(
                             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1884,7 +1895,7 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                               '请选择主分类',
                               style: TextStyle(
                                 fontSize: AppTheme.fontFootnote,
-                                color: chipTextColor,
+                                color: jellyChipTextColor(isDark),
                               ),
                             ),
                           )
@@ -1905,22 +1916,15 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                                 .toList(),
                           ),
                     const SizedBox(height: 16),
-                    Text(
-                      '年份',
-                      style: TextStyle(
-                        fontSize: AppTheme.fontSubhead,
-                        fontWeight: FontWeight.w600,
-                        color: labelColor,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
+                    JellySheetSectionTitle(title: '年份', isDark: isDark),
+                    const SizedBox(height: 8),
                     Row(
                       children: [
                         _yearDropdown(
                           value: _yearFrom,
                           hint: '起始',
                           labelColor: labelColor,
-                          chipColor: chipColor,
+                          chipColor: jellyChipColor(isDark),
                           onChanged: (v) => setState(() => _yearFrom = v),
                         ),
                         const Padding(
@@ -1931,21 +1935,14 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                           value: _yearTo,
                           hint: '结束',
                           labelColor: labelColor,
-                          chipColor: chipColor,
+                          chipColor: jellyChipColor(isDark),
                           onChanged: (v) => setState(() => _yearTo = v),
                         ),
                       ],
                     ),
                     const SizedBox(height: 16),
-                    Text(
-                      '语言',
-                      style: TextStyle(
-                        fontSize: AppTheme.fontSubhead,
-                        fontWeight: FontWeight.w600,
-                        color: labelColor,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
+                    JellySheetSectionTitle(title: '语言', isDark: isDark),
+                    const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
@@ -1965,15 +1962,8 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                       }).toList(),
                     ),
                     const SizedBox(height: 16),
-                    Text(
-                      '格式',
-                      style: TextStyle(
-                        fontSize: AppTheme.fontSubhead,
-                        fontWeight: FontWeight.w600,
-                        color: labelColor,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
+                    JellySheetSectionTitle(title: '格式', isDark: isDark),
+                    const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
@@ -1996,16 +1986,11 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                 ),
               ),
             ),
-            const Divider(height: 1),
-            // ── 底部按钮：重置 / 确认（按截图：两个等宽并排的圆角按钮）──
-            //
-            // 原来是「TextButton(重置) + Spacer + FilledButton(确定)」——
-            // 左文字按钮、右实心按钮、大小不一。
-            // 截图里是两个**等宽**的圆角按钮并排：
+            // ── 底部按钮：重置 / 确认（两个等宽圆角按钮，与漫画页同款）──
             //   左=重置（描边/浅底），右=确认（实心；未选子分类时禁用并
             //   把文案换成「请选择子分类」）
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
               child: Row(
                 children: [
                   // 重置
@@ -2013,14 +1998,14 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                     child: OutlinedButton(
                       onPressed: _reset,
                       style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
                         side: BorderSide(
                           color: isDark
                               ? Colors.white.withValues(alpha: 0.22)
                               : Colors.black.withValues(alpha: 0.16),
                         ),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                            borderRadius: BorderRadius.circular(14)),
                         foregroundColor: labelColor,
                       ),
                       child: const Text('重置'),
@@ -2032,9 +2017,10 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                     child: FilledButton(
                       onPressed: _selectedChild != null ? _confirm : null,
                       style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                            borderRadius: BorderRadius.circular(14)),
+                        backgroundColor: JellyTheme.primary,
                       ),
                       child: Text(
                         // 没选子分类时说清"缺什么"，而不是让按钮灰着不解释
