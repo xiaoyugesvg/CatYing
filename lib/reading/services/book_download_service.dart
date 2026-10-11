@@ -39,10 +39,11 @@ enum BookDownloadResult {
 class BookDownloadTask {
   final String bookId;
   String hash;
-  final String title;
-  final String? author;
+  // 书名/作者/封面可变：阅读器「编辑书籍」会直接改 + 落盘（updateMeta）
+  String title;
+  String? author;
   final String? extension;
-  final String? cover;
+  String? cover;
   BookDownloadStatus status;
   double progress; // 0~1
   String? localPath;
@@ -179,6 +180,25 @@ class BookDownloadService extends ChangeNotifier {
   BookDownloadTask? task(String bookId) => _tasks[bookId];
   bool isDownloaded(String bookId) =>
       _tasks[bookId]?.status == BookDownloadStatus.completed;
+
+  /// 编辑书籍元数据（书名/作者/封面）—— 阅读器右悬浮「编辑书籍」用。
+  /// 只改非空传入项；书名不允许改空。改完立即通知 + 落盘。
+  void updateMeta(String bookId, {String? title, String? author, String? cover}) {
+    final t = _tasks[bookId];
+    if (t == null) return;
+    final newTitle = title?.trim();
+    if (newTitle != null && newTitle.isNotEmpty) t.title = newTitle;
+    if (author != null) {
+      final a = author.trim();
+      t.author = a.isEmpty ? null : a;
+    }
+    if (cover != null) {
+      final c = cover.trim();
+      t.cover = c.isEmpty ? null : c;
+    }
+    notifyListeners();
+    _persist();
+  }
 
   List<BookDownloadTask> get activeTasks => _tasks.values
       .where((t) => t.status != BookDownloadStatus.completed)

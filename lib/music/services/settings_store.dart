@@ -101,13 +101,13 @@ class SettingsStore {
   static const String _kAlbumSortDesc = 'music.albumSortDesc';
   final albumSortDesc = ValueNotifier<bool>(false);
 
-  /// **平台固定第三方源**（用户 2026-10-10 需求）。
+  /// **平台固定第三方源**（用户 2026-10-10 需求；2026-10-11 升级为多源）。
   ///
-  /// key = `SongSource.key`（netease/qq/kugou/...），value = `ThirdPartySource.id`。
-  /// 绑定后：解析该平台的歌时**绑定源排最前**（自动直接用它），
-  /// 失败仍回退其它启用源，保证可播性。一个平台只绑一个源；一个源可服务多个平台。
+  /// key = `SongSource.key`（netease/qq/kugou/...），value = `ThirdPartySource.id` **列表**。
+  /// 绑定后：解析该平台的歌时**绑定源按顺序排最前**（自动逐个直接试），
+  /// 全失败仍回退其它启用源，保证可播性。一个平台可绑多个源；一个源可服务多个平台。
   static const String _kPlatformSources = 'music.platformSourceBindings';
-  final platformSourceBindings = ValueNotifier<Map<String, String>>({});
+  final platformSourceBindings = ValueNotifier<Map<String, List<String>>>({});
 
   /// 加载全部音乐偏好，并**连带初始化音源相关的东西**。
   ///
@@ -177,13 +177,18 @@ class SettingsStore {
       listenGrid.value = (prefs.getInt(_kListenGrid) ?? 2).clamp(0, 5);
       albumGrid.value = (prefs.getInt(_kAlbumGrid) ?? 0).clamp(0, 2);
       albumSortDesc.value = prefs.getBool(_kAlbumSortDesc) ?? false;
-      // 平台固定第三方源（没存过 = 空表，无绑定）
+      // 平台固定第三方源（兼容旧单源升级）
       try {
         final raw = prefs.getString(_kPlatformSources);
         if (raw != null && raw.isNotEmpty) {
           final decoded = jsonDecode(raw) as Map<String, dynamic>;
-          platformSourceBindings.value = decoded
-              .map((k, v) => MapEntry(k, v.toString()));
+          platformSourceBindings.value = decoded.map((k, v) {
+            if (v is List) {
+              return MapEntry(k, v.map((e) => e.toString()).toList());
+            }
+            // 旧存储是单字符串，升成单元素列表
+            return MapEntry(k, [v.toString()]);
+          });
         }
       } catch (_) {
         // 损坏的 JSON 当作无绑定处理，不拖垮启动
@@ -305,21 +310,22 @@ class SettingsStore {
     await _write(_kAlbumSortDesc, v, () => albumSortDesc.value = old);
   }
 
-  /// 某平台当前绑定的第三方源 id（未绑定 → null）
-  String? boundSourceIdFor(SongSource platform) =>
-      platformSourceBindings.value[platform.key];
+  /// 某平台当前绑定的第三方源 id 列表（未绑定 → 空表）。
+  /// 列表顺序 = 源管理页里的顺序（播放时按这个顺序逐个先试）。
+  List<String> boundSourceIdsFor(SongSource platform) =>
+      platformSourceBindings.value[platform.key] ?? const [];
 
-  /// 绑定/解绑某平台的固定第三方源（sourceId = null 解绑）。
+  /// 设置某平台的固定第三方源列表（空表 = 解绑该平台）。
   ///
   /// 🔴 直接写盘并检查返回值（不走 `_write`：它只支持标量，这里存 JSON 对象）。
-  Future<void> setPlatformSourceBinding(
-      SongSource platform, String? sourceId) async {
+  Future<void> setPlatformSourceBindings(
+      SongSource platform, List<String> sourceIds) async {
     final old = platformSourceBindings.value;
-    final next = Map<String, String>.from(old);
-    if (sourceId == null) {
+    final next = Map<String, List<String>>.from(old);
+    if (sourceIds.isEmpty) {
       next.remove(platform.key);
     } else {
-      next[platform.key] = sourceId;
+      next[platform.key] = List.unmodifiable(sourceIds);
     }
     platformSourceBindings.value = next;
     try {
@@ -341,9 +347,15 @@ class SettingsStore {
   /// 解绑某源在所有平台上的固定绑定（删除音源时调用，避免指向已删源）
   Future<void> clearBindingsForSource(String sourceId) async {
     final old = platformSourceBindings.value;
-    final next = Map<String, String>.from(old)
-      ..removeWhere((_, v) => v == sourceId);
-    if (next.length == old.length) return;
+    final next = <String, List<String>>{};
+    for (final e in old.entries) {
+      final ids = e.value.where((id) => id != sourceId).toList();
+      if (ids.isNotEmpty) next[e.key] = ids;
+    }
+    if (next.length == old.length &&
+        next.entries.every((e) => e.value.length == old[e.key]!.length)) {
+      return; // 没有任何绑定指向该源
+    }
     platformSourceBindings.value = next;
     try {
       final prefs = await SharedPreferences.getInstance();

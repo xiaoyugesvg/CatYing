@@ -579,11 +579,12 @@ class MusicPlayerManager extends ChangeNotifier {
 
 
     // ══════════════════════════════════════════════════════════
-    // ② 试**平台固定源**（音源管理页「固定平台」绑定的第三方源）
+    // ② 试**平台固定源**（设置页「音乐源」给平台绑定的第三方源，可多个）
     // ══════════════════════════════════════════════════════════
     //
     // 2026-10-10 用户需求："例如酷狗或 QQ 增加固定的第三方源设置，
-    // 自动直接用这个第三方源"。绑定关系存 `SettingsStore`（平台 → 源 id）。
+    // 自动直接用这个第三方源"。绑定关系存 `SettingsStore`（平台 → 源 id 列表）。
+    // 2026-10-11 升级：一个平台可绑多个源，按绑定顺序逐个先试。
     //
     // ── 为什么命中也要**当场验证**（原"记忆验证"同因）────────────
     // 第三方源给的地址是签名限时的，会过期成 403/404 —— 所以每次
@@ -592,37 +593,40 @@ class MusicPlayerManager extends ChangeNotifier {
     // ⚠️ **本地文件优先于固定源**：已下载的歌直接播本地文件，
     //    不为固定源白跑一次网络请求（离线时那次请求还会失败）。
     if (localPath.isEmpty && SettingsStore.instance.useThirdPartySources.value) {
-      final boundId = SettingsStore.instance.boundSourceIdFor(song.source);
-      ThirdPartySource? bound;
-      if (boundId != null && boundId.isNotEmpty) {
-        for (final s in ThirdPartySourceStore.instance.enabled) {
-          if (s.id == boundId) {
-            bound = s;
-            break;
+      final boundIds = SettingsStore.instance.boundSourceIdsFor(song.source);
+      if (boundIds.isNotEmpty) {
+        final enabled = ThirdPartySourceStore.instance.enabled;
+        // 按绑定顺序逐个试，第一个给出地址的直接用（不弹窗——这就是"固定"的意义）
+        for (final boundId in boundIds) {
+          ThirdPartySource? bound;
+          for (final s in enabled) {
+            if (s.id == boundId) {
+              bound = s;
+              break;
+            }
           }
-        }
-      }
-      if (bound != null) {
-        lastError.value = '正在用「${bound.name}」…';
-        final one = await UnblockService.instance.testOne(bound, song);
-        switching.value = false;
-        if (epoch != _loadEpoch) return;
-        if (one.ok && one.url.isNotEmpty) {
-          // 命中！直接用，**不弹窗** —— 这就是"固定"的意义
-          url = one.url;
-          fromSource = one.source?.name ?? bound.name;
-          quality = one.source?.quality ?? '';
-          sourceHeaders =
-              one.headers.isNotEmpty ? one.headers : (one.source?.headers ?? const {});
-          fromBound = true;
-          AppLog.instance.log(
-              '[Music] 命中平台固定源（${song.source.displayName}）：'
-              '《${song.name}》→「${bound.name}」');
-        } else {
-          // 绑定源这次给不出地址（后端变了/歌下架了）→ 落回内置接口，
-          // 不解绑（下一首还先试它；用户觉得不行会自己去管理页换）
-          AppLog.instance.log('[Music] 平台固定源失败（${bound.name}：'
-              '${one.error}），改用内置接口');
+          if (bound == null) continue; // 源被删/被禁用，跳过
+          lastError.value = '正在用「${bound.name}」…';
+          final one = await UnblockService.instance.testOne(bound, song);
+          switching.value = false;
+          if (epoch != _loadEpoch) return;
+          if (one.ok && one.url.isNotEmpty) {
+            url = one.url;
+            fromSource = one.source?.name ?? bound.name;
+            quality = one.source?.quality ?? '';
+            sourceHeaders =
+                one.headers.isNotEmpty ? one.headers : (one.source?.headers ?? const {});
+            fromBound = true;
+            AppLog.instance.log(
+                '[Music] 命中平台固定源（${song.source.displayName}）：'
+                '《${song.name}》→「${bound.name}」');
+            break;
+          } else {
+            // 这个绑定源这次给不出地址（后端变了/歌下架了）→ 试下一个绑定源，
+            // 全失败则落回内置接口，不解绑（用户觉得不行会自己去设置页换）
+            AppLog.instance.log('[Music] 平台固定源失败（${bound.name}：'
+                '${one.error}），尝试下一个绑定源/内置接口');
+          }
         }
       }
     }

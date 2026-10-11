@@ -613,7 +613,7 @@
 			repositoryURL = "https://github.com/kingslay/KSPlayer.git";
 			requirement = {
 				kind = revision;
-				revision = 95e6e6137428050eba57c88590af24e524a3f048;
+				revision = be7f60d3b94a0941c643fe8699113cfce4f08e83;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

@@ -695,8 +695,6 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
                   () => _showDetail(context, s)),
               _action(Icons.swap_vert, '排序',
                   () => _sortMenu(context, store, s)),
-              _action(Icons.push_pin_outlined, '固定平台',
-                  () => _platformBindingSheet(context, s)),
               _action(Icons.delete_outline, '删除',
                   () => _confirmDelete(context, store, s)),
             ],
@@ -735,92 +733,16 @@ class _SourceManagerPageState extends State<SourceManagerPage> {
       );
 
   /// 该源被绑定的平台名列表（如 ['酷狗','QQ']；无绑定 → null）
+  ///
+  /// 绑定本身已挪到 **设置 → 音乐源**（按平台分类、可绑多个）——
+  /// 这里只保留只读徽标，让人一眼看出"这个源被哪些平台固定使用"。
   String? _boundPlatformsLabel(String sourceId) {
     final names = SongSource.values
-        .where((p) => SettingsStore.instance.boundSourceIdFor(p) == sourceId)
+        .where((p) =>
+            SettingsStore.instance.boundSourceIdsFor(p).contains(sourceId))
         .map((p) => p.displayName)
         .toList();
     return names.isEmpty ? null : '固定:${names.join('/')}';
-  }
-
-  /// 「固定平台」弹层：勾选哪些平台，就把本源绑定为它们的固定第三方源。
-  ///
-  /// 绑定后播放该平台的歌会**自动优先用本源**（解析失败仍回退其它启用源）。
-  Future<void> _platformBindingSheet(BuildContext context, ThirdPartySource s) async {
-    final initial = <String, bool>{
-      for (final p in SongSource.values)
-        p.key: SettingsStore.instance.boundSourceIdFor(p) == s.id,
-    };
-    final result = await showMusicSheet<Map<String, bool>>(
-      context: context,
-      backgroundColor: MusicTheme.card,
-      builder: (ctx) => SafeArea(
-        top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text('「${s.name}」固定用于',
-                    style: TextStyle(
-                        color: MusicTheme.label,
-                        fontSize: AppTheme.fontHeadline,
-                        fontWeight: FontWeight.w600)),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text('勾选后播放该平台的歌自动优先用此源（失败回退其它源）',
-                    style: TextStyle(
-                        color: MusicTheme.secondary,
-                        fontSize: AppTheme.fontFootnote)),
-              ),
-            ),
-            for (final p in SongSource.values)
-              CheckboxListTile(
-                value: initial[p.key] ?? false,
-                controlAffinity: ListTileControlAffinity.leading,
-                activeColor: MusicTheme.tint,
-                title: Text(p.displayName,
-                    style: TextStyle(
-                        color: MusicTheme.label,
-                        fontSize: AppTheme.fontSubhead)),
-                onChanged: (v) =>
-                    setState(() => initial[p.key] = v ?? false),
-              ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  style: FilledButton.styleFrom(
-                      backgroundColor: MusicTheme.tint),
-                  onPressed: () => Navigator.pop(ctx, initial),
-                  child: const Text('保存',
-                      style: TextStyle(fontWeight: FontWeight.w600)),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (result == null) return;
-    for (final p in SongSource.values) {
-      final nowBound = result[p.key] ?? false;
-      final wasBound =
-          SettingsStore.instance.boundSourceIdFor(p) == s.id;
-      if (nowBound && !wasBound) {
-        await SettingsStore.instance.setPlatformSourceBinding(p, s.id);
-      } else if (!nowBound && wasBound) {
-        await SettingsStore.instance.setPlatformSourceBinding(p, null);
-      }
-    }
-    if (context.mounted) setState(() {}); // 刷新卡片上的「固定:xx」徽标
   }
 
   Future<void> _sortMenu(BuildContext context,

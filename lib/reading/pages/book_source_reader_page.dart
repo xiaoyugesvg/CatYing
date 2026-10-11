@@ -26,6 +26,7 @@ import '../widgets/book_page_curl.dart';
 import '../widgets/color_picker_dialog.dart';
 import '../widgets/pomodoro_button.dart';
 import 'tts_engine_page.dart';
+import 'book_source_editor_page.dart';
 import 'tts_full_player_page.dart';
 import '../../common/theme.dart';
 import '../theme/jelly_theme.dart';
@@ -2186,8 +2187,20 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   _toggleDayNight,
                   fg),
               const SizedBox(height: 10),
-              _dockButton(Icons.edit_outlined, '编辑（划线与笔记）',
-                  () => _showToc(initialTab: 2), fg),
+              // 对齐 Cmbok：书源书籍的阅读器「编辑」= 编辑该书源
+              // （划线与笔记入口在底部宫格「笔记」里，不冲突）
+              _dockButton(Icons.edit_outlined, '书源编辑', () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        BookSourceEditorPage(source: widget.source),
+                  ),
+                );
+              }, fg),
+              const SizedBox(height: 10),
+              // 番茄钟从底部宫格挪到这里（宫格让位给「夜间模式」，对齐 Cmbok 截图）
+              _dockButton(Icons.timer_outlined, '番茄钟',
+                  () => setState(() => _showPomodoro = !_showPomodoro), fg),
             ],
           ),
         ),
@@ -2483,11 +2496,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             ],
           ),
           const SizedBox(height: 2),
-          // ── 8 宫格（IMG_8485：AI / 朗读 / 图片模式 / 笔记）──
+          // ── 8 宫格（Cmbok 截图第一行：夜间模式 / 朗读 / AI / 图片模式）──
           Row(
             children: [
-              _navItem(Icons.auto_awesome_rounded, 'AI',
-                  _showAiSummary, fg),
+              _navItem(Icons.dark_mode_outlined, '夜间模式',
+                  _toggleDayNight, fg),
               _navItem(Icons.record_voice_over_outlined, '朗读',
                   // ✅ **接上「点朗读进播放页」** ✓（本页 TTS 面板里的那个开关 ✓）：
                   //   · 开启 → 先 `_startTts()` ✓（沉浸式页要在"念着"的状态才有内容 ✓），
@@ -2529,23 +2542,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         }
                       : () => _showTtsSheet(),
                   fg),
+              _navItem(Icons.auto_awesome_rounded, 'AI',
+                  _showAiSummary, fg),
               _navItem(Icons.image_outlined, '图片模式',
                   _showImageMode, fg),
-              _navItem(Icons.edit_note_rounded, '笔记',
-                  () => _showToc(initialTab: 2), fg),
             ],
           ),
           const SizedBox(height: 8),
+          // ── 第二行（Cmbok 截图第二行：笔记 / 排版 / 设置 / 目录）──
           Row(
             children: [
+              _navItem(Icons.edit_note_rounded, '笔记',
+                  () => _showToc(initialTab: 2), fg),
               _navItem(Icons.text_fields_rounded, '排版',
                   _showLayoutSheet, fg),
               _navItem(Icons.settings_outlined, '设置',
                   () => setState(() => _showSettingsPanel = true), fg),
               _navItem(Icons.menu_book_rounded, '目录', _showToc, fg),
-              // 番茄钟直接复用 2.0.3 原有的 PomodoroButton（两个阅读器都在用它）
-              _navItem(Icons.timer_outlined, '番茄钟',
-                  () => setState(() => _showPomodoro = !_showPomodoro), fg),
             ],
           ),
           const SizedBox(height: 4),

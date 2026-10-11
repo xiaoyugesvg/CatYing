@@ -78,7 +78,7 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
     return AppPlayer(config: const AppConfig(title: 'TVBox'));
   }
 
-  void _rebuildPlayer() {
+  void _rebuildPlayer({Duration? start}) {
     final old = _player;
     if (old != null && _ownsPlayer) {
       unawaited(old.dispose());
@@ -91,7 +91,7 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
     final url = _resolvedUrl();
     if (url.isNotEmpty) {
       _lastOpenedUrl = url;
-      p.open(AppMedia(url, httpHeaders: widget.headers ?? const {}));
+      p.open(AppMedia(url, httpHeaders: widget.headers ?? const {}, start: start));
     }
   }
 
@@ -152,6 +152,13 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
         return VideoPlayerWidget(
           key: ObjectKey(player),
           player: player,
+          // 核心热切换：记住当前进度，按新偏好重建播放器续播
+          onEngineChanged: (_) {
+            final pos = _player?.state.position;
+            _rebuildPlayer(
+              start: (pos != null && pos > Duration.zero) ? pos : null,
+            );
+          },
           url: url,
           headers: widget.headers?.isEmpty ?? true ? null : widget.headers,
           initialVideoFit: VideoFitType.contain,

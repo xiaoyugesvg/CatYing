@@ -116,6 +116,10 @@ class VideoPlayerWidget extends StatefulWidget {
   final ValueChanged<int>? onSetSkipIntro;
   final ValueChanged<int>? onSetSkipOutro;
 
+  /// 核心热切换回调：选中引擎后由父级立刻重建播放器、从当前进度续播。
+  /// 不传则走旧行为 —— 仅保存偏好，下一集或重新播放才生效。
+  final ValueChanged<PlayerEngine>? onEngineChanged;
+
   const VideoPlayerWidget({
     super.key,
     this.player,
@@ -156,6 +160,7 @@ class VideoPlayerWidget extends StatefulWidget {
     this.onBack,
     this.onSetSkipIntro,
     this.onSetSkipOutro,
+    this.onEngineChanged,
   });
 
   @override
@@ -235,6 +240,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   ///   的加载直接挡掉 ✗，且旧请求结束时 gen 已过期、锁清不掉 → **永久卡死** ✗✗。
   ///   用"地址"做锁：同地址不重复发 ✓，换集（地址变了）照常放行 ✓。
   String? _danmuInFlightUrl;
+
+  /// 上次弹幕请求失败的时间（失败重试节流）。
+  ///
+  /// 失败是可重试的（`_danmuLoaded` 不置位），但重试触发点是
+  /// **每秒一次**的位置回调 —— 不加节流的话，服务挂掉时会变成
+  /// 每秒一个请求 + 每秒一条失败日志，刷爆日志也拖累服务 ✗。
+  /// 失败后 10s 内不再重试；换集/换地址时清零（见各 `_danmuLoaded = false` 处）。
+  DateTime? _danmuLastFailAt;
 
   /// 弹幕**设置**是否已从 prefs 读出来（`_loadDanmuSettings` 是异步的）。
   /// 首帧它还是 false，此时不能因为 `_danmuApiUrl` 为空就显示成"未配置"
@@ -645,27 +658,6 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             setState(() {});
           }
           widget.onPositionChanged?.call(position);
-
-          // ── 🔴 周期性检测「弹幕地址」是否刚被改过（修一个真 bug）────
-          //
-          // 用户反馈：「填进去，弹幕不显示」（所有片都不显示）。
-          // 完整根因：**播放器自己就能打开弹幕设置页**
-          //（`:4390` 的 `Get.to(DanmuSettingsPage)`）——
-          // 也就是用户常常是"**正在播着的时候**去填地址"的 ✗
-          // 而 `_danmuApiUrl` 只在 `initState` 读一次 →
-          // 填完地址后当前这次播放**永远不会加载弹幕** ✗
-          //
-          // 这里借"每秒一次的位置回调"做一次便宜的检测：
-          // 地址变了 → `_danmuLoaded` 被清掉 → 立刻重新拉一次 ✓
-          // （只读一个 prefs key，开销可忽略；`_refreshDanmuApiUrlIfNeeded`
-          //   内部有"没变就直接 return"的短路 ✓）
-          if (!_danmuLoaded) {
-            _refreshDanmuApiUrlIfNeeded().then((_) {
-              if (mounted && !_danmuLoaded && _danmuApiUrl.isNotEmpty) {
-                _ensureDanmuLoaded(urlOverride: widget.url);
-              }
-            });
-          }
         }
       }),
     );
@@ -856,6 +848,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _danmuLoaded = false;
       _danmuLoadGen++;
       _danmus = [];
+      _danmuLastFailAt = null; // 新集是新目标，上一集的失败节流不该挡它
       // 「切集提示」：换到新的一集时在顶部轻提示（默认关闭）
       if (_switchEpisodeHint) {
         final ep = (widget.currentEpisodeName ?? '').trim();
@@ -1057,8 +1050,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           (prefs.getString('danmu_api_url') ?? '').trim(), src);
       if (latest == _danmuApiUrl) return;
       _danmuApiUrl = latest;
-      // 地址变了 → 之前"已加载过"的结论作废，允许重新拉
+      // 地址变了 → 之前"已加载过"的结论作废，允许重新拉；失败节流一并清掉
       _danmuLoaded = false;
+      _danmuLastFailAt = null;
       AppLog.instance.log('[video_player] danmu api url 变为: '
           '${latest.isEmpty ? "（空）" : latest}');
     } catch (e) {
@@ -1144,6 +1138,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// 支持 `host` / `host/{TOKEN}` / `host/{TOKEN}/api/v2`，最终用于拼 `/api/v2/...`
   String _danmuApiBase() {
     var b = _danmuApiUrl.trim();
+    // 裸 host（没写 scheme，如 `api.example.com`）补 https:// ——
+    // 否则 Uri.parse 出来是相对路径，HttpClient 直接抛异常，请求必败
+    if (b.isNotEmpty && !b.startsWith('http://') && !b.startsWith('https://')) {
+      b = 'https://$b';
+    }
     while (b.endsWith('/')) {
       b = b.substring(0, b.length - 1);
     }
@@ -1166,6 +1165,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               : widget.url);
     // 地址为空时不要置位 _danmuLoaded，否则该播放会话弹幕永久卡死
     if (url.isEmpty) return;
+
+    // 失败重试节流：上次失败距今不足 10s 就不再发（触发点是每秒一次的位置
+    // 回调，不节流会对挂掉的服务每秒打一枪）
+    final lastFail = _danmuLastFailAt;
+    if (lastFail != null &&
+        DateTime.now().difference(lastFail) < const Duration(seconds: 10)) {
+      return;
+    }
 
     // ✅ 用户 2026-10-08：「半天不出来」—— 原来 `_danmuLoaded = true`
     //   放在**请求之前** ✗：一旦网络波动请求失败，整个播放会话都不会再重试，
@@ -1203,7 +1210,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     //   两者互不依赖（搜索只用片名 ✓），并行后兜底链路少 1 个 RTT ✓。
     //   ⚠️ 只有 `titleFallbackUsable` 时才发搜索，避免无谓请求 ✓。
     final urlFuture = _danmuGetText(api);
-    Future<String>? searchFuture;
+    Future<String?>? searchFuture;
     if (titleFallbackUsable) {
       var clean = TmdbService.cleanTitle(title);
       if (clean.isEmpty) clean = title;
@@ -1212,7 +1219,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       );
     }
 
-    var list = await parseDanmuBodyAsync(await urlFuture);
+    // 🔴 请求失败（null）≠ 真的 0 条（'' 或解析后为空）：
+    //    失败时**直接 return，不置位 `_danmuLoaded`**，留给下次重试；
+    //    否则一次网络波动就把本次播放会话的弹幕永久锁死。
+    final urlBody = await urlFuture;
+    if (urlBody == null) {
+      if (loadGen == _danmuLoadGen) _danmuLastFailAt = DateTime.now();
+      AppLog.instance.log('[video_player] danmu URL 探测失败，等待重试');
+      return;
+    }
+    var list = await parseDanmuBodyAsync(urlBody);
 
     // ---- 按片名兜底 ----
     // 该弹幕服务的 url 匹配要求播放地址与库里索引的**标准平台地址**完全一致；
@@ -1220,13 +1236,20 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     // 服务同时提供 搜索→分集→弹幕 三步链路，此处作为兜底。
     var danmuSource = 'url';
     if (list.isEmpty && titleFallbackUsable) {
-      list = await _danmuFetchByTitle(
+      final fb = await _danmuFetchByTitle(
         base,
         title,
         epName,
         url,
         searchFuture: searchFuture,
       );
+      if (fb == null) {
+        // 兜底链路请求失败：同上，不置位，等待重试
+        if (loadGen == _danmuLoadGen) _danmuLastFailAt = DateTime.now();
+        AppLog.instance.log('[video_player] danmu 片名兜底请求失败，等待重试');
+        return;
+      }
+      list = fb;
       if (list.isNotEmpty) danmuSource = 'title';
     }
 
@@ -1244,6 +1267,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
     // 代次校验：快速换集时丢弃过期响应，避免旧集弹幕盖到新集上
     if (!mounted || loadGen != _danmuLoadGen) return;
+    _danmuLastFailAt = null; // 成功拿到结果（含真 0 条）→ 清掉失败节流
     setState(() {
       _danmus = list;
       // ✅ 有结果（哪怕 0 条）才标记"已加载"，失败不算 —— 失败了还能重试
@@ -1346,13 +1370,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _danmuHttpClient ??=
           (HttpClient()..connectionTimeout = const Duration(seconds: 6));
 
-  /// 取文本（弹幕接口专用；失败返回空串，不抛）
+  /// 取文本（弹幕接口专用；不抛异常）
+  ///
+  /// 返回值语义（调用方据此区分"重试"与"真的 0 条"）：
+  ///   · `null` —— 请求失败（HTTP 非 200 / 超时 / 异常）→ **可重试**，
+  ///     调用方不得置位 `_danmuLoaded`（否则一次波动永久锁死弹幕）；
+  ///   · `''` 或非空串 —— 请求成功，响应体就是这么多 ✓。
   ///
   /// ⚠️ 超时从 12s 收到 8s：弹幕是**锦上添花**的功能 ✓，
   ///   而兜底链路最多要串 4 个请求 ✗ → 12s 时最坏要等近 1 分钟才出弹幕 ✗✗
   ///   （用户反馈「半天不出来」的主因之一 ✓）。8s 足够正常网络往返 ✓，
   ///   慢到 8s 还没回的接口本来也基本拉不到数据 ✓。
-  Future<String> _danmuGetText(String api) async {
+  Future<String?> _danmuGetText(String api) async {
     final client = _danmuClient;
     try {
       final http = await client
@@ -1364,7 +1393,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         AppLog.instance.log(
           '[video_player] danmu HTTP ${res.statusCode} ($api)',
         );
-        return '';
+        return null;
       }
       return await res
           .transform(utf8.decoder)
@@ -1372,7 +1401,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           .timeout(const Duration(seconds: 8));
     } catch (e) {
       AppLog.instance.log('[video_player] danmu request fail: $e');
-      return '';
+      return null;
     }
   }
 
@@ -1386,12 +1415,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   ///     这样 URL 探测失败时不用再等一整轮往返 ✓（省 1 个 RTT ✓）。
   ///   · `_danmuTitleListCache` —— 同一集**重进**时直接命中缓存 ✓，
   ///     连 `comment/$episodeId` 都不用发 ✓。
-  Future<List<DanmuItem>> _danmuFetchByTitle(
+  ///
+  /// 返回 `null` 表示链路上任意一环**请求失败**（HTTP 非 200 / 超时 / 异常），
+  /// 调用方据此**不置位 `_danmuLoaded`**，允许下次重试 ✓；
+  /// 返回空列表才是"服务在线但确实没匹配到"（真 0 条，不再重试）。
+  Future<List<DanmuItem>?> _danmuFetchByTitle(
     String base,
     String title,
     String episodeName,
     String videoUrl, {
-    Future<String>? searchFuture,
+    Future<String?>? searchFuture,
   }) async {
     // 片名清洗：优先复用 TMDB 的清洗规则（去「更新至N集/第N季/4K/中字」等噪音）
     var clean = TmdbService.cleanTitle(title);
@@ -1416,12 +1449,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         '[video_player] danmu title-fallback episodeId 命中: $cacheKey',
       );
       final list = await _danmuFetchComments(base, cached);
-      if (list.isNotEmpty) _danmuTitleListCache[cacheKey] = list;
-      return list;
+      if (list != null && list.isNotEmpty) _danmuTitleListCache[cacheKey] = list;
+      return list; // null（请求失败）向上传播 → 调用方保留重试
     }
 
     // ① 搜索番剧（若调用方已并行发起，直接复用那个 future，省一轮往返）
-    final String searchBody;
+    final String? searchBody;
     if (searchFuture != null) {
       searchBody = await searchFuture;
     } else {
@@ -1430,7 +1463,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           '?keyword=${Uri.encodeQueryComponent(clean)}';
       searchBody = await _danmuGetText(searchUrl);
     }
-    if (searchBody.isEmpty) return const [];
+    if (searchBody == null) return null; // 请求失败 → 可重试
+    if (searchBody.isEmpty) return const []; // 服务在线但没搜到 → 真 0 条
     final animes = _danmuParseList(searchBody, 'animes');
     if (animes.isEmpty) {
       AppLog.instance.log('[video_player] danmu search 无结果: $clean');
@@ -1450,6 +1484,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
     // ② 取分集列表
     final bgBody = await _danmuGetText('$base/api/v2/bangumi/$animeId');
+    if (bgBody == null) return null; // 请求失败 → 可重试
     if (bgBody.isEmpty) return const [];
     final bangumi = _danmuParseMap(bgBody, 'bangumi');
     final episodes = (bangumi?['episodes'] as List?) ?? const [];
@@ -1480,18 +1515,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
     final list = await _danmuFetchComments(base, episodeId);
     // ✅ 存"整集弹幕"结果缓存 → 重进同一集秒出
-    if (list.isNotEmpty) _danmuTitleListCache[cacheKey] = list;
+    if (list != null && list.isNotEmpty) _danmuTitleListCache[cacheKey] = list;
     return list;
   }
 
-  /// 用 episodeId 取弹幕（兜底链路的最后一步）
-  Future<List<DanmuItem>> _danmuFetchComments(
+  /// 用 episodeId 取弹幕（兜底链路的最后一步）。失败返回 `null`（可重试）。
+  Future<List<DanmuItem>?> _danmuFetchComments(
     String base,
     int episodeId,
   ) async {
     final body = await _danmuGetText(
       '$base/api/v2/comment/$episodeId?format=json&duration=true',
     );
+    if (body == null) return null;
     if (body.isEmpty) return const [];
     return parseDanmuBodyAsync(body);
   }
@@ -4865,10 +4901,20 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
     if (picked == null || picked == current) return;
     await PlayerPrefs.instance.setEngine(picked);
-    AppToast.message(
-      '已切换到 ${picked.title}，下一集或重新播放生效',
-      duration: const Duration(seconds: 2),
-    );
+    final hotSwap = widget.onEngineChanged;
+    if (hotSwap != null) {
+      // 父级支持热切换：立刻按新核心重建播放器、从当前进度续播
+      AppToast.message(
+        '已切换到 ${picked.title}',
+        duration: const Duration(seconds: 1),
+      );
+      hotSwap(picked);
+    } else {
+      AppToast.message(
+        '已切换到 ${picked.title}，下一集或重新播放生效',
+        duration: const Duration(seconds: 2),
+      );
+    }
   }
 
   /// 短剧模式按钮 —— 样式参考弹幕按钮：圆角方块内一个「短」字，

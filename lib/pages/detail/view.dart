@@ -626,6 +626,31 @@ class _DetailPageState extends State<DetailPage> {
     _player!.open(AppMedia(url, httpHeaders: headers, start: start));
   }
 
+  /// 播放器核心热切换（VideoPlayerWidget.onEngineChanged）。
+  ///
+  /// 选中核心时偏好已保存；这里记住当前进度 → 释放旧引擎实例 →
+  /// 按新偏好立刻重建并从原位置续播，不用等下一集。
+  /// ObjectKey(_player) 会让 VideoPlayerWidget 整体 remount，状态干净。
+  void _onEngineHotSwap(PlayerEngine engine) {
+    final url = _controller.playUrl.value ?? '';
+    if (url.isEmpty) return;
+    final headers = _controller.playHeaders.isNotEmpty
+        ? Map<String, String>.from(_controller.playHeaders)
+        : const <String, String>{};
+    final pos = _player?.state.position ?? Duration.zero;
+    final old = _player;
+    // 先置空：_createPlayerAndOpen 才会走「按新引擎重建」分支而非「只换源」
+    _player = null;
+    old?.dispose();
+    _createPlayerAndOpen(
+      url,
+      headers,
+      _headersKey(headers),
+      pos > Duration.zero ? pos : null,
+    );
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     // 关键：isFull / isPip 必须在 Obx 内读取，Rx 变化才能触发 rebuild
@@ -886,6 +911,7 @@ class _DetailPageState extends State<DetailPage> {
       // 不会残留绑在已 dispose Player 上的 controller/纹理（灰屏）
       key: ObjectKey(_player),
       player: _player,
+      onEngineChanged: _onEngineHotSwap,
       // 跨全屏/普通模式共享同一个 controller
       initialVideoFit: VideoFitType.contain, // 4:3 容器 + 黑框适配: 画面按原始比例完整显示, 上下黑边
       url: url,

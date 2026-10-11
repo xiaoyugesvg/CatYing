@@ -6,9 +6,12 @@ import KSPlayer
 import UIKit
 
 /// 全局唯一 KSPlayer（第四播放核心「FF」：FFmpeg + Metal）。
+/// 依赖固定 revision be7f60d（2026-08-15，源码分发的最后一版，含
+/// FFmpegAssetTrack 的 NULL codecpar / 除零等直播流崩溃修复）。
 ///
 /// - MKV/AC3/DTS/ASS 等 AVPlayer 吃不下的格式全兼容，并自带系统小窗（PiP）；
-/// - 应用内画面：KSPlayerLayer 本身就是 UIView，由 UiKitView 平台视图直接 addSubview；
+/// - 应用内画面：KSPlayerLayer 是控制器（NSObject），其 player.view 才是渲染视图，
+///   由 UiKitView 平台视图宿主 addSubview；内核回退（ME→AV）时 layer 内部自动换视图；
 /// - 控制通道 'ks_player'（open/play/pause/seek/setRate/setVolume/getState/enterPip/exitPip）；
 /// - PiP 事件复用 "pip_manager" 通道名回调 Dart（onPipStarted/onPipStopped），
 ///   与 AVPlayer 路径共用 VideoPlayerPip 的同一套状态机；
@@ -152,7 +155,6 @@ final class KSEngine: NSObject {
     pendingPip = false
 
     let options = KSOptions()
-    options.isAutoPlay = true
     options.hardwareDecode = true
     options.registerRemoteControll = false
     if positionMs > 0 {
@@ -165,7 +167,8 @@ final class KSEngine: NSObject {
     KSOptions.firstPlayerType = KSMEPlayer.self
     KSOptions.secondPlayerType = KSAVPlayer.self
 
-    let l = KSPlayerLayer(url: u, options: options, delegate: self)
+    // be7f60d 起 KSPlayerLayer 不再是 UIView（改为控制器），画面视图在 player.view
+    let l = KSPlayerLayer(url: u, isAutoPlay: true, options: options, delegate: self)
     playerLayer = l
     isPlaying = true
     attachLayerToHost(l)
@@ -183,24 +186,24 @@ final class KSEngine: NSObject {
       l.player.pipController?.stopPictureInPicture()
       pipEventActive = false
     }
-    playerLayer?.removeFromSuperview()
+    playerLayer?.player.view?.removeFromSuperview()
     playerLayer = nil
   }
 
   // MARK: - 应用内画面（平台视图挂载）
 
   private func attachLayerToHost(_ l: KSPlayerLayer) {
-    guard let host = displayHost else { return }
-    l.frame = host.bounds
-    l.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-    host.addSubview(l)
+    guard let host = displayHost, let view = l.player.view else { return }
+    view.frame = host.bounds
+    view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    host.addSubview(view)
   }
 
   /// 平台视图创建时挂载现有播放层（晚于 open 的场景）
   func attach(to host: UIView) {
     displayHost = host
     if let l = playerLayer {
-      l.removeFromSuperview()
+      l.player.view?.removeFromSuperview()
       attachLayerToHost(l)
     }
   }
@@ -400,7 +403,7 @@ extension KSEngine: KSPlayerLayerDelegate {
     case .error:
       isPlaying = false
       emit("onError", arguments: "player error")
-    case .prepareToPlay:
+    case .initialized, .preparing:
       break
     }
   }

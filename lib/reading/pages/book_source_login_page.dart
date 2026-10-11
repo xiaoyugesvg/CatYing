@@ -227,27 +227,30 @@ class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
       body: SafeArea(
         child: Column(
           children: [
-            // ── 标题行 ────────────────────────────────────────
+            // ── 标题行（Cmbok 登录截图：X 在左上，标题居中）────
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 8, 10),
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
               child: Row(
                 children: [
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: Icon(Icons.close_rounded,
+                        size: 22, color: label),
+                  ),
                   Expanded(
                     child: Text(
-                      '⚡📂${widget.source.name}登录',
+                      '${widget.source.name}登录',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                           fontSize: AppTheme.fontTitle3,
                           fontWeight: FontWeight.w700,
                           color: label),
                     ),
                   ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: Icon(Icons.close_rounded,
-                        size: 22, color: label),
-                  ),
+                  // 右侧留个与 X 等宽的占位，标题才是真居中
+                  const SizedBox(width: 48),
                 ],
               ),
             ),
@@ -321,6 +324,10 @@ class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
                     ),
                     child: Row(
                       children: [
+                        // Cmbok 截图的输入框都带前导图标（✉邮箱/🔒密码）→ 这里给 Cookie 框配 🔑
+                        Icon(Icons.key_rounded,
+                            size: 18, color: JellyTheme.textSecondary),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: TextField(
                             controller: _ctrl,
@@ -379,32 +386,41 @@ class _BookSourceLoginPageState extends State<BookSourceLoginPage> {
                 ],
               ),
             ),
-            // ── 底部：清除登录态 · 网页登录 ──────────────────
+            // ── 底部（Cmbok 截图：全宽大黑按钮 + 下方居中文字链）──
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-              child: Row(
+              child: Column(
                 children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      // JS 登录源：主按钮是「登录」（执行 loginUrl JS）；
+                      // 网页源：主按钮是「网页登录」（WebView 采 Cookie）
+                      onPressed: _isJsLogin ? _jsLogin : _webLogin,
+                      style: FilledButton.styleFrom(
+                        backgroundColor:
+                            isDark ? Colors.white : JellyTheme.primary,
+                        foregroundColor:
+                            isDark ? JellyTheme.backgroundDark : Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        _isJsLogin ? '登录' : '网页登录',
+                        style: const TextStyle(
+                            fontSize: AppTheme.fontBody,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
                   TextButton(
                     onPressed: () => _save(''),
                     child: Text('清除登录态',
                         style: TextStyle(
-                            fontSize: AppTheme.fontBody,
+                            fontSize: AppTheme.fontSubhead,
                             color: JellyTheme.textSecondary)),
-                  ),
-                  const Spacer(),
-                  FilledButton(
-                    // JS 登录源：主按钮是「登录」（执行 loginUrl JS）；
-                    // 网页源：主按钮是「网页登录」（WebView 采 Cookie）
-                    onPressed: _isJsLogin ? _jsLogin : _webLogin,
-                    style: FilledButton.styleFrom(
-                      backgroundColor:
-                          isDark ? Colors.white : JellyTheme.primary,
-                      foregroundColor:
-                          isDark ? JellyTheme.backgroundDark : Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 40, vertical: 14),
-                    ),
-                    child: Text(_isJsLogin ? '登录' : '网页登录'),
                   ),
                 ],
               ),

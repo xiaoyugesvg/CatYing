@@ -163,15 +163,16 @@ class UnblockService {
     // ⚠️ 只是**排序**，不删其它源 —— 记忆失效时用户还能选别的
     //（那正是他重新走到这个弹窗的原因）。
     final all = ThirdPartySourceStore.instance.enabled;
-    // ✅ 2026-10-10 用户：平台固定第三方源（源管理页给酷狗/QQ 等平台绑定的源）
-    //    排**最前** —— 播放该平台歌曲时自动直接用它；失败仍回退其余源。
+    // ✅ 2026-10-10 用户：平台固定第三方源（设置页给酷狗/QQ 等平台绑定的源）
+    //    排**最前** —— 播放该平台歌曲时按绑定顺序自动先试它们；全失败仍回退其余源。
     //    （歌曲粒度源记忆已移除，绑定源是唯一的高优先级来源。）
-    final boundId = SettingsStore.instance.boundSourceIdFor(song.source);
-    final sources = (boundId == null || boundId.isEmpty)
+    final boundIds = SettingsStore.instance.boundSourceIdsFor(song.source);
+    final sources = boundIds.isEmpty
         ? all
         : ([
-            ...all.where((s) => s.id == boundId),
-            ...all.where((s) => s.id != boundId),
+            // 保持绑定列表的顺序（用户眼里靠前的优先级更高）
+            for (final id in boundIds) ...all.where((s) => s.id == id),
+            ...all.where((s) => !boundIds.contains(s.id)),
           ]);
     if (sources.isEmpty) {
       return const SourceResolveResult(ok: false, error: '没有启用中的音源');

@@ -2284,10 +2284,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
                       onPressed: _toggleDayNight,
                     ),
                     IconButton(
-                      tooltip: '编辑（划线与笔记）',
+                      // 对齐 Cmbok：本地书籍的阅读器「编辑」= 编辑书籍元数据
+                      tooltip: '编辑书籍',
                       visualDensity: VisualDensity.compact,
                       icon: Icon(Icons.edit_outlined, size: 20, color: iconColor),
-                      onPressed: _showEditPlaceholder,
+                      onPressed: _showEditBook,
                     ),
                   ],
                 ),
@@ -3062,6 +3063,79 @@ class _BookReaderPageState extends State<BookReaderPage> {
   void _showEditPlaceholder() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const BookNotesPage()),
+    );
+  }
+
+  /// 编辑书籍（书名/作者/封面）—— 对齐 Cmbok：本地书籍的阅读器右悬浮
+  /// 「编辑」开的是**编辑书籍**（书源书籍那边开的是书源编辑）。
+  /// 笔记入口仍在底部宫格「笔记」里（`_showEditPlaceholder`），不冲突。
+  void _showEditBook() {
+    final task = widget.task;
+    final titleCtrl = TextEditingController(text: task.title);
+    final authorCtrl = TextEditingController(text: task.author ?? '');
+    final coverCtrl = TextEditingController(text: task.cover ?? '');
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final isDark = _readerIsDark;
+        final labelColor = isDark
+            ? Colors.white.withValues(alpha: 0.92)
+            : JellyTheme.textPrimaryLight;
+        InputDecoration deco(String hint) => InputDecoration(
+              hintText: hint,
+              isDense: true,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            );
+        return AlertDialog(
+          title: Text('编辑书籍',
+              style: TextStyle(
+                  fontSize: AppTheme.fontHeadline, color: labelColor)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: titleCtrl,
+                style: TextStyle(fontSize: AppTheme.fontSubhead, color: labelColor),
+                decoration: deco('书名'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: authorCtrl,
+                style: TextStyle(fontSize: AppTheme.fontSubhead, color: labelColor),
+                decoration: deco('作者'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: coverCtrl,
+                style: TextStyle(fontSize: AppTheme.fontSubhead, color: labelColor),
+                decoration: deco('封面链接（留空用默认封面）'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () {
+                BookDownloadService().updateMeta(
+                  task.bookId,
+                  title: titleCtrl.text,
+                  author: authorCtrl.text,
+                  cover: coverCtrl.text,
+                );
+                Navigator.pop(ctx);
+                // 顶栏书名读的是 widget.task.title，字段已在服务里原地改
+                setState(() {});
+              },
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
     );
   }
 
