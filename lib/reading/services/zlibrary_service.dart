@@ -301,6 +301,25 @@ class ZlibraryService extends ChangeNotifier {
   /// 候选节点列表（只读视图）
   List<String> get candidates => List.unmodifiable(_candidates);
 
+  /// ✅ **删除候选节点**（节点管理面板用）——
+  ///   · 内置/自建节点都能删（用户 2026-10-11：「节点我要能删除」）；
+  ///   · 删的是**当前节点**时：自动切到剩余候选的第一个；全删光则清空 _domain ——
+  ///     下次 `init()` 发现候选为空会回播内置兜底节点，不会变砖；
+  ///   · 返回是否真的删到了（不在候选表里 = false）。
+  Future<bool> removeCandidate(String domain) async {
+    final d = domain.trim();
+    if (d.isEmpty || !_candidates.contains(d)) return false;
+    _candidates.remove(d);
+    if (_domain == d) {
+      _domain = _candidates.isNotEmpty ? _candidates.first : '';
+      await _persistDomain();
+    }
+    await _persistCandidates();
+    _log('删除候选节点: $d（剩余 ${_candidates.length} 个）');
+    notifyListeners();
+    return true;
+  }
+
   /// ✅ **一键测试全部节点** ✓（供"节点管理"界面用 ✓）——
   /// 返回每个候选节点的**可用性 + 延迟（秒）+ 最终落地域名** ✓。
   ///

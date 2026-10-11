@@ -157,18 +157,22 @@ class CmbokConstants {
     //   ⚠️ 假站/非 eapi 主机：z-library.my（首页 200 但 eapi 404）、
     //        zh.intcn.online（首页 200、eapi 不是 JSON）
     //   ℹ️ 失效节点想加回：设置里的「节点管理 → 添加节点」即可，无需改代码
-    // ── ✅ 中文入口（实测 eapi 可用 + 返回中文书）────────────────
-    'zh.26h2.tech',
-    'zh.86110101.xyz',
-    'zh.loves.works',
-    'zh.toffeeboba.com',
-    'zh.zlib.bz',
-    // ── 同批镜像的非中文入口（可用但推荐流是英文）→ 仅在前 5 个全挂时兜底 ──
-    '26h2.tech',
-    '86110101.xyz',
-    'loves.works',
-    'toffeeboba.com',
-    'zlib.bz',
+    // ── ✅ 中文入口（2026-10-11 实测 eapi 200 + 中文书）────────────────
+    //   来源：官方域名发现接口 https://z-library.sk/eapi/info/domains（当日实测可达），
+    //   返回 z-library.sk / 1lib.sk / article.sk / articles.sk /
+    //   proxy.zlibraryproxies.workers.dev 五个官方节点；`zh.` 前缀实测返回中文书 ✓
+    //   （上一批 zh.26h2.tech / zh.86110101.xyz / zh.loves.works /
+    //     zh.toffeeboba.com / zh.zlib.bz 当日全部连接失败，移出默认）
+    'zh.z-library.sk',
+    'zh.1lib.sk',
+    'zh.article.sk',
+    'zh.articles.sk',
+    // ── 官方同系非中文入口（eapi 可用但推荐流是英文）→ 仅在前 4 个全挂时兜底 ──
+    'z-library.sk',
+    '1lib.sk',
+    'article.sk',
+    'articles.sk',
+    'proxy.zlibraryproxies.workers.dev',
   ];
 
   /// 每页加载数量

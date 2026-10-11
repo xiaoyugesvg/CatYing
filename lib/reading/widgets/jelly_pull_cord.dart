@@ -88,7 +88,13 @@ class _JellyPullCordState extends State<JellyPullCord> {
       onTapUp: (_) => setState(() => _pressed = false),
       onTapCancel: () => setState(() => _pressed = false),
       onTap: widget.enabled ? widget.onTap : null,
-      child: cord,
+      // 🔴 热区扩宽：绳子本体只有 6px 宽（环外径），裸热区 6×20
+      //    手指根本点不中（"拉绳点击没反应"的根因）。左右各垫 9px →
+      //    热区 24 宽，视觉不变（Padding 在 GestureDetector 里面）。
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 9),
+        child: cord,
+      ),
     ));
   }
 
@@ -107,7 +113,10 @@ class _JellyPullCordState extends State<JellyPullCord> {
   Widget _constrain(Widget child) {
     if (widget.height == null) return child;
     return SizedBox(
-      height: widget.height,
+      // 🔴 热区高度保底 28：绳自然高 20，若按 20 报高，竖向也只有 20px
+      //    可点。同排按钮都 ≥32，这里报 28 不会撑高行（行高取最大子项），
+      //    绳子仍顶部对齐画 20、下面 8px 是纯热区。
+      height: widget.height! < 28 ? 28 : widget.height,
       child: Align(
         alignment: Alignment.topCenter,
         child: ClipRect(child: child),

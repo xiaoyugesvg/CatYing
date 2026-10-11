@@ -230,13 +230,15 @@ class DiscoverBackdrop extends StatelessWidget {
         ),
 
         // ② 氛围光斑（aurora / midnight）
+        //    alpha 别太保守：0.14 在壁纸上几乎看不出来（用户反馈"切了没效果"），
+        //    提到 0.24/0.20 后三套预设的区别一眼可见。
         if (style.blobs) ...[
           Positioned(
             left: size.width * 0.55,
             top: -size.width * 0.30,
             child: _blob(
               size: size.width * 0.85,
-              color: style.accent.withValues(alpha: 0.14),
+              color: style.accent.withValues(alpha: 0.24),
             ),
           ),
           Positioned(
@@ -244,7 +246,7 @@ class DiscoverBackdrop extends StatelessWidget {
             top: size.height * 0.32,
             child: _blob(
               size: size.width * 0.75,
-              color: style.blue.withValues(alpha: 0.12),
+              color: style.blue.withValues(alpha: 0.20),
             ),
           ),
         ],

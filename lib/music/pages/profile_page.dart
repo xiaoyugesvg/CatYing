@@ -8,6 +8,7 @@ import '../services/settings_store.dart';
 import '../theme/music_theme.dart';
 import '../widgets/floating_play_button.dart';
 import 'music_log_page.dart';
+import 'music_source_settings_page.dart';
 import 'source_manager_page.dart';
 import '../../common/module_theme_store.dart';
 import '../../common/module_theme_sync.dart';
@@ -109,43 +110,56 @@ class ProfilePage extends StatelessWidget {
 
           // ── 音源 ────────────────────────────────────────────
           const _GroupTitle('音源'),
-          // ── 音源记忆（用户 2026 要求）────────────────────────
-          //
-          // 「VIP 歌靠第三方源播成功后，退出去重新点，直接用它上次
-          // 成功的那个源」—— 那是自动的；这里给用户一个**出口**，
-          // 因为记忆是自动学的、用户看不见，记错了得能清掉。
           _groupCard([
-          ValueListenableBuilder<int>(
-            valueListenable: ThirdPartySourceStore.instance.revision,
-            builder: (context, _, __) {
-              final all = ThirdPartySourceStore.instance.all;
-              // 分类计数：让用户一眼看出两类各有几个
-              final lx = all.where((s) => !s.isMusicFree).length;
-              final mf = all.where((s) => s.isMusicFree).length;
-              final sub = all.isEmpty
-                  ? '还没有导入音乐源'
-                  : [
-                      if (lx > 0) '洛雪 $lx',
-                      if (mf > 0) 'MusicFree $mf',
-                    ].join(' · ');
-              return ListTile(
-                leading: _iconBox(Icons.extension_rounded),
-                title: Text('音乐源管理',
-                    style:
-                        TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
-                subtitle: Text(
-                  sub,
-                  style:
-                      TextStyle(color: MusicTheme.secondary, fontSize: AppTheme.fontFootnote),
-                ),
-                trailing: Icon(Icons.chevron_right,
-                    size: 18, color: MusicTheme.secondary),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(settings: const RouteSettings(name: 'music:page'),
-                  builder: (_) => const SourceManagerPage(),
-                )),
-              );
-            },
-          ),
+            // 按平台固定源（音乐 → 我的 → 按平台固定第三方源）
+            ListTile(
+              leading: _iconBox(Icons.tune_rounded),
+              title: Text('按平台固定源',
+                  style: TextStyle(
+                      color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
+              subtitle: Text('网易 / QQ / 酷狗… 各绑几个第三方源，优先自动试用',
+                  style: TextStyle(
+                      color: MusicTheme.secondary,
+                      fontSize: AppTheme.fontFootnote)),
+              trailing: Icon(Icons.chevron_right,
+                  size: 18, color: MusicTheme.secondary),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                settings: const RouteSettings(name: 'music:page'),
+                builder: (_) => const MusicSourceSettingsPage(),
+              )),
+            ),
+            // 源管理（导入/启用/删除第三方音源）
+            ValueListenableBuilder<int>(
+              valueListenable: ThirdPartySourceStore.instance.revision,
+              builder: (context, _, __) {
+                final all = ThirdPartySourceStore.instance.all;
+                final lx = all.where((s) => !s.isMusicFree).length;
+                final mf = all.where((s) => s.isMusicFree).length;
+                final sub = all.isEmpty
+                    ? '还没有导入音乐源'
+                    : [
+                        if (lx > 0) '洛雪 $lx',
+                        if (mf > 0) 'MusicFree $mf',
+                      ].join(' · ');
+                return ListTile(
+                  leading: _iconBox(Icons.extension_rounded),
+                  title: Text('音乐源管理',
+                      style: TextStyle(
+                          color: MusicTheme.label,
+                          fontSize: AppTheme.fontHeadline)),
+                  subtitle: Text(sub,
+                      style: TextStyle(
+                          color: MusicTheme.secondary,
+                          fontSize: AppTheme.fontFootnote)),
+                  trailing: Icon(Icons.chevron_right,
+                      size: 18, color: MusicTheme.secondary),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    settings: const RouteSettings(name: 'music:page'),
+                    builder: (_) => const SourceManagerPage(),
+                  )),
+                );
+              },
+            ),
           // ── 音乐运行日志（用户 2026 要求）────────────────────────
           //
           // 「源切换过程中源不能用的日志在哪看呢？"详情见日志"在哪呢？」

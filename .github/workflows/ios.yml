@@ -94,6 +94,18 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
+      - name: Resolve SPM packages + patch KSPlayer
+        # KSPlayer be7f60d3 的 FFmpegAssetTrack.init 对直播流有裸指针解引用闪退
+        # （Runner-2026-10-11-120910.ips）。远程 SPM 包改不了源码，上游 HEAD
+        # 已转闭源 xcframework —— 只能在构建前给本地检出打防御补丁。
+        # 先显式 resolve 让 checkout 落地，再打补丁；后面的 flutter build ios
+        # 会复用同一份检出（Package.resolved 不变就不会重新拉取覆盖）。
+        run: |
+          set -e
+          xcodebuild -resolvePackageDependencies \
+            -workspace ios/Runner.xcworkspace -scheme Runner
+          bash ios/scripts/patch_ksplayer.sh
+
       - name: Static analysis (errors only)
         # 只把 error 当失败：仓库既有 500+ 条 info 级 lint（风格），不应阻塞构建。
         # 放在 Xcode 构建之前，几秒内就能拦住「类型错误」这类会浪费 25 分钟

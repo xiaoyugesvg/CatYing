@@ -1,20 +1,19 @@
 import 'package:flutter/material.dart';
 
-import '../../../common/theme.dart';
-import '../../../widgets/common_widgets.dart';
-import '../../../music/models/models.dart';
-import '../../../music/models/third_party_source.dart';
-import '../../../music/services/settings_store.dart';
-import 'settings_shared.dart';
+import '../../common/theme.dart';
+import '../models/models.dart';
+import '../models/third_party_source.dart';
+import '../services/settings_store.dart';
+import '../theme/music_theme.dart';
+import '../widgets/music_sheet.dart';
 
-/// 设置 → 音乐源（按平台绑定第三方源）
+/// 音乐 → 我的 → 按平台固定源（网易/QQ 等平台各绑几个第三方源）。
 ///
-/// 用户在第三方源管理页导入音源后，到这里按**平台分类**决定：
-/// 播放某个平台（网易/QQ/酷狗/…）的歌时，优先用哪几个第三方源。
-/// 一个平台可绑**多个**源，播放时按列表顺序逐个先试，全失败再回退其它启用源。
+/// 一个平台可绑**多个**源：播放该平台的歌时按绑定顺序逐个先试，
+/// 第一个出地址的直接用（不弹窗）；全失败再回退内置接口 → 全部启用源。
 ///
 /// 绑定关系存 `SettingsStore.platformSourceBindings`（平台 key → 源 id 列表），
-/// 这里改完即刻生效（播放链路每次都现读）。
+/// 播放链路每次都现读，这里改完即刻生效。
 class MusicSourceSettingsPage extends StatefulWidget {
   const MusicSourceSettingsPage({super.key});
 
@@ -58,14 +57,14 @@ class _MusicSourceSettingsPageState extends State<MusicSourceSettingsPage> {
         .where((id) => candidates.any((s) => s.id == id))
         .toSet();
 
-    final saved = await showModalBottomSheet<bool>(
+    final saved = await showMusicSheet<bool>(
       context: context,
-      backgroundColor: AppTheme.backgroundSecondary,
-      isScrollControlled: true,
+      backgroundColor: MusicTheme.card,
       builder: (ctx) => StatefulBuilder(
         // ⚠️ 必须用 StatefulBuilder 的 setSheet 刷新勾选态 ——
         // 调外层页面的 setState 弹层不会重建（复选框"点不动"的坑）。
         builder: (ctx, setSheet) => SafeArea(
+          top: false,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -75,7 +74,7 @@ class _MusicSourceSettingsPageState extends State<MusicSourceSettingsPage> {
                   alignment: Alignment.centerLeft,
                   child: Text('「${p.displayName}」固定源',
                       style: TextStyle(
-                          color: AppTheme.textPrimary,
+                          color: MusicTheme.label,
                           fontSize: AppTheme.fontHeadline,
                           fontWeight: FontWeight.w600)),
                 ),
@@ -86,10 +85,10 @@ class _MusicSourceSettingsPageState extends State<MusicSourceSettingsPage> {
                   alignment: Alignment.centerLeft,
                   child: Text(
                       candidates.isEmpty
-                          ? '还没有启用中的第三方源，先去音乐 → 我的 → 音乐源导入'
+                          ? '还没有启用中的第三方源，先去「音乐源管理」导入'
                           : '可勾多个：播放该平台歌曲时按下方顺序逐个先试，全失败回退其它源',
                       style: TextStyle(
-                          color: AppTheme.textTertiary,
+                          color: MusicTheme.secondary,
                           fontSize: AppTheme.fontFootnote)),
                 ),
               ),
@@ -101,17 +100,17 @@ class _MusicSourceSettingsPageState extends State<MusicSourceSettingsPage> {
                       CheckboxListTile(
                         value: selected.contains(s.id),
                         controlAffinity: ListTileControlAffinity.leading,
-                        activeColor: AppTheme.accentColor,
+                        activeColor: MusicTheme.tint,
                         title: Text(s.name,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                                color: AppTheme.textPrimary,
+                                color: MusicTheme.label,
                                 fontSize: AppTheme.fontSubhead)),
                         subtitle: Text(
                             '${s.kindLabel}·${s.quality}',
                             style: TextStyle(
-                                color: AppTheme.textTertiary,
+                                color: MusicTheme.secondary,
                                 fontSize: AppTheme.fontCaption)),
                         onChanged: (v) => setSheet(() {
                           if (v ?? false) {
@@ -129,6 +128,10 @@ class _MusicSourceSettingsPageState extends State<MusicSourceSettingsPage> {
                 child: SizedBox(
                   width: double.infinity,
                   child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: MusicTheme.tint,
+                      foregroundColor: Colors.white,
+                    ),
                     onPressed: () => Navigator.pop(ctx, true),
                     child: const Text('保存',
                         style: TextStyle(fontWeight: FontWeight.w600)),
@@ -152,24 +155,74 @@ class _MusicSourceSettingsPageState extends State<MusicSourceSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return SettingsSubPage(
-      title: '音乐源',
-      children: [
-        SettingsGroup(
-          title: '按平台固定第三方源',
-          hint: '绑定后播放该平台的歌会优先用固定源（按顺序逐个试）；'
-              '不绑定则先走内置接口，拿不到地址再试全部启用源。',
-          children: [
-            for (final p in SongSource.values)
-              SettingsRow(
-                icon: _iconFor(p),
-                title: p.displayName,
-                subtitle: _boundNames(p),
-                onTap: () => _editBindings(p),
-              ),
-          ],
+    return Theme(
+      data: MusicTheme.themeData(),
+      child: Scaffold(
+        // 实底背景（不透明）——透明底会透出下层内容，看起来像"没顶栏、被遮住"
+        backgroundColor: MusicTheme.background,
+        appBar: AppBar(
+          backgroundColor: MusicTheme.background,
+          elevation: 0,
+          iconTheme: IconThemeData(color: MusicTheme.label),
+          title: Text('按平台固定源',
+              style: TextStyle(
+                  color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
         ),
-      ],
+        // 源管理页增删/启停源后回来要刷新副标题
+        body: ValueListenableBuilder<int>(
+          valueListenable: ThirdPartySourceStore.instance.revision,
+          builder: (context, _, __) => ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+                child: Text(
+                    '绑定后播放该平台的歌会优先用固定源（按顺序逐个试，第一个能播的直接用，不弹窗）；'
+                    '不绑定则先走内置接口，拿不到地址再试全部启用源。',
+                    style: TextStyle(
+                        color: MusicTheme.secondary,
+                        fontSize: AppTheme.fontFootnote)),
+              ),
+              Material(
+                color: MusicTheme.card,
+                borderRadius: BorderRadius.circular(14),
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  children: [
+                    for (final p in SongSource.values)
+                      ListTile(
+                        leading: Container(
+                          width: 32,
+                          height: 32,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: MusicTheme.tint.withValues(alpha: 0.13),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(_iconFor(p),
+                              size: 17, color: MusicTheme.tint),
+                        ),
+                        title: Text(p.displayName,
+                            style: TextStyle(
+                                color: MusicTheme.label,
+                                fontSize: AppTheme.fontHeadline)),
+                        subtitle: Text(_boundNames(p),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                color: MusicTheme.secondary,
+                                fontSize: AppTheme.fontFootnote)),
+                        trailing: Icon(Icons.chevron_right,
+                            size: 18, color: MusicTheme.secondary),
+                        onTap: () => _editBindings(p),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

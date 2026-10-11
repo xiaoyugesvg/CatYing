@@ -319,7 +319,9 @@ class _LivePageState extends State<LivePage> {
       _player?.pause();
       _avPlayer?.pause();
       _ksPlayer ??= KSPlayer(config: const AppConfig(title: '猫影直播'));
-      _ksPlayer!.open(AppMedia(url, httpHeaders: headers));
+      // live: true → 原生侧 AVPlayer 优先（FFmpeg 拆直播 DVB 数据轨会闪退，
+      // HLS 直播 AVPlayer 原生就能播；rtmp/flv 打不开会自动回退 FFmpeg）
+      _ksPlayer!.open(AppMedia(url, httpHeaders: headers), live: true);
     } else if (Platform.isIOS && !_iosUseMpv) {
       // 默认 AVPlayer 内核（与点播一致，进出小窗/手势一致）
       _player?.pause(); // 若之前用 mpv 在播，先停掉避免双声

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
 import '../../common/theme.dart';
-import 'general_settings_page.dart';
 
 /// 漫画阅读模式分段选项顺序（对齐参考图 IMG_8567 的 5 段 chips：
 /// 右左 / 左右 / 消散 / 无动画 / 拼页；枚举末尾保持旧持久化 index 不变）
@@ -184,35 +183,7 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
               const SizedBox(height: 12),
               _buildInkScreenCard(isDark, s),
               const SizedBox(height: 16),
-              // ── 运行维护（日志入口 —— 原来只藏在「通用设置」里 ✓）────────
-              _sectionTitle('运行维护', isDark),
-              const SizedBox(height: 8),
-              Container(
-                decoration: BoxDecoration(
-                  color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: ListTile(
-                  leading: Icon(Icons.receipt_long_rounded, color: JellyTheme.primary),
-                  title: Text('软件日志',
-                      style: TextStyle(
-                          fontSize: AppTheme.fontHeadline,
-                          fontWeight: FontWeight.bold,
-                          color: isDark ? Colors.white : JellyTheme.textPrimaryLight)),
-                  subtitle: Text('查看 / 清空运行日志（按天分文件）',
-                      style: TextStyle(
-                          fontSize: AppTheme.fontFootnote,
-                          color: JellyTheme.textSecondary)),
-                  trailing: Icon(Icons.chevron_right_rounded,
-                      color: JellyTheme.textSecondary),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const AppLogPage()),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 16),
+              // 「软件日志」入口只保留在「通用设置」里，本页不再重复。
               _sectionTitle('数据', isDark),
               const SizedBox(height: 8),
               Container(
@@ -385,63 +356,74 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
     );
   }
 
-  /// 图书阅读模式卡片：左右 / 上下 / 仿真 / 覆盖 / 无动画（下拉，同漫画模式）
+  /// 图书阅读模式卡片：左右 / 上下 / 仿真 / 覆盖 / 无动画
+  /// （5 段 chips，与上方漫画阅读模式同款交互 —— 用户 2026-10-11：
+  ///   "图书的阅读模式选择界面为啥不能和漫画一样"）
   Widget _buildBookReadingModeCard(bool isDark, SettingsService s) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
         color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  '图书阅读模式',
-                  style: TextStyle(
-                    fontSize: AppTheme.fontHeadline,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '左右：左右平移翻页\n上下：上下平移翻页\n仿真：纸张卷曲翻页\n覆盖：新页滑入覆盖当前页\n无动画：点击直接切换，不滑动',
-                  style: TextStyle(
-                    fontSize: AppTheme.fontFootnote,
-                    color: JellyTheme.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          DropdownButton<BookReadingMode>(
-            value: s.bookReadingMode,
-            underline: const SizedBox(),
-            isDense: true,
+          Text(
+            '图书阅读模式',
             style: TextStyle(
-              fontSize: AppTheme.fontBody,
-              fontWeight: FontWeight.w600,
+              fontSize: AppTheme.fontHeadline,
+              fontWeight: FontWeight.bold,
               color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
             ),
-            dropdownColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-            items: _bookModes
-                .map(
-                  (m) => DropdownMenuItem(
-                    value: m,
-                    child: Text(_bookModeLabels[m]!),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '左右：左右平移翻页\n上下：上下平移翻页\n仿真：纸张卷曲翻页\n覆盖：新页滑入覆盖当前页\n无动画：点击直接切换，不滑动',
+            style: TextStyle(
+              fontSize: AppTheme.fontFootnote,
+              color: JellyTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // 5 段 chips（同漫画阅读模式）
+          Row(
+            children: [
+              for (var i = 0; i < _bookModes.length; i++) ...[
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => s.setBookReadingMode(_bookModes[i]),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: s.bookReadingMode == _bookModes[i]
+                            ? JellyTheme.primary
+                            : (isDark
+                                ? Colors.white.withValues(alpha: 0.08)
+                                : Colors.black.withValues(alpha: 0.05)),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        _bookModeLabels[_bookModes[i]]!,
+                        style: TextStyle(
+                          fontSize: AppTheme.fontBody,
+                          fontWeight: s.bookReadingMode == _bookModes[i]
+                              ? FontWeight.w600
+                              : FontWeight.normal,
+                          color: s.bookReadingMode == _bookModes[i]
+                              ? Colors.white
+                              : (isDark
+                                  ? Colors.white
+                                  : JellyTheme.textPrimaryLight),
+                        ),
+                      ),
+                    ),
                   ),
-                )
-                .toList(),
-            onChanged: (v) {
-              if (v != null) s.setBookReadingMode(v);
-            },
+                ),
+                if (i < _bookModes.length - 1) const SizedBox(width: 6),
+              ],
+            ],
           ),
         ],
       ),

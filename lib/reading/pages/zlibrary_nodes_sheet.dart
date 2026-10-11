@@ -90,6 +90,22 @@ class _ZlibraryNodesSheetState extends State<ZlibraryNodesSheet> {
     setState(() {});
   }
 
+  /// 删除节点 ✓（当前节点被删会自动切到剩余候选的第一个，见 service 注释）
+  Future<void> _removeNode(String domain) async {
+    final removed = await _svc.removeCandidate(domain);
+    if (!mounted) return;
+    if (!removed) return;
+    setState(() {
+      _rows.removeWhere((r) => r.domain == domain);
+      if (_rows.isEmpty) _tested = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('已删除 $domain'
+          '${_svc.hasDomain ? '，当前节点：${_svc.domain}' : '（已没有候选节点，重启后恢复内置节点）'}'),
+      duration: const Duration(seconds: 2),
+    ));
+  }
+
   /// 添加节点 ✓（= 同上：归一化 + 并入候选表 + 落盘 ✓）
   Future<void> _addNode() async {
     final raw = _addCtrl.text.trim();
@@ -189,15 +205,32 @@ class _ZlibraryNodesSheetState extends State<ZlibraryNodesSheet> {
                       style: TextStyle(
                           fontSize: AppTheme.fontCaption, color: sub),
                     ),
-                    trailing: isCurrent
-                        ? Text('当前',
-                            style: TextStyle(
-                                fontSize: AppTheme.fontCaption,
-                                color: JellyTheme.primary))
-                        : TextButton(
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isCurrent)
+                          Text('当前',
+                              style: TextStyle(
+                                  fontSize: AppTheme.fontCaption,
+                                  color: JellyTheme.primary))
+                        else
+                          TextButton(
                             onPressed: () => _switchTo(r.domain),
                             child: const Text('切换'),
                           ),
+                        // ✅ 删除（用户 2026-10-11：「节点我要能删除」）——
+                        //    内置节点也能删；删当前节点会自动切到下一个候选，
+                        //    全删光后下次启动回播内置兜底节点，不会变砖。
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline_rounded,
+                              size: 18),
+                          color: sub,
+                          tooltip: '删除节点',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => _removeNode(r.domain),
+                        ),
+                      ],
+                    ),
                   );
                 },
               ),
@@ -239,7 +272,7 @@ class _ZlibraryNodesSheetState extends State<ZlibraryNodesSheet> {
           ),
           const SizedBox(height: 6),
           Text(
-            '添加会先验证可达性 ✓ 通过后并入候选表并落盘 ✓；内置节点不可删除 ✓（它们是兜底 ✓）',
+            '添加会先验证可达性 ✓ 通过后并入候选表并落盘 ✓；节点可删除（含内置），全删光后重启恢复内置兜底节点 ✓',
             style: TextStyle(fontSize: AppTheme.fontCaption, color: sub, height: 1.4),
           ),
         ],

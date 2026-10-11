@@ -71,7 +71,8 @@ final class KSEngine: NSObject {
         let url = args["url"] as? String ?? ""
         let headers = args["headers"] as? [String: String] ?? [:]
         let posMs = (args["positionMs"] as? NSNumber)?.doubleValue ?? 0
-        self.open(url: url, headers: headers, positionMs: posMs)
+        let live = (args["live"] as? NSNumber)?.boolValue ?? false
+        self.open(url: url, headers: headers, positionMs: posMs, live: live)
         result(nil)
       case "play":
         self.playerLayer?.play()
@@ -139,7 +140,31 @@ final class KSEngine: NSObject {
 
   // MARK: - 播放
 
-  private func open(url: String, headers: [String: String], positionMs: Double) {
+  // MARK: - 直播内核路由
+
+  /// 该直播 URL 是否 AVPlayer 原生就能播（true → AVPlayer 优先，避开 FFmpeg 拆流崩溃路径）。
+  /// 只看 scheme + 路径扩展名；无扩展名的 http(s) 按 HLS 处理（直播源绝大多数是 m3u8，
+  /// 就算判断错了 AVPlayer 报错后也会自动回退 MEPlayer）。
+  private static func avplayerNativeLive(url: URL) -> Bool {
+    let scheme = (url.scheme ?? "").lowercased()
+    // rtmp/rtsp/rtp/udp/srt/mms 等流媒体协议：AVPlayer 直接不认 → FFmpeg 优先
+    if scheme != "http" && scheme != "https" && scheme != "file" {
+      return false
+    }
+    // 扩展名白名单：AVPlayer 原生支持的容器/协议
+    let ext = url.pathExtension.lowercased()
+    if ext.isEmpty { return true } // 无扩展名按 HLS 处理（直播主流）
+    switch ext {
+    case "m3u8", "m3u", "mp4", "m4v", "mov", "3gp", "3gpp",
+         "mp3", "m4a", "aac", "wav", "caf":
+      return true
+    default:
+      // flv / mkv / ts / webm / avi … → FFmpeg 优先
+      return false
+    }
+  }
+
+  private func open(url: String, headers: [String: String], positionMs: Double, live: Bool = false) {
     guard !url.isEmpty, let u = URL(string: url) else {
       emit("onError", arguments: "invalid url")
       return
@@ -163,9 +188,34 @@ final class KSEngine: NSObject {
     if !headers.isEmpty {
       options.appendHeader(headers)
     }
-    // FFmpeg 内核优先（全格式兼容），失败自动回退 KSAVPlayer
-    KSOptions.firstPlayerType = KSMEPlayer.self
-    KSOptions.secondPlayerType = KSAVPlayer.self
+    if live {
+      // 🔴 直播按格式选首发内核（2026-10-11 崩溃报告 Runner-2026-10-11-120910.ips）：
+      //    TS/m3u8 类直播流常带 DVB 数据轨（bin_data/teletext），KSMEPlayer 的
+      //    FFmpegAssetTrack.init(codecpar:) 对这类轨有野指针解引用 →
+      //    EXC_BAD_ACCESS（PAC failure）直接闪退，进程死了连回退都来不及。
+      //    所以 AVPlayer 原生能播的格式（hls/mp4/常见音频）先给 AVPlayer ——
+      //    根本不碰 FFmpeg 崩溃路径；
+      //    flv/mkv/ts/rtmp 等 AVPlayer 本来就不行的格式，直接 FFmpeg 优先 ——
+      //    这才是 FF 核心存在的意义（全格式兜底），不白绕 AVPlayer 一圈。
+      //    两种顺序的首发失败都会经 KSPlayerLayer.finish(error:) 自动回退另一个，
+      //    判断错了也只是慢几秒，不会播不了。
+      if KSEngine.avplayerNativeLive(url: u) {
+        KSOptions.firstPlayerType = KSAVPlayer.self
+        KSOptions.secondPlayerType = KSMEPlayer.self
+      } else {
+        KSOptions.firstPlayerType = KSMEPlayer.self
+        KSOptions.secondPlayerType = KSAVPlayer.self
+      }
+      // 直播低延迟/快起播调优（仅影响 MEPlayer 回退路径与 AVPlayer 缓冲策略）：
+      options.maxBufferDuration = 10        // 默认 30s：直播等于自带 30s 延迟，砍到 10s
+      options.probesize = 1_000_000         // 默认 5MB 探测：直播起播慢的主因之一，砍到 1MB
+      options.maxAnalyzeDuration = 1_000_000 // 默认 5s 拆流分析（微秒）：砍到 1s
+      options.codecLowDelay = true          // FFmpeg low_delay：解码不等重排帧
+    } else {
+      // 点播：FFmpeg 内核优先（MKV/ASS/多音轨全格式），失败自动回退 KSAVPlayer
+      KSOptions.firstPlayerType = KSMEPlayer.self
+      KSOptions.secondPlayerType = KSAVPlayer.self
+    }
 
     // be7f60d 起 KSPlayerLayer 不再是 UIView（改为控制器），画面视图在 player.view
     let l = KSPlayerLayer(url: u, isAutoPlay: true, options: options, delegate: self)
@@ -473,6 +523,10 @@ final class KSPlayerPlatformView: NSObject, FlutterPlatformView {
 
   init(frame: CGRect) {
     host = KSPlayerHostView(frame: frame)
+    // 热切换核心/重建平台视图时，视频层还没渲染出首帧，
+    // 宿主视图不设色会透出 Flutter 平台视图的灰白底（用户实测"切完灰白"）。
+    // 视频区永远是黑的，与 Flutter 侧 Container(color: Colors.black) 对齐。
+    host.backgroundColor = .black
     host.isUserInteractionEnabled = false
     super.init()
     // 晚于 open 创建时挂载现有播放层；早于 open 时由 open 回来挂载

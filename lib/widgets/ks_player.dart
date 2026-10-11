@@ -116,16 +116,25 @@ class KSPlayer extends AppPlayer {
   AppPlayerStateView get state => _KsState(this);
 
   @override
-  Future<void> open(AppMedia media, {bool play = true}) async {
+  Future<void> open(AppMedia media, {bool play = true, bool live = false}) async {
     // 谁最后 open，谁就是共享 KSEngine 的当前主人 → 事件归它
     _activeInstance = this;
     _url = media.url;
     _buffering = true;
     stream.addBuffering(true);
+    // 换台/换集复用同一实例（直播页 _ksPlayer ??= 复用）：旧流的时长/进度
+    // 立即清零并广播，避免新流 ready 前 UI 短暂显示上一台的残留时长
+    _position = Duration.zero;
+    _duration = Duration.zero;
+    stream.addPosition(Duration.zero);
+    stream.addDuration(Duration.zero);
     await _channel.invokeMethod('open', {
       'url': media.url,
       'headers': media.httpHeaders ?? const <String, String>{},
       'positionMs': (media.start?.inMilliseconds ?? 0),
+      // 直播流原生侧 AVPlayer 优先（FFmpeg 拆 DVB 数据轨会野指针闪退，
+      // 见 KSEngine.open 的 live 分支注释）
+      'live': live,
     });
     if (!play) {
       await pause();

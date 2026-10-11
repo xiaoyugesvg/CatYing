@@ -11,7 +11,6 @@ import 'sub/danmu_settings_page.dart';
 import 'sub/data_source_settings_page.dart';
 import 'sub/home_pages_settings_page.dart';
 import 'sub/metadata_settings_page.dart';
-import 'sub/music_source_settings_page.dart';
 import 'sub/playback_settings_page.dart';
 
 /// 设置主页面
@@ -120,13 +119,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: Icons.subtitles,
                 title: '弹幕管理',
                 onTap: () => Get.to(() => const DanmuSettingsPage()),
-              ),
-              const SizedBox(height: AppTheme.spacingMD),
-              // 音乐：按平台分类绑定第三方源（可多个），原来在源管理页逐条设置
-              _categoryTile(
-                icon: Icons.library_music_outlined,
-                title: '音乐源',
-                onTap: () => Get.to(() => const MusicSourceSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingMD),
               _categoryTile(

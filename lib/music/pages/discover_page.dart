@@ -658,68 +658,50 @@ class _DiscoverPageState extends State<DiscoverPage>
     );
   }
 
-  /// 选视觉预设（底部弹窗，三选一 + 一句话说明）
+  /// 选视觉预设（中间弹窗，三选一）
   Future<void> _pickPreset(DiscoverStyle style) async {
     final picked = await showMusicSheet<DiscoverPreset>(
       context: context,
       backgroundColor: MusicTheme.card,
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('发现页外观',
+        // ⚠️ 弹窗高度被 showMusicSheet 限在 ~30% 屏高，内容必须能滚动，
+        //   否则第三个选项被裁掉、点不到（"滑动不了"的来源）
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 2),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('外观',
                       style: TextStyle(
                           color: MusicTheme.label,
                           fontSize: AppTheme.fontTitle3,
                           fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 4),
-                  Text(
-                    // ⚠️ 这句是**必须的**：用户会以为换预设 = 换主题。
-                    // 说清"只改背景与卡片材质，配色仍跟全局主题"，
-                    // 否则他会去报告"换了预设颜色没变"的假 bug。
-                    '只影响发现页的背景与卡片材质；配色仍跟随全局主题（设置 → 主题与外观）。',
-                    style: TextStyle(
-                        color: MusicTheme.secondary,
-                        fontSize: AppTheme.fontCaption,
-                        height: 1.45),
+                ),
+              ),
+              for (final p in DiscoverPreset.values)
+                ListTile(
+                  dense: true,
+                  leading: Icon(
+                    switch (p) {
+                      DiscoverPreset.aurora => Icons.blur_on_rounded,
+                      DiscoverPreset.paper => Icons.layers_outlined,
+                      DiscoverPreset.midnight => Icons.nightlight_round,
+                    },
+                    color: p == _preset ? style.accent : MusicTheme.secondary,
                   ),
-                ],
-              ),
-            ),
-            for (final p in DiscoverPreset.values)
-              ListTile(
-                leading: Icon(
-                  switch (p) {
-                    DiscoverPreset.aurora => Icons.blur_on_rounded,
-                    DiscoverPreset.paper => Icons.layers_outlined,
-                    DiscoverPreset.midnight => Icons.nightlight_round,
-                  },
-                  color: p == _preset ? style.accent : MusicTheme.secondary,
+                  title: Text(p.label,
+                      style: TextStyle(color: MusicTheme.label)),
+                  trailing: p == _preset
+                      ? Icon(Icons.check_rounded, color: style.accent, size: 20)
+                      : null,
+                  onTap: () => Navigator.pop(ctx, p),
                 ),
-                title: Text(p.label,
-                    style: TextStyle(color: MusicTheme.label)),
-                subtitle: Text(
-                  switch (p) {
-                    DiscoverPreset.aurora => '氛围光斑 + 粒子，玻璃质感',
-                    DiscoverPreset.paper => '纯色底 + 实心卡片，最省电',
-                    DiscoverPreset.midnight => '深色渐变舞台',
-                  },
-                  style: TextStyle(
-                      color: MusicTheme.secondary,
-                      fontSize: AppTheme.fontCaption),
-                ),
-                trailing: p == _preset
-                    ? Icon(Icons.check_rounded, color: style.accent, size: 20)
-                    : null,
-                onTap: () => Navigator.pop(ctx, p),
-              ),
-            const SizedBox(height: 8),
-          ],
+              const SizedBox(height: 6),
+            ],
+          ),
         ),
       ),
     );

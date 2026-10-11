@@ -1259,9 +1259,13 @@ JellyIconDeck(
       );
     }
 
-    // 结果：网格/列表用 TabBarView 横向滑动切换（参考下载页，滑块与内容 1:1 同步）
+    // 结果：网格/列表两个视图（切换入口已收进「我的 → 显示设置」）。
+    // 🔴 用 TabBarView 但**禁掉横滑切换**：页面上没有可见的切换控件，
+    //    横滑开着时用户在内容区（尤其右上）随手一划，整页内容就横着
+    //    滑到另一个视图 —— "整体都动了"的误触来源。
     return TabBarView(
       controller: _tabController,
+      physics: const NeverScrollableScrollPhysics(),
       children: [_buildGridView(), _buildListView()],
     );
   }
