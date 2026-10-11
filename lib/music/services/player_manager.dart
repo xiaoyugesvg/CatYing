@@ -556,11 +556,6 @@ class MusicPlayerManager extends ChangeNotifier {
     Map<String, String> sourceHeaders = const {};
     // 这次是不是靠"平台固定源"拿到了地址
     var fromBound = false;
-    // 该平台**配过**固定源且这一轮已经逐个试过（不管最终中没中）。
-    // 命中时 fromBound=true 直接播；全失败时本标志仍为 true —— 后续全源
-    // 回退自动播第一个可用源，不再弹窗（用户 2026-10-11：选了固定源就
-    // 别再让我手选）。
-    var boundTried = false;
     // 本轮试过的固定源 id（全源回退时排除，不重复试）
     var triedBoundIds = <String>{};
 
@@ -604,8 +599,6 @@ class MusicPlayerManager extends ChangeNotifier {
       // 提到外层：全源回退 resolveAll 时要排除这批刚试过的固定源
       triedBoundIds = boundIds.toSet();
       if (boundIds.isNotEmpty) {
-        // 配过固定源：无论成败，下面的全源回退都不再弹窗（自动直出第一个）
-        boundTried = true;
         final enabled = ThirdPartySourceStore.instance.enabled;
         // 按绑定顺序逐个试，第一个给出地址的直接用（不弹窗——这就是"固定"的意义）
         for (final boundId in boundIds) {
@@ -642,8 +635,14 @@ class MusicPlayerManager extends ChangeNotifier {
       }
     }
 
-    // 命中记忆时**根本不该再请求内置接口** —— 那正是"记住它、直接用"的意义
-    //（既能省一次网络往返，也避免内置接口的慢直链把好地址盖掉）。
+    // 固定源已命中（fromBound）：url/headers/quality 已在上方就位。
+    // 这里用失败占位**跳过内置接口请求**——绝不能真去请求内置，
+    // 否则内置的慢直链/失败会把固定源的好地址盖掉。
+    // 占位 ok=false 不会误进失败分支：下方回退块是 `else if (!fromBound)`，
+    // fromBound 时整块跳过，直接落到底部 _startPlayback 播固定源的地址。
+    // （🔴 之前回退块条件没排除 fromBound，固定源命中反而落进
+    //    「内置接口取地址失败」报错分支 —— 这就是"固定了能播的源
+    //    却完全没生效"的根因。）
     final r = fromBound
         ? MusicUrlInfo(ok: false, url: '', type: '')
         : (localPath.isNotEmpty
@@ -659,7 +658,7 @@ class MusicPlayerManager extends ChangeNotifier {
       quality = r.qualityText;
       // 直链命中时补源名（否则播放器下方"来源"是空的）
       if (direct) fromSource = song.source.displayName;
-    } else {
+    } else if (!fromBound) {
       final builtinMsg = r.noFreeSource
           ? '内置接口没有免费音源'
           : (r.message.isNotEmpty ? r.message : '内置接口取地址失败');
@@ -695,15 +694,14 @@ class MusicPlayerManager extends ChangeNotifier {
         if (epoch != _loadEpoch) return; // 期间用户又点了别的歌
 
         if (results.isNotEmpty) {
-          // 配过固定源的模式：固定源全挂后自动用全源回退的第一个结果直出，
-          // **不弹窗**（用户 2026-10-11：选了固定源就直接播，别让我再选）。
-          // 没 context（冷启动/耳机线控）同理直出。
+          // 2026-10-12 用户：固定源失败后其余源试完**弹窗让我选**，
+          // 不要自动直出第一个（同一个源对不同歌可用性差别大，用户自己挑）。
+          // 只有没有弹窗 context（冷启动/耳机线控）时才自动用第一个可用源。
           final ctx = _pickerCtxOrNull;
-          if (boundTried || ctx == null) {
+          if (ctx == null) {
             final first = results.first;
             AppLog.instance.log(
-                '[Music] ${boundTried ? "平台固定源均失败，全源回退" : "无弹窗 context"} → '
-                '直接用第一个可用源：${first.source?.name}'
+                '[Music] 无弹窗 context → 直接用第一个可用源：${first.source?.name}'
                 '（${results.length} 个可用）');
             // 让用户知道这次没走固定源、实际用了谁；开播成功后会被清掉
             lastError.value = '固定源暂不可用，已改用「${first.source?.name ?? ''}」';
