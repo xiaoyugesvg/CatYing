@@ -237,6 +237,15 @@ final class KSEngine: NSObject {
       pipEventActive = false
     }
     playerLayer?.player.view?.removeFromSuperview()
+    // 🔴 必须显式 stop()，不能只置 nil：KSPlayerLayer.deinit 不调 shutdown，
+    // 只置 nil 时旧 MEPlayerItem 的 openThread（可能正阻塞在
+    // avformat_open_input / find_stream_info 网络等待，或正在 createCodec 拆轨）
+    // 没人中断，会一直挂到网络超时。连续切多个台/多条线路时这些拆流线程会
+    // 叠加并存 —— 野流（DVB 数据轨）越多，踩中 FFmpegAssetTrack 野指针的
+    // 窗口越大（"一个源能播、多弄几个源就容易出事"的根因）。
+    // stop() → player.shutdown()：state=.closed → 中断回调让阻塞的网络 I/O
+    // 立刻返回 → openOperation 结束 → closeOperation avformat_close_input 收尾。
+    playerLayer?.stop()
     playerLayer = nil
   }
 

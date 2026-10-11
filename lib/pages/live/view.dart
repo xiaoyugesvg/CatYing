@@ -112,6 +112,13 @@ class _LivePageState extends State<LivePage> {
   /// 是否已成功开过流（切回直播 tab 时用于"恢复播放"而非重新拉流）
   bool _everOpened = false;
 
+  /// 最近一次 open 的地址与时间：短时间内同地址的重复调用（手势连发、
+  /// autoplay/位置回调/动画回调重入）直接忽略，避免同一流被重复拆流。
+  /// 多源多线路快速切换时，这些重复 open 会让原生侧拆流线程无谓叠加。
+  String? _lastOpenUrl;
+  DateTime? _lastOpenAt;
+  static const _repeatOpenWindow = Duration(milliseconds: 800);
+
   @override
   void initState() {
     super.initState();
@@ -272,6 +279,16 @@ class _LivePageState extends State<LivePage> {
 
   void _playChannel(String url) {
     if (url.isEmpty) return;
+    // 同地址在窗口内的重复 open 直接吞掉（切台手势连发、autoplay/回调重入）。
+    // 不同地址的主动切台/换线路一律放行；800ms 后的手动重试也不受影响。
+    final now = DateTime.now();
+    if (_lastOpenUrl == url &&
+        _lastOpenAt != null &&
+        now.difference(_lastOpenAt!) < _repeatOpenWindow) {
+      return;
+    }
+    _lastOpenUrl = url;
+    _lastOpenAt = now;
     _everOpened = true;
     _playError = null;
     // 直播要出声了 → 让点播/音乐先闭嘴（AudioFocus 三方互斥：
