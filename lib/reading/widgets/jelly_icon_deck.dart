@@ -86,6 +86,9 @@ class _JellyIconDeckState extends State<JellyIconDeck> {
   /// 是否正在横向拖动（拖动中禁用长按，避免两个手势打架）
   bool _dragging = false;
 
+  /// 手指纵向拖动的累计位移（px）：**下滑** → 展开竖列（用户 2026-10-12 新增）。
+  double _dragDy = 0;
+
   /// 收起态的总宽：第一个占满 size，其余每个只多露 overlap。
   double get _collapsedWidth =>
       widget.size + (widget.items.length - 1) * widget.overlap;
@@ -185,6 +188,28 @@ class _JellyIconDeckState extends State<JellyIconDeck> {
         _dragging = false;
         _dragDx = 0;
       }),
+      // ── 纵向拖动：**下滑** → 展开竖列（用户 2026-10-12 新增）──
+      //   与横向拖动并存：方向不同，手势竞技场自动分流 ✓
+      onVerticalDragStart: (_) => setState(() {
+        _dragging = true;
+        _dragDy = 0;
+      }),
+      onVerticalDragUpdate: (d) => setState(() {
+        _dragDy = (_dragDy + d.delta.dy).clamp(-40, 40);
+      }),
+      onVerticalDragEnd: (d) {
+        final v = d.primaryVelocity ?? 0;
+        setState(() {
+          _dragging = false;
+          // 下滑（正位移或正速度）→ 展开成竖列
+          if (_dragDy > 10 || v > 120) _expanded = true;
+          _dragDy = 0;
+        });
+      },
+      onVerticalDragCancel: () => setState(() {
+        _dragging = false;
+        _dragDy = 0;
+      }),
       // 长按 ⇒ 竖向展开 ✓（拖动中不触发，避免手势打架）
       onLongPress: _dragging ? null : () => setState(() => _expanded = true),
       onLongPressUp: () => setState(() => _expanded = false),
@@ -196,8 +221,9 @@ class _JellyIconDeckState extends State<JellyIconDeck> {
   double _leftOf(int i) {
     final n = widget.items.length;
     final rel = (i - _front) % n; // 0 = 最前
-    // 拖动中整叠跟着手指挪 ⇒ 有"在滑动"的手感 ✓
-    return rel * widget.overlap + _dragDx;
+    // 🔴 用户 2026-10-12：滑动时**整叠不要跟着手指移动** ——
+    //   只做"切换图标"即可，不再叠加 `_dragDx` 的跟手位移 ✓
+    return rel * widget.overlap;
   }
 
   /// 画叠层时的深度：越靠前（rel 越小）画得越晚 ✓。
@@ -213,6 +239,12 @@ class _JellyIconDeckState extends State<JellyIconDeck> {
       behavior: HitTestBehavior.opaque,
       onLongPressUp: () => setState(() => _expanded = false),
       onTap: () => setState(() => _expanded = false),
+      // 上滑（负速度）→ 收回叠图标（用户 2026-10-12：下滑展开的对称操作）
+      onVerticalDragEnd: (d) {
+        if ((d.primaryVelocity ?? 0) < -120) {
+          setState(() => _expanded = false);
+        }
+      },
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

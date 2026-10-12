@@ -6,10 +6,12 @@ import 'package:flutter/services.dart';
 
 import '../../common/theme.dart';
 import '../models/book_source.dart';
+import '../models/comic.dart';
 import '../services/book_download_service.dart';
 import '../services/book_reading_progress_service.dart';
 import '../services/book_source_download_service.dart';
 import '../services/book_source_service.dart';
+import '../services/download_service.dart';
 import '../services/platform_service.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
@@ -17,13 +19,15 @@ import '../utils/list_pagination.dart';
 import '../widgets/jelly_search_bar.dart';
 import 'book_reader_page.dart';
 import 'book_source_detail_page.dart';
+import 'reader_page.dart';
 
 /// 下载记录页（参考目标界面 IMG_8397）：
-/// 标题「下载记录」+ 搜索框 + 5 个状态 tab（下载中/已下载/失败/已暂停/已取消）
-/// + 共 N 本统计 + 任务列表 / 空态「该状态下暂无记录」。
+/// 分段切换（漫画 | 图书）+ 搜索框 + 5 个状态胶囊
+/// （下载中/已下载/失败/已暂停/已取消）+ 共 N 本统计 + 任务列表 / 空态「该状态下暂无记录」。
 ///
 /// 从图书页聚合菜单「下载」进入；底部导航的「下载」管理页保持原样。
-/// 数据只覆盖图书下载任务（[BookDownloadService]），漫画下载仍走主下载页。
+/// 「图书」段 = 图书下载任务（[BookDownloadService]）；
+/// 「漫画」段 = 漫画下载任务（[DownloadService]）。
 class BookDownloadRecordsPage extends StatefulWidget {
   const BookDownloadRecordsPage({super.key});
 
@@ -41,6 +45,9 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
   int _statusIndex = 0;
   int _displayCount = ListPagination.pageSize;
 
+  /// 分段：0=漫画，1=图书（默认图书，保持本页原有行为）
+  int _segment = 1;
+
   @override
   void initState() {
     super.initState();
@@ -57,7 +64,8 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
 
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    final total = _filtered().length;
+    final total =
+        _segment == 0 ? _filteredComic().length : _filtered().length;
     if (ListPagination.shouldLoadMore(_scrollController) &&
         _displayCount < total) {
       setState(
@@ -108,6 +116,47 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
     return tasks;
   }
 
+  /// 漫画下载任务：按状态 tab + 关键词过滤（最新在前）——复用 [DownloadService]
+  List<DownloadTask> _filteredComic() {
+    var tasks = DownloadService().tasks.values.toList().reversed.toList();
+    switch (_statusIndex) {
+      case 0:
+        tasks = tasks
+            .where(
+              (t) =>
+                  t.status == DownloadStatus.queued ||
+                  t.status == DownloadStatus.downloading,
+            )
+            .toList();
+      case 1:
+        tasks = tasks
+            .where((t) => t.status == DownloadStatus.completed)
+            .toList();
+      case 2:
+        tasks = tasks
+            .where((t) => t.status == DownloadStatus.failed)
+            .toList();
+      case 3:
+        tasks = tasks
+            .where((t) => t.status == DownloadStatus.paused)
+            .toList();
+      case 4:
+        // 已取消：任务取消即移除，无持久化状态 → 该 tab 恒为空态
+        tasks = const [];
+    }
+    final kw = _keyword.trim().toLowerCase();
+    if (kw.isNotEmpty) {
+      tasks = tasks
+          .where(
+            (t) =>
+                t.comicTitle.toLowerCase().contains(kw) ||
+                t.chapterTitle.toLowerCase().contains(kw),
+          )
+          .toList();
+    }
+    return tasks;
+  }
+
   Future<void> _openDownloadDir() async {
     final dir = await SettingsService.downloadBaseDir();
     final ok = await PlatformService.openDirectory(dir.path);
@@ -150,21 +199,28 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
         listenable: Listenable.merge([
           BookDownloadService(),
           BookSourceDownloadService.instance.revision,
+          DownloadService(),
         ]),
         builder: (context, _) {
-          final tasks = _filtered();
+          final isComic = _segment == 0;
+          final comicTasks =
+              isComic ? _filteredComic() : const <DownloadTask>[];
+          final bookTasks = isComic ? const <BookDownloadTask>[] : _filtered();
+          final count = isComic ? comicTasks.length : bookTasks.length;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 搜索行：搜索框 + 右侧文件夹图标（与漫画下载记录页一致）
+              // 搜索行：分段切换（漫画|图书）+ 搜索框 + 右侧方形文件夹图标
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
                 child: Row(
                   children: [
+                    _buildSegmentSwitch(),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: JellySearchBar(
                         controller: _searchController,
-                        hintText: '搜索图书',
+                        hintText: isComic ? '搜索漫画' : '搜索图书',
                         onChanged: (v) => setState(() {
                           _keyword = v;
                           _displayCount = ListPagination.pageSize;
@@ -180,18 +236,21 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
                   ],
                 ),
               ),
-              _buildStatusTabs(isDark),
-              _buildSourceDownloads(isDark),
-              ListPaginationCountBar(total: tasks.length, unit: '本'),
+              _buildStatusTabs(isDark, count),
+              if (!isComic) _buildSourceDownloads(isDark),
+              ListPaginationCountBar(total: count, unit: '本'),
               Expanded(
-                child: tasks.isEmpty
+                child: count == 0
                     ? _buildEmpty()
                     : ListView.builder(
                         controller: _scrollController,
                         padding: const EdgeInsets.fromLTRB(0, 4, 0, 16),
-                        itemCount: min(tasks.length, _displayCount),
-                        itemBuilder: (context, i) =>
-                            _buildTaskTile(tasks[i], isDark),
+                        itemCount: isComic
+                            ? min(comicTasks.length, _displayCount)
+                            : min(bookTasks.length, _displayCount),
+                        itemBuilder: (context, i) => isComic
+                            ? _buildComicTaskTile(comicTasks[i], isDark)
+                            : _buildTaskTile(bookTasks[i], isDark),
                       ),
               ),
             ],
@@ -201,10 +260,54 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
     );
   }
 
+  /// 分段切换：漫画（左）/ 图书（右）。选中项实底圆角高亮，未选中透明。
+  Widget _buildSegmentSwitch() {
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildSegmentItem(0, Icons.auto_stories_rounded), // 漫画
+          _buildSegmentItem(1, Icons.menu_book_rounded), // 图书
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSegmentItem(int index, IconData icon) {
+    final selected = _segment == index;
+    return GestureDetector(
+      onTap: () => setState(() {
+        _segment = index;
+        _displayCount = ListPagination.pageSize;
+      }),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: 34,
+        height: 32,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected ? JellyTheme.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(
+          icon,
+          size: 18,
+          color: selected ? Colors.white : JellyTheme.textSecondary,
+        ),
+      ),
+    );
+  }
+
   Widget _buildOpenDirButton(bool isDark) {
     return Material(
       color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-      shape: const CircleBorder(),
+      borderRadius: BorderRadius.circular(10),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: _openDownloadDir,
@@ -412,46 +515,81 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
     );
   }
 
-  /// 状态 tab：等分 5 列（与漫画下载记录页一致，参考图 IMG_8464）
-  Widget _buildStatusTabs(bool isDark) {
-    return Container(
-      height: 40,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: [
-          for (var i = 0; i < _tabs.length; i++) ...[
-            if (i > 0) const SizedBox(width: 4),
+  /// 状态标签行：5 个横向胶囊（选中实底高亮）+ 最右侧数字角标（当前选中状态条数）。
+  Widget _buildStatusTabs(bool isDark, int count) {
+    return SizedBox(
+      height: 42,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          children: [
             Expanded(
-              child: GestureDetector(
-                onTap: () => setState(() {
-                  _statusIndex = i;
-                  _displayCount = ListPagination.pageSize;
-                }),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: _statusIndex == i
-                        ? JellyTheme.primary.withValues(alpha: 0.12)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    _tabs[i],
-                    style: TextStyle(
-                      fontSize: AppTheme.fontSubhead,
-                      fontWeight:
-                          _statusIndex == i ? FontWeight.w700 : FontWeight.w500,
-                      color: _statusIndex == i
-                          ? JellyTheme.primary
-                          : (isDark ? Colors.white70 : JellyTheme.textSecondary),
-                    ),
-                  ),
-                ),
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _tabs.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (context, i) =>
+                    Center(child: _buildStatusPill(i, isDark)),
               ),
             ),
+            const SizedBox(width: 8),
+            _buildStatusBadge(count),
           ],
-        ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusPill(int i, bool isDark) {
+    final selected = _statusIndex == i;
+    final borderColor = isDark
+        ? Colors.white.withValues(alpha: 0.1)
+        : JellyTheme.primary.withValues(alpha: 0.2);
+    return GestureDetector(
+      onTap: () => setState(() {
+        _statusIndex = i;
+        _displayCount = ListPagination.pageSize;
+      }),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? JellyTheme.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected ? Colors.transparent : borderColor,
+            width: 0.5,
+          ),
+        ),
+        child: Text(
+          _tabs[i],
+          style: TextStyle(
+            fontSize: AppTheme.fontSubhead,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected
+                ? Colors.white
+                : (isDark ? Colors.white70 : JellyTheme.textSecondary),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 小数字角标：显示当前状态下的真实条数
+  Widget _buildStatusBadge(int count) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: JellyTheme.primary.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        '$count',
+        style: TextStyle(
+          fontSize: AppTheme.fontCaption,
+          fontWeight: FontWeight.w700,
+          color: JellyTheme.primary,
+        ),
       ),
     );
   }
@@ -724,6 +862,269 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
         return JellyTheme.primary;
       case BookDownloadStatus.queued:
       case BookDownloadStatus.paused:
+        return JellyTheme.textSecondary;
+    }
+  }
+
+  // ─────────────────────── 漫画段渲染（[DownloadService]） ───────────────────────
+
+  Widget _buildComicTaskTile(DownloadTask t, bool isDark) {
+    final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    final card = Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          children: [
+            _buildComicCover(t.comicCover, isDark),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    t.chapterTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: AppTheme.fontBody,
+                      fontWeight: FontWeight.w700,
+                      color: titleColor,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    t.comicTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: AppTheme.fontFootnote,
+                      color: JellyTheme.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Flexible(
+                    child: Text(
+                      _comicStatusText(t),
+                      style: TextStyle(
+                        fontSize: AppTheme.fontCaption,
+                        color: _comicStatusColor(t),
+                      ),
+                    ),
+                  ),
+                  if (t.status == DownloadStatus.downloading ||
+                      t.status == DownloadStatus.queued) ...[
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: LinearProgressIndicator(
+                        value: t.status == DownloadStatus.queued
+                            ? null
+                            : (t.totalImages > 0
+                                ? t.downloadedImages / t.totalImages
+                                : 0),
+                        minHeight: 4,
+                        backgroundColor:
+                            (isDark ? Colors.white : Colors.black)
+                                .withValues(alpha: 0.1),
+                        color: JellyTheme.primary,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            _buildComicTaskActions(t),
+          ],
+        ),
+      ),
+    );
+
+    switch (t.status) {
+      case DownloadStatus.completed:
+        return GestureDetector(
+          onTap: () => _readComicChapter(t),
+          child: card,
+        );
+      case DownloadStatus.failed:
+        return GestureDetector(
+          onTap: () => _showComicFailureDetail(t),
+          child: card,
+        );
+      default:
+        return card;
+    }
+  }
+
+  Widget _buildComicCover(String cover, bool isDark) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: CachedNetworkImage(
+        imageUrl: cover,
+        width: 48,
+        height: 64,
+        fit: BoxFit.cover,
+        placeholder: (c, u) => Container(
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+          width: 48,
+          height: 64,
+        ),
+        errorBuilder: (c, e, s) => Container(
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+          width: 48,
+          height: 64,
+          child: Icon(Icons.auto_stories_rounded,
+              size: 20, color: JellyTheme.textSecondary),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildComicTaskActions(DownloadTask t) {
+    switch (t.status) {
+      case DownloadStatus.queued:
+      case DownloadStatus.downloading:
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.pause_rounded, size: 20),
+              tooltip: '暂停',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => DownloadService().pauseTask(t.key),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close_rounded, size: 20),
+              tooltip: '取消',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => DownloadService().cancelTask(t.key),
+            ),
+          ],
+        );
+      case DownloadStatus.paused:
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.play_arrow_rounded, size: 20),
+              tooltip: '继续',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => DownloadService().resumeTask(t.key),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close_rounded, size: 20),
+              tooltip: '取消',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => DownloadService().cancelTask(t.key),
+            ),
+          ],
+        );
+      case DownloadStatus.failed:
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded, size: 20),
+              tooltip: '重试',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => DownloadService().retryTask(t.key),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close_rounded, size: 20),
+              tooltip: '取消',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => DownloadService().cancelTask(t.key),
+            ),
+          ],
+        );
+      case DownloadStatus.completed:
+        return const SizedBox.shrink();
+    }
+  }
+
+  /// 阅读单个已下载漫画章节（离线：仅本漫画已下载章节）
+  void _readComicChapter(DownloadTask t) {
+    final chapters = DownloadService().downloadedChapters(t.comicPathWord);
+    final idx = chapters.indexWhere((c) => c.id == t.chapterId);
+    if (idx < 0) return;
+    final comic = Comic(
+      id: t.comicPathWord,
+      title: t.comicTitle,
+      cover: t.comicCover,
+      pathWord: t.comicPathWord,
+      sourceId: t.sourceId,
+    );
+    final group = ChapterGroup(
+      id: 'default',
+      name: '默认',
+      count: chapters.length,
+      chapters: chapters,
+    );
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ReaderPage(
+          comic: comic,
+          chapter: chapters[idx],
+          groups: [group],
+          initialPage: 0,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showComicFailureDetail(DownloadTask t) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(t.chapterTitle),
+        content: Text(
+          t.error?.isNotEmpty == true ? t.error! : '下载失败',
+          style: const TextStyle(fontSize: AppTheme.fontSubhead),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _comicStatusText(DownloadTask t) {
+    switch (t.status) {
+      case DownloadStatus.queued:
+        return '排队中';
+      case DownloadStatus.downloading:
+        final pct = t.totalImages > 0
+            ? ((t.downloadedImages / t.totalImages) * 100).toInt()
+            : 0;
+        return '下载中 $pct%';
+      case DownloadStatus.completed:
+        return '已下载';
+      case DownloadStatus.failed:
+        return '下载失败';
+      case DownloadStatus.paused:
+        return '已暂停';
+    }
+  }
+
+  Color _comicStatusColor(DownloadTask t) {
+    switch (t.status) {
+      case DownloadStatus.completed:
+        return JellyTheme.primary;
+      case DownloadStatus.failed:
+        return JellyTheme.error;
+      case DownloadStatus.downloading:
+        return JellyTheme.primary;
+      case DownloadStatus.queued:
+      case DownloadStatus.paused:
         return JellyTheme.textSecondary;
     }
   }

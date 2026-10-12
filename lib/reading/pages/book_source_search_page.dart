@@ -1359,6 +1359,36 @@ JellyIconDeck(
     return '$n 章';
   }
 
+  /// 封面左上角作者角标：白字 + **透明灰底**（用户 2026-10-12：
+  /// 原来只有白字加阴影，浮在封面上没有依托）。
+  Widget _authorBadge(String author) {
+    return Positioned(
+      top: 4,
+      left: 4,
+      right: 36,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.38),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            author,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: AppTheme.fontCaption,
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 分类网格条目：竖版封面 + 书名 + 作者（点击直接进详情）
   Widget _exploreTile(BookSourceResult r) {
     return InkWell(
@@ -1399,57 +1429,20 @@ JellyIconDeck(
                         ),
                 ),
               ),
-              if (r.author.trim().isNotEmpty)
-                Positioned(
-                  top: 4,
-                  left: 4,
-                  right: 36,
-                  child: Text(
-                    r.author,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: AppTheme.fontCaption,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      shadows: [
-                        Shadow(blurRadius: 4, color: Colors.black87),
-                        Shadow(blurRadius: 1, color: Colors.black),
-                      ],
-                    ),
-                  ),
-                ),
-              if (r.author.trim().isNotEmpty)
-                Positioned(
-                  top: 4,
-                  left: 4,
-                  right: 36,
-                  child: Text(
-                    r.author,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: AppTheme.fontCaption,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      shadows: [
-                        Shadow(blurRadius: 4, color: Colors.black87),
-                        Shadow(blurRadius: 1, color: Colors.black),
-                      ],
-                    ),
-                  ),
-                ),
+              if (r.author.trim().isNotEmpty) _authorBadge(r.author),
+              // 最新章节角标：**右下角** + 透明灰底（用户 2026-10-12：
+              // 原来在右上角、还是红色，太抢眼）
               if (_chapterBadgeText(r.lastChapter) != null)
                 Positioned(
-                  top: 4,
                   right: 4,
+                  bottom: 4,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 5,
                       vertical: 2,
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFE5484D).withValues(alpha: 0.92),
+                      color: Colors.black.withValues(alpha: 0.38),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
@@ -1914,48 +1907,8 @@ JellyIconDeck(
                           placeholder: (_, __) => _bookCoverPlaceholder(),
                           errorWidget: (_, __, ___) => _bookCoverPlaceholder(),
                         ),
-                  // 左上角作者角标（✅ 2026-10-10 用户：作者行去掉，上封面左上角）
-                  if (first.author.trim().isNotEmpty)
-                    Positioned(
-                      top: 4,
-                      left: 4,
-                      right: 36,
-                      child: Text(
-                        first.author,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: AppTheme.fontCaption,
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          shadows: [
-                            Shadow(blurRadius: 4, color: Colors.black87),
-                            Shadow(blurRadius: 1, color: Colors.black),
-                          ],
-                        ),
-                      ),
-                    ),
-                  // 左上角作者角标（✅ 2026-10-10 用户：作者行去掉，上封面左上角）
-                  if (first.author.trim().isNotEmpty)
-                    Positioned(
-                      top: 4,
-                      left: 4,
-                      right: 36,
-                      child: Text(
-                        first.author,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: AppTheme.fontCaption,
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          shadows: [
-                            Shadow(blurRadius: 4, color: Colors.black87),
-                            Shadow(blurRadius: 1, color: Colors.black),
-                          ],
-                        ),
-                      ),
-                    ),
+                  // 左上角作者角标：透明灰底（用户 2026-10-12）
+                  if (first.author.trim().isNotEmpty) _authorBadge(first.author),
                   // 多源角标（>1 个来源才显示，提示可换源）
                   if (g.items.length > 1)
                     Positioned(

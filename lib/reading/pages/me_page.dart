@@ -11,7 +11,6 @@ import '../widgets/bookshelf_icon.dart';
 import '../widgets/jelly_nav_bar.dart';
 import '../widgets/me_account_quick_entries.dart';
 import '../widgets/staggered_entrance.dart';
-import '../widgets/guide_overlay.dart';
 import 'book_search_page.dart';
 import 'bookshelf_page.dart';
 import 'browse_history_page.dart';
@@ -46,24 +45,11 @@ class MePage extends StatefulWidget {
 class _MePageState extends State<MePage> {
   int _session = 0; // 首次切到"我的" tab 时 +1，触发卡片入场动画
   bool _hasShownEntrance = false; // 是否已播过首次入场动画
-  bool _guideShown = false; // 新手引导已展示标记
   final GlobalKey _themeToggleKey = GlobalKey(); // 暗色模式切换按钮（量取圆形扩散动画起点）
   String? _switchingTo; // 主题切换中（主题风格面板内 loading 遮罩用）
 
-  @override
-  void initState() {
-    super.initState();
-    _maybeTriggerGuide();
-  }
-
-  /// 首次激活时展示"我的"页新手引导（仅一次）
-  void _maybeTriggerGuide() {
-    if (_guideShown || !widget.isActive) return;
-    _guideShown = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) maybeShowGuide(context, GuideGroups.me);
-    });
-  }
+  /// 账号卡顶部让位高度：右上角快捷条从这里"露出上沿"（见 [_buildAccountCard]）
+  static const double _quickPeek = 28;
 
   @override
   void didUpdateWidget(covariant MePage oldWidget) {
@@ -73,7 +59,6 @@ class _MePageState extends State<MePage> {
       _hasShownEntrance = true;
       setState(() => _session++);
     }
-    if (widget.isActive && !oldWidget.isActive) _maybeTriggerGuide();
   }
 
   @override
@@ -159,88 +144,30 @@ class _MePageState extends State<MePage> {
                   spacing: spacing,
                   runSpacing: spacing,
                   children: [
+                    // 1. 主题风格
                     StaggeredEntrance(
-                      key: ValueKey('${_session}_0'),
+                      key: ValueKey('${_session}_theme_style'),
                       index: 0,
                       child: SizedBox(
                         width: itemWidth,
                         child: ListenableBuilder(
                           listenable: SettingsService(),
-                          builder: (context, _) => _buildSwitchTile(
+                          builder: (context, _) => _buildMenuItem(
                             isDark,
-                            icon: Icons.lock_person_rounded,
+                            icon: Icons.palette_rounded,
                             iconBg: JellyTheme.primary,
-                            title: '图书使用内置账号',
-                            subtitle: '关闭后需登录才能下载',
-                            value: SettingsService().useBuiltinAccount,
-                            onChanged: SettingsService().setUseBuiltinAccount,
+                            title: '主题风格',
+                            subtitle:
+                                '当前：${SettingsService().currentThemeInfo.name}',
+                            onTap: _showThemePresetSheet,
                           ),
                         ),
                       ),
                     ),
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_theme_follow'),
-                      index: 2,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: ListenableBuilder(
-                          listenable: SettingsService(),
-                          builder: (context, _) => _buildSwitchTile(
-                            isDark,
-                            icon: Icons.brightness_auto_rounded,
-                            iconBg: JellyTheme.primary,
-                            title: '主题跟随系统',
-                            subtitle: '随系统明暗自动切换',
-                            value: SettingsService().themeFollowSystem,
-                            onChanged: SettingsService().setThemeFollowSystem,
-                          ),
-                        ),
-                      ),
-                    ),
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_theme_style'),
-                      index: 3,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: ListenableBuilder(
-                          listenable: SettingsService(),
-                          builder: (context, _) {
-                            return _buildMenuItem(
-                              isDark,
-                              icon: Icons.palette_rounded,
-                              iconBg: JellyTheme.primary,
-                              title: '主题风格',
-                              subtitle:
-                                  '当前：${SettingsService().currentThemeInfo.name}',
-                              onTap: _showThemePresetSheet,
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_4'),
-                      index: 4,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.auto_stories_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '阅读设置',
-                          subtitle: '漫画阅读模式：翻页 / 拼页',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ReadingSettingsPage(),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
+                    // 2. 显示设置
                     StaggeredEntrance(
                       key: ValueKey('${_session}_5'),
-                      index: 5,
+                      index: 1,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -248,7 +175,7 @@ class _MePageState extends State<MePage> {
                           icon: Icons.tune_rounded,
                           iconBg: JellyTheme.primary,
                           title: '显示设置',
-                          subtitle: '漫画 / 图书搜索页视图',
+                          subtitle: '搜索页视图 · 默认首页 · 封面与书架样式',
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -258,11 +185,32 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 漫画源仓库 —— 服务**漫画**（SiteConfig 网页源，取图片）
+                    // 3. 阅读设置
+                    StaggeredEntrance(
+                      key: ValueKey('${_session}_4'),
+                      index: 2,
+                      child: SizedBox(
+                        width: itemWidth,
+                        child: _buildMenuItem(
+                          isDark,
+                          icon: Icons.auto_stories_rounded,
+                          iconBg: JellyTheme.primary,
+                          title: '阅读设置',
+                          subtitle: '漫画 / 图书阅读模式：翻页 · 上下',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ReadingSettingsPage(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // 4. 漫画源仓库 —— 服务**漫画**（SiteConfig 网页源，取图片）
                     // 与下面的「书源仓库」是两个独立体系，别合并
                     StaggeredEntrance(
                       key: ValueKey('${_session}_source_repo'),
-                      index: 6,
+                      index: 3,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -280,7 +228,7 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 小说书源仓库 —— 服务**小说**（Legado BookSource，取文字）
+                    // 5. 书源仓库 —— 服务**小说**（Legado BookSource，取文字）
                     //
                     // 与「漫画源仓库」是**两套独立体系**：
                     //   漫画源 = SiteConfig（取图片）
@@ -288,7 +236,7 @@ class _MePageState extends State<MePage> {
                     // 老桌面版也是分开的两项，这里保持一致。
                     StaggeredEntrance(
                       key: ValueKey('${_session}_book_source_repo'),
-                      index: 6,
+                      index: 4,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -306,9 +254,10 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
+                    // 6. 下载设置
                     StaggeredEntrance(
                       key: ValueKey('${_session}_2'),
-                      index: 7,
+                      index: 5,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -316,7 +265,7 @@ class _MePageState extends State<MePage> {
                           icon: Icons.download_for_offline_rounded,
                           iconBg: JellyTheme.primary,
                           title: '下载设置',
-                          subtitle: '同时下载量、分片并发量',
+                          subtitle: '通用 · 图书 · 书源 · 漫画',
                           onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -326,9 +275,10 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
+                    // 7. 下载记录
                     StaggeredEntrance(
                       key: ValueKey('${_session}_download_record'),
-                      index: 8,
+                      index: 6,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -349,16 +299,17 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
+                    // 8. 足迹（原「浏览记录」入口，跳转不变）
                     StaggeredEntrance(
                       key: ValueKey('${_session}_browse_history'),
-                      index: 9,
+                      index: 7,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
                           isDark,
                           icon: Icons.history_rounded,
                           iconBg: JellyTheme.primary,
-                          title: '浏览记录',
+                          title: '足迹',
                           subtitle: '漫画 & 图书浏览历史',
                           onTap: () => Navigator.push(
                             context,
@@ -369,24 +320,41 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 通用设置：软件日志 / 缓存清理 / 同步与备份
-                    // （对齐参考图 IMG_8465）
+                    // ── 以下为原有开关 / 入口：仅调整位置，逻辑与跳转全部保留 ──
                     StaggeredEntrance(
-                      key: ValueKey('${_session}_general_settings'),
+                      key: ValueKey('${_session}_0'),
+                      index: 8,
+                      child: SizedBox(
+                        width: itemWidth,
+                        child: ListenableBuilder(
+                          listenable: SettingsService(),
+                          builder: (context, _) => _buildSwitchTile(
+                            isDark,
+                            icon: Icons.lock_person_rounded,
+                            iconBg: JellyTheme.primary,
+                            title: '图书使用内置账号',
+                            subtitle: '关闭后需登录才能下载',
+                            value: SettingsService().useBuiltinAccount,
+                            onChanged: SettingsService().setUseBuiltinAccount,
+                          ),
+                        ),
+                      ),
+                    ),
+                    StaggeredEntrance(
+                      key: ValueKey('${_session}_theme_follow'),
                       index: 9,
                       child: SizedBox(
                         width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.settings_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '通用设置',
-                          subtitle: '日志 · 缓存 · 同步',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const GeneralSettingsPage(),
-                            ),
+                        child: ListenableBuilder(
+                          listenable: SettingsService(),
+                          builder: (context, _) => _buildSwitchTile(
+                            isDark,
+                            icon: Icons.brightness_auto_rounded,
+                            iconBg: JellyTheme.primary,
+                            title: '主题跟随系统',
+                            subtitle: '随系统明暗自动切换',
+                            value: SettingsService().themeFollowSystem,
+                            onChanged: SettingsService().setThemeFollowSystem,
                           ),
                         ),
                       ),
@@ -412,13 +380,13 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 被隐藏导航 tab 入口（导航栏关闭某 tab 时，依次补在"下载记录"下方）
+                    // 被隐藏导航 tab 入口（导航栏关闭某 tab 时，依次补在这里）
                     for (var i = 0; i < hiddenTabs.length; i++)
                       StaggeredEntrance(
                         key: ValueKey(
                           '${_session}_hidden_${hiddenTabs[i].name}',
                         ),
-                        index: 10 + i,
+                        index: 11 + i,
                         child: SizedBox(
                           width: itemWidth,
                           child: _buildHiddenTabItem(isDark, hiddenTabs[i]),
@@ -428,37 +396,29 @@ class _MePageState extends State<MePage> {
                 );
               },
             ),
+            // 底部附注：三项可点文字链接（同步与备份 · 软件日志 · 缓存清理）
+            _buildFooterLinks(isDark),
           ],
         ),
       ),
     );
   }
 
-  /// 顶部账号卡（参考 IMG_8564）：
-  ///   左：圆形头像（右下角相机编辑角标）
-  ///   中：「还未登录」+「登录后可下载更多图书」（已登录显示邮箱/管理）
-  ///   右上：**三个纯图标入口**（我的笔记 / 阅读经历 / 阅读计划）
-  ///   右下：箭头；下：进度条 + 右侧「每日可下载 N 本」
+  /// 顶部账号卡（参考目标设计）：
+  ///   左侧：圆形头像（描边 + 右下角相机角标）
+  ///   中间：用户名（加粗）+ 小号灰字「z-library」；下一行邮箱灰字
+  ///   右侧：`>` 箭头
+  ///   右下角：灰字小号「今日可下 N/N 本」（取不到限额时隐藏该行）
+  ///   卡片右上角**后方**：一条横向快捷条（我的笔记 / 阅读经历 / 阅读计划），
+  ///     用 `Stack` 让它"压在卡片后面露出一部分"（顶部让位 [_quickPeek]）。
   ///
-  /// ── 用户在 2026 反馈里的两点（都已落在这张卡里）────────────────
-  ///   1. 三个入口**只留图标**：文字 label 已删（见
-  ///      `widgets/me_account_quick_entries.dart`，语义改由 Tooltip 承载）
-  ///   2. 三个图标**并排放在这张登录卡的右上角**：
-  ///      用 `Stack` + `Positioned(top/right)` 钉在**卡片内**（不是卡片外面），
-  ///      所以未登录 / 已登录两套文案下位置**完全一致**、不会跳 ——
-  ///      图标行是 `Stack` 里的绝对定位层，**不参与**卡片主体的 Column 布局。
+  /// ── 分层顺序 ────────────────────────────────────────────────
+  /// `Stack.children` 的**绘制顺序 = 先后顺序**：快捷条在前（下层，被压），
+  /// 账号卡在后（上层）。卡片用 `Padding(top: _quickPeek)` 整体下移，
+  /// 于是快捷条上沿在卡片上方**露出** `_quickPeek` 高的一段 ✓。
   ///
-  /// ── 为什么上行要"右侧预留"（`_quickRowReserve`）─────────────────
-  /// 图标行只有 40 高（`top:16` ⇒ 占 y≈22..62，正对"右上角"），
-  /// 钉的是 `Stack` 的绝对定位层，**不参与**卡片主体的 Column/Row 布局，
-  /// 所以未登录 / 已登录两套文案下**位置完全一致**、不会跳 ✓。
-  ///
-  /// 代价是：主体上行的文字默认会一路排到卡片右内边（x≈296），
-  /// 而图标行从 x≈204 起 —— 实测（360 宽屏）副标题「登录后可下载更多图书」
-  /// 右缘 238.5 > 204，**被第三个圆盖住 34.5px** ✗。
-  /// ⇒ 上行 `Padding(right: _quickRowReserve)`，把「还未登录 + 副标题」这列
-  ///   文字**卡在图标行左侧**：文字要么正常排完、要么自己省略号收尾，
-  ///   永远不会钻到圆底下面 ✓（头像、进度条、箭头都在图标行覆盖范围之外）。
+  /// ⚠️ 账号字段（用户名 / 邮箱 / 限额）全部取自 [ZlibraryService] 的现有
+  ///    状态，**取不到的字段就隐藏或退回状态文案**，绝不编造。
   Widget _buildAccountCard(bool isDark) {
     return ListenableBuilder(
       listenable: ZlibraryService(),
@@ -473,104 +433,110 @@ class _MePageState extends State<MePage> {
         final sub = isDark
             ? Colors.white.withValues(alpha: 0.55)
             : JellyTheme.textSecondary;
-        final progress = limit <= 0 ? 0.0 : (used / limit).clamp(0.0, 1.0);
-        const chevronSize = 24.0;
-        // 图标热区高 44 + 顶部留白 16 = 60；自底向上留 44 ⇒ 箭头右缘外再留 16
-        final chevronRight =
-            16.0 + (MeAccountQuickEntries.tapSize - chevronSize) / 2;
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: Material(
-            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-            borderRadius: BorderRadius.circular(20),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const ZlibraryAuthPage(),
-                ),
+        final cardColor = isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
+        // 头像描边：深色下淡白、浅色下淡黑，两种主题下都能看清一圈
+        final avatarRing = isDark
+            ? Colors.white.withValues(alpha: 0.18)
+            : Colors.black.withValues(alpha: 0.10);
+        // 今日可下载量（限额取不到 / ≤0 时隐藏这一行）
+        final showQuota = limit > 0;
+        final remaining = (limit - used).clamp(0, limit);
+
+        final name = logged
+            ? (z.username.isNotEmpty
+                ? z.username
+                : (z.email.isNotEmpty ? z.email : '已登录'))
+            : '还未登录';
+        final secondLine = logged
+            ? (z.email.isNotEmpty ? z.email : '点击管理账号')
+            : '登录后可下载更多图书';
+
+        final card = Material(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(20),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const ZlibraryAuthPage(),
               ),
-              child: Stack(
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // ── 上行：头像 + 文字（箭头已挪到 Stack 右下角）──
-                        Row(
-                          children: [
-                            // 圆形头像（右下角相机编辑角标）
-                            Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                Container(
-                                  width: 64,
-                                  height: 64,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: logged
-                                        ? JellyTheme.primary
-                                        : (isDark
-                                            ? Colors.white.withValues(
-                                                alpha: 0.10)
-                                            : const Color(0xFFEDEEF0)),
-                                  ),
-                                  child: logged
-                                      ? Image.asset(
-                                          'assets/icons/user.png',
-                                          width: 52,
-                                          height: 52,
-                                          fit: BoxFit.cover,
-                                          errorBuilder: (_, _, _) => Icon(
-                                            Icons.person_rounded,
-                                            color: Colors.white,
-                                            size: 28,
-                                          ),
-                                        )
-                                      : Icon(
-                                          Icons.person_rounded,
-                                          color: sub,
-                                          size: 32,
-                                        ),
-                                ),
-                                // 相机角标（编辑头像入口）
-                                Positioned(
-                                  right: 0,
-                                  bottom: 0,
-                                  child: Container(
-                                    width: 22,
-                                    height: 22,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: JellyTheme.primary,
-                                      border: Border.all(
-                                        color: isDark
-                                            ? JellyTheme.cardDark
-                                            : JellyTheme.cardLight,
-                                        width: 2,
-                                      ),
-                                    ),
-                                    child: const Icon(
-                                      Icons.photo_camera_rounded,
-                                      size: 12,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                  Row(
+                    children: [
+                      // 圆形头像（描边 + 右下角相机编辑角标）
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Container(
+                            width: 64,
+                            height: 64,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: logged
+                                  ? JellyTheme.primary
+                                  : (isDark
+                                      ? Colors.white.withValues(alpha: 0.10)
+                                      : const Color(0xFFEDEEF0)),
+                              border: Border.all(color: avatarRing, width: 2),
                             ),
-                            const SizedBox(width: 14),
-                            // 账号信息
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    logged
-                                        ? (z.email.isNotEmpty ? z.email : '已登录')
-                                        : '还未登录',
+                            child: logged
+                                ? Image.asset(
+                                    'assets/icons/user.png',
+                                    width: 52,
+                                    height: 52,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) => const Icon(
+                                      Icons.person_rounded,
+                                      color: Colors.white,
+                                      size: 28,
+                                    ),
+                                  )
+                                : Icon(
+                                    Icons.person_rounded,
+                                    color: sub,
+                                    size: 32,
+                                  ),
+                          ),
+                          // 相机角标（编辑头像入口）
+                          Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              width: 22,
+                              height: 22,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: JellyTheme.primary,
+                                border: Border.all(color: cardColor, width: 2),
+                              ),
+                              child: const Icon(
+                                Icons.photo_camera_rounded,
+                                size: 12,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 14),
+                      // 账号信息：用户名 + z-library 标签 / 邮箱
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.baseline,
+                              textBaseline: TextBaseline.alphabetic,
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    name,
                                     style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w700,
@@ -579,87 +545,77 @@ class _MePageState extends State<MePage> {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
-                                  const SizedBox(height: 4),
+                                ),
+                                if (logged) ...[
+                                  const SizedBox(width: 6),
                                   Text(
-                                    logged
-                                        ? '登录后可下载更多图书 · 点击管理'
-                                        : '登录后可下载更多图书',
-                                    style: TextStyle(fontSize: 13, color: sub),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                                    'z-library',
+                                    style: TextStyle(fontSize: 12, color: sub),
                                   ),
                                 ],
-                              ),
+                              ],
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-                        // ── 下行：进度条 + 每日可下载 N 本 ──
-                        Row(
-                          children: [
-                            Expanded(
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(3),
-                                child: LinearProgressIndicator(
-                                  value: progress,
-                                  minHeight: 6,
-                                  backgroundColor: isDark
-                                      ? Colors.white.withValues(alpha: 0.10)
-                                      : const Color(0xFFE7E8EB),
-                                  valueColor: AlwaysStoppedAnimation(
-                                    JellyTheme.primary,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
+                            const SizedBox(height: 4),
                             Text(
-                              logged
-                                  ? '今日已下 $used/$limit 本'
-                                  : '每日可下载 $limit 本',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: fg,
-                              ),
+                              secondLine,
+                              style: TextStyle(fontSize: 13, color: sub),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                  ),
-                  // ── 卡片右上角：三个纯图标入口（并排，无文字）──────
-                  Positioned(
-                    top: 16,
-                    right: 16,
-                    child: MeAccountQuickEntries(
-                      // 测试用的稳定锚点（`find.byKey`）
-                      key: const ValueKey('me_account_quick_entries'),
-                      isDark: isDark,
-                      onNotes: () => _push(const NotesAndJourneyPage()),
-                      onJourney: () => _push(
-                        const BrowseHistoryPage(showTabs: false),
                       ),
-                      // ⚠️ 「阅读计划」原来的接线错误已在上一轮修掉（曾指向
-                      //   `NotesAndJourneyPage`），这里保持指向 `ReadingPlanPage`
-                      //   —— 三个入口的**跳转目标一个都没丢** ✓
-                      onPlan: () => _push(const ReadingPlanPage()),
-                    ),
+                      const SizedBox(width: 8),
+                      Icon(Icons.chevron_right_rounded, color: sub, size: 24),
+                    ],
                   ),
-                  // ── 卡片右下角：箭头（原来在上行 Row 的最右，会和右上角图标
-                  //    挤同一块地方，所以下移到底部右侧；两种登录态都只是这一处）
-                  Positioned(
-                    right: chevronRight,
-                    bottom: 16,
-                    child: Icon(
-                      Icons.chevron_right_rounded,
-                      color: sub,
-                      size: chevronSize,
+                  // ── 右下角：今日可下载量（灰字小号）──
+                  if (showQuota) ...[
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        '今日可下 $remaining/$limit 本',
+                        style: TextStyle(
+                          fontSize: AppTheme.fontCaption,
+                          color: sub,
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
+          ),
+        );
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              // 快捷条：先绘制 ⇒ 在卡片下层，被卡片压住下半部，只露出上沿
+              Positioned(
+                top: 0,
+                right: 16,
+                child: MeAccountQuickEntries(
+                  // 测试用的稳定锚点（`find.byKey`）
+                  key: const ValueKey('me_account_quick_entries'),
+                  isDark: isDark,
+                  onNotes: () => _push(const NotesAndJourneyPage()),
+                  onJourney: () => _push(
+                    const BrowseHistoryPage(showTabs: false),
+                  ),
+                  // ⚠️ 「阅读计划」接线保持指向 `ReadingPlanPage`（跳转目标未变）
+                  onPlan: () => _push(const ReadingPlanPage()),
+                ),
+              ),
+              // 账号卡：后绘制 ⇒ 压住快捷条下半部；顶部让位 [_quickPeek]
+              Padding(
+                padding: const EdgeInsets.only(top: _quickPeek),
+                child: card,
+              ),
+            ],
           ),
         );
       },
@@ -669,6 +625,41 @@ class _MePageState extends State<MePage> {
   /// 卡片内跳转（三个图标入口共用）
   void _push(Widget page) {
     Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+  }
+
+  /// 底部附注：三项可点文字链接（同步与备份 · 软件日志 · 缓存清理）。
+  ///
+  /// ⚠️ 降级说明（"能跳的就跳"）：
+  ///   · 「软件日志」有独立公开页 [AppLogPage] ⇒ 直接跳它；
+  ///   · 「同步与备份」「缓存清理」在代码里是 [GeneralSettingsPage] 的**私有**
+  ///     入口（`_showSyncSheet` / `_CacheCleanupPage`），无法单跳到子项，
+  ///     这里统一跳到承载它们的 [GeneralSettingsPage]（未丢失入口）。
+  Widget _buildFooterLinks(bool isDark) {
+    final style = TextStyle(
+      fontSize: AppTheme.fontCaption,
+      color: isDark
+          ? Colors.white.withValues(alpha: 0.45)
+          : JellyTheme.textSecondary,
+    );
+    Widget link(String label, VoidCallback onTap) => GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: Text(label, style: style),
+        );
+    final dot = Text(' · ', style: style);
+    return Padding(
+      padding: const EdgeInsets.only(top: 18, bottom: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          link('同步与备份', () => _push(const GeneralSettingsPage())),
+          dot,
+          link('软件日志', () => _push(const AppLogPage())),
+          dot,
+          link('缓存清理', () => _push(const GeneralSettingsPage())),
+        ],
+      ),
+    );
   }
 
   // -------------------- 暗色模式切换 --------------------

@@ -14,6 +14,7 @@ import '../services/browse_history_service.dart';
 //（analyze 一直在报 unused_import ✓）—— 那正是"收藏接线写到一半"留下的痕迹 ✓。
 // 真正需要的是收藏服务（见下方 `_toggleFavorite` ✓）
 import '../services/book_favorites_service.dart';
+import '../services/bookshelf_service.dart';
 // `Book.fromJson`（收藏用 ✓）—— 上面换成收藏服务后，这个模型也必须一起导入 ✓
 import '../models/book.dart';
 import '../theme/jelly_theme.dart';
@@ -52,6 +53,8 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
   List<BookSourceChapter> _chapters = const [];
   bool _descExpanded = false;
   bool _showAllChapters = false; // 目录列表默认只显示前 8 章（参考图 IMG_8481）
+  bool _descending = false; // 章节目录排序：false=正序（第1章在前），true=倒序（最新在前）
+  bool _isFavorite = false; // 是否已收藏（AppBar 胶囊 / 动作行图标据此切换）
 
   /// 详情接口补到的字段（封面/简介/作者），优先于搜索结果里的
   Map<String, dynamic> _info = const {};
@@ -71,12 +74,23 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
       'sourceName': widget.result.source.name,
       'bookUrl': widget.result.bookUrl,
     }));
+    // 进页先查一次收藏状态（收藏服务在 main.dart 启动时已 init）
+    _isFavorite =
+        BookFavoritesService().isFavorite('book-${widget.result.bookUrl}');
     _load();
   }
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
   Color get _titleColor =>
       _isDark ? Colors.white : JellyTheme.textPrimaryLight;
+
+  /// 卡片底色（简介 / 目录两项共用）
+  Color get _cardColor => _isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
+
+  /// 极淡的细分隔线（头部与目录行共用，深/浅都"刚好看得见"）
+  Color get _hairline => _isDark
+      ? Colors.white.withValues(alpha: 0.06)
+      : Colors.black.withValues(alpha: 0.05);
 
   void _toast(String msg) {
     if (!mounted) return;
@@ -127,28 +141,37 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     }
   }
 
-  String get _name => (_info['name'] ?? _result.name).toString();
-  String get _author => (_info['author'] ?? _result.author).toString();
-  String get _cover => (_info['coverUrl'] ?? _result.coverUrl).toString();
-  String get _intro => (_info['intro'] ?? _result.intro).toString();
+  // 详情接口返回的 Map 里这几个键恒存在但值可能是空字符串，
+  // 直接用 ?? 不会回退（空串非 null）→ 需手动判空回退到搜索结果带过来的初值，
+  // 否则加载完目录后封面/书名/作者/简介会"消失"。
+  String _pick(String key, String fallback) {
+    final v = _info[key]?.toString().trim();
+    return (v != null && v.isNotEmpty) ? v : fallback;
+  }
+
+  String get _name => _pick('name', _result.name);
+  String get _author => _pick('author', _result.author);
+  String get _cover => _pick('coverUrl', _result.coverUrl);
+  String get _intro => _pick('intro', _result.intro);
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor:
           _isDark ? JellyTheme.backgroundDark : JellyTheme.backgroundLight,
-      // ✅ 与图书 / 漫画详情页统一：透明 AppBar（标题=书名）+ 主题动态背景
-      //（原来是不透明 AppBar 直接盖住背景 ✗，标题还写死「书籍详情」✗）
+      // ✅ 透明 AppBar + 主题动态背景；标题居中：默认「书籍详情」，
+      //   已收藏时居中显示可点的收藏胶囊（点=取消收藏）
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
-        title: Text(_name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-                fontSize: AppTheme.fontHeadline, color: _titleColor)),
+        centerTitle: true,
+        title: _isFavorite
+            ? _favPill()
+            : Text('书籍详情',
+                style: TextStyle(
+                    fontSize: AppTheme.fontTitle3, color: _titleColor)),
         actions: [
           IconButton(
             tooltip: '换源',
@@ -165,7 +188,6 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
           Column(
             children: [
               _header(),
-              const Divider(height: 1),
               Expanded(child: _tocArea()),
             ],
           ),
@@ -181,13 +203,10 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── 左封面 + 右信息 ──
+          // ── 左侧文字信息 + 右侧封面 ──
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 封面挪到左侧（与漫画详情页一致）
-              _coverBox(),
-              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -201,115 +220,355 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                             color: _titleColor)),
                     if (_author.isNotEmpty) ...[
                       const SizedBox(height: 6),
-                      Text('$_author 著',
-                          style: TextStyle(
-                              fontSize: AppTheme.fontSubhead,
-                              color: JellyTheme.textSecondary)),
+                      Row(
+                        children: [
+                          Icon(Icons.person_outline_rounded,
+                              size: 14, color: JellyTheme.textSecondary),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text('$_author 著',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: AppTheme.fontSubhead,
+                                    color: JellyTheme.textSecondary)),
+                          ),
+                        ],
+                      ),
                     ],
                     const SizedBox(height: 6),
-                    Text('来源：${_result.source.name}',
-                        style: TextStyle(
-                            fontSize: AppTheme.fontSubhead,
-                            color: JellyTheme.textSecondary)),
+                    Row(
+                      children: [
+                        Icon(Icons.schedule_rounded,
+                            size: 14, color: JellyTheme.textSecondary),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text('来源：${_result.source.name}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: AppTheme.fontSubhead,
+                                  color: JellyTheme.textSecondary)),
+                        ),
+                      ],
+                    ),
+                    if (_metaChips.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: _metaChips.map(_metaChip).toList(),
+                      ),
+                    ],
                     if (_wordCountText.isNotEmpty) ...[
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 6),
                       Text(_wordCountText,
                           style: TextStyle(
                               fontSize: AppTheme.fontSubhead,
                               color: JellyTheme.textSecondary)),
                     ],
-                    if (_chapters.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 7, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: JellyTheme.primary.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text('最新章节',
-                                style: TextStyle(
-                                    fontSize: AppTheme.fontCaption,
-                                    color: JellyTheme.primary,
-                                    fontWeight: FontWeight.w600)),
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              _chapters.last.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  fontSize: AppTheme.fontSubhead,
-                                  color: _titleColor,
-                                  fontWeight: FontWeight.w500),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
                   ],
                 ),
               ),
-
+              const SizedBox(width: 12),
+              _coverBox(),
             ],
           ),
-          // ── 四按钮：收藏 / 加入书架 / 阅读 / 下载 ──
+          // ── 细分隔线 + 最新章节 ──
+          if (_chapters.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Divider(height: 1, thickness: 1, color: _hairline),
+            const SizedBox(height: 10),
+            Text('最新章节',
+                style: TextStyle(
+                    fontSize: AppTheme.fontCaption,
+                    color: JellyTheme.textSecondary)),
+            const SizedBox(height: 2),
+            InkWell(
+              onTap: () => _openReader(_chapters.length - 1),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _chapters.last.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: AppTheme.fontBody,
+                            fontWeight: FontWeight.w600,
+                            color: _titleColor),
+                      ),
+                    ),
+                    Icon(Icons.chevron_right_rounded,
+                        size: 18, color: JellyTheme.textSecondary),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          // ── 动作行：收藏 / 书架 / 阅读 / 下载（圆角卡 + 竖细分隔线，对齐参考图）──
           const SizedBox(height: 14),
-          Row(
+          Container(
+            decoration: BoxDecoration(
+              color: _cardColor,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                _actionItem(
+                  _isFavorite ? Icons.favorite : Icons.favorite_border_rounded,
+                  _isFavorite ? '已收藏' : '收藏',
+                  _toggleFavorite,
+                  color: _isFavorite ? Colors.pinkAccent : null,
+                ),
+                _actionDivider(),
+                // 书架：跟真实"是否已加入书架"联动（蓝紫色，与漫画详情页一致）
+                ListenableBuilder(
+                  listenable: BookshelfService(),
+                  builder: (context, _) {
+                    final inShelf = BookshelfService()
+                        .getBookshelvesForItem(
+                            'book-${_result.bookUrl}', BookshelfItemType.book)
+                        .isNotEmpty;
+                    return _actionItem(
+                      inShelf
+                          ? Icons.library_books_rounded
+                          : Icons.library_add_rounded,
+                      inShelf ? '已加书架' : '加入书架',
+                      _addToBookshelf,
+                      color: inShelf ? const Color(0xFF7C8CFF) : null,
+                    );
+                  },
+                ),
+                _actionDivider(),
+                _actionItem(Icons.menu_book_rounded, '阅读',
+                    _chapters.isEmpty ? null : () => _openReader(0)),
+                _actionDivider(),
+                _actionItem(Icons.download_for_offline_rounded, '下载',
+                    _chapters.isEmpty ? null : _downloadBook),
+              ],
+            ),
+          ),
+          // ── 简介 ──
+          if (intro.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            _introSection(intro),
+          ],
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  /// AppBar 居中收藏胶囊（已收藏时显示）：粉色实心爱心 + 「已收藏」+ ×，
+  /// 点它（或 ×）= 取消收藏（走 _toggleFavorite）。
+  Widget _favPill() {
+    return GestureDetector(
+      onTap: _toggleFavorite,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.pinkAccent.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.favorite, size: 15, color: Colors.pinkAccent),
+            SizedBox(width: 5),
+            Text('已收藏',
+                style: TextStyle(
+                    fontSize: AppTheme.fontSubhead,
+                    color: Colors.pinkAccent,
+                    fontWeight: FontWeight.w600)),
+            SizedBox(width: 5),
+            Icon(Icons.close_rounded, size: 14, color: Colors.pinkAccent),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 小元信息胶囊文字（分数 / 连载状态 / 分类 / 更新时间）。
+  /// 优先取 [_info] 里的键，取不到该项就整体不显示（绝不编造）。
+  List<String> get _metaChips {
+    final chips = <String>[];
+    final score = _infoFirst(['score', 'rating']);
+    if (score.isNotEmpty) chips.add(score);
+    final status = _infoFirst(['status', 'serialStatus']);
+    if (status.isNotEmpty) chips.add(status);
+    final category = _infoFirst(['category', 'categoryName']);
+    if (category.isNotEmpty) {
+      chips.add(category);
+    } else if (_result.kind.trim().isNotEmpty) {
+      // 分类缺失时回退到搜索结果里的 kind（真实数据，非编造）
+      chips.add(_result.kind.trim());
+    }
+    final updated = _infoFirst(['updatedAt', 'lastUpdate']);
+    if (updated.isNotEmpty) chips.add(updated);
+    return chips;
+  }
+
+  /// 按顺序取 [_info] 中第一个非空的键值
+  String _infoFirst(List<String> keys) {
+    for (final k in keys) {
+      final v = _info[k]?.toString().trim();
+      if (v != null && v.isNotEmpty) return v;
+    }
+    return '';
+  }
+
+  Widget _metaChip(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: _isDark
+            ? Colors.white.withValues(alpha: 0.07)
+            : Colors.black.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(text,
+          style: TextStyle(
+              fontSize: AppTheme.fontCaption,
+              color: JellyTheme.textSecondary)),
+    );
+  }
+
+  /// 动作行里的竖细分隔线（居中、不顶满高度，对齐参考图）
+  Widget _actionDivider() {
+    return Container(
+      width: 1,
+      height: 26,
+      color: _isDark
+          ? Colors.white.withValues(alpha: 0.10)
+          : Colors.black.withValues(alpha: 0.08),
+    );
+  }
+
+  /// 动作行之一：图标在上、文字在下，垂直居中，等宽（无胶囊底色）。
+  Widget _actionItem(IconData icon, String label, VoidCallback? onTap,
+      {Color? color}) {
+    final enabled = onTap != null;
+    final c = enabled
+        ? (color ?? _titleColor).withValues(alpha: 0.9)
+        : JellyTheme.textSecondary.withValues(alpha: 0.4);
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _actionCapsule(Icons.favorite_border_rounded, '收藏', _toggleFavorite),
-              const SizedBox(width: 8),
-              _actionCapsule(Icons.library_add_rounded, '加入书架', _addToBookshelf),
-              const SizedBox(width: 8),
-              // ✅ 「阅读」→「在线阅读」并用主色突出（与图书详情页的在线阅读入口一致）
-              _actionCapsule(Icons.play_arrow_rounded, '在线阅读',
-                  _chapters.isEmpty ? null : () => _openReader(0),
-                  highlight: true),
-              const SizedBox(width: 8),
-              _actionCapsule(Icons.download_for_offline_rounded, '下载',
-                  _chapters.isEmpty ? null : _downloadBook),
+              Icon(icon, size: 22, color: c),
+              const SizedBox(height: 6),
+              Text(label,
+                  style: TextStyle(
+                      fontSize: AppTheme.fontCaption,
+                      color: c,
+                      fontWeight: FontWeight.w500)),
             ],
           ),
-          // ── 简介板块 ──
-          if (intro.isNotEmpty) ...[
-            const SizedBox(height: 16),
+        ),
+      ),
+    );
+  }
+
+  /// 简介区块：区块标题 + 圆角卡片（更新时间 / 内容简介 / 展开收起）
+  Widget _introSection(String intro) {
+    final updated = _infoFirst(['updatedAt', 'lastUpdate']);
+    final long = intro.length > 90 || intro.contains('\n');
+    final subtitleStyle = TextStyle(
+        fontSize: AppTheme.fontSubhead,
+        fontWeight: FontWeight.w600,
+        color: _titleColor.withValues(alpha: 0.72));
+    final valueStyle = TextStyle(
+        fontSize: AppTheme.fontFootnote,
+        height: 1.55,
+        color: JellyTheme.textSecondary);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.article_outlined,
+                size: 16, color: JellyTheme.textSecondary),
+            const SizedBox(width: 6),
             Text('简介',
                 style: TextStyle(
                     fontSize: AppTheme.fontBody,
                     fontWeight: FontWeight.w700,
                     color: _titleColor)),
-            const SizedBox(height: 6),
-            Text(
-              intro,
-              maxLines: _descExpanded ? null : 4,
-              overflow: _descExpanded ? null : TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: AppTheme.fontFootnote,
-                  height: 1.55,
-                  color: JellyTheme.textSecondary),
-            ),
-            if (intro.length > 90 || intro.contains('\n'))
-              GestureDetector(
-                onTap: () => setState(() => _descExpanded = !_descExpanded),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Text(
-                    _descExpanded ? '收起' : '展开全部',
-                    style: TextStyle(
-                        fontSize: AppTheme.fontSubhead,
-                        color: JellyTheme.primary,
-                        fontWeight: FontWeight.w600),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: _cardColor,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (updated.isNotEmpty) ...[
+                Text('🕐 更新时间：', style: subtitleStyle),
+                const SizedBox(height: 4),
+                Text(updated, style: valueStyle),
+                const SizedBox(height: 10),
+              ],
+              Text('▤ 内容简介：', style: subtitleStyle),
+              const SizedBox(height: 4),
+              Text(
+                intro,
+                maxLines: _descExpanded ? null : 4,
+                overflow: _descExpanded ? null : TextOverflow.ellipsis,
+                style: valueStyle,
+              ),
+              if (long)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: GestureDetector(
+                    onTap: () =>
+                        setState(() => _descExpanded = !_descExpanded),
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        _descExpanded ? '收起' : '展开全部',
+                        style: TextStyle(
+                            fontSize: AppTheme.fontSubhead,
+                            color: JellyTheme.primary,
+                            fontWeight: FontWeight.w600,
+                            decoration: TextDecoration.underline,
+                            decorationColor: JellyTheme.primary),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-          ],
-          const SizedBox(height: 12),
-        ],
-      ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 目录卡片头部的小图标按钮（刷新 / 排序）
+  Widget _tocIcon(IconData icon, String tooltip, VoidCallback onTap) {
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onTap,
+      iconSize: 20,
+      padding: const EdgeInsets.all(6),
+      constraints: const BoxConstraints(),
+      visualDensity: VisualDensity.compact,
+      color: _titleColor.withValues(alpha: 0.8),
+      icon: Icon(icon),
     );
   }
 
@@ -351,42 +610,6 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     return '$n字';
   }
 
-  /// 四按钮之一（参考图 IMG_8481 深灰胶囊）。
-  /// [highlight] = true 用主色实心（如「在线阅读」），与图书详情页的入口一致。
-  Widget _actionCapsule(IconData icon, String label, VoidCallback? onTap,
-      {bool highlight = false}) {
-    final fg = highlight ? Colors.white : _titleColor.withValues(alpha: 0.85);
-    return Expanded(
-      child: Material(
-        color: highlight
-            ? JellyTheme.primary
-            : (_isDark
-                ? Colors.white.withValues(alpha: 0.12)
-                : Colors.black.withValues(alpha: 0.06)),
-        borderRadius: BorderRadius.circular(20),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 9),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, size: 15, color: fg),
-                const SizedBox(width: 4),
-                Text(label,
-                    style: TextStyle(
-                        fontSize: AppTheme.fontFootnote,
-                        color: fg,
-                        fontWeight: FontWeight.w600)),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   void _toggleFavorite() {
     // 🔴 原来是**假按钮** ✗：只 `setState(() {})` + 弹「已收藏《书名》」✓，
     // **什么都没写进收藏** ✓，也没有任何状态跟随 ✓ —— 用户以为收藏了、其实没有 ✓。
@@ -407,8 +630,10 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
       'sourceName': _result.source.name,
       'bookUrl': _result.bookUrl,
     }));
-    setState(() {});
-    _toast(svc.isFavorite(id) ? '已收藏《$_name》' : '已取消收藏《$_name》');
+    setState(() {
+      _isFavorite = svc.isFavorite(id);
+    });
+    _toast(_isFavorite ? '已收藏《$_name》' : '已取消收藏《$_name》');
   }
 
   Future<void> _addToBookshelf() async {
@@ -667,53 +892,90 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
         : _chapters.length.clamp(0, 8);
     final hasMore = _chapters.length > 8;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(8, 4, 8, 90),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
       children: [
-        // ── 章节目录 · 共N章 ──
-        Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-          child: Row(
+        Container(
+          decoration: BoxDecoration(
+            color: _cardColor,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
             children: [
-              Text('章节目录',
-                  style: TextStyle(
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.bold,
-                      color: _titleColor)),
-              const SizedBox(width: 8),
-              Text('共 ${_chapters.length} 章',
-                  style: TextStyle(
-                      fontSize: AppTheme.fontSubhead,
-                      color: JellyTheme.textSecondary)),
+              // ── 头部行：章节目录 + 共N章 + 刷新/排序 ──
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+                child: Row(
+                  children: [
+                    Text('章节目录',
+                        style: TextStyle(
+                            fontSize: AppTheme.fontBody,
+                            fontWeight: FontWeight.w700,
+                            color: _titleColor)),
+                    const SizedBox(width: 4),
+                    Icon(Icons.chevron_right_rounded,
+                        size: 16, color: JellyTheme.textSecondary),
+                    const SizedBox(width: 6),
+                    Text('共 ${_chapters.length} 章',
+                        style: TextStyle(
+                            fontSize: AppTheme.fontCaption,
+                            color: JellyTheme.textSecondary)),
+                    const Spacer(),
+                    _tocIcon(Icons.refresh_rounded, '刷新', _load),
+                    _tocIcon(Icons.swap_vert_rounded,
+                        _descending ? '倒序' : '正序',
+                        () => setState(() => _descending = !_descending)),
+                  ],
+                ),
+              ),
+              // ── 章节列表（行间一条极淡的细分隔线）──
+              ...List.generate(visibleCount, (i) {
+                // 倒序时把显示序号映射回 _chapters 的真实下标，保证点哪章开哪章
+                final real = _descending ? _chapters.length - 1 - i : i;
+                final ch = _chapters[real];
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (i != 0)
+                      Divider(height: 1, thickness: 1, color: _hairline),
+                    InkWell(
+                      onTap: () => _openReader(real),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 12),
+                        child: Text(ch.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: AppTheme.fontBody,
+                                color: _titleColor)),
+                      ),
+                    ),
+                  ],
+                );
+              }),
+              if (hasMore)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Center(
+                    child: TextButton.icon(
+                      onPressed: () => setState(
+                          () => _showAllChapters = !_showAllChapters),
+                      icon: Icon(
+                        _showAllChapters
+                            ? Icons.expand_less_rounded
+                            : Icons.expand_more_rounded,
+                        size: 18,
+                      ),
+                      label: Text(_showAllChapters
+                          ? '收起'
+                          : '显示全部（共 ${_chapters.length} 章）'),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
-        ...List.generate(visibleCount, (i) {
-          final ch = _chapters[i];
-          return ListTile(
-            dense: true,
-            title: Text(ch.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: AppTheme.fontBody, color: _titleColor)),
-            onTap: () => _openReader(i),
-          );
-        }),
-        if (hasMore)
-          Center(
-            child: TextButton.icon(
-              onPressed: () =>
-                  setState(() => _showAllChapters = !_showAllChapters),
-              icon: Icon(
-                _showAllChapters
-                    ? Icons.expand_less_rounded
-                    : Icons.expand_more_rounded,
-                size: 18,
-              ),
-              label: Text(_showAllChapters
-                  ? '收起'
-                  : '显示全部（共 ${_chapters.length} 章）'),
-            ),
-          ),
       ],
     );
   }

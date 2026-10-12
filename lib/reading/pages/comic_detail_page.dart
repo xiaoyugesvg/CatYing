@@ -20,6 +20,8 @@ import '../widgets/jelly_bookshelf_dialog.dart';
 import '../widgets/jelly_score_badge.dart';
 import '../widgets/theme_background_animation.dart';
 import 'reader_page.dart';
+import 'comic_aggregate_search_page.dart';
+import 'search_page.dart';
 import '../../common/theme.dart';
 
 /// 日志工具
@@ -53,6 +55,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
   int _selectedGroupIndex = 0;
   bool _showAllChapters = false; // 当前分组是否展开全部章节
   bool _descExpanded = false; // 简介是否展开
+  bool _descending = false; // 章节展示是否倒序（最新在前）
   bool _showBackToTop = false; // 是否显示返回顶部按钮
 
   /// 章节默认显示条数
@@ -262,7 +265,6 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
               else if (_error != null)
                 _buildChapterError()
               else ...[
-                _buildLatestChapters(),
                 _buildChapterSummary(),
                 ..._buildChapterList(),
               ],
@@ -274,25 +276,46 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
   }
 
   SliverAppBar _buildAppBar() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
     return SliverAppBar(
       pinned: true,
+      centerTitle: true,
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
       title: Text(
-        _comic.title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: AppTheme.fontHeadline),
+        '漫画详情',
+        style: TextStyle(
+          fontSize: AppTheme.fontHeadline,
+          fontWeight: FontWeight.w600,
+          color: titleColor,
+        ),
       ),
+      actions: [
+        IconButton(
+          tooltip: '更多',
+          icon: Icon(Icons.chevron_right_rounded, color: titleColor),
+          onPressed: _showMoreSheet,
+        ),
+        const SizedBox(width: 4),
+      ],
     );
   }
 
   /// 封面（带 Hero 共享元素过渡）
   Widget _buildCover(bool isDark) {
-    final cover = ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: SizedBox(
-        width: 110,
+    final cover = Container(
+      width: 110,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.08),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
         child: AspectRatio(
           aspectRatio: 3 / 4,
           child: SourceCoverImage(
@@ -362,7 +385,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
 
     return SliverToBoxAdapter(
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -387,42 +410,14 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      if (_comic.author != null &&
-                          _comic.author!.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.person_outline,
-                              size: 15,
-                              color: secondaryColor,
-                            ),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                _comic.author!,
-                                style: TextStyle(
-                                  fontSize: AppTheme.fontSubhead,
-                                  color: secondaryColor,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                      if (_comic.status != null &&
-                          _comic.status!.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        _buildStatusChip(_comic.status!, isDark),
-                      ],
-                      if (comicHasScore(_comic)) ...[
-                        const SizedBox(height: 8),
+                      // 评分徽标
+                      if (_comic.rating != null && _comic.rating! > 0) ...[
+                        const SizedBox(height: 6),
                         JellyScoreBadge(comic: _comic, isDark: isDark),
                       ],
+                      // 题材标签
                       if (_comic.tags != null && _comic.tags!.isNotEmpty) ...[
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 6),
                         Wrap(
                           spacing: 6,
                           runSpacing: 6,
@@ -432,13 +427,72 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                               .toList(),
                         ),
                       ],
+                      // 作者（可点 → 搜索作者的其他漫画）
+                      if (_comic.author != null &&
+                          _comic.author!.trim().isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _showAuthorSheet,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.person_outline,
+                                size: 15,
+                                color: secondaryColor,
+                              ),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  _comic.author!.trim(),
+                                  style: TextStyle(
+                                    fontSize: AppTheme.fontSubhead,
+                                    color: secondaryColor,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      // 连载状态胶囊
+                      if (_comic.status != null &&
+                          _comic.status!.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        _buildStatusChip(_comic.status!, isDark),
+                      ],
+                      // 热度/人气
+                      if (_comic.popular != null && _comic.popular! > 0) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.people_outline,
+                              size: 15,
+                              color: secondaryColor,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              _formatPopular(_comic.popular!),
+                              style: TextStyle(
+                                fontSize: AppTheme.fontSubhead,
+                                color: secondaryColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
               ],
             ),
-            // 收藏 / 下载 胶囊按钮（简介上方靠右，避免在元信息窄列中溢出）
-            const SizedBox(height: 12),
+            // 收藏 / 书架 / 下载 胶囊按钮（右对齐）
+            const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
@@ -456,13 +510,21 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
             // 简介（漫画详情）
             if (_comic.description != null &&
                 _comic.description!.isNotEmpty) ...[
-              const SizedBox(height: 16),
+              const SizedBox(height: 18),
               _buildSynopsis(titleColor, secondaryColor),
             ],
           ],
         ),
       ),
     );
+  }
+
+  /// 人气数值格式化（≥1万 显示「x.x万」）
+  String _formatPopular(int popular) {
+    if (popular >= 10000) {
+      return '${(popular / 10000).toStringAsFixed(1)}万';
+    }
+    return popular.toString();
   }
 
   /// 胶囊按钮（左图标 + 右文字）。
@@ -624,6 +686,224 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     );
   }
 
+  /// 底部弹层：搜索作者的其他漫画（聚搜 / 当前漫画源 / 取消）
+  Future<void> _showAuthorSheet() async {
+    final author = _comic.author?.trim() ?? '';
+    if (author.isEmpty) return;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    final secondaryColor = isDark ? Colors.white70 : JellyTheme.textSecondary;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => kbSheet(
+        Container(
+          decoration: BoxDecoration(
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _sheetHandle(),
+              const SizedBox(height: 10),
+              Text(
+                '搜索作者的其他漫画',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: AppTheme.fontHeadline,
+                  fontWeight: FontWeight.bold,
+                  color: titleColor,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.10)
+                        : Colors.black.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    author,
+                    style: TextStyle(
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: FontWeight.w600,
+                      color: secondaryColor,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: _sheetActionButton(
+                      label: '聚搜',
+                      filled: true,
+                      onTap: () {
+                        Navigator.of(sheetCtx).pop();
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const ComicAggregateSearchPage(),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _sheetActionButton(
+                      label: '当前漫画源',
+                      onTap: () {
+                        Navigator.of(sheetCtx).pop();
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const SearchPage(
+                              isActive: true,
+                              showBackButton: true,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _sheetActionButton(
+                      label: '取消',
+                      onTap: () => Navigator.of(sheetCtx).pop(),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 右上角「更多」弹层：换源 / 刷新章节
+  void _showMoreSheet() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => kbSheet(
+        Container(
+          decoration: BoxDecoration(
+            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _sheetHandle(),
+              const SizedBox(height: 4),
+              ListTile(
+                leading: Icon(Icons.swap_horiz_rounded, color: titleColor),
+                title: Text(
+                  '换源',
+                  style: TextStyle(
+                    fontSize: AppTheme.fontBody,
+                    color: titleColor,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const ComicAggregateSearchPage(),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.refresh_rounded, color: titleColor),
+                title: Text(
+                  '刷新章节',
+                  style: TextStyle(
+                    fontSize: AppTheme.fontBody,
+                    color: titleColor,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  _loadData();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 底部弹层顶部把手
+  Widget _sheetHandle() {
+    return Center(
+      child: Container(
+        width: 40,
+        height: 4,
+        decoration: BoxDecoration(
+          color: JellyTheme.textSecondary.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
+    );
+  }
+
+  /// 作者弹层底部按钮（filled = 主色填充）
+  Widget _sheetActionButton({
+    required String label,
+    required VoidCallback onTap,
+    bool filled = false,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = filled
+        ? JellyTheme.primary
+        : (isDark
+              ? Colors.white.withValues(alpha: 0.10)
+              : Colors.black.withValues(alpha: 0.06));
+    final fg = filled
+        ? Colors.white
+        : (isDark ? Colors.white : JellyTheme.textPrimaryLight);
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: AppTheme.fontBody,
+              fontWeight: FontWeight.w600,
+              color: fg,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildStatusChip(String status, bool isDark) {
     final ongoing =
         status.contains('连载') || status.toLowerCase().contains('ongoing');
@@ -683,7 +963,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
             color: titleColor,
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Text(
           desc,
           maxLines: _descExpanded ? null : 3,
@@ -710,114 +990,15 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     );
   }
 
-  /// 章节数统计：共多少话（按分组统计）
-  /// 最新章节区（简介与章节之间）：最新10话横向卡片，点击在线阅读。
-  /// 仅当当前分组章节 > 10 时显示；不参与下载选章（下载走 DownloadChapterSheet 完整列表）。
-  SliverToBoxAdapter _buildLatestChapters() {
-    if (_groups.isEmpty) {
-      return const SliverToBoxAdapter(child: SizedBox.shrink());
-    }
-    final group = _groups[_selectedGroupIndex.clamp(0, _groups.length - 1)];
-    final chapters = group.chapters;
-    if (chapters.length <= 10) {
-      return const SliverToBoxAdapter(child: SizedBox.shrink());
-    }
-    // 主列表已「第1话在前」，末尾即最新；取末尾10个反转为「最新在前」
-    final latest = chapters.sublist(chapters.length - 10).reversed.toList();
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
-    final lastReadId = ReadingProgressService()
-        .getProgress(_comic.pathWord)
-        ?.lastChapterId;
-
-    return SliverToBoxAdapter(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(
-                '最新章节',
-                style: TextStyle(
-                  fontSize: AppTheme.fontHeadline,
-                  fontWeight: FontWeight.bold,
-                  color: titleColor,
-                ),
-              ),
-            ),
-            SizedBox(
-              height: 44,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: latest.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (context, index) {
-                  final chapter = latest[index];
-                  final downloaded = DownloadService().isChapterDownloaded(
-                    _comic.pathWord,
-                    chapter.id,
-                  );
-                  final isLastRead = lastReadId == chapter.id;
-                  return Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      OutlinedButton(
-                        onPressed: () => _onChapterTap(chapter),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          minimumSize: const Size(0, 36),
-                          side: BorderSide(
-                            color: isDark ? Colors.white70 : Colors.black38,
-                          ),
-                        ),
-                        child: Text(
-                          chapter.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: AppTheme.fontCaption),
-                        ),
-                      ),
-                      if (isLastRead)
-                        Positioned(
-                          left: 2,
-                          top: 2,
-                          child: Icon(
-                            Icons.bookmark_rounded,
-                            size: 12,
-                            color: JellyTheme.blue,
-                          ),
-                        ),
-                      if (downloaded)
-                        Positioned(
-                          right: 2,
-                          top: 2,
-                          child: Icon(
-                            Icons.check_circle,
-                            size: 12,
-                            color: JellyTheme.success,
-                          ),
-                        ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
+  /// 章节区头部行：标题 + 共N话 + 续读胶囊 + 刷新/排序按钮
   SliverToBoxAdapter _buildChapterSummary() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    final secondaryColor = isDark ? Colors.white70 : JellyTheme.textSecondary;
     return SliverToBoxAdapter(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Text(
               '章节',
@@ -827,18 +1008,54 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                 color: titleColor,
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
+            Icon(Icons.chevron_right_rounded, size: 18, color: secondaryColor),
+            const SizedBox(width: 4),
             Text(
               '共 $_totalChapters 话',
-              style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary),
+              style: TextStyle(
+                fontSize: AppTheme.fontSubhead,
+                color: JellyTheme.textSecondary,
+              ),
             ),
             if (_continueChapter != null) ...[
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               _buildContinueCapsule(),
             ],
+            const Spacer(),
+            _buildIconAction(
+              icon: Icons.refresh_rounded,
+              tooltip: '刷新章节',
+              onTap: _isLoading ? null : _loadData,
+            ),
+            _buildIconAction(
+              icon: Icons.swap_vert_rounded,
+              tooltip: _descending ? '正序' : '倒序',
+              color: _descending ? JellyTheme.primary : null,
+              onTap: () => setState(() => _descending = !_descending),
+            ),
           ],
         ),
       ),
+    );
+  }
+
+  /// 章节区头部的小图标按钮（紧凑）
+  Widget _buildIconAction({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onTap,
+    Color? color,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fg = color ?? (isDark ? Colors.white70 : JellyTheme.textSecondary);
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onTap,
+      icon: Icon(icon, size: 20, color: fg),
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
     );
   }
 
@@ -855,26 +1072,29 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     final index = _selectedGroupIndex.clamp(0, _groups.length - 1);
     final group = _groups[index];
     final chapters = group.chapters;
+    // 展示顺序：默认「第1话在前」，_descending 时反转为「最新在前」。
+    // 列表已实体化，点击下标 i 即 display[i]，天然映射回真实章节。
+    final display = _descending ? chapters.reversed.toList() : chapters;
     final lastReadId = ReadingProgressService()
         .getProgress(_comic.pathWord)
         ?.lastChapterId;
     final visibleCount = _showAllChapters
-        ? chapters.length
-        : chapters.length.clamp(0, _defaultVisibleChapters);
-    final hasMore = chapters.length > _defaultVisibleChapters;
+        ? display.length
+        : display.length.clamp(0, _defaultVisibleChapters);
+    final hasMore = display.length > _defaultVisibleChapters;
 
     slivers.add(
       SliverPadding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
         sliver: SliverGrid(
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 4, // 4 列网格（参考图 IMG_8471）
-            childAspectRatio: 2.6,
+            childAspectRatio: 1.9,
             crossAxisSpacing: 8,
             mainAxisSpacing: 8,
           ),
           delegate: SliverChildBuilderDelegate((context, index) {
-            final chapter = chapters[index];
+            final chapter = display[index];
             final isDark = Theme.of(context).brightness == Brightness.dark;
             final downloaded = DownloadService().isChapterDownloaded(
               _comic.pathWord,
@@ -887,35 +1107,47 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
                 OutlinedButton(
                   onPressed: () => _onChapterTap(chapter),
                   style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 6,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                     side: BorderSide(
                       color: isDark ? Colors.white70 : Colors.black38,
                     ),
                   ),
                   child: Text(
                     chapter.title,
-                    maxLines: 1,
+                    maxLines: 2,
+                    textAlign: TextAlign.center,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: AppTheme.fontCaption),
+                    style: const TextStyle(
+                      fontSize: AppTheme.fontCaption,
+                      height: 1.15,
+                    ),
                   ),
                 ),
                 if (isLastRead)
                   Positioned(
-                    left: 4,
-                    top: 4,
+                    left: 3,
+                    top: 3,
                     child: Icon(
                       Icons.bookmark_rounded,
-                      size: 14,
+                      size: 12,
                       color: JellyTheme.blue,
                     ),
                   ),
                 if (downloaded)
                   Positioned(
-                    right: 4,
-                    top: 4,
+                    right: 3,
+                    top: 3,
                     child: Icon(
                       Icons.check_circle,
-                      size: 14,
+                      size: 12,
                       color: JellyTheme.success,
                     ),
                   ),
@@ -962,7 +1194,7 @@ class _ComicDetailPageState extends State<ComicDetailPage> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return SliverToBoxAdapter(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
         child: SizedBox(
           height: 38,
           child: ListView.separated(

@@ -23,7 +23,6 @@ import '../widgets/jelly_filter_sheet.dart';
 import '../widgets/jelly_comic_list_tile.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_search_bar.dart';
-import '../widgets/guide_overlay.dart';
 import '../widgets/jelly_icon_deck.dart';
 import '../widgets/staggered_entrance.dart';
 import 'browse_history_page.dart';
@@ -117,7 +116,6 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
 
   bool _pendingSearch = false; // 搜索中途切源/换词积压，待当前搜索结束后补搜
   bool _categorySheetOpening = false; // 分类筛选弹窗防连点守卫
-  bool _guideShown = false; // 新手引导已展示标记
 
   // 各源独立的搜索状态缓存：切源时保存/恢复，使每个源保留自己的上次结果
   final Map<String, _SourceSearchState> _sourceStates = {};
@@ -169,22 +167,6 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
         _autoLoadCategoryContent();
       }
     });
-    _maybeTriggerGuide();
-  }
-
-  /// 首次激活时展示漫画页新手引导（仅一次）
-  void _maybeTriggerGuide() {
-    if (_guideShown || !widget.isActive) return;
-    _guideShown = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) maybeShowGuide(context, GuideGroups.manga);
-    });
-  }
-
-  @override
-  void didUpdateWidget(covariant SearchPage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.isActive && !oldWidget.isActive) _maybeTriggerGuide();
   }
 
   @override
@@ -471,7 +453,8 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 12, 8),
+          // 区块垂直间距 18；标题下留白 10；左右与顶栏对齐（16）
+          padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
           child: Row(
             children: [
               Text(
@@ -515,13 +498,13 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
           )
         else
           GridView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 3,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 12,
+              mainAxisSpacing: 14,
+              crossAxisSpacing: 8,
               childAspectRatio: 0.56,
             ),
             // ⚠️ 用户 2026-10-07：「漫画页和书源页里面的分类内容只要显示前6个就行」
@@ -878,6 +861,8 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
     return JellyExpandableSearch(
       controller: _searchController,
       hintText: '搜索漫画',
+      // 胶囊高约 40（与右上叠图标同高，对齐参考图）
+      height: 40,
       // 用户 2026-10-07：宽度改成原来的三分之二（160 → 107）
       maxWidth: 107,
       onFocusChange: (f) => setState(() {
@@ -906,7 +891,10 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
       final key = _chipKeys.putIfAbsent(src.id, () => GlobalKey());
       chips.add(_buildSourceChip(src, src.id == currentId, isDark, key: key));
     }
-    return Row(
+    return Padding(
+      // 源标签行：上边距 8、下边距 4，左右与顶栏/内容对齐（16）
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Row(
       children: [
         // 「聚搜」固定在第一位，不随源 chip 横向滑动（对齐参考图）
         _buildAggregateChip(isDark),
@@ -915,7 +903,7 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: EdgeInsets.zero,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: chips,
@@ -943,7 +931,8 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             ),
           ),
         ),
-      ],
+        ],
+      ),
     );
   }
 

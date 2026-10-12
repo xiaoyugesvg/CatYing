@@ -17,13 +17,11 @@ import 'book_source_login_page.dart';
 import 'book_source_qr_scan_page.dart';
 // cloud_book_source_page 的 import 已移除（云端网页入口迁到书源页）
 // ✅ **补齐缺失的 import** ✗✓（本轮修的 8 条 error 全因它们 ✗）：
-//   · `JellySearchBar` / `JellyExpandableSearch` / `JellySlidingActions`(+`JellyAction`)
-//     这三个是**共用组件** ✓ —— 我之前误以为"能被传递导出"✗，那是因为**闸门跑错了目录** ✗✗
+//   · `JellySearchBar` / `JellySlidingActions`(+`JellyAction`)
+//     是**共用组件** ✓ —— 我之前误以为"能被传递导出"✗，那是因为**闸门跑错了目录** ✗✗
 //     （`dart analyze` 没带仓库根 → 分析的是别的项目 ✓ → 假绿 ✓）。
 //   （书源页本身不再提供「浏览记录 / 收藏」入口，如需查看请到漫画/图书搜索页或“我的”页。）
-import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_search_bar.dart';
-import '../widgets/jelly_sliding_actions.dart';
 import '../theme/jelly_theme.dart';
 import '../../common/theme.dart';
 
@@ -55,20 +53,17 @@ class BookSourceRepoPage extends StatefulWidget {
 
 class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   final store = BookSourceStore.instance;
-  final _searchCtrl = TextEditingController();
   /// 顶部导入卡片的地址输入框
   final _urlCtrl = TextEditingController();
   bool _busy = false;
   bool _selectMode = false;
-  bool _searching = false;
   String _keyword = '';
   bool _autoImportHandled = false;
   final Set<String> _selected = {};
 
-  // ── 主列表的筛选与分组（按截图）────────────────────────────
-  /// 顶部「筛选已导入的书源」输入框
+  // ── 主列表的筛选与分组 ──────────────────────────────────
+  /// 页面内「筛选已导入的书源」输入框（搜索栏已从 AppBar 移到页面内）
   final _filterCtrl = TextEditingController();
-  String _filter = '';
   /// 分组 chip 当前选中项：null = 「全部」
   String? _pickedGroup;
   /// 被「隐藏组」的组名（不显示其书源）
@@ -103,7 +98,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
 
   @override
   void dispose() {
-    _searchCtrl.dispose();
     _urlCtrl.dispose();
     _filterCtrl.dispose();
     super.dispose();
@@ -151,10 +145,9 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
           return Column(
             children: [
               // 导入卡片**常驻页面顶部**（不藏进弹层）。
-              // 按 cmbok V2.0.7 截图：地址输入框 + 三个并排按钮就在页面上，
+              // 按目标设计：地址输入框 + 三个并排按钮就在页面上，
               // 用户一眼看到"能怎么导"。
               _importCard(),
-              if (_selectMode) _selectBar(store.sorted()),
               Expanded(
                 child: store.isEmpty
                     ? _emptyState()
@@ -164,14 +157,8 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
           );
         },
       ),
-      floatingActionButton: _selectMode && _selected.isNotEmpty
-          ? FloatingActionButton.extended(
-              onPressed: _deleteSelected,
-              icon: const Icon(Icons.delete_outline),
-              label: const Text('删除选中'),
-              backgroundColor: Colors.redAccent,
-            )
-          : null,
+      // 多选模式：底部圆角浮动操作栏（统一替代原来的 FAB）。
+      bottomNavigationBar: _selectMode ? _multiSelectBar() : null,
     );
   }
 
@@ -207,7 +194,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
             style: TextStyle(fontSize: AppTheme.fontBody, color: _titleColor),
             keyboardType: TextInputType.url,
             decoration: InputDecoration(
-              hintText: '书源网络地址（json / zip / 仓库索引）',
+              hintText: '书源地址 (json / zip / 仓库索引)',
               hintStyle:
                   TextStyle(fontSize: AppTheme.fontBody, color: JellyTheme.textSecondary),
               filled: true,
@@ -254,7 +241,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                           width: 15,
                           height: 15,
                           child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('网络导入',
+                      : const Text('从地址导入',
                           style: TextStyle(fontSize: AppTheme.fontBody)),
                 ),
               ),
@@ -290,116 +277,47 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       );
 
   // ============================================================
-  // AppBar：标题「书源仓库」（居中）+ 分享 + 体检（按截图）
+  // AppBar：居中标题「书源仓库」+ 右侧分享 + 盾牌体检（并排常显）
+  //   多选模式：标题变「多选书源」，右侧只留盾牌。
   // ============================================================
 
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
-      // ── 🔴 `centerTitle` 改成 false（修用户反馈"搜索框要往右靠"）──────
-      //
-      // 原来 `centerTitle: true` ✗，而搜索框就挂在 `title` 里 →
-      // 它被塞进**居中区**，再叠加组件内部当时写死的 `Alignment.centerLeft` ✗
-      // ⇒ 搜索框落在屏幕偏左，离右边 `actions` 的图标**空一大截** ✗
-      // 用户原话：「搜索框要靠右，然后右边的图标也要靠右，不要贴那么近」
-      //
-      // 改成 false 后 `title` 从左侧排版，再由下面的 `Spacer`
-      // 把搜索框推到**紧挨右侧图标**的位置 ✓
-      centerTitle: false,
-      title: Row(
-        children: [
-          // 非搜索态：显示标题
-          if (!_searching)
-            Flexible(
-              child: Text(
-                _selectMode ? '已选 ${_selected.length}' : '书源仓库',
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: AppTheme.fontTitle2,
-                  fontWeight: FontWeight.w600,
-                  color: _titleColor,
-                ),
-              ),
-            ),
-          // 搜索态：搜索框 + 靠右（原来的三元两支拆成两个分支，语义更清楚）
-          if (_searching) ...[
-            // ⚠️ **必须用 `Spacer`，不能用 `Expanded(child: 搜索框)`** ✗
-            //
-            // 实测（量胶囊本体，不是外层 Align）：
-            //   · `Expanded` 包裹 → 组件内部那个 `Align(centerLeft)` 生效，
-            //     胶囊被推到可用区**左缘**，与右侧图标之间空 **46.8px** ✗
-            //     （这正是用户报"搜索框不靠右"的成因）
-            //   · `Spacer` → 组件只占内容宽（`maxWidth`），内部 `Align`
-            //     没有可推空间 ⇒ 胶囊自然贴到右侧 ✓ 间距 = 下面那个 12px ✓
-            const Spacer(),
-            JellyExpandableSearch(
-              controller: _searchCtrl,
-              hintText: '搜索书源',
-              // 用户 2026-10-07：宽度改成原来的三分之二（210 → 140）
-              maxWidth: 140,
-              height: 32,
-              // ⚠️ 组件**没有** `autofocus` 参数（那是 `JellySearchBar` 的能力）——
-              //    本页是"标题行内常驻胶囊"，也不该自动弹键盘（会盖住列表）。
-              onChanged: (v) => setState(() => _keyword = v.trim()),
-              onSubmitted: (v) => setState(() => _keyword = v.trim()),
-            ),
-            // 与右侧 `actions` 的图标留出间距（用户：**不要贴那么近**）
-            const SizedBox(width: 12),
-          ],
-        ],
+      // 居中标题（左为自动返回箭头）
+      centerTitle: true,
+      title: Text(
+        _selectMode ? '多选书源' : '书源仓库',
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: AppTheme.fontTitle2,
+          fontWeight: FontWeight.w600,
+          color: _titleColor,
+        ),
       ),
       actions: [
-        // ✅ **滑动切换动作组**（Cmbok 截图同款）—— 右上角就这一个控件：
-        //   横向拨动一个个切换 ✓ + 长按下滑展开成竖列圆形按钮 ✓
-        //   体检 / 分享 / 搜索 / 多选 全部收进来（原来是 1 个在滑块里 +
-        //   3 个散装 IconButton，既挤又不能滑 ✗）
-        JellySlidingActions(
-          isDark: _isDark,
-          actions: [
-            JellyAction(
-              icon: Icons.verified_user_rounded,
-              tooltip: '书源体检',
-              // ⚠️ **`JellyAction.onPressed` 是非空 `VoidCallback`** ✓，
-              //   不能传 `? null : …` ✗ ⇒ 进来先判条件、不满足就 return ✓
-              onPressed: () {
-                if (store.isEmpty || _healthChecking) return;
-                _runHealthCheck();
-              },
-            ),
-            // 分享（截图右上）：导出全部书源 JSON
-            JellyAction(
-              icon: Icons.ios_share_rounded,
-              tooltip: '分享书源',
-              onPressed: () {
-                if (store.isEmpty) return;
-                _shareAll();
-              },
-            ),
-            JellyAction(
-              icon: _searching ? Icons.close_rounded : Icons.search_rounded,
-              tooltip: _searching ? '关闭搜索' : '搜索书源',
-              onPressed: () => setState(() {
-                _searching = !_searching;
-                if (!_searching) {
-                  _searchCtrl.clear();
-                  _keyword = '';
-                }
-              }),
-            ),
-            if (!store.isEmpty)
-              JellyAction(
-                icon: _selectMode
-                    ? Icons.done_rounded
-                    : Icons.checklist_rounded,
-                tooltip: _selectMode ? '退出多选' : '多选',
-                onPressed: () => setState(() {
-                  _selectMode = !_selectMode;
-                  _selected.clear();
-                }),
-              ),
-          ],
-        ),
+        // 普通模式：分享 + 盾牌（体检）两个图标**同时并排显示**，不用滑动切换。
+        if (!_selectMode)
+          _appBarIcon(Icons.ios_share_rounded, '分享书源', () {
+            if (store.isEmpty) return;
+            _shareAll();
+          }),
+        // 盾牌（书源体检）：两种模式都在。
+        _appBarIcon(Icons.verified_user_rounded, '书源体检', () {
+          if (store.isEmpty || _healthChecking) return;
+          _runHealthCheck();
+        }),
         const SizedBox(width: 4),
       ],
+    );
+  }
+
+  /// 顶栏动作图标：紧凑 IconButton（右上角图标并排用）。
+  Widget _appBarIcon(IconData icon, String tooltip, VoidCallback onTap) {
+    return IconButton(
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+      icon: Icon(icon, color: _titleColor),
+      onPressed: onTap,
     );
   }
 
@@ -483,49 +401,78 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   }
 
 
-  Widget _selectBar(List<BookSource> list) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-      child: Row(
-        children: [
-          TextButton(
-            onPressed: () => setState(() {
-              if (_selected.length == list.length) {
-                _selected.clear();
-              } else {
-                _selected
-                  ..clear()
-                  ..addAll(list.map((e) => e.id));
-              }
-            }),
-            child: Text(_selected.length == list.length ? '取消全选' : '全选'),
+  // ============================================================
+  // 多选模式底部圆角浮动操作栏（替代原 FAB）
+  //   已选 N 项 + 全选 + 删除 + 分享 + ×（退出多选）
+  // ============================================================
+
+  Widget _multiSelectBar() {
+    final list = _visible;
+    final allSelected =
+        list.isNotEmpty && _selected.length == list.length;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+        child: Container(
+          height: 56,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          decoration: BoxDecoration(
+            color: _isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: _isDark ? 0.35 : 0.12),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
-          const Spacer(),
-          TextButton(
-            onPressed: () {
-              for (final id in _selected.toList()) {
-                store.setEnabled(id, true);
-              }
-              _toast('已启用 ${_selected.length} 个');
-            },
-            child: const Text('启用'),
+          child: Row(
+            children: [
+              const SizedBox(width: 12),
+              Text(
+                '已选 ${_selected.length} 项',
+                style: TextStyle(
+                    fontSize: AppTheme.fontSubhead, color: _titleColor),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: () => setState(() {
+                  if (allSelected) {
+                    _selected.clear();
+                  } else {
+                    _selected
+                      ..clear()
+                      ..addAll(list.map((e) => e.id));
+                  }
+                }),
+                child: Text(allSelected ? '取消全选' : '全选',
+                    style: const TextStyle(fontSize: AppTheme.fontSubhead)),
+              ),
+              _barIcon(Icons.delete_outline_rounded, '删除选中',
+                  _selected.isEmpty ? null : _deleteSelected),
+              _barIcon(Icons.ios_share_rounded, '分享选中',
+                  _selected.isEmpty ? null : _shareSelected),
+              _barIcon(Icons.close_rounded, '退出多选', () => setState(() {
+                    _selectMode = false;
+                    _selected.clear();
+                  })),
+              const SizedBox(width: 4),
+            ],
           ),
-          TextButton(
-            onPressed: () {
-              for (final id in _selected.toList()) {
-                store.setEnabled(id, false);
-              }
-              _toast('已停用 ${_selected.length} 个');
-            },
-            child: const Text('停用'),
-          ),
-          // ✅ 多选分享（用户 2026-10-12）：导出选中源的 JSON 到剪贴板
-          TextButton(
-            onPressed: _selected.isEmpty ? null : _shareSelected,
-            child: const Text('分享'),
-          ),
-        ],
+        ),
       ),
+    );
+  }
+
+  /// 底部操作栏里的一个图标按钮
+  Widget _barIcon(IconData icon, String tooltip, VoidCallback? onTap) {
+    return IconButton(
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+      icon: Icon(icon, size: 22, color: _titleColor),
+      onPressed: onTap,
     );
   }
 
@@ -586,8 +533,9 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
   // 列表
   // ============================================================
 
-  /// 主列表（按截图）：
-  ///   共 N 个 + 清空  →  筛选输入框  →  分组 chip 行  →  书源卡片
+  /// 主列表：
+  ///   共 N 个 + 清空  →  搜索框  →  统计 chips  →  分组 chip 行  →  书源卡片
+  /// （关键词搜索在 `_visible` 里完成，这里只做「隐藏组 / 选中分组」过滤）
   Widget _sourceList(List<BookSource> all) {
     // 1) 按"隐藏组"和"选中分组"过滤
     var list = all
@@ -595,19 +543,6 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
         .toList();
     if (_pickedGroup != null) {
       list = list.where((s) => s.group == _pickedGroup).toList();
-    }
-    // 🔴 「筛选已导入的书源」输入框**一直是死的** ✗：它的 `onChanged` 确实在写
-    // `_filter`（见本文件 :571-605 的输入框 ✓），但**这里从来没读过它** ✓
-    // → 用户输入关键词后列表**纹丝不动** ✗（这是本页最常用的控件之一 ✓）。
-    // 按 名称 / 地址 / 分组 做不区分大小写的包含匹配 ✓
-    final kw = _filter.trim().toLowerCase();
-    if (kw.isNotEmpty) {
-      list = list
-          .where((s) =>
-              s.name.toLowerCase().contains(kw) ||
-              s.url.toLowerCase().contains(kw) ||
-              s.group.toLowerCase().contains(kw))
-          .toList();
     }
     // 2) 分组统计（用过滤后的全集算，chip 上的数字才对）
     final base = all.where((s) => !_hiddenGroups.contains(s.group)).toList();
@@ -659,31 +594,18 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
             ],
           ),
         ),
-        // ── 筛选已导入的书源 ──────────────────────────────────
-        // ✅ 统一到 `JellySearchBar` ✓ —— 这是**全宽**场景 ✓（注意与同页标题行那个
-        //   210 宽的**小胶囊**不同 ✗：那个用 `JellyExpandableSearch` ✓；
-        //   判据就是"**有没有固定宽度**" ✓：有 → Expandable ✓；无（Column 内）→ Bar ✓）。
-        //   原为手写：`Container(高40 / 圆角20 / 卡片色)` + 手画 `prefixIcon` 放大镜 +
-        //   自己实现的 `suffixIcon` 清空键 ✓。
-        // ⚠️ 必须**整段替换** ✓：组件自带底色 / 圆角 / 放大镜 / 清空键 ✓，
-        //   留下外层 `Container(decoration: …)` 就会"圆角方框套胶囊" ✗。
-        // 参数对照 ✓：controller `_filterCtrl` ✓ · hintText 同文案 ✓ ·
-        //   ⚠️ `onChanged` 里的 **`.trim().toLowerCase()` 必须原样保留** ✓
-        //   （该页的过滤是**大小写不敏感**的 ✓，漏掉就退化成大小写敏感 ✗）·
-        //   onCleared：保留 `_filterCtrl.clear()` ✓（我不假设组件内部是否清 controller ✗，
-        //   多清一次无害 ✓）+ 置空 ✓
+        // ── 搜索栏（从 AppBar 移到页面内）：圆角搜索框，筛选已导入的书源 ──
         JellySearchBar(
           controller: _filterCtrl,
           hintText: '筛选已导入的书源',
-          onChanged: (v) => setState(() => _filter = v.trim().toLowerCase()),
+          onChanged: (v) => setState(() => _keyword = v.trim()),
           onCleared: () {
             _filterCtrl.clear();
-            setState(() => _filter = '');
+            setState(() => _keyword = '');
           },
         ),
-        // ── 统计 chip 行（Cmbok 截图：筛选框与分组行之间的一排
-        //    「图标 + 数量」小胶囊：总数/已启用/已停用/需登录/有发现/
-        //    体检判死/隐藏组）—— 只读展示，快速回答"库里什么状况"
+        // ── 统计 chip 行：总数 / 待更新 / 正常 / 重复 / 异常 / 失效 ──
+        //   数字全部基于真实数据计算（拿不到的项显示 0，不编造）。
         Padding(
           padding: const EdgeInsets.only(top: 10),
           child: SizedBox(
@@ -694,10 +616,9 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
             ),
           ),
         ),
-        // ── 分组 chip 行 ──────────────────────────────────────
-        //
-        // 截图：最左是「排序/分组设置」圆钮 + 「＋」新建分组，
-        // 接着是「∞ 全部 N」「未分组 N」「通常书源 N」…
+        // ── 筛选/分组行 ──────────────────────────────────────
+        //   方形「☰」= 管理分组弹层 · 「⋯」= 更多（新建分组 / 设置分组）·
+        //   接着是「全部 N」「通常书源 N」「正版书源 N」…（按真实分组字段统计）
         Padding(
           padding: const EdgeInsets.only(top: 10, bottom: 4),
           child: SizedBox(
@@ -705,9 +626,9 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
             child: ListView(
               scrollDirection: Axis.horizontal,
               children: [
-                _groupActionBtn(Icons.tune_rounded, '分组设置', _showManageGroups),
+                _squareIconBtn(Icons.menu_rounded, '管理分组', _showManageGroups),
                 const SizedBox(width: 8),
-                _groupActionBtn(Icons.add_box_outlined, '新建分组', _showNewGroup),
+                _moreBtn(),
                 const SizedBox(width: 8),
                 _groupChip('全部', base.length, _pickedGroup == null,
                     () => setState(() => _pickedGroup = null)),
@@ -750,29 +671,82 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     );
   }
 
-  /// 统计 chip 行（Cmbok 截图：图标 + 数量的一排小胶囊，只读）。
-  /// 依次是：总数 / 已启用 / 已停用 / 需登录 / 有发现 / 体检判死 / 隐藏组。
+  /// 筛选行左侧的**方形**小按钮（☰ 管理分组）
+  Widget _squareIconBtn(IconData icon, String tip, VoidCallback onTap) {
+    return Tooltip(
+      message: tip,
+      child: Material(
+        color: _isDark
+            ? Colors.white.withValues(alpha: 0.08)
+            : Colors.black.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            width: 34,
+            height: 34,
+            child: Icon(icon, size: 18, color: JellyTheme.textSecondary),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 筛选行里的「⋯」更多按钮（新建分组 / 设置分组）
+  Widget _moreBtn() {
+    return PopupMenuButton<String>(
+      tooltip: '更多',
+      onSelected: (v) {
+        if (v == 'new') _showNewGroup();
+        if (v == 'set') _showSetGroup(Set<String>.from(_selected));
+      },
+      itemBuilder: (_) => const [
+        PopupMenuItem<String>(value: 'new', child: Text('新建分组')),
+        PopupMenuItem<String>(value: 'set', child: Text('设置分组')),
+      ],
+      child: Container(
+        width: 34,
+        height: 34,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: _isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(Icons.more_horiz_rounded,
+            size: 18, color: JellyTheme.textSecondary),
+      ),
+    );
+  }
+
+  /// 统计 chip 行：总数 / 待更新 / 正常 / 重复 / 异常 / 失效。
+  /// 数字全部基于真实数据计算；模型拿不到的项（待更新）显示 0。
   List<Widget> _statChips(List<BookSource> base) {
+    final total = base.length;
+    // 正常 = 启用；异常 = 停用
     final enabled = base.where((s) => s.enabled).length;
-    final needLogin = base
-        .where((s) =>
-            (s.readPath('loginUrl') ?? '').toString().trim().isNotEmpty)
+    final disabled = total - enabled;
+    // 重复 = 按 id/url 去重后多出来的条数
+    final unique = base
+        .map((s) => s.url.trim().isNotEmpty ? s.url.trim() : s.id)
+        .toSet()
         .length;
-    final hasExplore = base
-        .where((s) =>
-            (s.readPath('exploreUrl') ?? '').toString().trim().isNotEmpty)
+    final duplicate = total - unique;
+    // 失效 = 体检判死的源（未跑体检则为 0，不编造）
+    final dead = _health.values
+        .where((h) => h.level == BookSourceHealthLevel.dead)
         .length;
-    // 体检判死数：只统计已跑过体检的源（_health 在跑完体检后才有值）
-    final dead =
-        _health.values.where((h) => h.level == BookSourceHealthLevel.dead).length;
+    // 待更新：模型没有"可更新"字段 → 恒为 0
+    const pending = 0;
     final stats = <(IconData, int)>[
-      (Icons.menu_book_rounded, base.length),
+      (Icons.menu_book_rounded, total),
+      (Icons.update_rounded, pending),
       (Icons.check_circle_outline_rounded, enabled),
-      (Icons.block_rounded, base.length - enabled),
-      (Icons.key_rounded, needLogin),
-      (Icons.explore_outlined, hasExplore),
+      (Icons.copy_all_rounded, duplicate),
+      (Icons.error_outline_rounded, disabled),
       (Icons.heart_broken_outlined, dead),
-      (Icons.visibility_off_outlined, _hiddenGroups.length),
     ];
     return [
       for (var i = 0; i < stats.length; i++) ...[
@@ -1024,14 +998,12 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     return '📂';
   }
 
-  /// 一个书源卡片（按 Cmbok 截图）：
-  ///   [复选框] [分组emoji图标] ✅ 名称 / 分组·emoji ......  [启用开关]
+  /// 一个书源卡片：
+  ///   [方形复选框] [缩略图] ✅名称 ⓘ / 分组小标签 ......  [启用开关]
   ///
-  /// 与旧版的区别：
-  ///   · 左侧由"首字头像"改为**分组 emoji 图标**（截图如此：⚡快速/📣正版/📂通常）
-  ///   · 名称前带**状态点**：启用=绿勾，停用=灰⊘（截图如此）
-  ///   · subtitle 只看分组（URL 在详情页里看）
-  ///   · 非选择模式下也显示**复选框**（截图里常驻），点它进选择模式
+  ///   · 左侧缩略图：模型没有封面字段 → 以"分组 emoji"块降级代替
+  ///   · 名称前带状态点：启用=绿勾，停用=灰⊘
+  ///   · 点正文 / 复选框 → 进入多选并勾选；长按 / ⓘ → 源菜单
   Widget _sourceTile(BookSource s) {
     final sel = _selected.contains(s.id);
     return Container(
@@ -1082,7 +1054,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
               ),
               title: Row(
                 children: [
-                  // 状态点（截图：启用=绿勾，停用=灰⊘）
+                  // 状态点：启用=绿勾，停用=灰⊘
                   Icon(
                     s.enabled
                         ? Icons.check_circle_rounded
@@ -1106,33 +1078,52 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                       ),
                     ),
                   ),
+                  const SizedBox(width: 5),
+                  // ⓘ 小标：点它打开书源菜单（编辑/置顶/登录/删除/设置分组）
+                  GestureDetector(
+                    onTap: () => _showSourceMenu(s),
+                    child: Icon(Icons.info_outline_rounded,
+                        size: 15, color: JellyTheme.textSecondary),
+                  ),
                 ],
               ),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    // 截图的徽章行：「通常书源 ·📂」—— 分组名 + 对应 emoji
-                    '${s.group.isEmpty ? '未分组' : s.group} ·${_groupEmoji(s.group)}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: AppTheme.fontFootnote, color: JellyTheme.textSecondary),
+                  // 分组小标签（如「通常书源」）
+                  Container(
+                    margin: const EdgeInsets.only(top: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
+                    decoration: BoxDecoration(
+                      color: _isDark
+                          ? Colors.white.withValues(alpha: 0.07)
+                          : Colors.black.withValues(alpha: 0.045),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      s.group.isEmpty ? '未分组' : s.group,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: AppTheme.fontCaption,
+                          color: JellyTheme.textSecondary),
+                    ),
                   ),
                   if (_health[s.id] != null) _healthBadge(_health[s.id]!),
                 ],
               ),
-              onTap: _selectMode
-                  ? () => setState(() {
-                        if (sel) {
-                          _selected.remove(s.id);
-                        } else {
-                          _selected.add(s.id);
-                        }
-                        if (_selected.isEmpty) _selectMode = false;
-                      })
-                  : () => _showSourceMenu(s),
+              // 点正文 = 进入多选并勾选；长按 = 源菜单
+              onTap: () => setState(() {
+                if (sel) {
+                  _selected.remove(s.id);
+                } else {
+                  _selected.add(s.id);
+                  _selectMode = true;
+                }
+                if (_selected.isEmpty) _selectMode = false;
+              }),
               onLongPress: () => _showSourceMenu(s),
               trailing: Switch(
                 value: s.enabled,
@@ -1290,7 +1281,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                     size: 20, color: JellyTheme.textSecondary),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _showPickGroup(s);
+                  _showSetGroup({s.id});
                 },
               ),
               const SizedBox(height: 8),
@@ -1301,13 +1292,42 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     );
   }
 
-  /// 「设置分组」：给单个书源选一个已有分组，或新建
-  Future<void> _showPickGroup(BookSource s) async {
-    final names = <String>{for (final x in store.sorted()) x.group}.toList();
-    final picked = await showModalBottomSheet<String>(
+  /// 「设置分组」预设分组（外加仓库里已有的自定义分组）
+  static const _presetGroups = <String>[
+    '未分组',
+    '通常书源',
+    '正版书源',
+    '快速书源',
+    '下载书源',
+    '特殊书源',
+    '出版书源',
+    '同人书源',
+    '轻文书源',
+  ];
+
+  /// 「设置分组」底部弹层：给一批书源（多选/单个）归入某个分组。
+  ///   顶部把手 + 标题「设置分组 (N 个源)」+ ×；下方一列分组选项，
+  ///   每项左侧方形 checkbox 图标，当前分组右侧带 ✓。
+  Future<void> _showSetGroup(Set<String> ids) async {
+    if (ids.isEmpty) return;
+    final all = store.sorted();
+    // 选项 = 预设分组 + 仓库里已存在的自定义分组（去重）
+    final existing = <String>{for (final s in all) s.group};
+    final options = <String>[
+      ..._presetGroups,
+      ...existing.where((g) => !_presetGroups.contains(g)),
+    ];
+    // 当前分组：全部选中源同属一个组时才标记（否则不显示 ✓）
+    final selectedGroups = <String>{
+      for (final s in all.where((s) => ids.contains(s.id))) s.group,
+    };
+    final current = selectedGroups.length == 1 ? selectedGroups.first : null;
+    await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (ctx) => Container(
+        constraints:
+            BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.7),
         decoration: BoxDecoration(
           color: _card,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
@@ -1317,64 +1337,74 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const SizedBox(height: 14),
-              Text('设置分组',
-                  style: TextStyle(
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.w700,
-                      color: _titleColor)),
-              const SizedBox(height: 8),
-              for (final g in names)
-                ListTile(
-                  title: Text(g,
-                      style: TextStyle(fontSize: AppTheme.fontHeadline, color: _titleColor)),
-                  trailing: s.group == g
-                      ? Icon(Icons.check_rounded,
-                          size: 20, color: JellyTheme.primary)
-                      : null,
-                  onTap: () => Navigator.pop(ctx, g),
+              Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 6),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: JellyTheme.textSecondary.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-              ListTile(
-                leading: Icon(Icons.add_rounded,
-                    size: 20, color: JellyTheme.textSecondary),
-                title: Text('新建分组…',
-                    style: TextStyle(
-                        fontSize: AppTheme.fontHeadline, color: JellyTheme.textSecondary)),
-                onTap: () => Navigator.pop(ctx, '__new__'),
               ),
-              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 8, 6),
+                child: Row(
+                  children: [
+                    Text('设置分组 (${ids.length} 个源)',
+                        style: TextStyle(
+                            fontSize: AppTheme.fontTitle3,
+                            fontWeight: FontWeight.w700,
+                            color: _titleColor)),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: '关闭',
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: Icon(Icons.close_rounded,
+                          size: 20, color: _titleColor),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final g in options)
+                      ListTile(
+                        leading: Icon(
+                          g == current
+                              ? Icons.check_box
+                              : Icons.check_box_outline_blank,
+                          size: 22,
+                          color: g == current
+                              ? JellyTheme.primary
+                              : JellyTheme.textSecondary,
+                        ),
+                        title: Text(g,
+                            style: TextStyle(
+                                fontSize: AppTheme.fontHeadline,
+                                color: _titleColor)),
+                        trailing: g == current
+                            ? Icon(Icons.check_rounded,
+                                size: 20, color: JellyTheme.primary)
+                            : null,
+                        onTap: () async {
+                          Navigator.pop(ctx);
+                          for (final id in ids) {
+                            await store.setGroup(id, g);
+                          }
+                          _toast('已归入「$g」');
+                        },
+                      ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
       ),
     );
-    if (picked == null) return;
-    var target = picked;
-    if (picked == '__new__') {
-      final ctrl = TextEditingController();
-      final name = await showDialog<String>(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('新建分组'),
-          content: TextField(
-            controller: ctrl,
-            autofocus: true,
-            decoration: const InputDecoration(hintText: '输入分组名称'),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(c), child: const Text('取消')),
-            TextButton(
-                onPressed: () => Navigator.pop(c, ctrl.text.trim()),
-                child: const Text('确定')),
-          ],
-        ),
-      );
-      if (name == null || name.isEmpty) return;
-      target = name;
-    }
-    await store.setGroup(s.id, target);
-    _toast('已归入「$target」');
   }
 
   // ============================================================
