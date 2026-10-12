@@ -21,7 +21,6 @@ import '../widgets/jelly_filter_sheet.dart';
 import '../widgets/jelly_icon_deck.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_pull_cord.dart';
-import '../widgets/guide_overlay.dart';
 import '../widgets/staggered_entrance.dart';
 import 'book_detail_page.dart';
 import 'book_source_search_page.dart';
@@ -77,7 +76,6 @@ class _BookSearchPageState extends State<BookSearchPage>
   bool _isLoading = false;
   bool _isSearching = false;
   String _keyword = '';
-  bool _guideShown = false; // 新手引导已展示标记
 
   // 首页推荐流（z-library「最受欢迎」）：打开图书页自动加载，
   // 不再让用户面对空态先选分类/搜索（用户 2026-10-06 要求恢复内容）。
@@ -133,7 +131,6 @@ class _BookSearchPageState extends State<BookSearchPage>
     _loadHistory();
     _ensureCategories();
     _loadHome();
-    _maybeTriggerGuide();
     // 豆瓣排行「去找书」跳转：预填关键词并立即执行搜索
     // （首帧后触发，避免 initState 阶段 FocusScope 查询）
     final kw = widget.initialKeyword?.trim() ?? '';
@@ -143,21 +140,6 @@ class _BookSearchPageState extends State<BookSearchPage>
         if (mounted) _runSearch(kw);
       });
     }
-  }
-
-  /// 首次激活时展示图书页新手引导（仅一次）
-  void _maybeTriggerGuide() {
-    if (_guideShown || !widget.isActive) return;
-    _guideShown = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) maybeShowGuide(context, GuideGroups.book);
-    });
-  }
-
-  @override
-  void didUpdateWidget(covariant BookSearchPage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.isActive && !oldWidget.isActive) _maybeTriggerGuide();
   }
 
   @override
