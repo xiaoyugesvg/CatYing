@@ -1361,27 +1361,18 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           else
             Container(color: bg[0]),
           GestureDetector(
-            // 点屏幕中间切换菜单栏；点左/右 1/3 翻章
-            onTapUp: (d) {
-              final w = MediaQuery.of(context).size.width;
-              final x = d.globalPosition.dx;
-              if (_showBar || _showSettingsPanel) {
-                setState(() {
-                  _showBar = false;
-                  _showSettingsPanel = false;
-                });
-                return;
-              }
-              // 翻页反转同样作用于整屏左 / 右 1/3 的翻章 ✓
-              final flip = _rs.flipReverse;
-              if (x < w * 0.3) {
-                _go(flip ? 1 : -1);
-              } else if (x > w * 0.7) {
-                _go(flip ? -1 : 1);
-              } else {
-                setState(() => _showBar = true);
-              }
-            },
+            // ✅ 点击统一走 [_handleTap]（3×3 分区 + 「点击区域」配置）：
+            //   原来这里硬编码"左 1/3 翻章 / 右 1/3 翻章 / 中间开顶栏"，
+            //   且只在 PageView 分支（左右/无动画/双页）生效——上下模式被
+            //   内层 _handleTap 赢走、仿真/覆盖被组件内部点击赢走 ⇒
+            //   「点击区域」配置在不同模式下行为不一致 ✗。
+            //   现在外层兜底也走同一套分区逻辑（tapZones 生效 ✓）：
+            //   · 上下模式：内层 _handleTap 赢（更深节点）✓
+            //   · 仿真/覆盖：组件内部点击赢（onTapCenter）✓
+            //   · PageView：PageView 只注册拖拽手势，tap 落到这里 ✓
+            //   · 面板/顶栏打开：_handleTap 第一行收起 ✓
+            onTapUp: (d) =>
+                _handleTap(d.globalPosition, MediaQuery.of(context).size),
             child: SafeArea(
               child: Stack(
                 children: [
@@ -2134,7 +2125,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         return SafeArea(
           child: ConstrainedBox(
             constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(ctx).size.height * 0.72,
+              // 弹窗一律**最高半屏**（用户 2026-10-12）：内容区自带滚动 ✓
+              maxHeight: MediaQuery.of(ctx).size.height * 0.5,
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -3495,7 +3487,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
             child: Container(
               constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(ctx).size.height * 0.85),
+                  // 最高半屏（用户 2026-10-12）
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.5),
               decoration: BoxDecoration(
                 color: _bgTop,
                 borderRadius:
@@ -3680,7 +3673,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
           return Container(
             constraints:
-                BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.82),
+                // 最高半屏（用户 2026-10-12）
+                BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.5),
             decoration: BoxDecoration(
               color: _bgTop,
               borderRadius:
@@ -4135,7 +4129,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) => Container(
           constraints:
-              BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.6),
+              // 最高半屏（用户 2026-10-12）
+              BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.5),
           decoration: BoxDecoration(
             color: _bgTop,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
@@ -5067,7 +5062,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
           return Container(
             constraints:
-                BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.8),
+                // 最高半屏（用户 2026-10-12）
+                BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.5),
             decoration: BoxDecoration(
               color: _bgTop,
               borderRadius:
@@ -5534,7 +5530,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
           return Container(
             constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(ctx).size.height * 0.55),
+                // 最高半屏（用户 2026-10-12）
+                maxHeight: MediaQuery.of(ctx).size.height * 0.5),
             decoration: BoxDecoration(
               color: _bgTop,
               borderRadius:
@@ -6354,7 +6351,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       isScrollControlled: true,
       builder: (ctx) => Container(
         constraints:
-            BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.8),
+            // 最高半屏（用户 2026-10-12）
+            BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.5),
         decoration: BoxDecoration(
           color: _bgTop,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
@@ -6433,7 +6431,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       isScrollControlled: true,
       builder: (ctx) => Container(
         constraints:
-            BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.8),
+            // 最高半屏（用户 2026-10-12）
+            BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.5),
         decoration: BoxDecoration(
           color: _bgTop,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
@@ -6616,7 +6615,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       right: 0,
       child: Container(
         constraints:
-            BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
+            // 最高半屏（用户 2026-10-12）
+            BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.5),
         decoration: BoxDecoration(
           color: _bgTop,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
@@ -7230,7 +7230,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           }
           return Container(
             constraints:
-                BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.9),
+                // 最高半屏（用户 2026-10-12）：章节列表自带滚动 ✓
+                BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.5),
             decoration: BoxDecoration(
               color: _bgTop,
               borderRadius:
