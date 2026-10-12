@@ -62,6 +62,23 @@ jobs:
           # 不传 architecture = 默认 x64
           # 如果以后切到 Apple Silicon runner，把这里改成 'ARM64' 即可
 
+      - name: Select Xcode 16 (LibDovi 要求 Swift tools 6.0)
+        # 第五播放核心 AE（AetherEngine）依赖 LibDovi（Dolby Vision），
+        # 其 Package.swift 声明 swift-tools-version: 6.0（仓库所有 tag 均如此，
+        # 无可降级的 5.x 版本）—— Xcode 15.4（Swift 5.10）解析 SPM 依赖时直接报
+        #   "'libdovi' contains incompatible tools version (6.0.0)"
+        # macos-14 镜像预装 Xcode 16.x，这里显式切到最高的 16.x。
+        run: |
+          set -e
+          ls -d /Applications/Xcode*.app || true
+          XCODE16=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE16" ]; then
+            echo "❌ 镜像上没有 Xcode 16，无法满足 LibDovi 的 tools 6.0 要求"
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE16"
+          echo "已切换：$XCODE16"
+
       - name: Show Flutter / Xcode versions
         run: |
           flutter --version
