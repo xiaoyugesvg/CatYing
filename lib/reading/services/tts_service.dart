@@ -133,7 +133,8 @@ class TtsService extends GetxService {
   // ============================================================
 
   /// 开始朗读整段文本
-  Future<void> speak(String text, {int startAt = 0}) async {
+  Future<void> speak(String text,
+      {int startAt = 0, List<String?>? segmentVoices}) async {
     // 刷新当前朗读源：朗读引擎页里选中的 easyvoice 源生效，否则原生
     await TtsSourceStore.instance.init();
     final active = TtsSourceStore.instance.active;
@@ -152,6 +153,8 @@ class TtsService extends GetxService {
     }
     await stop();
     _segments = segs;
+    // A4 双音色：与 _segments 对齐的逐段音色覆盖（null = 用源默认音色）✓
+    _segmentVoices = segmentVoices;
     totalSegments.value = segs.length;
     currentIndex.value = startAt.clamp(0, segs.length - 1);
     _stopRequested = false;
@@ -283,6 +286,9 @@ class TtsService extends GetxService {
   // 内部
   // ============================================================
 
+  /// 逐段音色覆盖（A4 双音色，与 [_segments] 对齐；null = 用源默认音色）
+  List<String?>? _segmentVoices;
+
   Future<void> _speakCurrent() async {
     if (_stopRequested) return;
     final i = currentIndex.value;
@@ -332,7 +338,13 @@ class TtsService extends GetxService {
     }
     _netSynthesizing = true;
     try {
-      final bytes = await _synthesizeEasyVoice(src, seg);
+      // A4 双音色：取本段音色覆盖（无则走源默认）
+      final segVoice =
+          (_segmentVoices != null && i < _segmentVoices!.length)
+              ? _segmentVoices![i]
+              : null;
+      final bytes = await _synthesizeEasyVoice(src, seg,
+          voiceOverride: segVoice);
       _netSynthesizing = false;
       if (_stopRequested) return;
       if (bytes == null || bytes.isEmpty) throw '服务返回空音频';
@@ -355,23 +367,27 @@ class TtsService extends GetxService {
   }
 
   /// EasyVoice 合成：AI 推荐配音走任务接口，否则走 generateJson 直出 mp3
-  Future<List<int>?> _synthesizeEasyVoice(TtsSource src, String text) async {
+  /// [voiceOverride]（A4）：本段指定的音色（对话/旁白），非空时优先于源默认。
+  Future<List<int>?> _synthesizeEasyVoice(TtsSource src, String text,
+      {String? voiceOverride}) async {
     if (src.useAiVoice && src.aiVoiceAvailable) {
-      return _synthesizeEasyVoiceAi(src, text);
+      return _synthesizeEasyVoiceAi(src, text,
+          voiceOverride: voiceOverride);
     }
     final base = src.endpoint.trim().replaceAll(RegExp(r'/+$'), '');
     if (base.isEmpty) throw '接口地址为空';
     final ratePct = '${(((rate.value - 0.5) / 0.5) * 100).round()}%';
     final pitchHz = '${((pitch.value - 1.0) * 10).round()}Hz';
-    final voice = src.voice.trim().isEmpty
-        ? 'zh-CN-XiaoxiaoNeural'
-        : src.voice.trim();
+    final voice = (voiceOverride != null && voiceOverride.trim().isNotEmpty)
+        ? voiceOverride.trim()
+        : (src.voice.trim().isEmpty ? 'zh-CN-XiaoxiaoNeural' : src.voice.trim());
     final r = await _dio.post<List<int>>(
       '$base/api/v1/tts/generateJson',
       data: {
         'data': [
           {
-            'desc': '旁白',
+            // A4 双音色：有覆盖标「对话」，否则「旁白」（EasyVoice 语义）✓
+            'desc': voiceOverride == null ? '旁白' : '对话',
             'text': text,
             'voice': voice,
             'rate': ratePct,
@@ -393,7 +409,8 @@ class TtsService extends GetxService {
   /// EasyVoice「AI 智能推荐配音」（useLLM=true）：
   /// POST /api/v1/create 建任务 → 轮询 /api/v1/task/{id} →
   /// 完成后 GET /api/v1/download/{file} 取整段 mp3（多角色有声书）。
-  Future<List<int>?> _synthesizeEasyVoiceAi(TtsSource src, String text) async {
+  Future<List<int>?> _synthesizeEasyVoiceAi(TtsSource src, String text,
+      {String? voiceOverride}) async {
     final base = src.endpoint.trim().replaceAll(RegExp(r'/+$'), '');
     if (base.isEmpty) throw '接口地址为空';
     final body = <String, dynamic>{
@@ -401,7 +418,11 @@ class TtsService extends GetxService {
       'useLLM': true,
     };
     // 用户手填了音色 → 带上让服务端优先用；空则由大模型推荐
-    if (src.voice.trim().isNotEmpty) body['voice'] = src.voice.trim();
+    // A4：本段有音色覆盖（对话/旁白）时优先传它
+    final v = (voiceOverride != null && voiceOverride.trim().isNotEmpty)
+        ? voiceOverride.trim()
+        : src.voice.trim();
+    if (v.isNotEmpty) body['voice'] = v;
 
     final create = await _dio.post<Map<String, dynamic>>(
       '$base/api/v1/create',

@@ -10,6 +10,12 @@
 ///                 时间 / 章节 / 电量 / 书名 / 页码 / 进度
 ///   音量键翻页  ：按音量上/下键翻页（会接管音量键）
 ///   屏幕休眠    ：默认 / 10分钟 / 永不息屏
+///   A1 对话气泡  ：关 / 对话气泡 / 对称气泡 + 配色
+///   A2 繁简转换  ：原始 / 繁→简 / 简→繁
+library;
+
+import '../novel_source/novel_chinese_converter.dart';
+
 class ReadingSettings {
   ReadingSettings({
     this.pageMode = PageMode.slide,
@@ -20,6 +26,12 @@ class ReadingSettings {
     this.statusItems = const {'章节', '页码', '进度'},
     this.volumeKeys = false,
     this.sleepMode = SleepMode.defaultMode,
+    this.bubbleMode = BubbleMode.none,
+    this.bubblePalette = BubblePalette.light,
+    this.convertMode = ChineseConvertMode.none,
+    this.eyeBreakEnabled = false,
+    this.eyeBreakMinutes = 30,
+    this.purifyRules = defaultPurifyRules,
   });
 
   final PageMode pageMode;
@@ -47,6 +59,23 @@ class ReadingSettings {
 
   final SleepMode sleepMode;
 
+  /// 对话气泡样式（A1）：关 / 对话左气泡 / 对称气泡
+  final BubbleMode bubbleMode;
+
+  /// 气泡配色（A1）：浅色 / 深色 / 护眼
+  final BubblePalette bubblePalette;
+
+  /// 繁简转换（A2）：原始 / 繁→简 / 简→繁
+  final ChineseConvertMode convertMode;
+
+  /// 护眼休息提醒（C7）：连续阅读达到时长后提醒休息
+  final bool eyeBreakEnabled;
+  /// 护眼休息提醒时长（分钟）
+  final int eyeBreakMinutes;
+
+  /// 正文净化规则（C9）：默认规则集 + 用户自定义，启停状态随设置持久化
+  final List<PurifyRule> purifyRules;
+
   ReadingSettings copyWith({
     PageMode? pageMode,
     bool? flipReverse,
@@ -56,6 +85,12 @@ class ReadingSettings {
     Set<String>? statusItems,
     bool? volumeKeys,
     SleepMode? sleepMode,
+    BubbleMode? bubbleMode,
+    BubblePalette? bubblePalette,
+    ChineseConvertMode? convertMode,
+    bool? eyeBreakEnabled,
+    int? eyeBreakMinutes,
+    List<PurifyRule>? purifyRules,
   }) {
     return ReadingSettings(
       pageMode: pageMode ?? this.pageMode,
@@ -66,6 +101,12 @@ class ReadingSettings {
       statusItems: statusItems ?? this.statusItems,
       volumeKeys: volumeKeys ?? this.volumeKeys,
       sleepMode: sleepMode ?? this.sleepMode,
+      bubbleMode: bubbleMode ?? this.bubbleMode,
+      bubblePalette: bubblePalette ?? this.bubblePalette,
+      convertMode: convertMode ?? this.convertMode,
+      eyeBreakEnabled: eyeBreakEnabled ?? this.eyeBreakEnabled,
+      eyeBreakMinutes: eyeBreakMinutes ?? this.eyeBreakMinutes,
+      purifyRules: purifyRules ?? this.purifyRules,
     );
   }
 
@@ -91,6 +132,12 @@ class ReadingSettings {
         'statusItems': statusItems.toList(),
         'volumeKeys': volumeKeys,
         'sleepMode': sleepMode.name,
+        'bubbleMode': bubbleMode.name,
+        'bubblePalette': bubblePalette.name,
+        'convertMode': convertMode.name,
+        'eyeBreakEnabled': eyeBreakEnabled,
+        'eyeBreakMinutes': eyeBreakMinutes,
+        'purifyRules': purifyRules.map((r) => r.toJson()).toList(),
       };
 
   static ReadingSettings fromJson(Map<String, dynamic> j) {
@@ -101,6 +148,27 @@ class ReadingSettings {
     SleepMode sm = SleepMode.defaultMode;
     for (final v in SleepMode.values) {
       if (v.name == j['sleepMode']) sm = v;
+    }
+    BubbleMode bm = BubbleMode.none;
+    for (final v in BubbleMode.values) {
+      if (v.name == j['bubbleMode']) bm = v;
+    }
+    BubblePalette bp = BubblePalette.light;
+    for (final v in BubblePalette.values) {
+      if (v.name == j['bubblePalette']) bp = v;
+    }
+    final cm = ChineseConvertMode.fromString(j['convertMode'] as String?);
+    final eyeOn = j['eyeBreakEnabled'] as bool? ?? false;
+    final eyeMin = j['eyeBreakMinutes'] as int? ?? 30;
+    List<PurifyRule> purify = defaultPurifyRules;
+    final pj = j['purifyRules'];
+    if (pj is List) {
+      final parsed = pj
+          .whereType<Map>()
+          .map((m) => PurifyRule.fromJson(Map<String, dynamic>.from(m)))
+          .where((r) => r.pattern.trim().isNotEmpty)
+          .toList();
+      if (parsed.isNotEmpty) purify = parsed;
     }
     final zones = <int, TapAction>{};
     final zj = j['tapZones'];
@@ -124,8 +192,39 @@ class ReadingSettings {
           : {'章节', '页码', '进度'},
       volumeKeys: j['volumeKeys'] == true,
       sleepMode: sm,
+      bubbleMode: bm,
+      bubblePalette: bp,
+      convertMode: cm,
+      eyeBreakEnabled: eyeOn,
+      eyeBreakMinutes: eyeMin,
+      purifyRules: purify,
     );
   }
+}
+
+/// 对话气泡样式（A1）
+enum BubbleMode {
+  /// 关闭气泡（默认平铺）
+  none('关'),
+
+  /// 对话行渲染为左侧气泡
+  chat('对话气泡'),
+
+  /// 对话行左右交错对称气泡
+  symmetric('对称气泡');
+
+  const BubbleMode(this.label);
+  final String label;
+}
+
+/// 气泡配色（A1）
+enum BubblePalette {
+  light('浅色'),
+  dark('深色'),
+  eye('护眼');
+
+  const BubblePalette(this.label);
+  final String label;
 }
 
 /// 阅读模式（截图里的 5 个）
@@ -183,3 +282,49 @@ enum SleepMode {
     }
   }
 }
+
+/// 正文净化规则（C9）：正则替换，enabled=false 时跳过。
+/// pattern 用 RegExp 语义（默认 multiLine），坏正则会被阅读器 try/catch 跳过。
+class PurifyRule {
+  final String pattern;
+  final String replacement;
+  final bool enabled;
+
+  const PurifyRule({
+    required this.pattern,
+    this.replacement = '',
+    this.enabled = true,
+  });
+
+  factory PurifyRule.fromJson(Map<String, dynamic> j) => PurifyRule(
+        pattern: j['pattern'] as String? ?? '',
+        replacement: j['replacement'] as String? ?? '',
+        enabled: j['enabled'] as bool? ?? true,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'pattern': pattern,
+        'replacement': replacement,
+        'enabled': enabled,
+      };
+
+  PurifyRule copyWith({
+    String? pattern,
+    String? replacement,
+    bool? enabled,
+  }) =>
+      PurifyRule(
+        pattern: pattern ?? this.pattern,
+        replacement: replacement ?? this.replacement,
+        enabled: enabled ?? this.enabled,
+      );
+}
+
+/// C9 默认净化规则集（站点残留文案，可按需关闭/删除）
+const List<PurifyRule> defaultPurifyRules = [
+  PurifyRule(pattern: r'本章未完，请点击下一页继续阅读'),
+  PurifyRule(pattern: r'请记住本书首发域名[^\n]*'),
+  PurifyRule(pattern: r'最新网址[：:][^\n]*'),
+  PurifyRule(pattern: r'新八一中文网[^\n]*'),
+  PurifyRule(pattern: r'为您提供[^\n]*阅读[^\n]*'),
+];

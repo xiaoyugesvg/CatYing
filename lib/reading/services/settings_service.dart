@@ -124,6 +124,8 @@ class SettingsService extends ChangeNotifier {
   static const _kRememberZoomKey = 'reader_remember_zoom';
   static const _kPinchZoomKey = 'reader_pinch_zoom';
   static const _kSingleHandKey = 'reader_single_hand';
+  /// C8 漫画点击九宫格：JSON List<int>（9 格，值 = TapAction.index；空 = 默认三列）
+  static const _kMangaTapZonesKey = 'manga_tap_zones';
   // 书架排序方式（按用户截图里的"排序"按钮）
   static const _kShelfSortKey = 'shelf_sort';
   // 排序方向（true = 正序 Z→A / 旧→新）与"全局应用"
@@ -270,6 +272,9 @@ class SettingsService extends ChangeNotifier {
   bool _pinchZoom = true;
   /// 单手模式：屏幕左右点击都是下一页
   bool _singleHand = false;
+  /// 漫画点击九宫格（C8）：9 格动作（TapAction.index），空 = 默认三列
+  List<int> _mangaTapZones = const [];
+  List<int> get mangaTapZones => _mangaTapZones;
   /// 屏幕休眠：'default' 跟随系统 / '10min' / 'never'
   String _screenSleep = 'default';
 
@@ -664,6 +669,19 @@ class SettingsService extends ChangeNotifier {
     _rememberZoom = prefs.getBool(_kRememberZoomKey) ?? false;
     _pinchZoom = prefs.getBool(_kPinchZoomKey) ?? true;
     _singleHand = prefs.getBool(_kSingleHandKey) ?? false;
+    final zonesRaw = prefs.getString(_kMangaTapZonesKey);
+    if (zonesRaw != null) {
+      try {
+        final list = jsonDecode(zonesRaw) as List;
+        _mangaTapZones = list
+            .whereType<num>()
+            .map((e) => e.toInt().clamp(0, 3))
+            .toList();
+        if (_mangaTapZones.length != 9) _mangaTapZones = const [];
+      } catch (_) {
+        _mangaTapZones = const [];
+      }
+    }
     _screenSleep = prefs.getString(_kScreenSleepKey) ?? 'default';
     _readerBackgroundStyle = _clamp(
       prefs.getInt(_kReaderBackgroundStyleKey) ?? 3,
@@ -1781,6 +1799,17 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kSingleHandKey, value);
+  }
+
+  /// C8：保存漫画点击九宫格（9 格 TapAction.index；空 = 恢复默认三列）
+  Future<void> setMangaTapZones(List<int> value) async {
+    final norm = value.length == 9
+        ? value.map((e) => e.clamp(0, 3)).toList()
+        : const <int>[];
+    _mangaTapZones = norm;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kMangaTapZonesKey, jsonEncode(norm));
   }
 
   Future<void> setScreenSleep(String value) async {

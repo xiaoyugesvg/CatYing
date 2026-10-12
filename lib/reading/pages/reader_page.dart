@@ -860,9 +860,16 @@ class _ReaderPageState extends State<ReaderPage> {
                         onChanged: (v) =>
                             setSheet(() => draftSingleHand = v),
                       ),
-                      _settingInfoRow(
-                        title: '点击区域',
-                        subtitle: '自定义各区域触发上一页/菜单/下一页',
+                      InkWell(
+                        onTap: _showTapZoneEditor,
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: _settingInfoRow(
+                            title: '点击区域',
+                            subtitle: _zoneSummary(),
+                          ),
+                        ),
                       ),
                       _settingSwitchRow(
                         title: '音量键翻页',
@@ -2146,9 +2153,160 @@ class _ReaderPageState extends State<ReaderPage> {
     dir == 'down' ? _onTapRight() : _onTapLeft();
   }
 
+  // C8 漫画九宫格动作码（与 SettingsService 存储一致）：
+  // 0=上一页 1=菜单 2=下一页 3=无
+  static const List<int> _mangaZoneActionOrder = [0, 1, 2, 3];
+  /// 默认三列：左=上一页，中=菜单，右=下一页（与书源阅读器默认一致）
+  static const List<int> _defaultMangaZones = [
+    0, 0, 1, // 上排：上一页 上一页 菜单
+    1, 1, 1, // 中排：菜单 菜单 菜单
+    2, 2, 2, // 下排：下一页 下一页 下一页
+  ];
+
+  /// C8 九宫格配置概要（设置面板副标题）
+  String _zoneSummary() {
+    const names = ['上一页', '菜单', '下一页', '无'];
+    final zones = SettingsService().mangaTapZones;
+    final list = zones.length == 9 ? zones : _defaultMangaZones;
+    // 按三列归纳：左列/中列/右列最常见的动作
+    final left = list[0];
+    final mid = list[4];
+    final right = list[8];
+    return '点击设置 3×3 各区域动作（左$names[left]·中$names[mid]·右$names[right]）';
+  }
+
+  /// C8：九宫格点击区域编辑弹窗。每格点击循环切换动作，
+  /// 即时保存到 SettingsService（点「恢复默认」回到默认三列）。
+  void _showTapZoneEditor() {
+    const names = ['上一页', '菜单', '下一页', '无'];
+    final s = SettingsService();
+    // 本地工作副本（int 列表，可变）
+    final zones = List<int>.from(s.mangaTapZones.length == 9
+        ? s.mangaTapZones
+        : _defaultMangaZones);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.black87,
+      barrierColor: Colors.black54,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => kbSheet(StatefulBuilder(
+        builder: (ctx, setSheet) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Text(
+                        '点击区域',
+                        style: TextStyle(
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: () {
+                          zones
+                            ..clear()
+                            ..addAll(_defaultMangaZones);
+                          setSheet(() {});
+                          s.setMangaTapZones(_defaultMangaZones);
+                        },
+                        child: Text(
+                          '恢复默认',
+                          style: TextStyle(
+                            fontSize: AppTheme.fontSubhead,
+                            color: JellyTheme.primary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '点击每个格子循环切换：上一页 → 菜单 → 下一页 → 无',
+                    style: TextStyle(
+                      fontSize: AppTheme.fontCaption,
+                      color: Colors.white54,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  GridView.count(
+                    crossAxisCount: 3,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: 10,
+                    crossAxisSpacing: 10,
+                    childAspectRatio: 2.1,
+                    children: [
+                      for (var i = 0; i < 9; i++)
+                        InkWell(
+                          onTap: () {
+                            final next =
+                                _mangaZoneActionOrder[(zones[i] + 1) % 4];
+                            zones[i] = next;
+                            setSheet(() {});
+                            s.setMangaTapZones(List<int>.from(zones));
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(
+                                  alpha: zones[i] == 0 ? 0.20 : 0.08),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: zones[i] == 0
+                                    ? JellyTheme.primary.withValues(alpha: 0.8)
+                                    : Colors.white24,
+                              ),
+                            ),
+                            child: Text(
+                              names[zones[i]],
+                              style: TextStyle(
+                                fontSize: AppTheme.fontSubhead,
+                                color: Colors.white,
+                                fontWeight: zones[i] == 0
+                                    ? FontWeight.w700
+                                    : FontWeight.w400,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Center(
+                    child: Text(
+                      '左上第一格默认高亮 = 上一页（双击格子可切回）',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontCaption,
+                        color: Colors.white38,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      )),
+    );
+  }
+
   void _handleTap(TapUpDetails details) {
     final size = MediaQuery.sizeOf(context);
     final dx = details.globalPosition.dx;
+    final dy = details.globalPosition.dy;
     // 单手模式：屏幕左右点击都是下一页
     if (SettingsService().singleHand) {
       final tapEdge = dx < size.width / 3 || dx > size.width * 2 / 3;
@@ -2159,18 +2317,25 @@ class _ReaderPageState extends State<ReaderPage> {
       }
       return;
     }
+    // C8：3×3 分区，下标 = row*3 + col；空配置 = 默认三列
+    final col = (dx / (size.width / 3)).floor().clamp(0, 2);
+    final row = (dy / (size.height / 3)).floor().clamp(0, 2);
+    final zone = row * 3 + col;
+    final zones = SettingsService().mangaTapZones;
+    final action = zones.length == 9 ? zones[zone] : _defaultMangaZones[zone];
     // 从左往右模式自带方向反转；「翻页按钮反转」开关与之异或叠加
     final tapReverse =
         _isReverseDirection !=
         ReaderOverrideService().effectiveReverseTapManga(widget.comic.pathWord);
-    final tapLeft = dx < size.width / 3;
-    final tapRight = dx > size.width * 2 / 3;
-    if (tapLeft) {
-      tapReverse ? _onTapRight() : _onTapLeft();
-    } else if (tapRight) {
-      tapReverse ? _onTapLeft() : _onTapRight();
-    } else {
-      _toggleControls();
+    switch (action) {
+      case 0:
+        tapReverse ? _onTapRight() : _onTapLeft();
+      case 1:
+        _toggleControls();
+      case 2:
+        tapReverse ? _onTapLeft() : _onTapRight();
+      default:
+        break; // 3 = 无
     }
   }
 

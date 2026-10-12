@@ -65,10 +65,35 @@ sealed class BookBlock {
   factory BookBlock.divider() = DividerBlock;
 }
 
+/// 段落类型（A1 对话/旁白气泡 + A4 双音色共用）
+enum ParagraphKind {
+  /// 旁白 / 普通正文
+  normal,
+
+  /// 对话（引号开头等）
+  dialogue,
+}
+
+/// 按文本识别段落类型（A1 气泡样式 / A4 双音色共用）。
+/// 规则（Cmbok 差距文档）：中文引号（“「『）或英文引号（" ' ‘）开头的行视为对话。
+ParagraphKind paragraphKindOf(String text) {
+  final t = text.trimLeft();
+  if (t.isEmpty) return ParagraphKind.normal;
+  const heads = ['“', '「', '『', '"', "'", '‘'];
+  for (final h in heads) {
+    if (t.startsWith(h)) return ParagraphKind.dialogue;
+  }
+  return ParagraphKind.normal;
+}
+
 /// 段落（普通正文）
 class ParagraphBlock extends BookBlock {
   final String text;
-  const ParagraphBlock(this.text);
+
+  /// 段落类型（解析时默认旁白；气泡渲染按 [paragraphKindOf] 动态识别，
+  /// 这里保留显式标记的扩展点）
+  final ParagraphKind kind;
+  const ParagraphBlock(this.text, {this.kind = ParagraphKind.normal});
 }
 
 /// 标题（h1~h6）

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/book_source.dart';
 import '../models/book_content.dart';
 import '../models/reading_settings.dart';
+import '../novel_source/novel_chinese_converter.dart';
 import '../services/book_paginator.dart';
 import '../services/book_source_service.dart';
 import '../services/reader_notes_service.dart';
@@ -23,6 +25,7 @@ import '../services/reading_time_service.dart';
 import '../services/bsr_independent_layout.dart';
 import '../widgets/book_page_cover.dart';
 import '../widgets/book_page_curl.dart';
+import '../widgets/jelly_filter_sheet.dart';
 import '../widgets/color_picker_dialog.dart';
 import '../widgets/pomodoro_button.dart';
 import 'tts_engine_page.dart';
@@ -140,6 +143,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
 
   /// 当前选中的内置壁纸（null = 不用壁纸，走 `_bgIndex` 的纯色底 ✓）
   String? _bgImageAsset;
+
+  /// 当前壁纸是否为深色（A3：深色壁纸自动换浅字，避免深底黑字）。
+  /// null = 未分析（尚未选壁纸）。
+  bool? _bgImageDark;
   /// 日夜切换时记住的浅色背景索引（从夜间切回时还原）
   int _dayBgIndex = 0;
 
@@ -260,6 +267,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   int _ttsVolume = 100;
   /// 跟随系统音色（参考图 IMG_8488「跟随系统」）
   bool _ttsFollowSystem = true;
+  /// A4 双音色朗读（旁白/对话各一个音色，仅 EasyVoice 网络源生效）
+  bool _ttsDualVoice = false;
+  /// A4 旁白音色（EasyVoice 音色名，空 = 源默认）
+  String _ttsNarratorVoice = '';
+  /// A4 对话音色（EasyVoice 音色名，空 = 源默认）
+  String _ttsDialogueVoice = '';
+  /// A4 旁白音色输入框（UI 层，与 `_ttsNarratorVoice` 同步）
+  final TextEditingController _ttsNarratorCtl = TextEditingController();
+  /// A4 对话音色输入框（UI 层，与 `_ttsDialogueVoice` 同步）
+  final TextEditingController _ttsDialogueCtl = TextEditingController();
   /// 番茄钟浮层是否显示
   bool _showPomodoro = false;
   /// 听书迷你条已收成光碟（向左快滑收起 ✓，点光碟展开 ✓，朗读不停 ✓）
@@ -281,8 +298,6 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   // ── 屏幕休眠 ────────────────────────────────────────────────
   /// 当前是否已请求"禁止息屏"（避免重复调用 + 退出时要知道该不该关）
   bool _awakeRequested = false;
-  /// 阅读悬浮球的偏移（拖动后记住）
-  Offset _ballOffset = Offset.zero;
 
   // ── 书签（截图 IMG_8100）────────────────────────────────────
   /// 6 种书签颜色（截图里的那 6 个圆点）
@@ -326,6 +341,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 自定义/内置背景为深色时自动换浅色文字，避免深底黑字。
   Color get _fg {
     if (_fgOverride != null) return _fgOverride!;
+    // A3：选了壁纸 → 按壁纸明暗决定文字色（深图浅字 / 浅图深字）✓
+    if (_bgImageAsset != null && _bgImageDark != null) {
+      return _bgImageDark!
+          ? const Color(0xFFE2E2E2)
+          : const Color(0xFF1A1A1A);
+    }
     return _bgTop.computeLuminance() < 0.4
         ? const Color(0xFFB8B8B8)
         : _bgs[_bgIndex][1];
@@ -380,7 +401,19 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     HardwareKeyboard.instance.addHandler(_onKey);
     _restorePrefs();
     _loadChapter(_index);
+    // C7 护眼休息提醒：墙钟计时（后台恢复后自动补齐），30s 检查一次
+    _eyeBreakStart = DateTime.now();
+    _eyeTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _checkEyeBreak();
+    });
   }
+
+  /// 护眼提醒定时器（C7，30s 检查一次）
+  Timer? _eyeTimer;
+  /// 本次连续阅读起点（墙钟，后台恢复自动补齐 ✓）
+  DateTime _eyeBreakStart = DateTime.now();
+  /// 已弹过提醒（避免重复弹）
+  bool _eyeBreakShown = false;
 
   /// 应用「屏幕休眠」设置（截图里的 默认 / 10分钟 / 永不息屏）。
   ///
@@ -489,11 +522,65 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     //   （定时器会在页面销毁后照常触发 → 潜在泄漏/异常 ✓）
     _ttsTimerHandle?.cancel();
     _repaginateDebounce?.cancel();
+    // C7 护眼提醒定时器
+    _eyeTimer?.cancel();
     _pageCtrl.dispose();
     super.dispose();
   }
 
   // ── 偏好与进度 ──────────────────────────────────────────────
+
+  /// C7：连续阅读达到时长后弹休息提醒（不强退；可推迟/关闭）。
+  void _checkEyeBreak() {
+    if (!mounted) return;
+    if (!_rs.eyeBreakEnabled || _eyeBreakShown) return;
+    final elapsed = DateTime.now().difference(_eyeBreakStart);
+    if (elapsed.inMinutes < _rs.eyeBreakMinutes) return;
+    _eyeBreakShown = true;
+    _showEyeBreakDialog();
+  }
+
+  /// C7：护眼休息提醒弹窗（关掉或推迟都重新计时，不打断阅读）。
+  void _showEyeBreakDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _bgTop,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text('护眼提醒',
+            style: TextStyle(
+                fontSize: AppTheme.fontTitle3,
+                fontWeight: FontWeight.w700,
+                color: _fg)),
+        content: Text('已连续阅读 ${_rs.eyeBreakMinutes} 分钟，休息一下眼睛吧。',
+            style:
+                TextStyle(fontSize: AppTheme.fontBody, color: _fgMuted)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _eyeBreakStart = DateTime.now();
+              _eyeBreakShown = false;
+            },
+            child: Text('再读 10 分钟', style: TextStyle(color: _fg)),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _eyeBreakStart = DateTime.now();
+              _eyeBreakShown = false;
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: _fg.withValues(alpha: 0.9),
+              foregroundColor: _bgTop,
+            ),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
 
   String get _progressKey =>
       'bsr.progress.${widget.source.id}.${widget.bookName}';
@@ -586,13 +673,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         // 内置壁纸（与 `_savePrefs` 的 `reading.bgImage` 配对 ✓）
         final bgImg =
             (ov?['bgImage'] as String?) ?? p.getString('reading.bgImage');
-        if (bgImg != null && bgImg.isNotEmpty) _bgImageAsset = bgImg;
-        // 🔴 与 `_savePrefs` 侧的 `bsr.ball.dx/dy` 配对读回 ✓
-        //（原来写读两边都没有它 ✗ → 悬浮球位置"承诺持久化却从不生效" ✓）
-        final bdx = p.getDouble('bsr.ball.dx');
-        final bdy = p.getDouble('bsr.ball.dy');
-        if (bdx != null && bdy != null) {
-          _ballOffset = Offset(bdx, bdy);
+        if (bgImg != null && bgImg.isNotEmpty) {
+          _bgImageAsset = bgImg;
+          _bgImageDark = p.getBool('reading.bgImageDark');
         }
         // ✅ 书签**按章**读回 ✓ —— 只读"即将显示的那一章"的键 ✓，
         // 不再把整本一份的书签装到当前章（那正是串章的根因 ✓）。
@@ -660,6 +743,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         if (tt != null) _ttsTimer = tt;
         if (tv != null) _ttsVolume = tv;
         if (tf != null) _ttsFollowSystem = tf;
+        _ttsDualVoice = p.getBool('bsr.tts.dualVoice') ?? false;
+        _ttsNarratorVoice = p.getString('bsr.tts.narratorVoice') ?? '';
+        _ttsDialogueVoice = p.getString('bsr.tts.dialogueVoice') ?? '';
+        // 恢复完成后把输入框初值同步上（initState 时还是默认空 ✓）
+        _ttsNarratorCtl.text = _ttsNarratorVoice;
+        _ttsDialogueCtl.text = _ttsDialogueVoice;
         if (tdp != null) _ttsDirectPlayer = tdp;
         if (tal != null) _ttsAutoLocate = tal;
       });
@@ -706,6 +795,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         } else {
           await p.remove('reading.bgImage');
         }
+        if (_bgImageDark != null) {
+          await p.setBool('reading.bgImageDark', _bgImageDark!);
+        } else {
+          await p.remove('reading.bgImageDark');
+        }
         if (_underlineColor != null) {
           await p.setInt('reading.underlineColor', _underlineColor!.toARGB32());
         } else {
@@ -719,12 +813,6 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       // ✅ TTS 面板的两个新设置也落盘 ✓（键名与 `_restorePrefs` 里的读回一一对应 ✓）
       await p.setBool('bsr.tts.directPlayer', _ttsDirectPlayer);
       await p.setBool('bsr.tts.autoLocate', _ttsAutoLocate);
-      // 🔴 悬浮球位置原来**从不落盘** ✗ —— 注释（:4175 附近）明写"移动后的位置
-      // 记在 `_ballOffset`，重进阅读器还在原处" ✓，`onPanEnd` 也确实调了
-      // `_savePrefs()` 假装在保存 ✓ → 实际每次重进都回到默认位置 ✗。
-      // 现在两个分量真正写盘 ✓，`_restorePrefs` 侧配对读回 ✓（缺任一边都等于没做 ✓）
-      await p.setDouble('bsr.ball.dx', _ballOffset.dx);
-      await p.setDouble('bsr.ball.dy', _ballOffset.dy);
       // ✅ 书签**按章**落盘 ✓（键含章号 ✓）—— 与 `_restorePrefs` 侧配对读回 ✓。
       // 写"`_bookmarks` 当前所属的那一章"的键 ✓；加载空窗（`= -1`）跳过 ✓，
       // 否则会拿空表覆盖某章书签 ✗。
@@ -742,6 +830,9 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       await p.setInt('bsr.tts.timer', _ttsTimer);
       await p.setInt('bsr.tts.volume', _ttsVolume);
       await p.setBool('bsr.tts.followSystem', _ttsFollowSystem);
+      await p.setBool('bsr.tts.dualVoice', _ttsDualVoice);
+      await p.setString('bsr.tts.narratorVoice', _ttsNarratorVoice);
+      await p.setString('bsr.tts.dialogueVoice', _ttsDialogueVoice);
     } catch (_) {}
   }
 
@@ -825,7 +916,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           //    确认后再补 ✓
           _images = const [];
           _chapterImages = const [];
-          _paragraphs = _cache[i]!;
+          _paragraphs = _applyConvert(_cache[i]!);
           _invalidateTtsSegs();
           _loading = false;
           _error = null;
@@ -895,12 +986,13 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         _prefetch(i + 1);
         return;
       }
-      final paras = _splitParagraphs(r.content);
-      _cache[i] = paras;
+      // C9 正文净化：净化 → 繁简 → 气泡（装载链路固定顺序）
+      final paras = _splitParagraphs(_applyPurify(r.content));
+      _cache[i] = paras; // 缓存**净化后原文**（A2 繁简切换时从原文重转 ✓）
       _evictIfNeeded();
       if (!prefetchOnly) {
         setState(() {
-          _paragraphs = paras;
+          _paragraphs = _applyConvert(paras);
           _invalidateTtsSegs();
           _images = const []; // 切回文字章节要把漫画图清掉
           // 文字章附带的插图（上游按 content-is-empty 已排除纯图章）
@@ -951,6 +1043,233 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     }
   }
 
+  /// C9：正文净化（正则替换）。坏正则跳过，不打断阅读。
+  String _applyPurify(String raw) {
+    var text = raw;
+    for (final rule in _rs.purifyRules) {
+      if (!rule.enabled || rule.pattern.trim().isEmpty) continue;
+      try {
+        text = text.replaceAll(
+          RegExp(rule.pattern, multiLine: true),
+          rule.replacement,
+        );
+      } catch (_) {
+        // 用户自定义正则不合法 → 跳过该条
+      }
+    }
+    return text;
+  }
+
+  /// C9：正文净化设置弹窗。规则列表 + 启停开关 + 删除自定义规则 +
+  /// 新增规则（正则替换），改完即时重排当前章（从净化后原文缓存重转）。
+  void _showPurifySheet() {
+    final list = List<PurifyRule>.from(_rs.purifyRules);
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _bgTop,
+      shape: jellySheetShape,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          void commit() {
+            setSheet(() {});
+            setState(() => _rs = _rs.copyWith(purifyRules: List.from(list)));
+            _scheduleSavePrefs();
+            // 已加载章节：从缓存（净化后原文）重走转换与分页
+            _invalidateTtsSegs();
+            if (_cache.containsKey(_index)) {
+              _paragraphs = _applyConvert(_cache[_index]!);
+            }
+            _repaginateLayout();
+          }
+
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const JellySheetHandle(),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Text('正文净化',
+                          style: TextStyle(
+                              fontSize: AppTheme.fontTitle2,
+                              fontWeight: FontWeight.w700,
+                              color: _fg)),
+                      const Spacer(),
+                      IconButton(
+                        icon: Icon(Icons.close_rounded,
+                            color: _fgMuted, size: 22),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                  Text('正则替换章节正文里的站点残留文案（净化 → 繁简 → 气泡）',
+                      style: TextStyle(
+                          fontSize: AppTheme.fontFootnote,
+                          color: _fgMuted)),
+                  const SizedBox(height: 12),
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: list.length + 1,
+                      separatorBuilder: (_, _) => Divider(
+                          height: 1, color: _fg.withValues(alpha: 0.08)),
+                      itemBuilder: (_, i) {
+                        if (i == list.length) {
+                          // ── 新增规则 ──
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: InkWell(
+                              onTap: () async {
+                                final patternC =
+                                    TextEditingController();
+                                final replC = TextEditingController();
+                                final ok = await showDialog<bool>(
+                                  context: ctx,
+                                  builder: (dctx) => AlertDialog(
+                                    backgroundColor: _bgTop,
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(18)),
+                                    title: Text('新增净化规则',
+                                        style: TextStyle(
+                                            fontSize: AppTheme.fontTitle3,
+                                            color: _fg)),
+                                    content: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        TextField(
+                                          controller: patternC,
+                                          style: TextStyle(color: _fg),
+                                          decoration: InputDecoration(
+                                            labelText: '正则（匹配要清除的文本）',
+                                            labelStyle: TextStyle(
+                                                color: _fgMuted),
+                                            filled: true,
+                                            fillColor: _fg.withValues(
+                                                alpha: 0.05),
+                                            border: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(
+                                                        10),
+                                                borderSide:
+                                                    BorderSide.none),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 10),
+                                        TextField(
+                                          controller: replC,
+                                          style: TextStyle(color: _fg),
+                                          decoration: InputDecoration(
+                                            labelText: '替换为（默认留空=删除）',
+                                            labelStyle: TextStyle(
+                                                color: _fgMuted),
+                                            filled: true,
+                                            fillColor: _fg.withValues(
+                                                alpha: 0.05),
+                                            border: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(
+                                                        10),
+                                                borderSide:
+                                                    BorderSide.none),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dctx, false),
+                                        child: Text('取消',
+                                            style:
+                                                TextStyle(color: _fg)),
+                                      ),
+                                      FilledButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dctx, true),
+                                        child: const Text('添加'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (ok == true &&
+                                    patternC.text.trim().isNotEmpty) {
+                                  list.add(PurifyRule(
+                                    pattern: patternC.text.trim(),
+                                    replacement: replC.text,
+                                  ));
+                                  commit();
+                                }
+                              },
+                              child: Row(
+                                children: [
+                                  Icon(Icons.add_circle_outline_rounded,
+                                      color: JellyTheme.primary,
+                                      size: 20),
+                                  const SizedBox(width: 10),
+                                  Text('新增规则',
+                                      style: TextStyle(
+                                          fontSize: AppTheme.fontBody,
+                                          color: _fg)),
+                                ],
+                              ),
+                            ),
+                          );
+                        }
+                        final rule = list[i];
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  rule.pattern,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: AppTheme.fontBody,
+                                    color: rule.enabled
+                                        ? _fg
+                                        : _fgMuted,
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                icon: Icon(Icons.delete_outline_rounded,
+                                    size: 18,
+                                    color: _fgMuted),
+                                onPressed: () {
+                                  list.removeAt(i);
+                                  commit();
+                                },
+                              ),
+                              Switch(
+                                value: rule.enabled,
+                                onChanged: (v) {
+                                  list[i] = rule.copyWith(enabled: v);
+                                  commit();
+                                },
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   /// 把抓到的正文切成段落。
   ///
   /// 书源返回的正文形态不统一：有的每段换行，有的用 `<br>`（引擎已转成 \n），
@@ -968,6 +1287,20 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     }
     return out;
   }
+
+  /// A2 繁简转换：按 `_rs.convertMode` 把段落列表整体转换（原文缓存不变）。
+  List<String> _applyConvert(List<String> paras) {
+    final m = _rs.convertMode;
+    if (m == ChineseConvertMode.none || paras.isEmpty) return paras;
+    return paras.map((p) => convertChinese(p, m)).toList(growable: false);
+  }
+
+  /// A2 设置面板的繁简模式文案
+  String _convertLabel(ChineseConvertMode m) => switch (m) {
+        ChineseConvertMode.none => '原始',
+        ChineseConvertMode.traditionalToSimplified => '繁→简',
+        ChineseConvertMode.simplifiedToTraditional => '简→繁',
+      };
 
   void _go(int delta) {
     final next = _index + delta;
@@ -1156,8 +1489,6 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                         ),
                       );
                     }),
-                  // 阅读悬浮球（截图里右下角那个球：单击翻页/双击菜单/拖动移动）
-                  if (!_showBar) _readingBall(bg[1]),
                 ],
               ),
             ),
@@ -1729,6 +2060,207 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         decorationThickness: _underlineWidth,
       );
 
+  /// A1 对话气泡容器：圆角卡片 + 三套配色（浅 / 深 / 护眼），跟随全局明暗。
+  /// [alignRight] 为真时右对齐（对称气泡的偶数段）。
+  Widget _bubbleWrap(
+      String text, Color fg, bool alignRight, BubblePalette palette) {
+    final isDark = fg.computeLuminance() > 0.45; // 前景亮 = 深色模式
+    late final Color bg, border, textColor;
+    switch (palette) {
+      case BubblePalette.light:
+        bg = fg.withValues(alpha: 0.06);
+        border = fg.withValues(alpha: 0.10);
+        textColor = fg;
+      case BubblePalette.dark:
+        bg = fg.withValues(alpha: 0.13);
+        border = fg.withValues(alpha: 0.20);
+        textColor = fg;
+      case BubblePalette.eye:
+        bg = isDark ? const Color(0xFF1F2E24) : const Color(0xFFE9F5EC);
+        border = isDark ? const Color(0xFF31463A) : const Color(0xFFC9E4D0);
+        textColor = isDark ? const Color(0xFFD9E9DD) : const Color(0xFF2E4A38);
+    }
+    return Align(
+      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.72,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: border),
+        ),
+        child: Text(
+          text,
+          style: _bodyStyle(textColor, noUnderline: true),
+        ),
+      ),
+    );
+  }
+
+  /// A3：分析内置壁纸图片的平均亮度（暗图 → 自动换浅字）。
+  Future<bool> _assetIsDark(String asset) async {
+    try {
+      final data = await rootBundle.load(asset);
+      final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+      final frame = await codec.getNextFrame();
+      final img = frame.image;
+      final bytes =
+          (await img.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+      final px = bytes.buffer.asUint8List();
+      var sum = 0, n = 0;
+      // 每 64 字节（16 像素）抽样一个，够算平均亮度
+      for (var i = 0; i + 4 <= px.length; i += 64) {
+        sum += (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) ~/ 1000;
+        n++;
+      }
+      return n > 0 && sum / n < 128;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// A3：背景壁纸选择弹窗（14 张内置 + 无壁纸），深色图自动换浅字。
+  Future<void> _showBgImageSheet() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final labelColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+      shape: jellySheetShape,
+      builder: (ctx) {
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.72,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const JellySheetHandle(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 16, 10),
+                  child: Row(
+                    children: [
+                      Text('背景壁纸',
+                          style: TextStyle(
+                              fontSize: AppTheme.fontTitle3,
+                              fontWeight: FontWeight.w700,
+                              color: labelColor)),
+                      const Spacer(),
+                      JellySheetCircleButton(
+                        isDark: isDark,
+                        icon: Icons.close_rounded,
+                        onTap: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                ),
+                Flexible(
+                  child: GridView.count(
+                    crossAxisCount: 3,
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                    mainAxisSpacing: 10,
+                    crossAxisSpacing: 10,
+                    childAspectRatio: 0.78,
+                    children: [
+                      _bgWallCell(ctx, null, labelColor, isDark),
+                      for (final asset in _builtinBgImages)
+                        _bgWallCell(ctx, asset, labelColor, isDark),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (picked == null) return;
+    // 空字符串 = 选「无壁纸」（回到纯色底）
+    if (picked.isEmpty) {
+      setState(() {
+        _bgImageAsset = null;
+        _bgImageDark = null;
+      });
+      _scheduleSavePrefs();
+      return;
+    }
+    final dark = await _assetIsDark(picked);
+    if (!mounted) return;
+    setState(() {
+      _bgImageAsset = picked;
+      _bgImageDark = dark;
+    });
+    _scheduleSavePrefs();
+  }
+
+  /// A3：壁纸弹窗里的一个格子（null = 「无壁纸」）。
+  Widget _bgWallCell(
+      BuildContext ctx, String? asset, Color labelColor, bool isDark) {
+    final selected = asset == _bgImageAsset;
+    final isNone = asset == null;
+    return GestureDetector(
+      onTap: () => Navigator.pop(ctx, asset ?? ''),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected
+                ? JellyTheme.primary
+                : (isDark
+                    ? Colors.white.withValues(alpha: 0.10)
+                    : Colors.black.withValues(alpha: 0.07)),
+            width: selected ? 2 : 1,
+          ),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                      color: JellyTheme.primary.withValues(alpha: 0.25),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3))
+                ]
+              : null,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: isNone
+            ? ColoredBox(
+                color: isDark
+                    ? const Color(0xFF2B2B2B)
+                    : const Color(0xFFF5EFE0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.format_color_reset_rounded,
+                        size: 26, color: labelColor),
+                    const SizedBox(height: 6),
+                    Text('无壁纸',
+                        style: TextStyle(
+                            fontSize: AppTheme.fontFootnote,
+                            color: labelColor)),
+                  ],
+                ),
+              )
+            : Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.asset(asset!, fit: BoxFit.cover),
+                  if (selected)
+                    Container(
+                      color: JellyTheme.primary.withValues(alpha: 0.10),
+                      alignment: Alignment.center,
+                      child: const Icon(Icons.check_circle_rounded,
+                          color: Colors.white, size: 26),
+                    ),
+                ],
+              ),
+      ),
+    );
+  }
+
   /// 页眉 + 页脚（信息栏）占掉的高度 —— 分页度量要把它从可用高度里减掉 ✓。
   /// 信息栏关闭（`statusItems` 为空）时两者都不渲染 ⇒ 返回 0 ✓。
   ///
@@ -1880,15 +2412,28 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     //   （原来度量用原文、渲染再加 2 个全角空格 ✗ ⇒ 渲染比量出来的多占 36px 宽、
                     //    多折行 ⇒ 页面底部溢出被裁，看着就是"文字被切片" ✗）
                     final paraText = e.partialText ?? b.text;
+                    // ✅ A1 对话/旁白气泡（Cmbok 差距文档）：
+                    //   引号开头识别为对话行 → 渲染为气泡卡片；旁白平铺。
+                    //   对称模式按段落下标奇偶左右交错。识别在渲染层动态做
+                    //   （不重建块数据，书签/笔记定位零影响 ✓）
+                    final bubbleOn = _rs.bubbleMode != BubbleMode.none;
+                    final isBubble =
+                        bubbleOn && paragraphKindOf(paraText) == ParagraphKind.dialogue;
+                    final bubbleRight = isBubble &&
+                        _rs.bubbleMode == BubbleMode.symmetric &&
+                        pi.isOdd;
                     // 满行底线（信纸）：每行拉满整行宽，用段落底边线实现（IMG_8497/8498）
-                    Widget body = Text(
-                      paraText,
-                      style: _bodyStyle(
-                          fg,
-                          bold: _focusBold && pi == 0,
-                          noUnderline: _underlineFull),
-                    );
-                    if (_underlineFull) {
+                    Widget body = isBubble
+                        ? _bubbleWrap(paraText, fg, bubbleRight,
+                            _rs.bubblePalette)
+                        : Text(
+                            paraText,
+                            style: _bodyStyle(
+                                fg,
+                                bold: _focusBold && pi == 0,
+                                noUnderline: _underlineFull),
+                          );
+                    if (_underlineFull && !isBubble) {
                       body = Container(
                         decoration: BoxDecoration(
                           border: Border(
@@ -2026,6 +2571,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// 点击分区处理（截图里的「点击区域」设置）
   void _handleTap(Offset pos, Size size) {
     if (size.width <= 0 || size.height <= 0) return;
+    // ✅ 面板 / 顶栏打开时：点击正文空白任意位置先收起（不翻页、不误切换）。
+    //   之前只有外层 GestureDetector 处理面板状态，但内层 `onTapUp` 赢下
+    //   手势竞技场后外层永远不触发 → 面板开着点空白毫无反应 ✗。
+    if (_showBar || _showSettingsPanel) {
+      setState(() {
+        _showBar = false;
+        _showSettingsPanel = false;
+      });
+      return;
+    }
     // 3×3 分区，下标 = row*3 + col
     final col = (pos.dx / (size.width / 3)).floor().clamp(0, 2);
     final row = (pos.dy / (size.height / 3)).floor().clamp(0, 2);
@@ -4732,8 +5287,23 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       });
     };
     // TtsService 自己切段（splitSegments 会按标点再切过长段）
-    await _tts.speak(text);
+    // A4 双音色：逐段音色覆盖（对话段 → 对话音色，其余 → 旁白音色）✓
+    await _tts.speak(text, segmentVoices: _buildSegmentVoices());
     if (mounted) setState(() {});
+  }
+
+  /// A4：按段生成音色覆盖（双音色关 → null；开 → 对话段/旁白段各用对应音色；
+  /// 音色名为空 → 该段用源默认，不强制覆盖 ✓）。
+  List<String?>? _buildSegmentVoices() {
+    if (!_ttsDualVoice) return null;
+    final segs = _ttsSegments;
+    if (segs.isEmpty) return null;
+    return segs.map((s) {
+      final isDialogue =
+          paragraphKindOf(s.trim()) == ParagraphKind.dialogue;
+      final v = isDialogue ? _ttsDialogueVoice : _ttsNarratorVoice;
+      return v.trim().isEmpty ? null : v.trim();
+    }).toList(growable: false);
   }
 
   List<Widget> _ttsVoiceTab(void Function(VoidCallback) upd) {
@@ -4794,6 +5364,53 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           ),
         ),
       ),
+      Divider(color: _fg.withValues(alpha: 0.10)),
+      // ── A4 双音色朗读（旁白/对话各一音色，EasyVoice 网络源生效）──
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Icon(Icons.graphic_eq_rounded, size: 20, color: _fg),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('双音色朗读',
+                      style: TextStyle(
+                          fontSize: AppTheme.fontBody,
+                          fontWeight: FontWeight.w600,
+                          color: _fg)),
+                  const SizedBox(height: 2),
+                  Text('旁白与对话各配一个音色（EasyVoice 源生效）',
+                      style: TextStyle(
+                          fontSize: AppTheme.fontFootnote, color: _fgMuted)),
+                ],
+              ),
+            ),
+            Switch(
+              value: _ttsDualVoice,
+              onChanged: (v) => upd(() => _ttsDualVoice = v),
+            ),
+          ],
+        ),
+      ),
+      if (_ttsDualVoice) ...[
+        _ttsVoiceField('旁白音色', _ttsNarratorCtl, () {
+          _ttsNarratorVoice = _ttsNarratorCtl.text.trim();
+          _scheduleSavePrefs();
+        }),
+        _ttsVoiceField('对话音色', _ttsDialogueCtl, () {
+          _ttsDialogueVoice = _ttsDialogueCtl.text.trim();
+          _scheduleSavePrefs();
+        }),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text('留空 = 该角色用源默认音色；例如 zh-CN-XiaoxiaoNeural',
+              style:
+                  TextStyle(fontSize: AppTheme.fontFootnote, color: _fgMuted)),
+        ),
+      ],
       Divider(color: _fg.withValues(alpha: 0.10)),
       // ── 朗读引擎（参考图 IMG_8489：更换 / 试听）──
       InkWell(
@@ -5051,6 +5668,44 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     if (s.isEmpty) return;
     _tts.speak(s[0], startAt: 0);
     setState(() {});
+  }
+
+  /// A4：双音色音色名输入行
+  Widget _ttsVoiceField(String label, TextEditingController ctl,
+      VoidCallback onChanged) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 92,
+            child: Text(label,
+                style: TextStyle(fontSize: AppTheme.fontBody, color: _fg)),
+          ),
+          Expanded(
+            child: TextField(
+              controller: ctl,
+              style: TextStyle(fontSize: AppTheme.fontSubhead, color: _fg),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: '空 = 用源默认音色',
+                hintStyle: TextStyle(
+                    fontSize: AppTheme.fontFootnote, color: _fgMuted),
+                filled: true,
+                fillColor: _fg.withValues(alpha: 0.05),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+              onChanged: (_) => onChanged(),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   List<Widget> _ttsFollowTab(void Function(VoidCallback) upd) {
@@ -5348,43 +6003,6 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   }
 
   void _invalidateTtsSegs() => _ttsSegsCache = null;
-
-    /// 笔记面板  /// 阅读悬浮球（截图里右下角那个球）。
-  ///
-  /// 操作（截图里阅读器的标准交互）：
-  ///   单击 = 下一页 · 双击 = 开菜单 · 拖动 = 移动位置
-  /// 移动后的位置记在 _ballOffset，重进阅读器还在原处。
-  Widget _readingBall(Color fg) {
-    return Positioned(
-      right: 12 + _ballOffset.dx,
-      bottom: 90 + _ballOffset.dy,
-      child: GestureDetector(
-        onTap: _nextPageOrChapter,
-        onDoubleTap: () => setState(() => _showBar = true),
-        onPanUpdate: (d) => setState(() {
-          _ballOffset = Offset(
-            (_ballOffset.dx - d.delta.dx).clamp(-220.0, 0.0),
-            (_ballOffset.dy - d.delta.dy).clamp(-300.0, 200.0),
-          );
-        }),
-        // ⚡ 防抖 ✓：拖动悬浮球时**每次松手**都触发这里 ✗（最热的一处 ✓）——
-        //   改用 `_scheduleSavePrefs()` 合并 300ms 内的多次拖动 ✓；
-        //   离开页面时 `dispose` 会**兜底落盘** ✓（否则"拖完立刻退出"会丢位置 ✗）
-        onPanEnd: (_) => _scheduleSavePrefs(),
-        child: Container(
-          width: 46,
-          height: 46,
-          decoration: BoxDecoration(
-            color: fg.withValues(alpha: 0.14),
-            shape: BoxShape.circle,
-            border: Border.all(color: fg.withValues(alpha: 0.10)),
-          ),
-          child: Icon(Icons.auto_stories_rounded,
-              size: 22, color: fg.withValues(alpha: 0.55)),
-        ),
-      ),
-    );
-  }
 
   /// AI 面板（真实可用）：四个动作走 OpenAI 兼容 chat 接口，
   /// 未配置时引导填写自己的接口地址 / API Key / 模型名。
@@ -6137,6 +6755,72 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                       setState(() => _rs = _rs.copyWith(volumeKeys: v));
                       _scheduleSavePrefs();
                     }),
+                    // ── A2 繁简转换（Cmbok 差距文档）────────────
+                    _setRowRight(
+                      '繁简转换',
+                      Wrap(
+                        spacing: 6,
+                        children: [
+                          for (final cm in ChineseConvertMode.values)
+                            _chip(_convertLabel(cm), _rs.convertMode == cm,
+                                () {
+                              setState(() =>
+                                  _rs = _rs.copyWith(convertMode: cm));
+                              _scheduleSavePrefs();
+                              _invalidateTtsSegs();
+                              // 从**原文缓存**重转（不改缓存），保留锚点重排 ✓
+                              if (_cache.containsKey(_index)) {
+                                _paragraphs = _applyConvert(_cache[_index]!);
+                              }
+                              _repaginateLayout();
+                            }, compact: true),
+                        ],
+                      ),
+                    ),
+                    // ── C9 正文净化（Cmbok 差距文档）────────────
+                    _setRowRight(
+                      '正文净化',
+                      Wrap(
+                        spacing: 6,
+                        children: [
+                          _chip(
+                              '规则 ${_rs.purifyRules.where((r) => r.enabled).length} 条',
+                              true,
+                              _showPurifySheet,
+                              compact: true),
+                        ],
+                      ),
+                    ),
+                    // ── A1 对话气泡（Cmbok 差距文档）────────────
+                    _setRowRight(
+                      '对话气泡',
+                      Wrap(
+                        spacing: 6,
+                        children: [
+                          for (final bm in BubbleMode.values)
+                            _chip(bm.label, _rs.bubbleMode == bm, () {
+                              setState(() =>
+                                  _rs = _rs.copyWith(bubbleMode: bm));
+                              _scheduleSavePrefs();
+                            }, compact: true),
+                        ],
+                      ),
+                    ),
+                    if (_rs.bubbleMode != BubbleMode.none)
+                      _setRowRight(
+                        '气泡配色',
+                        Wrap(
+                          spacing: 6,
+                          children: [
+                            for (final bp in BubblePalette.values)
+                              _chip(bp.label, _rs.bubblePalette == bp, () {
+                                setState(() =>
+                                    _rs = _rs.copyWith(bubblePalette: bp));
+                                _scheduleSavePrefs();
+                              }, compact: true),
+                          ],
+                        ),
+                      ),
                     // ── 屏幕休眠（标签左 + 3 个按钮同一行）────────
                     _setRowRight(
                       '屏幕休眠',
@@ -6149,6 +6833,69 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                               _scheduleSavePrefs();
                               _applySleepMode();
                             }, compact: true),
+                        ],
+                      ),
+                    ),
+                    // ── A3 背景壁纸（点开 14 张内置壁纸 + 无壁纸）──
+                    InkWell(
+                      onTap: _showBgImageSheet,
+                      borderRadius: BorderRadius.circular(10),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _bgImageAsset == null ? '背景壁纸' : '背景壁纸',
+                                style: TextStyle(
+                                    fontSize: AppTheme.fontBody,
+                                    color: _fg),
+                              ),
+                            ),
+                            Text(
+                              _bgImageAsset == null
+                                  ? '纯色底'
+                                  : (_bgImageDark ?? false
+                                      ? '壁纸 · 浅字'
+                                      : '壁纸 · 深字'),
+                              style: TextStyle(
+                                  fontSize: AppTheme.fontSubhead,
+                                  color: _fgMuted),
+                            ),
+                            const SizedBox(width: 8),
+                            Icon(Icons.image_outlined,
+                                size: 18, color: _fgMuted),
+                          ],
+                        ),
+                      ),
+                    ),
+                    // ── C7 护眼休息提醒（关 / 30 / 45 / 60 分钟）──
+                    _setRowRight(
+                      '护眼提醒',
+                      Wrap(
+                        spacing: 6,
+                        children: [
+                          _chip('关', !_rs.eyeBreakEnabled, () {
+                            setState(() =>
+                                _rs = _rs.copyWith(eyeBreakEnabled: false));
+                            _scheduleSavePrefs();
+                            _eyeBreakStart = DateTime.now();
+                            _eyeBreakShown = false;
+                          }, compact: true),
+                          for (final m in [30, 45, 60])
+                            _chip('${m}分钟',
+                                _rs.eyeBreakEnabled &&
+                                    _rs.eyeBreakMinutes == m,
+                                () {
+                                  setState(() => _rs = _rs.copyWith(
+                                      eyeBreakEnabled: true,
+                                      eyeBreakMinutes: m));
+                                  _scheduleSavePrefs();
+                                  _eyeBreakStart = DateTime.now();
+                                  _eyeBreakShown = false;
+                                },
+                                compact: true),
                         ],
                       ),
                     ),

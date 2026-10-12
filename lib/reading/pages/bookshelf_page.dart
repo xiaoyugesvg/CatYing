@@ -7,6 +7,7 @@ import 'dart:ui';
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'peer_transfer_page.dart';
 import '../models/book.dart';
 import '../models/bookshelf.dart';
@@ -1894,6 +1895,30 @@ class _BookshelfPageState extends State<BookshelfPage>
                     _importLocalBook();
                   },
                 ),
+                ListTile(
+                  leading: Icon(
+                    Icons.folder_open_outlined,
+                    color: JellyTheme.primary,
+                  ),
+                  title: const Text('扫描书库'),
+                  subtitle: const Text('选择文件夹，批量扫描 txt/epub 等图书入库'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _scanLibraryFolder();
+                  },
+                ),
+                ListTile(
+                  leading: Icon(
+                    Icons.restore_rounded,
+                    color: JellyTheme.primary,
+                  ),
+                  title: const Text('导入阅读备份'),
+                  subtitle: const Text('解析 legado 备份（书架/进度/书签）写入书架'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _importLegadoBackup();
+                  },
+                ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(56, 0, 20, 4),
                   child: Align(
@@ -2520,6 +2545,293 @@ class _BookshelfPageState extends State<BookshelfPage>
           SnackBar(
             content: Text(parts.join('，')),
             duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // B6 文件夹扫描导入（Cmbok 差距文档）：选目录 → 递归收集支持的
+  // 图书格式 → 复用 BookDownloadService.importLocalFile 入库去重。
+  // ════════════════════════════════════════════════════════════
+  static const _scanBookExtensions = <String>{
+    'txt', 'epub', 'pdf', 'mobi', 'azw', 'azw3', 'fb2', 'docx', 'rtf',
+  };
+
+  Future<void> _scanLibraryFolder() async {
+    final dir = await FilePicker.getDirectoryPath();
+    if (dir == null || dir.isEmpty) return;
+    if (!mounted) return;
+
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: Center(
+          child: CircularProgressIndicator(color: JellyTheme.primary),
+        ),
+      ),
+    );
+
+    final svc = BookDownloadService();
+    var found = 0, imported = 0, skipped = 0, failed = 0;
+    try {
+      final files = <File>[];
+      void walk(Directory d) {
+        try {
+          for (final e in d.listSync(followLinks: false)) {
+            if (e is Directory) {
+              walk(e);
+            } else if (e is File) {
+              final dot = e.path.lastIndexOf('.');
+              final ext = dot > 0 ? e.path.substring(dot + 1).toLowerCase() : '';
+              if (_scanBookExtensions.contains(ext)) files.add(e);
+            }
+          }
+        } catch (_) {}
+      }
+
+      walk(Directory(dir));
+      found = files.length;
+      for (final f in files) {
+        final fileName = f.uri.pathSegments.isNotEmpty
+            ? f.uri.pathSegments.last
+            : f.path.split(Platform.pathSeparator).last;
+        final dot = fileName.lastIndexOf('.');
+        final title = dot > 0 ? fileName.substring(0, dot) : fileName;
+        final ext = dot > 0 ? fileName.substring(dot + 1) : 'txt';
+        // 去重：同名同扩展名的导入书已在书架则跳过
+        final dup = svc.tasks.values.any(
+          (t) =>
+              t.isLocalImport &&
+              t.title.toLowerCase() == title.toLowerCase() &&
+              t.extension == ext.toLowerCase(),
+        );
+        if (dup) {
+          skipped++;
+          continue;
+        }
+        final bookId = await svc.importLocalFile(
+          f,
+          title: title,
+          extension: ext,
+        );
+        if (bookId == null) {
+          failed++;
+          continue;
+        }
+        imported++;
+      }
+    } finally {
+      rootNav.pop(); // 关 loading
+    }
+    if (!mounted) return;
+
+    if (imported > 0) {
+      // 同步把新入库的书挂进「本地图书」书架（与单本导入同款逻辑）
+      final shelf = await BookshelfService().ensureLocalBookshelf();
+      for (final t in svc.tasks.values) {
+        if (!t.isLocalImport) continue;
+        final already = BookshelfService()
+            .items
+            .any((it) => it.bookshelfId == shelf.id && it.itemId == t.bookId);
+        if (already) continue;
+        final meta = jsonEncode(
+          Book(
+            id: t.bookId,
+            hash: '',
+            title: t.title,
+            cover: t.cover,
+            extension: t.extension,
+          ).toJson(),
+        );
+        await BookshelfService().addToBookshelf(
+          shelf.id,
+          t.bookId,
+          BookshelfItemType.book,
+          meta: meta,
+        );
+      }
+      final bookIdx = _indexOfTab(NavTab.book);
+      if (bookIdx >= 0 && _tabController.index != bookIdx) {
+        _tabController.animateTo(bookIdx);
+      }
+      setState(() => _currentShelfId = shelf.id);
+      _ensureShelfChipVisible(shelf.id);
+    }
+
+    final parts = <String>[];
+    if (found == 0) {
+      parts.add('目录里没有支持的图书文件');
+    } else {
+      parts.add('扫描到 $found 本');
+    }
+    if (imported > 0) parts.add('新增 $imported 本');
+    if (skipped > 0) parts.add('跳过 $skipped 本（已在书架）');
+    if (failed > 0) parts.add('$failed 本失败');
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(parts.join('，')),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // B5 legado 阅读备份导入（Cmbok 差距文档）：解析 legado 导出 JSON
+  // 的 bookshelf / bookProgress / bookmark，映射写入书架与进度/书签。
+  // ════════════════════════════════════════════════════════════
+  Future<void> _importLegadoBackup() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+    );
+    if (result.isEmpty) return;
+    final path = result.single.path;
+    if (path == null || path.isEmpty) return;
+    if (!mounted) return;
+
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: Center(
+          child: CircularProgressIndicator(color: JellyTheme.primary),
+        ),
+      ),
+    );
+
+    var imported = 0, skipped = 0, failed = 0;
+    try {
+      final raw = File(path).readAsStringSync();
+      final data = jsonDecode(raw);
+      if (data is! Map<String, dynamic>) throw '备份文件不是 JSON 对象';
+
+      final books = (data['bookshelf'] is List)
+          ? (data['bookshelf'] as List)
+              .whereType<Map>()
+              .map((m) => Map<String, dynamic>.from(m))
+              .toList()
+          : <Map<String, dynamic>>[];
+      final progressMap = (data['bookProgress'] is Map)
+          ? Map<String, dynamic>.from(data['bookProgress'] as Map)
+          : <String, dynamic>{};
+      final bookmarkMap = (data['bookmark'] is Map)
+          ? Map<String, dynamic>.from(data['bookmark'] as Map)
+          : <String, dynamic>{};
+
+      final shelf = await BookshelfService().ensureLocalBookshelf();
+      // 已导入过的 legado 记录（按 tocUrl 判重）
+      final prefs = await SharedPreferences.getInstance();
+      final prior = (prefs.getString('legado_backup_data') ?? '{}');
+
+      for (final b in books) {
+        final name = (b['name'] as String? ?? '').trim();
+        final author = (b['author'] as String? ?? '').trim();
+        final tocUrl = (b['tocUrl'] as String? ?? '').trim();
+        final coverUrl = (b['coverUrl'] as String? ?? '').trim();
+        if (name.isEmpty) {
+          failed++;
+          continue;
+        }
+        // 冲突：同书名同作者已在书架 → 跳过
+        final dup = BookshelfService().items.any((it) {
+          if (it.type != BookshelfItemType.book) return false;
+          final m = it.meta;
+          if (m == null) return false;
+          try {
+            final book = Book.fromJson(jsonDecode(m) as Map<String, dynamic>);
+            return book.title == name &&
+                (author.isEmpty || book.author == author);
+          } catch (_) {
+            return false;
+          }
+        });
+        if (dup) {
+          skipped++;
+          continue;
+        }
+        final itemId =
+            'legado_${(tocUrl.isNotEmpty ? tocUrl : name).hashCode}';
+        final meta = jsonEncode(
+          Book(
+            id: itemId,
+            hash: '',
+            title: name,
+            author: author,
+            cover: coverUrl,
+            extension: 'legado',
+          ).toJson(),
+        );
+        await BookshelfService().addToBookshelf(
+          shelf.id,
+          itemId,
+          BookshelfItemType.book,
+          meta: meta,
+        );
+        imported++;
+        // 进度/书签：按 tocUrl 定位并记录到 legado_backup_data
+        dynamic prog;
+        for (final e in progressMap.entries) {
+          if ((tocUrl.isNotEmpty && e.key.contains(tocUrl)) ||
+              (e.value is Map && (e.value as Map)['name'] == name)) {
+            prog = e.value;
+            break;
+          }
+        }
+        final marks = bookmarkMap.entries
+            .where((e) => e.value is Map && (e.value as Map)['name'] == name)
+            .map((e) {
+          final v = e.value as Map;
+          return {
+            'chapter': (v['chapterName'] ?? v['chapter'] ?? ''),
+            'text': (v['markText'] ?? ''),
+          };
+        }).toList();
+        var dataMap = <String, dynamic>{};
+        try {
+          dataMap = Map<String, dynamic>.from(
+              jsonDecode(prior) as Map<String, dynamic>);
+        } catch (_) {}
+        dataMap[itemId] = {
+          'name': name,
+          'tocUrl': tocUrl,
+          'progress': prog is Map
+              ? ((prog as Map)['chapter'] ?? '')
+              : '',
+          'bookmarks': marks,
+        };
+        await prefs.setString('legado_backup_data', jsonEncode(dataMap));
+      }
+    } catch (e) {
+      failed++;
+    } finally {
+      rootNav.pop(); // 关 loading
+    }
+    if (!mounted) return;
+
+    final parts = <String>[];
+    if (imported > 0) parts.add('导入 $imported 本');
+    if (skipped > 0) parts.add('跳过 $skipped 本（已在书架）');
+    if (failed > 0) parts.add('$failed 条失败');
+    if (parts.isEmpty) parts.add('未导入任何书籍（文件里没有 bookshelf 列表）');
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(parts.join('，')),
+            duration: const Duration(seconds: 3),
             behavior: SnackBarBehavior.floating,
           ),
         );
