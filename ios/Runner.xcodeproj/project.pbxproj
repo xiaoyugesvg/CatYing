@@ -1,4 +1,4 @@
-// !$*UTF8*$!
+﻿// !$*UTF8*$!
 {
 	archiveVersion = 1;
 	classes = {
@@ -19,7 +19,9 @@
 		A1B2C3D4000000000000000C /* TtsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4000000000000000B /* TtsEngine.swift */; };
 		A1B2C3D40000000000000010 /* MusicNowPlaying.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000011 /* MusicNowPlaying.swift */; };
 		A1B2C3D40000000000000012 /* KSEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000013 /* KSEngine.swift */; };
+		AE0000000000000000000004 /* AetherBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0000000000000000000005 /* AetherBridge.swift */; };
 		A1B2C3D40000000000000016 /* KSPlayer in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000015 /* KSPlayer */; };
+		AE0000000000000000000003 /* Aether in Frameworks */ = {isa = PBXBuildFile; productRef = AE0000000000000000000002 /* Aether */; };
 		A1B2C3D4000000000000000E /* ExceptionGuard.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4000000000000000D /* ExceptionGuard.m */; };
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
@@ -58,6 +60,7 @@
 		A1B2C3D4000000000000000F /* ExceptionGuard.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ExceptionGuard.h; sourceTree = "<group>"; };
 		A1B2C3D40000000000000011 /* MusicNowPlaying.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MusicNowPlaying.swift; sourceTree = "<group>"; };
 		A1B2C3D40000000000000013 /* KSEngine.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = KSEngine.swift; sourceTree = "<group>"; };
+		AE0000000000000000000005 /* AetherBridge.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AetherBridge.swift; sourceTree = "<group>"; };
 		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Release.xcconfig; path = Flutter/Release.xcconfig; sourceTree = "<group>"; };
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; name = Debug.xcconfig; path = Flutter/Debug.xcconfig; sourceTree = "<group>"; };
 		9740EEB31CF90195004384FC /* Generated.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; name = Generated.xcconfig; path = Flutter/Generated.xcconfig; sourceTree = "<group>"; };
@@ -74,6 +77,7 @@
 			files = (
 				2431C9E3151C7449D0D1C0F4 /* Pods_Runner.framework in Frameworks */,
 				A1B2C3D40000000000000016 /* KSPlayer in Frameworks */,
+				AE0000000000000000000003 /* Aether in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -136,6 +140,7 @@
 				A1B2C3D4000000000000000B /* TtsEngine.swift */,
 				A1B2C3D40000000000000011 /* MusicNowPlaying.swift */,
 				A1B2C3D40000000000000013 /* KSEngine.swift */,
+				AE0000000000000000000005 /* AetherBridge.swift */,
 				A1B2C3D4000000000000000D /* ExceptionGuard.m */,
 				A1B2C3D4000000000000000F /* ExceptionGuard.h */,
 			);
@@ -175,6 +180,7 @@
 			);
 			packageProductDependencies = (
 				A1B2C3D40000000000000015 /* KSPlayer */,
+				AE0000000000000000000002 /* Aether */,
 			);
 			name = Runner;
 			productName = Runner;
@@ -210,6 +216,7 @@
 			projectRoot = "";
 			packageReferences = (
 				A1B2C3D40000000000000014 /* XCRemoteSwiftPackageReference "KSPlayer" */,
+				AE0000000000000000000001 /* XCLocalSwiftPackageReference "AetherEngine" */,
 			);
 			targets = (
 				97C146ED1CF9000F007C117D /* Runner */,
@@ -334,6 +341,7 @@
 				A1B2C3D4000000000000000C /* TtsEngine.swift in Sources */,
 				A1B2C3D40000000000000010 /* MusicNowPlaying.swift in Sources */,
 				A1B2C3D40000000000000012 /* KSEngine.swift in Sources */,
+				AE0000000000000000000004 /* AetherBridge.swift in Sources */,
 				A1B2C3D4000000000000000E /* ExceptionGuard.m in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 			);
@@ -394,7 +402,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = iphoneos;
@@ -474,7 +482,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
@@ -523,7 +531,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = iphoneos;
@@ -607,6 +615,13 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+/* Begin XCLocalSwiftPackageReference section */
+		AE0000000000000000000001 /* XCLocalSwiftPackageReference "AetherEngine" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = AetherEngine;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		A1B2C3D40000000000000014 /* XCRemoteSwiftPackageReference "KSPlayer" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -622,6 +637,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A1B2C3D40000000000000014 /* XCRemoteSwiftPackageReference "KSPlayer" */;
 			productName = KSPlayer;
+		};
+		AE0000000000000000000002 /* Aether */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AE0000000000000000000001 /* XCLocalSwiftPackageReference "AetherEngine" */;
+			productName = AetherEngine;
 		};
 /* End XCSwiftPackageProductDependency section */
         };

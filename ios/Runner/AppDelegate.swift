@@ -94,6 +94,18 @@ import AVFoundation
       print("[AppDelegate] ❌ 无法获取 KSEngine 的 registrar")
     }
 
+    // 注册全局唯一 Aether（第五播放核心：AetherEngine，FFmpeg 解复用 +
+    // VideoToolbox/dav1d 解码 + Metal，仅 iOS 17+；vendored ios/AetherEngine）
+    if let aeRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "AetherBridge") {
+      AetherBridge.shared.register(messenger: aeRegistrar.messenger())
+      aeRegistrar.register(
+        AetherPlayerViewFactory(messenger: aeRegistrar.messenger()),
+        withId: "aether_player_view"
+      )
+    } else {
+      print("[AppDelegate] ❌ 无法获取 AetherBridge 的 registrar")
+    }
+
     // 注册 TTS（听书朗读）
     //
     // 用系统自带的 AVSpeechSynthesizer，**不引第三方插件**：

@@ -15,12 +15,28 @@ enum PlayerEngine {
   webview(2, 'Webview播放器'),
   /// KSPlayer 内核（FFmpeg + Metal），iOS 第四核心「FF」：
   /// AVPlayer 吃不下的格式（MKV/ASS/多音轨等）全兼容，并自带小窗
-  ksplayer(3, 'KSPlayer播放器');
+  ksplayer(3, 'KSPlayer播放器'),
+  /// AetherEngine 内核（FFmpeg 解复用 + VideoToolbox/dav1d 解码 + Metal），
+  /// iOS 第五核心「AE」：vendored 本地包 ios/AetherEngine。
+  /// 仅 iOS 17+ 开放（见 [aetherSupported]），第一版无画中画
+  aether(4, 'Aether播放器');
 
   final int value;
   final String title;
 
   const PlayerEngine(this.value, this.title);
+
+  /// Aether（第五核心）是否受当前系统支持：仅 iOS 17+。
+  ///
+  /// vendored 包的平台声明虽降到 16（构建需要），但 iOS 16 未实测过，
+  /// 运行时收敛到 17+ 更稳：16 的机器上看不到该核心选项，
+  /// 历史偏好里存过 AE 的低版本设备会在 PlayerPrefs.load 时回退 AVPlayer。
+  static bool get aetherSupported {
+    if (!Platform.isIOS) return false;
+    // Platform.version 形如 "17.5.1 (Darwin ...)"，取首个主版本段
+    final major = int.tryParse(Platform.version.split('.').first) ?? 0;
+    return major >= 17;
+  }
 
   /// 从持久化值恢复播放器选项，并自动兜底到可用引擎
   static PlayerEngine fromStoredValue(int rawValue) {
@@ -42,6 +58,16 @@ enum PlayerEngine {
   /// - 桌面（Windows / Linux）：mpv（window_manager 小窗路径）。
   static List<PlayerEngine> get availableEngines {
     if (Platform.isIOS) {
+      // 第五核心「AE」（AetherEngine）仅 iOS 17+ 开放，列表动态组装
+      if (aetherSupported) {
+        return const [
+          PlayerEngine.avplayer,
+          PlayerEngine.ksplayer,
+          PlayerEngine.aether,
+          PlayerEngine.mpv,
+          PlayerEngine.webview,
+        ];
+      }
       return const [
         PlayerEngine.avplayer,
         PlayerEngine.ksplayer,

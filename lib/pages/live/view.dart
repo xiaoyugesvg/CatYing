@@ -21,6 +21,7 @@ import '../../services/player_prefs.dart';
 import '../../widgets/app_player.dart';
 import '../../widgets/ios_av_player.dart';
 import '../../widgets/ks_player.dart';
+import '../../widgets/aether_player.dart';
 import '../../widgets/video_player_pip.dart';
 import 'controller.dart';
 import '../../services/audio_focus.dart';
@@ -49,6 +50,9 @@ class _LivePageState extends State<LivePage> {
   /// iOS：KSPlayer（FF 核心）备用内核
   KSPlayer? _ksPlayer;
 
+  /// iOS：AetherPlayer（AE 核心，AetherEngine）备用内核，仅 iOS 17+
+  AetherPlayer? _aetherPlayer;
+
   /// iOS 是否启用 mpv 备用内核（播放器右上「核心」按钮可选；默认 AVPlayer，
   /// 遇到 flv/ts/rtmp 等 AVPlayer 不支持的流时可切到 mpv）。
   /// ⚠️ 读独立的 liveEngine 偏好 —— 不再与点播共用 vodEngine，
@@ -62,11 +66,21 @@ class _LivePageState extends State<LivePage> {
       Platform.isIOS &&
       PlayerPrefs.instance.liveEngine.value == PlayerEngine.ksplayer;
 
-  /// 直播可用内核：iOS = AVPlayer / KSPlayer / MPV（直播页没有 webview 播放路径）；
-  /// 其它平台仅 mpv（media_kit），无可切换项。
+  /// iOS 是否启用 Aether（AE）内核（FFmpeg + Metal，仅 iOS 17+ 可选）
+  bool get _iosUseAe =>
+      Platform.isIOS &&
+      PlayerPrefs.instance.liveEngine.value == PlayerEngine.aether;
+
+  /// 直播可用内核：iOS = AVPlayer / KSPlayer /（17+ 加 Aether）/ MPV
+  /// （直播页没有 webview 播放路径）；其它平台仅 mpv（media_kit），无可切换项。
   List<PlayerEngine> get _liveEngines {
     if (Platform.isIOS) {
-      return const [PlayerEngine.avplayer, PlayerEngine.ksplayer, PlayerEngine.mpv];
+      return [
+        PlayerEngine.avplayer,
+        PlayerEngine.ksplayer,
+        if (PlayerEngine.aetherSupported) PlayerEngine.aether,
+        PlayerEngine.mpv,
+      ];
     }
     return const [PlayerEngine.mpv];
   }
@@ -148,6 +162,11 @@ class _LivePageState extends State<LivePage> {
         } catch (e) {
           /* ignore */
         }
+        try {
+          _aetherPlayer?.pause();
+        } catch (e) {
+          /* ignore */
+        }
       } else {
         // 切回直播：已在播就不动；已开过流但被暂停 → 直接恢复播放
         //（避免每次切回都重新 open 拉流闪断）；从没开过流才自动开播。
@@ -157,12 +176,17 @@ class _LivePageState extends State<LivePage> {
         if (MusicRouteObserver.livePushedFrom.value > 0) return;
         final pPlaying = _player?.state.playing ?? false;
         final avPlaying = _avPlayer?.state.playing ?? false;
-        if (pPlaying || avPlaying) return;
+        final aePlaying = _aetherPlayer?.state.playing ?? false;
+        if (pPlaying || avPlaying || aePlaying) return;
         if (!_everOpened) {
           _autoplayCurrent();
           return;
         }
-        final useAv = Platform.isIOS && !_iosUseMpv && !_iosUseKs && _avPlayer != null;
+        final useAv = Platform.isIOS &&
+            !_iosUseMpv &&
+            !_iosUseKs &&
+            !_iosUseAe &&
+            _avPlayer != null;
         if (useAv) {
           // ⚠️ iOS 共享原生 AvEngine（AVPlayer 单例）：点播/音乐最后
           // open 过的话，原生 item 已被它们的内容覆盖，直接 play() 恢复的
@@ -218,6 +242,7 @@ class _LivePageState extends State<LivePage> {
         if (VideoPlayerPip.instance.isIosActive) return;
         try { _player?.pause(); } catch (_) {}
         try { _avPlayer?.pause(); } catch (_) {}
+        try { _aetherPlayer?.pause(); } catch (_) {}
       } else {
         // 回到直播根 → 恢复播放
         // 注意：只在"开过流且当前被暂停"时恢复，
@@ -225,8 +250,13 @@ class _LivePageState extends State<LivePage> {
         if (!_everOpened) return;
         final pPlaying = _player?.state.playing ?? false;
         final avPlaying = _avPlayer?.state.playing ?? false;
-        if (pPlaying || avPlaying) return;
-        final useAv = Platform.isIOS && !_iosUseMpv && !_iosUseKs && _avPlayer != null;
+        final aePlaying = _aetherPlayer?.state.playing ?? false;
+        if (pPlaying || avPlaying || aePlaying) return;
+        final useAv = Platform.isIOS &&
+            !_iosUseMpv &&
+            !_iosUseKs &&
+            !_iosUseAe &&
+            _avPlayer != null;
         if (useAv) {
           // iOS 共享 AVPlayer：子页面里可能被点播/音乐覆盖了 item，
           // 直接 play 会播别人的内容 → 重新 open 直播流
@@ -264,6 +294,8 @@ class _LivePageState extends State<LivePage> {
     _avPlayer = null;
     _ksPlayer?.dispose();
     _ksPlayer = null;
+    _aetherPlayer?.dispose();
+    _aetherPlayer = null;
     // 全屏（横屏锁）态下页面被直接销毁（iOS 边缘滑动手势 pop、异常路径）时，
     // _leaveFullscreenUi 不会执行 → 横屏锁与底栏隐藏没人解 → 整个 App 滞留
     // 横屏（与影视详情页同源的问题）。dispose 兜底：退出全屏态并强制回竖屏。
@@ -347,10 +379,22 @@ class _LivePageState extends State<LivePage> {
       if (referer.isNotEmpty) 'Referer': referer,
       if (origin.isNotEmpty) 'Origin': origin,
     };
-    if (_iosUseKs) {
+    if (_iosUseAe) {
+      // Aether（AE 核心，仅 iOS 17+）：独立原生单例，与 FF/AV 互斥；
+      // v1 无直播低延迟调优与画中画（open 的 live 标志在封装层忽略）
+      _player?.pause();
+      _avPlayer?.pause();
+      // 切走 FF 核心必须连层释放（拆流线程不能留在后台，同下）
+      _ksPlayer?.dispose();
+      _ksPlayer = null;
+      _aetherPlayer ??= AetherPlayer(config: const AppConfig(title: '猫影直播'));
+      _aetherPlayer!.open(AppMedia(url, httpHeaders: headers));
+    } else if (_iosUseKs) {
       // KSPlayer（FF 核心，全格式）：与点播共用同一个 KSEngine 单例
       _player?.pause();
       _avPlayer?.pause();
+      _aetherPlayer?.dispose();
+      _aetherPlayer = null;
       _ksPlayer ??= KSPlayer(config: const AppConfig(title: '猫影直播'));
       // live: true → 原生侧按格式路由内核（m3u8/mp4 走 AVPlayer，
       // flv/mkv/ts/rtmp 走打了野指针防御补丁的 FFmpeg）
@@ -363,6 +407,8 @@ class _LivePageState extends State<LivePage> {
       // 下次切回 FF 时 ??= 重建即可。
       _ksPlayer?.dispose();
       _ksPlayer = null;
+      _aetherPlayer?.dispose();
+      _aetherPlayer = null;
       _avPlayer ??= IosAvPlayer(config: const AppConfig(title: '猫影直播'));
       _avPlayer!.open(AppMedia(url, httpHeaders: headers));
     } else {
@@ -370,11 +416,13 @@ class _LivePageState extends State<LivePage> {
       _avPlayer?.pause(); // iOS 切回 mpv 时停掉 AVPlayer 避免双声
       _ksPlayer?.dispose(); // 同上：连层一起释放，别留拆流线程在后台裸奔
       _ksPlayer = null;
+      _aetherPlayer?.dispose();
+      _aetherPlayer = null;
       _player!.open(Media(url, httpHeaders: headers));
     }
     // 预热原生 PiP，否则点小窗时 AVPlayer 冷启动易失败/黑屏
-    // （KSPlayer 小窗与前台共用同一实例，无需预热）
-    if (Platform.isIOS && !_iosUseKs) {
+    // （KSPlayer 小窗与前台共用同一实例，无需预热；AE 核心 v1 无小窗）
+    if (Platform.isIOS && !_iosUseKs && !_iosUseAe) {
       VideoPlayerPip.instance.prepareIos(url: url, headers: headers);
     }
     // 订阅播放错误，避免一直转圈无提示。
@@ -394,8 +442,12 @@ class _LivePageState extends State<LivePage> {
     // 按实际在播内核分派，两个内核的 error=Stream<String> / position=Stream<Duration> /
     // playing=Stream<bool> 类型一致，共用同一套监听逻辑。
     final useKs = _iosUseKs && _ksPlayer != null;
+    final useAe = _iosUseAe && _aetherPlayer != null;
     if (useKs) {
       final s = _ksPlayer!.stream;
+      _bindPlaybackStreams(s.error, s.position, s.playing);
+    } else if (useAe) {
+      final s = _aetherPlayer!.stream;
       _bindPlaybackStreams(s.error, s.position, s.playing);
     } else if (useAv) {
       final s = _avPlayer!.stream;
@@ -441,10 +493,15 @@ class _LivePageState extends State<LivePage> {
         _playingConfirmTimer = Timer(const Duration(milliseconds: 2500), () {
           _playingConfirmTimer = null;
           if (!mounted || !_switching) return;
-          final useAvNow = Platform.isIOS && !_iosUseMpv && !_iosUseKs && _avPlayer != null;
+          final useAvNow = Platform.isIOS &&
+              !_iosUseMpv &&
+              !_iosUseKs &&
+              !_iosUseAe &&
+              _avPlayer != null;
           final pos = useAvNow
               ? (_avPlayer?.state.position ?? Duration.zero)
-              : (_ksPlayer?.state.position ??
+              : (_aetherPlayer?.state.position ??
+                  _ksPlayer?.state.position ??
                   (_player?.state.position ?? Duration.zero));
           if (pos > Duration.zero) {
             _switchTimer?.cancel();
@@ -514,6 +571,7 @@ class _LivePageState extends State<LivePage> {
                   switch (engine) {
                     PlayerEngine.avplayer => '系统内核，HLS/MP4 兼容性好',
                     PlayerEngine.ksplayer => 'FFmpeg 内核，MKV 等全格式兼容',
+                    PlayerEngine.aether => 'AetherEngine 内核，FFmpeg + Metal（实验）',
                     _ => '支持 flv/ts/rtmp 等更多直播流',
                   },
                   style: TextStyle(
@@ -1304,8 +1362,13 @@ class _LivePageState extends State<LivePage> {
     //（引擎不再提交该平台视图的图层 → 原生视图被移除）。
     // 只隐藏画面，**不 dispose 播放器**，音频与播放进度都保留。
     final routeIsCurrent = ModalRoute.of(context)?.isCurrent ?? true;
-    final isIosAv = Platform.isIOS && !_iosUseMpv && !_iosUseKs && _avPlayer != null;
+    final isIosAv = Platform.isIOS &&
+        !_iosUseMpv &&
+        !_iosUseKs &&
+        !_iosUseAe &&
+        _avPlayer != null;
     final isIosKs = _iosUseKs && _ksPlayer != null;
+    final isIosAe = _iosUseAe && _aetherPlayer != null;
 
     return Container(
       color: Colors.black,
@@ -1318,7 +1381,7 @@ class _LivePageState extends State<LivePage> {
           fit: StackFit.expand,
           children: [
           // 视频层常驻（听剧时透明隐藏，不从树上摘掉，保证音轨不断、退出听剧能恢复画面）
-          if (isIosAv || isIosKs || (_videoController != null && current != null))
+          if (isIosAv || isIosKs || isIosAe || (_videoController != null && current != null))
             Offstage(
               offstage: !routeIsCurrent,
               child: Opacity(
@@ -1327,10 +1390,12 @@ class _LivePageState extends State<LivePage> {
                     ? AppVideoView(player: _avPlayer!)
                     : isIosKs
                         ? AppVideoView(player: _ksPlayer!)
-                        : Video(
-                            controller: _videoController!,
-                            controls: AdaptiveVideoControls,
-                          ),
+                        : isIosAe
+                            ? AppVideoView(player: _aetherPlayer!)
+                            : Video(
+                                controller: _videoController!,
+                                controls: AdaptiveVideoControls,
+                              ),
               ),
             )
           else
@@ -1575,6 +1640,7 @@ class _LivePageState extends State<LivePage> {
                                 .instance.liveEngine.value) {
                               PlayerEngine.avplayer => 'AV',
                               PlayerEngine.ksplayer => 'FF',
+                              PlayerEngine.aether => 'AE',
                               PlayerEngine.mpv => 'MPV',
                               PlayerEngine.webview => 'WEB',
                             },

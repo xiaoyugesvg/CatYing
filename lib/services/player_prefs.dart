@@ -131,10 +131,24 @@ class PlayerPrefs {
     await prefs.setInt(AppConstants.playTypeVod, mapped);
     vodEngine.value = PlayerEngine.fromStoredValue(mapped);
 
+    // Aether（第五核心）仅 iOS 17+：低版本系统读到历史 AE 偏好时回退 AVPlayer
+    if (vodEngine.value == PlayerEngine.aether &&
+        !PlayerEngine.aetherSupported) {
+      vodEngine.value = PlayerEngine.avplayer;
+      await prefs.setInt(AppConstants.playTypeVod, PlayerEngine.avplayer.value);
+    }
+
     // 直播内核（与点播独立持久化；无历史值时默认 AVPlayer，
     // 与旧行为一致 —— 旧版本直播读的就是 vodEngine 的默认值）
     liveEngine.value = PlayerEngine.fromStoredValue(
         prefs.getInt('play_live_engine') ?? PlayerEngine.avplayer.value);
+    // 直播同样受 Aether 的 iOS 17+ 门槛约束
+    if (liveEngine.value == PlayerEngine.aether &&
+        !PlayerEngine.aetherSupported) {
+      liveEngine.value = PlayerEngine.avplayer;
+      await prefs.setInt(
+          'play_live_engine', PlayerEngine.avplayer.value);
+    }
 
     decodeMode.value =
         VideoDecodeMode.fromStoredValue(prefs.getInt('play_decode_mode') ?? 0);
