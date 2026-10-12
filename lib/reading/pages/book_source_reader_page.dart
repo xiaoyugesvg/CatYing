@@ -1360,25 +1360,26 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             )
           else
             Container(color: bg[0]),
-          GestureDetector(
-            // ✅ 点击统一走 [_handleTap]（3×3 分区 + 「点击区域」配置）：
-            //   原来这里硬编码"左 1/3 翻章 / 右 1/3 翻章 / 中间开顶栏"，
-            //   且只在 PageView 分支（左右/无动画/双页）生效——上下模式被
-            //   内层 _handleTap 赢走、仿真/覆盖被组件内部点击赢走 ⇒
-            //   「点击区域」配置在不同模式下行为不一致 ✗。
-            //   现在外层兜底也走同一套分区逻辑（tapZones 生效 ✓）：
-            //   · 上下模式：内层 _handleTap 赢（更深节点）✓
-            //   · 仿真/覆盖：组件内部点击赢（onTapCenter）✓
-            //   · PageView：PageView 只注册拖拽手势，tap 落到这里 ✓
-            //   · 面板/顶栏打开：_handleTap 第一行收起 ✓
-            onTapUp: (d) =>
-                _handleTap(d.globalPosition, MediaQuery.of(context).size),
-            child: SafeArea(
-              child: Stack(
-                children: [
+          // ✅ 点击判定已全部由正文区 Listener 手动负责（_onPointerUp），
+          //   不再用 GestureDetector onTapUp —— iOS 上单指 tap 会被
+          //   PageView/ListView 的 drag 竞技场抢走 ⇒ "两指才呼出" ✗。
+          //   仿真/覆盖模式由组件内部 onTapCenter 自行处理 ✓。
+          SafeArea(
+            child: Stack(
+              children: [
                   Column(
                     children: [
-                      Expanded(child: _contentArea(bg[1])),
+                      // ✅ 点击判定从 GestureDetector 换成 Listener 手动判定：
+                      //   单指点击正文一定响应（呼出/翻页/收起），不再被
+                      //   PageView/ListView 的 drag 竞技场抢走（"两指才出现" ✗）。
+                      Expanded(
+                        child: Listener(
+                          behavior: HitTestBehavior.translucent,
+                          onPointerDown: _onPointerDown,
+                          onPointerUp: _onPointerUp,
+                          child: _contentArea(bg[1]),
+                        ),
+                      ),
                       _ttsMiniBar(bg[1]),
                     ],
                   ),
@@ -1483,7 +1484,6 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                 ],
               ),
             ),
-          ),
         ],
       ),
     );
@@ -1754,44 +1754,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   /// （横向分页/双页/仿真那套留给**文字**阅读，见 _contentArea。）
   Widget _mangaView(Color fg) {
     final headers = _mangaHeaders;
-    return GestureDetector(
-      // 点屏幕中间的 1/3 显隐工具栏；左右 1/3 翻章。
-      // ✅ 补上"工具栏/面板已展开时，任意点击先收起"——与外层 Stack 手势一致 ✓。
-      //    原来这里缺这一步 ✗ → 面板开着时左右点击会**翻页**而不是**收起面板** ✗。
-      onTapUp: (d) {
-        final w = MediaQuery.of(context).size.width;
-        final x = d.localPosition.dx;
-        if (_showBar || _showSettingsPanel) {
-          setState(() {
-            _showBar = false;
-            _showSettingsPanel = false;
-          });
-          return;
-        }
-        // 翻页反转（左点下一页 / 右点上一页）在漫画模式同样生效 ✓
-        final flip = _rs.flipReverse;
-        if (x < w / 3) {
-          if (flip) {
-            _nextPageOrChapter();
-          } else {
-            _prevPageOrChapter();
-          }
-        } else if (x > w * 2 / 3) {
-          if (flip) {
-            _prevPageOrChapter();
-          } else {
-            _nextPageOrChapter();
-          }
-        } else {
-          setState(() => _showBar = true);
-        }
-      },
-      child: ListView.builder(
-        padding: EdgeInsets.only(
-            top: _padTop, bottom: _padBottom + 40),
-        // 图片数量 + 1（末尾放"下一章"）
-        itemCount: _images.length + 1,
-        itemBuilder: (c, i) {
+    // 点击判定统一由正文区 Listener（_onPointerUp）负责：
+    // 左/右 1/3 翻章、中间 1/3 呼出、面板开时点空白收起（逻辑已迁移到 _onPointerUp）。
+    return ListView.builder(
+      padding: EdgeInsets.only(
+          top: _padTop, bottom: _padBottom + 40),
+      // 图片数量 + 1（末尾放"下一章"）
+      itemCount: _images.length + 1,
+      itemBuilder: (c, i) {
           if (i == _images.length) {
             // 末尾：本章读完 → 下一章
             return Padding(
@@ -1864,16 +1834,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             ),
           );
         },
-      ),
     );
   }
 
   /// 上下模式 / 分页失败时的兜底：整章滚动
   Widget _scrollView(Color fg) {
-    return GestureDetector(
-      // 点击区域的"菜单"动作（截图里的点击区域设置）
-      onTapUp: (d) => _handleTap(d.localPosition, MediaQuery.of(context).size),
-      child: SingleChildScrollView(
+    return SingleChildScrollView(
         padding:
             EdgeInsets.fromLTRB(_padLeft, _padTop, _padRight, _padBottom),
         child: Column(
@@ -1893,7 +1859,6 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               _paragraphWidget(pi, fg),
           ],
         ),
-      ),
     );
   }
 
@@ -2325,11 +2290,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     final progress = _pages.isEmpty
         ? 0.0
         : (_pageIndex.clamp(0, _pages.length - 1) + 1) / _pages.length;
-    return GestureDetector(
-      onTapUp: (d) => _handleTap(d.localPosition, _viewport),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
+    // 点击判定统一由正文区 Listener（_onPointerUp）负责，不再注册 onTapUp
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
           // ── 页眉 ────────────────────────────────────────────
           if (items.isNotEmpty)
             Padding(
@@ -2475,7 +2439,6 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               ),
             ),
         ],
-      ),
     );
   }
 
@@ -2560,12 +2523,51 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     );
   }
 
-  /// 点击分区处理（截图里的「点击区域」设置）
-  void _handleTap(Offset pos, Size size) {
+  // ── 手动点击判定（Listener，不参与手势竞技场）────────────────
+  // 之前用 GestureDetector 的 onTapUp 触发翻页/呼出，在 iOS 上单指 tap 会被
+  // PageView/ListView 的 drag recognizer 抢赢（手指轻微位移即判为滚动），
+  // 导致"必须两指点击顶栏/功能面板才出现" ✗。改用 Listener 原始事件流
+  // 手动判定"点击"（位移小 + 时长短），单指一定响应 ✓。
+  Offset? _tapDownPos;
+  DateTime? _tapDownTime;
+  // 当前按下的指针数：多指（漫画双指缩放 / 两指同时点）时不判定点击，
+  // 避免抬起瞬间被误判成翻页 / 呼出。
+  int _activePointers = 0;
+
+  void _onPointerDown(PointerDownEvent e) {
+    _activePointers++;
+    // 只记录第一根手指：双指缩放 / 双指点击时第二根手指的 down 不覆盖基准
+    if (_activePointers == 1) {
+      _tapDownPos = e.position;
+      _tapDownTime = DateTime.now();
+    }
+  }
+
+  void _onPointerUp(PointerUpEvent e) {
+    _activePointers--;
+    if (_activePointers < 0) _activePointers = 0;
+    // 还有其它手指按着（双指缩放 / 双指点击过程中）→ 不是单指点击，跳过
+    if (_activePointers > 0) {
+      _tapDownPos = null;
+      _tapDownTime = null;
+      return;
+    }
+    final down = _tapDownPos;
+    final t0 = _tapDownTime;
+    _tapDownPos = null;
+    _tapDownTime = null;
+    if (down == null || t0 == null) return;
+    final dt = DateTime.now().difference(t0).inMilliseconds;
+    if (dt > 350) return; // 长按选字/长按书签，不是点击
+    final dist = (e.position - down).distance;
+    if (dist > 24) return; // 滑动翻页中，不是点击
+    // 仿真/覆盖：组件内部自绘点击稳定（无 Scrollable 竞争），交给组件处理
+    if (_rs.pageMode == PageMode.curl || _rs.pageMode == PageMode.cover) {
+      return;
+    }
+    final size = MediaQuery.of(context).size;
     if (size.width <= 0 || size.height <= 0) return;
-    // ✅ 面板 / 顶栏打开时：点击正文空白任意位置先收起（不翻页、不误切换）。
-    //   之前只有外层 GestureDetector 处理面板状态，但内层 `onTapUp` 赢下
-    //   手势竞技场后外层永远不触发 → 面板开着点空白毫无反应 ✗。
+    // 面板 / 顶栏打开时：点击正文空白任意位置先收起（不翻页、不误切换）
     if (_showBar || _showSettingsPanel) {
       setState(() {
         _showBar = false;
@@ -2573,19 +2575,39 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       });
       return;
     }
-    // 3×3 分区，下标 = row*3 + col
-    final col = (pos.dx / (size.width / 3)).floor().clamp(0, 2);
-    final row = (pos.dy / (size.height / 3)).floor().clamp(0, 2);
-    var zone = row * 3 + col;
-    // 单手模式：左右都是下一页（覆盖分区设置）
+    // 漫画模式：固定 左/右 1/3 翻章、中间 1/3 呼出（保持原漫画交互）
+    if (_images.isNotEmpty) {
+      final x = e.position.dx;
+      final w = size.width;
+      final flip = _rs.flipReverse;
+      if (x < w / 3) {
+        if (flip) {
+          _nextPageOrChapter();
+        } else {
+          _prevPageOrChapter();
+        }
+      } else if (x > w * 2 / 3) {
+        if (flip) {
+          _prevPageOrChapter();
+        } else {
+          _nextPageOrChapter();
+        }
+      } else {
+        setState(() => _showBar = true);
+      }
+      return;
+    }
+    // 文字模式：3×3 分区 + 「点击区域」配置
+    final col = (e.position.dx / (size.width / 3)).floor().clamp(0, 2);
+    final row = (e.position.dy / (size.height / 3)).floor().clamp(0, 2);
+    final zone = row * 3 + col;
     final zones = _rs.tapZones.isEmpty
         ? ReadingSettings.defaultZones()
         : _rs.tapZones;
     var action = _rs.oneHand
         ? (zone == 4 ? TapAction.menu : TapAction.next)
         : (zones[zone] ?? TapAction.menu);
-    // ✅ 接上「翻页反转」开关（原来只存不读 ✗ —— 面板里拨了毫无效果）：
-    //    左点下一页、右点上一页 = 把「上一页 / 下一页」两个动作对调 ✓
+    // 翻页反转：左点下一页 / 右点上一页 对调
     if (_rs.flipReverse) {
       if (action == TapAction.prev) {
         action = TapAction.next;
@@ -2599,7 +2621,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       case TapAction.next:
         _nextPageOrChapter();
       case TapAction.menu:
-        setState(() => _showBar = !_showBar);
+        setState(() => _showBar = true);
       case TapAction.none:
         break;
     }

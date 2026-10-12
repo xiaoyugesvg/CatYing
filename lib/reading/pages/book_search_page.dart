@@ -337,6 +337,9 @@ class _BookSearchPageState extends State<BookSearchPage>
       final newResult = await ZlibraryService().search(
         _keyword,
         extensions: _filterExtensions.isEmpty ? null : _filterExtensions,
+        languages: _filterLanguages.isEmpty ? null : _filterLanguages.first,
+        yearFrom: _filterYearFrom,
+        yearTo: _filterYearTo,
         page: page,
       );
       _log('API返回: ${newResult.items.length} 条, 总数: ${newResult.total}');
@@ -1539,28 +1542,19 @@ class _CategorySheetGateState extends State<_CategorySheetGate> {
       );
     }
     if (_error != null) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(24, 32, 24, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.wifi_off_rounded,
-                size: 36, color: JellyTheme.textSecondary),
-            const SizedBox(height: 12),
-            Text(_errorText,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: JellyTheme.textSecondary,
-                )),
-            const SizedBox(height: 16),
-            TextButton.icon(
-              onPressed: _ensureCategories,
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('重试'),
-            ),
-          ],
-        ),
+      // ✅ 分类目录抓取失败时**不再整页报错** ✗：
+      // 直接把弹窗渲染出来（分类区显示失败原因 + 重试，年份/语言/格式过滤常驻），
+      // 用户至少还能看到完整筛选 UI、能重试，而不是一个纯错误页。
+      return _BookCategorySheet(
+        isDark: widget.isDark,
+        initialCategory: widget.initialCategory,
+        initialYearFrom: widget.initialYearFrom,
+        initialYearTo: widget.initialYearTo,
+        initialLanguages: widget.initialLanguages,
+        initialExtensions: widget.initialExtensions,
+        categoriesFailed: true,
+        categoriesErrorText: _errorText,
+        onRetryCategories: _ensureCategories,
       );
     }
     return _BookCategorySheet(
@@ -1582,6 +1576,11 @@ class _BookCategorySheet extends StatefulWidget {
   final List<String> initialLanguages;
   final List<String> initialExtensions;
 
+  /// 分类目录加载失败：分类区显示失败原因 + 重试，过滤区仍常驻。
+  final bool categoriesFailed;
+  final String? categoriesErrorText;
+  final VoidCallback? onRetryCategories;
+
   const _BookCategorySheet({
     required this.isDark,
     required this.initialCategory,
@@ -1589,6 +1588,9 @@ class _BookCategorySheet extends StatefulWidget {
     required this.initialYearTo,
     required this.initialLanguages,
     required this.initialExtensions,
+    this.categoriesFailed = false,
+    this.categoriesErrorText,
+    this.onRetryCategories,
   });
 
   @override
@@ -1803,78 +1805,121 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
               ),
             ),
             const SizedBox(height: 2),
-            // 主分类标签栏（横向滚动，单选）
-            SizedBox(
-              height: 44,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                cacheExtent: double.maxFinite,
-                itemCount: BookCategories.groups.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (_, gi) {
-                  final g = BookCategories.groups[gi];
-                  final selected = gi == _selectedGroupIdx;
-                  return GestureDetector(
-                    key: selected ? _selectedTabKey : null,
-                    onTap: () => setState(() {
-                      if (_selectedGroupIdx == gi) {
-                        _selectedGroupIdx = -1;
-                        _selectedChild = null;
-                      } else {
-                        _selectedGroupIdx = gi;
-                        _selectedChild = null;
-                      }
-                    }),
-                    // 主分类 tab：比子选项 chip 大一号（fontSubhead），
-                    // 选中态/未选中态与统一 chip 同语言
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 9,
+            // 主分类标签栏（横向滚动，单选；分类目录为空时显示失败提示 + 重试）
+            if (BookCategories.groups.isEmpty) ...[
+              SizedBox(
+                height: 44,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.wifi_off_rounded,
+                        size: 16,
+                        color: jellyChipTextColor(isDark),
                       ),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? JellyTheme.primary
-                            : jellyChipColor(isDark),
-                        borderRadius: BorderRadius.circular(13),
-                        border: selected
-                            ? null
-                            : Border.fromBorderSide(BorderSide(
-                                color: isDark
-                                    ? Colors.white.withValues(alpha: 0.12)
-                                    : Colors.black.withValues(alpha: 0.07),
-                              )),
-                        boxShadow: selected
-                            ? [
-                                BoxShadow(
-                                  color:
-                                      JellyTheme.primary.withValues(alpha: 0.3),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 3),
-                                ),
-                              ]
-                            : null,
-                      ),
-                      child: Center(
+                      const SizedBox(width: 8),
+                      Expanded(
                         child: Text(
-                          g.title,
+                          widget.categoriesFailed
+                              ? (widget.categoriesErrorText ??
+                                  '分类目录加载失败')
+                              : '暂无分类目录',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: AppTheme.fontSubhead,
-                            fontWeight: selected
-                                ? FontWeight.w600
-                                : FontWeight.w500,
-                            color: selected
-                                ? Colors.white
-                                : jellyChipTextColor(isDark),
+                            fontSize: AppTheme.fontFootnote,
+                            color: jellyChipTextColor(isDark),
                           ),
                         ),
                       ),
-                    ),
-                  );
-                },
+                      if (widget.categoriesFailed &&
+                          widget.onRetryCategories != null)
+                        TextButton.icon(
+                          onPressed: widget.onRetryCategories,
+                          icon: const Icon(Icons.refresh_rounded, size: 16),
+                          label: const Text('重试'),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            foregroundColor: JellyTheme.primary,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
-            ),
+            ] else
+              SizedBox(
+                height: 44,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  cacheExtent: double.maxFinite,
+                  itemCount: BookCategories.groups.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
+                  itemBuilder: (_, gi) {
+                    final g = BookCategories.groups[gi];
+                    final selected = gi == _selectedGroupIdx;
+                    return GestureDetector(
+                      key: selected ? _selectedTabKey : null,
+                      onTap: () => setState(() {
+                        if (_selectedGroupIdx == gi) {
+                          _selectedGroupIdx = -1;
+                          _selectedChild = null;
+                        } else {
+                          _selectedGroupIdx = gi;
+                          _selectedChild = null;
+                        }
+                      }),
+                      // 主分类 tab：比子选项 chip 大一号（fontSubhead），
+                      // 选中态/未选中态与统一 chip 同语言
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 9,
+                        ),
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? JellyTheme.primary
+                              : jellyChipColor(isDark),
+                          borderRadius: BorderRadius.circular(13),
+                          border: selected
+                              ? null
+                              : Border.fromBorderSide(BorderSide(
+                                  color: isDark
+                                      ? Colors.white.withValues(alpha: 0.12)
+                                      : Colors.black.withValues(alpha: 0.07),
+                                )),
+                          boxShadow: selected
+                              ? [
+                                  BoxShadow(
+                                    color: JellyTheme.primary
+                                        .withValues(alpha: 0.3),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ]
+                              : null,
+                        ),
+                        child: Center(
+                          child: Text(
+                            g.title,
+                            style: TextStyle(
+                              fontSize: AppTheme.fontSubhead,
+                              fontWeight: selected
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
+                              color: selected
+                                  ? Colors.white
+                                  : jellyChipTextColor(isDark),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
             const SizedBox(height: 12),
             // 子分类 + 年份/语言/格式过滤条件（整体可滚动，过滤条件始终常驻）
             Flexible(
@@ -1892,7 +1937,9 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                         ? Padding(
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             child: Text(
-                              '请选择主分类',
+                              BookCategories.groups.isEmpty
+                                  ? '分类目录不可用，可先使用下方年份 / 语言 / 格式条件'
+                                  : '请选择主分类',
                               style: TextStyle(
                                 fontSize: AppTheme.fontFootnote,
                                 color: jellyChipTextColor(isDark),

@@ -5,8 +5,10 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../models/book.dart';
+import '../models/book_source.dart';
 import '../models/comic.dart';
 import '../services/book_favorites_service.dart';
+import '../services/book_source_service.dart';
 import '../services/book_view_mode.dart';
 import '../services/favorites_service.dart';
 import '../services/shelf_update_service.dart';
@@ -23,6 +25,7 @@ import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import '../widgets/staggered_entrance.dart';
+import 'book_source_detail_page.dart';
 import '../widgets/source_cover_image.dart';
 import 'book_detail_page.dart';
 import 'comic_detail_page.dart';
@@ -823,10 +826,50 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   /// 打开图书详情（不传搜索结果 -> 详情页以作者搜索推荐）
   void _openBookDetail(Book book) {
+    // ✅ 书源体系的书（书源搜索/分类收藏的）：回到书源详情页继续阅读 ✓
+    //   （之前一律进 zlib 详情页 → "收藏了看不了" ✗）
+    if (book.isBookSource) {
+      final src = _matchBookSource(book);
+      if (src != null) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => BookSourceDetailPage(
+              result: BookSourceResult(
+                source: src,
+                name: book.title,
+                author: book.author ?? '',
+                bookUrl: book.bookUrl!,
+                coverUrl: book.cover ?? '',
+              ),
+            ),
+          ),
+        );
+        return;
+      }
+    }
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => BookDetailPage(book: book)),
     );
+  }
+
+  /// 按存的 sourceId 找回书源（兼容旧收藏数据：sourceId 缺失时按源名匹配）；
+  /// 源已删除/禁用时返回 null（兜底走 zlib 详情页）
+  BookSource? _matchBookSource(Book book) {
+    final id = book.sourceId;
+    if (id != null && id.isNotEmpty) {
+      for (final s in BookSourceStore.instance.all) {
+        if (s.id == id) return s;
+      }
+    }
+    final name = book.sourceName;
+    if (name != null && name.isNotEmpty) {
+      for (final s in BookSourceStore.instance.all) {
+        if (s.name == name) return s;
+      }
+    }
+    return null;
   }
 }
 

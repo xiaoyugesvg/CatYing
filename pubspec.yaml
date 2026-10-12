@@ -83,6 +83,7 @@ dependencies:
   xml: ^6.5.0
   # [PATCH-5] 同步 HTTP：java.ajax 的同步抓取用（纯 Dart，无原生插件）
   sync_http: ^0.3.0
+  mobile_scanner: ^7.4.2
   # cached_network_image 3.3.1 已移除（A2）：它与 cached_network_image_ce
   # 是**两条平行的完整实现**（各带 platform_interface / web 子包），
   # 同时编译进 App 且各自维护磁盘缓存 → 同一个网络图在影视和音乐会存两份。

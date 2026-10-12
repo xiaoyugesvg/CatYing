@@ -1,3 +1,15 @@
+/// 书名展示清洗：去掉外层书名号《》与首尾装饰性标点（！？，。、空格），
+/// 只改显示层，不动原始数据。z-library 返回的书名常带《》或尾部感叹号。
+String cleanBookTitle(String raw) {
+  var s = (raw ?? '').trim();
+  if (s.startsWith('《') && s.endsWith('》') && s.length > 2) {
+    s = s.substring(1, s.length - 1).trim();
+  }
+  s = s.replaceFirst(RegExp(r'^[！!？?，,。.、\s]+'), '');
+  s = s.replaceFirst(RegExp(r'[！!？?，,。.、\s]+$'), '');
+  return s.trim();
+}
+
 /// 图书模型（z-library 搜索结果）
 /// 字段对应 cmbook service/cmbok_service.py _emit_success 精简后的结构，
 /// 另含 description/pages/publisher 供详情页展示（搜索接口即返回）。
@@ -18,6 +30,18 @@ class Book {
   final String? identifier; // ISBN
   final String? readOnlineUrl; // 在线阅读地址（z-library reader）
 
+  // ── 书源体系的书（BookSourceDetailPage 收藏/历史）──────────────
+  // 用于收藏/历史/书架点开后正确回到书源详情页继续阅读（不是 zlib 详情页）
+  final String? sourceId;   // BookSource.id
+  final String? sourceName; // 书源名
+  final String? bookUrl;    // 书源内书籍 URL
+
+  /// 是否是书源体系的书（非 z-library 图书）
+  bool get isBookSource => (bookUrl ?? '').isNotEmpty;
+
+  /// 展示用书名（去掉《》、首尾标点），卡片/详情/目录统一用这个。
+  String get displayTitle => cleanBookTitle(title);
+
   const Book({
     required this.id,
     required this.hash,
@@ -34,6 +58,9 @@ class Book {
     this.interestScore,
     this.identifier,
     this.readOnlineUrl,
+    this.sourceId,
+    this.sourceName,
+    this.bookUrl,
   });
 
   /// 安全取字符串（z-library 返回的 id/year/pages 等可能是 int）
@@ -69,6 +96,9 @@ class Book {
       interestScore: safeDouble(json['interestScore']),
       identifier: safeString(json['identifier']),
       readOnlineUrl: safeString(json['readOnlineUrl']),
+      sourceId: safeString(json['sourceId']),
+      sourceName: safeString(json['sourceName']),
+      bookUrl: safeString(json['bookUrl']),
     );
   }
 
@@ -88,6 +118,9 @@ class Book {
     'interestScore': interestScore,
     'identifier': identifier,
     'readOnlineUrl': readOnlineUrl,
+    'sourceId': sourceId,
+    'sourceName': sourceName,
+    'bookUrl': bookUrl,
   };
 
   Book copyWith({
@@ -106,6 +139,9 @@ class Book {
     double? interestScore,
     String? identifier,
     String? readOnlineUrl,
+    String? sourceId,
+    String? sourceName,
+    String? bookUrl,
   }) {
     return Book(
       id: id ?? this.id,
@@ -123,6 +159,9 @@ class Book {
       interestScore: interestScore ?? this.interestScore,
       identifier: identifier ?? this.identifier,
       readOnlineUrl: readOnlineUrl ?? this.readOnlineUrl,
+      sourceId: sourceId ?? this.sourceId,
+      sourceName: sourceName ?? this.sourceName,
+      bookUrl: bookUrl ?? this.bookUrl,
     );
   }
 }

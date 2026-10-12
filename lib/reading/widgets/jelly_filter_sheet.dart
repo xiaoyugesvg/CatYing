@@ -94,6 +94,9 @@ class JellySheetSectionTitle extends StatelessWidget {
 }
 
 /// 统一筛选 chip：选中 = 主题色实底 + 投影；未选中 = 表面色 + 细边框。
+///
+/// ✅ 用户 2026-10-12「筛选卡片太大、文字显小」：内边距 14×7 → 10×5、
+///   圆角 12 → 10，卡片更紧凑、文字占比更高（三个页面共用，全局生效）。
 class JellyFilterChip extends StatelessWidget {
   const JellyFilterChip({
     super.key,
@@ -113,11 +116,11 @@ class JellyFilterChip extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: selected ? JellyTheme.primary : jellyChipColor(isDark),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
           border: selected
               ? null
               : Border.fromBorderSide(BorderSide(
@@ -138,7 +141,7 @@ class JellyFilterChip extends StatelessWidget {
         child: Text(
           label,
           style: TextStyle(
-            fontSize: AppTheme.fontFootnote,
+            fontSize: AppTheme.fontSubhead,
             fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
             color: selected ? Colors.white : jellyChipTextColor(isDark),
           ),

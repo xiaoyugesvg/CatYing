@@ -1539,8 +1539,8 @@ JellyIconDeck(
               Flexible(
                 child: SingleChildScrollView(
                   child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                    spacing: 6,
+                    runSpacing: 6,
                     children: _cats.map((c) {
                       final active = _activeCat?.url == c.url;
                       return JellyFilterChip(

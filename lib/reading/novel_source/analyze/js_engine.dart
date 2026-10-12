@@ -10,6 +10,7 @@ import 'package:quickjs_engine/quickjs_engine.dart';
 import '../novel_chinese_converter.dart';
 import '../../../services/app_log.dart';
 import 'legado_java_prelude.dart';
+import 'js_polyfills.dart';
 
 class JsEngine {
   /// 进程级共享引擎：书源解析（搜索/发现/详情/目录/正文）全程复用同一个
@@ -134,9 +135,25 @@ class JsEngine {
     }
   }
 
+  /// 单次求值的「JS 执行预算」（毫秒）。
+  ///
+  /// 书源里一个 `while(true){}` / 病态正则会让求值永不返回 —— 本 runtime
+  /// 是在主 isolate 上同步 `evaluate` 的，卡住即冻死界面。装上限兜住：
+  /// 超时由原生中断处理器打断成可捕获错误（日志里会显示「执行超时」）。
+  ///
+  /// ⚠️ 只计**脚本自身**耗时，宿主请求（java.ajax 等）的等待不计入，
+  /// 所以慢速网络源不会因此被误杀；10s 对正常源非常宽裕。
+  static const int _evalTimeoutMs = 10000;
+
+  /// JS 堆上限（64MB）：防止病态脚本把内存吃爆导致 OOM 崩溃。
+  static const int _evalMemoryLimit = 64 * 1024 * 1024;
+
   JavascriptRuntime get runtime {
     if (_runtime == null) {
-      _runtime = getJavascriptRuntime();
+      _runtime = getJavascriptRuntime(extraArgs: const {
+        'timeout': _evalTimeoutMs,
+        'memoryLimit': _evalMemoryLimit,
+      });
       _injectPrelude();
       // 预置脚本就绪后补注入 jsLib（首次取 runtime 时 pending 还没消费）
       _applyPendingJsLib();
@@ -150,6 +167,21 @@ class JsEngine {
   void _injectPrelude() {
     if (_preludeInjected) return;
     _preludeInjected = true;
+    // ── 标准全局垫片（借鉴 qjs_ultra 的能力面，纯 JS 实现）──────────
+    // QuickJS-NG 原生没有 TextEncoder/TextDecoder/Buffer/crypto/URL 等
+    // Web 全局，而部分书源脚本（尤其带签名/哈希/编解码的源）依赖它们。
+    // 注入 atob/btoa/TextEncoder/TextDecoder(UTF-8)/Buffer/crypto(md5、
+    // sha1、sha256、randomBytes、subtle)/URLSearchParams/URL/performance
+    // 纯 JS 实现；GBK/GB2312 网络层已自动转 UTF-8，此处显式抛错提示。
+    try {
+      final polyfillResult = _runtime!.evaluate(jsStandardPolyfills);
+      if (polyfillResult.isError) {
+        AppLog.instance.w(
+            '[书源JS] 标准全局垫片注入失败: ${polyfillResult.stringResult}');
+      }
+    } catch (e) {
+      AppLog.instance.w('[书源JS] 标准全局垫片注入异常: $e');
+    }
     try {
       final result = _runtime!.evaluate(chineseConverterJsPrelude);
       if (result.isError) {

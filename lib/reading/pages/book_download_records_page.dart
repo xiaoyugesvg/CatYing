@@ -5,14 +5,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../common/theme.dart';
+import '../models/book_source.dart';
 import '../services/book_download_service.dart';
 import '../services/book_reading_progress_service.dart';
+import '../services/book_source_download_service.dart';
+import '../services/book_source_service.dart';
 import '../services/platform_service.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
 import '../utils/list_pagination.dart';
 import '../widgets/jelly_search_bar.dart';
 import 'book_reader_page.dart';
+import 'book_source_detail_page.dart';
 
 /// 下载记录页（参考目标界面 IMG_8397）：
 /// 标题「下载记录」+ 搜索框 + 5 个状态 tab（下载中/已下载/失败/已暂停/已取消）
@@ -143,7 +147,10 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
         centerTitle: true,
       ),
       body: ListenableBuilder(
-        listenable: BookDownloadService(),
+        listenable: Listenable.merge([
+          BookDownloadService(),
+          BookSourceDownloadService.instance.revision,
+        ]),
         builder: (context, _) {
           final tasks = _filtered();
           return Column(
@@ -174,6 +181,7 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
                 ),
               ),
               _buildStatusTabs(isDark),
+              _buildSourceDownloads(isDark),
               ListPaginationCountBar(total: tasks.length, unit: '本'),
               Expanded(
                 child: tasks.isEmpty
@@ -207,6 +215,197 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
             Icons.folder_open_rounded,
             size: 20,
             color: JellyTheme.textPrimaryLight,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 书源「下载全书」区块：横滑卡片（封面 + 书名 + 源名·章数 + 删除）。
+  /// 有记录才显示；点击卡片 → 回书源详情页继续阅读。
+  Widget _buildSourceDownloads(bool isDark) {
+    return FutureBuilder<List<BookSourceDownloadRecord>>(
+      future: BookSourceDownloadService.instance.records(),
+      builder: (context, snap) {
+        final records = snap.data ?? const <BookSourceDownloadRecord>[];
+        if (records.isEmpty) return const SizedBox.shrink();
+        final titleColor =
+            isDark ? Colors.white : JellyTheme.textPrimaryLight;
+        final subColor = isDark ? Colors.white70 : JellyTheme.textSecondary;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 2, 16, 6),
+              child: Text(
+                '书源下载',
+                style: TextStyle(
+                  fontSize: AppTheme.fontSubhead,
+                  fontWeight: FontWeight.w700,
+                  color: titleColor,
+                ),
+              ),
+            ),
+            SizedBox(
+              height: 96,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemCount: records.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 10),
+                itemBuilder: (context, i) {
+                  final rec = records[i];
+                  return _buildSourceDownloadCard(rec, isDark, titleColor,
+                      subColor);
+                },
+              ),
+            ),
+            const SizedBox(height: 6),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildSourceDownloadCard(
+    BookSourceDownloadRecord rec,
+    bool isDark,
+    Color titleColor,
+    Color subColor,
+  ) {
+    return Material(
+      color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _openSourceDownload(rec),
+        child: SizedBox(
+          width: 210,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: SizedBox(
+                    width: 48,
+                    height: 66,
+                    child: rec.cover.isEmpty
+                        ? ColoredBox(
+                            color: JellyTheme.primary.withValues(alpha: 0.15),
+                            child: Icon(
+                              Icons.menu_book_rounded,
+                              size: 22,
+                              color: JellyTheme.primary,
+                            ),
+                          )
+                        : CachedNetworkImage(
+                            imageUrl: rec.cover,
+                            fit: BoxFit.cover,
+                            errorWidget: (_, _, _) => ColoredBox(
+                              color:
+                                  JellyTheme.primary.withValues(alpha: 0.15),
+                              child: Icon(
+                                Icons.menu_book_rounded,
+                                size: 22,
+                                color: JellyTheme.primary,
+                              ),
+                            ),
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        rec.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: AppTheme.fontSubhead,
+                          fontWeight: FontWeight.w600,
+                          color: titleColor,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${rec.sourceName} · ${rec.chapterCount} 章',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: AppTheme.fontFootnote,
+                          color: subColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () async {
+                    await BookSourceDownloadService.instance
+                        .remove(rec.sourceId, rec.bookUrl);
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Icon(
+                      Icons.close_rounded,
+                      size: 16,
+                      color: subColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openSourceDownload(BookSourceDownloadRecord rec) {
+    // 找回源：sourceId 优先，源名回退（兼容旧记录）；找不到 → 提示源已删除
+    BookSource? src;
+    if (rec.sourceId.isNotEmpty) {
+      for (final s in BookSourceStore.instance.all) {
+        if (s.id == rec.sourceId) {
+          src = s;
+          break;
+        }
+      }
+    }
+    if (src == null && rec.sourceName.isNotEmpty) {
+      for (final s in BookSourceStore.instance.all) {
+        if (s.name == rec.sourceName) {
+          src = s;
+          break;
+        }
+      }
+    }
+    if (src == null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+          content: Text('该书源已不在仓库中，请重新导入后下载'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      return;
+    }
+    // 提升为非空局部量：`src` 在声明后被赋值过 ⇒ 在 `builder` 闭包内
+    // 类型提升失效（仍视作 BookSource?）⇒ 必须另存一个 final 变量
+    final source = src;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BookSourceDetailPage(
+          result: BookSourceResult(
+            source: source,
+            name: rec.title,
+            author: rec.author,
+            bookUrl: rec.bookUrl,
+            coverUrl: rec.cover,
           ),
         ),
       ),

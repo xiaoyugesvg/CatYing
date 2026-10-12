@@ -8,6 +8,8 @@ import 'package:path_provider/path_provider.dart';
 import '../models/book_source.dart';
 import '../models/bookshelf.dart';
 import '../services/book_source_service.dart';
+import '../services/book_source_download_service.dart';
+import '../services/browse_history_service.dart';
 // 收藏服务：本文件原来导入的是**从未被使用**的 bookshelf_service ✗
 //（analyze 一直在报 unused_import ✓）—— 那正是"收藏接线写到一半"留下的痕迹 ✓。
 // 真正需要的是收藏服务（见下方 `_toggleFavorite` ✓）
@@ -57,6 +59,18 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
   @override
   void initState() {
     super.initState();
+    // ✅ 进详情即记浏览历史（足迹页 Book tab 可见）✓ —— 与漫画/图书搜索页
+    //   进详情 `recordComic/recordBook` 的口径一致 ✓；服务本身去重置顶 ✓
+    BrowseHistoryService().recordBook(Book.fromJson({
+      'id': 'book-${widget.result.bookUrl}',
+      'hash': '',
+      'title': widget.result.name,
+      'author': widget.result.author,
+      'cover': widget.result.coverUrl,
+      'sourceId': widget.result.source.id,
+      'sourceName': widget.result.source.name,
+      'bookUrl': widget.result.bookUrl,
+    }));
     _load();
   }
 
@@ -380,14 +394,18 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     //（`id` 与"加入书架"用的完全一致 ✓，见下面 :348 附近的 meta ✓）
     final id = 'book-${_result.bookUrl}';
     final svc = BookFavoritesService();
-    // ⚠️ 本页的封面字段名我**没有核实过** ✗ → 这里**不传封面** ✓
-    //（收藏记录的封面会为空 ✓，不影响收藏本身是否正确 ✓；宁可少一个字段，
-    //  也不要写一个可能不存在、直接编译失败的字段名 ✓）
+    // ✅ 完整快照：封面 / 源 id / 源名 / 书内 URL 一起存 ✓ ——
+    //   收藏页 / 历史页 / 书架点开这本书时据此回到**书源详情页**继续阅读 ✓
+    //   （之前只存 id/title/author，点开落到 zlib 详情页 → "收藏了看不了" ✗✓）
     svc.toggle(Book.fromJson({
       'id': id,
       'hash': '',
       'title': _name,
       'author': _author,
+      'cover': _cover,
+      'sourceId': _result.source.id,
+      'sourceName': _result.source.name,
+      'bookUrl': _result.bookUrl,
     }));
     setState(() {});
     _toast(svc.isFavorite(id) ? '已收藏《$_name》' : '已取消收藏《$_name》');
@@ -401,12 +419,13 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
       title: '加入书架',
       meta: jsonEncode({
         // 书架按 Book 结构解析（id/title/author/cover），
-        // 否则书架里书名/封面为空；sourceName/bookUrl 为自定义字段（解析忽略）。
+        // 否则书架里书名/封面为空；sourceId/sourceName/bookUrl 为自定义字段（解析忽略）。
         'id': 'book-${_result.bookUrl}',
         'hash': '',
         'title': _name,
         'author': _author,
         'cover': _cover,
+        'sourceId': _result.source.id,
         'sourceName': _result.source.name,
         'bookUrl': _result.bookUrl,
       }),
@@ -568,6 +587,20 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
           ? '下载完成：$done / $count 章，保存于 ${dir.path}'
           : '下载完成：$done / $count 章（其中 $failedCount 章失败），'
               '保存于 ${dir.path}');
+      // ✅ 写入书源下载索引（下载记录页「书源下载」区块可见）✓
+      await BookSourceDownloadService.instance.add(
+        BookSourceDownloadRecord(
+          sourceId: _result.source.id,
+          sourceName: _result.source.name,
+          bookUrl: _result.bookUrl,
+          title: _name,
+          author: _author,
+          cover: _cover,
+          chapterCount: done,
+          dir: dir.path,
+          time: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
     }
   }
 

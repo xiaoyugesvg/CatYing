@@ -10,9 +10,11 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'peer_transfer_page.dart';
 import '../models/book.dart';
+import '../models/book_source.dart';
 import '../models/bookshelf.dart';
 import '../models/comic.dart';
 import '../services/book_download_service.dart';
+import '../services/book_source_service.dart';
 import '../services/sync_service.dart';
 import '../services/book_favorites_service.dart';
 import '../services/book_reading_progress_service.dart';
@@ -32,6 +34,7 @@ import '../widgets/jelly_nav_bar.dart';
 import '../widgets/jelly_expandable_search.dart';
 import '../widgets/jelly_search_bar.dart';
 import '../widgets/jelly_segmented_toggle.dart';
+import 'book_source_detail_page.dart';
 import '../widgets/jelly_select_badge.dart';
 import '../widgets/staggered_entrance.dart';
 import 'book_detail_page.dart';
@@ -1861,102 +1864,175 @@ class _BookshelfPageState extends State<BookshelfPage>
       backgroundColor: Colors.transparent,
       builder: (context) {
         final isDark = Theme.of(context).brightness == Brightness.dark;
+        final cardColor = isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
+        final titleColor =
+            isDark ? Colors.white : JellyTheme.textPrimaryLight;
+        final subColor =
+            isDark ? Colors.white70 : JellyTheme.textSecondary;
+        final groupColor = isDark ? Colors.white38 : Colors.black45;
+
+        /// 分组小标题（导入 / 传输·备份）
+        Widget groupLabel(String text) => Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  text,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontFootnote,
+                    fontWeight: FontWeight.w700,
+                    color: groupColor,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            );
+
+        /// 单项：圆角底色图标容器（primary@12%）+ 标题 + 副标题
+        Widget item({
+          required IconData icon,
+          required String title,
+          required String subtitle,
+          required VoidCallback onTap,
+          Color? accent,
+        }) {
+          final c = accent ?? JellyTheme.primary;
+          return ListTile(
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+            leading: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: c.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: c, size: 22),
+            ),
+            title: Text(
+              title,
+              style: TextStyle(
+                fontSize: AppTheme.fontBody,
+                fontWeight: FontWeight.w600,
+                color: titleColor,
+              ),
+            ),
+            subtitle: Text(
+              subtitle,
+              style: TextStyle(fontSize: AppTheme.fontFootnote, color: subColor),
+            ),
+            onTap: onTap,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          );
+        }
+
         return Container(
           decoration: BoxDecoration(
-            color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+            color: cardColor,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: SafeArea(
             top: false,
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 12),
-                Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.2)
-                        : Colors.black.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
+                // 抓手条
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.2)
+                          : Colors.black.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 8),
-                ListTile(
-                  leading: Icon(
-                    Icons.file_download_outlined,
-                    color: JellyTheme.primary,
+                const SizedBox(height: 14),
+                // 标题 + 副标题
+                Text(
+                  '书架数据',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontHeadline,
+                    fontWeight: FontWeight.w700,
+                    color: titleColor,
                   ),
-                  title: const Text('导入本地图书'),
-                  subtitle: const Text('从本地文件导入 epub/pdf/txt 等图书'),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '导入 / 导出 / 同步书架内容',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontFootnote,
+                    color: subColor,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                // ── 导入 ─────────────────────────────────────
+                groupLabel('导入'),
+                item(
+                  icon: Icons.file_download_outlined,
+                  title: '导入本地图书',
+                  subtitle: '从本地文件导入 epub / pdf / txt 等图书',
                   onTap: () {
                     Navigator.pop(context);
                     _importLocalBook();
                   },
                 ),
-                ListTile(
-                  leading: Icon(
-                    Icons.folder_open_outlined,
-                    color: JellyTheme.primary,
-                  ),
-                  title: const Text('扫描书库'),
-                  subtitle: const Text('选择文件夹，批量扫描 txt/epub 等图书入库'),
+                item(
+                  icon: Icons.folder_open_outlined,
+                  title: '扫描书库',
+                  subtitle: '选择文件夹，批量扫描 txt / epub 等图书入库',
                   onTap: () {
                     Navigator.pop(context);
                     _scanLibraryFolder();
                   },
                 ),
-                ListTile(
-                  leading: Icon(
-                    Icons.restore_rounded,
-                    color: JellyTheme.primary,
-                  ),
-                  title: const Text('导入阅读备份'),
-                  subtitle: const Text('解析 legado 备份（书架/进度/书签）写入书架'),
+                item(
+                  icon: Icons.restore_rounded,
+                  title: '导入阅读备份',
+                  subtitle: '解析 legado 备份（书架 / 进度 / 书签）写入书架',
                   onTap: () {
                     Navigator.pop(context);
                     _importLegadoBackup();
                   },
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(56, 0, 20, 4),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '导入的图书会加入「本地图书」书架，仅在图书标签下显示，离线可读',
-                      style: TextStyle(
-                        fontSize: AppTheme.fontFootnote,
-                        color: isDark ? Colors.white38 : Colors.black38,
-                      ),
+                  padding: const EdgeInsets.fromLTRB(20, 2, 20, 4),
+                  child: Text(
+                    '导入的图书会加入「本地图书」书架，仅在图书标签下显示，离线可读',
+                    style: TextStyle(
+                      fontSize: AppTheme.fontFootnote,
+                      color: isDark ? Colors.white38 : Colors.black38,
                     ),
                   ),
                 ),
-                ListTile(
-                  leading: Icon(
-                    Icons.upload_outlined,
-                    color: JellyTheme.primary,
-                  ),
-                  title: const Text('传书到手机/电脑'),
-                  subtitle: const Text('把书架的书发送到手机/电脑'),
+                // ── 传输 / 备份 ─────────────────────────────
+                groupLabel('传输 / 备份'),
+                item(
+                  icon: Icons.upload_outlined,
+                  title: '传书到手机 / 电脑',
+                  subtitle: '把书架的书发送到手机或电脑',
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) =>
-                            kbSheet(const PeerTransferPage(mode: PeerTransferMode.send)),
+                        builder: (_) => kbSheet(const PeerTransferPage(
+                            mode: PeerTransferMode.send)),
                       ),
                     );
                   },
                 ),
-                ListTile(
-                  leading: Icon(
-                    Icons.download_outlined,
-                    color: JellyTheme.primary,
-                  ),
-                  title: const Text('从手机/电脑接收'),
-                  subtitle: const Text('接收手机/电脑发来的书，自动入库'),
+                item(
+                  icon: Icons.download_outlined,
+                  title: '从手机 / 电脑接收',
+                  subtitle: '接收手机 / 电脑发来的书，自动入库',
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.push(
@@ -1969,39 +2045,36 @@ class _BookshelfPageState extends State<BookshelfPage>
                     );
                   },
                 ),
-                // ── WebDAV 备份同步 ──────────────────────────
-                ListTile(
-                  leading: Icon(
-                    Icons.cloud_sync_outlined,
-                    color: JellyTheme.primary,
-                  ),
-                  title: const Text('WebDAV 备份同步'),
-                  subtitle: const Text('把书架/设置备份到 WebDAV 网盘，换机恢复'),
+                item(
+                  icon: Icons.cloud_sync_outlined,
+                  title: 'WebDAV 备份同步',
+                  subtitle: '把书架 / 设置备份到 WebDAV 网盘，换机恢复',
                   onTap: () {
                     Navigator.pop(context);
                     _showWebdavPanel();
                   },
                 ),
-                // ── Kindle 推送 ───────────────────────────────
-                ListTile(
-                  leading: Icon(
-                    Icons.menu_book_outlined,
-                    color: JellyTheme.primary,
-                  ),
-                  title: const Text('Kindle 推送'),
-                  subtitle: const Text('通过邮件把图书推送到 Kindle 设备'),
+                item(
+                  icon: Icons.menu_book_outlined,
+                  title: 'Kindle 推送',
+                  subtitle: '通过邮件把图书推送到 Kindle 设备',
                   onTap: () {
                     Navigator.pop(context);
                     _showKindlePanel();
                   },
                 ),
-                ListTile(
-                  leading: Icon(
-                    Icons.close_rounded,
-                    color: isDark ? Colors.white70 : JellyTheme.textSecondary,
+                const SizedBox(height: 6),
+                // ── 取消 ─────────────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: TextButton.styleFrom(
+                      foregroundColor:
+                          isDark ? Colors.white70 : JellyTheme.textSecondary,
+                    ),
+                    child: const Text('取消'),
                   ),
-                  title: const Text('取消'),
-                  onTap: () => Navigator.pop(context),
                 ),
               ],
             ),
@@ -4033,6 +4106,25 @@ class _BookShelfTab extends StatelessWidget {
   }
 
   static Future<void> _onTap(BuildContext context, Book book) async {
+    // 书源书籍：优先打开书源详情页（与详情页入口保持一致）
+    final src = _matchBookSource(book);
+    if (src != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => BookSourceDetailPage(
+            result: BookSourceResult(
+              source: src,
+              name: book.title,
+              author: book.author ?? '',
+              bookUrl: book.bookUrl!,
+              coverUrl: book.cover ?? '',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
     final task = BookDownloadService().task(book.id);
     if (task != null && task.status == BookDownloadStatus.completed) {
       // 已下载：直接续读（阅读器内部自动定位续读点）
@@ -4069,6 +4161,23 @@ class _BookShelfTab extends StatelessWidget {
             BookDetailPage(book: book, heroTag: 'bookshelf_book_${book.id}'),
       ),
     );
+  }
+
+  /// 按存的 sourceId 找回书源（兼容旧书架数据：sourceId 缺失时按源名匹配）
+  static BookSource? _matchBookSource(Book book) {
+    final id = book.sourceId;
+    if (id != null && id.isNotEmpty) {
+      for (final s in BookSourceStore.instance.all) {
+        if (s.id == id) return s;
+      }
+    }
+    final name = book.sourceName;
+    if (name != null && name.isNotEmpty) {
+      for (final s in BookSourceStore.instance.all) {
+        if (s.name == name) return s;
+      }
+    }
+    return null;
   }
 }
 

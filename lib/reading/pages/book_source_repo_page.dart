@@ -14,6 +14,7 @@ import '../services/book_source_service.dart';
 import 'book_source_editor_page.dart';
 import 'book_source_health_page.dart';
 import 'book_source_login_page.dart';
+import 'book_source_qr_scan_page.dart';
 // cloud_book_source_page 的 import 已移除（云端网页入口迁到书源页）
 // ✅ **补齐缺失的 import** ✗✓（本轮修的 8 条 error 全因它们 ✗）：
 //   · `JellySearchBar` / `JellyExpandableSearch` / `JellySlidingActions`(+`JellyAction`)
@@ -206,7 +207,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
             style: TextStyle(fontSize: AppTheme.fontBody, color: _titleColor),
             keyboardType: TextInputType.url,
             decoration: InputDecoration(
-              hintText: '书源地址（json / zip / 仓库索引）',
+              hintText: '书源网络地址（json / zip / 仓库索引）',
               hintStyle:
                   TextStyle(fontSize: AppTheme.fontBody, color: JellyTheme.textSecondary),
               filled: true,
@@ -253,11 +254,23 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                           width: 15,
                           height: 15,
                           child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('从地址导入',
+                      : const Text('网络导入',
                           style: TextStyle(fontSize: AppTheme.fontBody)),
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          // ✅ 二维码导入（用户 2026-10-12 新增）：整行按钮，扫到即走口令同款解析
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _busy ? null : _importByQrCode,
+              style: _outlineStyle(),
+              icon: const Icon(Icons.qr_code_scanner_rounded, size: 19),
+              label: const Text('二维码导入',
+                  style: TextStyle(fontSize: AppTheme.fontBody)),
+            ),
           ),
         ],
       ),
@@ -415,6 +428,50 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
     );
   }
 
+  /// 分享选中的书源：只导出多选勾选的源（JSON 到剪贴板）
+  Future<void> _shareSelected() async {
+    final selected =
+        store.all.where((s) => _selected.contains(s.id)).toList();
+    if (selected.isEmpty) return;
+    final json = BookSourceService.instance.exportSources(selected);
+    await Clipboard.setData(ClipboardData(text: json));
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('已复制书源',
+            style: TextStyle(fontSize: AppTheme.fontHeadline)),
+        content: Text(
+          '已把选中的 ${selected.length} 个书源复制到剪贴板，'
+          '可直接分享给别人。\n\n'
+          '对方用「口令导入」粘贴，或把内容生成二维码后用「二维码导入」扫码即可。',
+          style: const TextStyle(fontSize: AppTheme.fontSubhead, height: 1.6),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 二维码导入：打开扫码页，扫到的文本走「口令导入」同款解析链路
+  Future<void> _importByQrCode() async {
+    final text = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const BookSourceQrScanPage()),
+    );
+    if (text == null || text.trim().isEmpty) return;
+    final parsed = _parseSources(text);
+    if (parsed.isEmpty) {
+      _toast('二维码内容里没有解析出书源');
+      return;
+    }
+    final r = await store.addAll(parsed);
+    _toast(r.added > 0 ? '已导入 ${r.added} 个书源' : '已更新 ${r.updated} 个书源');
+  }
+
   /// 从顶部地址栏导入
   Future<void> _importByUrlFromField() async {
     final url = _urlCtrl.text.trim();
@@ -462,6 +519,11 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
             },
             child: const Text('停用'),
           ),
+          // ✅ 多选分享（用户 2026-10-12）：导出选中源的 JSON 到剪贴板
+          TextButton(
+            onPressed: _selected.isEmpty ? null : _shareSelected,
+            child: const Text('分享'),
+          ),
         ],
       ),
     );
@@ -487,7 +549,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                       fontWeight: FontWeight.w600,
                       color: _titleColor)),
               const SizedBox(height: 8),
-              Text('用上面的地址、口令或本地文件导入',
+              Text('用上面的地址、口令、二维码或本地文件导入',
                   textAlign: TextAlign.center,
                   style:
                       TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
@@ -1348,13 +1410,13 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                       fontWeight: FontWeight.w600,
                       color: _titleColor)),
               const SizedBox(height: 6),
-              Text('用地址、口令或本地文件导入书源',
+              Text('用地址、口令、二维码或本地文件导入书源',
                   style: TextStyle(
                       fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
               const SizedBox(height: 18),
               _importOption(
                 icon: Icons.link_rounded,
-                title: '地址导入',
+                title: '网络导入',
                 subtitle: '填书源列表网址，自动拉取',
                 onTap: () {
                   Navigator.pop(ctx);
@@ -1371,9 +1433,18 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
                 },
               ),
               _importOption(
+                icon: Icons.qr_code_scanner_rounded,
+                title: '二维码导入',
+                subtitle: '扫描书源二维码，自动识别',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _importByQrCode();
+                },
+              ),
+              _importOption(
                 icon: Icons.folder_open_rounded,
                 title: '本地文件导入',
-                subtitle: '选择 .json / .txt 书源文件',
+                subtitle: '选择 .json / .txt / .zip 书源文件',
                 onTap: () {
                   Navigator.pop(ctx);
                   _importByFile();

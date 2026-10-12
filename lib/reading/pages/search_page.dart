@@ -1314,14 +1314,16 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
                                   // ✅ 用户 2026-10-12「筛选不要一列，要一行多列」：
                                   //   原 Wrap 自动换行（一行几个取决于文字宽度，视觉随机）✗
                                   //   ⇒ 固定 **3 列网格**（每格等宽等高、选中态统一 chip）✓
+                                  // ✅ 用户 2026-10-12「筛选卡片太大」：间距 8→6、
+                                  //   高宽比 2.5→3.0（卡片更矮更紧凑，不再大格小字）✓
                                   GridView.count(
                                     crossAxisCount: 3,
                                     shrinkWrap: true,
                                     physics:
                                         const NeverScrollableScrollPhysics(),
-                                    mainAxisSpacing: 8,
-                                    crossAxisSpacing: 8,
-                                    childAspectRatio: 2.5,
+                                    mainAxisSpacing: 6,
+                                    crossAxisSpacing: 6,
+                                    childAspectRatio: 3.0,
                                     children: g.options.map((o) {
                                       final selected =
                                           g.selected?.value == o.value ||

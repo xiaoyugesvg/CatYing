@@ -1,19 +1,26 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/book.dart';
+import '../models/book_content.dart';
 import '../models/bookshelf.dart';
 import '../services/book_download_service.dart';
 import '../services/book_favorites_service.dart';
+import '../services/book_parser.dart';
 import '../services/book_reading_progress_service.dart';
 import '../services/bookshelf_service.dart';
+import '../services/gbk_txt_parser.dart';
 import '../services/zlibrary_service.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/jelly_bookshelf_dialog.dart';
 import '../widgets/theme_background_animation.dart';
 import 'book_reader_page.dart';
+import 'book_search_page.dart';
 import 'webview_page.dart';
 import 'zlibrary_auth_page.dart';
 import '../../common/theme.dart';
@@ -44,12 +51,48 @@ class _BookDetailPageState extends State<BookDetailPage> {
   List<Book> _recommendations = [];
   bool _loadingRec = false; // 仅从收藏页打开（无搜索结果）时按作者搜索推荐
 
+  // 章节目录区（已下载时解析本地文件展示）
+  BookContent? _tocContent;
+  bool _tocReversed = false; // 倒序：最新章在最上
+  bool _tocExpanded = false; // 展开全部章节
+  static const int _tocPreviewCount = 20;
+
   @override
   void initState() {
     super.initState();
     BookDownloadService().addListener(_onChanged);
     BookFavoritesService().addListener(_onChanged);
     _initRecommendations();
+    _loadToc();
+  }
+
+  /// 已下载的书：解析本地文件得到章节列表（目录区用）。
+  /// txt 走 GBK 解析，epub/mobi/azw/azw3 走 BookParser；pdf 等无章节结构跳过。
+  Future<void> _loadToc() async {
+    final task = BookDownloadService().task(widget.book.id);
+    if (task == null ||
+        task.status != BookDownloadStatus.completed ||
+        task.localPath == null) {
+      return;
+    }
+    final ext = (task.extension ?? 'epub').toLowerCase();
+    if (ext == 'pdf' || ext == 'cbz' || ext == 'cbr' || ext == 'fb2') return;
+    try {
+      BookContent content;
+      if (ext == 'txt') {
+        final txtFile = File(task.localPath!);
+        final bytes = await txtFile.readAsBytes();
+        final name = txtFile.uri.pathSegments.isNotEmpty
+            ? txtFile.uri.pathSegments.last
+            : widget.book.title;
+        content = await GbkTxtParser.instance.parse(bytes, name);
+      } else {
+        content = await compute(BookParser.parseEpub, File(task.localPath!));
+      }
+      if (mounted) setState(() => _tocContent = content);
+    } catch (_) {
+      // 解析失败不打扰详情页，目录区自动不显示
+    }
   }
 
   /// 推荐图书：有传入搜索结果（从搜索页打开）则直接随机取 5 本，不发请求；
@@ -69,7 +112,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
     final keyword =
         (widget.book.author != null && widget.book.author!.isNotEmpty)
         ? widget.book.author!
-        : widget.book.title;
+        : widget.book.displayTitle;
     if (keyword.isEmpty) return;
     setState(() => _loadingRec = true);
     try {
@@ -174,7 +217,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                 backgroundColor: Colors.transparent,
                 surfaceTintColor: Colors.transparent,
                 title: Text(
-                  widget.book.title,
+                  widget.book.displayTitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: AppTheme.fontHeadline),
@@ -182,6 +225,8 @@ class _BookDetailPageState extends State<BookDetailPage> {
               ),
               SliverToBoxAdapter(child: _buildContent(isDark)),
               SliverToBoxAdapter(child: _buildDownloadCard(isDark)),
+              SliverToBoxAdapter(child: _buildContinueCard(isDark)),
+              SliverToBoxAdapter(child: _buildTocSection(isDark)),
               SliverToBoxAdapter(child: _buildRecommendations(isDark)),
               const SliverToBoxAdapter(child: SizedBox(height: 32)),
             ],
@@ -256,7 +301,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
           // 两者字号恰好同档（`fontPageTitle`），但语义与排版都不同，
           // 强行套用会把居中与行高一起改掉。
           Text(
-            book.title,
+            book.displayTitle,
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: AppTheme.fontPageTitle,
@@ -442,8 +487,21 @@ class _BookDetailPageState extends State<BookDetailPage> {
       icon: fav ? Icons.favorite : Icons.favorite_border,
       label: fav ? '已收藏' : '收藏',
       color: fav ? const Color(0xFFFF8B94) : JellyTheme.primary,
-      onTap: () {
-        BookFavoritesService().toggle(widget.book);
+      onTap: () async {
+        var book = widget.book;
+        // 收藏时补 readOnlineUrl：eapi 来源的书没有链接，先按书名在
+        // 当前镜像网页搜一次，拿到就把带链接的 Book 存进收藏，
+        // 这样以后从收藏页打开「在线阅读」直接可用。
+        if (book.readOnlineUrl == null || book.readOnlineUrl!.isEmpty) {
+          try {
+            final resolved =
+                await ZlibraryService().resolveOnlineUrl(book);
+            if (resolved != null && resolved.isNotEmpty) {
+              book = book.copyWith(readOnlineUrl: resolved);
+            }
+          } catch (_) {}
+        }
+        BookFavoritesService().toggle(book);
         _toast(fav ? '已取消收藏' : '已收藏');
       },
     );
@@ -495,49 +553,87 @@ class _BookDetailPageState extends State<BookDetailPage> {
         onTap: () => BookReaderPage.open(context, task),
       );
     }
-    // [方案A] 在线阅读地址：
-    //   网页路径（搜索/分类/推荐 HTML 回退）的书带完整网页链接 → 直接用；
-    //   eapi 数据（推荐流 eapi 命中 / 搜索兜底）readOnlineUrl 为空 →
-    //   点击时用书名在当前镜像网页搜索补正确链接（resolveOnlineUrl）。
-    //   不再用 `https://<domain>/book/<id>/<hash>` 拼接（eapi 数字 id + hex hash
-    //   在网页上不存在，实测重定向首页）。
-    final explicit = widget.book.readOnlineUrl;
-    final onlineUrl =
-        (explicit != null && explicit.isNotEmpty) ? explicit : null;
     return _buildCapsule(
       icon: Icons.menu_book_outlined,
       label: '在线阅读',
-      onTap: () async {
-        var url = onlineUrl;
-        if (url == null || url.isEmpty) {
-          // eapi 书：网页搜索补正确链接（当前镜像 /s/?q=书名）
-          final resolved =
-              await ZlibraryService().resolveOnlineUrl(widget.book);
-          if (resolved != null && resolved.isNotEmpty) url = resolved;
-        }
-        if (url == null || url.isEmpty) {
-          ScaffoldMessenger.of(context)
-            ..hideCurrentSnackBar()
-            ..showSnackBar(
-              const SnackBar(
-                content: Text('暂无在线阅读地址，请先下载'),
-                duration: Duration(seconds: 2),
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
-          return;
-        }
-        if (!context.mounted) return;
-        final target = url; // 已 null-check，显式收窄为 String
+      onTap: () => _openOnlineRead(),
+    );
+  }
+
+  /// 打开在线阅读：readOnlineUrl 优先；空则网页搜索补链；再失败给兜底对话框。
+  Future<void> _openOnlineRead() async {
+    var url = widget.book.readOnlineUrl;
+    if (url == null || url.isEmpty) {
+      final resolved = await ZlibraryService().resolveOnlineUrl(widget.book);
+      if (resolved != null && resolved.isNotEmpty) url = resolved;
+    }
+    if (url == null || url.isEmpty) {
+      await _showOnlineFallback();
+      return;
+    }
+    if (!mounted) return;
+    final target = url;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => OnlineReaderPage(url: target, title: widget.book.title),
+      ),
+    );
+  }
+
+  /// 在线阅读找不到可用链接时的兜底：重试 / 去搜索页找这本书 / 打开镜像网页搜索。
+  Future<void> _showOnlineFallback() async {
+    final title = widget.book.title;
+    final domain = ZlibraryService().domain;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgTop = isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
+    final fg = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    final fgMuted = isDark ? Colors.white70 : JellyTheme.textSecondary;
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        backgroundColor: bgTop,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text('没找到在线阅读地址', style: TextStyle(fontSize: AppTheme.fontTitle3, color: fg)),
+        content: Text(
+          '《$title》在当前镜像没有可用的网页阅读链接。'
+          '你可以重试一次，或去搜索页重新找这本书。',
+          style: TextStyle(fontSize: AppTheme.fontBody, color: fgMuted, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dctx, 'retry'),
+            child: Text('重试', style: TextStyle(color: fg)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dctx, 'search'),
+            child: Text('去搜索页找书', style: TextStyle(color: fg)),
+          ),
+          if (domain.isNotEmpty)
+            TextButton(
+              onPressed: () => Navigator.pop(dctx, 'web'),
+              child: Text('打开镜像网页', style: TextStyle(color: JellyTheme.primary)),
+            ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'retry':
+        _openOnlineRead();
+      case 'search':
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) =>
-                OnlineReaderPage(url: target, title: widget.book.title),
+            builder: (_) => BookSearchPage(initialKeyword: title),
           ),
         );
-      },
-    );
+      case 'web':
+        if (domain.isNotEmpty) {
+          final uri = Uri.tryParse('https://$domain/s/?q=${Uri.encodeQueryComponent(title)}');
+          if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+    }
   }
 
   Widget _buildDownloadCapsule(BookDownloadTask? task) {
@@ -764,6 +860,320 @@ class _BookDetailPageState extends State<BookDetailPage> {
         // 详情页不显示已下载/删除，完成态卡片已隐藏
         return [];
     }
+  }
+
+  /// 继续阅读卡片：已下载 -> 直接续读/开始阅读（带进度）；未下载但有阅读
+  /// 进度 -> 「上次读到 x%」+ 在线阅读入口。让收藏/详情进来的书一步就能看。
+  Widget _buildContinueCard(bool isDark) {
+    final task = BookDownloadService().task(widget.book.id);
+    final done = task?.status == BookDownloadStatus.completed && task != null;
+    final progress = BookReadingProgressService().getProgress(widget.book.id);
+    if (!done && progress == null) return const SizedBox.shrink();
+
+    final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    final secondaryColor = isDark ? Colors.white70 : JellyTheme.textSecondary;
+
+    // 进度百分比（阅读器记录 pageIndex/pageTotal）
+    int? pct;
+    if (progress != null &&
+        progress.pageTotal > 0 &&
+        progress.pageIndex > 0) {
+      pct = (progress.pageIndex / progress.pageTotal * 100).round();
+      if (pct > 100) pct = 100;
+    }
+
+    final mainLabel = done
+        ? (pct != null
+            ? (pct >= 100 ? '已读完，重新阅读' : '继续阅读 $pct%')
+            : '开始阅读')
+        : (pct != null ? '上次读到 $pct%' : '上次有阅读记录');
+
+    final subText = done
+        ? (pct != null && pct < 100
+            ? '从上次位置继续，不丢进度'
+            : '从第一章开始')
+        : '尚未下载，可在网页继续阅读';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(40, 14, 40, 0),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: JellyTheme.primary.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  done
+                      ? (pct != null && pct >= 100
+                            ? Icons.replay_rounded
+                            : Icons.play_arrow_rounded)
+                      : Icons.menu_book_outlined,
+                  size: 22,
+                  color: JellyTheme.primary,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      mainLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: AppTheme.fontBody,
+                        fontWeight: FontWeight.w700,
+                        color: titleColor,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: AppTheme.fontFootnote,
+                        color: secondaryColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              // 主按钮
+              Material(
+                color: done ? JellyTheme.primary : JellyTheme.primary.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(18),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: done
+                      ? () => BookReaderPage.open(context, task)
+                      : _openOnlineRead,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    child: Text(
+                      done ? '阅读' : '在线阅读',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontSubhead,
+                        fontWeight: FontWeight.w600,
+                        color: done ? Colors.white : JellyTheme.primary,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 章节目录区：已下载的书展示章节列表。
+  /// - 排序：右上角按钮切换 第一章→最新章（正序）/ 最新章→第一章（倒序）
+  /// - 「最新章节」行固定置顶，数据来自最新章节本身
+  /// - 点击章节：记录进度到该章开头并进阅读器定位
+  Widget _buildTocSection(bool isDark) {
+    final content = _tocContent;
+    if (content == null) return const SizedBox.shrink();
+    // 保留原索引：chapterStarts 按未过滤 chapters 对齐
+    final allChapters = content.chapters;
+    final origIndices = <int>[
+      for (var i = 0; i < allChapters.length; i++)
+        if (allChapters[i].title.trim().isNotEmpty) i,
+    ];
+    if (origIndices.isEmpty) return const SizedBox.shrink();
+    final chapters = [for (final i in origIndices) allChapters[i]];
+
+    final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    final secondaryColor = isDark ? Colors.white70 : JellyTheme.textSecondary;
+    final task = BookDownloadService().task(widget.book.id);
+    if (task == null || task.status != BookDownloadStatus.completed) {
+      return const SizedBox.shrink();
+    }
+
+    // 展示顺序：正序=原序；倒序=最新章在最上
+    final ordered = _tocReversed ? chapters.reversed.toList() : chapters;
+    final latest = chapters.last; // 最新章节（原序最后）
+    final latestStart = content.chapterStarts[origIndices.last];
+    final shown = _tocExpanded ? ordered : ordered.take(_tocPreviewCount).toList();
+
+    Widget chapterRow(int displayIndex, BookChapter c) {
+      // 原序索引：正序=displayIndex；倒序=总长-1-displayIndex
+      final origIndex =
+          _tocReversed ? origIndices.length - 1 - displayIndex : origIndices[displayIndex];
+      final startBlock = content.chapterStarts[origIndex];
+      final isLatest = origIndex == origIndices.last;
+      return InkWell(
+        onTap: () {
+          BookReadingProgressService().recordBlock(
+            widget.book.id, startBlock, 0, 0, notify: false);
+          BookReaderPage.open(context, task);
+        },
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          child: Row(
+            children: [
+              Text(
+                '${origIndex + 1}',
+                style: TextStyle(
+                  fontSize: AppTheme.fontFootnote,
+                  color: isLatest ? JellyTheme.primary : secondaryColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  cleanBookTitle(c.title),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppTheme.fontBody,
+                    color: isLatest ? JellyTheme.primary : titleColor,
+                    fontWeight: isLatest ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(40, 18, 40, 0),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 标题行：章节目录 + 排序按钮
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 6, 4),
+              child: Row(
+                children: [
+                  Icon(Icons.format_list_numbered_rounded,
+                      size: 18, color: JellyTheme.primary),
+                  const SizedBox(width: 6),
+                  Text(
+                    '章节目录（${chapters.length}章）',
+                    style: TextStyle(
+                      fontSize: AppTheme.fontBody,
+                      fontWeight: FontWeight.w700,
+                      color: titleColor,
+                    ),
+                  ),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: () =>
+                        setState(() => _tocReversed = !_tocReversed),
+                    icon: Icon(
+                      _tocReversed
+                          ? Icons.arrow_downward_rounded
+                          : Icons.arrow_upward_rounded,
+                      size: 15,
+                      color: secondaryColor,
+                    ),
+                    label: Text(
+                      _tocReversed ? '最新→第一章' : '第一章→最新',
+                      style: TextStyle(
+                          fontSize: AppTheme.fontFootnote,
+                          color: secondaryColor),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Divider(height: 1, color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.08)),
+            // 最新章节行（固定置顶，数据来自最新章节）
+            InkWell(
+              onTap: () {
+                BookReadingProgressService().recordBlock(
+                    widget.book.id, latestStart, 0, 0, notify: false);
+                BookReaderPage.open(context, task);
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: JellyTheme.primary.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: Text(
+                        '最新章节',
+                        style: TextStyle(
+                          fontSize: AppTheme.fontCaption,
+                          fontWeight: FontWeight.w700,
+                          color: JellyTheme.primary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        cleanBookTitle(latest.title),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: AppTheme.fontBody,
+                          fontWeight: FontWeight.w600,
+                          color: titleColor,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Divider(height: 1, color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.08)),
+            // 章节列表
+            for (var i = 0; i < shown.length; i++) ...[
+              chapterRow(i, shown[i]),
+              if (i < shown.length - 1)
+                Divider(height: 1, color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.05)),
+            ],
+            if (!_tocExpanded && ordered.length > _tocPreviewCount)
+              InkWell(
+                onTap: () => setState(() => _tocExpanded = true),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Center(
+                    child: Text(
+                      '展开全部 ${chapters.length} 章',
+                      style: TextStyle(
+                        fontSize: AppTheme.fontSubhead,
+                        color: JellyTheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// 推荐图书区：整体水平居中；从搜索结果或按作者搜索随机取 5 本

@@ -363,9 +363,9 @@ class _JellyBookCardState extends State<JellyBookCard>
                         child: Text(
                           // 兜底：数据侧 title 偶发空串时显示"未知书名"，
                           // 避免名称栏空白（用户 2026-10-06 反馈"书没有名称"）
-                          widget.book.title.trim().isEmpty
+                          widget.book.displayTitle.trim().isEmpty
                               ? '未知书名'
-                              : widget.book.title,
+                              : widget.book.displayTitle,
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: AppTheme.fontSubhead,

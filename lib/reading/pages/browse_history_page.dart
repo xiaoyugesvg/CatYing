@@ -2,7 +2,9 @@ import 'dart:math' show min;
 
 import 'package:flutter/material.dart';
 import '../models/book.dart';
+import '../models/book_source.dart';
 import '../models/comic.dart';
+import '../services/book_source_service.dart';
 import '../services/browse_history_service.dart';
 import '../theme/jelly_theme.dart';
 import '../utils/list_pagination.dart';
@@ -10,6 +12,7 @@ import '../widgets/jelly_book_card.dart';
 import '../widgets/jelly_comic_list_tile.dart';
 import '../widgets/jelly_segmented_toggle.dart';
 import 'book_detail_page.dart';
+import 'book_source_detail_page.dart';
 import 'comic_detail_page.dart';
 import '../widgets/jelly_search_bar.dart';
 
@@ -408,6 +411,27 @@ class _BookHistoryTabState extends State<_BookHistoryTab> {
   }
 
   void _openDetail(Book book) {
+    // ✅ 书源体系的书：回到书源详情页继续阅读（源已删则兜底 zlib 详情页）
+    if (book.isBookSource) {
+      final src = _matchBookSource(book);
+      if (src != null) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => BookSourceDetailPage(
+              result: BookSourceResult(
+                source: src,
+                name: book.title,
+                author: book.author ?? '',
+                bookUrl: book.bookUrl!,
+                coverUrl: book.cover ?? '',
+              ),
+            ),
+          ),
+        );
+        return;
+      }
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -417,6 +441,24 @@ class _BookHistoryTabState extends State<_BookHistoryTab> {
         ),
       ),
     );
+  }
+
+  /// 按存的 sourceId 找回书源（兼容旧记录：sourceId 缺失时按源名匹配）；
+  /// 源已删除时返回 null（兜底走 zlib 详情页）
+  BookSource? _matchBookSource(Book book) {
+    final id = book.sourceId;
+    if (id != null && id.isNotEmpty) {
+      for (final s in BookSourceStore.instance.all) {
+        if (s.id == id) return s;
+      }
+    }
+    final name = book.sourceName;
+    if (name != null && name.isNotEmpty) {
+      for (final s in BookSourceStore.instance.all) {
+        if (s.name == name) return s;
+      }
+    }
+    return null;
   }
 
   @override
