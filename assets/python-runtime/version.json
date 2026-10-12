@@ -1,0 +1,14 @@
+{
+  "runtime": "python",
+  "version": "3.12 (b11)",
+  "build": "3.12-b11",
+  "package": "Python-3.12-iOS-support.b11.tar.gz",
+  "source": "https://github.com/beeware/Python-Apple-support/releases/download/3.12-b11/Python-3.12-iOS-support.b11.tar.gz",
+  "stdlib": "Python.xcframework/ios-arm64/lib-arm64/python3.12",
+  "libs": [
+    "requests",
+    "httpx",
+    "beautifulsoup4"
+  ],
+  "note": "一期锁纯 Python 三件套，无 C 扩展（lxml/pycryptodome/flask 属二期）；精确 patch 版本以运行时 sys.version 为准。"
+}

@@ -1,4 +1,4 @@
-name: Build iOS TrollStore IPA (Flutter + NodeMobile)
+name: Build iOS TrollStore IPA (Flutter + NodeMobile + CPython)
 
 # 触发：
 #   - push to main / tag: 自动构建
@@ -37,6 +37,9 @@ jobs:
       # nodejs-mobile 官方 release
       NODEJS_MOBILE_VERSION: "v18.20.4"
       NODEJS_MOBILE_URL: "https://github.com/nodejs-mobile/nodejs-mobile/releases/download/v18.20.4/nodejs-mobile-v18.20.4-ios.zip"
+      # BeeWare Python-Apple-support 官方 release（Python.xcframework）
+      PYTHON_IOS_VERSION: "3.12-b11"
+      PYTHON_IOS_URL: "https://github.com/beeware/Python-Apple-support/releases/download/3.12-b11/Python-3.12-iOS-support.b11.tar.gz"
       BUNDLE_NAME: Runner
 
     steps:
@@ -172,6 +175,32 @@ jobs:
           ls NodeMobile.xcframework/
           echo "✅ NodeMobile.xcframework ready"
 
+      - name: Download Python.xcframework
+        # BeeWare Python-Apple-support 的 iOS 支持包（CPython 3.12）
+        # 包内含 Python.xcframework（ios-arm64 + ios-arm64_x86_64-simulator 双 slice）
+        # 这是 iOS 端 CPython 嵌入的运行时来源（T3 Python spider 源引擎）
+        run: |
+          set -e
+          echo "=== Downloading Python.xcframework ($PYTHON_IOS_VERSION) ==="
+          mkdir -p build/ios/Frameworks
+          cd build/ios/Frameworks
+          if [ -d "Python.xcframework" ]; then
+            rm -rf Python.xcframework
+          fi
+          curl -fSL "$PYTHON_IOS_URL" -o python-ios-support.tar.gz
+          TEMP_DIR=$(mktemp -d)
+          tar -xzf python-ios-support.tar.gz -C "$TEMP_DIR"
+          FRAMEWORK_PATH=$(find "$TEMP_DIR" -name "Python.xcframework" -type d | head -1)
+          if [ -z "$FRAMEWORK_PATH" ]; then
+            echo "❌ Python.xcframework not found in archive"
+            exit 1
+          fi
+          cp -R "$FRAMEWORK_PATH" .
+          rm -rf "$TEMP_DIR" python-ios-support.tar.gz
+          echo "=== Python.xcframework slices ==="
+          ls Python.xcframework/
+          echo "✅ Python.xcframework ready"
+
       - name: Copy NodeMobile.xcframework to ios/Frameworks
         # 关键：xcframework 必须放在项目内（ios/Frameworks/），pbxproj 才能用
         # 短路径 `Frameworks/NodeMobile.xcframework`。
@@ -185,6 +214,50 @@ jobs:
           echo "=== ios/Frameworks ==="
           ls ios/Frameworks/
           ls ios/Frameworks/NodeMobile.xcframework/
+
+      - name: Copy Python.xcframework to ios/Frameworks
+        # 与 NodeMobile 同一策略：Python.xcframework 必须放在项目内，
+        # pbxproj 用短路径 `Frameworks/Python.xcframework`。
+        run: |
+          set -e
+          mkdir -p ios/Frameworks
+          rm -rf ios/Frameworks/Python.xcframework
+          cp -R build/ios/Frameworks/Python.xcframework ios/Frameworks/
+          echo "=== ios/Frameworks/Python.xcframework ==="
+          ls ios/Frameworks/Python.xcframework/
+
+      - name: Build python-home (stdlib + site-packages + 适配层)
+        # T3 Python spider 源引擎的运行时目录，最终 embed 到 Runner.app/python-home：
+        #   python-home/
+        #   ├── lib/python3.12/                     ← stdlib（来自 Python.xcframework）
+        #   ├── lib/python3.12/site-packages/       ← pip --target 的纯 Python 三件套
+        #   ├── spider_runner.py                    ← 适配层标准入口
+        #   ├── src/spider/{video,book}/            ← 源脚本
+        #   └── pylib/
+        # 一期锁纯 Python 库（requests/httpx/bs4 及其依赖均无 C 扩展，跨平台 OK）；
+        # lxml/pycryptodome 等 C 扩展无法被超时中断拦截 → 二期再引入。
+        run: |
+          set -e
+          echo "=== 构建 python-home ==="
+          STDLIB_SRC=$(find build/ios/Frameworks/Python.xcframework -path "*ios-arm64/lib-arm64/python3.12" -type d | head -1)
+          if [ -z "$STDLIB_SRC" ]; then
+            echo "❌ 找不到 stdlib: ios-arm64/lib-arm64/python3.12"
+            exit 1
+          fi
+          mkdir -p build/python-home/lib/python3.12
+          cp -R "$STDLIB_SRC/." build/python-home/lib/python3.12/
+          echo "=== stdlib 就绪 ==="
+          ls build/python-home/lib/python3.12 | head -20
+          echo "=== pip install 三件套 (--target site-packages) ==="
+          mkdir -p build/python-home/lib/python3.12/site-packages
+          python3 -m pip install --quiet --target build/python-home/lib/python3.12/site-packages \
+            requests httpx beautifulsoup4
+          echo "=== site-packages 就绪 ==="
+          ls build/python-home/lib/python3.12/site-packages | head -20
+          echo "=== 合并适配层 (spider_runner.py + src/ + pylib/) ==="
+          cp -R assets/python-project/. build/python-home/
+          ls build/python-home/
+          echo "✅ python-home ready"
 
       - name: Install ruby + xcodeproj gem
         # macos-14 runner 自带 ruby，需要 xcodeproj gem 来自动改 project.pbxproj
@@ -213,6 +286,11 @@ jobs:
           ruby scripts/add_nodemobile.rb \
             --xcframework Frameworks/NodeMobile.xcframework \
             --extra-swift NodeJSBridge.swift,BackgroundAudio.swift,PipManager.swift,AvEngine.swift,AvPlayerViewFactory.swift,TtsEngine.swift
+          # Python.xcframework + PythonBridge.swift：第二次调用 add_nodemobile.rb
+          # （脚本幂等，只处理自己列的文件；PythonBridge.swift 不重复进 Node 列表）
+          ruby scripts/add_nodemobile.rb \
+            --xcframework Frameworks/Python.xcframework \
+            --extra-swift PythonBridge.swift
           echo "=== pbxproj 改动 diff ==="
           git diff --stat Runner.xcodeproj/project.pbxproj || true
 
@@ -230,7 +308,7 @@ jobs:
           # 不走上面 add_nodemobile.rb 的 --extra-swift，同样纳入兜底校验。
           for F in TtsEngine.swift ExceptionGuard.m BackgroundAudio.swift AppDelegate.swift \
                    NodeJSBridge.swift PipManager.swift AvEngine.swift AvPlayerViewFactory.swift \
-                   KSEngine.swift; do
+                   KSEngine.swift PythonBridge.swift; do
             if grep -q "$F in Sources" "$PBX"; then
               echo "✅ $F 已在 Sources build phase"
             else
@@ -244,6 +322,13 @@ jobs:
             echo "✅ KSPlayer SPM 依赖已在 Frameworks build phase"
           else
             echo "❌ KSPlayer in Frameworks 丢失 —— Xcode 编译报 No such module 'KSPlayer'"
+            MISSING=1
+          fi
+          # Python.xcframework 由 add_nodemobile.rb 二次调用 link + embed
+          if grep -q "Python.xcframework in Frameworks" "$PBX"; then
+            echo "✅ Python.xcframework 已在 Frameworks build phase"
+          else
+            echo "❌ Python.xcframework in Frameworks 丢失 —— Xcode 编译报 No such module 'Python'"
             MISSING=1
           fi
           for F in ExceptionGuard.h; do
@@ -344,7 +429,7 @@ jobs:
           echo "📦 App bundle: $APP_PATH"
           ls -la "$APP_PATH"
 
-      - name: Embed NodeMobile.xcframework + main.js
+      - name: Embed NodeMobile.xcframework + main.js + python-home
         # 关键步骤：把 framework 和 main.js 塞进 Runner.app bundle
         # 这样 iOS 端 Flutter 调 NodeMobile API 时能 load 框架 + main.js
         # 注意：**目前 pbxproj 没 link NodeMobile**，所以这只是物理塞进去
@@ -357,14 +442,33 @@ jobs:
           mkdir -p "$APP_PATH/Frameworks"
           # 1) NodeMobile.xcframework (整包 copy，TrollStore 接受)
           cp -R "$FW_SRC" "$APP_PATH/Frameworks/"
-          # 2) main.js (NodeMobile 启动入口)
+          # 2) Python.xcframework (整包 copy；Xcode embed phase 会把选中 slice 的
+          #    Python.framework 拷到 Frameworks/ 根，这里再物理塞一份整包兜底)
+          if [ -d "build/ios/Frameworks/Python.xcframework" ]; then
+            cp -R build/ios/Frameworks/Python.xcframework "$APP_PATH/Frameworks/"
+          else
+            echo "❌ Python.xcframework 缺失（应已被下载步骤产出）"
+            exit 1
+          fi
+          # 3) main.js (NodeMobile 启动入口)
           mkdir -p "$APP_PATH/nodejs-project"
           cp assets/nodejs-project/dist/main.js   "$APP_PATH/nodejs-project/main.js"
           cp assets/nodejs-project/dist/main.js.md5 "$APP_PATH/nodejs-project/main.js.md5"
+          # 4) python-home (CPython stdlib + site-packages + spider 适配层)
+          if [ -d "build/python-home" ]; then
+            cp -R build/python-home "$APP_PATH/python-home"
+          else
+            echo "❌ python-home 缺失（应已被 Build python-home 步骤产出）"
+            exit 1
+          fi
           echo "=== Runner.app/Frameworks ==="
           ls "$APP_PATH/Frameworks/"
           echo "=== Runner.app/nodejs-project ==="
           ls -la "$APP_PATH/nodejs-project/"
+          echo "=== Runner.app/python-home ==="
+          ls -la "$APP_PATH/python-home/"
+          ls "$APP_PATH/python-home/lib/python3.12/" | head -20
+          ls "$APP_PATH/python-home/lib/python3.12/site-packages/" | head -20
 
       - name: Strip original code signature
         run: |
@@ -421,6 +525,14 @@ jobs:
               fi
             done
           fi
+          # python-home stdlib 里的 C 扩展（lib-dynload/*.so）也要签：
+          # dlopen 未签名 .so 在部分 iOS 环境会失败 → import 这些模块时闪退
+          for PYSO in "$APP_PATH"/python-home/lib/python3.12/lib-dynload/*.so; do
+            if [ -f "$PYSO" ]; then
+              ldid -S "$PYSO" || true
+            fi
+          done
+          echo "✅ Signed python-home C extensions"
           for BIN in "$APP_PATH/"*.dylib "$APP_PATH/"*.so; do
             if [ -f "$BIN" ]; then
               ldid -S "$BIN"

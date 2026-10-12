@@ -75,6 +75,12 @@ class BookSource {
   /// 搜索/聚搜不受此开关影响。
   bool get enabledExplore => raw['enabledExplore'] != false;
 
+  /// 是否 Python 源（raw 带 pythonKey → CPython 引擎执行 search/bookInfo/toc/content）
+  bool get isPythonSource => pythonKey.isNotEmpty;
+
+  /// Python 源模块 key（对应 Documents 下 python-project/src/spider/book/<key>.py）
+  String get pythonKey => (raw['pythonKey'] ?? '').toString().trim();
+
   /// 书源类型（Legado 有小说/漫画/音源等；config 源一律 0=小说）
   String get type {
     if (isConfig) return '0';

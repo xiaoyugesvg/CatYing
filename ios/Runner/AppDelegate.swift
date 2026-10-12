@@ -6,6 +6,8 @@ import AVFoundation
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   // NodeJSBridge 持有 platform channel
   private var nodeJSBridge: NodeJSBridge?
+  // PythonBridge（CPython 嵌入，对齐 NodeJSBridge 模式）
+  private var pythonBridge: PythonBridge?
 
   override func application(
     _ application: UIApplication,
@@ -61,6 +63,16 @@ import AVFoundation
       self.nodeJSBridge = NodeJSBridge(messenger: registrar.messenger())
     } else {
       print("[AppDelegate] ❌ 无法获取 NodeJSBridge 的 registrar")
+    }
+
+    // 注册 PythonBridge（iOS 端 CPython 集成的 platform channel）
+    // 与 NodeJSBridge 同一注册模式。Python.xcframework 由 T0-5 集成进工程；
+    // 在未集成前，PythonBridge.swift 内的 `import Python` 会编译失败——
+    // 因此本注册块与 xcframework 集成**必须同时**进入 CI。
+    if let pythonRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "PythonBridge") {
+      self.pythonBridge = PythonBridge(messenger: pythonRegistrar.messenger())
+    } else {
+      print("[AppDelegate] ❌ 无法获取 PythonBridge 的 registrar")
     }
 
     // 注册 PipManager（iOS 系统画中画）

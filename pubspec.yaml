@@ -111,6 +111,11 @@ flutter:
     - assets/nodejs-project/src/util/
     # Node.js 运行时的版本元信息（不内嵌 node.exe，启动时按需下载）
     - assets/nodejs-runtime/version.json
+    # Python spider 源适配层（spider_runner.py / src/ / pylib/）
+    #   stdlib + site-packages 由 CI 打进 Runner.app/python-home，不随 Flutter assets
+    - assets/python-project/
+    # Python 运行时版本元信息（BeeWare 3.12-b11 基线）
+    - assets/python-runtime/version.json
     # 猫爪（猫咪）Logo：用于接口配置引导页主视觉
     - assets/images/
     # 阅读模块用到的图标（logo / 文件夹 / 魔棒）：

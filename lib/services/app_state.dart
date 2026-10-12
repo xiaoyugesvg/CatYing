@@ -8,6 +8,8 @@ import 'ad_filter_service.dart';
 import 'app_log.dart';
 import 'network_manager.dart';
 import 'nodejs_manager.dart';
+import 'python_manager.dart';
+import 'python_sources_service.dart';
 import 'scene_recovery.dart';
 import 'spider_service.dart';
 
@@ -140,6 +142,9 @@ class AppState extends GetxController {
     try {
       await ApiConfig.instance.loadConfigs(vodApiUrl: trimmedVod);
       await _ensureNodeJSAndLoadSource();
+      // Python 引擎（T3 Python spider / 书源）：惰性启动 + 用户源同步，
+      // 不阻塞主流程（增量能力，Node 失败不影响 Python 源）
+      unawaited(_ensurePythonSource());
       loadingPhase.value = LoadingPhase.completed;
       applyLoadedConfigState();
     } catch (e) {
@@ -200,6 +205,20 @@ class AppState extends GetxController {
   // ============================================================
   // Spider 源加载 - 对应 Swift ensureNodeJSAndLoadSource
   // ============================================================
+
+  /// 确保 Python 引擎已启动并把用户导入的 .py 源同步进引擎
+  /// （视频/书源 Python 源都在此注册，重启后依然可用）
+  Future<void> _ensurePythonSource() async {
+    if (!PythonManager.instance.isIOS) return;
+    try {
+      final ok = await PythonManager.instance.ensureStarted();
+      if (ok) {
+        await PythonSourcesService.instance.syncToEngine();
+      }
+    } catch (e) {
+      AppLog.instance.w('[AppState] Python 引擎启动异常（可忽略）: $e');
+    }
+  }
 
   /// 确保 Node.js 已启动并加载 Spider 源 - 对应 Swift ensureNodeJSAndLoadSource
   /// 公开方法，供 SettingsController 调用

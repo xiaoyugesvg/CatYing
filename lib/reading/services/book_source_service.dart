@@ -14,6 +14,7 @@ import '../models/book_source.dart';
 import '../source/global_proxy.dart';
 import '../utils/source_fail_text.dart';
 import 'book_source_dart_engine.dart';
+import 'book_source_python_engine.dart';
 
 /// 书源搜索到的一本书。
 ///
@@ -334,6 +335,10 @@ class BookSourceService {
     // 而 Dart 侧现在已有 quickjs 引擎与宿主方法表（补丁 0005/0007/0008）。
     final dartHandled = await BookSourceDartEngine.instance.handle(body);
     if (dartHandled != null) return dartHandled;
+    // ── [PY-1] Python 书源分支：raw 带 pythonKey 的源走 CPython 引擎 ──
+    // 与 Dart 引擎同构：返回 null（非 Python 源/动作未接管/失败）⇒ 回落 Node。
+    final pythonHandled = await BookSourcePythonEngine.instance.handle(body);
+    if (pythonHandled != null) return pythonHandled;
     // ── [PATCH-24-REVERT] 恢复 **Node 回退** ─────────────────────────────
     // 背景（实机证据）：我一度把这里改成"只走 Dart 引擎"，结果用户手机上
     // 《校花的贴身高手》(QQ阅读) 与《不死神王书城》的**目录直接报错**：

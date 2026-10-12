@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'app_log.dart';
 import 'dio_factory.dart';
 import 'nodejs_manager.dart';
+import 'python_manager.dart';
 
 /// Spider 服务 - 对应 Swift SpiderService
 /// 与本地 Node.js Spider 服务通信
@@ -135,6 +136,58 @@ class SpiderService {
   }
 
   // ============================================================
+  // Python 源分支（T3 Python spider：每站一个 .py，走 CPython 引擎）
+  // ============================================================
+  // 识别：apiBase 以 .py 结尾（TVBox type=3 Python 源惯例，api=py_xxx.py）
+  //       或 key 以 py_ 开头。
+  // 模块映射：`py_demo.py` / `py_demo` → `demo`（对应 src/spider/video/demo.py）
+  // 返回格式与 Node spider 服务同构（{class,list} / {list} / {parse,playUrl}），
+  // 调用方 source_service 无需感知引擎差异。
+
+  bool _isPythonSource(String key, int type, String apiBase) {
+    if (type != 3) return false;
+    if (apiBase.toLowerCase().endsWith('.py')) return true;
+    return key.toLowerCase().startsWith('py_');
+  }
+
+  /// apiBase → Python 模块 key（去 .py 后缀 + py_ 前缀）
+  String _pythonModuleKey(String apiBase) {
+    var k = apiBase;
+    if (k.toLowerCase().endsWith('.py')) {
+      k = k.substring(0, k.length - 3);
+    }
+    // 去掉路径部分（如 /spider/py_demo）
+    final slash = k.lastIndexOf('/');
+    if (slash >= 0) k = k.substring(slash + 1);
+    if (k.toLowerCase().startsWith('py_')) {
+      k = k.substring(3);
+    }
+    return k.isEmpty ? 'demo' : k;
+  }
+
+  /// 调 Python 引擎执行源方法（module=video.<key>，args 为 kwargs）
+  Future<Map<String, dynamic>?> _pythonCall(
+    String moduleKey,
+    String action,
+    Map<String, dynamic> args,
+  ) async {
+    final r = await PythonManager.instance.call(
+      'video.$moduleKey',
+      action,
+      args,
+    );
+    if (!r.ok) {
+      AppLog.instance
+          .w('[SpiderService] Python 源 $moduleKey.$action 失败: ${r.error}');
+      return null;
+    }
+    final data = r.json;
+    if (data is Map<String, dynamic>) return data;
+    if (data is List) return {'list': data};
+    return null;
+  }
+
+  // ============================================================
   // Spider API - 所有方法都接受 key/type/apiBase 参数
   // ============================================================
 
@@ -189,6 +242,9 @@ class SpiderService {
 
   /// 获取首页内容 - 对应 Swift getHomeContent
   Future<Map<String, dynamic>?> getHomeContent(String key, int type, String apiBase) async {
+    if (_isPythonSource(key, type, apiBase)) {
+      return _pythonCall(_pythonModuleKey(apiBase), 'home', {});
+    }
     if (!isSpiderReady) return null;
 
     final url = _buildSpiderUrl(key, type, apiBase, 'home');
@@ -204,6 +260,14 @@ class SpiderService {
     int page = 1,
     Map<String, dynamic>? filters,
   }) async {
+    if (_isPythonSource(key, type, apiBase)) {
+      return _pythonCall(_pythonModuleKey(apiBase), 'category', {
+        'tid': id,
+        'pg': page,
+        'filter': filters != null && filters.isNotEmpty,
+        'extend': filters ?? {},
+      });
+    }
     if (!isSpiderReady) return null;
 
     final url = _buildSpiderUrl(key, type, apiBase, 'category');
@@ -221,6 +285,9 @@ class SpiderService {
 
   /// 获取详情 - 对应 Swift getDetail
   Future<Map<String, dynamic>?> getDetail(String key, int type, String apiBase, String id) async {
+    if (_isPythonSource(key, type, apiBase)) {
+      return _pythonCall(_pythonModuleKey(apiBase), 'detail', {'ids': id});
+    }
     if (!isSpiderReady) return null;
 
     final url = _buildSpiderUrl(key, type, apiBase, 'detail');
@@ -232,6 +299,9 @@ class SpiderService {
   /// 获取播放 URL - 对应 Swift getPlayUrl
   Future<Map<String, dynamic>?> getPlayUrl(
       String key, int type, String apiBase, String flag, String id) async {
+    if (_isPythonSource(key, type, apiBase)) {
+      return _pythonCall(_pythonModuleKey(apiBase), 'play', {'flag': flag, 'id': id});
+    }
     if (!isSpiderReady) return null;
 
     final url = _buildSpiderUrl(key, type, apiBase, 'play');
@@ -243,6 +313,12 @@ class SpiderService {
   /// 搜索 - 对应 Swift search
   Future<Map<String, dynamic>?> search(
       String key, int type, String apiBase, String keyword, {int page = 1}) async {
+    if (_isPythonSource(key, type, apiBase)) {
+      return _pythonCall(_pythonModuleKey(apiBase), 'search', {
+        'wd': keyword,
+        'pg': page,
+      });
+    }
     if (!isSpiderReady) return null;
 
     final url = _buildSpiderUrl(key, type, apiBase, 'search');

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:file_picker/file_picker.dart';
 
 import '../../../common/theme.dart';
+import '../../../models/source_bean.dart';
 import '../../../models/subscription.dart';
 import '../../../services/api_config.dart';
+import '../../../services/python_sources_service.dart';
 import '../../subscription/view.dart';
 import '../../../widgets/common_widgets.dart';
 import '../controller.dart';
@@ -87,6 +90,12 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
               ),
             ),
             SettingsRow(
+              icon: Icons.code_rounded,
+              title: '导入 Python 视频源',
+              value: '.py 文件 → 注册为线路',
+              onTap: _importPythonVideoSource,
+            ),
+            SettingsRow(
               icon: Icons.restart_alt,
               iconColor: Colors.redAccent,
               title: '重置配置',
@@ -98,6 +107,73 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         ),
       ],
     );
+  }
+
+  // ============================================================
+  // 导入 Python 视频源
+  // ============================================================
+
+  /// 选 .py 文件 → 注册进 CPython 引擎（video kind）→ 生成一条线路。
+  ///
+  /// 生成的 SourceBean：`api = py_<key>.py`（SpiderService 识别 .py 结尾即走
+  /// Python 引擎），type=3（脚本源），可直接搜/播。
+  Future<void> _importPythonVideoSource() async {
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['py'],
+      );
+      if (result.isEmpty) return;
+      final f = result.first;
+      String code;
+      try {
+        code = await f.readAsString();
+      } catch (_) {
+        final path = f.path;
+        if (path == null) {
+          AppToast.message('读不出这个文件（没有本地路径）');
+          return;
+        }
+        code = await File(path).readAsString();
+      }
+      if (code.trim().isEmpty) {
+        AppToast.message('文件是空的');
+        return;
+      }
+      final fileName = f.name.endsWith('.py')
+          ? f.name.substring(0, f.name.length - 3)
+          : f.name;
+      final key = fileName.replaceAll(RegExp(r'[^A-Za-z0-9_\-]'), '_');
+      if (key.isEmpty) {
+        AppToast.message('文件名不合法');
+        return;
+      }
+      final installed =
+          await PythonSourcesService.instance.installSource('video', key, code);
+      if (!installed.ok) {
+        AppToast.message('注册失败：${installed.message ?? '未知错误'}');
+        return;
+      }
+      // 加一条线路（重名则先移除旧线路，避免重复）
+      final api = 'py_$key.py';
+      final beans = ApiConfig.instance.sourceBeanList;
+      beans.removeWhere((s) => s.key == key || s.api == api);
+      beans.add(SourceBean(
+        key: key,
+        name: key,
+        api: api,
+        searchable: 1,
+        filterable: 0,
+        quickSearch: 0,
+        playerType: 0,
+        type: 3,
+        ext: null,
+        indexs: 0,
+      ));
+      AppToast.message('已导入 Python 视频源「$key」（线路 ${beans.length} 条）');
+    } catch (e) {
+      AppToast.message('导入失败：${e.toString().split('\n').first}');
+    }
   }
 
   // ============================================================
