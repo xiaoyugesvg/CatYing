@@ -381,6 +381,11 @@ class _DanmuLayerState extends State<DanmuLayer>
   final List<DanmuItem> _pendingCatchup = [];
   static const int _catchupPerFrame = 10;
 
+  /// 正常生成路径的每帧上限：与补播对齐，防止密集场景下一帧 spawn 十几条
+  /// 全部走 TextPainter.layout（每条 1~2ms）→ 单帧 20ms+ 掉帧。
+  /// 超出部分留到下一帧继续（`_nextIndex` 不推进，条件仍满足）。
+  static const int _spawnPerFrame = 12;
+
   /// 绘制用 TextPainter 缓存（CustomPaint 模式）：同文案同样式只 layout 一次。
   /// ⚠️ 与旧 `_widthCache` 合并：现在宽度直接取缓存里 fill 层的 `.width`，
   ///   一份缓存同时服务「轨道碰撞测宽」和「Canvas 绘制」两处。
@@ -405,7 +410,16 @@ class _DanmuLayerState extends State<DanmuLayer>
       fontWeight: widget.fontWeight,
       strokeWidth: widget.strokeWidth,
     );
-    if (_paintCache.length >= _paintCacheLimit) _paintCache.clear();
+    // 🔴 满了不能整表 clear：60 条活跃弹幕下帧全部重 layout = 90ms 大卡顿。
+    //   改为滑动淘汰最旧的一半（Dart Map 保插入序，keys 前半即最旧），
+    //   把淘汰成本摊到后续帧的惰性重建上，单帧开销可控。
+    if (_paintCache.length >= _paintCacheLimit) {
+      final keys = _paintCache.keys.toList();
+      final removeCount = (keys.length / 2).ceil();
+      for (var i = 0; i < removeCount; i++) {
+        _paintCache.remove(keys[i]);
+      }
+    }
     _paintCache[key] = p;
     return p;
   }
@@ -472,9 +486,11 @@ class _DanmuLayerState extends State<DanmuLayer>
   void didUpdateWidget(covariant DanmuLayer oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    // ⚠️ 位置驱动：父级（播放器）每次重建都顺带推进一帧弹幕。
-    //    放在最前，这样即使后面因为"列表变了"而清屏，本帧也算推进过了。
-    _onPositionChanged();
+    // ⚠️ 位置推进已由 Ticker 每帧驱动（见 `_tick`），这里**不再**调
+    //   `_onPositionChanged`：父级每帧重建会让 didUpdateWidget 也每帧跑，
+    //   再调一次 `_tick` 等于每帧双倍工作量（_rebuildTrackEdges / spawn 检查 /
+    //   removeWhere / notify 全跑两遍），白白吃掉一帧预算。
+    //   Ticker 在 initState 启动、dispose 销毁，期间始终每帧驱动，不依赖父级重建。
 
     // 「按类型屏蔽」变化 → 立刻按新过滤重建（清屏避免已上屏的类型残留）
     final filtersChanged = oldWidget.blockScroll != widget.blockScroll ||
@@ -620,14 +636,17 @@ class _DanmuLayerState extends State<DanmuLayer>
     //   这里重建比"增量维护"简单且不会漏更新（弹幕回收是整批 `removeWhere` ✓）。
     _rebuildTrackEdges();
     var spawned = false;
+    var spawnCount = 0;
     while (_nextIndex < _sorted.length &&
-        _sorted[_nextIndex].time <= pos + 0.25) {
+        _sorted[_nextIndex].time <= pos + 0.25 &&
+        spawnCount < _spawnPerFrame) {
       // 前跳后不"补播"已经过去的那批（否则 seek 会把历史弹幕一次性倒出来）
       if (_sorted[_nextIndex].time >= pos - 0.6) {
         _spawn(_sorted[_nextIndex]);
         spawned = true;
       }
       _nextIndex++;
+      spawnCount++;
     }
 
     // ── ④ 推进 / 回收 ───────────────────────────────────────────
@@ -658,12 +677,6 @@ class _DanmuLayerState extends State<DanmuLayer>
       _repaint.notify();
     }
   }
-
-  /// 位置变化时被调用（父级每帧重建）→ 让弹幕动画跟上，而不是等 100ms 定时器。
-  ///
-  /// 这样弹幕是**每帧**推进的（60fps 顺滑），而定时器只作兜底
-  ///（处理"暂停时固定弹幕到期"这类位置不变但仍需刷新的情况）。
-  void _onPositionChanged() => _tick();
 
   /// seek 后把游标重定位到 `pos`，并清空屏上弹幕。
   ///
