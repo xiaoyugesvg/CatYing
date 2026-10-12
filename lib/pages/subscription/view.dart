@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../../common/theme.dart';
@@ -121,22 +122,92 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             ),
           );
         }
-        return ListView.separated(
+        // 「当前激活」判定：直接按激活订阅的 id 精确命中。
+        //
+        // ── 为什么不用 SubscriptionService.active（getter 回退）──
+        // `active` getter 在 activeId 找不到对应项时会**回退到第一条**，于是
+        // "激活了第二个，第一个却一直亮着"。
+        //
+        // ── 为什么也不用 ApiConfig.configUrl（实际加载的地址）──
+        // 激活流程里 `loadConfig()` 遇到**多仓库入口**会中断加载等用户挑选
+        // （SettingsController.loadConfig 的 pending 分支直接 return），
+        // 或网络加载失败时 configUrl 保持**上一条订阅的地址**——高亮永远
+        // 停在旧订阅上（用户实测："激活第二个，但第一个常亮"）。
+        //
+        // activeId 是用户的明确选择：激活第二个后**立即**亮起第二个，
+        // 不依赖网络加载是否成功；没有命中（id 失效）就都不亮，绝不回退。
+        final activeId = svc.activeId.value;
+
+        // 按「导入分类」分组显示：组标题 + 该组卡片。
+        // 顺序按 SubscriptionKind.values 固定；空分组不显示。
+        final grouped = <SubscriptionKind, List<Subscription>>{};
+        for (final s in list) {
+          grouped.putIfAbsent(s.kind, () => []).add(s);
+        }
+        final children = <Widget>[];
+        for (final kind in SubscriptionKind.values) {
+          final items = grouped[kind];
+          if (items == null || items.isEmpty) continue;
+          if (children.isNotEmpty) {
+            // 组与组之间：留足一整段空白（24），上一组最后一张卡片不会贴着下一组标题
+            children.add(const SizedBox(height: AppTheme.spacingXXL));
+          }
+          children.add(_groupHeader(kind, items.length));
+          // 组标题与它下面第一张卡片之间：16，标题不会贴在卡片上
+          children.add(const SizedBox(height: AppTheme.spacingLG));
+          for (var i = 0; i < items.length; i++) {
+            if (i > 0) {
+              // 卡片之间：20，明显拉开（原来 16 太近，观感"贴在一起"）
+              children.add(const SizedBox(height: AppTheme.spacingXL));
+            }
+            final s = items[i];
+            children.add(_card(s, activeId.isNotEmpty && s.id == activeId));
+          }
+        }
+        return ListView(
           padding: const EdgeInsets.fromLTRB(
+            AppTheme.spacingXL,
             AppTheme.spacingLG,
-            AppTheme.spacingSM,
-            AppTheme.spacingLG,
-            28,
+            AppTheme.spacingXL,
+            AppTheme.spacingXXL,
           ),
-          itemCount: list.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
-          itemBuilder: (context, i) {
-            final s = list[i];
-            final isActive = svc.activeId.value == s.id;
-            return _card(s, isActive);
-          },
+          children: children,
         );
       }),
+    );
+  }
+
+  /// 分组标题：分类图标 + 中文名 + 数量胶囊（用主题色，深浅都可读）
+  Widget _groupHeader(SubscriptionKind kind, int count) {
+    return Row(
+      children: [
+        Icon(kind.icon, size: 16, color: AppTheme.textSecondary),
+        const SizedBox(width: AppTheme.spacingSM),
+        Text(
+          kind.label,
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: AppTheme.fontSubhead + 0.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(width: AppTheme.spacingSM),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+          decoration: BoxDecoration(
+            color: AppTheme.accentColor.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+          ),
+          child: Text(
+            '$count',
+            style: TextStyle(
+              color: AppTheme.accentColor,
+              fontSize: AppTheme.fontCaption,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -147,44 +218,43 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         _openEdit(s);
       },
       child: Container(
-        padding: const EdgeInsets.all(14),
+        // 内边距加大（14 → spacingLG=16），卡片不再显得挤
+        padding: const EdgeInsets.all(AppTheme.spacingLG),
         decoration: BoxDecoration(
           color: isActive
               ? AppTheme.accentColor.withValues(alpha: 0.10)
-              : AppTheme.backgroundCard,
+              : AppTheme.backgroundCardElevated,
           borderRadius: BorderRadius.circular(AppTheme.glassRadiusCard),
+          // 统一 1px 描边：非激活改用更实的 glassBorder（原来 glassBorderSoft
+          // 透明度只有 0.06/0.12，边几乎看不见，卡片在底上"糊成一片"）
           border: Border.all(
             color: isActive
-                ? AppTheme.accentColor.withValues(alpha: 0.55)
-                : AppTheme.glassBorderSoft,
-            width: isActive ? 1.3 : 0.6,
+                ? AppTheme.accentColor.withValues(alpha: 0.6)
+                : AppTheme.glassBorder,
+            width: 1,
           ),
         ),
         child: Row(
           children: [
-            // 图标
+            // 分类图标
             Container(
-              width: 40,
-              height: 40,
+              width: 42,
+              height: 42,
               decoration: BoxDecoration(
                 color: AppTheme.accentColor.withValues(alpha: 0.16),
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(AppTheme.radiusMD),
               ),
-              child: Icon(
-                Icons.rss_feed,
-                size: 20,
-                color: AppTheme.accentColor,
-              ),
+              child: Icon(s.kindIcon, size: 20, color: AppTheme.accentColor),
             ),
-            const SizedBox(width: 12),
-            // 名称 + 地址 + 上次更新
+            const SizedBox(width: AppTheme.spacingMD),
+            // 名称 + 分类徽标 / 地址 / 状态
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      Flexible(
+                      Expanded(
                         child: Text(
                           s.name,
                           maxLines: 1,
@@ -204,35 +274,42 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                           color: AppTheme.textTertiary,
                         ),
                       ],
+                      const SizedBox(width: AppTheme.spacingSM),
+                      // 右上角：分类徽标
+                      _kindBadge(s.kind),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Text(
-                        '网络地址',
-                        style: TextStyle(
-                          color: AppTheme.textTertiary,
-                          fontSize: AppTheme.fontCaption,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          s.maskedUrl,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: AppTheme.fontCaption,
+                  const SizedBox(height: AppTheme.spacingSM),
+                  // 地址（次要，小字、单行省略、可点击复制）
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _copyUrl(s),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            s.maskedUrl,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: AppTheme.fontCaption,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: AppTheme.spacingXS),
+                        Icon(
+                          Icons.copy_rounded,
+                          size: 13,
+                          color: AppTheme.textTertiary,
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: AppTheme.spacingSM),
+                  // 状态行：上次更新 / 自动更新 / 已上锁
                   Text(
-                    '上次更新 ${s.lastUpdatedText}',
+                    _statusText(s),
                     style: TextStyle(
                       color: AppTheme.textTertiary,
                       fontSize: AppTheme.fontCaption,
@@ -241,7 +318,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 ],
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppTheme.spacingSM),
             // 右侧：编辑模式下是删除；否则是「激活 / 已激活」
             if (_editing)
               GestureDetector(
@@ -262,6 +339,41 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         ),
       ),
     );
+  }
+
+  /// 分类徽标（小胶囊，显示中文分类名）
+  Widget _kindBadge(SubscriptionKind kind) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppTheme.accentColor.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppTheme.glassRadiusSmall),
+      ),
+      child: Text(
+        kind.label,
+        style: TextStyle(
+          color: AppTheme.accentColor,
+          fontSize: AppTheme.fontCaption,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  /// 状态行文案：上次更新 · 自动更新 · 已上锁
+  String _statusText(Subscription s) {
+    final parts = <String>[
+      '上次更新 ${s.lastUpdatedText}',
+      s.autoUpdate ? '自动更新' : '手动更新',
+    ];
+    if (s.locked) parts.add('已上锁');
+    return parts.join(' · ');
+  }
+
+  /// 复制地址（上锁时复制脱敏后的地址，避免泄露真实地址）
+  Future<void> _copyUrl(Subscription s) async {
+    await Clipboard.setData(ClipboardData(text: s.maskedUrl));
+    AppToast.message('已复制地址');
   }
 
   Widget _activateButton(Subscription s, bool isActive) {

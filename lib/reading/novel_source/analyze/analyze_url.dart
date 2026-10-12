@@ -15,6 +15,7 @@ import 'analyze_rule.dart';
 import 'sync_http_bridge.dart';
 import 'browser_faithful_adapter.dart';
 import 'verification_exception.dart';
+import 'source_variable_store.dart';
 import '../model/xiaoshuo_book.dart';
 import '../model/xiaoshuo_book_chapter.dart';
 import '../model/book_source.dart';
@@ -632,6 +633,12 @@ class AnalyzeUrl {
       requestHeaders.addAll(headers);
     }
 
+    // 请求头变量替换：legado 允许头值里写 `{{key}}` / `{{page}}` / `{{变量}}`
+    // （变量来自书源级存储 `source.setVariable` / `putConcurrent`）。
+    // 此前头值原样发送 ⇒ 含占位符的头（如 `Referer: {{$.url}}`）会被站点拒绝。
+    // 无 `{{` 的头值原样返回（未配置该项的源行为完全不变）。
+    requestHeaders.updateAll((key, value) => _applyHeaderVars(value));
+
     String body;
     try {
       // 书源链路用独立 Dio，背靠背连发可能触发 Cloudflare 临时挑战；
@@ -672,6 +679,19 @@ class AnalyzeUrl {
         if (body.trim().isEmpty) {
           AppLog.instance.w('[书源HTTP] webView 无内容，回退普通请求: $url');
           body = await _requestViaDio(dio, options);
+        } else if (webJs != null && webJs!.isNotEmpty) {
+          // [webJs] URL 选项里的 `webJs` 在 WebView 抓取完成后执行，用于改写
+          // HTML（legado 在浏览器 DOM 上执行并取其结果作为正文来源）。
+          // ⚠️ 本引擎的 WebView 抓取走本机代理（只回渲染后 HTML），没有把 JS
+          //    注入浏览器 DOM 的通道 ⇒ 这里用 QuickJS 以 `result=HTML` 求值做
+          //    **尽力近似**；执行失败/返回空则保留原 HTML（对未配置 webJs 的源
+          //    零影响）。
+          final rewritten = _execWebJs(body);
+          if (rewritten.trim().isNotEmpty) {
+            body = rewritten;
+          } else {
+            AppLog.instance.w('[书源HTTP] webJs 执行无结果，保留原 HTML: $url');
+          }
         }
       } else {
         body = await _requestViaDio(dio, options);
@@ -751,7 +771,87 @@ class AnalyzeUrl {
       } catch (_) {}
     }
 
+    _applyLoginCheck(body);
+
     return body;
+  }
+
+  // ── 书源级变量键（`source.*` 存储分组，与 AnalyzeRule._sourceKey 同口径）──
+  String get _sourceKey {
+    final u = source?.bookSourceUrl;
+    if (u != null && u.isNotEmpty) return u;
+    return baseUrl ?? '';
+  }
+
+  /// 请求头值变量替换：`{{key}}` / `{{page}}` / `{{变量}}` / `{{java.get('x')}}`。
+  ///
+  /// 变量值取自书源级进程存储（`SourceVariableStore`，由规则里的
+  /// `source.setVariable` / `putConcurrent` 写入）；未知变量原样保留（避免把
+  /// 不含变量的头改坏）。
+  String _applyHeaderVars(String value) {
+    if (!value.contains('{{')) return value;
+    final box = SourceVariableStore.instance.box(_sourceKey);
+    return value.replaceAllMapped(RegExp(r'\{\{([\w\W]*?)\}\}'), (m) {
+      final expr = m.group(1)!.trim();
+      if (expr == 'key') return key ?? '';
+      if (expr == 'page') return page.toString();
+      // ⚠️ 必须用三引号原始字符串：正则里的 ['\"] 同时含两种引号，
+      // 单引号/双引号 raw string 都会被其中的 " 提前终止（编译期语法错误）。
+      final get = RegExp(r'''^java\.get\(\s*['"]([^'"]+)['"]\s*\)$''').firstMatch(expr);
+      if (get != null) return box[get.group(1) ?? ''] ?? '';
+      if (box.containsKey(expr)) return box[expr] ?? '';
+      return m.group(0)!;
+    });
+  }
+
+  /// 执行 URL 选项里的 `webJs`（以 `result`=抓取到的 HTML 求值）。
+  /// 失败/异常返回空串，由调用方回退原 HTML。
+  String _execWebJs(String html) {
+    final js = webJs;
+    if (js == null || js.isEmpty) return '';
+    try {
+      final analyzeRule = AnalyzeRule(book: ruleData, chapter: chapter)
+        ..setContent(html, url)
+        ..setBaseUrl(url);
+      return analyzeRule.evalJs(js, html, extraBindings: {
+        'page': page,
+        'key': key ?? '',
+      });
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// 登录校验标记：校验 JS 返回串命中任一标记即视为「未登录/登录失效」。
+  /// 依据 legado `loginCheckJs` 语义（返回结果含“登录/失效”等字样即失效）。
+  static const List<String> _kLoginInvalidMarkers = <String>[
+    '登录', '登陆', '失效', '未登录', '请先登录', '重新登录',
+  ];
+
+  /// 登录校验（`source.loginCheckJs`）：以 `result`=响应体求值该 JS，
+  /// 命中 [_kLoginInvalidMarkers] 时记一条 warn。**仅检测 + 记日志**，不改动
+  /// 返回值与流程（引擎侧无登录 UI 挂钩，避免误伤正常请求）。
+  void _applyLoginCheck(String body) {
+    final js = source?.loginCheckJs;
+    if (js == null || js.isEmpty) return;
+    try {
+      final analyzeRule = AnalyzeRule(book: ruleData, chapter: chapter)
+        ..setContent(body, url)
+        ..setBaseUrl(url);
+      final out = analyzeRule
+          .evalJs(js, body, extraBindings: {'page': page, 'key': key ?? ''});
+      final lower = out.toLowerCase();
+      final invalid =
+          _kLoginInvalidMarkers.any((mk) => lower.contains(mk.toLowerCase()));
+      if (invalid) {
+        final brief = out.replaceAll('\n', ' ').trim();
+        AppLog.instance.w('[书源] 登录校验：疑似未登录/登录失效'
+            '（源=${source?.bookSourceName}）校验结果='
+            '${brief.length > 120 ? '${brief.substring(0, 120)}…' : brief}');
+      } else {
+        AppLog.instance.d('[书源] 登录校验通过（源=${source?.bookSourceName}）');
+      }
+    } catch (_) {}
   }
 
   Map<String, String> _parseHeader(String headerStr) {

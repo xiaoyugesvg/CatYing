@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' show Random;
 
@@ -7,7 +8,6 @@ import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../../models/movie.dart';
-import '../../models/source_bean.dart';
 import '../../models/vod_info.dart';
 import '../../models/cache_store.dart';
 import '../../models/cache_ttl.dart';
@@ -17,6 +17,8 @@ import '../../services/spider_service.dart';
 import '../../services/app_log.dart';
 import '../../services/network_manager.dart';
 import '../../services/player_prefs.dart';
+import '../../services/ad_filter_service.dart';
+import '../../services/parse_service.dart';
 
 class PlaybackQualityOption {
   static const String autoIdentifier = 'auto';
@@ -387,10 +389,8 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     if (isSpiderSource) {
       _resolveSpiderPlayUrl(flag: flag, id: episodeURL);
     } else {
-      playUrl.value = _selectedPlayableURL(fallback: episodeURL);
       playHeaders.clear();
-      playbackSessionId.value = _newUuid();
-      isPlaying.value = true;
+      unawaited(_startPlayback(episodeURL));
     }
   }
 
@@ -418,10 +418,8 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       if (isSpiderSource) {
         _resolveSpiderPlayUrl(flag: selectedFlag.value, id: episode.url);
       } else {
-        playUrl.value = _selectedPlayableURL(fallback: episode.url);
         playHeaders.clear();
-        playbackSessionId.value = _newUuid();
-        isPlaying.value = true;
+        unawaited(_startPlayback(episode.url));
       }
     }
   }
@@ -454,9 +452,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     if (isSpiderSource) {
       _resolveSpiderPlayUrl(flag: targetFlag, id: episodeURL);
     } else {
-      playUrl.value = _selectedPlayableURL(fallback: episodeURL);
-      playbackSessionId.value = _newUuid();
-      isPlaying.value = true;
+      unawaited(_startPlayback(episodeURL));
     }
   }
 
@@ -532,9 +528,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     if (episode.url.startsWith('/')) {
       _resolveSpiderPlayUrl(flag: flag, id: episode.url);
     } else {
-      playUrl.value = _selectedPlayableURL(fallback: episode.url);
-      playbackSessionId.value = _newUuid();
-      isPlaying.value = true;
+      unawaited(_startPlayback(episode.url));
     }
   }
 
@@ -648,6 +642,52 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       return selected;
     }
     return fallback;
+  }
+
+  static const List<String> _directMediaExtensions = [
+    '.m3u8',
+    '.mp4',
+    '.flv',
+    '.ts',
+    '.mkv',
+    '.m3u',
+  ];
+
+  /// 是否已是已知直链媒体（后缀命中）——是则无需再过解析接口。
+  bool _looksLikeDirectMedia(String url) {
+    if (url.isEmpty) return false;
+    final path = Uri.tryParse(url)?.path ?? url;
+    final lower = path.toLowerCase();
+    for (final ext in _directMediaExtensions) {
+      if (lower.endsWith(ext)) return true;
+    }
+    return false;
+  }
+
+  /// 取流/播放入口统一入口：在 [_selectedPlayableURL] 基础上接入广告过滤与解析接口。
+  ///
+  /// - 命中广告黑名单 → 回退到 fallback（沿用既有回退语义，不抛弃原地址）；
+  /// - 非直链媒体后缀且解析器可用 → 走 parses 接口，成功替换、失败保持原地址。
+  ///
+  /// 无 ads/rules 且无 parses 时，方法内不产生 await，行为与原来的同步赋值一致。
+  Future<void> _startPlayback(String fallback) async {
+    var candidate = _selectedPlayableURL(fallback: fallback);
+
+    if (AdFilterService.instance.isBlocked(candidate) &&
+        candidate != fallback) {
+      candidate = fallback;
+    }
+
+    if (!_looksLikeDirectMedia(candidate) && ParseService.instance.enabled) {
+      final parsed = await ParseService.instance.parse(candidate);
+      if (parsed != null && parsed.isNotEmpty) {
+        candidate = parsed;
+      }
+    }
+
+    playUrl.value = candidate;
+    playbackSessionId.value = _newUuid();
+    isPlaying.value = true;
   }
 
   void resetQualityState() {

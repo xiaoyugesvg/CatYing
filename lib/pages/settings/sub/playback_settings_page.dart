@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -73,6 +75,16 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                   value: controller.vodPlayerEngine.value.title,
                   onTap: _pickEngine,
                 )),
+            // 直播内核：与点播**独立持久化**（PlayerPrefs.liveEngine），
+            // 选项与直播页内嵌菜单一致（iOS：AV/KS/MPV，无 webview ——
+            // 直播没有网页播放路径）。其它平台只有 mpv 可选，直接隐藏。
+            if (Platform.isIOS)
+              Obx(() => SettingsRow(
+                    icon: Icons.live_tv,
+                    title: '直播内核',
+                    value: PlayerPrefs.instance.liveEngine.value.title,
+                    onTap: _pickLiveEngine,
+                  )),
             Obx(() => SettingsRow(
                   icon: Icons.aspect_ratio,
                   title: '画面填充',
@@ -389,6 +401,24 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
       labelBuilder: (x) => x.title,
     );
     if (e != null) await controller.setVodPlayerEngine(e);
+  }
+
+  /// 直播内核选择：与直播页 `_liveEngines` 保持一致（无 webview）。
+  /// 选中即写入 `PlayerPrefs.liveEngine`——直播页每次都实时读它，
+  /// 下次开播/切台立即生效（无需重启）。
+  Future<void> _pickLiveEngine() async {
+    final e = await SettingsDialogs.pick<PlayerEngine>(
+      context: context,
+      title: '直播播放器',
+      options: const [
+        PlayerEngine.avplayer,
+        PlayerEngine.ksplayer,
+        PlayerEngine.mpv,
+      ],
+      selected: PlayerPrefs.instance.liveEngine.value,
+      labelBuilder: (x) => x.title,
+    );
+    if (e != null) await PlayerPrefs.instance.setLiveEngine(e);
   }
 
   Future<void> _pickDecodeMode() async {

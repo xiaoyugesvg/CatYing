@@ -34,6 +34,15 @@ class SourceCookieStore {
   /// host → {cookieName: value}
   final Map<String, Map<String, String>> _byHost = <String, Map<String, String>>{};
 
+  /// cookie jar 总开关（对应书源 `enabledCookieJar`）。
+  ///
+  /// `false` ⇒ **不读、不写、不发送** cookie（对齐 legado 关闭 CookieJar 的
+  /// 语义）：[getCookie] 恒返回空串（请求侧据此不再附带 Cookie），
+  /// [setCookie]/[ingestResponseHeader]/[removeCookie] 全部 no-op。
+  /// 由书源解析入口（`WebBook._bindJsLib`）按**当前源**设置。
+  /// 默认 `true` ⇒ 未配置该项的书源行为与从前完全一致。
+  bool enabled = true;
+
   /// 该 host 的 Cookie 是否为空（诊断用）。
   bool isEmptyFor(String url) => (_byHost[_hostOf(url)] ?? const {}).isEmpty;
 
@@ -44,6 +53,7 @@ class SourceCookieStore {
 
   /// 取 [url] 所属 host 的 Cookie 串（`a=b; c=d`；无则空串）。
   String getCookie(String url) {
+    if (!enabled) return '';
     final m = _byHost[_hostOf(url)];
     if (m == null || m.isEmpty) return '';
     return m.entries.map((e) => '${e.key}=${e.value}').join('; ');
@@ -54,6 +64,7 @@ class SourceCookieStore {
   /// 只认含 `=` 且 name 非空且不是 `expires`/`path`/`domain`/`max-age` 这类
   /// **属性片段**（`Set-Cookie` 常用 `; path=/; HttpOnly` 尾巴）。
   void setCookie(String url, String raw) {
+    if (!enabled) return;
     if (raw.trim().isEmpty) return;
     final host = _hostOf(url);
     final jar = _byHost.putIfAbsent(host, () => <String, String>{});
@@ -80,6 +91,7 @@ class SourceCookieStore {
 
   /// 从响应头吸收 `Set-Cookie`（可能多条被 `,` 连接，见 [ingestResponseHeader]）。
   void ingestResponseHeader(String url, String? setCookieHeader) {
+    if (!enabled) return;
     if (setCookieHeader == null || setCookieHeader.isEmpty) return;
     // 多个 Set-Cookie 常被合并成一个 header，用 ",<name>=" 的形式切分
     final parts = setCookieHeader.split(RegExp(r',(?=\s*[^;=,\s]+=)'));
@@ -91,6 +103,7 @@ class SourceCookieStore {
 
   /// 删除该 host 的某个 cookie；[name] 为空则清空该 host。
   void removeCookie(String url, [String? name]) {
+    if (!enabled) return;
     final host = _hostOf(url);
     if (name == null || name.isEmpty) {
       _byHost.remove(host);

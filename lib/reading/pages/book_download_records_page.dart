@@ -212,7 +212,7 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
             children: [
               // 搜索行：分段切换（漫画|图书）+ 搜索框 + 右侧方形文件夹图标
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
                 child: Row(
                   children: [
                     _buildSegmentSwitch(),
@@ -238,10 +238,21 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
               ),
               _buildStatusTabs(isDark, count),
               if (!isComic) _buildSourceDownloads(isDark),
+              // 「共 N 本」与上方状态区、下方列表拉开层次：淡分割线 + 留白
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
+                child: Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.06)
+                      : Colors.black.withValues(alpha: 0.05),
+                ),
+              ),
               ListPaginationCountBar(total: count, unit: '本'),
               Expanded(
                 child: count == 0
-                    ? _buildEmpty()
+                    ? _buildEmpty(isDark)
                     : ListView.builder(
                         controller: _scrollController,
                         padding: const EdgeInsets.fromLTRB(0, 4, 0, 16),
@@ -518,9 +529,9 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
   /// 状态标签行：5 个横向胶囊（选中实底高亮）+ 最右侧数字角标（当前选中状态条数）。
   Widget _buildStatusTabs(bool isDark, int count) {
     return SizedBox(
-      height: 42,
+      height: 46,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
         child: Row(
           children: [
             Expanded(
@@ -532,7 +543,7 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
                     Center(child: _buildStatusPill(i, isDark)),
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
             _buildStatusBadge(count),
           ],
         ),
@@ -542,9 +553,13 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
 
   Widget _buildStatusPill(int i, bool isDark) {
     final selected = _statusIndex == i;
+    // 未选中：淡色实底 + 细描边（两种主题下都能看清胶囊轮廓）
+    final unselectedBg = isDark
+        ? Colors.white.withValues(alpha: 0.06)
+        : JellyTheme.primary.withValues(alpha: 0.06);
     final borderColor = isDark
-        ? Colors.white.withValues(alpha: 0.1)
-        : JellyTheme.primary.withValues(alpha: 0.2);
+        ? Colors.white.withValues(alpha: 0.08)
+        : JellyTheme.primary.withValues(alpha: 0.18);
     return GestureDetector(
       onTap: () => setState(() {
         _statusIndex = i;
@@ -552,13 +567,13 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
       }),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? JellyTheme.primary : Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
+          color: selected ? JellyTheme.primary : unselectedBg,
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(
             color: selected ? Colors.transparent : borderColor,
-            width: 0.5,
+            width: 0.8,
           ),
         ),
         child: Text(
@@ -594,16 +609,41 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
     );
   }
 
-  Widget _buildEmpty() {
+  Widget _buildEmpty(bool isDark) {
+    final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.search_off_rounded, size: 48, color: JellyTheme.textSecondary),
-          const SizedBox(height: 12),
+          Container(
+            width: 84,
+            height: 84,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: JellyTheme.primary.withValues(alpha: isDark ? 0.12 : 0.08),
+            ),
+            child: Icon(
+              Icons.inbox_rounded,
+              size: 38,
+              color: JellyTheme.primary.withValues(alpha: 0.75),
+            ),
+          ),
+          const SizedBox(height: 16),
           Text(
             '该状态下暂无记录',
-            style: TextStyle(color: JellyTheme.textSecondary),
+            style: TextStyle(
+              fontSize: AppTheme.fontBody,
+              fontWeight: FontWeight.w600,
+              color: titleColor,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '换个状态或关键词试试',
+            style: TextStyle(
+              fontSize: AppTheme.fontFootnote,
+              color: JellyTheme.textSecondary,
+            ),
           ),
         ],
       ),
@@ -613,17 +653,23 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
   Widget _buildTaskTile(BookDownloadTask t, bool isDark) {
     final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
     final card = Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
       decoration: BoxDecoration(
         color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.06)
+              : Colors.black.withValues(alpha: 0.05),
+        ),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.all(12),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildCover(t.cover ?? '', isDark),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -731,18 +777,18 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
       borderRadius: BorderRadius.circular(10),
       child: CachedNetworkImage(
         imageUrl: cover,
-        width: 44,
-        height: 60,
+        width: 48,
+        height: 66,
         fit: BoxFit.cover,
         placeholder: (c, u) => Container(
           color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-          width: 44,
-          height: 60,
+          width: 48,
+          height: 66,
         ),
         errorBuilder: (c, e, s) => Container(
           color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
-          width: 44,
-          height: 60,
+          width: 48,
+          height: 66,
           child: Icon(Icons.menu_book_rounded,
               size: 20, color: JellyTheme.textSecondary),
         ),
@@ -871,17 +917,23 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
   Widget _buildComicTaskTile(DownloadTask t, bool isDark) {
     final titleColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
     final card = Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
       decoration: BoxDecoration(
         color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.06)
+              : Colors.black.withValues(alpha: 0.05),
+        ),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.all(12),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildComicCover(t.comicCover, isDark),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -967,17 +1019,17 @@ class _BookDownloadRecordsPageState extends State<BookDownloadRecordsPage> {
       child: CachedNetworkImage(
         imageUrl: cover,
         width: 48,
-        height: 64,
+        height: 66,
         fit: BoxFit.cover,
         placeholder: (c, u) => Container(
           color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
           width: 48,
-          height: 64,
+          height: 66,
         ),
         errorBuilder: (c, e, s) => Container(
           color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
           width: 48,
-          height: 64,
+          height: 66,
           child: Icon(Icons.auto_stories_rounded,
               size: 20, color: JellyTheme.textSecondary),
         ),

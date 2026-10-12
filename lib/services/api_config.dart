@@ -7,6 +7,7 @@ import '../models/source_bean.dart';
 import '../common/constants.dart';
 import 'network_manager.dart';
 import 'live_service.dart';
+import 'host_resolver.dart';
 
 /// 配置错误枚举
 enum ConfigError {
@@ -515,6 +516,9 @@ class ApiConfig extends GetxController {
       } else {
         dohList.value = [];
       }
+
+      // 把 hosts / doh 真正下发给网络层的 DNS 解析器
+      HostResolver.instance.load(hosts: config.hosts, doh: config.doh);
 
       // 壁纸
       wallpaper.value = config.wallpaper ?? '';

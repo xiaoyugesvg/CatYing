@@ -48,9 +48,6 @@ class _MePageState extends State<MePage> {
   final GlobalKey _themeToggleKey = GlobalKey(); // 暗色模式切换按钮（量取圆形扩散动画起点）
   String? _switchingTo; // 主题切换中（主题风格面板内 loading 遮罩用）
 
-  /// 账号卡顶部让位高度：右上角快捷条从这里"露出上沿"（见 [_buildAccountCard]）
-  static const double _quickPeek = 28;
-
   @override
   void didUpdateWidget(covariant MePage oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -130,7 +127,7 @@ class _MePageState extends State<MePage> {
             //    用户 2026 反馈：「那三个（我的笔记、阅读经历、阅读计划**只留图标**）
             //    图标**并排放在那个登录（也就是第一个卡片）的右上角**」✓
             //    ⇒ 三个入口已**只留图标**、去掉文字，并搬进 [ _buildAccountCard ]
-            //      的卡片右上角（`Stack` + `Positioned`），
+            //      的**同一张账号卡**右上角（卡片内首行），
             //      实现在 `widgets/me_account_quick_entries.dart`。
             //    这里删掉的正是原来那一整块 `Padding + Row + _iconEntry×3`。
             _buildAccountCard(isDark),
@@ -409,13 +406,13 @@ class _MePageState extends State<MePage> {
   ///   中间：用户名（加粗）+ 小号灰字「z-library」；下一行邮箱灰字
   ///   右侧：`>` 箭头
   ///   右下角：灰字小号「今日可下 N/N 本」（取不到限额时隐藏该行）
-  ///   卡片右上角**后方**：一条横向快捷条（我的笔记 / 阅读经历 / 阅读计划），
-  ///     用 `Stack` 让它"压在卡片后面露出一部分"（顶部让位 [_quickPeek]）。
+  ///   卡片右上角：一条横向快捷条（我的笔记 / 阅读经历 / 阅读计划），
+  ///     与账号卡**同处一张卡片容器内**，右对齐排在卡片顶部。
   ///
-  /// ── 分层顺序 ────────────────────────────────────────────────
-  /// `Stack.children` 的**绘制顺序 = 先后顺序**：快捷条在前（下层，被压），
-  /// 账号卡在后（上层）。卡片用 `Padding(top: _quickPeek)` 整体下移，
-  /// 于是快捷条上沿在卡片上方**露出** `_quickPeek` 高的一段 ✓。
+  /// ── 结构 ────────────────────────────────────────────────────
+  /// 单个 `Material` 卡片内一个 `Column`：先快捷条（卡片内右上角），再账号
+  /// 信息区。账号信息区自带 `InkWell`（点击进登录），快捷条在它外部 ——
+  /// 点图标只跳目标页，不会误触进登录。
   ///
   /// ⚠️ 账号字段（用户名 / 邮箱 / 限额）全部取自 [ZlibraryService] 的现有
   ///    状态，**取不到的字段就隐藏或退回状态文案**，绝不编造。
@@ -455,168 +452,172 @@ class _MePageState extends State<MePage> {
           color: cardColor,
           borderRadius: BorderRadius.circular(20),
           clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const ZlibraryAuthPage(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── 快捷条：与账号卡同一张卡片内，右对齐排在卡片顶部 ──
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 12, 0),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: MeAccountQuickEntries(
+                    // 测试用的稳定锚点（`find.byKey`）
+                    key: const ValueKey('me_account_quick_entries'),
+                    isDark: isDark,
+                    onNotes: () => _push(const NotesAndJourneyPage()),
+                    onJourney: () => _push(
+                      const BrowseHistoryPage(showTabs: false),
+                    ),
+                    // ⚠️ 「阅读计划」接线保持指向 `ReadingPlanPage`（跳转目标未变）
+                    onPlan: () => _push(const ReadingPlanPage()),
+                  ),
+                ),
               ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+              // ── 账号信息区：点击整块进入登录（快捷条在其外部，不误触）──
+              InkWell(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const ZlibraryAuthPage(),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // 圆形头像（描边 + 右下角相机编辑角标）
-                      Stack(
-                        clipBehavior: Clip.none,
+                      Row(
                         children: [
-                          Container(
-                            width: 64,
-                            height: 64,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: logged
-                                  ? JellyTheme.primary
-                                  : (isDark
-                                      ? Colors.white.withValues(alpha: 0.10)
-                                      : const Color(0xFFEDEEF0)),
-                              border: Border.all(color: avatarRing, width: 2),
-                            ),
-                            child: logged
-                                ? Image.asset(
-                                    'assets/icons/user.png',
-                                    width: 52,
-                                    height: 52,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, _, _) => const Icon(
-                                      Icons.person_rounded,
-                                      color: Colors.white,
-                                      size: 28,
-                                    ),
-                                  )
-                                : Icon(
-                                    Icons.person_rounded,
-                                    color: sub,
-                                    size: 32,
+                          // 圆形头像（描边 + 右下角相机编辑角标）
+                          Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Container(
+                                width: 64,
+                                height: 64,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: logged
+                                      ? JellyTheme.primary
+                                      : (isDark
+                                          ? Colors.white.withValues(alpha: 0.10)
+                                          : const Color(0xFFEDEEF0)),
+                                  border:
+                                      Border.all(color: avatarRing, width: 2),
+                                ),
+                                child: logged
+                                    ? Image.asset(
+                                        'assets/icons/user.png',
+                                        width: 52,
+                                        height: 52,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, _, _) => const Icon(
+                                          Icons.person_rounded,
+                                          color: Colors.white,
+                                          size: 28,
+                                        ),
+                                      )
+                                    : Icon(
+                                        Icons.person_rounded,
+                                        color: sub,
+                                        size: 32,
+                                      ),
+                              ),
+                              // 相机角标（编辑头像入口）
+                              Positioned(
+                                right: 0,
+                                bottom: 0,
+                                child: Container(
+                                  width: 22,
+                                  height: 22,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: JellyTheme.primary,
+                                    border: Border.all(
+                                        color: cardColor, width: 2),
                                   ),
-                          ),
-                          // 相机角标（编辑头像入口）
-                          Positioned(
-                            right: 0,
-                            bottom: 0,
-                            child: Container(
-                              width: 22,
-                              height: 22,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: JellyTheme.primary,
-                                border: Border.all(color: cardColor, width: 2),
-                              ),
-                              child: const Icon(
-                                Icons.photo_camera_rounded,
-                                size: 12,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(width: 14),
-                      // 账号信息：用户名 + z-library 标签 / 邮箱
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.baseline,
-                              textBaseline: TextBaseline.alphabetic,
-                              children: [
-                                Flexible(
-                                  child: Text(
-                                    name,
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
-                                      color: fg,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                                  child: const Icon(
+                                    Icons.photo_camera_rounded,
+                                    size: 12,
+                                    color: Colors.white,
                                   ),
                                 ),
-                                if (logged) ...[
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    'z-library',
-                                    style: TextStyle(fontSize: 12, color: sub),
-                                  ),
-                                ],
+                              ),
+                            ],
+                          ),
+                          const SizedBox(width: 14),
+                          // 账号信息：用户名 + z-library 标签 / 邮箱
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.baseline,
+                                  textBaseline: TextBaseline.alphabetic,
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        name,
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700,
+                                          color: fg,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    if (logged) ...[
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'z-library',
+                                        style:
+                                            TextStyle(fontSize: 12, color: sub),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  secondLine,
+                                  style: TextStyle(fontSize: 13, color: sub),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ],
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              secondLine,
-                              style: TextStyle(fontSize: 13, color: sub),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(Icons.chevron_right_rounded,
+                              color: sub, size: 24),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      Icon(Icons.chevron_right_rounded, color: sub, size: 24),
+                      // ── 右下角：今日可下载量（灰字小号）──
+                      if (showQuota) ...[
+                        const SizedBox(height: 12),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            '今日可下 $remaining/$limit 本',
+                            style: TextStyle(
+                              fontSize: AppTheme.fontCaption,
+                              color: sub,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
-                  // ── 右下角：今日可下载量（灰字小号）──
-                  if (showQuota) ...[
-                    const SizedBox(height: 12),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: Text(
-                        '今日可下 $remaining/$limit 本',
-                        style: TextStyle(
-                          fontSize: AppTheme.fontCaption,
-                          color: sub,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
+                ),
               ),
-            ),
+            ],
           ),
         );
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 14),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              // 快捷条：先绘制 ⇒ 在卡片下层，被卡片压住下半部，只露出上沿
-              Positioned(
-                top: 0,
-                right: 16,
-                child: MeAccountQuickEntries(
-                  // 测试用的稳定锚点（`find.byKey`）
-                  key: const ValueKey('me_account_quick_entries'),
-                  isDark: isDark,
-                  onNotes: () => _push(const NotesAndJourneyPage()),
-                  onJourney: () => _push(
-                    const BrowseHistoryPage(showTabs: false),
-                  ),
-                  // ⚠️ 「阅读计划」接线保持指向 `ReadingPlanPage`（跳转目标未变）
-                  onPlan: () => _push(const ReadingPlanPage()),
-                ),
-              ),
-              // 账号卡：后绘制 ⇒ 压住快捷条下半部；顶部让位 [_quickPeek]
-              Padding(
-                padding: const EdgeInsets.only(top: _quickPeek),
-                child: card,
-              ),
-            ],
-          ),
+          child: card,
         );
       },
     );

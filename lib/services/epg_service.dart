@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_log.dart';
+import 'dio_factory.dart';
 
 class EpgProgram {
   final String title;
@@ -22,10 +23,10 @@ class EpgService extends GetxService {
   Dio? _dio;
 
   Dio get _dioC {
-    return _dio ??= Dio(BaseOptions(
+    return _dio ??= buildDioWithDns(
       connectTimeout: const Duration(seconds: 12),
       receiveTimeout: const Duration(seconds: 20),
-    ));
+    );
   }
 
   /// 简易内存缓存：频道名 -> 节目

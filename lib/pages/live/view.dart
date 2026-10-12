@@ -7,12 +7,13 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart'
-    show VideoController, Video, AdaptiveVideoControls;
+    show VideoController, Video;
 
 import '../../common/theme.dart';
 import '../../common/system_ui.dart';
 import '../../models/live_models.dart';
 import '../../models/player_engine.dart';
+import '../../services/app_log.dart';
 import '../../services/epg_service.dart';
 import '../../services/live_service.dart';
 import '../../services/main_tab_controller.dart';
@@ -307,6 +308,9 @@ class _LivePageState extends State<LivePage> {
     _lastOpenAt = now;
     _everOpened = true;
     _playError = null;
+    AppLog.instance.log('[live] 开播/切台: '
+        '核心=${_iosUseKs ? 'KS(FF)' : (_iosUseMpv ? 'MPV' : (Platform.isIOS ? 'AVPlayer' : 'MPV'))} '
+        'url=$url');
     // 直播要出声了 → 让点播/音乐先闭嘴（AudioFocus 三方互斥：
     // 任何开播/切台/恢复路径都必须声明焦点，缺一路就会"双声"）
     unawaited(AudioFocus.request('live'));
@@ -415,6 +419,9 @@ class _LivePageState extends State<LivePage> {
   ) {
     _errSub = errors.listen((msg) {
       if (!mounted) return;
+      AppLog.instance.log('[live] 播放失败: '
+          '核心=${_iosUseKs ? 'KS(FF)' : (_iosUseMpv ? 'MPV' : (Platform.isIOS ? 'AVPlayer' : 'MPV'))} '
+          'url=$_lastOpenUrl 错误=$msg');
       setState(() {
         _playError = msg.isEmpty ? '播放失败，点此重试' : msg;
         _switching = false;
@@ -532,6 +539,7 @@ class _LivePageState extends State<LivePage> {
       ),
     );
     if (picked == null || picked == current) return;
+    AppLog.instance.log('[live] 切换播放器核心: ${current.title} → ${picked.title}');
     await PlayerPrefs.instance.setLiveEngine(picked);
     if (!mounted) return;
     setState(() {}); // 刷新右上按钮的内核短标签
@@ -1146,21 +1154,99 @@ class _LivePageState extends State<LivePage> {
   /// 所以静音按钮只能记在本地，初始音量从 `state.volume` 读）。
   bool _iosMuted = false;
 
-  /// iOS 直播的底部工具栏。
+  /// 直播底部工具栏（AV / FF / MPV 三个核心共用同一形态）。
   ///
   /// ── 为什么必须自己写 ──────────────────────────────────────────
-  /// 直播画面在 iOS 上走 `AppVideoView(player: _avPlayer!)` —— 原生 AVPlayer
-  /// 平台视图；而 media_kit 的 `AdaptiveVideoControls`（进度条 + 工具栏）
-  /// **只挂在非 iOS 的 `Video(...)` 分支上**。于是 iOS 直播是
-  /// "有画面、零控件"：用户实测「直播播放器没有下面的进度条和下部的工具栏」。
+  /// 移动端直播画面走原生平台视图（AVPlayer / KSEngine / media_kit），而
+  /// media_kit 的 `AdaptiveVideoControls` 在手机上只调**系统音量**
+  /// （volume_controller），底部根本没有音量按钮 —— 所以统一用这条自绘控制栏：
+  /// 播放/暂停 + （有时长才显示）真实进度条 + 音量/静音。
   ///
   /// ── 直播的"进度条"该怎么显示 ──────────────────────────────────
   /// 直播流没有可 seek 的时长，画一根假进度条是欺骗：
   ///   · `duration > 0`（回看 / DVR 窗口）→ 显示真实进度条且可拖动
-  ///   · 否则 → 显示「● 直播」标记
+  ///   · 否则 → 不显示进度条
   /// 播放/暂停与静音对任何直播流都有意义，始终显示。
-  Widget _buildIosLiveControls() {
-    final p = _avPlayer!;
+  ///
+  /// ⚠️ 旧实现固定取 `_avPlayer!`：切到 FF / MPV 核心后这条栏仍在操作 AVPlayer
+  /// 实例 → 静音/播放/拖动全部无效（`_avPlayer` 为 null 时还会空指针）。
+  Widget _activeLiveControls() {
+    final ks = _ksPlayer;
+    if (_iosUseKs && ks != null) {
+      return _buildLiveControls(
+        playingStream: ks.stream.playing,
+        playingInitial: ks.state.playing,
+        durationStream: ks.stream.duration,
+        durationInitial: ks.state.duration,
+        positionStream: ks.stream.position,
+        positionInitial: ks.state.position,
+        onTogglePlay: () => ks.state.playing ? ks.pause() : ks.play(),
+        onSeek: ks.seek,
+        muted: _iosMuted,
+        onToggleMute: _setLiveMuted,
+      );
+    }
+    final av = _avPlayer;
+    if (Platform.isIOS && !_iosUseMpv && !_iosUseKs && av != null) {
+      return _buildLiveControls(
+        playingStream: av.stream.playing,
+        playingInitial: av.state.playing,
+        durationStream: av.stream.duration,
+        durationInitial: av.state.duration,
+        positionStream: av.stream.position,
+        positionInitial: av.state.position,
+        onTogglePlay: () => av.state.playing ? av.pause() : av.play(),
+        onSeek: av.seek,
+        muted: _iosMuted,
+        onToggleMute: _setLiveMuted,
+      );
+    }
+    final mpv = _player;
+    if (mpv != null) {
+      return _buildLiveControls(
+        playingStream: mpv.stream.playing,
+        playingInitial: mpv.state.playing,
+        durationStream: mpv.stream.duration,
+        durationInitial: mpv.state.duration,
+        positionStream: mpv.stream.position,
+        positionInitial: mpv.state.position,
+        onTogglePlay: () => mpv.state.playing ? mpv.pause() : mpv.play(),
+        onSeek: mpv.seek,
+        muted: _iosMuted,
+        onToggleMute: _setLiveMuted,
+      );
+    }
+    return const SizedBox.shrink();
+  }
+
+  /// 直播静音开关：作用于**当前在播核心**（AV / FF / MPV），并记住本地状态。
+  void _setLiveMuted(bool muted) {
+    setState(() => _iosMuted = muted);
+    final v = muted ? 0.0 : 100.0;
+    final ks = _ksPlayer;
+    final av = _avPlayer;
+    final mpv = _player;
+    if (_iosUseKs && ks != null) {
+      unawaited(ks.setVolume(v));
+    } else if (_iosUseMpv && mpv != null) {
+      unawaited(mpv.setVolume(v));
+    } else if (av != null) {
+      unawaited(av.setVolume(v));
+    }
+  }
+
+  Widget _buildLiveControls({
+    required Stream<bool> playingStream,
+    required bool playingInitial,
+    required Stream<Duration> durationStream,
+    required Duration durationInitial,
+    required Stream<Duration> positionStream,
+    required Duration positionInitial,
+    required VoidCallback onTogglePlay,
+    required ValueChanged<Duration> onSeek,
+    required bool muted,
+    required ValueChanged<bool> onToggleMute,
+  }) {
     return Container(
       padding: const EdgeInsets.fromLTRB(6, 12, 6, 2),
       decoration: BoxDecoration(
@@ -1176,8 +1262,8 @@ class _LivePageState extends State<LivePage> {
       child: Row(
         children: [
           StreamBuilder<bool>(
-            stream: p.stream.playing,
-            initialData: p.state.playing,
+            stream: playingStream,
+            initialData: playingInitial,
             builder: (context, snap) {
               final playing = snap.data ?? false;
               return IconButton(
@@ -1187,14 +1273,14 @@ class _LivePageState extends State<LivePage> {
                 constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
                 tooltip: playing ? '暂停' : '播放',
                 icon: Icon(playing ? Icons.pause : Icons.play_arrow_rounded),
-                onPressed: () => playing ? p.pause() : p.play(),
+                onPressed: onTogglePlay,
               );
             },
           ),
           Expanded(
             child: StreamBuilder<Duration>(
-              stream: p.stream.duration,
-              initialData: p.state.duration,
+              stream: durationStream,
+              initialData: durationInitial,
               builder: (context, dSnap) {
                 final dur = dSnap.data ?? Duration.zero;
                 // 纯 HLS 直播流 duration ≤0（LIVE 无时长）→ 不给进度条
@@ -1205,8 +1291,8 @@ class _LivePageState extends State<LivePage> {
                 // 其余（mp4 直链 / 点播类 m3u8 / DVR 回看等**有时长的流**）
                 // → 保留真实进度条，可拖动 seek（用户拍板：进度条功能保留）
                 return StreamBuilder<Duration>(
-                  stream: p.stream.position,
-                  initialData: p.state.position,
+                  stream: positionStream,
+                  initialData: positionInitial,
                   builder: (context, pSnap) {
                     final pos = pSnap.data ?? Duration.zero;
                     final v = (pos.inMilliseconds / dur.inMilliseconds)
@@ -1237,7 +1323,7 @@ class _LivePageState extends State<LivePage> {
                             ),
                             child: Slider(
                               value: v,
-                              onChanged: (x) => p.seek(
+                              onChanged: (x) => onSeek(
                                 Duration(
                                   milliseconds:
                                       (dur.inMilliseconds * x).round(),
@@ -1265,15 +1351,11 @@ class _LivePageState extends State<LivePage> {
             color: Colors.white,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
-            tooltip: _iosMuted ? '取消静音' : '静音',
+            tooltip: muted ? '取消静音' : '静音',
             icon: Icon(
-              _iosMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+              muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
             ),
-            onPressed: () {
-              final next = !_iosMuted;
-              setState(() => _iosMuted = next);
-              p.setVolume(next ? 0 : 100);
-            },
+            onPressed: () => onToggleMute(!muted),
           ),
         ],
       ),
@@ -1306,6 +1388,12 @@ class _LivePageState extends State<LivePage> {
     final routeIsCurrent = ModalRoute.of(context)?.isCurrent ?? true;
     final isIosAv = Platform.isIOS && !_iosUseMpv && !_iosUseKs && _avPlayer != null;
     final isIosKs = _iosUseKs && _ksPlayer != null;
+    // media_kit 播放路径（iOS 切到 MPV / Android / 桌面）：底部控制栏改用自绘，
+    // 让它也有音量/静音按钮（见 _activeLiveControls）。
+    final isMpvPath = !isIosAv &&
+        !isIosKs &&
+        _player != null &&
+        current != null;
 
     return Container(
       color: Colors.black,
@@ -1329,7 +1417,9 @@ class _LivePageState extends State<LivePage> {
                         ? AppVideoView(player: _ksPlayer!)
                         : Video(
                             controller: _videoController!,
-                            controls: AdaptiveVideoControls,
+                            // 底部控制栏改用 App 自绘（含音量/静音）：media_kit 的
+                            // 内置控制在手机上只有系统音量手势、没有音量按钮。
+                            controls: null,
                           ),
               ),
             )
@@ -1417,15 +1507,15 @@ class _LivePageState extends State<LivePage> {
                 ),
               ),
             ),
-          // iOS 直播：补上原生平台视图**缺失的底部工具栏**
-          //（进度条 / 「直播」标记 + 播放暂停 + 静音）。理由见
-          // `_buildIosLiveControls` 的注释。
-          if ((isIosAv || isIosKs) && !_audioMode && routeIsCurrent)
+          // 直播：补上原生平台视图**缺失的底部工具栏**
+          // （播放暂停 + 进度条 + 音量/静音），三个核心（AV/FF/MPV）统一。
+          // 理由见 `_activeLiveControls` 的注释。
+          if ((isIosAv || isIosKs || isMpvPath) && !_audioMode && routeIsCurrent)
             Positioned(
               left: 0,
               right: 0,
               bottom: 0,
-              child: _controlsWrap(_buildIosLiveControls()),
+              child: _controlsWrap(_activeLiveControls()),
             ),
           if (_audioMode) _buildAudioModeOverlay(c, current),
           // 普通模式左上：返回 + LIVE 角标

@@ -14,6 +14,7 @@ import '../../../services/app_log.dart';
 import '../analyze/analyze_rule.dart';
 import '../analyze/js_engine.dart';
 import '../analyze/analyze_url.dart';
+import '../analyze/cookie_store.dart';
 import '../model/book_source.dart';
 import '../model/search_book.dart';
 import '../model/xiaoshuo_book.dart';
@@ -44,6 +45,10 @@ class WebBook {
   /// ⚠️ 必须在**开始解析前**调用（jsLib 要先于规则执行进入上下文）。
   static void _bindJsLib(XiaoshuoBookSource source) {
     try {
+      // enabledCookieJar 真开关：按当前源设置 cookie jar 的读写/发送开关
+      // （见 SourceCookieStore.enabled）。false ⇒ java.ajax / cookie.* 链路
+      // 不读、不写、不发送 cookie。
+      SourceCookieStore.instance.enabled = source.enabledCookieJar;
       JsEngine.shared.setActiveSource(
         source.bookSourceUrl.isNotEmpty ? source.bookSourceUrl : source.bookSourceName,
         source.jsLib,
@@ -506,7 +511,8 @@ class WebBook {
       source: source,
     );
 
-    final firstBody = await firstAnalyze.getStrResponse();
+    final firstBody =
+        await firstAnalyze.getStrResponse(sourceRegex: contentRule.sourceRegex);
     if (firstBody.isEmpty) {
       return BookContentResult(content: '', error: '正文为空');
     }
@@ -555,7 +561,8 @@ class WebBook {
               baseUrl: source.bookSourceUrl,
               source: source,
             );
-            final body = await analyze.getStrResponse();
+            final body = await analyze
+                .getStrResponse(sourceRegex: contentRule.sourceRegex);
             if (body.isEmpty) return const <NovelBlock>[];
             return BookContent.analyzeContent(
               bookSource: source,
@@ -588,7 +595,8 @@ class WebBook {
             baseUrl: source.bookSourceUrl,
             source: source,
           );
-          final pageBody = await pageAnalyze.getStrResponse();
+          final pageBody =
+              await pageAnalyze.getStrResponse(sourceRegex: contentRule.sourceRegex);
           if (pageBody.isEmpty) break;
 
           final pageContent = BookContent.analyzeContent(

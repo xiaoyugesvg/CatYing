@@ -113,7 +113,8 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
       return;
     }
     final svc = SubscriptionService.instance;
-    final s = await svc.add(url: url);
+    // 带上分类：能按地址识别就识别，识别不出归「未分类」
+    final s = await svc.add(url: url, kind: SubscriptionKind.inferKind(url));
     await svc.setActive(s.id);
     AppToast.message('已存为订阅：${s.name}');
   }

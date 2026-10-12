@@ -65,9 +65,13 @@ function splitRule(rule) {
   const jsTag = /^\s*<js>([\s\S]*?)<\/js>\s*$/i.exec(rule);
   if (jsTag) return { prefix: 'js', parts: [jsTag[1]] };
 
-  const m = /^@?(css|json|js|XPath|xpath):([\s\S]*)$/.exec(rule);
+  const m = /^@?(css|jsoup|json|js|XPath|xpath):([\s\S]*)$/.exec(rule);
   if (m) {
     prefix = m[1].toLowerCase();
+    // `@jsoup:` 与 `@css:` 同语义：jsoup 选择器即 CSS（cheerio 支持 :contains
+    // 等扩展），统一走 css 分支，避免整条规则（含 `@jsoup:` 字面量）被当作
+    // CSS 选择器而匹配 0 个元素。
+    if (prefix === 'jsoup') prefix = 'css';
     body = m[2];
   }
   if (prefix === 'js') return { prefix, parts: [body] };

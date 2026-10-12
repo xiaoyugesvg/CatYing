@@ -53,6 +53,14 @@ class SourceRule {
       mode = Mode.defaultMode;
       isCss = true;
       rule = ruleStr.substring(5);
+    } else if (lower.startsWith('@jsoup:')) {
+      // `@jsoup:` 与 `@css:` **同语义**：jsoup 选择器就是 CSS 选择器加上
+      // `:contains(...)` / `:has(...)` 等扩展，后者由 `AnalyzeByJsoup` 的
+      // `_safeQuery` 透明支持（见 analyze_jsoup.dart）。此前该前缀未被识别 ⇒
+      // 整条规则（含 `@jsoup:` 字面量）被当成 CSS 选择器 ⇒ 匹配 0 个元素。
+      mode = Mode.defaultMode;
+      isCss = true;
+      rule = ruleStr.substring(7);
     } else if (lower.startsWith('@xpath:')) {
       mode = Mode.xpath;
       rule = ruleStr.substring(7);

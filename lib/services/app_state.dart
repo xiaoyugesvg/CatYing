@@ -1,8 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:get/get.dart';
+import '../models/app_config.dart';
 import 'api_config.dart';
+import 'ad_filter_service.dart';
 import 'app_log.dart';
+import 'network_manager.dart';
 import 'nodejs_manager.dart';
 import 'scene_recovery.dart';
 import 'spider_service.dart';
@@ -155,7 +159,42 @@ class AppState extends GetxController {
     configLoadError.value = null;
     currentSourceKey.value =
         ApiConfig.instance.homeSourceBean.value?.key ?? '';
+    // 配置加载完成 → 重建视频广告过滤规则（ads / rules）
+    unawaited(_reloadAdFilterRules());
     // 不再弹免责声明（用户要求去掉首次打开的责任弹窗）
+  }
+
+  /// 从配置里提取 ads / rules 并交给 AdFilterService。
+  ///
+  /// ⚠️ ApiConfig 未对外暴露已解析的 AppConfigData，且本次改动不允许修改
+  /// api_config.dart，所以这里用其公开静态工具（normalizeConfigUrl /
+  /// stripJsonComments）按同一份 configUrl 重新拉取并解析一次。任何失败都
+  /// 视为「无规则」，绝不影响主流程。
+  Future<void> _reloadAdFilterRules() async {
+    try {
+      final rawUrl = ApiConfig.instance.configUrl.value.trim();
+      if (rawUrl.isEmpty) {
+        AdFilterService.instance.load();
+        return;
+      }
+      final normalized = ApiConfig.normalizeConfigUrl(rawUrl);
+      final raw = await NetworkManager.instance.getString(normalized);
+      final cleaned = ApiConfig.stripJsonComments(raw);
+      final decoded = jsonDecode(cleaned);
+      if (decoded is Map<String, dynamic>) {
+        final config = AppConfigData.fromJson(decoded);
+        AdFilterService.instance.load(ads: config.ads, rules: config.rules);
+        return;
+      }
+      AdFilterService.instance.load();
+    } catch (e) {
+      AppLog.instance.log('[AdFilter] 规则加载失败: $e');
+      try {
+        AdFilterService.instance.load();
+      } catch (_) {
+        // ignore
+      }
+    }
   }
 
   // ============================================================

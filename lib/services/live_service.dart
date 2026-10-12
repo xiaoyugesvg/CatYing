@@ -8,8 +8,9 @@ import 'app_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/live_models.dart';
+import 'xtream_service.dart';
 
-/// 直播源服务：解析 tvbox `lives` 配置 / m3u 播放列表 / 内嵌 channels
+/// 直播源服务：解析 tvbox `lives` 配置 / m3u 播放列表 / 内嵌 channels / Xtream 账号
 class LiveService extends GetxService {
   static LiveService get instance => Get.find<LiveService>();
 
@@ -189,6 +190,11 @@ class LiveService extends GetxService {
   /// 按源索引解析并替换当前频道/分组
   Future<void> _loadSourceLocked(int index) async {
     final map = _rawLives![index];
+    // Xtream 账号源：走 player_api，不当 m3u 拉取
+    if (map['type'] == 'xtream') {
+      await _loadXtreamSourceLocked(index, map);
+      return;
+    }
     final all = <LiveChannel>[];
     final embedded = (map['channels'] as List?) ?? const [];
     for (final ch in embedded) {
@@ -231,6 +237,77 @@ class LiveService extends GetxService {
     }
     channels.value = all;
     _rebuildGroups();
+  }
+
+  /// 加载 Xtream 账号源：拉分类+频道，顺带记录到期时间。
+  Future<void> _loadXtreamSourceLocked(
+    int index,
+    Map<String, dynamic> map,
+  ) async {
+    final account = XtreamService.instance.accountFromStored(map);
+    if (account == null) {
+      error.value = 'Xtream 账号信息不完整（缺少地址或用户名/密码）。';
+      return;
+    }
+    // 缓存优先：先出列表再走网络
+    final cacheId = 'xtream:${account.user}@${account.base}';
+    final cached = await _readChannelCache(cacheId);
+    if (cached != null && cached.isNotEmpty) {
+      channels.value = cached;
+      _rebuildGroups();
+    }
+
+    // 账号信息（到期时间）与频道并行拉取；账号信息失败不致命
+    final Future<XtreamAccount?> infoFuture = XtreamService.instance
+        .fetchAccount(account)
+        .then<XtreamAccount?>((a) => a)
+        .catchError((_) => null);
+    try {
+      final list = await XtreamService.instance.fetchChannels(account);
+      if (list.isNotEmpty) {
+        await _saveChannelCache(cacheId, list);
+      }
+      channels.value = list;
+      _rebuildGroups();
+    } catch (e) {
+      AppLog.instance.log('[LiveService] 加载 Xtream 源失败 ${account.base}: $e');
+      if (cached == null || cached.isEmpty) {
+        error.value = e is XtreamException
+            ? e.message
+            : humanizeLiveError(e);
+      }
+    }
+
+    // 记录到期时间 / 状态，供设置页副标题展示
+    final info = await infoFuture;
+    if (info != null) {
+      map['xtreamStatus'] = info.status;
+      if (info.expDate != null) {
+        map['exp'] = info.expDate!.millisecondsSinceEpoch;
+      }
+      await _persistLives();
+    }
+  }
+
+  /// 该索引的源是否为 Xtream 账号源（设置页展示标记用）。
+  bool isXtreamSource(int index) {
+    final raw = _rawLives;
+    if (raw == null || index < 0 || index >= raw.length) return false;
+    return raw[index]['type'] == 'xtream';
+  }
+
+  /// Xtream 源的到期文案（如「到期 2026-01-01」/「已过期 2026-01-01」）；
+  /// 尚未拿到到期时间时返回 null。
+  String? xtreamExpiryText(int index) {
+    final raw = _rawLives;
+    if (raw == null || index < 0 || index >= raw.length) return null;
+    final ts = raw[index]['exp'];
+    if (ts is! int) return null;
+    final dt = DateTime.fromMillisecondsSinceEpoch(ts);
+    String two(int v) => v.toString().padLeft(2, '0');
+    final date = '${dt.year}-${two(dt.month)}-${two(dt.day)}';
+    if (dt.isBefore(DateTime.now())) return '已过期 $date';
+    return '到期 $date';
   }
 
   /// 把网络异常翻译成用户能看懂、且能据此行动的一句话。
@@ -357,20 +434,141 @@ class LiveService extends GetxService {
     }
   }
 
+  /// 手动调整直播源顺序（设置页拖动排序）。单源模式（_rawLives == null）直接返回。
+  ///
+  /// [newIndex] 遵循 ReorderableListView.onReorder 的约定：向下拖动时它指向
+  /// 「目标位置之后」的插槽，这里先归一化（newIndex > oldIndex 时减一）。
+  /// 只重排 [_rawLives]，不重新联网；通过保留原始条目的对象引用，
+  /// 让「当前已加载的源」在重排后仍然指向同一个源（loaded 标记跟着源走）。
+  Future<void> reorderSource(int oldIndex, int newIndex) async {
+    final raw = _rawLives;
+    if (raw == null) return;
+    if (oldIndex < 0 || oldIndex >= raw.length) return;
+    var target = newIndex;
+    if (target > oldIndex) target -= 1;
+    target = target.clamp(0, raw.length - 1);
+    if (target == oldIndex) return;
+    await _markLivesManaged();
+    final loadedRef = _loadedRaw();
+    final item = raw.removeAt(oldIndex);
+    raw.insert(target, item);
+    await _persistLives();
+    _rebuildSourcesKeepingLoaded(loadedRef);
+  }
+
+  /// 一键自动排序。规则（固定、可解释）：
+  ///   1) Xtream 账号源（type == 'xtream'）统一排在最后，普通源在前；
+  ///   2) 同组内按名称升序（[String.compareTo]，中文按 Unicode 码点/本地序）；
+  ///   3) 名称相同再按 url 升序兜底，保证结果可复现。
+  /// 排序后同样保留「当前已加载的源」。单源模式（_rawLives == null）直接返回。
+  Future<void> autoSortSources() async {
+    final raw = _rawLives;
+    if (raw == null) return;
+    await _markLivesManaged();
+    final loadedRef = _loadedRaw();
+    int rank(Map<String, dynamic> m) => m['type'] == 'xtream' ? 1 : 0;
+    String nameOf(Map<String, dynamic> m) =>
+        (m['name']?.toString() ?? '').trim();
+    raw.sort((a, b) {
+      final r = rank(a) - rank(b);
+      if (r != 0) return r;
+      final byName = nameOf(a).compareTo(nameOf(b));
+      if (byName != 0) return byName;
+      return (a['url']?.toString() ?? '').compareTo(b['url']?.toString() ?? '');
+    });
+    await _persistLives();
+    _rebuildSourcesKeepingLoaded(loadedRef);
+  }
+
+  /// 找到当前「已加载」条目对应的原始 Map（按对象引用）。
+  Map<String, dynamic>? _loadedRaw() {
+    final raw = _rawLives;
+    if (raw == null) return null;
+    for (var i = 0; i < sources.length && i < raw.length; i++) {
+      if (sources[i].loaded) return raw[i];
+    }
+    return null;
+  }
+
+  /// 按 [_rawLives] 顺序重建 [sources]，并让 [loadedRef] 指向的那个源保持 loaded。
+  ///
+  /// 重排/排序只改变顺序，不联网；这里用 [identical] 按引用定位同一个源，
+  /// 因此 loaded 标记（以及 selectedSourceIndex）会跟着源移动，而不是钉在原下标。
+  void _rebuildSourcesKeepingLoaded(Map<String, dynamic>? loadedRef) {
+    final raw = _rawLives;
+    if (raw == null) {
+      _notifySources(const []);
+      return;
+    }
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final list = <LiveSource>[];
+    var loadedIndex = -1;
+    for (var i = 0; i < raw.length; i++) {
+      final n = (raw[i]['name']?.toString() ?? '').trim();
+      final ts = raw[i]['updatedAt'];
+      list.add(LiveSource(
+        name: n.isEmpty ? '直播源${i + 1}' : n,
+        loaded: false,
+        updatedAt: ts is int ? ts : nowMs,
+      ));
+      if (loadedRef != null && identical(raw[i], loadedRef)) {
+        loadedIndex = i;
+      }
+    }
+    if (loadedIndex >= 0) {
+      final s = list[loadedIndex];
+      list[loadedIndex] = LiveSource(
+        name: s.name,
+        loaded: true,
+        updatedAt: s.updatedAt,
+      );
+      selectedSourceIndex.value = loadedIndex;
+    }
+    _notifySources(list);
+  }
+
   /// 添加一个新的直播源（追加到列表末尾）
   /// 单源模式下自动转成多源模式
-  Future<void> addSource(String url, {String? name}) async {
+  ///
+  /// [xtream] 或地址形如 Xtream 账号链接时，保存为 `type=xtream` 源：
+  /// 存 `{base}/get.php?username=&password=` 链接，并另存 user/pass，
+  /// 加载时走 [XtreamService.fetchChannels]（不再当 m3u 拉取）。
+  Future<void> addSource(String url, {String? name, bool xtream = false}) async {
     url = url.trim();
     if (url.isEmpty) return;
     await _markLivesManaged();
     isLoading.value = true;
     error.value = null;
     try {
-      final newItem = <String, dynamic>{
-        'name': name?.trim().isEmpty ?? true ? '直播源${sources.length + 1}' : name!,
-        'url': url,
-        'updatedAt': DateTime.now().millisecondsSinceEpoch,
-      };
+      final isXtream =
+          xtream || XtreamService.instance.looksLikeXtream(url);
+      final Map<String, dynamic> newItem;
+      if (isXtream) {
+        final acc = XtreamService.instance.parseAccount(url);
+        if (acc == null || acc.user.isEmpty || acc.pass.isEmpty) {
+          error.value = '无法从地址解析出 Xtream 账号（需包含 base 与 username/password）。';
+          return;
+        }
+        newItem = <String, dynamic>{
+          'name': name?.trim().isEmpty ?? true
+              ? '直播源${sources.length + 1}'
+              : name!,
+          'url': XtreamService.instance
+              .buildAccountUrl(acc.base, acc.user, acc.pass),
+          'type': 'xtream',
+          'user': acc.user,
+          'pass': acc.pass,
+          'updatedAt': DateTime.now().millisecondsSinceEpoch,
+        };
+      } else {
+        newItem = <String, dynamic>{
+          'name': name?.trim().isEmpty ?? true
+              ? '直播源${sources.length + 1}'
+              : name!,
+          'url': url,
+          'updatedAt': DateTime.now().millisecondsSinceEpoch,
+        };
+      }
       if (_rawLives == null) {
         // 单源模式 → 先把当前的转成多源第一项，再追加新源
         if (_persistedUrl != null && _persistedUrl!.isNotEmpty) {

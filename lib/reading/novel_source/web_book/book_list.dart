@@ -6,6 +6,7 @@ import 'dart:collection';
 
 import 'package:html/parser.dart' as html_parser;
 
+import '../../../services/app_log.dart';
 import '../analyze/analyze_rule.dart';
 import '../model/book_source.dart';
 import '../model/search_book.dart';
@@ -75,6 +76,7 @@ class BookList {
     String? bookUrlRule;
     String? kindRule;
     String? lastChapterRule;
+    String? checkKeyWordRule;
 
     if (isSearch) {
       final rule = bookSource.getSearchRule();
@@ -85,6 +87,7 @@ class BookList {
       bookUrlRule = rule.bookUrl;
       kindRule = rule.bookKind;
       lastChapterRule = rule.bookLastChapter;
+      checkKeyWordRule = rule.checkKeyWord;
     } else {
       final exploreRule = bookSource.getExploreRule();
       if (exploreRule.bookList == null || exploreRule.bookList!.isEmpty) {
@@ -142,6 +145,24 @@ class BookList {
 
       for (final element in elements) {
         analyzeRule.setContent(element);
+        // ruleSearch.checkKeyWord：结果条目关键字校验（legado 语义）。
+        // 对每个结果条目求值 checkKeyWord 规则，取其文本做「包含搜索词」判断：
+        // 不含则丢弃该条（用于过滤站点返回的无关/推荐结果）。
+        // ⚠️ 仅在「规则非空 + 搜索词非空 + 校验文本非空」时才过滤 ——
+        //   校验文本为空（规则未命中）时保留该条，避免把整页结果清空；
+        //   未配置 checkKeyWord 的源行为与本改动前完全一致。
+        if (checkKeyWordRule != null &&
+            checkKeyWordRule.isNotEmpty &&
+            searchKey != null &&
+            searchKey.isNotEmpty) {
+          final ck = analyzeRule.getString(checkKeyWordRule);
+          if (ck.isNotEmpty && !ck.contains(searchKey)) {
+            AppLog.instance.d(
+                '[书源] checkKeyWord 过滤：源=${bookSource.bookSourceName} '
+                '「$ck」不含「$searchKey」');
+            continue;
+          }
+        }
         final book = _extractSearchBook(
           analyzeRule,
           bookSource,

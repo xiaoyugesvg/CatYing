@@ -10,6 +10,7 @@ import 'charts_page.dart';
 import 'profile_page.dart';
 import 'search_page.dart';
 import '../../common/theme.dart';
+import '../../services/nodejs_manager.dart';
 
 /// 音乐模块的 App 骨架 —— 移植自 Beans 的 `RootView.swift`。
 ///
@@ -103,6 +104,19 @@ class _MusicRootViewState extends State<MusicRootView> {
   /// 改用 `hotSearchResult()`：后台未就绪/接口失败会拿到 `ok:false` ✓
   /// → 提示条能真的出现、点了也真的会重试 ✓
   Future<void> _warmUp() async {
+    // 🔴 音乐数据服务跑在内嵌 Node 的 `/music/api` 上，与影视配置的
+    // spider 源**无关**；但 Node 全局只在「配置里有 spider 源」时才被拉起
+    //（`app_state.dart` 的 `_ensureNodeJSAndLoadSource`：
+    //  `hasSpiderSource == false` 直接 return）。
+    // 后果：纯 TVBox 配置（只有 CMS 采集站、没有 jar/js spider）下
+    // Node 从未启动 → `managementPort <= 0` → 音乐模块一切请求直接报
+    // 「后台服务未就绪」（用户实测："用 tvbox 源时音乐数据加载失败"，
+    //  而 catvod 类带 spider 的配置就能用）。
+    // 这里进音乐 tab 时自行确保 Node 已启动（已运行/已就绪时幂等返回）。
+    if (NodeJSManager.instance.managementPort <= 0) {
+      await NodeJSManager.instance.startNodeJS();
+      if (!mounted) return;
+    }
     final r = await MusicApi.instance.hotSearchResult();
     if (!mounted) return;
     setState(() => _warmUpFailed = !r.ok);

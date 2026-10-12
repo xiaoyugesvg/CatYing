@@ -147,6 +147,14 @@ class BookContent {
       ..setBaseUrl(baseUrl)
       ..setRedirectUrl(redirectUrl ?? baseUrl);
 
+    // ruleContent.webJs：legado 中用于在 WebView 内改写正文页 HTML。
+    // 本引擎正文经 AnalyzeUrl 抓取（WebView 抓取走本机代理、无注入 DOM 通道），
+    // 此处**语义不明确、暂只记录日志**，不参与解析（详见任务汇报）。
+    if (contentRule.webJs != null && contentRule.webJs!.isNotEmpty) {
+      AppLog.instance.d('[书源] ruleContent.webJs 已配置但暂未接入（仅记录）：'
+          '源=${bookSource.bookSourceName}');
+    }
+
     String content = '';
 
     if (contentRule.content != null && contentRule.content!.isNotEmpty) {
@@ -182,6 +190,14 @@ class BookContent {
 
     if (content.trim().isEmpty) {
       content = _extractGenericContent(body);
+    }
+
+    // ruleContent.payAction：正文疑似「需付费/需登录」时求值该 JS 规则。
+    // ⚠️ 引擎侧无读者付费弹窗/解锁跳转的目标 UI（相关 UI 在 pages/services，
+    //    本任务范围外，且项目内无对应跳转入口）⇒ **只做解析 + 日志提示**，
+    //    不产生跳转、不改变正文（详见任务汇报）。
+    if (contentRule.payAction != null && contentRule.payAction!.isNotEmpty) {
+      _handlePayAction(analyzeRule, contentRule.payAction!, content);
     }
 
     // 通用反爬：还原 CSS flex `order` 乱序段落（详见 _reorderCssOrderParagraphs）。
@@ -296,6 +312,40 @@ class BookContent {
       return parts.join('\n');
     } catch (_) {
       return '';
+    }
+  }
+
+  /// 付费/受限正文识别标记：正文为空或命中这些标记时，视为「需要付费/受限」，
+  /// 触发 `ruleContent.payAction` 求值（仅日志）。
+  static const List<String> _paidMarkers = <String>[
+    '需要付费', '付费阅读', '购买本章', '购买后可看', '本章为VIP',
+    'VIP章节', 'vip章节', '充值后', '订阅后可看', '余额不足', '金币不足',
+    '需要登录', '请登录后阅读', '登录后阅读',
+  ];
+
+  /// 正文是否疑似「需付费/受限」（空正文或命中 [_paidMarkers]）。
+  static bool _looksLikePaidContent(String content) {
+    final t = content.trim();
+    if (t.isEmpty) return true;
+    // 仅在短文本（付费提示通常很短）里查标记，避免正文中巧合命中。
+    if (t.length > 200) return false;
+    final lower = t.toLowerCase();
+    return _paidMarkers.any((mk) => lower.contains(mk.toLowerCase()));
+  }
+
+  /// 求值 `ruleContent.payAction`（legado：返回付费解锁动作数组）。
+  /// 本引擎仅解析 + 记日志，**不执行跳转**（无对应目标 UI）。
+  static void _handlePayAction(
+    AnalyzeRule analyzeRule,
+    String payAction,
+    String content,
+  ) {
+    if (!_looksLikePaidContent(content)) return;
+    try {
+      final out = analyzeRule.evalJs(payAction, content);
+      AppLog.instance.w('[书源] ruleContent.payAction 触发（正文疑似需付费/受限）：$out');
+    } catch (e) {
+      AppLog.instance.w('[书源] ruleContent.payAction 求值失败：$e');
     }
   }
 

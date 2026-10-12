@@ -940,15 +940,19 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                       Divider(height: 1, thickness: 1, color: _hairline),
                     InkWell(
                       onTap: () => _openReader(real),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 12),
-                        child: Text(ch.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                fontSize: AppTheme.fontBody,
-                                color: _titleColor)),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 12),
+                          child: Text(ch.name,
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: AppTheme.fontBody,
+                                  color: _titleColor)),
+                        ),
                       ),
                     ),
                   ],

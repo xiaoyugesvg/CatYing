@@ -269,6 +269,22 @@ function applyLegadoVars(str, state) {
   });
 }
 
+/**
+ * 对请求头值做 Legado 变量替换（`{{key}}` / `{{page}}` / `{{变量}}`）。
+ * 仅当头值是字符串且含 `{{` 时替换；未配置变量的源行为完全不变。
+ */
+function applyHeaderVars(headers, state) {
+  if (!headers || typeof headers !== 'object') return headers;
+  const out = {};
+  for (const key of Object.keys(headers)) {
+    const v = headers[key];
+    out[key] = typeof v === 'string' && v.includes('{{')
+      ? applyLegadoVars(v, state)
+      : v;
+  }
+  return out;
+}
+
 // ============================================================
 // 结果规整
 // ============================================================
@@ -436,7 +452,10 @@ async function search({ source, keyword, page = 1 }) {
   }
 
   const url = absolute(opt.url, base);
-  const headers = Object.assign({}, normalizeHeaders(source.header, source.jsLib), opt.headers || {});
+  const headers = applyHeaderVars(
+    Object.assign({}, normalizeHeaders(source.header, source.jsLib), opt.headers || {}),
+    state,
+  );
 
   let resp;
   try {
@@ -518,7 +537,7 @@ async function bookInfo({ source, bookUrl }) {
   let input;
   let finalUrl = bookUrl;
   try {
-    const resp = await httpGet(bookUrl, normalizeHeaders(source.header, source.jsLib));
+    const resp = await httpGet(bookUrl, applyHeaderVars(normalizeHeaders(source.header, source.jsLib), state));
     input = makeInputSafe(resp.text);
   } catch (e) {
     // 详情页拿不到也不算致命：目录可能仍能取
@@ -575,7 +594,7 @@ async function toc({ source, tocUrl }) {
   const url = absolute(opt.url, base);
   let text = '';
   try {
-    const resp = await httpGet(url, Object.assign({}, normalizeHeaders(source.header, source.jsLib), opt.headers || {}));
+    const resp = await httpGet(url, applyHeaderVars(Object.assign({}, normalizeHeaders(source.header, source.jsLib), opt.headers || {}), state));
     text = resp.text;
   } catch (e) {
     // 有些详情的 tocUrl 是 ajax 接口，失败时退回用 URL 本身当单章
@@ -631,10 +650,19 @@ async function content({ source, chapterUrl }) {
 
   let text = '';
   try {
-    const resp = await httpGet(url, Object.assign({}, normalizeHeaders(source.header, source.jsLib), opt.headers || {}));
+    const resp = await httpGet(url, applyHeaderVars(Object.assign({}, normalizeHeaders(source.header, source.jsLib), opt.headers || {}), state));
     text = resp.text;
   } catch (e) {
     return { ok: false, error: '正文请求失败：' + (e.message || e) };
+  }
+
+  // ruleContent.sourceRegex：命中则截取匹配部分（有分组取第 1 组，否则取整体），
+  // 与 Dart 引擎 AnalyzeUrl.getStrResponse 的口径一致。未配置时行为不变。
+  if (rule.sourceRegex) {
+    try {
+      const m = new RegExp(rule.sourceRegex, 's').exec(text);
+      if (m) text = m[1] != null ? m[1] : m[0];
+    } catch (_) { /* 非法正则忽略，保持原文 */ }
   }
 
   const input = makeInputSafe(text);

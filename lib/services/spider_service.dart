@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'app_log.dart';
+import 'dio_factory.dart';
 import 'nodejs_manager.dart';
 
 /// Spider 服务 - 对应 Swift SpiderService
@@ -21,10 +22,10 @@ class SpiderService {
   }
 
   static Dio _buildDio() {
-    return Dio(BaseOptions(
+    return buildDioWithDns(
       connectTimeout: const Duration(seconds: 60),
       receiveTimeout: const Duration(seconds: 60),
-    ))..interceptors.add(_AppLogInterceptor());
+    )..interceptors.add(_AppLogInterceptor());
   }
 
   // ============================================================

@@ -252,7 +252,7 @@ class _ContentViewState extends State<ContentView>
                 ),
                 const SizedBox(height: AppTheme.spacingXL),
                 Text(
-                  'TVBox',
+                  '猫影',
                   style: TextStyle(
                     fontSize: AppTheme.fontDisplay,
                     fontWeight: FontWeight.w800,

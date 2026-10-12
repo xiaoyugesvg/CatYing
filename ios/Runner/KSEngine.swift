@@ -12,7 +12,7 @@ import UIKit
 /// - MKV/AC3/DTS/ASS 等 AVPlayer 吃不下的格式全兼容，并自带系统小窗（PiP）；
 /// - 应用内画面：KSPlayerLayer 是控制器（NSObject），其 player.view 才是渲染视图，
 ///   由 UiKitView 平台视图宿主 addSubview；内核回退（ME→AV）时 layer 内部自动换视图；
-/// - 控制通道 'ks_player'（open/play/pause/seek/setRate/setVolume/getState/enterPip/exitPip）；
+/// - 控制通道 'ks_player'（open/play/pause/seek/setRate/setVolume/setMuted/getState/enterPip/exitPip）；
 /// - PiP 事件复用 "pip_manager" 通道名回调 Dart（onPipStarted/onPipStopped），
 ///   与 AVPlayer 路径共用 VideoPlayerPip 的同一套状态机；
 /// - 首选 KSMEPlayer（FFmpeg 全格式），失败自动回退 KSAVPlayer。
@@ -43,6 +43,12 @@ final class KSEngine: NSObject {
   private(set) var duration: Double = 0
   private(set) var position: Double = 0
 
+  /// 记住最近一次音量（0~1）与静音状态。每次 open 都会重建播放层、内核回退
+  /// （ME↔AV）也会换 player 实例 —— 必须在这两个时机重放下发，否则换台/换集
+  /// 会把静音重置回满音量（用户实测"静音后换台又有声音"）。
+  private var currentVolume: Float = 1.0
+  private var currentMuted = false
+
   /// 画面分辨率（来自 player.naturalSize）。0 表示尚未就绪或纯音频流。
   private(set) var videoWidth: Double = 0
   private(set) var videoHeight: Double = 0
@@ -50,6 +56,13 @@ final class KSEngine: NSObject {
 
   /// 应用内预览宿主（平台视图注册；弱引用，同 AvEngine.displayContainer 模式）
   private weak var displayHost: UIView?
+
+  /// 挂载重试计数（open 时重置）。KS 的 player.view 由内核懒创建，open /
+  /// readyToPlay / 平台视图 attach 三个挂载点的时序在冷启动下会竞态：
+  /// readyToPlay 早于平台视图创建时 attach 全部跳过，之后没人再补 →
+  /// 直播整页灰白（有声音没画面）。挂载失败时延迟重试，直到挂上或超时。
+  private var attachRetryCount = 0
+  private static let attachRetryMax = 30 // 100ms × 30 = 3s 封顶
 
   private override init() {
     super.init()
@@ -109,7 +122,15 @@ final class KSEngine: NSObject {
         result(nil)
       case "setVolume":
         let v = (call.arguments as? NSNumber)?.doubleValue ?? 1
-        self.playerLayer?.player.playbackVolume = Float(v)
+        self.currentVolume = Float(v)
+        // 音量为 0 即视为静音：同时置 isMuted，FF(ME) 内核仅靠 playbackVolume=0
+        // 有时仍会出声。
+        self.currentMuted = self.currentVolume <= 0
+        self.applyVolume()
+        result(nil)
+      case "setMuted":
+        self.currentMuted = (call.arguments as? NSNumber)?.boolValue ?? false
+        self.applyVolume()
         result(nil)
       case "getState":
         result(self.currentState())
@@ -178,6 +199,7 @@ final class KSEngine: NSObject {
     videoHeight = 0
     lastReportedPos = -1
     pendingPip = false
+    attachRetryCount = 0 // 新一轮 open：重置挂载重试预算
 
     let options = KSOptions()
     options.hardwareDecode = true
@@ -221,6 +243,8 @@ final class KSEngine: NSObject {
     let l = KSPlayerLayer(url: u, isAutoPlay: true, options: options, delegate: self)
     playerLayer = l
     isPlaying = true
+    // 重放音量/静音：新播放层默认满音量，不重放会丢掉上一次的静音状态
+    applyVolume()
     attachLayerToHost(l)
     observePip(l)
     emit("onPlaying", arguments: true)
@@ -249,10 +273,27 @@ final class KSEngine: NSObject {
     playerLayer = nil
   }
 
+  /// 把记住的音量/静音下发到当前播放层。open 重建播放层、内核回退后 ready
+  /// 都要重放一次，保证静音在换台/换集后依然生效且不被重置。
+  private func applyVolume() {
+    guard let player = playerLayer?.player else { return }
+    player.playbackVolume = currentMuted ? 0 : currentVolume
+    player.isMuted = currentMuted
+  }
+
   // MARK: - 应用内画面（平台视图挂载）
 
   private func attachLayerToHost(_ l: KSPlayerLayer) {
-    guard let host = displayHost, let view = l.player.view else { return }
+    guard let host = displayHost, let view = l.player.view else {
+      // 宿主未创建或内核 view 未就绪：延迟重试，直到挂上（或 open 重置/超时停止）
+      scheduleAttachRetry()
+      return
+    }
+    // 已挂到正确宿主：不再重复挂载（readyToPlay 与 attach(to:) 会重复进来）
+    if view.superview === host && view.frame == host.bounds {
+      attachRetryCount = KSEngine.attachRetryMax
+      return
+    }
     // 内核回退（ME→AV）时 player.view 可能换实例，先移除旧 view 防叠加，
     // 也避免 readyToPlay 与 attach(to:) 重复调用时残留旧视图。
     view.removeFromSuperview()
@@ -270,11 +311,30 @@ final class KSEngine: NSObject {
     if view.superview !== host {
       host.addSubview(view)
     }
+    attachRetryCount = KSEngine.attachRetryMax // 挂上即停止重试
+  }
+
+  /// 挂载重试：100ms 后重查一次，条件仍不齐则继续顺延，最多 3 秒。
+  /// closeLayer / detachDisplay 后 host 或 layer 为空，重试自然终止。
+  private func scheduleAttachRetry() {
+    guard attachRetryCount < KSEngine.attachRetryMax else { return }
+    attachRetryCount += 1
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+      guard let self = self, let l = self.playerLayer else { return }
+      if let host = self.displayHost, let view = l.player.view,
+         view.superview === host {
+        return // 已挂上
+      }
+      self.attachLayerToHost(l)
+    }
   }
 
   /// 平台视图创建时挂载现有播放层（晚于 open 的场景）
   func attach(to host: UIView) {
     displayHost = host
+    // 新宿主出现 = 新一轮挂载：重置重试预算（上一轮成功会把计数顶到上限，
+    // 不重置的话平台视图重建后再也触发不了重试）。
+    attachRetryCount = 0
     if let l = playerLayer {
       l.player.view?.removeFromSuperview()
       attachLayerToHost(l)
@@ -449,6 +509,8 @@ extension KSEngine: KSPlayerLayerDelegate {
       // ready 后 view 一定就绪，这里补挂保证画面上屏 ——
       // 否则直播/换台后只有声音没有画面（一片灰白，用户实测"FF核心直播有声无画"）。
       attachLayerToHost(layer)
+      // 内核就绪（含 ME↔AV 回退换实例）：重放音量/静音
+      applyVolume()
       let d = layer.player.duration
       if d.isFinite && d > 0 {
         duration = d

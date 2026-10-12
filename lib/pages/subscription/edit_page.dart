@@ -27,6 +27,19 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
   late bool _autoUpdate;
   late bool _locked;
 
+  /// 所选分类；[_autoKind] 为 true 时表示"自动识别"（保存时按 url 推断）
+  late SubscriptionKind _kind;
+  late bool _autoKind;
+
+  /// 可手动选择的分类（不含「未分类」，未分类由自动识别兜底）
+  static const List<SubscriptionKind> _selectableKinds = [
+    SubscriptionKind.videoConfig,
+    SubscriptionKind.live,
+    SubscriptionKind.bookSource,
+    SubscriptionKind.comicSource,
+    SubscriptionKind.xtream,
+  ];
+
   bool get isNew => widget.subscription == null;
 
   @override
@@ -37,6 +50,9 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
     _nameCtrl = TextEditingController(text: s?.name ?? '');
     _autoUpdate = s?.autoUpdate ?? true;
     _locked = s?.locked ?? false;
+    _kind = s?.kind ?? SubscriptionKind.unknown;
+    // 新建时默认「自动识别」，编辑时沿用已有分类
+    _autoKind = s == null;
   }
 
   @override
@@ -114,6 +130,54 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
                   ),
                 ),
               ],
+            ),
+          ),
+          const SizedBox(height: AppTheme.spacingLG),
+
+          // ---- 分类（导入分类，用于订阅管理分组显示）----
+          AppCard(
+            dense: true,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppTheme.spacingXS,
+                vertical: 12,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '分类',
+                    style: TextStyle(
+                      color: AppTheme.textTertiary,
+                      fontSize: AppTheme.fontCaption,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.spacingSM),
+                  Wrap(
+                    spacing: AppTheme.spacingSM,
+                    runSpacing: AppTheme.spacingSM,
+                    children: [
+                      // 新建时可选「自动识别」（按地址推断）
+                      if (isNew)
+                        SelectableChip(
+                          title: '自动识别',
+                          isSelected: _autoKind,
+                          onTap: () => setState(() => _autoKind = true),
+                        ),
+                      for (final k in _selectableKinds)
+                        SelectableChip(
+                          title: k.label,
+                          isSelected: !_autoKind && _kind == k,
+                          onTap: () => setState(() {
+                            _autoKind = false;
+                            _kind = k;
+                          }),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: AppTheme.spacingLG),
@@ -424,9 +488,11 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
       return;
     }
     final name = _nameCtrl.text.trim();
+    // 「自动识别」按地址推断，否则用用户选的分类
+    final chosenKind = _autoKind ? SubscriptionKind.inferKind(url) : _kind;
 
     if (isNew) {
-      final s = await svc.add(url: url, name: name);
+      final s = await svc.add(url: url, name: name, kind: chosenKind);
       s
         ..autoUpdate = _autoUpdate
         ..locked = _locked;
@@ -436,7 +502,8 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
         ..url = url
         ..name = name.isEmpty ? widget.subscription!.name : name
         ..autoUpdate = _autoUpdate
-        ..locked = _locked;
+        ..locked = _locked
+        ..kind = chosenKind;
       await svc.update(s);
     }
     if (!mounted) return;

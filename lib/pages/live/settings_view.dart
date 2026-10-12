@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../common/theme.dart';
 import 'blocked_categories_page.dart';
 import '../../services/live_service.dart';
+import '../../services/xtream_service.dart';
 import '../../widgets/app_toast.dart';
 
 /// 设置 → 直播：直播源管理 + 全局 EPG + 屏蔽分类
@@ -67,15 +68,39 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
       body: ListView(
         padding: EdgeInsets.fromLTRB(16, 8, 16, 40),
         children: [
-          Text(
-            '直播源管理',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: AppTheme.fontSubhead,
-              fontWeight: FontWeight.w600,
-            ),
+          Row(
+            children: [
+              Text(
+                '直播源管理',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: AppTheme.fontSubhead,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                tooltip: '自动排序',
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  Icons.sort_by_alpha_rounded,
+                  size: 20,
+                  color: AppTheme.textSecondary,
+                ),
+                onPressed: () async {
+                  final svc = LiveService.instance;
+                  final multi = svc.sources.length >= 2;
+                  await svc.autoSortSources();
+                  if (!mounted) return;
+                  AppToast.message(
+                    multi ? '已按名称自动排序' : '当前只有一个直播源，无需排序',
+                  );
+                  setState(() {});
+                },
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 2),
           Container(
             decoration: BoxDecoration(
               color: AppTheme.backgroundSecondary,
@@ -84,15 +109,36 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             child: Obx(() {
               // 依赖 sourcesTick，改名/增删后强制重建
               final _ = LiveService.instance.sourcesTick.value;
-              final srcs = LiveService.instance.sources.toList();
+              final svc = LiveService.instance;
+              final srcs = svc.sources.toList();
               // 「添加直播源」按钮必须**始终**可见：空列表时也要能直接加，
               // 否则全新安装要先到直播页加一个源、设置页才冒出按钮（用户实测困惑）。
-              final items = <Widget>[
-                if (srcs.isEmpty) const _EmptyRow(),
-                for (var i = 0; i < srcs.length; i++) _sourceTile(i, srcs[i]),
-                _addTile(),
-              ];
-              return Column(children: items);
+              return Column(
+                children: [
+                  if (srcs.isEmpty)
+                    const _EmptyRow()
+                  else
+                    // 源列表可拖动排序；「添加直播源」放在 ReorderableListView
+                    // 之外，因此不参与排序、也不可拖。
+                    ReorderableListView(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      buildDefaultDragHandles: false,
+                      onReorder: svc.reorderSource,
+                      children: [
+                        for (var i = 0; i < srcs.length; i++)
+                          _sourceTile(
+                            i,
+                            srcs[i],
+                            key: ValueKey(
+                              '$i|${srcs[i].name}|${svc.getSourceUrl(i) ?? ''}',
+                            ),
+                          ),
+                      ],
+                    ),
+                  _addTile(),
+                ],
+              );
             }),
           ),
           SizedBox(height: 24),
@@ -244,27 +290,52 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
     );
   }
 
-  Widget _sourceTile(int index, LiveSource src) {
+  Widget _sourceTile(int index, LiveSource src, {required Key key}) {
     final svc = LiveService.instance;
     final loaded = src.loaded;
     final sourceUrl = svc.getSourceUrl(index);
     final canEdit = sourceUrl != null && sourceUrl.isNotEmpty;
+    // Xtream 源加标记，并展示到期时间（如「Xtream · 到期 2026-01-01」）
+    final isXtream = svc.isXtreamSource(index);
+    final expiry = svc.xtreamExpiryText(index);
+    final sub = isXtream
+        ? 'Xtream${expiry == null ? ' · ${src.statusText()}' : ' · $expiry'}'
+        : src.statusText();
     return ListTile(
+      key: key,
       contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      leading: Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: loaded
-              ? AppTheme.accentColor.withValues(alpha: 0.18)
-              : AppTheme.backgroundTertiary,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(
-          Icons.live_tv,
-          color: loaded ? AppTheme.accentColor : AppTheme.textTertiary,
-          size: 20,
-        ),
+      // 左侧：拖动手柄 + 图标。手柄套 ReorderableDragStartListener，
+      // 只有按住手柄才进入拖动，点击整行仍是「切换加载该源」。
+      leading: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ReorderableDragStartListener(
+            index: index,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Icon(
+                Icons.drag_indicator,
+                color: AppTheme.textTertiary,
+                size: 20,
+              ),
+            ),
+          ),
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: loaded
+                  ? AppTheme.accentColor.withValues(alpha: 0.18)
+                  : AppTheme.backgroundTertiary,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.live_tv,
+              color: loaded ? AppTheme.accentColor : AppTheme.textTertiary,
+              size: 20,
+            ),
+          ),
+        ],
       ),
       title: Text(
         src.name,
@@ -275,7 +346,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
         ),
       ),
       subtitle: Text(
-        src.statusText(),
+        sub,
         style: TextStyle(
           color: loaded ? AppTheme.textSecondary : AppTheme.textTertiary,
           fontSize: AppTheme.fontFootnote,
@@ -449,62 +520,15 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
       ),
       trailing: Icon(Icons.chevron_right, color: AppTheme.textTertiary),
       onTap: () async {
-        final result = await showDialog<(String, String)>(
+        final result = await showDialog<({String name, String url, bool xtream})>(
           context: context,
-          builder: (ctx) {
-            final nameCtrl = TextEditingController();
-            final ctrl = TextEditingController();
-            return AlertDialog(
-              backgroundColor: AppTheme.backgroundSecondary,
-              title: Text(
-                '添加直播源',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: AppTheme.fontHeadline,
-                ),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: nameCtrl,
-                    style: TextStyle(color: AppTheme.textPrimary),
-                    decoration: InputDecoration(
-                      hintText: '源名称（可选，留空自动取地址）',
-                      hintStyle: TextStyle(color: AppTheme.textTertiary),
-                    ),
-                  ),
-                  SizedBox(height: 10),
-                  TextField(
-                    controller: ctrl,
-                    style: TextStyle(color: AppTheme.textPrimary),
-                    decoration: InputDecoration(
-                      hintText: 'm3u / txt 地址',
-                      hintStyle: TextStyle(color: AppTheme.textTertiary),
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('取消'),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx, (
-                    nameCtrl.text.trim(),
-                    ctrl.text.trim(),
-                  )),
-                  child: const Text('添加'),
-                ),
-              ],
-            );
-          },
+          builder: (ctx) => const _AddLiveSourceDialog(),
         );
-        if (result != null && result.$2.isNotEmpty) {
+        if (result != null && result.url.isNotEmpty) {
           await LiveService.instance.addSource(
-            result.$2,
-            name: result.$1.isEmpty ? null : result.$1,
+            result.url,
+            name: result.name.isEmpty ? null : result.name,
+            xtream: result.xtream,
           );
           if (mounted) {
             final err = LiveService.instance.error.value;
@@ -537,6 +561,174 @@ class _EmptyRow extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 「添加直播源」对话框：支持 m3u / txt 地址与 Xtream 账号两种模式。
+class _AddLiveSourceDialog extends StatefulWidget {
+  const _AddLiveSourceDialog();
+
+  @override
+  State<_AddLiveSourceDialog> createState() => _AddLiveSourceDialogState();
+}
+
+class _AddLiveSourceDialogState extends State<_AddLiveSourceDialog> {
+  final _nameCtrl = TextEditingController();
+  final _urlCtrl = TextEditingController();
+  final _hostCtrl = TextEditingController();
+  final _userCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  bool _xtream = false;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _urlCtrl.dispose();
+    _hostCtrl.dispose();
+    _userCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
+
+  InputDecoration _dec(String hint) => InputDecoration(
+    filled: true,
+    fillColor: AppTheme.backgroundTertiary,
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide.none,
+    ),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+    hintText: hint,
+    hintStyle: TextStyle(
+      color: AppTheme.textTertiary,
+      fontSize: AppTheme.fontSubhead,
+    ),
+  );
+
+  void _submit() {
+    final name = _nameCtrl.text.trim();
+    if (_xtream) {
+      // 服务器地址可填 host:port，也可直接粘完整 get.php 链接
+      final acc = XtreamService.instance.parseAccount(_hostCtrl.text);
+      if (acc == null || acc.base.isEmpty) {
+        AppToast.message('请输入有效的 host:port 或完整账号链接');
+        return;
+      }
+      final user =
+          _userCtrl.text.trim().isNotEmpty ? _userCtrl.text.trim() : acc.user;
+      final pass =
+          _passCtrl.text.trim().isNotEmpty ? _passCtrl.text.trim() : acc.pass;
+      if (user.isEmpty || pass.isEmpty) {
+        AppToast.message('请填写用户名和密码');
+        return;
+      }
+      final url = XtreamService.instance.buildAccountUrl(acc.base, user, pass);
+      Navigator.pop(context, (name: name, url: url, xtream: true));
+    } else {
+      final url = _urlCtrl.text.trim();
+      if (url.isEmpty) {
+        AppToast.message('请输入 m3u / txt 地址');
+        return;
+      }
+      Navigator.pop(context, (name: name, url: url, xtream: false));
+    }
+  }
+
+  Widget _modeChip(String label, bool selected, VoidCallback onTap) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onTap(),
+      labelStyle: TextStyle(
+        color: selected ? AppTheme.textPrimary : AppTheme.textSecondary,
+        fontSize: AppTheme.fontFootnote,
+      ),
+      selectedColor: AppTheme.accentColor.withValues(alpha: 0.25),
+      backgroundColor: AppTheme.backgroundTertiary,
+      side: BorderSide.none,
+      showCheckmark: false,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fieldStyle = TextStyle(
+      color: AppTheme.textPrimary,
+      fontSize: AppTheme.fontSubhead,
+    );
+    return AlertDialog(
+      backgroundColor: AppTheme.backgroundSecondary,
+      title: Text(
+        '添加直播源',
+        style: TextStyle(
+          color: AppTheme.textPrimary,
+          fontSize: AppTheme.fontHeadline,
+        ),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                _modeChip(
+                  'm3u / txt 地址',
+                  !_xtream,
+                  () => setState(() => _xtream = false),
+                ),
+                const SizedBox(width: 8),
+                _modeChip(
+                  'Xtream 账号',
+                  _xtream,
+                  () => setState(() => _xtream = true),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _nameCtrl,
+              style: fieldStyle,
+              decoration: _dec('源名称（可选）'),
+            ),
+            const SizedBox(height: 10),
+            if (_xtream) ...[
+              TextField(
+                controller: _hostCtrl,
+                keyboardType: TextInputType.url,
+                style: fieldStyle,
+                decoration: _dec('服务器地址 host:port 或完整 get.php 链接'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _userCtrl,
+                style: fieldStyle,
+                decoration: _dec('用户名'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _passCtrl,
+                style: fieldStyle,
+                decoration: _dec('密码'),
+              ),
+            ] else
+              TextField(
+                controller: _urlCtrl,
+                keyboardType: TextInputType.url,
+                style: fieldStyle,
+                decoration: _dec('m3u / txt 地址'),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        TextButton(onPressed: _submit, child: const Text('添加')),
+      ],
     );
   }
 }

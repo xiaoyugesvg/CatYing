@@ -1,12 +1,83 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
-import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/app_log.dart';
+
+/// 订阅的「导入分类」——用于在订阅管理里按来源分组显示。
+///
+/// 注意：这是**展示/归类**用的，不影响是否激活、也不影响配置加载。
+/// 旧数据没有这个字段时，[SubscriptionKind.inferKind] 会按 url 猜一个，
+/// 猜不出就落到 [SubscriptionKind.unknown]，**绝不**默认成 [videoConfig]（避免误判）。
+enum SubscriptionKind {
+  videoConfig,
+  live,
+  bookSource,
+  comicSource,
+  xtream,
+  unknown;
+
+  /// 按地址推断导入分类（猜不出返回 [unknown]，不擅自猜成影视配置）
+  ///
+  /// 规则：
+  ///   · 含 `get.php?username=` → Xtream 账号
+  ///   · 路径以 `.m3u` / `.m3u8` / `.txt` 结尾 → 直播源
+  ///   · 其余 → 未分类
+  static SubscriptionKind inferKind(String url) {
+    final u = url.trim().toLowerCase();
+    if (u.isEmpty) return SubscriptionKind.unknown;
+    if (u.contains('get.php?username=')) return SubscriptionKind.xtream;
+    final path = Uri.tryParse(u)?.path ?? u;
+    if (path.endsWith('.m3u') ||
+        path.endsWith('.m3u8') ||
+        path.endsWith('.txt')) {
+      return SubscriptionKind.live;
+    }
+    return SubscriptionKind.unknown;
+  }
+}
+
+extension SubscriptionKindX on SubscriptionKind {
+  /// 中文名（分组标题 / 徽标用）
+  String get label {
+    switch (this) {
+      case SubscriptionKind.videoConfig:
+        return '影视配置';
+      case SubscriptionKind.live:
+        return '直播源';
+      case SubscriptionKind.bookSource:
+        return '书源';
+      case SubscriptionKind.comicSource:
+        return '漫画源';
+      case SubscriptionKind.xtream:
+        return 'Xtream 账号';
+      case SubscriptionKind.unknown:
+        return '未分类';
+    }
+  }
+
+  /// 图标（与现有 Material 图标风格一致）
+  IconData get icon {
+    switch (this) {
+      case SubscriptionKind.videoConfig:
+        return Icons.movie_outlined;
+      case SubscriptionKind.live:
+        return Icons.live_tv_outlined;
+      case SubscriptionKind.bookSource:
+        return Icons.menu_book_outlined;
+      case SubscriptionKind.comicSource:
+        return Icons.auto_stories_outlined;
+      case SubscriptionKind.xtream:
+        return Icons.vpn_key_outlined;
+      case SubscriptionKind.unknown:
+        return Icons.rss_feed;
+    }
+  }
+}
 
 /// 一条订阅（= 一个点播接口地址的条目）
 class Subscription {
@@ -31,6 +102,9 @@ class Subscription {
   /// 内容指纹：配置内容的 CRC/hash 前 8 位，用于判断"内容是否真的变了"
   String fingerprint;
 
+  /// 导入分类（旧数据缺失时由 [inferKind] 推断）
+  SubscriptionKind kind;
+
   Subscription({
     required this.id,
     required this.url,
@@ -39,6 +113,7 @@ class Subscription {
     this.locked = false,
     this.lastUpdatedMs = 0,
     this.fingerprint = '',
+    this.kind = SubscriptionKind.unknown,
   });
 
   Map<String, Object?> toJson() => {
@@ -49,17 +124,46 @@ class Subscription {
         'locked': locked,
         'lastUpdatedMs': lastUpdatedMs,
         'fingerprint': fingerprint,
+        'kind': kind.name,
       };
 
-  static Subscription fromJson(Map<String, Object?> j) => Subscription(
-        id: (j['id'] ?? '') as String,
-        url: (j['url'] ?? '') as String,
-        name: (j['name'] ?? '') as String,
-        autoUpdate: (j['autoUpdate'] ?? true) as bool,
-        locked: (j['locked'] ?? false) as bool,
-        lastUpdatedMs: (j['lastUpdatedMs'] as num?)?.toInt() ?? 0,
-        fingerprint: (j['fingerprint'] ?? '') as String,
-      );
+  static Subscription fromJson(Map<String, Object?> j) {
+    final url = (j['url'] ?? '') as String;
+    final rawKind = j['kind'];
+    // 向后兼容：旧数据没有 kind 字段时按 url 推断；
+    // 有 kind 字段则直接解析（解析不出归 unknown，不再猜）。
+    final kind = rawKind is String
+        ? _kindFromName(rawKind)
+        : Subscription.inferKind(url);
+    return Subscription(
+      id: (j['id'] ?? '') as String,
+      url: url,
+      name: (j['name'] ?? '') as String,
+      autoUpdate: (j['autoUpdate'] ?? true) as bool,
+      locked: (j['locked'] ?? false) as bool,
+      lastUpdatedMs: (j['lastUpdatedMs'] as num?)?.toInt() ?? 0,
+      fingerprint: (j['fingerprint'] ?? '') as String,
+      kind: kind,
+    );
+  }
+
+  static SubscriptionKind _kindFromName(String name) {
+    for (final k in SubscriptionKind.values) {
+      if (k.name == name) return k;
+    }
+    return SubscriptionKind.unknown;
+  }
+
+  /// 按地址推断导入分类（猜不出返回 [unknown]，不擅自猜成影视配置）
+  /// 按地址推断导入分类（复用 [SubscriptionKind.inferKind]）
+  static SubscriptionKind inferKind(String url) =>
+      SubscriptionKind.inferKind(url);
+
+  /// 分类中文名（供列表徽标 / 分组标题复用）
+  String get kindLabel => kind.label;
+
+  /// 分类图标
+  IconData get kindIcon => kind.icon;
 
   /// 上次更新的展示文案（yyyy.M.d）
   String get lastUpdatedText {
@@ -165,16 +269,21 @@ class SubscriptionService extends GetxService {
   String _newId() => DateTime.now().microsecondsSinceEpoch.toString();
 
   /// 新增订阅；若当前没有任何订阅，设为激活
+  ///
+  /// [kind] 为空时按 url 推断（见 [Subscription.inferKind]）。
   Future<Subscription> add({
     required String url,
     String? name,
+    SubscriptionKind? kind,
   }) async {
+    final trimmed = url.trim();
     final s = Subscription(
       id: _newId(),
-      url: url.trim(),
+      url: trimmed,
       name: (name == null || name.trim().isEmpty)
           ? _deriveName(url)
           : name.trim(),
+      kind: kind ?? Subscription.inferKind(trimmed),
     );
     subscriptions.add(s);
     if (activeId.value.isEmpty) activeId.value = s.id;

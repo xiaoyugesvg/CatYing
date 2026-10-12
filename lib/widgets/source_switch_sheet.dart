@@ -52,6 +52,28 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
     Navigator.of(context).pop(true);
   }
 
+  /// 固定分组顺序；只返回非空分组，组内保持列表原顺序。
+  static const List<SourceKind> _kindOrder = [
+    SourceKind.cms,
+    SourceKind.js,
+    SourceKind.t4,
+    SourceKind.jar,
+    SourceKind.unknown,
+  ];
+
+  List<MapEntry<SourceKind, List<SourceBean>>> _groupByKind(
+      List<SourceBean> list) {
+    final bucket = <SourceKind, List<SourceBean>>{};
+    for (final s in list) {
+      bucket.putIfAbsent(s.sourceKind, () => []).add(s);
+    }
+    return [
+      for (final kind in _kindOrder)
+        if (bucket[kind]?.isNotEmpty ?? false)
+          MapEntry(kind, bucket[kind]!),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final h = MediaQuery.of(context).size.height;
@@ -131,6 +153,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
               // 源列表：占满剩余空间，随时可滚动（搜索中/键盘弹起时也一样）
               Expanded(
                 child: Obx(() {
+                  // ignore: invalid_use_of_protected_member
                   final all = ApiConfig.instance.sourceBeanList.value;
                   final selectedKey =
                       ApiConfig.instance.homeSourceBean.value?.key;
@@ -152,46 +175,88 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                       ),
                     );
                   }
-                  if (_gridMode) {
-                    return GridView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        mainAxisSpacing: 8,
-                        crossAxisSpacing: 10,
-                        childAspectRatio: 3.4,
-                      ),
-                      itemCount: list.length,
-                      itemBuilder: (context, index) {
-                        final source = list[index];
-                        return _SourceTile(
-                          name: source.name,
-                          selected: source.key == selectedKey,
-                          onTap: () => _selectSource(source),
-                        );
-                      },
-                    );
-                  }
-                  return ListView.builder(
+                  // 按源类型分组：组标题 = 类型名 + 数量，组内保持原有交互
+                  // （网格/单列两种形态都沿用，只是前面插一行分组标题）。
+                  final groups = _groupByKind(list);
+                  return ListView(
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                     physics: const AlwaysScrollableScrollPhysics(),
-                    itemCount: list.length,
-                    itemBuilder: (context, index) {
-                      final source = list[index];
-                      return _SourceRow(
-                        name: source.name,
-                        selected: source.key == selectedKey,
-                        onTap: () => _selectSource(source),
-                      );
-                    },
+                    children: [
+                      for (final g in groups) ...[
+                        _SourceGroupHeader(
+                            kind: g.key, count: g.value.length),
+                        if (_gridMode)
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            padding: const EdgeInsets.only(bottom: 8),
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              mainAxisSpacing: 8,
+                              crossAxisSpacing: 10,
+                              childAspectRatio: 3.4,
+                            ),
+                            itemCount: g.value.length,
+                            itemBuilder: (context, index) {
+                              final source = g.value[index];
+                              return _SourceTile(
+                                name: source.name,
+                                selected: source.key == selectedKey,
+                                onTap: () => _selectSource(source),
+                              );
+                            },
+                          )
+                        else
+                          for (final source in g.value)
+                            _SourceRow(
+                              name: source.name,
+                              selected: source.key == selectedKey,
+                              onTap: () => _selectSource(source),
+                            ),
+                      ],
+                    ],
                   );
                 }),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 分组标题：源类型中文名 + 数量
+class _SourceGroupHeader extends StatelessWidget {
+  final SourceKind kind;
+  final int count;
+
+  const _SourceGroupHeader({required this.kind, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 6, left: 2),
+      child: Row(
+        children: [
+          Text(
+            kind.label,
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: AppTheme.fontCaption,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '$count',
+            style: TextStyle(
+              color: AppTheme.textTertiary,
+              fontSize: AppTheme.fontCaption,
+            ),
+          ),
+        ],
       ),
     );
   }

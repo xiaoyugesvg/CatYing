@@ -369,6 +369,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   late VideoFitType _videoFit;
   double _volume = 1.0;
+
+  /// 上一次的非零音量：取消静音时恢复到该值（而不是直接拉满）。
+  double _lastNonZeroVolume = 1.0;
   // 应用内亮度遮罩：1.0 = 不遮（系统亮度）。默认不要半黑。
   double _brightness = 1.0;
 
@@ -677,7 +680,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       }),
     );
 
-    _volume = _player.state.volume;
+    // state.volume 各内核统一为 0-100；UI 内部 _volume 用 0-1，需换算，
+    // 否则初次进入时音量态被写成 100（取消静音/图标判定都会错）。
+    _volume = (_player.state.volume / 100).clamp(0.0, 1.0);
+    if (_volume > 0) _lastNonZeroVolume = _volume;
     if (_ownsPlayer) {
       _openMedia();
     } else {
@@ -893,6 +899,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _persisted.resumeApplied = true;
     // 新一次加载开始 → 复位"卡死"计时（否则上一集的计时会立刻误报）
     _resetStallWatch();
+    AppLog.instance.log('[video_player] 开始播放: '
+        '核心=${_player.runtimeType} '
+        'url=${widget.url} '
+        '续播=${widget.resumeSeconds ?? 0}s '
+        'headers=${headers.isEmpty ? '无' : headers.keys.join(',')}');
     _player.open(AppMedia(widget.url, httpHeaders: headers, start: start));
     _scheduleResumeSeek();
   }
@@ -2114,7 +2125,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   void _setVolume(double v) {
     final clamped = v.clamp(0.0, 1.0);
-    _player.setVolume(clamped * 100); // media_kit 用 0-100
+    // 记住非零音量，供取消静音时恢复（对齐用户预期："取消静音回到原音量"）
+    if (clamped > 0) _lastNonZeroVolume = clamped;
+    _player.setVolume(clamped * 100); // 各内核统一 0-100（media_kit/AV/FF 一致）
     setState(() => _volume = clamped);
   }
 
@@ -2122,7 +2135,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (_volume > 0) {
       _setVolume(0);
     } else {
-      _setVolume(1);
+      _setVolume(_lastNonZeroVolume > 0 ? _lastNonZeroVolume : 1.0);
     }
     _scheduleHideControls();
   }

@@ -51,6 +51,10 @@ class KSPlayer extends AppPlayer {
   double _rate = 1.0;
   double _volume = 100;
 
+  /// 是否静音。音量拖到 0 / 点静音都置 true，原生侧据此同时下发 `isMuted`
+  /// （仅靠 playbackVolume=0，FF(ME) 内核有时不真正静音）。
+  bool _muted = false;
+
   /// 真实画面分辨率（原生 naturalSize 回传），0 表示未就绪/纯音频
   double _videoWidth = 0;
   double _videoHeight = 0;
@@ -175,7 +179,15 @@ class KSPlayer extends AppPlayer {
   @override
   Future<void> setVolume(double v) async {
     _volume = v.clamp(0.0, 100.0);
-    await _channel.invokeMethod('setVolume', _volume / 100.0);
+    // 音量为 0 视为静音：原生侧显式置 isMuted，保证 FF 内核真正无声；
+    // 取消静音（>0）时同时解除 muted 并恢复该音量。
+    _muted = _volume <= 0;
+    try {
+      await _channel.invokeMethod('setVolume', _muted ? 0.0 : _volume / 100.0);
+      await _channel.invokeMethod('setMuted', _muted);
+    } catch (_) {
+      // 通道不可用时不阻断播放
+    }
   }
 
   @override
