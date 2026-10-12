@@ -12,7 +12,6 @@ import '../../services/player_prefs.dart';
 import '../../widgets/app_player.dart';
 import '../../widgets/ios_av_player.dart';
 import '../../widgets/ks_player.dart';
-import '../../widgets/aether_player.dart';
 import '../../widgets/mpv_app_player.dart';
 import '../../widgets/video_player.dart';
 
@@ -72,10 +71,6 @@ class _MediaLibraryPlayerPageState extends State<MediaLibraryPlayerPage> {
     }
     if (engine == PlayerEngine.ksplayer && Platform.isIOS) {
       return KSPlayer(config: const AppConfig(title: 'TVBox'));
-    }
-    if (engine == PlayerEngine.aether && Platform.isIOS) {
-      // 第五核心「AE」：仅 iOS 17+ 可选，偏好加载时已做门槛回退
-      return AetherPlayer(config: const AppConfig(title: 'TVBox'));
     }
     if (Platform.isIOS) {
       return IosAvPlayer(config: const AppConfig(title: 'TVBox'));

@@ -25,7 +25,6 @@ import '../../widgets/common_widgets.dart';
 import '../../widgets/app_player.dart';
 import '../../widgets/ios_av_player.dart';
 import '../../widgets/ks_player.dart';
-import '../../widgets/aether_player.dart';
 import '../../widgets/mpv_app_player.dart';
 import '../../widgets/video_player.dart';
 import '../../widgets/video_player_pip.dart';
@@ -633,9 +632,6 @@ class _DetailPageState extends State<DetailPage> {
       _player = mpv;
     } else if (engine == PlayerEngine.ksplayer && Platform.isIOS) {
       _player = KSPlayer(config: const AppConfig(title: 'TVBox'));
-    } else if (engine == PlayerEngine.aether && Platform.isIOS) {
-      // 第五核心「AE」（AetherEngine）：仅 iOS 17+ 可选，偏好加载时已做门槛回退
-      _player = AetherPlayer(config: const AppConfig(title: 'TVBox'));
     } else if (Platform.isIOS) {
       _player = IosAvPlayer(config: const AppConfig(title: 'TVBox'));
     } else {
