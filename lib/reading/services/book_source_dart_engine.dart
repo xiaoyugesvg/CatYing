@@ -30,14 +30,17 @@
 /// 只会让"Node 跑不通、Dart 引擎跑得通"的源多一条路。
 ///
 /// ── 已知取舍（如实标注）──────────────────────────────────────
-/// · `bsExplore`（发现页）**暂未接管** ⇒ 返回 null 走 Node（其分类/列表契约
-///   与 `ExploreResult` 的映射还需单独核对）。
+/// · 六个动作（bsSearch / bsExplore / bsBookInfo / bsToc / bsContent / bsLogin）
+///   均已接管；失败/空结果/异常一律返回 null ⇒ 回落 Node（现行为不变）。
+/// · `bsLogin` 仅处理表单 POST + Set-Cookie 提取；登录态写在 body 里的站点
+///   （如返回 token JSON）会因无 Set-Cookie ⇒ 返回 null ⇒ 回落 Node。
 /// · `bsContent` **同时回 `content` 与 `images`**（不再二选一）✓ ——
 ///   客户端按「正文是否为空」（漫画源则「有没有图」）判定是否进图片模式 ✓。
 /// · 目录字段名差异已处理：引擎给 `title`，服务契约要 `name`。
 library;
 
 import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 
 // ⚠️ 本文件在 lib/reading/services/ 下，而引擎在 lib/reading/novel_source/
 // ⇒ 相对路径必须带 novel_source/ 前缀（首次交付时漏了，导致 19 个
@@ -67,7 +70,29 @@ class BookSourceDartEngine {
     'bsBookInfo',
     'bsToc',
     'bsContent',
+    'bsLogin',
   };
+
+  /// 登录专用 Dio：关重定向（302 响应头才有 Set-Cookie）、短超时、
+  /// 宽松状态码（登录失败常返回 4xx，要取响应体判断）。
+  static Dio? _loginDio;
+  static Dio get _loginClient {
+    if (_loginDio == null) {
+      final d = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 15),
+        followRedirects: false,
+        validateStatus: (s) => s != null && s < 600,
+      ));
+      d.options.headers.addAll({
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+      });
+      _loginDio = d;
+    }
+    return _loginDio!;
+  }
 
   /// 处理一个 `bs*` 动作；**返回 null 表示"交给 Node"**。
   Future<Map<String, dynamic>?> handle(Map<String, dynamic> body) async {
@@ -187,6 +212,66 @@ class BookSourceDartEngine {
             'content': text,
             if (imgs.isNotEmpty) 'type': 'images',
             if (imgs.isNotEmpty) 'images': imgs,
+          };
+
+        case 'bsLogin':
+          // 表单登录：POST 到登录接口，从 Set-Cookie 响应头提取 Cookie。
+          // 契约：{ok, cookie, error}；调用方把 cookie 写进书源 header。
+          // ⚠️ 登录接口常返回 302 并在响应头带 Set-Cookie ⇒ 必须关重定向，
+          //   否则 Dio 跟随跳转后最终响应里拿不到 Set-Cookie。
+          final loginUrl = body['url']?.toString() ?? '';
+          if (loginUrl.isEmpty) return null;
+          final method = (body['method']?.toString() ?? 'POST').toUpperCase();
+          final contentType =
+              body['contentType']?.toString() ??
+                  'application/x-www-form-urlencoded';
+          final fields = body['body'];
+          final reqHeaders = <String, String>{};
+          if (body['headers'] is Map) {
+            for (final e in (body['headers'] as Map).entries) {
+              reqHeaders[e.key.toString()] = e.value.toString();
+            }
+          }
+          Object? reqData;
+          if (fields is Map) {
+            if (contentType.contains('json')) {
+              reqData = fields.map(
+                  (k, v) => MapEntry(k.toString(), v));
+            } else {
+              // form-urlencoded：Dio 自动编码
+              reqData = fields.map(
+                  (k, v) => MapEntry(k.toString(), v.toString()));
+            }
+          }
+          final opts = Options(
+            method: method,
+            headers: {
+              ...reqHeaders,
+              'Content-Type': contentType,
+            },
+          );
+          final resp = await _loginClient.request(
+            loginUrl,
+            data: reqData,
+            options: opts,
+          );
+          // 从所有响应头提取 Set-Cookie（Dio 把同名多值合成 List）
+          final setCookies = resp.headers['set-cookie'] ?? <String>[];
+          final cookieParts = <String>[];
+          for (final sc in setCookies) {
+            // 只取第一个 ; 之前的 name=value（丢弃 expires/path/domain 等属性）
+            final first = sc.split(';').first.trim();
+            if (first.isNotEmpty) cookieParts.add(first);
+          }
+          final cookie = cookieParts.join('; ');
+          if (cookie.isEmpty) {
+            // 没有 Set-Cookie 不算成功 ⇒ 回落 Node（有些站登录态在 body 里，
+            // Node 引擎可能有更完整的处理）
+            return null;
+          }
+          return <String, dynamic>{
+            'ok': true,
+            'cookie': cookie,
           };
       }
     } catch (e) {
