@@ -178,6 +178,12 @@ class QuickJsRuntime2 extends JavascriptRuntime {
   }
 
   /// Evaluate js script.
+  ///
+  /// 构造时若传了 [timeout]（> 0），本次求值受「JS 执行预算」约束：
+  /// 脚本自身跑超时会被中断并返回一条可读的超时错误，而不是卡死线程。
+  /// 宿主函数（Dart 侧 IO，如 java.ajax 抓网页）的等待**不计入**预算 ——
+  /// 原生侧每次宿主调用返回后都会重新计时（见 js_eval_rearm），
+  /// 所以合法的慢速网络请求不会被误杀。
   JsEvalResult evaluate(
     String command, {
     String? name,
@@ -186,22 +192,43 @@ class QuickJsRuntime2 extends JavascriptRuntime {
   }) {
     _ensureEngine();
     final ctx = _ctx!;
-    final jsval = jsEval(
-      ctx,
-      command,
-      name ?? '<eval>',
-      evalFlags ?? JSEvalFlag.GLOBAL,
-    );
+    final budgetMs = timeout ?? 0;
+    // 原生库未导出 jsSetEvalTimeout（未打补丁/旧预编译库）时静默跳过，
+    // 退化为旧的无限时行为，不会崩。
+    final armTimeout = budgetMs > 0 && jsSetEvalTimeout != null;
+    if (armTimeout) jsSetEvalTimeout!(_rt!, budgetMs);
+    try {
+      final jsval = jsEval(
+        ctx,
+        command,
+        name ?? '<eval>',
+        evalFlags ?? JSEvalFlag.GLOBAL,
+      );
 
-    if (jsIsException(jsval) != 0) {
+      if (jsIsException(jsval) != 0) {
+        jsFreeValue(ctx, jsval);
+        JSError exception = _parseJSException(ctx);
+        // 超时中断原生只抛 `InternalError: interrupted`，对用户不直观 ⇒
+        // 识别出来换成明确说明，便于在运行日志里定位是哪个源跑飞了。
+        if (armTimeout && _looksInterrupted(exception)) {
+          final e = JSError('书源脚本执行超时（${budgetMs}ms），已强制中断'
+              '（仅计脚本自身耗时，宿主请求等待不计入）');
+          return JsEvalResult(e.toString(), e, isError: true);
+        }
+        return JsEvalResult(exception.toString(), exception, isError: true);
+      }
+      final result = _jsToDart(ctx, jsval);
       jsFreeValue(ctx, jsval);
-      JSError exception = _parseJSException(ctx);
-      return JsEvalResult(exception.toString(), exception, isError: true);
+      return JsEvalResult(result?.toString() ?? "null", result);
+    } finally {
+      // 求值结束立刻清掉预算：否则截止时间已过，会瞬间打断后续每一次求值
+      if (armTimeout) jsSetEvalTimeout!(_rt!, 0);
     }
-    final result = _jsToDart(ctx, jsval);
-    jsFreeValue(ctx, jsval);
-    return JsEvalResult(result?.toString() ?? "null", result);
   }
+
+  /// 异常是否来自超时中断（QuickJS 抛 `InternalError: interrupted`）。
+  static bool _looksInterrupted(JSError e) =>
+      e.message.toLowerCase().contains('interrupt');
 
   @override
   JsEvalResult callFunction(Pointer<NativeType> fn, Pointer<NativeType> obj) {

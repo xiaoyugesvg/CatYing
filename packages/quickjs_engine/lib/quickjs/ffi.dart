@@ -269,6 +269,30 @@ final void Function(
             )>>('jsSetMemoryLimit')
     .asFunction();
 
+/// DLLEXPORT void jsSetEvalTimeout(JSRuntime *rt, long long ms);
+///
+/// 设置/清除本 runtime 的**求值墙钟预算**（毫秒）：ms <= 0 = 不限制。
+/// 由 Dart 侧在每次 evaluate 前装入、求值后清除（见 QuickJsRuntime2.evaluate）。
+///
+/// ⚠️ **可选用符号**：未打本补丁的旧原生库（如某些平台随包预编译的
+/// dylib）没有导出它，`lookup` 会抛异常。这里降级为 null 而不是让整个
+/// 引擎崩掉 —— 「库没升级 ⇒ 退化为旧的无限时行为」，不会因 Dart 侧先行
+/// 更新而炸。iOS/Android 由源码编译，补丁生效后该符号必然存在。
+final void Function(Pointer<JSRuntime>, int)? jsSetEvalTimeout = () {
+  try {
+    return _qjsLib
+        .lookup<
+            NativeFunction<
+                Void Function(
+                  Pointer<JSRuntime>,
+                  LongLong,
+                )>>('jsSetEvalTimeout')
+        .asFunction<void Function(Pointer<JSRuntime>, int)>();
+  } catch (_) {
+    return null;
+  }
+}();
+
 /// void jsFreeRuntime(JSRuntime *rt)
 final void Function(
   Pointer<JSRuntime>,

@@ -2,6 +2,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <chrono>
+#include <mutex>
+#include <unordered_map>
 #ifdef __ANDROID__
 #include <android/log.h>
 #else
@@ -20,6 +23,55 @@ int ONE_VALUE = 0;
 
 extern "C"
 {
+
+    // ── 求值墙钟超时（新增）──────────────────────────────────────────────
+    // 背景：书源 JS 里一个 `while(true){}` 或病态正则会让 evaluate 永不返回，
+    //   在主 isolate 上同步求值即冻死界面。原生侧此前**没有**装中断处理器
+    //   （旧 jsNewRuntime 只收 channel 一个参数，Dart 侧传的 timeout 在 ABI 上
+    //   被当作多余实参丢弃），所以这里补上真实现。
+    //
+    // 语义：jsSetEvalTimeout(rt, ms) 设「JS 执行预算」——
+    //   · ms <= 0 ⇒ 清除预算，不限制（默认，行为与补丁前完全一致）
+    //   · ms >  0 ⇒ 装入截止时间；QuickJS 在解释器循环里回调中断处理器，
+    //               超时就抛可捕获的 "interrupted" 错误，而非卡死线程
+    // 关键：宿主函数（Dart 侧 IO，如 java.ajax 抓网页）的等待**不计入**预算——
+    //   js_channel / js_module_loader 每次宿主调用返回后都会重新计时
+    //   （见 js_eval_rearm），所以合法的慢速网络请求不会被误杀。
+    //
+    // 按 JSRuntime 分别记账：同进程内多个 isolate 各持有独立 runtime，
+    //   全局单值会互相踩，故用 map 键控 + 互斥锁保护。
+    static std::mutex g_eval_timeout_mutex;
+    static std::unordered_map<JSRuntime *, long long> g_eval_budget_ms;
+    static std::unordered_map<JSRuntime *, long long> g_eval_deadline;
+
+    static long long js_eval_now_ms()
+    {
+        using namespace std::chrono;
+        return (long long)duration_cast<milliseconds>(
+                   steady_clock::now().time_since_epoch())
+            .count();
+    }
+
+    // 中断处理器：返回非 0 让 QuickJS 抛错。QuickJS 内部按指令间隔节流回调，
+    // 这里的加锁开销可忽略。未设预算的 runtime 直接返回 0（完全无副作用）。
+    static int js_eval_interrupt_handler(JSRuntime *rt, void *opaque)
+    {
+        std::lock_guard<std::mutex> lock(g_eval_timeout_mutex);
+        auto it = g_eval_deadline.find(rt);
+        if (it == g_eval_deadline.end())
+            return 0;
+        return js_eval_now_ms() > it->second ? 1 : 0;
+    }
+
+    // 宿主调用返回后重新计时：把「等待 Dart 侧 IO」的时间从预算里剔除。
+    static void js_eval_rearm(JSRuntime *rt)
+    {
+        std::lock_guard<std::mutex> lock(g_eval_timeout_mutex);
+        auto bit = g_eval_budget_ms.find(rt);
+        if (bit == g_eval_budget_ms.end())
+            return;
+        g_eval_deadline[rt] = js_eval_now_ms() + bit->second;
+    }
 
     DLLEXPORT int doReturnOne()
     {
@@ -349,6 +401,8 @@ extern "C"
         JSRuntime *rt = JS_GetRuntime(ctx);
         JSChannel *channel = (JSChannel *)JS_GetRuntimeOpaque(rt);
         const char *str = (char *)channel(ctx, JSChannelType_MODULE, (void *)module_name);
+        // 模块加载走 Dart 侧 IO ⇒ 返回后重新计时，等待不计入 JS 执行预算
+        js_eval_rearm(rt);
         if (str == 0)
             return NULL;
         JSValue func_val = JS_Eval(ctx, str, strlen(str), module_name, JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
@@ -369,7 +423,11 @@ extern "C"
         data[1] = &argc;
         data[2] = argv;
         data[3] = func_data;
-        return *(JSValue *)channel(ctx, JSChannelType_METHON, data);
+        JSValue *ret = (JSValue *)channel(ctx, JSChannelType_METHON, data);
+        // 宿主函数（Dart 侧同步 IO，如 java.ajax）返回后重新计时：
+        // 网络等待不计入 JS 执行预算，避免合法的慢请求被超时误杀。
+        js_eval_rearm(rt);
+        return *ret;
     }
 
     void js_promise_rejection_tracker(JSContext *ctx, JSValueConst promise,
@@ -389,7 +447,25 @@ extern "C"
         JS_SetRuntimeOpaque(rt, (void *)channel);
         JS_SetHostPromiseRejectionTracker(rt, js_promise_rejection_tracker, nullptr);
         JS_SetModuleLoaderFunc(rt, nullptr, js_module_loader, nullptr);
+        // 装中断处理器以支持求值超时。**默认未设预算 ⇒ 处理器恒返回 0，
+        // 行为与补丁前完全一致**；只有 Dart 侧显式调用 jsSetEvalTimeout 才生效。
+        JS_SetInterruptHandler(rt, js_eval_interrupt_handler, nullptr);
         return rt;
+    }
+
+    // 设置/清除本 runtime 的求值墙钟预算（毫秒）。ms <= 0 = 不限制。
+    // Dart 侧每次 evaluate 前装入、求值后清除（见 QuickJsRuntime2.evaluate）。
+    DLLEXPORT void jsSetEvalTimeout(JSRuntime *rt, long long ms)
+    {
+        std::lock_guard<std::mutex> lock(g_eval_timeout_mutex);
+        if (ms <= 0)
+        {
+            g_eval_budget_ms.erase(rt);
+            g_eval_deadline.erase(rt);
+            return;
+        }
+        g_eval_budget_ms[rt] = ms;
+        g_eval_deadline[rt] = js_eval_now_ms() + ms;
     }
 
     DLLEXPORT uint32_t jsNewClass(JSContext *ctx, const char *name)
@@ -445,6 +521,12 @@ extern "C"
 
     DLLEXPORT void jsFreeRuntime(JSRuntime *rt)
     {
+        // 先摘掉本 runtime 的超时记账，避免 map 里残留已释放的指针
+        {
+            std::lock_guard<std::mutex> lock(g_eval_timeout_mutex);
+            g_eval_budget_ms.erase(rt);
+            g_eval_deadline.erase(rt);
+        }
         JS_SetRuntimeOpaque(rt, nullptr);
         JS_FreeRuntime(rt);
     }

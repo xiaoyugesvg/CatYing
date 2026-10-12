@@ -32,7 +32,17 @@ JavascriptRuntime getJavascriptRuntime({
   Map<String, dynamic>? extraArgs = const {},
 }) {
   final int stackSize = extraArgs?['stackSize'] ?? 1024 * 1024;
-  final JavascriptRuntime runtime = QuickJsRuntime2(stackSize: stackSize);
+  // 可选：单次求值「JS 执行预算」（毫秒）。不传 / 0 = 不限制（旧行为）。
+  // 逾期由原生中断处理器打断成可捕获错误，宿主请求等待不计入（见
+  // QuickJsRuntime2.evaluate / jsSetEvalTimeout）。
+  final Object? rawTimeout = extraArgs?['timeout'];
+  // 可选：JS 堆上限（字节）。不传 / 0 = 不限制（旧行为）。
+  final Object? rawMemoryLimit = extraArgs?['memoryLimit'];
+  final JavascriptRuntime runtime = QuickJsRuntime2(
+    stackSize: stackSize,
+    timeout: rawTimeout is int ? rawTimeout : null,
+    memoryLimit: rawMemoryLimit is int ? rawMemoryLimit : null,
+  );
   if (xhr) runtime.enableFetch();
   runtime.enableHandlePromises();
   return runtime;
