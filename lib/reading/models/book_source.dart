@@ -464,10 +464,34 @@ class BookSourceStore {
   }
 
   /// 导入一批。**同 id 覆盖、新 id 追加**，不清空已有的。
+  /// 导入时自动判定「发现」开关（用户 2026-10-12）：
+  /// 源未显式声明 `enabledExplore` 时，按**引擎实际支持的发现规则**
+  /// （`exploreUrl`，含 `@js:`/JSON 数组形式）有无自动开/关。
+  ///
+  /// ⚠️ 老版阅读 3.0 的 `ruleFindUrl`/`ruleFind*` 字段**不参与判定**——
+  /// 当前引擎（Node legado / Dart WebBook）只认 `exploreUrl`+`ruleExplore`，
+  /// 带 `ruleFindUrl` 的老源即使打开发现也解析不出分类，按"没有发现功能"处理。
+  /// 源作者显式写了 `enabledExplore` 的尊重原值。
+  static BookSource _applyAutoExplore(BookSource s) {
+    if (s.isConfig) return s; // config 源无发现概念
+    if (s.raw.containsKey('enabledExplore')) return s; // 显式声明 → 尊重
+    final ex = s.raw['exploreUrl'];
+    final hasExplore = (ex is String && ex.trim().isNotEmpty) ||
+        (ex is Map || ex is List); // 非字符串形态（对象/数组）也视为有
+    if (hasExplore == s.enabledExplore) return s; // 判定结果与缺省一致 → 原样
+    final m = Map<String, dynamic>.of(s.raw);
+    m['enabledExplore'] = hasExplore;
+    return BookSource(raw: m, id: s.id);
+  }
+
   Future<({int added, int updated})> addAll(List<BookSource> list) async {
     var added = 0;
     var updated = 0;
-    for (final s in list) {
+    for (final orig in list) {
+      // 导入即自动判定「发现」开关：没有发现规则的源自动关闭发现
+      // （书源页不展示该源，搜索/聚搜不受影响），避免点进发现只报
+      // "没有配置分类浏览"。
+      final s = _applyAutoExplore(orig);
       final i = _items.indexWhere((e) => e.id == s.id);
       if (i >= 0) {
         // 保留用户当前的启用状态与顺序，只更新配置本身
