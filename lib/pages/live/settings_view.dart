@@ -85,15 +85,13 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
               // 依赖 sourcesTick，改名/增删后强制重建
               final _ = LiveService.instance.sourcesTick.value;
               final srcs = LiveService.instance.sources.toList();
-              final items = srcs.isEmpty
-                  ? <Widget>[
-                      const _EmptyRow(),
-                    ]
-                  : [
-                      for (var i = 0; i < srcs.length; i++)
-                        _sourceTile(i, srcs[i]),
-                      _addTile(),
-                    ];
+              // 「添加直播源」按钮必须**始终**可见：空列表时也要能直接加，
+              // 否则全新安装要先到直播页加一个源、设置页才冒出按钮（用户实测困惑）。
+              final items = <Widget>[
+                if (srcs.isEmpty) const _EmptyRow(),
+                for (var i = 0; i < srcs.length; i++) _sourceTile(i, srcs[i]),
+                _addTile(),
+              ];
               return Column(children: items);
             }),
           ),

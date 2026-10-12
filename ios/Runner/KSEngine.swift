@@ -253,9 +253,23 @@ final class KSEngine: NSObject {
 
   private func attachLayerToHost(_ l: KSPlayerLayer) {
     guard let host = displayHost, let view = l.player.view else { return }
+    // 内核回退（ME→AV）时 player.view 可能换实例，先移除旧 view 防叠加，
+    // 也避免 readyToPlay 与 attach(to:) 重复调用时残留旧视图。
+    view.removeFromSuperview()
+    // 🔴 原生画面**必须被裁到视频区**：KS 的 player.view 不裁边时可能按自身
+    //    frame 溢出，盖住整个 Flutter 页面（用户实测"整页一片灰白只有悬浮窗可见"）。
+    host.clipsToBounds = true
+    view.clipsToBounds = true
+    // 首帧渲染前原生视图是空的，不设色就透出平台视图的灰白底（"有声无画"）。
+    view.backgroundColor = .black
     view.frame = host.bounds
     view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     host.addSubview(view)
+    // 兜底：若 KS 内部把 player.view 挂到了别处（window 等），这里强制收回宿主，
+    // 保证画面只在视频区那一块渲染。
+    if view.superview !== host {
+      host.addSubview(view)
+    }
   }
 
   /// 平台视图创建时挂载现有播放层（晚于 open 的场景）
@@ -430,6 +444,11 @@ extension KSEngine: KSPlayerLayerDelegate {
   func player(layer: KSPlayerLayer, state: KSPlayerState) {
     switch state {
     case .readyToPlay:
+      // 🔴 补挂 player.view：open 创建播放层时 player.view 可能还没就绪（ready 前），
+      // attachLayerToHost 的 `guard let view = l.player.view` 会跳过；
+      // ready 后 view 一定就绪，这里补挂保证画面上屏 ——
+      // 否则直播/换台后只有声音没有画面（一片灰白，用户实测"FF核心直播有声无画"）。
+      attachLayerToHost(layer)
       let d = layer.player.duration
       if d.isFinite && d > 0 {
         duration = d
@@ -536,6 +555,7 @@ final class KSPlayerPlatformView: NSObject, FlutterPlatformView {
     // 宿主视图不设色会透出 Flutter 平台视图的灰白底（用户实测"切完灰白"）。
     // 视频区永远是黑的，与 Flutter 侧 Container(color: Colors.black) 对齐。
     host.backgroundColor = .black
+    host.clipsToBounds = true
     host.isUserInteractionEnabled = false
     super.init()
     // 晚于 open 创建时挂载现有播放层；早于 open 时由 open 回来挂载
