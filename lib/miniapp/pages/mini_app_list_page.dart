@@ -50,6 +50,17 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
   final _searchCtrl = TextEditingController();
   String _query = '';
 
+  /// 顶部双 Tab（对齐参考图）：0 = 已安装 / 1 = 市场
+  int _tab = 0;
+
+  /// 市场 Tab 是否进过 —— 懒加载：没点过就不建 State、不发请求
+  bool _marketVisited = false;
+
+  /// 从「添加程序 → 小程序市场」导入时带进市场 Tab 的地址与已解析清单
+  /// （带上清单是为了省掉一次重复下载）
+  String? _pendingMarketUrl;
+  List<MiniAppMarketEntry>? _pendingMarketList;
+
   @override
   void initState() {
     super.initState();
@@ -137,30 +148,111 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                       ),
                     const Spacer(),
                     // 右：搜索 / 设置 / 添加
-                    _topIcon(
-                      _searching ? Icons.close_rounded : Icons.search_rounded,
-                      _searching ? '关闭搜索' : '搜索',
-                      () => setState(() {
-                        _searching = !_searching;
-                        if (!_searching) {
-                          _searchCtrl.clear();
-                          _query = '';
-                        }
-                      }),
-                    ),
+                    // 搜索只作用于「已安装」，在「市场」Tab 下不显示（免得是个死按钮）
+                    if (_tab == 0)
+                      _topIcon(
+                        _searching
+                            ? Icons.close_rounded
+                            : Icons.search_rounded,
+                        _searching ? '关闭搜索' : '搜索',
+                        () => setState(() {
+                          _searching = !_searching;
+                          if (!_searching) {
+                            _searchCtrl.clear();
+                            _query = '';
+                          }
+                        }),
+                      ),
                     _topIcon(Icons.tune_rounded, '设置', _showSettingsSheet),
                     _topIcon(Icons.add_circle_outline, '添加程序', _showAddSheet),
                   ],
                 ),
               ),
-              const SizedBox(height: AppTheme.spacingMD),
+              const SizedBox(height: AppTheme.spacingSM),
 
-              Expanded(child: Obx(() => _buildBody())),
+              // ── 双 Tab：已安装 / 市场（对齐参考图，选中项带下划线指示条）──
+              _tabBar(),
+              const SizedBox(height: AppTheme.spacingSM),
+
+              // IndexedStack：切 Tab 不丢市场那屏的滚动/已加载清单
+              Expanded(
+                child: IndexedStack(
+                  index: _tab,
+                  children: [
+                    Obx(() => _buildBody()),
+                    _marketVisited
+                        ? MiniAppMarketView(
+                            initialUrl: _pendingMarketUrl,
+                            initialList: _pendingMarketList,
+                            onInstalled: () => setState(() {}),
+                          )
+                        : const SizedBox.shrink(),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  /// 顶部双 Tab（参考图 1：等宽两格 + 选中下划线）
+  Widget _tabBar() {
+    const tabs = ['已安装', '市场'];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppTheme.spacingMD),
+      child: Row(
+        children: [
+          for (var i = 0; i < tabs.length; i++)
+            Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _switchTab(i),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      tabs[i],
+                      style: TextStyle(
+                        color: _tab == i
+                            ? AppTheme.textPrimary
+                            : AppTheme.textTertiary,
+                        fontSize: AppTheme.fontSubhead + 1,
+                        fontWeight:
+                            _tab == i ? FontWeight.w600 : FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      height: 2,
+                      width: _tab == i ? 28 : 0,
+                      decoration: BoxDecoration(
+                        color: AppTheme.accentColor,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _switchTab(int i) async {
+    if (i == _tab) return;
+    // ⚠️ 顺序很重要：市场地址存在 prefs 里，必须**先读出来再建市场 Tab**
+    //   —— MarketView 的 initState 只会读一次 `service.marketUrl`，
+    //   读早了拿到空串 → 地址栏空白、也不会自动加载（看着像"没记住地址"）。
+    if (i == 1) await service.ensureLoaded();
+    if (!mounted) return;
+    setState(() {
+      _tab = i;
+      _marketVisited = true;
+    });
   }
 
   // ── 内置应用卡（官方市场/预置小程序）──────────────────────
@@ -258,14 +350,12 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
             _listRow(
               title: b.name,
               subtitle: b.tag,
-              icon: b.icon,
               onTap: () => Get.to(() => MiniAppWebPage(assetRoot: b.assetRoot)),
             ),
           for (final a in apps)
             _listRow(
               title: a.name,
               subtitle: _appTag(a),
-              icon: Icons.widgets_outlined,
               onTap: () => _openApp(a),
               onLongPress: () => _showAppMenu(a),
             ),
@@ -341,50 +431,73 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
   Widget _listRow({
     required String title,
     required String subtitle,
-    required IconData icon,
     required VoidCallback onTap,
     VoidCallback? onLongPress,
   }) {
+    // 行式卡片对齐参考图与「市场」Tab：**彩色首字图标 + 标题 + 副标题 + 右侧箭头**
+    final tint = _tintFor(title);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: AppTheme.backgroundTertiary,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundCard,
           borderRadius: BorderRadius.circular(14),
-          onTap: onTap,
-          onLongPress: onLongPress,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            child: Row(
-              children: [
-                Icon(icon, size: 20, color: AppTheme.textSecondary),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600)),
-                      if (subtitle.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(subtitle,
+          border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: onTap,
+            onLongPress: onLongPress,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(11),
+                      color: tint,
+                    ),
+                    child: Text(
+                      title.isNotEmpty ? title.characters.first : '程',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                                color: AppTheme.textTertiary, fontSize: 11)),
+                                color: AppTheme.textPrimary,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600)),
+                        if (subtitle.isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Text(subtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  color: AppTheme.textTertiary, fontSize: 11)),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
-                Icon(Icons.chevron_right_rounded,
-                    size: 18, color: AppTheme.textTertiary),
-              ],
+                  const SizedBox(width: 8),
+                  Icon(Icons.chevron_right_rounded,
+                      size: 18, color: AppTheme.textTertiary),
+                ],
+              ),
             ),
           ),
         ),
@@ -392,7 +505,31 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     );
   }
 
-  // ── 设置弹层：排序 / 视图 / 调整顺序 ──────────────────────────
+  static const _tints = <Color>[
+    Color(0xFF4FC3F7),
+    Color(0xFF9575CD),
+    Color(0xFF66BB6A),
+    Color(0xFFFFA726),
+    Color(0xFFEF5350),
+    Color(0xFF26A69A),
+  ];
+
+  /// 按名称稳定取色（不用 String.hashCode：不保证跨进程稳定）
+  Color _tintFor(String s) {
+    var h = 0;
+    for (final c in s.codeUnits) {
+      h = (h * 31 + c) & 0x7fffffff;
+    }
+    return _tints[h % _tints.length];
+  }
+
+  // ── 设置弹层：排序 / 视图 / 调整顺序（行式排版，对齐参考图 2）──────
+  //
+  // 参考图 2 是「标题粗体 + 灰色说明小字 + 右侧控件」一行的排法，这里照抄这个
+  // 信息结构；⚠️ 但**不照抄它那些设置项**（本地服务起始端口 / 最多同时后台运行 /
+  // 在线网站广告过滤 / 混合合成模式 / 局域网共享）—— 那些能力本项目没有，
+  // 放上去就是假开关。这里只列**真实存在**的三项，且改完即时生效，
+  // 所以也不需要参考图底部那个「保存」按钮。
   void _showSettingsSheet() {
     showModalBottomSheet(
       context: context,
@@ -403,70 +540,118 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) => SafeArea(
           top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                child: Text('程序设置',
-                    style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold)),
-              ),
-              _sheetGroupTitle('排序'),
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (final s in _AppSort.values)
-                    _sheetChip(s.label, _sort == s, () {
-                      setState(() => _sort = s);
-                      setSheet(() {});
-                    }),
-                ],
-              ),
-              _sheetGroupTitle('视图'),
-              Wrap(
-                spacing: 8,
-                children: [
-                  _sheetChip('网格', _gridMode, () {
-                    setState(() => _gridMode = true);
-                    setSheet(() {});
-                  }),
-                  _sheetChip('列表', !_gridMode, () {
-                    setState(() => _gridMode = false);
-                    setSheet(() {});
-                  }),
-                ],
-              ),
-              const SizedBox(height: 6),
-              if (service.apps.length > 1)
-                ListTile(
-                  leading: Icon(Icons.reorder_rounded,
-                      color: AppTheme.textSecondary),
-                  title: Text('调整顺序（拖动）',
-                      style: TextStyle(color: AppTheme.textPrimary)),
-                  onTap: () {
-                    Get.back();
-                    _showReorderSheet();
-                  },
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                  child: Text('程序设置',
+                      style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold)),
                 ),
-              const SizedBox(height: 10),
-            ],
+                _settingRow(
+                  title: '排序',
+                  desc: '已安装列表按什么顺序排列',
+                  control: Wrap(
+                    spacing: 8,
+                    children: [
+                      for (final s in _AppSort.values)
+                        _sheetChip(s.label, _sort == s, () {
+                          setState(() => _sort = s);
+                          setSheet(() {});
+                        }),
+                    ],
+                  ),
+                ),
+                _settingDivider(),
+                _settingRow(
+                  title: '视图',
+                  desc: '网格看图方便，列表信息更全',
+                  control: Wrap(
+                    spacing: 8,
+                    children: [
+                      _sheetChip('网格', _gridMode, () {
+                        setState(() => _gridMode = true);
+                        setSheet(() {});
+                      }),
+                      _sheetChip('列表', !_gridMode, () {
+                        setState(() => _gridMode = false);
+                        setSheet(() {});
+                      }),
+                    ],
+                  ),
+                ),
+                if (service.apps.length > 1) ...[
+                  _settingDivider(),
+                  _settingRow(
+                    title: '调整顺序',
+                    desc: '长按拖动把手，重排已安装程序',
+                    control: Icon(Icons.chevron_right_rounded,
+                        color: AppTheme.textTertiary),
+                    onTap: () {
+                      Get.back();
+                      _showReorderSheet();
+                    },
+                  ),
+                ],
+                const SizedBox(height: 12),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _sheetGroupTitle(String t) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 10, 20, 6),
-        child: Text(t,
-            style: TextStyle(
-                color: AppTheme.textTertiary,
-                fontSize: 12,
-                fontWeight: FontWeight.w600)),
+  /// 设置行（参考图 2 的排法）：左「标题 + 灰色说明」，右侧控件
+  Widget _settingRow({
+    required String title,
+    required String desc,
+    required Widget control,
+    VoidCallback? onTap,
+  }) {
+    final row = Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontSubhead + 1,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 3),
+                Text(desc,
+                    style: TextStyle(
+                        color: AppTheme.textTertiary,
+                        fontSize: AppTheme.fontCaption,
+                        height: 1.3)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          control,
+        ],
+      ),
+    );
+    if (onTap == null) return row;
+    return InkWell(onTap: onTap, child: row);
+  }
+
+  Widget _settingDivider() => Divider(
+        height: 1,
+        thickness: 0.5,
+        indent: 20,
+        endIndent: 20,
+        color: AppTheme.borderLight,
       );
 
   Widget _sheetChip(String label, bool selected, VoidCallback onTap) {
@@ -875,8 +1060,14 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
       final market = r.market;
       if (!mounted) return;
       if (market != null) {
-        await Get.to(
-            () => MiniAppMarketPage(marketUrl: url, preloaded: market));
+        // 市场清单 → 直接切到「市场」Tab，并带上已解析好的清单
+        // （老版本是 push 一个独立市场页；参考图里市场就是程序页的一个 Tab）
+        setState(() {
+          _pendingMarketUrl = url;
+          _pendingMarketList = market;
+          _marketVisited = true;
+          _tab = 1;
+        });
       } else {
         AppToast.message(r.ok ? '导入成功' : (r.error ?? '导入失败'));
       }

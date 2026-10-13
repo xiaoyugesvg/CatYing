@@ -119,7 +119,10 @@ import Python
     private func teardown() {
         cancelDeadline()
         if let m = mainModule {
+            // 碰 C API 就得持 GIL
+            let gil = PyGILState_Ensure()
             Py_DecRef(m)
+            PyGILState_Release(gil)
         }
         mainModule = nil
         PythonBridge.sharedExecTid = 0
@@ -183,18 +186,38 @@ import Python
             print("[PythonBridge] Python 代理已注入: \(proxy)")
         }
 
-        // 3. 初始化解释器（本函数在 workQueue 执行，主线程外的串行上下文，
-        //    Py_Initialize 一次性持有 GIL；后续所有调用都在同一队列 → GIL 串行）
+        // 3. 初始化解释器
+        //    ⚠️ **GIL 必须在这里交还**（本轮修的那个 SIGABRT）：
+        //       Py_Initialize() 会让**调用它的那个线程**持有 GIL。而这里是 GCD 的
+        //       串行队列 —— 串行队列只保证"同一时刻只有一个 block 在跑"，**不保证
+        //       同一个 OS 线程**（下一个 block 可能落在池里另一条线程上）。
+        //       于是后面的 call()/eval() 在另一条线程上直接碰 Python C API：
+        //         · PyGILState_Ensure() 之前没有任何线程状态 → PyThreadState_Get()
+        //           直接 Py_FatalError("PyThreadState_Get: no current thread")
+        //           → abort() → SIGABRT
+        //         （崩溃报告 Runner-2026-10-13-201409.ips 的触发栈就是这么走的：
+        //           PythonBridge.resetDeadline ← PythonBridge.call）
+        //       ⇒ 标准嵌入姿势：init 完立刻 PyEval_SaveThread() 把 GIL 放掉，
+        //         之后每个入口都用 PyGILState_Ensure()/Release() 成对包住。
         Py_Initialize()
+        PyEval_SaveThread()
         // 4. 导入适配层（spider_runner.py 在 python-home 根，PYTHONPATH 可达）
-        guard let module = PyImport_ImportModule("spider_runner") else {
-            print("[PythonBridge] ❌ 导入 spider_runner 失败: \(pyLastErrorString() ?? "未知错误")")
+        //    ⚠️ 上面刚放掉 GIL，所以这里必须先拿回来
+        let gilInit = PyGILState_Ensure()
+        let module = PyImport_ImportModule("spider_runner")
+        if module == nil {
+            let msg = pyLastErrorString() ?? "未知错误"
+            PyGILState_Release(gilInit)
+            print("[PythonBridge] ❌ 导入 spider_runner 失败: \(msg)")
             started = false
             return false
         }
         mainModule = module
         started = true
-        print("[PythonBridge] ✅ CPython \(pyVersionString()) 就绪")
+        // ⚠️ 版本串也是 C API 调用，必须在 Release 之前取
+        let ver = pyVersionString()
+        PyGILState_Release(gilInit)
+        print("[PythonBridge] ✅ CPython \(ver) 就绪")
         return true
     }
 
@@ -206,6 +229,9 @@ import Python
         guard started, let module = mainModule else {
             return ["ok": false, "error": "Python 未启动"]
         }
+        // 进入 Python：拿 GIL + 本线程的 thread state（成对释放，见 ensureStarted 注释）
+        let gil = PyGILState_Ensure()
+        defer { PyGILState_Release(gil) }
         // PyRun_String 的 globals/locals 必须是 **dict**；
         // 传模块对象会报 "globals must be a dict"。用 PyModule_GetDict 取模块命名空间
         // （borrowed reference，不需 DecRef）。
@@ -253,6 +279,10 @@ import Python
         guard started, let main = mainModule else {
             return ["ok": false, "error": "Python 未启动"]
         }
+        // ⚠️ **必须**先拿到 GIL/线程状态再碰任何 Python C API
+        //   （`resetDeadline()` 里要读 thread state；上一版就是在这里 abort 的）
+        let gil = PyGILState_Ensure()
+        defer { PyGILState_Release(gil) }
         resetDeadline()
         defer { cancelDeadline() }
         // 拼 args 为 JSON 字符串传给 Python 侧适配层（Python 自己 json.loads）
@@ -286,7 +316,12 @@ import Python
         //    旧代码把 PyThreadState_Get() 的指针直接传进去 ⇒
         //    CI: "Cannot convert value of type 'OpaquePointer' to expected argument
         //    type 'UInt'"。用 PyThreadState_GetID 取 id。
-        if let tstate = PyThreadState_Get() {
+        //
+        // ⚠️ 这里**绝对不能用 `PyThreadState_Get()`**：它在本线程没有线程状态时
+        //    会直接 `Py_FatalError` → abort（就是 201409.ips 那次 SIGABRT）。
+        //    `PyGILState_GetThisThreadState()` 拿不到时**返回 nil**，不致命。
+        //    调用方（eval/call）已经 PyGILState_Ensure() 过了，所以这里正常能拿到。
+        if let tstate = PyGILState_GetThisThreadState() {
             PythonBridge.sharedExecTid = UInt(PyThreadState_GetID(tstate))
         } else {
             PythonBridge.sharedExecTid = 0

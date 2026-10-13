@@ -33,15 +33,35 @@ class MiniAppService extends GetxService {
 
   static const String _key = 'miniapp_list_v1';
 
+  /// 上次用的「市场地址」——程序页 → 市场 Tab 的输入框会记住它（参考图里的
+  /// 「市场地址（JSON）」那一栏，重进页面自动填回并加载）
+  static const String _kMarketUrl = 'miniapp_market_url';
+
   /// 已安装程序列表
   final apps = <MiniApp>[].obs;
 
   bool _loaded = false;
 
+  String _marketUrl = '';
+  String get marketUrl => _marketUrl;
+
+  Future<void> setMarketUrl(String url) async {
+    final u = url.trim();
+    if (u == _marketUrl) return;
+    _marketUrl = u;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kMarketUrl, u);
+    } catch (e) {
+      AppLog.instance.w('[MiniApp] 保存市场地址失败: $e');
+    }
+  }
+
   Future<void> ensureLoaded() async {
     if (_loaded) return;
     _loaded = true;
     final prefs = await SharedPreferences.getInstance();
+    _marketUrl = prefs.getString(_kMarketUrl) ?? '';
     final raw = prefs.getString(_key);
     if (raw == null || raw.isEmpty) return;
     try {
@@ -105,7 +125,8 @@ class MiniAppService extends GetxService {
   Future<List<MiniAppMarketEntry>?> fetchMarket(String url) async {
     final trimmed = url.trim();
     if (trimmed.isEmpty) return null;
-    final body = await NetworkManager.instance.getString(trimmed);
+    // 带镜像回退：市场清单也可能挂在 GitHub 上
+    final body = await _downloadWithMirrors(trimmed, asBytes: false) as String;
     if (!looksLikeMiniAppMarket(body)) return null;
     final list = parseMiniAppMarket(body);
     return list.isEmpty ? null : list;
@@ -119,7 +140,8 @@ class MiniAppService extends GetxService {
     final trimmed = url.trim();
     if (trimmed.isEmpty) return (ok: false, error: '地址不能为空', market: null);
     try {
-      final body = await NetworkManager.instance.getString(trimmed);
+      final body =
+          await _downloadWithMirrors(trimmed, asBytes: false) as String;
       if (body.trim().isEmpty) {
         return (ok: false, error: '下载内容为空', market: null);
       }
@@ -153,6 +175,64 @@ class MiniAppService extends GetxService {
     }
     final mf = File('${dir.path}/manifest.json');
     return await mf.exists() ? await mf.readAsString() : '{}';
+  }
+
+  // ── 下载（带 GitHub 镜像回退）────────────────────────────────
+  //
+  // 市场里的包/清单基本都挂在 raw.githubusercontent.com 上（xsc.json 的条目就是
+  // `ghfast.top` 包一层）。国内直连基本不通，而单个镜像经常抽风/限速/返回 404 页
+  // ⇒ 「加载市场」和「安装」会卡死在一个镜像上直到超时。
+  // 这里统一成：**原地址 → 逐个镜像包一层**，谁先成功用谁（失败的要靠内容校验剔除，
+  // 因为镜像返回的 HTML 错误页也是"非空"）。
+  static const _ghMirrors = <String>[
+    'https://ghfast.top/',
+    'https://gh-proxy.com/',
+    'https://ghproxy.net/',
+    'https://gh.llkk.cc/',
+    'https://ghproxy.cc/',
+  ];
+
+  /// 抹掉已有的镜像前缀，还原成 GitHub 原始地址
+  static String _stripGhMirror(String url) {
+    for (final m in _ghMirrors) {
+      if (url.startsWith(m)) return url.substring(m.length);
+    }
+    return url;
+  }
+
+  /// 下载 zip（bytes）或 manifest（String），带 GitHub 镜像回退
+  Future<Object> _downloadWithMirrors(String url, {required bool asBytes}) async {
+    final original = url.trim();
+    final raw = _stripGhMirror(original);
+    final candidates = <String>[original];
+    if (raw != original) candidates.add(raw);
+    if (raw.contains('githubusercontent.com') || raw.contains('github.com')) {
+      for (final m in _ghMirrors) {
+        final c = '$m$raw';
+        if (!candidates.contains(c)) candidates.add(c);
+      }
+    }
+
+    Object? lastErr;
+    for (final c in candidates) {
+      try {
+        if (asBytes) {
+          final b = await NetworkManager.instance.getData(c);
+          // ZIP 魔数 PK\x03\x04：镜像返回的 404/HTML 页也是"非空"，必须校验
+          if (b.length > 4 && b[0] == 0x50 && b[1] == 0x4B) return b;
+        } else {
+          final s = await NetworkManager.instance.getString(c);
+          // manifest / 市场清单都是 JSON，必须是对象/数组开头
+          final t = s.trimLeft();
+          if (t.startsWith('{') || t.startsWith('[')) return s;
+        }
+      } catch (e) {
+        lastErr = e;
+      }
+      AppLog.instance.w('[MiniApp] 该源不可用，换下一个: $c');
+    }
+    if (lastErr != null) throw lastErr;
+    throw Exception('所有下载源都不可用');
   }
 
   /// 本地 zip 小程序包安装（「本地文件」选 .zip）
@@ -207,13 +287,15 @@ class MiniAppService extends GetxService {
       var manifestBody = '{}';
 
       if (e.isZip) {
-        final bytes = await NetworkManager.instance.getData(e.url);
+        final bytes = await _downloadWithMirrors(e.url, asBytes: true)
+            as List<int>;
         if (bytes.isEmpty) return (ok: false, error: '下载内容为空');
         manifestBody = await _unpackZipToDir(bytes, e.appId);
         name = _manifestName(manifestBody) ?? e.name;
         source = (await _appDir(e.appId)).path;
       } else {
-        manifestBody = await NetworkManager.instance.getString(e.url);
+        manifestBody =
+            await _downloadWithMirrors(e.url, asBytes: false) as String;
         name = _manifestName(manifestBody) ?? e.name;
         final base = e.url.substring(0, e.url.lastIndexOf('/') + 1);
         source = '$base${_manifestEntry(manifestBody)}';
