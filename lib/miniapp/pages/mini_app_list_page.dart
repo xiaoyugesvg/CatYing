@@ -6,7 +6,6 @@ import 'package:get/get.dart';
 import '../../common/theme.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/glass.dart';
-import '../models/builtin_apps.dart';
 import '../models/mini_app.dart';
 import '../services/mini_app_service.dart';
 import 'mini_app_detail_page.dart';
@@ -255,64 +254,6 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     });
   }
 
-  // ── 内置应用卡（官方市场/预置小程序）──────────────────────
-  Widget _builtinCard(BuiltinMiniApp app) {
-    final tint = app.tint ?? AppTheme.accentColor;
-    return GlassPanel(
-      radius: 16,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () => Get.to(() => MiniAppWebPage(assetRoot: app.assetRoot)),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      tint.withValues(alpha: 0.85),
-                      tint.withValues(alpha: 0.45),
-                    ],
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Icon(app.icon, size: 26, color: Colors.white),
-              ),
-              const Spacer(),
-              Text(
-                app.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                app.tag,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 11,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   // ── 顶栏小图标 ────────────────────────────────────────────────
   Widget _topIcon(IconData icon, String tip, VoidCallback onTap) {
     return Tooltip(
@@ -328,11 +269,10 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     );
   }
 
-  // ── 主体：内置卡片 + 已装程序（网格/列表、可搜索/排序）────────
+  // ── 主体：已装程序（网格/列表、可搜索/排序）────────
   Widget _buildBody() {
-    final builtins = builtinMiniApps;
     final apps = _visibleApps();
-    if (builtins.isEmpty && apps.isEmpty) {
+    if (apps.isEmpty) {
       return Center(
         child: Text(
           _query.trim().isEmpty ? '还没有程序，点右上角 + 导入' : '没有匹配的程序',
@@ -346,12 +286,6 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
         padding: const EdgeInsets.fromLTRB(
             AppTheme.spacingMD, 0, AppTheme.spacingMD, 110),
         children: [
-          for (final b in builtins)
-            _listRow(
-              title: b.name,
-              subtitle: b.tag,
-              onTap: () => Get.to(() => MiniAppWebPage(assetRoot: b.assetRoot)),
-            ),
           for (final a in apps)
             _listRow(
               title: a.name,
@@ -375,12 +309,9 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
         crossAxisSpacing: 12,
         childAspectRatio: 0.78,
       ),
-      itemCount: builtins.length + apps.length,
+      itemCount: apps.length,
       itemBuilder: (context, index) {
-        if (index < builtins.length) {
-          return _builtinCard(builtins[index]);
-        }
-        final app = apps[index - builtins.length];
+        final app = apps[index];
         return _MiniAppCard(
           app: app,
           tag: _appTag(app),
