@@ -306,7 +306,7 @@ class BookSourceStore {
       added += await _loadBundledFile(_kBundledSourcesPath);
       added += await _loadBundledFile(_kBundledLegadoPath);
       if (added > 0) {
-        debugPrint('[BookSource] 内置书源补入 $added 个');
+        debugPrint('[BookSource] 内置书源补入/同步 $added 个');
         await _persist();
       }
       await prefs.setString(_kBundledFp, fp);
@@ -411,9 +411,27 @@ class BookSourceStore {
       }
       var added = 0;
       for (final s in defs) {
-        if (_items.any((e) => e.id == s.id)) continue;
-        _items.add(s);
-        added++;
+        final i = _items.indexWhere((e) => e.id == s.id);
+        if (i < 0) {
+          _items.add(s);
+          added++;
+          continue;
+        }
+        // 🔴 内置包把该源显式标成「无发现」（enabledExplore:false）时，
+        //   同步关掉**本地已有**该源的发现开关 —— 内置源声明了 enabledExplore
+        //   就绕过了 [_applyAutoExplore] 的自动判定（见 :483 "显式声明 → 尊重"），
+        //   于是「能搜索但没有发现」的源（无 exploreUrl）依然会出现在书源页
+        //   发现 chips 里，点进去只报错（用户 2026-10-13：「书源内置，这些能
+        //   搜索但是没有发现的就关闭发现，不要显示」）。
+        //   只**单向关闭**：内置包为 true 时绝不动本地值，尊重用户手动开启；
+        //   且只在资产指纹变化（本次内置包更新）时执行，用户之后重新开启
+        //   不会被再次覆盖（指纹不变 ⇒ `_loadBundled` 直接 return）。
+        if (s.raw['enabledExplore'] == false && _items[i].enabledExplore) {
+          final m = Map<String, dynamic>.of(_items[i].raw)
+            ..['enabledExplore'] = false;
+          _items[i] = BookSource(raw: m, id: _items[i].id);
+          added++; // 计入"有变更"（触发持久化）
+        }
       }
       return added;
     } catch (e) {

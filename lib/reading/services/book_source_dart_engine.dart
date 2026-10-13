@@ -164,6 +164,10 @@ class BookSourceDartEngine {
               'coverUrl': b.coverUrl ?? '',
               'intro': b.intro ?? '',
               'lastChapter': b.lastChapter ?? '',
+              // 详情页「更新时间」用：引擎已按 ruleBookInfo.updateTime 解析进
+              // `book.updateTime`，但原先没透传 ⇒ 详情页永远拿不到（
+              // 页面上读的键是 updatedAt/lastUpdate，也对不上）。
+              'updateTime': b.updateTime ?? '',
               // 详情页解析出的目录地址：为空说明该源的 ruleBookInfo.tocUrl
               // 没算出结果（很多榜单类 bookUrl 不是详情接口 ⇒ 目录必然空）
               'tocUrl': b.tocUrl ?? '',

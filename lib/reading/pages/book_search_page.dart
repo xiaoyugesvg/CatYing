@@ -1928,11 +1928,18 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                               ),
                             ),
                           )
-                        : Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: BookCategories
-                                .groups[_selectedGroupIdx]
+                        : GridView.count(
+                            // ✅ 与漫画页筛选弹窗同款：固定 3 列等宽网格。
+                            // 原 Wrap 里的 chip 因自身 alignment 会撑满整行 ⇒
+                            // 变成"一行一个"（用户 2026-10-13：「图书的筛选弹窗
+                            // UI 界面不要一行一个，也是一行行依次排列」）。
+                            crossAxisCount: 3,
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            mainAxisSpacing: 6,
+                            crossAxisSpacing: 6,
+                            childAspectRatio: 3.0,
+                            children: BookCategories.groups[_selectedGroupIdx]
                                 .children
                                 .map(
                                   (c) => chip(
@@ -1972,9 +1979,14 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                     const SizedBox(height: 16),
                     JellySheetSectionTitle(title: '语言', isDark: isDark),
                     const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                    // 固定 3 列网格（与漫画页筛选弹窗一致，见上方子分类注释）
+                    GridView.count(
+                      crossAxisCount: 3,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      mainAxisSpacing: 6,
+                      crossAxisSpacing: 6,
+                      childAspectRatio: 3.0,
                       children: BookCategoryFilters.languages.map((lang) {
                         final selected = _selLanguages.contains(lang.value);
                         return chip(
@@ -1993,9 +2005,14 @@ class _BookCategorySheetState extends State<_BookCategorySheet> {
                     const SizedBox(height: 16),
                     JellySheetSectionTitle(title: '格式', isDark: isDark),
                     const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                    // 固定 3 列网格（与漫画页筛选弹窗一致，见上方子分类注释）
+                    GridView.count(
+                      crossAxisCount: 3,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      mainAxisSpacing: 6,
+                      crossAxisSpacing: 6,
+                      childAspectRatio: 3.0,
                       children: BookCategoryFilters.extensions.map((ext) {
                         final selected = _selExtensions.contains(ext);
                         return chip(

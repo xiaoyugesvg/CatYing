@@ -11,7 +11,7 @@
    "customOrder": -30,
    "enabled": true,
    "enabledCookieJar": true,
-   "enabledExplore": true,
+   "enabledExplore": false,
    "eventListener": false,
    "exploreUrl": "[{\"title\":\"玄幻奇幻\",\"url\":\"/wuji345/\",\"style\":{\"layout_flexBasisPercent\":0.25,\"layout_flexGrow\":1}},{\"title\":\"仙侠武侠\",\"url\":\"/wuji342/\",\"style\":{\"layout_flexBasisPercent\":0.25,\"layout_flexGrow\":1}},{\"title\":\"都市重生\",\"url\":\"/wuji341/\",\"style\":{\"layout_flexBasisPercent\":0.25,\"layout_flexGrow\":1}},{\"title\":\"历史军事\",\"url\":\"/wuji348/\",\"style\":{\"layout_flexBasisPercent\":0.25,\"layout_flexGrow\":1}},{\"title\":\"科幻未来\",\"url\":\"/wuji343/\",\"style\":{\"layout_flexBasisPercent\":0.25,\"layout_flexGrow\":1}},{\"title\":\"灵异悬疑\",\"url\":\"/wuji349/\",\"style\":{\"layout_flexBasisPercent\":0.25,\"layout_flexGrow\":1}},{\"title\":\"女生言情\",\"url\":\"/wuji344/\",\"style\":{\"layout_flexBasisPercent\":0.25,\"layout_flexGrow\":1}},{\"title\":\"二次元\",\"url\":\"/wuji346/\",\"style\":{\"layout_flexBasisPercent\":0.25,\"layout_flexGrow\":1}},{\"title\":\"游戏竞技\",\"url\":\"/wuji347/\",\"style\":{\"layout_flexBasisPercent\":0.25,\"layout_flexGrow\":1}}]",
    "header": "{\"User-Agent\":\"Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36\",\"Referer\":\"http://m.wjzxchina.com/\",\"Accept\":\"text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\",\"Accept-Language\":\"zh-CN,zh;q=0.9,en;q=0.8\"}",
@@ -65,7 +65,7 @@
    "customOrder": -29,
    "enabled": true,
    "enabledCookieJar": false,
-   "enabledExplore": true,
+   "enabledExplore": false,
    "eventListener": false,
    "lastUpdateTime": 1787214019794,
    "respondTime": 1829,
@@ -106,7 +106,7 @@
    "customOrder": -28,
    "enabled": true,
    "enabledCookieJar": true,
-   "enabledExplore": true,
+   "enabledExplore": false,
    "eventListener": false,
    "header": {
     "Referer": "http://www.shukuge.com/"
@@ -154,7 +154,7 @@
    "customOrder": -27,
    "enabled": true,
    "enabledCookieJar": true,
-   "enabledExplore": true,
+   "enabledExplore": false,
    "eventListener": false,
    "header": "{\"User-Agent\": \"Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36\"}",
    "lastUpdateTime": 1787413443390,
@@ -279,7 +279,7 @@
    "bookSourceGroup": "✅ 可用书源",
    "customOrder": -24,
    "enabled": true,
-   "enabledExplore": true
+   "enabledExplore": false
   },
   {
    "bookSourceName": "无极书院电脑版",
@@ -318,7 +318,7 @@
    "bookSourceGroup": "✅ 可用书源",
    "customOrder": -23,
    "enabled": true,
-   "enabledExplore": true
+   "enabledExplore": false
   },
   {
    "bookSourceComment": "备用地址：https://sma.yueyouxs.com",
@@ -534,7 +534,7 @@
    "customOrder": -18,
    "enabled": true,
    "enabledCookieJar": true,
-   "enabledExplore": true,
+   "enabledExplore": false,
    "eventListener": false,
    "header": "{\n\t \"client-device\": \"d3e7353f4d87aac594e68a5fd71dcf37\",\n\t \"client-brand\": \"vivo\",\n\t \"client-version\": \"1.0.0\",\n\t \"client-name\": \"app.maoyankanshu.novel\",\n\t \"client-source\": \"android\",\n\t \t \"Authorization\": \"bearereyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwOlwvXC9hcGkubG9uZ2NodW5iYWppYW8uY29tXC9hdXRoXC90aGlyZCIsImlhdCI6MTcwMjgyNTAyNCwiZXhwIjoxNzk2MTM3MDI0LCJuYmYiOjE3MDI4MjUwMjQsImp0aSI6IlRra2FWVHNKdUdXMDQxYzciLCJzdWIiOjczOTA2MCwicHJ2IjoiYTFjYjAzNzE4MDI5NmM2YTE5MzhlZjMwYjQzNzk0NjcyZGQwMTZjNSJ9.Q3Uc9Yr1oUSNleRDqSRhmzpdUsAfbtJ9jKt_8UUSJF8\",\n\t \"User-Agent\": \"okhttp/4.9.2\"\n}",
    "lastUpdateTime": 1780793463220,
@@ -583,7 +583,7 @@
    "customOrder": -10,
    "enabled": true,
    "enabledCookieJar": true,
-   "enabledExplore": true,
+   "enabledExplore": false,
    "eventListener": false,
    "lastUpdateTime": 1719945572500,
    "respondTime": 3181,
@@ -687,7 +687,7 @@
    "customOrder": -8,
    "enabled": true,
    "enabledCookieJar": false,
-   "enabledExplore": true,
+   "enabledExplore": false,
    "eventListener": false,
    "lastUpdateTime": 1769597547163,
    "respondTime": 3605,
@@ -876,7 +876,7 @@
    "customOrder": -4,
    "enabled": true,
    "enabledCookieJar": true,
-   "enabledExplore": true,
+   "enabledExplore": false,
    "eventListener": false,
    "lastUpdateTime": 1784709735999,
    "respondTime": 3190,

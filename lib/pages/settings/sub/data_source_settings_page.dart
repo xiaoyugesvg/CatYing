@@ -54,6 +54,10 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             }),
           ],
         ),
+        // 分组之间留出一整段间距：SettingsGroup 自身只有标题的 10+6px 内边距，
+        // 两块卡片几乎贴在一起、圆角叠成一个怪形状（用户 2026-10-13：
+        // 「订阅里面这个卡片问题」）。与 playback 等页保持一致用 spacingLG。
+        const SizedBox(height: AppTheme.spacingLG),
         SettingsGroup(
           children: [
             Obx(
@@ -185,7 +189,6 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
 
   /// 把手填的接口地址存进订阅列表并设为激活。
   Future<void> _saveCurrentAsSubscription() async {
-    final messenger = ScaffoldMessenger.of(context);
     final url = controller.vodApiUrl.value.trim();
     if (url.isEmpty) {
       AppToast.message('还没有接口地址');

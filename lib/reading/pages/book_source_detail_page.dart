@@ -59,6 +59,12 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
   /// 详情接口补到的字段（封面/简介/作者），优先于搜索结果里的
   Map<String, dynamic> _info = const {};
 
+  /// 详情页数据（详情 + 目录）**本次拉取成功的时间**。
+  /// 书源规则大多不提供 `updateTime`（实测 20 个内置源里 0 个声明
+  /// `ruleBookInfo.updateTime`）⇒ 头部「更新时间」用源站时间，取不到时
+  /// 回退到这个真实拉取时间（不是编造：就是本页数据的更新时间）。
+  DateTime? _infoLoadedAt;
+
   @override
   void initState() {
     super.initState();
@@ -114,6 +120,7 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
       final info = await BookSourceService.instance.bookInfo(r.source, r.bookUrl);
       if (!mounted) return;
       if (info != null) _info = info;
+      _infoLoadedAt = DateTime.now();
 
       // 2) 目录：详情里带的 tocUrl 优先（有些站详情页和目录页不同）
       final tocUrl = (_info['tocUrl'] ?? '').toString().trim();
@@ -260,6 +267,30 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                         children: _metaChips.map(_metaChip).toList(),
                       ),
                     ],
+                    // ── 最新章节 / 更新时间并入信息列 ──
+                    // 用户 2026-10-13：「最新章节不要单独一行，要放在（来源下方）
+                    // 这个位置，还有更新时间也要有」⇒ 原来是「分隔线 + 最新章节
+                    // 标签 + 可点章节行」独占一段，现在收进信息列与「来源」同款。
+                    // 点「最新章节」仍可直接跳到最后一章（保留原来的跳转能力）。
+                    if (_latestChapterName.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      _metaLine(
+                        Icons.auto_stories_outlined,
+                        '最新章节：',
+                        _latestChapterName,
+                        onTap: _chapters.isEmpty
+                            ? null
+                            : () => _openReader(_chapters.length - 1),
+                      ),
+                    ],
+                    if (_updateTimeText.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      _metaLine(
+                        Icons.update_rounded,
+                        '更新时间：',
+                        _updateTimeText,
+                      ),
+                    ],
                     if (_wordCountText.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       Text(_wordCountText,
@@ -274,41 +305,6 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
               _coverBox(),
             ],
           ),
-          // ── 细分隔线 + 最新章节 ──
-          if (_chapters.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Divider(height: 1, thickness: 1, color: _hairline),
-            const SizedBox(height: 10),
-            Text('最新章节',
-                style: TextStyle(
-                    fontSize: AppTheme.fontCaption,
-                    color: JellyTheme.textSecondary)),
-            const SizedBox(height: 2),
-            InkWell(
-              onTap: () => _openReader(_chapters.length - 1),
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _chapters.last.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: AppTheme.fontBody,
-                            fontWeight: FontWeight.w600,
-                            color: _titleColor),
-                      ),
-                    ),
-                    Icon(Icons.chevron_right_rounded,
-                        size: 18, color: JellyTheme.textSecondary),
-                  ],
-                ),
-              ),
-            ),
-          ],
           // ── 动作行：收藏 / 书架 / 阅读 / 下载（圆角卡 + 竖细分隔线，对齐参考图）──
           const SizedBox(height: 14),
           Container(
@@ -393,6 +389,31 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     );
   }
 
+  /// 最新章节名：优先用详情页 `ruleBookInfo.lastChapter` 的结果，
+  /// 取不到再回退到已拉取的目录最后一章（都是真实数据，不编造）。
+  String get _latestChapterName {
+    final fromInfo = (_info['lastChapter'] ?? '').toString().trim();
+    if (fromInfo.isNotEmpty) return fromInfo;
+    if (_chapters.isNotEmpty) return _chapters.last.name;
+    return '';
+  }
+
+  /// 更新时间：优先用源站规则给的 `updateTime`（引擎透传），
+  /// 没有就回退到本次详情/目录的拉取时间（见 [_infoLoadedAt] 注释）。
+  String get _updateTimeText {
+    final src = _infoFirst(['updateTime', 'updatedAt', 'lastUpdate']);
+    if (src.isNotEmpty) return src;
+    final at = _infoLoadedAt;
+    if (at == null) return '';
+    String two(int v) => v.toString().padLeft(2, '0');
+    final now = DateTime.now();
+    final sameDay =
+        at.year == now.year && at.month == now.month && at.day == now.day;
+    return sameDay
+        ? '今天 ${two(at.hour)}:${two(at.minute)}'
+        : '${two(at.month)}-${two(at.day)} ${two(at.hour)}:${two(at.minute)}';
+  }
+
   /// 小元信息胶囊文字（分数 / 连载状态 / 分类 / 更新时间）。
   /// 优先取 [_info] 里的键，取不到该项就整体不显示（绝不编造）。
   List<String> get _metaChips {
@@ -408,7 +429,7 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
       // 分类缺失时回退到搜索结果里的 kind（真实数据，非编造）
       chips.add(_result.kind.trim());
     }
-    final updated = _infoFirst(['updatedAt', 'lastUpdate']);
+    final updated = _infoFirst(['updateTime', 'updatedAt', 'lastUpdate']);
     if (updated.isNotEmpty) chips.add(updated);
     return chips;
   }
@@ -435,6 +456,32 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
           style: TextStyle(
               fontSize: AppTheme.fontCaption,
               color: JellyTheme.textSecondary)),
+    );
+  }
+
+  /// 头部信息列里的一行元信息（图标 + 「标签：值」），与「来源」行同款；
+  /// 用于把「最新章节 / 更新时间」并进信息列（不再单独占一行）。
+  Widget _metaLine(IconData icon, String label, String value,
+      {VoidCallback? onTap}) {
+    final row = Row(
+      children: [
+        Icon(icon, size: 14, color: JellyTheme.textSecondary),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text('$label$value',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: AppTheme.fontSubhead,
+                  color: JellyTheme.textSecondary)),
+        ),
+      ],
+    );
+    if (onTap == null) return row;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: row,
     );
   }
 
@@ -946,7 +993,10 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 12),
                           child: Text(ch.name,
-                              textAlign: TextAlign.center,
+                              // 章节名**左对齐**（与阅读器里的目录弹层一致 ✓）：
+                              // 原来这里居中，和阅读器目录两处观感不一致
+                              //（用户 2026-10-13：「书源目录不是说这个不居中吗？」）
+                              textAlign: TextAlign.start,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(

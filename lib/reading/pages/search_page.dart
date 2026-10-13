@@ -497,16 +497,20 @@ class _SearchPageState extends State<SearchPage> with TickerProviderStateMixin {
             ),
           )
         else
-          GridView.builder(
+          // ✅ 用 MasonryGridView（自然高度）替代固定比例 GridView：
+          //   原 `childAspectRatio: 0.56` 是按封面 3:4 + 名称区估的，
+          //   但设备宽度不同 ⇒ 每格底部都会多出一段空白（单元格比内容高，
+          //   Column 默认 start 对齐 ⇒ 空白全堆在名称下方）✗
+          //   ⇒ 观感就是"名称和封面/下一行间距太大"（用户 2026-10-13）。
+          //   Masonry 让每张卡片按内容自适应高度、不留空白；间距与搜索结果
+          //   网格（同文件 :1990）保持一致：行 8 / 列 12。
+          MasonryGridView.count(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              mainAxisSpacing: 14,
-              crossAxisSpacing: 8,
-              childAspectRatio: 0.56,
-            ),
+            crossAxisCount: 3,
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 12,
             // ⚠️ 用户 2026-10-07：「漫画页和书源页里面的分类内容只要显示前6个就行」
             //   ⇒ 每个分类板块只预览**前 6 个**（3 列 = 2 行）✓
             itemCount: s.items.length > 6 ? 6 : s.items.length,
