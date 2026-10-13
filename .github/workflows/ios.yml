@@ -199,6 +199,26 @@ jobs:
           rm -rf "$TEMP_DIR" python-ios-support.tar.gz
           echo "=== Python.xcframework slices ==="
           ls Python.xcframework/
+          # ── 🔴 让 Swift 能 `import Python`（CI 实测报错：PythonBridge.swift:24
+          #    "No such module 'Python'"）──────────────────────────────
+          # BeeWare 的 Python.framework 里 module map 只放在 **Headers/** 下：
+          #     Python.framework/{Python, Headers/module.modulemap, Info.plist}
+          # 而 Swift 解析 `import Python` 时只在
+          #     Python.framework/**Modules**/module.modulemap
+          # 里找模块 ⇒ 必然 No such module（与框架是否 link、是否 embed 无关，
+          # 所以 pbxproj 校验全绿也照样编译失败）。
+          # 修法：为每个 slice 补出 Modules/module.modulemap，并把声明改成
+          # `framework module`（框架目录下的 module map 必须是 framework module）。
+          for FW in Python.xcframework/*/Python.framework; do
+            [ -d "$FW" ] || continue
+            mkdir -p "$FW/Modules"
+            sed '1s/^module Python {/framework module Python {/' \
+              "$FW/Headers/module.modulemap" > "$FW/Modules/module.modulemap"
+            grep -q '^framework module Python {' "$FW/Modules/module.modulemap" \
+              || { echo "❌ module map 改写失败: $FW"; exit 1; }
+            echo "✅ 已补 $(dirname "$FW" | xargs basename)/Python.framework/Modules/module.modulemap"
+          done
+          head -3 Python.xcframework/ios-arm64/Python.framework/Modules/module.modulemap
           echo "✅ Python.xcframework ready"
 
       - name: Copy NodeMobile.xcframework to ios/Frameworks
