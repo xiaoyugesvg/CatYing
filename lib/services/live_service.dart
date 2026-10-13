@@ -195,6 +195,11 @@ class LiveService extends GetxService {
       await _loadXtreamSourceLocked(index, map);
       return;
     }
+    // 麦优订阅源：json.txt 分类接口 + 分类文件频道列表
+    if (map['type'] == 'maiyou') {
+      await _loadMaiyouSourceLocked(index, map);
+      return;
+    }
     final all = <LiveChannel>[];
     final embedded = (map['channels'] as List?) ?? const [];
     for (final ch in embedded) {
@@ -294,6 +299,114 @@ class LiveService extends GetxService {
     final raw = _rawLives;
     if (raw == null || index < 0 || index >= raw.length) return false;
     return raw[index]['type'] == 'xtream';
+  }
+
+  /// 该索引的源是否为麦优订阅源（设置页展示标记用）。
+  bool isMaiyouSource(int index) {
+    final raw = _rawLives;
+    if (raw == null || index < 0 || index >= raw.length) return false;
+    return raw[index]['type'] == 'maiyou';
+  }
+
+  /// 麦优订阅源：`json.txt` 返回 pingtai 分类，每个分类是一个 json 文件，
+  /// 文件内 `zhubo` 数组即频道（title / address / img）。
+  /// 分类文件并发拉取（[_maiyouPoolSize] 并发），频道分组=分类名。
+  static const int _maiyouPoolSize = 6;
+
+  Future<void> _loadMaiyouSourceLocked(
+    int index,
+    Map<String, dynamic> map,
+  ) async {
+    final subUrl = map['url']?.toString() ?? '';
+    if (subUrl.isEmpty) {
+      error.value = '麦优订阅地址为空';
+      return;
+    }
+    final uri = Uri.tryParse(subUrl);
+    if (uri == null) {
+      error.value = '麦优订阅地址无效';
+      return;
+    }
+
+    // 缓存优先：先出列表再走网络
+    final cacheId = 'maiyou:$subUrl';
+    final cached = await _readChannelCache(cacheId);
+    if (cached != null && cached.isNotEmpty) {
+      channels.value = cached;
+      _rebuildGroups();
+    }
+
+    try {
+      // 1) 拉分类索引 json.txt → pingtai
+      final body = await _fetch(subUrl);
+      final decoded = jsonDecode(body);
+      if (decoded is! Map) throw Exception('分类索引不是 JSON 对象');
+      final pingtai = decoded['pingtai'];
+      if (pingtai is! List || pingtai.isEmpty) {
+        throw Exception('分类索引里没有 pingtai 分类');
+      }
+      final cats = <({String title, String file, String? img})>[];
+      for (final c in pingtai) {
+        if (c is! Map) continue;
+        final title = (c['title'] ?? '').toString().trim();
+        final file = (c['address'] ?? '').toString().trim();
+        if (title.isEmpty || file.isEmpty) continue;
+        cats.add((
+          title: title,
+          file: file,
+          img: c['xinimg']?.toString(),
+        ));
+      }
+      if (cats.isEmpty) throw Exception('没有可用的分类');
+
+      // 2) 并发拉取全部分类文件 → 频道列表
+      final all = <LiveChannel>[];
+      var cursor = 0;
+      Future<void> worker() async {
+        while (true) {
+          final idx = cursor++;
+          if (idx >= cats.length) break;
+          final c = cats[idx];
+          try {
+            final catUri = uri.resolve(c.file);
+            final catBody = await _fetch(catUri.toString());
+            final catDecoded = jsonDecode(catBody);
+            final zhubo = catDecoded is Map ? catDecoded['zhubo'] : null;
+            if (zhubo is! List) continue;
+            for (final z in zhubo) {
+              if (z is! Map) continue;
+              final name = (z['title'] ?? '').toString().trim();
+              final addr = (z['address'] ?? '').toString().trim();
+              if (name.isEmpty || addr.isEmpty) continue;
+              all.add(LiveChannel(
+                name: name,
+                urls: [addr],
+                group: c.title,
+                logo: z['img']?.toString(),
+              ));
+            }
+          } catch (e) {
+            AppLog.instance.log('[LiveService] 麦优分类拉取失败 ${c.file}: $e');
+          }
+        }
+      }
+
+      await Future.wait(List.generate(_maiyouPoolSize, (_) => worker()));
+
+      if (all.isNotEmpty) {
+        await _saveChannelCache(cacheId, all);
+      }
+      channels.value = all;
+      _rebuildGroups();
+      if (all.isEmpty && (cached == null || cached.isEmpty)) {
+        error.value = '麦优订阅未解析到频道';
+      }
+    } catch (e) {
+      AppLog.instance.log('[LiveService] 加载麦优订阅失败 $subUrl: $e');
+      if (cached == null || cached.isEmpty) {
+        error.value = humanizeLiveError(e);
+      }
+    }
   }
 
   /// Xtream 源的到期文案（如「到期 2026-01-01」/「已过期 2026-01-01」）；
@@ -533,7 +646,16 @@ class LiveService extends GetxService {
   /// [xtream] 或地址形如 Xtream 账号链接时，保存为 `type=xtream` 源：
   /// 存 `{base}/get.php?username=&password=` 链接，并另存 user/pass，
   /// 加载时走 [XtreamService.fetchChannels]（不再当 m3u 拉取）。
-  Future<void> addSource(String url, {String? name, bool xtream = false}) async {
+  ///
+  /// [maiyou] 或地址指向麦优订阅（含 `maiyoux.com` / `/mf/json`）时，
+  /// 保存为 `type=maiyou` 源：加载时走麦优分类式接口
+  /// （json.txt → pingtai 分类 → 分类文件 → zhubo 频道）。
+  Future<void> addSource(
+    String url, {
+    String? name,
+    bool xtream = false,
+    bool maiyou = false,
+  }) async {
     url = url.trim();
     if (url.isEmpty) return;
     await _markLivesManaged();
@@ -542,6 +664,7 @@ class LiveService extends GetxService {
     try {
       final isXtream =
           xtream || XtreamService.instance.looksLikeXtream(url);
+      final isMaiyou = maiyou || _looksLikeMaiyouUrl(url);
       final Map<String, dynamic> newItem;
       if (isXtream) {
         final acc = XtreamService.instance.parseAccount(url);
@@ -558,6 +681,15 @@ class LiveService extends GetxService {
           'type': 'xtream',
           'user': acc.user,
           'pass': acc.pass,
+          'updatedAt': DateTime.now().millisecondsSinceEpoch,
+        };
+      } else if (isMaiyou) {
+        newItem = <String, dynamic>{
+          'name': name?.trim().isEmpty ?? true
+              ? '麦优订阅${sources.length + 1}'
+              : name!,
+          'url': url,
+          'type': 'maiyou',
           'updatedAt': DateTime.now().millisecondsSinceEpoch,
         };
       } else {
@@ -865,6 +997,13 @@ class LiveService extends GetxService {
     return result;
   }
 
+  /// 麦优订阅地址识别：域名含 maiyoux.com 或路径含 /mf/json
+  /// （如 http://api.maiyoux.com:81/mf/json.txt）
+  bool _looksLikeMaiyouUrl(String url) {
+    final s = url.toLowerCase();
+    return s.contains('maiyoux.com') || s.contains('/mf/json');
+  }
+
   bool _looksLikeStream(String u) {
     final s = u.toLowerCase().trim();
     if (s.isEmpty) return false;
@@ -913,6 +1052,19 @@ class LiveService extends GetxService {
         .map((e) => LiveGroup(name: e.key, channels: e.value))
         .toList();
     selectedGroup.value = 0;
+  }
+
+  /// 临时展示一组频道（不持久化、不改直播源列表）。
+  ///
+  /// 供独立直播应用（如麦优订阅页）点频道后把列表交给直播页播放：
+  /// 只覆盖当前 channels/groups，直播源列表（sources/_rawLives）保持不变。
+  void showEphemeralChannels(List<LiveGroup> groupsIn) {
+    final flat = <LiveChannel>[];
+    for (final g in groupsIn) {
+      flat.addAll(g.channels);
+    }
+    channels.value = flat;
+    _rebuildGroups();
   }
 
   List<LiveChannel> get currentChannels {

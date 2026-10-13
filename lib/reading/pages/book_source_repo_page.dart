@@ -1151,7 +1151,7 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
             : JellyTheme.primary.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(6),
       ),
-      child: const Text(
+      child: Text(
         'Python',
         maxLines: 1,
         style: TextStyle(
@@ -1853,15 +1853,16 @@ class _BookSourceRepoPageState extends State<BookSourceRepoPage> {
       if (result.isEmpty) return;
       final f = result.first;
       String code;
+      final path = f.path;
+      if (path == null) {
+        _toast('读不出这个文件（没有本地路径）');
+        return;
+      }
       try {
-        code = await f.readAsString();
-      } catch (_) {
-        final path = f.path;
-        if (path == null) {
-          _toast('读不出这个文件（没有本地路径）');
-          return;
-        }
         code = await File(path).readAsString();
+      } catch (_) {
+        _toast('文件读取失败');
+        return;
       }
       if (code.trim().isEmpty) {
         _toast('文件是空的');

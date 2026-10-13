@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>搜索</title>
+  <link rel="stylesheet" href="theme.css" />
+  <style>
+    /* 搜索页专属样式（海豚TV风格） */
+    .search-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px 8px;
+    }
+    .search-back-btn {
+      width: 36px; height: 36px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(255,255,255,0.1); border: none; border-radius: 50%;
+      color: var(--text); cursor: pointer; flex-shrink: 0; font-size: 18px;
+    }
+    .search-input-wrap {
+      flex: 1;
+      display: flex; align-items: center;
+      background: var(--card);
+      border-radius: 20px;
+      padding: 0 14px;
+      height: 40px;
+    }
+    .search-input-wrap svg { flex-shrink: 0; margin-right: 8px; }
+    .search-input {
+      flex: 1;
+      background: transparent; border: none; outline: none;
+      color: var(--text); font-size: 14px;
+    }
+    .search-input::placeholder { color: var(--dim); }
+    .search-go-btn {
+      height: 40px; padding: 0 16px;
+      background: var(--accent); border: none; border-radius: 20px;
+      color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
+      flex-shrink: 0;
+    }
+    .source-info-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 16px 10px;
+      font-size: 12px; color: var(--dim);
+    }
+    .source-info-name {
+      display: flex; align-items: center; gap: 6px;
+      cursor: pointer;
+    }
+    .source-info-name .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent);
+    }
+    .source-info-switch {
+      color: var(--accent); cursor: pointer;
+    }
+    .dolphin-chips {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      padding: 0 16px 12px;
+    }
+    .dolphin-chip {
+      padding: 6px 14px;
+      background: var(--card);
+      border-radius: 16px;
+      font-size: 12px; color: var(--text);
+      cursor: pointer; border: none;
+    }
+    .dolphin-chip.clear {
+      color: var(--dim);
+      background: transparent;
+      border: 1px solid var(--line);
+    }
+    .search-result-count {
+      padding: 8px 16px;
+      font-size: 12px; color: var(--dim);
+    }
+    .dolphin-movie-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      padding: 0 12px 80px;
+    }
+    .dolphin-movie-card {
+      background: var(--card);
+      border-radius: 10px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .dolphin-movie-poster {
+      width: 100%;
+      aspect-ratio: 2/3;
+      background: var(--surface);
+      object-fit: cover;
+      display: block;
+    }
+    .dolphin-movie-poster.placeholder {
+      display: flex; align-items: center; justify-content: center;
+      font-size: 32px; color: var(--dim);
+    }
+    .dolphin-movie-info {
+      padding: 6px 8px 8px;
+    }
+    .dolphin-movie-title {
+      font-size: 12px; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      line-height: 1.3;
+    }
+    .dolphin-movie-remark {
+      font-size: 10px; color: var(--dim);
+      margin-top: 2px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .dolphin-load-more {
+      padding: 12px 16px 80px;
+      text-align: center;
+      font-size: 13px; color: var(--dim);
+    }
+    .dolphin-load-more button {
+      padding: 8px 24px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      color: var(--text);
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .state-box {
+      padding: 48px 24px;
+      text-align: center;
+      color: var(--dim);
+    }
+    .state-box .icon { font-size: 48px; margin-bottom: 12px; }
+    .state-box .title { font-size: 16px; color: var(--text); margin-bottom: 6px; }
+    .state-box .desc { font-size: 13px; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <!-- 顶部搜索栏 -->
+  <header class="search-header">
+    <button class="search-back-btn" id="btn-back" title="返回">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+    </button>
+    <div class="search-input-wrap">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--dim)" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input class="search-input" id="kw" type="search" enterkeyhint="search" placeholder="搜片名、演员、导演…" />
+    </div>
+    <button class="search-go-btn" id="go">搜索</button>
+  </header>
+
+  <!-- 源信息条（显示数据来源） -->
+  <div class="source-info-bar">
+    <div class="source-info-name" id="source-name" title="点击切换源">
+      <span class="dot"></span>
+      <span id="source-label-text">加载中…</span>
+    </div>
+    <span class="source-info-switch" id="btn-switch-source">切换源</span>
+  </div>
+
+  <!-- 搜索历史 -->
+  <div id="recent" class="dolphin-chips"></div>
+
+  <!-- 搜索结果数量 -->
+  <div class="search-result-count" id="result-count" style="display:none"></div>
+
+  <!-- 搜索结果网格 -->
+  <div id="grid" class="dolphin-movie-grid"></div>
+
+  <!-- 加载更多 -->
+  <div id="more" class="dolphin-load-more"></div>
+
+  <!-- 底部导航 -->
+  <nav class="dolphin-nav">
+    <div class="dolphin-nav-item" data-tab="movies">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+      <span>影片</span>
+    </div>
+    <div class="dolphin-nav-item" data-tab="live">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      <span>电视</span>
+    </div>
+    <div class="dolphin-nav-item" data-tab="files">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      <span>文件</span>
+    </div>
+    <div class="dolphin-nav-item" data-tab="settings">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span>设置</span>
+    </div>
+  </nav>
+
+  <script src="lib.js"></script>
+  <script>
+    (function () {
+      'use strict';
+      var U = window.EmbyUI;
+
+      var input = document.getElementById('kw');
+      var recentBox = document.getElementById('recent');
+      var grid = document.getElementById('grid');
+      var moreBox = document.getElementById('more');
+      var resultCount = document.getElementById('result-count');
+      var sourceLabelText = document.getElementById('source-label-text');
+
+      var state = {
+        site: null,
+        keyword: '',
+        page: 1,
+        list: [],
+        loading: false,
+        done: false
+      };
+
+      /* ---------- 源信息显示 ---------- */
+      function updateSourceLabel() {
+        var site = window.App.site;
+        sourceLabelText.textContent = site ? (site.name || site.key) : '未配置源';
+      }
+
+      /* ---------- 搜索历史 ---------- */
+      function paintRecent() {
+        return ant.storage.getJSON('searchHistory', []).then(function (list) {
+          var words = Array.isArray(list) ? list : [];
+          if (!words.length) { recentBox.innerHTML = ''; return; }
+          recentBox.innerHTML =
+            words.map(function (w) {
+              return '<button class="dolphin-chip" data-kw="' + U.esc(w) + '">' +
+                U.esc(w) + '</button>';
+            }).join('') +
+            '<button class="dolphin-chip clear" id="clear-recent">清空历史</button>';
+
+          recentBox.querySelectorAll('[data-kw]').forEach(function (node) {
+            node.addEventListener('click', function () {
+              input.value = node.dataset.kw;
+              search(node.dataset.kw);
+            });
+          });
+          var clearBtn = document.getElementById('clear-recent');
+          if (clearBtn) clearBtn.addEventListener('click', function () {
+            ant.storage.setJSON('searchHistory', []).then(paintRecent);
+          });
+        });
+      }
+
+      function rememberKeyword(word) {
+        return ant.storage.getJSON('searchHistory', []).then(function (list) {
+          var words = (Array.isArray(list) ? list : []).filter(function (w) {
+            return w !== word;
+          });
+          words.unshift(word);
+          return ant.storage.setJSON('searchHistory', words.slice(0, 10));
+        }).then(paintRecent);
+      }
+
+      /* ---------- 搜索 ---------- */
+      function search(word) {
+        var keyword = String(word || '').trim();
+        if (!keyword) { U.toast('输入点什么再搜'); return; }
+        state.site = window.App.site;
+        if (!state.site) { U.toast('未配置采集源，去设置页导入'); return; }
+        updateSourceLabel();
+        state.keyword = keyword;
+        state.page = 1;
+        state.list = [];
+        state.done = false;
+        resultCount.style.display = 'none';
+        grid.innerHTML = U.skeleton(9, null);
+        moreBox.textContent = '';
+        rememberKeyword(keyword);
+        fetchPage();
+      }
+
+      function fetchPage() {
+        if (state.loading || state.done) return;
+        state.loading = true;
+
+        U.apiSearch(state.site, state.keyword, state.page)
+          .then(function (res) {
+            var list = (res && res.list) || [];
+            if (state.page === 1) state.list = [];
+            state.list = state.list.concat(list);
+
+            if (!state.list.length) {
+              grid.innerHTML = '';
+              resultCount.style.display = 'none';
+              moreBox.innerHTML = '<div class="state-box"><div class="icon">🔍</div><div class="title">没有找到「' + U.esc(state.keyword) + '」</div><div class="desc">换个关键词，或者点上方切换源换个采集源再搜</div></div>';
+              state.done = true;
+              return;
+            }
+
+            resultCount.style.display = '';
+            resultCount.textContent = '找到 ' + state.list.length + ' 个结果（' + (state.site.name || state.site.key) + '）';
+            renderGrid(state.list);
+
+            if (!list.length || state.list.length >= (res.total || Infinity)) {
+              state.done = true;
+              moreBox.textContent = '— 没有更多了 —';
+            } else {
+              state.page += 1;
+              moreBox.innerHTML = '<button id="load-more">加载更多</button>';
+              document.getElementById('load-more').addEventListener('click', function () {
+                moreBox.textContent = '加载中…';
+                fetchPage();
+              });
+            }
+          })
+          .catch(function (e) {
+            if (state.page === 1) {
+              grid.innerHTML = '';
+              resultCount.style.display = 'none';
+              moreBox.innerHTML = '<div class="state-box"><div class="icon">⚠️</div><div class="title">搜索失败</div><div class="desc">' + U.esc(U.errText(e)) + '<br/>源：' + U.esc(state.site.name || state.site.key) + '</div></div>';
+            } else {
+              moreBox.textContent = '加载失败：' + U.errText(e);
+            }
+            state.done = true;
+          })
+          .then(function () { state.loading = false; });
+      }
+
+      /* ---------- 渲染搜索结果网格 ---------- */
+      function renderGrid(list) {
+        grid.innerHTML = list.map(function (v) {
+          var pic = v.vod_pic || v.pic || v.img || v.cover || '';
+          var name = v.vod_name || v.name || v.title || '';
+          var remark = v.vod_remarks || v.remarks || v.year || '';
+          var posterHtml = pic
+            ? '<img class="dolphin-movie-poster" src="' + U.esc(pic) + '" alt="' + U.esc(name) + '" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'"/><div class="dolphin-movie-poster placeholder" style="display:none">' + (name ? name.charAt(0) : '?') + '</div>'
+            : '<div class="dolphin-movie-poster placeholder">' + (name ? name.charAt(0) : '?') + '</div>';
+          return '<div class="dolphin-movie-card" data-id="' + U.esc(v.vod_id || v.id || '') + '">' +
+            posterHtml +
+            '<div class="dolphin-movie-info">' +
+              '<div class="dolphin-movie-title">' + U.esc(name) + '</div>' +
+              (remark ? '<div class="dolphin-movie-remark">' + U.esc(remark) + '</div>' : '') +
+            '</div>' +
+          '</div>';
+        }).join('');
+
+        grid.querySelectorAll('.dolphin-movie-card').forEach(function (card) {
+          card.addEventListener('click', function () {
+            var id = card.dataset.id;
+            if (!id) return;
+            ant.storage.setJSON('nav.detail', {
+              id: id,
+              siteKey: state.site.key,
+              sourceType: state.site.sourceType || 'host'
+            }).then(function () {
+              ant.navigateTo('detail.html?id=' + encodeURIComponent(id));
+            }).catch(function () {
+              ant.navigateTo('detail.html?id=' + encodeURIComponent(id));
+            });
+          });
+        });
+      }
+
+      /* ---------- 事件绑定 ---------- */
+      document.getElementById('go').addEventListener('click', function () {
+        search(input.value);
+      });
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') search(input.value);
+      });
+
+      // 返回按钮
+      document.getElementById('btn-back').addEventListener('click', function () {
+        ant.navigateBack().catch(function () {
+          ant.navigateTo('index.html');
+        });
+      });
+
+      // 切换源（点击源名称或切换源按钮）
+      function doSwitchSource() {
+        if (!window.App.sites || window.App.sites.length < 2) {
+          U.toast('只有一个采集源，去设置页导入更多');
+          return;
+        }
+        U.switchSite();
+        // 源切换面板关闭后更新标签
+        var checkInterval = setInterval(function () {
+          if (!document.querySelector('.site-mask')) {
+            clearInterval(checkInterval);
+            state.site = window.App.site;
+            updateSourceLabel();
+            if (state.keyword) search(state.keyword);
+          }
+        }, 300);
+      }
+      document.getElementById('source-name').addEventListener('click', doSwitchSource);
+      document.getElementById('btn-switch-source').addEventListener('click', doSwitchSource);
+
+      // 底部导航
+      document.querySelectorAll('.dolphin-nav-item').forEach(function (item) {
+        item.addEventListener('click', function () {
+          var tab = item.dataset.tab;
+          ant.navigateTo('index.html?tab=' + tab);
+        });
+      });
+
+      /* ---------- 启动 ---------- */
+      U.boot({ active: 'search' }).then(function (ok) {
+        if (!ok) return;
+        state.site = window.App.site;
+        updateSourceLabel();
+        paintRecent();
+
+        var initial = U.qs('wd');
+        if (initial) { input.value = initial; search(initial); }
+        else {
+          moreBox.innerHTML = '<div class="state-box"><div class="icon">🔍</div><div class="title">搜索 ' + U.esc(window.App.site ? (window.App.site.name || window.App.site.key) : '采集源') + '</div><div class="desc">数据来自当前选中的采集源<br/>点上方「切换源」可换源搜索<br/>搜索历史会自动保存</div></div>';
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

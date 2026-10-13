@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>播放</title>
+  <link rel="stylesheet" href="theme.css" />
+</head>
+<body class="play-body">
+  <div class="play-container">
+    <div class="play-topbar">
+      <button data-focus class="play-back" id="play-back">‹</button>
+      <div class="play-title" id="play-title">正在播放</div>
+    </div>
+    <div class="play-video-wrap">
+      <video id="play-video" controls playsinline webkit-playsinline autoplay></video>
+      <div class="play-loading" id="play-loading">加载中…</div>
+      <div class="play-error" id="play-error" style="display:none">播放失败，请检查地址或换一条线路</div>
+    </div>
+    <div class="play-info" id="play-info"></div>
+  </div>
+
+  <script src="lib.js"></script>
+  <script src="hls.min.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    var U = window.EmbyUI;
+    var video = document.getElementById('play-video');
+    var loading = document.getElementById('play-loading');
+    var errorBox = document.getElementById('play-error');
+    var titleEl = document.getElementById('play-title');
+    var infoEl = document.getElementById('play-info');
+
+    document.getElementById('play-back').addEventListener('click', function () {
+      try { video.pause(); } catch (e) {}
+      ant.navigateBack();
+    });
+
+    var hls = null;
+    function playUrl(url, title) {
+      titleEl.textContent = title || '正在播放';
+      loading.style.display = 'block';
+      errorBox.style.display = 'none';
+      // 销毁之前的hls实例
+      if (hls) { try { hls.destroy(); } catch (e) {} hls = null; }
+      try { video.pause(); } catch (e) {}
+
+      var isM3u8 = /\.m3u8(\?|$)/i.test(url);
+      if (isM3u8 && window.Hls && Hls.isSupported()) {
+        hls = new Hls({ maxBufferLength: 30, maxMaxBufferLength: 60 });
+        hls.xhrSetup = function (xhr) {
+          try {
+            xhr.setRequestHeader('User-Agent', 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36');
+            xhr.setRequestHeader('Referer', url);
+            xhr.setRequestHeader('Origin', url);
+          } catch (e) {}
+        };
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, function () {
+          video.play().catch(function () {});
+        });
+        hls.on(Hls.Events.ERROR, function (event, data) {
+          if (data.fatal) {
+            loading.style.display = 'none';
+            errorBox.textContent = '播放失败：' + (data.details || data.type || '未知错误');
+            errorBox.style.display = 'block';
+          }
+        });
+      } else {
+        video.src = url;
+        video.load();
+        var p = video.play();
+        if (p && p.catch) {
+          p.catch(function () { /* 自动播放被拦截，用户手动点播放 */ });
+        }
+      }
+    }
+
+    video.addEventListener('playing', function () { loading.style.display = 'none'; });
+    video.addEventListener('waiting', function () { loading.style.display = 'block'; });
+    video.addEventListener('error', function () {
+      loading.style.display = 'none';
+      errorBox.style.display = 'block';
+    });
+
+    // 加载主题
+    ant.storage.get('ui-theme', 'dark').then(function (t) {
+      if (t && t !== 'dark') document.documentElement.setAttribute('data-theme', t);
+    }).catch(function () {});
+
+    // 从导航参数获取播放信息
+    var title = U.qs('title') || '正在播放';
+    ant.storage.getJSON('nav.play', null).then(function (nav) {
+      if (nav && nav.url) {
+        playUrl(nav.url, nav.title || title);
+        if (nav.info) infoEl.textContent = nav.info;
+      } else {
+        errorBox.textContent = '没有播放地址';
+        errorBox.style.display = 'block';
+        loading.style.display = 'none';
+      }
+    });
+  })();
+  </script>
+</body>
+</html>

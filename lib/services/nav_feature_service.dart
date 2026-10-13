@@ -19,6 +19,7 @@ enum NavFeature {
   live('live', '直播', false, tabIndex: 4),
   music('music', '音乐', false, tabIndex: 5),
   books('books', '阅读', false, tabIndex: 6),
+  apps('apps', '程序', false, tabIndex: 7),
   shelf('shelf', '史藏', false, tabIndex: 1),
   settings('settings', '设置', true, tabIndex: 3),
   search('search', '搜索', false, tabIndex: 0);
@@ -44,6 +45,7 @@ enum NavFeature {
         NavFeature.live => Icons.live_tv,
         NavFeature.music => Icons.library_music_outlined,
         NavFeature.books => Icons.menu_book_outlined,
+        NavFeature.apps => Icons.widgets_outlined,
         NavFeature.shelf => Icons.schedule_outlined,
         NavFeature.settings => Icons.settings_outlined,
         NavFeature.search => Icons.search,
@@ -55,6 +57,7 @@ enum NavFeature {
         NavFeature.live => Icons.live_tv,
         NavFeature.music => Icons.library_music,
         NavFeature.books => Icons.menu_book,
+        NavFeature.apps => Icons.widgets,
         NavFeature.shelf => Icons.schedule,
         NavFeature.settings => Icons.settings,
         NavFeature.search => Icons.search,

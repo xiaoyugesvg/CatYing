@@ -1,0 +1,11 @@
+{
+  "appId": "com.leospring.Nemby",
+  "name": "新影视库",
+  "version": "3.4.7",
+  "versionCode": 35,
+  "renderer": "webview",
+  "entry": "index.html",
+  "icon": "icon.png",
+  "description": "OK影视风格影视浏览器：双源引擎+内置播放器+IPTV直播+T4配置，底部三栏导航（影片/直播/设置），右上角切换源，3列海报网格",
+  "permissions": ["ui", "storage", "navigate", "player", "source", "service", "network"]
+}

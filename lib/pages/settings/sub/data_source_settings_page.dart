@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:file_picker/file_picker.dart';
@@ -126,15 +128,16 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
       if (result.isEmpty) return;
       final f = result.first;
       String code;
+      final path = f.path;
+      if (path == null) {
+        AppToast.message('读不出这个文件（没有本地路径）');
+        return;
+      }
       try {
-        code = await f.readAsString();
-      } catch (_) {
-        final path = f.path;
-        if (path == null) {
-          AppToast.message('读不出这个文件（没有本地路径）');
-          return;
-        }
         code = await File(path).readAsString();
+      } catch (_) {
+        AppToast.message('文件读取失败');
+        return;
       }
       if (code.trim().isEmpty) {
         AppToast.message('文件是空的');

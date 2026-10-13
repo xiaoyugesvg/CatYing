@@ -1091,7 +1091,7 @@ class _LivePageState extends State<LivePage> {
                 controller: ctrl,
                 style: TextStyle(color: AppTheme.textPrimary),
                 decoration: InputDecoration(
-                  hintText: 'm3u / txt 地址',
+                  hintText: 'm3u / txt 地址（麦优订阅 json.txt 链接自动识别）',
                   hintStyle: TextStyle(color: AppTheme.textTertiary),
                 ),
               ),

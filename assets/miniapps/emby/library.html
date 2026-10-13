@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>媒体库</title>
+  <link rel="stylesheet" href="theme.css" />
+</head>
+<body>
+  <header id="app-header"></header>
+  <main id="app-main">
+    <div id="cats" class="chips scroll" style="padding-top:12px"></div>
+    <div id="filters" class="filter-panel"></div>
+    <div id="grid" class="grid"></div>
+    <div id="more" class="loading-more"></div>
+  </main>
+
+  <script src="lib.js"></script>
+  <script>
+    (function () {
+      'use strict';
+      var U = window.EmbyUI;
+
+      var catsBox = document.getElementById('cats');
+      var filtersBox = document.getElementById('filters');
+      var grid = document.getElementById('grid');
+      var moreBox = document.getElementById('more');
+
+      var state = {
+        siteKey: '',
+        classes: [],
+        filters: {},
+        activeFilters: [],
+        selected: {},
+        tid: '',
+        page: 1,
+        pageCount: 999,
+        list: [],
+        loading: false,
+        done: false,
+        generation: 0
+      };
+
+      function paintCats() {
+        catsBox.innerHTML = state.classes.map(function (c) {
+          return '<button data-focus class="chip ' +
+            (String(c.type_id) === String(state.tid) ? 'on' : '') +
+            '" data-tid="' + U.esc(c.type_id) + '">' +
+            U.esc(c.type_name || c.type_id) + '</button>';
+        }).join('');
+
+        catsBox.querySelectorAll('[data-tid]').forEach(function (node) {
+          node.addEventListener('click', function () {
+            if (node.dataset.tid === String(state.tid)) return;
+            state.tid = node.dataset.tid;
+            prepareFilters();
+            reset();
+            paintCats();
+            paintFilters();
+            loadMore();
+          });
+        });
+      }
+
+      function prepareFilters() {
+        var groups = state.filters && state.filters[state.tid];
+        state.activeFilters = Array.isArray(groups) ? groups.filter(function (group) {
+          return group && group.key;
+        }) : [];
+        state.selected = {};
+        state.activeFilters.forEach(function (group) {
+          if (group.init !== undefined && group.init !== null && String(group.init) !== '') {
+            state.selected[group.key] = String(group.init);
+          }
+        });
+      }
+
+      function selectedValue(group) {
+        return Object.prototype.hasOwnProperty.call(state.selected, group.key)
+          ? String(state.selected[group.key]) : '';
+      }
+
+      function filterOptionHtml(group, value, name, selected) {
+        return '<button data-focus class="filter-option ' + (selected ? 'on' : '') +
+          '" data-filter-key="' + U.esc(group.key) + '" data-filter-value="' +
+          U.esc(value) + '">' + U.esc(name) + '</button>';
+      }
+
+      function paintFilters() {
+        if (!state.activeFilters.length) {
+          filtersBox.innerHTML = '';
+          return;
+        }
+        filtersBox.innerHTML = state.activeFilters.map(function (group) {
+          var current = selectedValue(group);
+          var values = Array.isArray(group.value) ? group.value : [];
+          return '<div class="filter-row"><span class="filter-name">' +
+            U.esc(group.name || group.key) + '</span><div class="filter-options">' +
+            filterOptionHtml(group, '', '不限', !current) +
+            values.map(function (option) {
+              if (!option) return '';
+              var value = option.v === undefined || option.v === null ? '' : String(option.v);
+              return filterOptionHtml(group, value, option.n || value, value === current);
+            }).join('') + '</div></div>';
+        }).join('');
+
+        filtersBox.querySelectorAll('[data-filter-key]').forEach(function (node) {
+          node.addEventListener('click', function () {
+            var key = node.dataset.filterKey;
+            var value = node.dataset.filterValue || '';
+            if (value) state.selected[key] = value;
+            else delete state.selected[key];
+            paintFilters();
+            reset();
+            loadMore();
+          });
+        });
+      }
+
+      function requestExt() {
+        var ext = {};
+        Object.keys(state.selected).forEach(function (key) {
+          if (state.selected[key] !== '') ext[key] = state.selected[key];
+        });
+        return ext;
+      }
+
+      function reset() {
+        state.generation += 1;
+        state.page = 1;
+        state.pageCount = 999;
+        state.list = [];
+        state.done = false;
+        state.loading = false;
+        grid.innerHTML = '';
+        moreBox.textContent = '';
+      }
+
+      function paintList() {
+        U.renderCards(grid, state.list, { empty: '这个分类没有内容' });
+      }
+
+      function loadMore() {
+        if (state.loading || state.done) return;
+        state.loading = true;
+        var generation = state.generation;
+        moreBox.textContent = state.page === 1 ? '' : '加载中…';
+        if (state.page === 1) {
+          grid.innerHTML = U.skeleton(12, null);
+        }
+
+        ant.source
+          .category({
+            siteKey: state.siteKey,
+            tid: state.tid,
+            page: state.page,
+            ext: requestExt()
+          })
+          .then(function (res) {
+            if (generation !== state.generation) return;
+            var list = (res && res.list) || [];
+            var pageCount = Number(res && (res.size || res.pagecount));
+            if (pageCount > 0) state.pageCount = pageCount;
+
+            if (state.page === 1) state.list = [];
+            state.list = state.list.concat(list);
+            paintList();
+
+            if (!list.length || state.page >= state.pageCount) {
+              state.done = true;
+              moreBox.textContent = state.list.length ? '没有更多了' : '';
+            } else {
+              state.page += 1;
+              moreBox.textContent = '';
+            }
+          })
+          .catch(function (e) {
+            if (generation !== state.generation) return;
+            if (state.page === 1) {
+              grid.innerHTML = '';
+              moreBox.innerHTML = U.stateHtml('⚠️', '加载失败', U.esc(U.errText(e)));
+            } else {
+              moreBox.textContent = '加载失败：' + U.errText(e);
+            }
+            state.done = true;
+          })
+          .then(function () {
+            if (generation === state.generation) state.loading = false;
+          });
+      }
+
+      window.addEventListener('scroll', function () {
+        var bottom = document.documentElement.scrollHeight - window.innerHeight;
+        if (window.scrollY > bottom - 480) loadMore();
+      }, { passive: true });
+
+      U.boot({ active: 'library' }).then(function (ok) {
+        if (!ok) return;
+        state.siteKey = window.App.site.key;
+        state.tid = U.qs('tid');
+
+        catsBox.innerHTML = '<span class="hint">分类加载中…</span>';
+        filtersBox.innerHTML = '';
+        ant.source.home(state.siteKey).then(function (home) {
+          state.classes = ((home && home.classes) || []).filter(function (c) {
+            return c && c.type_id;
+          });
+          state.filters = (home && home.filters) || {};
+          if (!state.classes.length) {
+            catsBox.innerHTML = '';
+            filtersBox.innerHTML = '';
+            grid.innerHTML = '';
+            moreBox.innerHTML = U.stateHtml('📂', '这个源没有返回分类',
+              '换一个采集源，或直接用搜索。');
+            return;
+          }
+          var known = state.classes.some(function (c) {
+            return String(c.type_id) === String(state.tid);
+          });
+          if (!known) state.tid = String(state.classes[0].type_id);
+          prepareFilters();
+          paintCats();
+          paintFilters();
+          loadMore();
+        }).catch(function (e) {
+          catsBox.innerHTML = '';
+          filtersBox.innerHTML = '';
+          moreBox.innerHTML = U.stateHtml('⚠️', '分类加载失败', U.esc(U.errText(e)));
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

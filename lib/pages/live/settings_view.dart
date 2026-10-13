@@ -298,9 +298,12 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
     // Xtream 源加标记，并展示到期时间（如「Xtream · 到期 2026-01-01」）
     final isXtream = svc.isXtreamSource(index);
     final expiry = svc.xtreamExpiryText(index);
+    final isMaiyou = svc.isMaiyouSource(index);
     final sub = isXtream
         ? 'Xtream${expiry == null ? ' · ${src.statusText()}' : ' · $expiry'}'
-        : src.statusText();
+        : isMaiyou
+            ? '麦优订阅 · ${src.statusText()}'
+            : src.statusText();
     return ListTile(
       key: key,
       contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -520,7 +523,8 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
       ),
       trailing: Icon(Icons.chevron_right, color: AppTheme.textTertiary),
       onTap: () async {
-        final result = await showDialog<({String name, String url, bool xtream})>(
+        final result = await showDialog<
+            ({String name, String url, bool xtream, bool maiyou})>(
           context: context,
           builder: (ctx) => const _AddLiveSourceDialog(),
         );
@@ -529,6 +533,7 @@ class _LiveSettingsPageState extends State<LiveSettingsPage> {
             result.url,
             name: result.name.isEmpty ? null : result.name,
             xtream: result.xtream,
+            maiyou: result.maiyou,
           );
           if (mounted) {
             final err = LiveService.instance.error.value;
@@ -565,7 +570,7 @@ class _EmptyRow extends StatelessWidget {
   }
 }
 
-/// 「添加直播源」对话框：支持 m3u / txt 地址与 Xtream 账号两种模式。
+/// 「添加直播源」对话框：支持 m3u / txt 地址、Xtream 账号、麦优订阅三种模式。
 class _AddLiveSourceDialog extends StatefulWidget {
   const _AddLiveSourceDialog();
 
@@ -579,7 +584,8 @@ class _AddLiveSourceDialogState extends State<_AddLiveSourceDialog> {
   final _hostCtrl = TextEditingController();
   final _userCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
-  bool _xtream = false;
+  /// 0=m3u/txt，1=Xtream 账号，2=麦优订阅
+  int _mode = 0;
 
   @override
   void dispose() {
@@ -608,7 +614,7 @@ class _AddLiveSourceDialogState extends State<_AddLiveSourceDialog> {
 
   void _submit() {
     final name = _nameCtrl.text.trim();
-    if (_xtream) {
+    if (_mode == 1) {
       // 服务器地址可填 host:port，也可直接粘完整 get.php 链接
       final acc = XtreamService.instance.parseAccount(_hostCtrl.text);
       if (acc == null || acc.base.isEmpty) {
@@ -624,14 +630,24 @@ class _AddLiveSourceDialogState extends State<_AddLiveSourceDialog> {
         return;
       }
       final url = XtreamService.instance.buildAccountUrl(acc.base, user, pass);
-      Navigator.pop(context, (name: name, url: url, xtream: true));
+      Navigator.pop(context,
+          (name: name, url: url, xtream: true, maiyou: false));
+    } else if (_mode == 2) {
+      final url = _urlCtrl.text.trim();
+      if (url.isEmpty) {
+        AppToast.message('请输入麦优订阅地址（json.txt 链接）');
+        return;
+      }
+      Navigator.pop(context,
+          (name: name, url: url, xtream: false, maiyou: true));
     } else {
       final url = _urlCtrl.text.trim();
       if (url.isEmpty) {
         AppToast.message('请输入 m3u / txt 地址');
         return;
       }
-      Navigator.pop(context, (name: name, url: url, xtream: false));
+      Navigator.pop(context,
+          (name: name, url: url, xtream: false, maiyou: false));
     }
   }
 
@@ -675,14 +691,20 @@ class _AddLiveSourceDialogState extends State<_AddLiveSourceDialog> {
               children: [
                 _modeChip(
                   'm3u / txt 地址',
-                  !_xtream,
-                  () => setState(() => _xtream = false),
+                  _mode == 0,
+                  () => setState(() => _mode = 0),
                 ),
                 const SizedBox(width: 8),
                 _modeChip(
                   'Xtream 账号',
-                  _xtream,
-                  () => setState(() => _xtream = true),
+                  _mode == 1,
+                  () => setState(() => _mode = 1),
+                ),
+                const SizedBox(width: 8),
+                _modeChip(
+                  '麦优订阅',
+                  _mode == 2,
+                  () => setState(() => _mode = 2),
                 ),
               ],
             ),
@@ -693,7 +715,7 @@ class _AddLiveSourceDialogState extends State<_AddLiveSourceDialog> {
               decoration: _dec('源名称（可选）'),
             ),
             const SizedBox(height: 10),
-            if (_xtream) ...[
+            if (_mode == 1) ...[
               TextField(
                 controller: _hostCtrl,
                 keyboardType: TextInputType.url,
@@ -717,7 +739,11 @@ class _AddLiveSourceDialogState extends State<_AddLiveSourceDialog> {
                 controller: _urlCtrl,
                 keyboardType: TextInputType.url,
                 style: fieldStyle,
-                decoration: _dec('m3u / txt 地址'),
+                decoration: _dec(
+                  _mode == 2
+                      ? '麦优订阅地址（如 http://api.maiyoux.com:81/mf/json.txt）'
+                      : 'm3u / txt 地址',
+                ),
               ),
           ],
         ),

@@ -8,6 +8,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'app.dart';
+import 'miniapp/services/mini_app_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'common/constants.dart';
 import 'models/cache_store.dart';
@@ -244,6 +245,10 @@ void main() async {
 
   // 首页导航栏功能开关与顺序（设置 → 主页页面）
   await NavFeatureService.instance.load();
+
+  // 「程序」模块：重启后把已装程序的 CMS 影视源重新注册进视频源列表
+  // （这样不进程序页也能在搜索/首页搜到这些源）
+  await MiniAppService.instance.ensureLoaded();
 
   // 多订阅管理（订阅列表 / 激活切换 / 上锁）
   // 必须在 ApiConfig 首次加载前就绪：启动时要按"已激活的订阅"决定加载哪个地址。

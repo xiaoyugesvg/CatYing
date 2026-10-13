@@ -19,6 +19,7 @@ import '../../services/network_manager.dart';
 import '../../services/player_prefs.dart';
 import '../../services/ad_filter_service.dart';
 import '../../services/parse_service.dart';
+import '../play/sniff_player_page.dart';
 
 class PlaybackQualityOption {
   static const String autoIdentifier = 'auto';
@@ -679,9 +680,15 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     }
 
     if (!_looksLikeDirectMedia(candidate) && ParseService.instance.enabled) {
-      final parsed = await ParseService.instance.parse(candidate);
-      if (parsed != null && parsed.isNotEmpty) {
-        candidate = parsed;
+      final outcome = await ParseService.instance.parseOutcome(candidate);
+      if (outcome != null && outcome.url.isNotEmpty) {
+        if (outcome.direct) {
+          candidate = outcome.url;
+        } else {
+          // 解析接口返回的是网页播放页 → 交给嗅探播放页，避免直接播黑屏
+          Get.to(() => SniffPlayerPage(url: outcome.url));
+          return;
+        }
       }
     }
 

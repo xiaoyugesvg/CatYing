@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>设置 - 影视库</title>
+  <link rel="stylesheet" href="theme.css" />
+</head>
+<body>
+  <header id="app-header"></header>
+
+  <main class="settings-main">
+    <section class="settings-hero">
+      <h2>CMS 转 T4 服务</h2>
+      <p>配置多个 CMS JSON 接口，影视库会在后台提供按站点区分的 T4 兼容首页、分类、搜索和详情服务，可供其它应用调用。</p>
+    </section>
+
+    <section class="t4-panel">
+      <div class="t4-panel-head"><h3 id="site-editor-title">添加站点</h3></div>
+
+      <div class="batch-import">
+        <div class="batch-head">
+          <span class="batch-title">批量粘贴识别</span>
+          <span class="batch-hint">粘贴一行一个接口地址，自动识别批量添加</span>
+        </div>
+        <textarea id="batch-input" rows="4" placeholder="支持两种格式：&#10;1. 整段 JSON 配置（自动识别 api_site 数组，连名带址导入）：&#10;   { &quot;api_site&quot;: [{ &quot;name&quot;: &quot;量子资源&quot;, &quot;api&quot;: &quot;https://cj.lziapi.com/api.php/provide/vod&quot; }] }&#10;2. 纯 URL 列表（每行一个，自动从域名生成名称）：&#10;   https://example.com/api.php/provide/vod/"></textarea>
+        <div class="t4-actions">
+          <button data-focus class="t4-btn primary" id="batch-parse">识别并添加</button>
+          <button data-focus class="t4-btn quiet" id="batch-clear">清空</button>
+        </div>
+        <p id="batch-status" class="t4-status"></p>
+      </div>
+
+      <div class="t4-divider"><span>或逐个添加</span></div>
+
+      <label class="t4-label">
+        <span>站点 key</span>
+        <input id="key" type="text" maxlength="40" placeholder="例如：souav" autocomplete="off" />
+      </label>
+      <label class="t4-label">
+        <span>服务名称</span>
+        <input id="name" type="text" maxlength="80" placeholder="例如：我的影视源" />
+      </label>
+      <label class="t4-label">
+        <span>CMS JSON 接口</span>
+        <input id="url" type="url" inputmode="url" placeholder="https://example.com/api.php/provide/vod/" />
+      </label>
+      <div class="t4-actions">
+        <button data-focus class="t4-btn primary" id="save">添加 / 更新站点</button>
+        <button data-focus class="t4-btn" id="test">测试接口</button>
+        <button data-focus class="t4-btn quiet" id="reset">清除配置</button>
+      </div>
+      <p id="status" class="t4-status">服务启动后会自动注册，无需保持页面在前台。</p>
+      <div id="site-list" class="t4-site-list"></div>
+    </section>
+
+    <section class="t4-panel">
+      <div class="t4-panel-head">
+        <h3>对外接口</h3>
+        <span class="t4-badge" id="site-count-badge">0 个站点</span>
+      </div>
+
+      <div class="t4-hero-link">
+        <div class="t4-hero-link-text">
+          <span>config 配置接口</span>
+          <code id="config-url">尚未配置</code>
+        </div>
+        <button data-focus class="t4-btn primary" id="copy-config-url">复制</button>
+      </div>
+      <p class="t4-hint">宿主内部地址，供宿主自己的设置项和其它小程序引用；把这个地址填到支持 T4 源的播放器即可。</p>
+
+      <div id="link-list" class="t4-link-list"></div>
+      <p id="export-status" class="t4-status"></p>
+
+      <div class="t4-sub-head">
+        <h4>配置 JSON</h4>
+        <button data-focus class="t4-copy-btn" id="copy">复制 JSON</button>
+      </div>
+      <pre id="config-output">尚未配置</pre>
+    </section>
+
+    <section class="t4-panel">
+      <h3>接口路径</h3>
+      <p class="t4-hint">业务路径前面接上前缀 <code id="prefix-sample">miniapp://com.leospring.emby</code>；站点既能写成 <code>/site/souav</code>，也能写成 <code>?site=souav</code></p>
+      <div class="t4-endpoint"><code>GET /site/souav?filter=true</code><span>首页与分类</span></div>
+      <div class="t4-endpoint"><code>GET /site/souav?t=1&amp;ac=videolist&amp;pg=1</code><span>分类列表</span></div>
+      <div class="t4-endpoint"><code>GET /site/souav?wd=关键词&amp;pg=1</code><span>搜索</span></div>
+      <div class="t4-endpoint"><code>GET /site/souav?ac=detail&amp;ids=影片ID</code><span>详情</span></div>
+      <div class="t4-endpoint"><code>GET /site/souav?flag=线路&amp;play=播放地址</code><span>播放</span></div>
+      <div class="t4-endpoint"><code>GET /config</code><span>多站点配置</span></div>
+      <div class="t4-endpoint"><code>GET /health</code><span>服务状态与站点数量</span></div>
+    </section>
+  </main>
+
+  <script src="lib.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    var U = window.EmbyUI;
+
+    var keyInput = document.getElementById('key');
+    var nameInput = document.getElementById('name');
+    var urlInput = document.getElementById('url');
+    var siteList = document.getElementById('site-list');
+    var siteEditorTitle = document.getElementById('site-editor-title');
+    var status = document.getElementById('status');
+    var output = document.getElementById('config-output');
+    var configUrl = document.getElementById('config-url');
+    var linkList = document.getElementById('link-list');
+    var exportStatus = document.getElementById('export-status');
+    var prefixSample = document.getElementById('prefix-sample');
+    var siteCountBadge = document.getElementById('site-count-badge');
+    var batchInput = document.getElementById('batch-input');
+    var batchStatus = document.getElementById('batch-status');
+
+    var current = { sites: [], selectedKey: '' };
+    var editingKey = '';
+    var activeConfigUrl = '';
+
+    function setStatus(message, kind) {
+      status.textContent = message;
+      status.className = 't4-status' + (kind ? ' ' + kind : '');
+    }
+
+    function setExportStatus(message, kind) {
+      exportStatus.textContent = message || '';
+      exportStatus.className = 't4-status' + (kind ? ' ' + kind : '');
+    }
+
+    function setBatchStatus(message, kind) {
+      batchStatus.textContent = message || '';
+      batchStatus.className = 't4-status' + (kind ? ' ' + kind : '');
+    }
+
+    function copyText(text, label) {
+      if (!text) { setExportStatus('没有可复制的内容。', 'error'); return; }
+      ant.clipboard.set(text).then(function () {
+        setExportStatus(label + '已复制。', 'ok');
+      }).catch(function (e) {
+        setExportStatus('复制失败：' + ((e && e.message) || e), 'error');
+      });
+    }
+
+    function paintSites() {
+      siteCountBadge.textContent = current.sites.length + ' 个站点';
+      var editing = current.sites.find(function (s) { return s.key === editingKey; });
+      if (editing) {
+        keyInput.value = editing.key;
+        nameInput.value = editing.name;
+        urlInput.value = editing.url;
+        siteEditorTitle.textContent = '编辑站点';
+      }
+      if (!editing && !editingKey) {
+        keyInput.value = '';
+        nameInput.value = '';
+        urlInput.value = '';
+        siteEditorTitle.textContent = '添加站点';
+      }
+      siteList.innerHTML = '';
+      current.sites.forEach(function (site) {
+        var item = document.createElement('div');
+        item.className = 't4-site-item' + (site.key === current.selectedKey ? ' selected' : '');
+        item.innerHTML = '<div class="t4-site-meta"><strong></strong><span></span><code></code></div><div class="t4-site-actions"><button data-key="edit">编辑</button><button data-key="default">' + (site.key === current.selectedKey ? '默认站点' : '设为默认') + '</button><button data-key="delete" class="danger">删除</button></div>';
+        item.querySelector('strong').textContent = site.name;
+        item.querySelector('span').textContent = 'key: ' + site.key + (site.key === current.selectedKey ? ' · 当前默认' : '');
+        item.querySelector('code').textContent = site.url;
+        item.querySelector('[data-key="edit"]').addEventListener('click', function () { editingKey = site.key; paintSites(); });
+        item.querySelector('[data-key="default"]').addEventListener('click', function () {
+          current.selectedKey = site.key;
+          saveConfig(current, '已设为默认站点。');
+        });
+        item.querySelector('[data-key="delete"]').addEventListener('click', function () {
+          current.sites = current.sites.filter(function (s) { return s.key !== site.key; });
+          if (current.selectedKey === site.key) current.selectedKey = current.sites[0] ? current.sites[0].key : '';
+          if (editingKey === site.key) editingKey = '';
+          saveConfig(current, '站点已删除。');
+        });
+        siteList.appendChild(item);
+      });
+    }
+
+    function linkRow(row) {
+      var item = document.createElement('div');
+      item.className = 't4-link-item';
+      var meta = document.createElement('div');
+      meta.className = 't4-link-meta';
+      var label = document.createElement('strong');
+      label.textContent = row.label;
+      meta.appendChild(label);
+      if (row.hint) {
+        var hint = document.createElement('span');
+        hint.textContent = row.hint;
+        meta.appendChild(hint);
+      }
+      var code = document.createElement('code');
+      code.textContent = row.url;
+      meta.appendChild(code);
+      var button = document.createElement('button');
+      button.className = 't4-copy-btn';
+      button.textContent = '复制';
+      button.setAttribute('data-focus', '');
+      button.addEventListener('click', function () { copyText(row.url, row.label + '地址'); });
+      item.appendChild(meta);
+      item.appendChild(button);
+      return item;
+    }
+
+    function paintExport() {
+      var base = U.t4InternalBase;
+      activeConfigUrl = base + '/config';
+      configUrl.textContent = activeConfigUrl;
+      prefixSample.textContent = base;
+
+      linkList.innerHTML = '';
+      if (!current.sites.length) {
+        var empty = document.createElement('p');
+        empty.className = 't4-hint';
+        empty.textContent = '还没有站点，先在上面添加一个 CMS 接口；此时 config 接口返回空的 sites。';
+        linkList.appendChild(empty);
+      } else {
+        linkList.appendChild(linkRow({ label: '默认站点', hint: '省略 site 参数，走设为默认的站点', url: base + '/' }));
+        current.sites.forEach(function (site) {
+          linkList.appendChild(linkRow({
+            label: site.name,
+            hint: 'key: ' + site.key + (site.key === current.selectedKey ? ' · 默认' : '') + ' · 后面可直接接 ?ac=…',
+            url: base + '/site/' + encodeURIComponent(site.key)
+          }));
+        });
+      }
+      linkList.appendChild(linkRow({ label: '健康检查', hint: '确认服务在线与站点数量', url: base + '/health' }));
+      output.textContent = JSON.stringify(U.t4Descriptor(current.sites, base), null, 2);
+    }
+
+    function paint() {
+      paintSites();
+      paintExport();
+    }
+
+    function saveConfig(config, message) {
+      current = U.t4NormalizeConfig(config);
+      return U.t4SaveConfig(config).then(function () {
+        paint();
+        setStatus(message || '配置已保存，T4 服务已启用。', 'ok');
+      });
+    }
+
+    // 单个保存
+    document.getElementById('save').addEventListener('click', function () {
+      var config;
+      try {
+        var key = U.t4CleanKey(keyInput.value);
+        var site = { key: key, name: String(nameInput.value || '').trim() || 'CMS 影视源', url: U.t4CleanUrl(urlInput.value) };
+        var duplicate = current.sites.some(function (item) { return item.key === key && item.key !== editingKey; });
+        if (duplicate) throw new Error('key 已存在，请使用其他 key');
+        var sites = current.sites.filter(function (item) { return item.key !== editingKey && item.key !== key; });
+        sites.push(site);
+        config = { sites: sites, selectedKey: current.selectedKey || key };
+        if (!config.selectedKey || !sites.some(function (item) { return item.key === config.selectedKey; })) config.selectedKey = key;
+      } catch (e) {
+        setStatus(e.message, 'error');
+        return;
+      }
+      editingKey = '';
+      saveConfig(config).catch(function (e) { setStatus('保存失败：' + e.message, 'error'); });
+    });
+
+    // 测试接口
+    document.getElementById('test').addEventListener('click', function () {
+      var config;
+      try {
+        config = {
+          key: String(keyInput.value || '').trim() || 'test',
+          name: String(nameInput.value || '').trim() || 'CMS 影视源',
+          url: U.t4CleanUrl(urlInput.value)
+        };
+      } catch (e) { setStatus(e.message, 'error'); return; }
+      setStatus('正在请求 CMS 首页…');
+      U.t4FetchJson(config, { filter: 'true' }).then(function (data) {
+        var d = data && data.data ? data.data : data;
+        var cls = d.class || d.classes || [];
+        var list = d.list || [];
+        setStatus('接口正常：返回 ' + cls.length + ' 个分类、' + list.length + ' 条推荐。', 'ok');
+      }).catch(function (e) { setStatus('接口测试失败：' + ((e && e.message) || e), 'error'); });
+    });
+
+    // 清除配置
+    document.getElementById('reset').addEventListener('click', function () {
+      ant.storage.remove('emby-t4-config').then(function () {
+        current = { sites: [], selectedKey: '' };
+        editingKey = '';
+        nameInput.value = '';
+        urlInput.value = '';
+        paint();
+        setStatus('站点配置已清除，T4 服务暂不可用。');
+      }).catch(function (e) { setStatus('清除失败：' + e.message, 'error'); });
+    });
+
+    // 批量粘贴识别
+    document.getElementById('batch-parse').addEventListener('click', function () {
+      var text = batchInput.value;
+      if (!text || !text.trim()) { setBatchStatus('请先粘贴包含 CMS 接口地址的文本。', 'error'); return; }
+
+      // 智能解析：支持 JSON 配置（含 name/api）和纯 URL 列表
+      var parsed = U.t4ParseImportText(text);
+      if (!parsed.items.length) {
+        setBatchStatus('未在文本中识别到任何有效的 CMS 接口地址。', 'error');
+        return;
+      }
+
+      var existingKeys = {};
+      var existingUrls = {};
+      current.sites.forEach(function (site) { existingKeys[site.key] = true; existingUrls[site.url] = true; });
+
+      var added = [];
+      var skipped = [];
+      var invalid = [];
+
+      parsed.items.forEach(function (item) {
+        var cleaned;
+        try { cleaned = U.t4CleanUrl(item.url); } catch (e) { invalid.push(item.url); return; }
+        if (existingUrls[cleaned]) { skipped.push(cleaned); return; }
+        var key = U.t4DeriveKey(cleaned, existingKeys);
+        if (!key) { invalid.push(item.url); return; }
+        existingKeys[key] = true;
+        existingUrls[cleaned] = true;
+        // 有名称用名称，没名称用 key 兜底
+        var siteName = item.name && item.name.trim() ? item.name.trim() : key;
+        added.push({ key: key, name: siteName, url: cleaned });
+      });
+
+      if (!added.length) {
+        setBatchStatus('识别到 ' + parsed.items.length + ' 个地址，但全部已存在或无效。' + (invalid.length ? ' 无效 ' + invalid.length + ' 个。' : ''), 'error');
+        return;
+      }
+
+      var sites = current.sites.concat(added);
+      var selectedKey = current.selectedKey || (added[0] && added[0].key) || '';
+      if (!selectedKey || !sites.some(function (s) { return s.key === selectedKey; })) selectedKey = sites[0] ? sites[0].key : '';
+      var config = { sites: sites, selectedKey: selectedKey };
+
+      var modeText = parsed.mode === 'json' ? 'JSON 配置解析' : 'URL 提取';
+      saveConfig(config, '批量添加完成（' + modeText + '）：新增 ' + added.length + ' 个站点' +
+        (skipped.length ? '，跳过 ' + skipped.length + ' 个已存在' : '') +
+        (invalid.length ? '，无效 ' + invalid.length + ' 个' : '') + '。').then(function () {
+          batchInput.value = '';
+          setBatchStatus('已新增 ' + added.length + ' 个站点：' + added.map(function (s) { return s.name; }).join('、'), 'ok');
+        }).catch(function (e) {
+          setBatchStatus('保存失败：' + ((e && e.message) || e), 'error');
+        });
+    });
+
+    document.getElementById('batch-clear').addEventListener('click', function () {
+      batchInput.value = '';
+      setBatchStatus('');
+    });
+
+    // 复制 config URL
+    document.getElementById('copy-config-url').addEventListener('click', function () {
+      copyText(activeConfigUrl, 'config 接口');
+    });
+
+    // 复制 JSON
+    document.getElementById('copy').addEventListener('click', function () {
+      if (!current.sites.length) { setExportStatus('请先添加站点。', 'error'); return; }
+      copyText(output.textContent, '配置 JSON');
+    });
+
+    // 启动
+    U.boot({ active: 'settings' }).then(function (ok) {
+      if (!ok) return;
+      U.t4ReadConfig().then(function (config) {
+        current = config;
+        paint();
+        if (current.sites.length) setStatus('已加载 ' + current.sites.length + ' 个 CMS 站点，T4 服务运行中。', 'ok');
+        else setStatus('添加站点后，下面的 config 接口就能给其它应用用了。');
+      }).catch(function (e) { setStatus('读取配置失败：' + ((e && e.message) || e), 'error'); });
+    });
+  })();
+  </script>
+</body>
+</html>

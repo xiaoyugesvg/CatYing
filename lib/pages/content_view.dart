@@ -13,6 +13,7 @@ import '../services/nav_feature_service.dart';
 import 'live/view.dart';
 import '../reading/pages/home_page.dart' as reading_app;
 import '../music/pages/root_view.dart';
+import '../miniapp/pages/mini_app_list_page.dart';
 import 'settings/view.dart';
 import 'search/view.dart';
 import 'search/controller.dart';
@@ -591,6 +592,8 @@ class _ContentViewState extends State<ContentView>
         // 阅读（索引 6）—— 完整移植 cmbok_app 的 5-tab 应用
         // （漫画 / 图书 / 书架 / 收藏 / 我的），内含它自己的导航栏与主题体系
         reading_app.HomePage(),
+        // 程序（索引 7）—— 独立「小程序」模块（TVBox 配置：影视 + 直播）
+        const MiniAppListPage(),
       ];
     }
     return _tabPagesCache!;

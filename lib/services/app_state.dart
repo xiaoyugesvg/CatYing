@@ -263,8 +263,12 @@ class AppState extends GetxController {
 
   /// 加载 Spider 源 - 对应 Swift loadSpiderSource
   Future<void> _loadSpiderSource() async {
+    // 「程序」模块的 spider 源（key 前缀 app_）不走全局加载链路：
+    // 它们由程序详情页惰性加载（Node 引擎单源架构，全局加载会触发
+    // /config 线路替换并覆盖主源），这里只加载主订阅源里的蜘蛛源。
     final spiderSource = ApiConfig.instance.sourceBeanList
-        .firstWhereOrNull((s) => s.isSpiderSource);
+        .firstWhereOrNull(
+            (s) => s.isSpiderSource && !s.key.startsWith('app_'));
     if (spiderSource == null || spiderSource.api.isEmpty) return;
 
     // **会话级复用**: 本次启动已成功加载过源, 直接复用,

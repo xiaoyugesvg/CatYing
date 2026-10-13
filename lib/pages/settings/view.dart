@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import '../../common/theme.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/glass.dart';
+import '../../miniapp/pages/mini_app_list_page.dart';
 import 'controller.dart';
 import 'sub/about_settings_page.dart';
 import 'sub/unified_theme_settings_page.dart';
@@ -97,6 +98,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: Icons.movie_outlined,
                 title: '数据订阅',
                 onTap: () => Get.to(() => const DataSourceSettingsPage()),
+              ),
+              const SizedBox(height: AppTheme.spacingMD),
+              // 程序（独立小程序模块：TVBox 配置 影视+直播）
+              _categoryTile(
+                icon: Icons.widgets_outlined,
+                title: '小程序',
+                onTap: () => Get.to(() => const MiniAppListPage()),
               ),
               const SizedBox(height: AppTheme.spacingMD),
 
