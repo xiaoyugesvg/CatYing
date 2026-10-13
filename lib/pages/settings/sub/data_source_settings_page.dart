@@ -54,10 +54,11 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             }),
           ],
         ),
-        // 分组之间留出一整段间距：SettingsGroup 自身只有标题的 10+6px 内边距，
-        // 两块卡片几乎贴在一起、圆角叠成一个怪形状（用户 2026-10-13：
-        // 「订阅里面这个卡片问题」）。与 playback 等页保持一致用 spacingLG。
-        const SizedBox(height: AppTheme.spacingLG),
+        // 分组之间留出一整段空白：SettingsGroup 自身只在**有 title 时**加 10+6px 内边距，
+        // 第二组没 title ⇒ 两块卡片会直接贴在一起、圆角叠成一个怪形状。
+        // ⚠️ 只给 16(spacingLG) 用户仍嫌不够（2026-10-13：「距离还他么没加大吗」）
+        //    ⇒ 用 24(spacingXXL)，与订阅管理页「组与组之间留一整段空白」同一取值。
+        const SizedBox(height: AppTheme.spacingXXL),
         SettingsGroup(
           children: [
             Obx(
