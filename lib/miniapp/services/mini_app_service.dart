@@ -33,6 +33,27 @@ class MiniAppService extends GetxService {
 
   static const String _key = 'miniapp_list_v1';
 
+  /// 文件级备份（Documents，独立于 prefs plist）。
+  /// 与订阅同理：进程被硬打断时整个 plist 可能丢失 ⇒ 小程序列表也一起没。
+  static const String _backupName = 'miniapp_list.bak';
+
+  Future<File> _backupFile() async {
+    final docs = await getApplicationDocumentsDirectory();
+    return File('${docs.path}/$_backupName');
+  }
+
+  Future<String?> _readBackup() async {
+    try {
+      final f = await _backupFile();
+      if (!await f.exists()) return null;
+      final txt = await f.readAsString();
+      return txt.trim().isEmpty ? null : txt;
+    } catch (e) {
+      AppLog.instance.w('[MiniApp] 读文件备份失败: $e');
+      return null;
+    }
+  }
+
   /// 上次用的「市场地址」——程序页 → 市场 Tab 的输入框会记住它（参考图里的
   /// 「市场地址（JSON）」那一栏，重进页面自动填回并加载）
   static const String _kMarketUrl = 'miniapp_market_url';
@@ -62,8 +83,19 @@ class MiniAppService extends GetxService {
     _loaded = true;
     final prefs = await SharedPreferences.getInstance();
     _marketUrl = prefs.getString(_kMarketUrl) ?? '';
-    final raw = prefs.getString(_key);
-    if (raw == null || raw.isEmpty) return;
+    var raw = prefs.getString(_key) ?? '';
+    // prefs 空/损坏 → 用文件备份兜底（整域丢失后的自救）
+    if (raw.trim().isEmpty) {
+      final bak = await _readBackup();
+      if (bak != null) {
+        raw = bak;
+        try {
+          await prefs.setString(_key, raw);
+        } catch (_) {}
+        AppLog.instance.log('[MiniApp] prefs 为空，已从文件备份恢复列表');
+      }
+    }
+    if (raw.isEmpty) return;
     try {
       final list = jsonDecode(raw);
       if (list is List) {
@@ -83,8 +115,15 @@ class MiniAppService extends GetxService {
 
   Future<void> _persist() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-        _key, jsonEncode(apps.map((a) => a.toJson()).toList()));
+    final body = jsonEncode(apps.map((a) => a.toJson()).toList());
+    await prefs.setString(_key, body);
+    // 文件备份（独立于 plist，进程被硬打断也能救回来）
+    try {
+      final f = await _backupFile();
+      await f.writeAsString(body, flush: true);
+    } catch (e) {
+      AppLog.instance.w('[MiniApp] 写文件备份失败: $e');
+    }
   }
 
   // ── 导入 ──────────────────────────────────────────────────────

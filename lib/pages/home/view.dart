@@ -214,8 +214,8 @@ class _HomePageState extends State<HomePage> {
                   final isSelected =
                       _controller.selectedSort.value?.id == sort.id;
                   return Padding(
-                    // 名称间距收紧（原 spacingSM=8，现 2）
-                    padding: const EdgeInsets.only(right: 2),
+                    // 改成椭圆卡片后需要一点横向间隔（原来是纯文字，2 就够）
+                    padding: const EdgeInsets.only(right: 8),
                     child: GestureDetector(
                       onTap: () => _controller.selectSort(sort),
                       child: _CategoryChip(
@@ -1028,7 +1028,9 @@ const double _kBannerWideHeight = 196;
 //   · 侧卡缩到 0.62 → ≈105 宽，与参考图里"两侧小卡完整露出、只被屏幕边裁一点"
 //     一致 ⇒ 页间距（viewportFraction）要**小于**卡宽，卡才会比自己的槽位宽、
 //     互相轻微叠压（这正是 coverflow 的关键，参考图里中心卡压着两侧卡）。
-const double _kBannerCardsViewport = 0.34; // ≈0.34 屏宽的页间距
+// 用户 2026-10-13：「卡片幻灯片之间的间距小一点」⇒ 页间距调小（0.34→0.30），
+// 中心卡与两侧卡叠压更多、整体更紧凑。
+const double _kBannerCardsViewport = 0.30; // ≈0.30 屏宽的页间距
 const double _kBannerCardsCardW = 170;
 const double _kBannerCardsCardH = 250;
 const double _kBannerCardsHeight = 282; // 画布：卡 250 + 两侧下沉/缩放的余量
@@ -1048,24 +1050,38 @@ class _RecommendBanner extends StatefulWidget {
 }
 
 class _RecommendBannerState extends State<_RecommendBanner> {
+  /// 循环轮播的起始**绝对**页（取足够大的整数，前后都能滑，实现无限循环）
+  static const int _kLoopAnchor = 100000;
+
+  /// 起始绝对页：取 length 的整数倍，保证首屏显示的是第 0 条数据
+  int get _loopStart {
+    final len = widget.videos.length;
+    if (len <= 0) return 0;
+    return (_kLoopAnchor ~/ len) * len;
+  }
+
   late final PageController _pageCtrl = PageController(
+    initialPage: _loopStart,
     viewportFraction:
         widget.style == HomeBannerStyle.cards ? _kBannerCardsViewport : 0.92,
   );
-  int _index = 0;
+
+  /// 当前**绝对**页（无限递增/递减）。数据下标 = `_page % length`。
+  int _page = 0;
+
+  /// 当前数据下标（圆点用）
+  int get _index => widget.videos.isEmpty ? 0 : _page % widget.videos.length;
+
   Timer? _autoTimer;
 
   @override
   void initState() {
     super.initState();
+    _page = _loopStart;
     _autoTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!mounted || widget.videos.isEmpty || !_pageCtrl.hasClients) return;
-      final len = widget.videos.length;
-      // 防御：_index 可能因列表变化越界，取模前先夹紧
-      final cur = _index.clamp(0, len - 1);
-      final next = (cur + 1) % len;
-      _pageCtrl.animateToPage(
-        next,
+      // 无限循环：直接翻下一页（PageView 无边界）
+      _pageCtrl.nextPage(
         duration: const Duration(milliseconds: 400),
         curve: Curves.easeOut,
       );
@@ -1076,8 +1092,7 @@ class _RecommendBannerState extends State<_RecommendBanner> {
   void didUpdateWidget(covariant _RecommendBanner oldWidget) {
     super.didUpdateWidget(oldWidget);
     // 切换源后 homeVideos 会整体替换（数量/顺序都可能变），而 State 被复用：
-    // _index 不重置就会越界（圆点全灭 + 自动轮播跳页），PageController 也可能
-    // 停在已不存在的位置。
+    // 不重置绝对页就会让 % length 映射到错误的数据下标（圆点错位）。
     //
     // ⚠️ 只能比「长度 + 首条 id」，不能比对象 identity：父组件每次 rebuild 都
     // 传新建的 List（sublist / List.from），用 identical 会每帧都重置回第一页。
@@ -1085,9 +1100,9 @@ class _RecommendBannerState extends State<_RecommendBanner> {
     final newFirst = widget.videos.isEmpty ? '' : widget.videos.first.id;
     if (oldWidget.videos.length != widget.videos.length ||
         oldFirst != newFirst) {
-      _index = 0;
+      _page = _loopStart;
       if (_pageCtrl.hasClients) {
-        _pageCtrl.jumpToPage(0);
+        _pageCtrl.jumpToPage(_page);
       }
     }
   }
@@ -1110,11 +1125,11 @@ class _RecommendBannerState extends State<_RecommendBanner> {
           height: cards ? _kBannerCardsHeight : _kBannerWideHeight,
           child: PageView.builder(
             controller: _pageCtrl,
-            itemCount: widget.videos.length,
-            onPageChanged: (i) => setState(() => _index = i),
+            // 不传 itemCount = 无限，实现**循环轮播**（用户 2026-10-13）
+            onPageChanged: (i) => setState(() => _page = i),
             itemBuilder: (_, i) {
               if (cards) return _coverflowItem(context, i);
-              final v = widget.videos[i];
+              final v = widget.videos[i % widget.videos.length];
               final badge = VodCard.badgeText(v);
               return GestureDetector(
                 onTap: () => Get.toNamed('/detail', arguments: v),
@@ -1227,21 +1242,25 @@ class _RecommendBannerState extends State<_RecommendBanner> {
 
   /// 卡片轮播的一项：竖版海报 + 底部标题 + 右上角标。
   ///
-  /// 按与当前页的**连续**距离 `delta` 做 缩放 / 侧倾 / 下沉 / 压暗 ——
+  /// 按与当前页的**连续**距离 `delta` 做 缩放 / 侧倾 / 后退 / 下沉 / 压暗 ——
   /// 拖动过程中 `page` 是小数，所以这些变化是平滑的（不会只在翻页那一刻跳变）。
+  ///
+  /// 用户 2026-10-13：「整体带 V 形的那种切换形式」⇒ 加大两侧的侧倾与下沉，
+  /// 并让两侧向后退（Z 轴），中心卡前凸、两侧后收下坠，整体呈 **V 形**。
   Widget _coverflowItem(BuildContext context, int i) {
-    final v = widget.videos[i];
+    final v = widget.videos[i % widget.videos.length];
     final badge = VodCard.badgeText(v);
 
-    double page = _index.toDouble();
+    double page = _page.toDouble();
     if (_pageCtrl.hasClients && _pageCtrl.position.haveDimensions) {
       page = _pageCtrl.page ?? page;
     }
     final delta = (i - page).clamp(-1.5, 1.5);
     final absD = delta.abs().clamp(0.0, 1.0);
     final scale = 1 - 0.38 * absD; // 两侧缩到 0.62（对齐参考图里的小卡）
-    final rotY = -0.16 * delta; // 两侧 ±9° 侧倾
-    final dy = 12.0 * absD; // 两侧轻微下沉
+    final rotY = -0.26 * delta; // 两侧 ±≈15° 侧倾（V 形的斜边）
+    final dy = 18.0 * absD; // 两侧下沉（V 形的下坠）
+    final dz = -55.0 * absD; // 两侧后退（透视里更「远」，强化 V 形纵深）
     final dim = (1 - 0.45 * absD).clamp(0.0, 1.0); // 两侧压暗
 
     return Transform(
@@ -1250,7 +1269,7 @@ class _RecommendBannerState extends State<_RecommendBanner> {
         ..setEntry(3, 2, 0.0012) // 透视
         ..rotateY(rotY)
         ..scale(scale)
-        ..translate(0.0, dy),
+        ..translate(0.0, dy, dz),
       child: Opacity(
         opacity: dim,
         // 卡比自己的槽位（viewportFraction 0.34 ≈ 133）宽 → 居中后轻微叠压两侧，
@@ -1389,38 +1408,29 @@ class _CategoryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 去掉胶囊背景卡片：分类名直接排版，只用「文字色 + 下划线」表达选中。
-    // 原来的 backgroundTertiary 胶囊在浅色模式下是一块灰底，且描边写死白色
-    // （Colors.white.withValues(...)）→ 切外观时看起来"没跟着变"。
+    // 用户 2026-10-13：「影视那个分类也加个椭圆的卡片背景」⇒ 由「纯文字 + 下划线」
+    // 改成**椭圆胶囊卡片**：选中 = 强调色实底 + 白字，未选中 = 次级底 + 次级字。
+    // 样式与小程序详情页的分类 chip、阅读模块筛选 chip 统一。
     return Container(
-      alignment: Alignment.bottomCenter,
-      height: 34,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: selected ? AppTheme.accentColor : AppTheme.textSecondary,
-              fontSize: AppTheme.fontSubhead,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-            ),
-          ),
-          const SizedBox(height: 4),
-          // 选中下划线（未选中占位，避免文字上下跳动）
-          AnimatedContainer(
-            duration: AppTheme.motionFast,
-            curve: AppTheme.motionCurve,
-            width: selected ? 18 : 0,
-            height: 2.5,
-            decoration: BoxDecoration(
-              color: AppTheme.accentColor,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        ],
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      decoration: BoxDecoration(
+        color: selected ? AppTheme.accentColor : AppTheme.backgroundSecondary,
+        borderRadius: BorderRadius.circular(999), // 椭圆胶囊
+        border: Border.all(
+          color: selected
+              ? AppTheme.accentColor
+              : AppTheme.glassBorderSoft,
+          width: 0.6,
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: selected ? Colors.white : AppTheme.textSecondary,
+          fontSize: AppTheme.fontSubhead,
+          fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+        ),
       ),
     );
   }

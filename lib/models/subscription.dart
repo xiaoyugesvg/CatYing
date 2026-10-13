@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/app_log.dart';
@@ -207,10 +209,6 @@ class SubscriptionService extends GetxService {
     return Get.find<SubscriptionService>();
   }
 
-  static const String _listKey = 'subscriptions_v1';
-  static const String _activeKey = 'active_subscription_id';
-  static const String _pinKey = 'subscription_pin';
-
   final subscriptions = <Subscription>[].obs;
 
   /// 当前激活的订阅 id
@@ -228,6 +226,61 @@ class SubscriptionService extends GetxService {
         subscriptions.first;
   }
 
+  static const String _listKey = 'subscriptions_v1';
+  static const String _activeKey = 'active_subscription_id';
+  static const String _pinKey = 'subscription_pin';
+
+  /// 文件级备份名（放 Documents，与 prefs plist 互相独立）。
+  ///
+  /// 为什么要它：**进程被硬打断（崩溃 / CPython fatal exit）时，整个 prefs plist
+  /// 可能没落盘或被写坏** ⇒ 所有键一起丢。用户 2026-10-13 报的「用了 py 源后退出
+  /// 再进，订阅管理里的订阅 + 小程序订阅全没了」正是这种整域丢失（两个键同时空）。
+  /// `api_config` 的 `api_url.bak` 用的是同一套兜底，这里补齐订阅这一份。
+  static const String _backupName = 'subscriptions.bak';
+
+  Future<File> _backupFile() async {
+    final docs = await getApplicationDocumentsDirectory();
+    return File('${docs.path}/$_backupName');
+  }
+
+  /// 解析一段 JSON 文本为订阅列表（失败返回空，不抛）
+  List<Subscription> _tryDecode(String raw) {
+    if (raw.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        final out = <Subscription>[];
+        for (final e in decoded) {
+          if (e is Map) {
+            final s = Subscription.fromJson(e.cast<String, Object?>());
+            if (s.url.isNotEmpty) out.add(s);
+          }
+        }
+        return out;
+      }
+    } catch (e) {
+      AppLog.instance.log('[Subscription] 解析失败: $e');
+    }
+    return const [];
+  }
+
+  /// 读文件备份（返回 items + 激活 id；没有/损坏返回 null）
+  Future<({List<Subscription> items, String activeId})?> _readBackup() async {
+    try {
+      final f = await _backupFile();
+      if (!await f.exists()) return null;
+      final txt = await f.readAsString();
+      if (txt.trim().isEmpty) return null;
+      final m = jsonDecode(txt);
+      if (m is! Map) return null;
+      final items = _tryDecode(jsonEncode(m['items'] ?? const []));
+      return (items: items, activeId: (m['activeId'] ?? '').toString());
+    } catch (e) {
+      AppLog.instance.log('[Subscription] 读文件备份失败: $e');
+      return null;
+    }
+  }
+
   @override
   void onInit() {
     super.onInit();
@@ -240,28 +293,37 @@ class SubscriptionService extends GetxService {
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_listKey);
-    subscriptions.clear();
-    if (raw != null && raw.isNotEmpty) {
-      try {
-        final decoded = jsonDecode(raw);
-        if (decoded is List) {
-          for (final e in decoded) {
-            if (e is Map) {
-              final s = Subscription.fromJson(e.cast<String, Object?>());
-              if (s.url.isNotEmpty) subscriptions.add(s);
-            }
+    var items = _tryDecode(prefs.getString(_listKey) ?? '');
+    var savedActive = prefs.getString(_activeKey) ?? '';
+
+    // prefs 空/损坏 → 用文件备份兜底（整域丢失后的自救）
+    if (items.isEmpty) {
+      final bak = await _readBackup();
+      if (bak != null && bak.items.isNotEmpty) {
+        items = bak.items;
+        if (savedActive.isEmpty) savedActive = bak.activeId;
+        // 回填 prefs，后续读写恢复正常
+        try {
+          await prefs.setString(
+              _listKey, jsonEncode(items.map((s) => s.toJson()).toList()));
+          if (savedActive.isNotEmpty) {
+            await prefs.setString(_activeKey, savedActive);
           }
+        } catch (e) {
+          AppLog.instance.log('[Subscription] 回填 prefs 失败: $e');
         }
-      } catch (e) {
-        AppLog.instance.log('[Subscription] 解析失败: $e');
+        AppLog.instance.log(
+            '[Subscription] prefs 丢失/损坏，已从文件备份恢复 ${items.length} 条');
       }
     }
-    activeId.value = prefs.getString(_activeKey) ?? '';
+
+    subscriptions.assignAll(items);
+    activeId.value = savedActive;
     pinSet.value = (prefs.getString(_pinKey) ?? '').isNotEmpty;
     // 激活 id 失效时回落到第一条
-    if (active != null && activeId.value != active!.id) {
-      activeId.value = active!.id;
+    if (savedActive.isNotEmpty &&
+        !subscriptions.any((s) => s.id == savedActive)) {
+      activeId.value = subscriptions.isEmpty ? '' : subscriptions.first.id;
     }
     AppLog.instance.log('[Subscription] 已加载 ${subscriptions.length} 条, '
         '激活=${active?.name ?? "无"}');
@@ -269,9 +331,18 @@ class SubscriptionService extends GetxService {
 
   Future<void> _persist() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-        _listKey, jsonEncode(subscriptions.map((s) => s.toJson()).toList()));
+    final items = subscriptions.map((s) => s.toJson()).toList();
+    await prefs.setString(_listKey, jsonEncode(items));
     await prefs.setString(_activeKey, activeId.value);
+    // 文件备份（独立于 plist，进程被硬打断也能救回来）
+    try {
+      final f = await _backupFile();
+      await f.writeAsString(
+          jsonEncode({'items': items, 'activeId': activeId.value}),
+          flush: true);
+    } catch (e) {
+      AppLog.instance.log('[Subscription] 写文件备份失败: $e');
+    }
   }
 
   // ============================================================

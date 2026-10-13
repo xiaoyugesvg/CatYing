@@ -149,9 +149,9 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
   Widget build(BuildContext context) {
     // 用户 2026-10-13：「小程序打开界面不要顶栏」。
     // 去掉原来的「返回 + 标题 + 刷新」那一行 —— 很多小程序页面自带 header，
-    // 再叠一层宿主标题栏很难看。只保留两样**不占内容高度**的东西：
-    //   · 贴顶 2px 的加载进度条（只在加载中出现）
-    //   · 左上角一个半透明小圆返回钮（浮在内容上）—— 不然没地方退出去
+    // 再叠一层宿主标题栏很难看。
+    // 用户 2026-10-13 追加：「已经有个返回了，去掉新增的那个返回按钮」
+    //   ⇒ 连左上角那个悬浮返回圆钮也去掉，只保留**完全不占位**的贴顶进度条。
     return Scaffold(
       backgroundColor: AppTheme.backgroundPrimary,
       body: SafeArea(
@@ -172,25 +172,7 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
                       AlwaysStoppedAnimation<Color>(AppTheme.accentColor),
                 ),
               ),
-            Positioned(left: 6, top: 6, child: _floatBackButton()),
           ],
-        ),
-      ),
-    );
-  }
-
-  /// 悬浮返回钮：不占内容高度、半透明，尽量不挡小程序自己的 UI
-  Widget _floatBackButton() {
-    return Material(
-      color: Colors.black.withValues(alpha: 0.30),
-      shape: const CircleBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => Navigator.maybePop(context),
-        child: const SizedBox(
-          width: 34,
-          height: 34,
-          child: Icon(Icons.arrow_back_ios_new, size: 15, color: Colors.white),
         ),
       ),
     );

@@ -178,7 +178,22 @@ import Python
         //   - python-home 根：spider_runner.py / src/ / pylib/
         //   - <home>/lib/python3.12/site-packages：CI pip --target 装的三件套
         let sitePath = "\(home)/lib/python3.12/site-packages"
-        setenv("PYTHONPATH", "\(home):\(sitePath)", 1)
+        // 运行时兜底：把 xcframework（真机 slice）自带的 C 扩展目录也挂上 PYTHONPATH。
+        // 为什么需要：标准库的 C 扩展（math / _socket / _ssl …）在两个地方各有一份，
+        //   python-home/lib/python3.12/lib-dynload   ← CI 从 xcframework 拷过来的
+        //   Frameworks/Python.xcframework/ios-arm64/lib-arm64/python3.12/lib-dynload  ← 框架自带(真机)
+        // 只要 python-home 那份缺失、或被误拷成 simulator slice（.so 名是
+        // `…-iphonesimulator.so`，真机只认 `…-iphoneos.so`），`import math/_socket`
+        // 就会 ModuleNotFoundError（用户 2026-10-13 连续报的 'math' / '_socket'）。
+        // 把框架那份也放进 sys.path，任一份可用即可 import 成功。
+        let fwDynload = bundle.bundlePath
+            + "/Frameworks/Python.xcframework/ios-arm64/lib-arm64/python3.12/lib-dynload"
+        var pyPath = "\(home):\(sitePath)"
+        if FileManager.default.fileExists(atPath: fwDynload) {
+            pyPath += ":\(fwDynload)"
+            print("[PythonBridge] C 扩展兜底路径已加入 PYTHONPATH: \(fwDynload)")
+        }
+        setenv("PYTHONPATH", pyPath, 1)
         if let proxy = ProcessInfo.processInfo.environment["ALL_PROXY"],
            !proxy.isEmpty {
             setenv("https_proxy", proxy, 1)

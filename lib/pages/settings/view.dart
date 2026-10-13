@@ -10,7 +10,7 @@ import 'sub/unified_theme_settings_page.dart';
 import 'sub/cache_settings_page.dart';
 import 'sub/danmu_settings_page.dart';
 import 'sub/data_source_settings_page.dart';
-import 'sub/engine_settings_page.dart';
+import 'sub/general_settings_page.dart';
 import 'sub/home_pages_settings_page.dart';
 import 'sub/metadata_settings_page.dart';
 import 'sub/playback_settings_page.dart';
@@ -94,10 +94,11 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: AppTheme.spacingMD),
 
-              // 数据源
+              // 订阅管理（用户 2026-10-13：原名「数据订阅」→「订阅管理」；
+              // 原独立的「引擎管理」并入该页，不再单独占一格）
               _categoryTile(
                 icon: Icons.movie_outlined,
-                title: '数据订阅',
+                title: '订阅管理',
                 onTap: () => Get.to(() => const DataSourceSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingMD),
@@ -109,11 +110,12 @@ class _SettingsPageState extends State<SettingsPage> {
                 onTap: () => Get.to(() => const MiniAppListPage()),
               ),
               const SizedBox(height: AppTheme.spacingMD),
-              // 引擎管理：Node / Python 运行时引擎的手动加载（用户 2026-10-13）
+              // 通用设置（软件日志 / 缓存清理 / 同步与备份）—— 与阅读「我的」里的
+              // 「通用设置」复用同一个页面，两模块入口保持一致（用户 2026-10-13）
               _categoryTile(
-                icon: Icons.memory_outlined,
-                title: '引擎管理',
-                onTap: () => Get.to(() => const EngineSettingsPage()),
+                icon: Icons.settings_rounded,
+                title: '通用设置',
+                onTap: () => Get.to(() => const GeneralSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingMD),
 

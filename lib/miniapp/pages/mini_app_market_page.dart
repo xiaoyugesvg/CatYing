@@ -228,8 +228,11 @@ class MiniAppMarketViewState extends State<MiniAppMarketView> {
     }
 
     return ListView.separated(
+      // 用户 2026-10-13：底部留白加大——原来只留 24，列表最后几条会被
+      // 底部悬浮菜单栏遮住一部分。这里放到 130（菜单栏高度 + 余量），
+      // 保证能完整滑到底、最后一项也露在外面。
       padding: const EdgeInsets.fromLTRB(
-          AppTheme.spacingMD, 0, AppTheme.spacingMD, 24),
+          AppTheme.spacingMD, 0, AppTheme.spacingMD, 130),
       itemCount: list.length,
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (c, i) => _tile(list[i]),

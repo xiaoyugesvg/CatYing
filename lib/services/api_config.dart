@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:crypto/crypto.dart';
 import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
 import 'app_log.dart';
@@ -426,17 +427,11 @@ class ApiConfig extends GetxController {
 
     if (!isCurrentInNewList) {
       // 当前 homeSourceBean 是过时占位（key 不在新列表中），重置为新列表第一项
-      homeSourceBean.value = newSources
-              .where((s) => s.isSupportedInSwift)
-              .firstOrNull ??
-          newSources.firstOrNull;
+      // （用户 2026-10-13：按列表第一个来，不跳）
+      homeSourceBean.value = newSources.firstOrNull;
     } else if (homeSourceBean.value == null) {
-      // _restoreHomeSource 也没找到（保存的 key 在新列表中不存在），
-      // 兜底选第一个支持的
-      homeSourceBean.value = newSources
-              .where((s) => s.isSupportedInSwift)
-              .firstOrNull ??
-          newSources.firstOrNull;
+      // _restoreHomeSource 也没找到（保存的 key 在新列表中不存在），兜底第一个
+      homeSourceBean.value = newSources.firstOrNull;
     }
 
     AppLog.instance.log('[ApiConfig] 从 Spider /config 更新了 ${newSources.length} 个线路，默认 homeSourceBean=${homeSourceBean.value?.key}');
@@ -568,10 +563,65 @@ class ApiConfig extends GetxController {
       _rawConfigCache.remove(key);
     }
 
-    final content = await _network.getString(normalizedUrl);
-    _rawConfigCache[key] = _RawConfigCacheEntry(content: content, fetchedAt: now);
-    _trimRawConfigCacheIfNeeded();
-    return content;
+    try {
+      final content = await _network.getString(normalizedUrl);
+      _rawConfigCache[key] =
+          _RawConfigCacheEntry(content: content, fetchedAt: now);
+      _trimRawConfigCacheIfNeeded();
+      // 拉到就落一份到本地磁盘（用户 2026-10-13：把源下到本地，切换更稳）
+      await _writeDiskCache(normalizedUrl, content);
+      return content;
+    } catch (e) {
+      // 网络失败 → 回退本地磁盘缓存，切源/离线时不再「一片空白」
+      final cached = await _readDiskCache(normalizedUrl);
+      if (cached != null && cached.trim().isNotEmpty) {
+        AppLog.instance.log('[ApiConfig] 拉取失败，改用本地缓存配置: $normalizedUrl');
+        _rawConfigCache[key] =
+            _RawConfigCacheEntry(content: cached, fetchedAt: now);
+        return cached;
+      }
+      rethrow;
+    }
+  }
+
+  // ============================================================
+  // 本地磁盘配置缓存（<Documents>/config_cache/<md5(url)>.json）
+  // ------------------------------------------------------------
+  // 解决「切换订阅/离线时拉不到配置 → 首页空白、像坏了一样」。
+  // 与内存缓存（20s TTL）互补：内存只是短时去重，磁盘才是离线兜底。
+  // ============================================================
+  static const String _kConfigCacheDir = 'config_cache';
+
+  static Future<Directory> _diskCacheDir() async {
+    final docs = await getApplicationDocumentsDirectory();
+    final d = Directory('${docs.path}/$_kConfigCacheDir');
+    if (!await d.exists()) await d.create(recursive: true);
+    return d;
+  }
+
+  static String _diskKey(String url) =>
+      md5.convert(utf8.encode(url.toLowerCase().trim())).toString();
+
+  static Future<void> _writeDiskCache(String url, String content) async {
+    try {
+      final d = await _diskCacheDir();
+      await File('${d.path}/${_diskKey(url)}.json')
+          .writeAsString(content, flush: true);
+    } catch (e) {
+      AppLog.instance.log('[ApiConfig] 写配置缓存失败: $e');
+    }
+  }
+
+  static Future<String?> _readDiskCache(String url) async {
+    try {
+      final d = await _diskCacheDir();
+      final f = File('${d.path}/${_diskKey(url)}.json');
+      if (!await f.exists()) return null;
+      return await f.readAsString();
+    } catch (e) {
+      AppLog.instance.log('[ApiConfig] 读配置缓存失败: $e');
+      return null;
+    }
   }
 
   static void _trimRawConfigCacheIfNeeded() {
@@ -678,15 +728,13 @@ class ApiConfig extends GetxController {
       if (isSingleScriptSpider.value) {
         AppLog.instance.log('[ApiConfig] 当前 config 是单个 Spider 源，homeSourceBean 等待 getCatConfig 完成后设置');
       } else {
-        // 普通源：按优先级选第一个
+        // 用户 2026-10-13：「改成按你列表里的第一个来，不要你跳」
+        //   ⇒ 默认主页源 = 列表第一个（**不再**优先挑非 Spider 源，
+        //     py/js 脚本源也不再被排到最后）。若用户手动选过源，_restoreHomeSource
+        //     已按保存的 key 命中并优先，这里只在没有保存选择时兜底。
         await _restoreHomeSource(sources);
         if (homeSourceBean.value == null) {
-          homeSourceBean.value = sources
-                  .where((s) => !s.isSpiderSource && s.isSupportedInSwift)
-                  .firstOrNull ??
-              sources.where((s) => !s.isSpiderSource).firstOrNull ??
-              sources.where((s) => s.isSupportedInSwift).firstOrNull ??
-              sources.firstOrNull;
+          homeSourceBean.value = sources.firstOrNull;
         }
       }
 

@@ -15,10 +15,10 @@ import '../controller.dart';
 import 'settings_shared.dart';
 import '../../../widgets/app_toast.dart';
 
-/// 设置 → 数据源
+/// 设置 → 订阅管理
 ///
-/// 从原 settings/view.dart 拆出：点播接口地址（含历史切换/长按移除）、
-/// 主页数据源、重置配置。
+/// 从原 settings/view.dart 拆出：订阅列表、点播接口地址（含历史切换/长按移除）、
+/// 主页数据源、引擎管理、重置配置。
 class DataSourceSettingsPage extends StatefulWidget {
   const DataSourceSettingsPage({super.key});
 
@@ -34,7 +34,8 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
   @override
   Widget build(BuildContext context) {
     return SettingsSubPage(
-      title: '数据源',
+      // 用户 2026-10-13：顶栏「数据源」→「订阅管理」
+      title: '订阅管理',
       children: [
         SettingsGroup(
           title: '订阅',

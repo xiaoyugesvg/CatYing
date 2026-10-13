@@ -377,13 +377,34 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
+                    // 通用设置（软件日志 / 缓存清理 / 同步与备份）
+                    StaggeredEntrance(
+                      key: ValueKey('${_session}_general'),
+                      index: 11,
+                      child: SizedBox(
+                        width: itemWidth,
+                        child: _buildMenuItem(
+                          isDark,
+                          icon: Icons.settings_rounded,
+                          iconBg: JellyTheme.primary,
+                          title: '通用设置',
+                          subtitle: '软件日志 · 缓存清理 · 同步与备份',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const GeneralSettingsPage(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                     // 被隐藏导航 tab 入口（导航栏关闭某 tab 时，依次补在这里）
                     for (var i = 0; i < hiddenTabs.length; i++)
                       StaggeredEntrance(
                         key: ValueKey(
                           '${_session}_hidden_${hiddenTabs[i].name}',
                         ),
-                        index: 11 + i,
+                        index: 12 + i,
                         child: SizedBox(
                           width: itemWidth,
                           child: _buildHiddenTabItem(isDark, hiddenTabs[i]),

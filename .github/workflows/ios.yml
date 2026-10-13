@@ -284,14 +284,35 @@ jobs:
           mkdir -p build/python-home/lib/python3.12
           cp -R "$STDLIB_SRC/." build/python-home/lib/python3.12/
           # C 扩展：CPython 默认在 $PYTHONHOME/lib/python3.12/lib-dynload 找 .so
-          DYNL_SRC=$(find "$XCF" -path "*lib-arm64/python3.12/lib-dynload" -type d | head -1)
+          #  🔴 必须取 **ios-arm64（真机）** 那一份。xcframework 里 device 与
+          #     simulator **各有一份** lib-dynload，且 .so 名字不同：
+          #       真机   : math.cpython-312-iphoneos.so
+          #       模拟器 : math.cpython-312-iphonesimulator.so
+          #     旧实现 `find … | head -1` 顺序不定，可能拷到 simulator 那份 ⇒
+          #     真机上 `import math` 找不到 iphoneos 后缀的 .so ⇒
+          #       ModuleNotFoundError: No module named 'math'
+          #     而 .py 源注册（install_source）内部会 exec 脚本代码（脚本 import math
+          #     等标准库 C 扩展），注册当场失败 → 后续调用再 import 该模块就报
+          #       ModuleNotFoundError: No module named 'src.spider.video.psrc_…'
+          #     （用户 2026-10-13 连续报的这两条，其实是同一个根因）。
+          #     判据：目录里**必须存在 iphoneos 后缀的 math.so**。
+          DYNL_SRC=""
+          for d in "$XCF"/ios-arm64/lib-arm64/python3.12/lib-dynload \
+                   "$XCF"/*/lib-arm64/python3.12/lib-dynload; do
+            if [ -f "$d/math.cpython-312-iphoneos.so" ]; then DYNL_SRC="$d"; break; fi
+          done
           if [ -z "$DYNL_SRC" ]; then
-            echo "❌ 找不到 lib-dynload（C 扩展 .so）"
+            echo "❌ 找不到真机 lib-dynload（缺 math.cpython-312-iphoneos.so）"
+            ls "$XCF" || true
+            find "$XCF" -name "math.*.so" 2>/dev/null || true
             exit 1
           fi
-          echo "lib-dynload ← $DYNL_SRC"
+          echo "lib-dynload(真机) ← $DYNL_SRC"
           mkdir -p build/python-home/lib/python3.12/lib-dynload
           cp -R "$DYNL_SRC/." build/python-home/lib/python3.12/lib-dynload/
+          # 硬自检：真机缺少 C 扩展 ⇒ 所有 .py 源注册必失败，这里先拦住
+          test -f build/python-home/lib/python3.12/lib-dynload/math.cpython-312-iphoneos.so \
+            || { echo "❌ python-home 里缺 math.cpython-312-iphoneos.so"; exit 1; }
           # 硬自检：没有 encodings 就一定会在 Py_Initialize 崩，这里先拦住
           test -f build/python-home/lib/python3.12/encodings/__init__.py \
             || { echo "❌ python-home 里缺 encodings/__init__.py"; exit 1; }
