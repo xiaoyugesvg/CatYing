@@ -239,17 +239,25 @@ class AppState extends GetxController {
 
   /// 确保 Node.js 已启动并加载 Spider 源 - 对应 Swift ensureNodeJSAndLoadSource
   Future<void> _ensureNodeJSAndLoadSource() async {
-    // 只有「整包就是一个 js/jar spider」的配置才在这里启动 Node 并让 /config
-    // 决定线路（见 ApiConfig.isSingleScriptSpider）。聚合 TVBox 配置里
-    // sites[] 的 type=3 脚本源各自按需载入引擎，不走这条流程 ——
-    // 否则会把第一个 .py 当 index.js 交给 Node，载入失败 → /config 空 → 首页报错。
-    if (!ApiConfig.instance.isSingleScriptSpider.value) {
-      AppLog.instance.log('[AppState] 非单 Spider 配置，跳过 Node 启动/加载流程');
+    // 🔴 2026-10-13 修（用户：「导入猫源还有 tvbox 源后导入 py 源，重启后订阅里
+    // 面全空了，并且这些猫源还有 tvbox 源全部没有内容」）：
+    //
+    // 上一版这里只判断 `isSingleScriptSpider`（= 点播接口地址本身就是 .js/jar）
+    // 才启动 Node —— 那把 **CatVod 那类聚合配置**漏了：它们的 sites[] 里是
+    // `csp_xxx` 线路，实现**必须**由 Node 的 jar/js spider 提供，Node 一不启动
+    // 就全部线路没内容（看起来像"订阅空了"）。聚合 TVBox 配置同理。
+    //
+    // 现在改回「只要有 **js** 脚本源就启动 Node」，但**排除 .py**
+    //（.py 走 CPython，见 isPythonScriptSource；把 .py 当 index.js 交给 Node
+    //  会载入失败 → /config 空 → 首页报错，那是上一版修掉的问题）。
+    // 另外「整表替换线路」只对单 spider 配置生效（见 api_config.dart 里
+    // `if (isSingleScriptSpider.value)`），所以这里放开**不会**冲掉聚合配置的线路。
+    final hasSpiderSource = ApiConfig.instance.sourceBeanList
+        .any((s) => s.isSpiderSource && !s.isPythonScriptSource);
+    if (!hasSpiderSource) {
+      AppLog.instance.log('[AppState] 无 js/jar spider 源，跳过 Node 启动/加载流程');
       return;
     }
-    final hasSpiderSource =
-        ApiConfig.instance.sourceBeanList.any((s) => s.isSpiderSource);
-    if (!hasSpiderSource) return;
 
     if (!_nodeJSStarted) {
       // iOS: Node.js 运行时内嵌（NodeMobile.xcframework）, 无需下载

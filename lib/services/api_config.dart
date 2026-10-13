@@ -598,8 +598,21 @@ class ApiConfig extends GetxController {
     if (_activeLoadToken != loadToken) return;
 
     if (includeSources) {
-      // 整包是不是「单个 js/jar spider」配置（决定后面对 homeSourceBean 的处置）
-      isSingleScriptSpider.value = _isSpiderSourceUrl(apiUrl);
+      // 整包线路**是不是由 spider 决定**的（这决定后面对 homeSourceBean 的处置，
+      // 以及要不要让 Node 的 /config 结果整表替换线路）。
+      //
+      // 🔴 2026-10-13 修（用户：「导入猫源还有 tvbox 源后导入 py 源，重启后订阅
+      // 里面全空了，并且这些猫源还有 tvbox 源全部没有内容」）：
+      // 上一版只看「点播接口地址本身是不是 .js/.jar」⇒ **CatVod / TVBox-jar 类
+      // 配置全被误判成"聚合配置"**。那类配置的 `sites[]` 只是 `csp_xxx` 占位，
+      // 真正的线路清单（名字/搜索口）是 spider 启动后由 `/config` 下发的
+      // ⇒ 跳过整表替换 = 线路表全是空壳 → 看起来"订阅空了、全部没有内容"。
+      //
+      // 所以：**配置声明了非空 `spider` 字段** 也要走 spider 线路流程（恢复旧行为）。
+      // 只有「既不是 js/jar 接口、也没声明 spider」的纯聚合配置（如 huahua.json）
+      // 才走新路径：脚本源按需载入、不被 /config 整表替换冲掉。
+      isSingleScriptSpider.value = _isSpiderSourceUrl(apiUrl) ||
+          ((config.spider ?? '').trim().isNotEmpty);
 
       // 解析站点列表
       final sources = <SourceBean>[];
