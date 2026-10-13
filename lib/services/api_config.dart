@@ -86,7 +86,10 @@ class ApiConfig extends GetxController {
   int _activeLoadToken = 0;
 
   /// 原始配置缓存
-  final Map<String, _RawConfigCacheEntry> _rawConfigCache = {};
+  ///
+  /// **static**：这样 main() 里在实例还没注册之前就能预取（见 [prefetchConfig]），
+  /// 预取结果对之后真正加载的那个实例同样有效。进程级缓存 + 20s TTL，语义不变。
+  static final Map<String, _RawConfigCacheEntry> _rawConfigCache = {};
 
   ApiConfig();
 
@@ -123,6 +126,33 @@ class ApiConfig extends GetxController {
 
     if (_activeLoadToken != loadToken) return;
     isLoaded.value = true;
+  }
+
+  /// 启动预取：只把「原始配置文本」预热进 [_rawConfigCache]（20s TTL），
+  /// **不解析、不写状态、不抛错**。
+  ///
+  /// 用途：`ContentView` 要等第一帧之后才发起真正的加载，而这里是在 main() 里
+  /// fire-and-forget 先拉一遍 ⇒ 真正加载时直接命中缓存，少等一次完整网络往返
+  /// （用户反馈"启动要好久"）。失败完全静默 —— 预取只是优化，不影响主流程。
+  ///
+  /// **static**：main() 调它时 `ApiConfig` 实例还没注册（注册在 TVBoxApp.initState）。
+  static Future<void> prefetchConfig(String apiUrl) async {
+    try {
+      final normalized = normalizeConfigUrl(apiUrl.trim());
+      if (normalized.isEmpty) return;
+      // 单 js/jar spider 源不是 JSON，预取没意义（那类走 Node 加载那套）
+      if (_isSpiderSourceUrl(normalized)) return;
+
+      final key = normalized.toLowerCase();
+      final now = DateTime.now();
+      final content = await NetworkManager.instance.getString(normalized);
+      _rawConfigCache[key] =
+          _RawConfigCacheEntry(content: content, fetchedAt: now);
+      _trimRawConfigCacheIfNeeded();
+      AppLog.instance.log('[ApiConfig] 配置预取完成（命中缓存后加载会更快）');
+    } catch (_) {
+      // 静默：预取失败就老老实实走正常加载路径
+    }
   }
 
   /// 仅探测"多仓库入口"并返回可选项。
@@ -544,7 +574,7 @@ class ApiConfig extends GetxController {
     return content;
   }
 
-  void _trimRawConfigCacheIfNeeded() {
+  static void _trimRawConfigCacheIfNeeded() {
     if (_rawConfigCache.length <= _maxRawConfigCacheEntries) return;
     final overflow = _rawConfigCache.length - _maxRawConfigCacheEntries;
     // LRU：优先淘汰最久未访问

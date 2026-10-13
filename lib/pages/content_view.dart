@@ -38,6 +38,11 @@ class _ContentViewState extends State<ContentView>
     with WidgetsBindingObserver {
   // int _selectedTab 已迁移到 MainTabController.selectedTab (全局共享)
   bool _hasSavedConfig = false;
+
+  /// 「已保存配置」这件事**查完了没有**（见 build 里的分支）。
+  /// 查完之前**不渲染「填入订阅」页**，否则冷启动会先闪一帧设置页。
+  bool _configChecked = false;
+
   bool _showSearch = false;
   // 防止 ever() 回调重入 - 在回调内部清空 pendingSearchKeyword 时会再次触发 ever()
   bool _isProcessingSearchKeyword = false;
@@ -61,6 +66,17 @@ class _ContentViewState extends State<ContentView>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // ── 「闪一哈」的根治 ─────────────────────────────────────────
+    // 首帧就用 main() 里**同步**读到的接口地址（AppState.startupSavedApiUrl）：
+    // 有配置 → 直接进"加载页"，**绝不先渲染一帧「填入订阅」页**。
+    // （以前 _hasSavedConfig 初值恒为 false，要等 _loadSavedConfig() 异步跑完，
+    //   于是冷启动第一帧必然是设置页 —— 用户看到的"闪一哈"。）
+    final seeded = AppState.startupSavedApiUrl.trim();
+    if (seeded.isNotEmpty) {
+      _hasSavedConfig = true;
+      _configChecked = true;
+      _vodUrlController.text = seeded;
+    }
     // 主题模式（含「跟随系统」）已在 main() 启动时从 prefs 加载，
     // 这里不再用 BackgroundService.appearanceMode 覆盖 ——
     // 旧逻辑每次冷启动都会把 'system' 覆盖成 dark/light（跟随系统丢失）。
@@ -137,17 +153,29 @@ class _ContentViewState extends State<ContentView>
 
   /// 对应 Swift onAppear - 加载已保存的配置
   Future<void> _loadSavedConfig() async {
-    final prefs = await SharedPreferences.getInstance();
-    var savedVodUrl = prefs.getString(AppConstants.apiUrl) ?? '';
-    // prefs 丢了就用手写那份文件备份兜底（防"重启又要重新填源"）
-    savedVodUrl = await ApiConfig.restoreApiUrlIfLost(savedVodUrl);
-
-    if (savedVodUrl.isNotEmpty) {
-      _hasSavedConfig = true;
-      _vodUrlController.text = savedVodUrl;
-      final appState = Get.find<AppState>();
-      await appState.loadConfig(vodUrl: savedVodUrl);
+    // 首帧已用 main() 的同步值填过（见 initState）→ 这里就不必再读一遍 prefs
+    var savedVodUrl = _vodUrlController.text.trim();
+    if (savedVodUrl.isEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      savedVodUrl = prefs.getString(AppConstants.apiUrl) ?? '';
+      // prefs 丢了就用手写那份文件备份兜底（防"重启又要重新填源"）
+      savedVodUrl = await ApiConfig.restoreApiUrlIfLost(savedVodUrl);
     }
+    if (!mounted) return;
+
+    if (savedVodUrl.isEmpty) {
+      // 确认「确实没有配置」→ 这时才允许渲染「填入订阅」页
+      setState(() => _configChecked = true);
+      return;
+    }
+
+    setState(() {
+      _hasSavedConfig = true;
+      _configChecked = true;
+      _vodUrlController.text = savedVodUrl;
+    });
+    final appState = Get.find<AppState>();
+    await appState.loadConfig(vodUrl: savedVodUrl);
   }
 
   @override
@@ -155,16 +183,20 @@ class _ContentViewState extends State<ContentView>
     final appState = Get.find<AppState>();
 
     return Obx(() {
-      final phase = appState.loadingPhase.value;
-
-      // 对应 Swift: if appState.isConfigLoaded → mainTabView
-      // else if hasSavedConfig && loadingPhase != .idle → loadingView
-      // else → setupView
+      // 三态（顺序即优先级）：
+      //   ① 配置就绪 → 主界面
+      //   ② 有已保存配置（含首帧 seed 的）→ 加载页。⚠️ 这里**不再要求
+      //      `loadingPhase != idle`** —— phase 还停在 idle 的那一两帧以前会掉到
+      //      下面的 else 分支，于是先渲染一帧「填入订阅」页（用户说的"闪一哈"）。
+      //   ③ 还没查完有没有配置 → 什么都不画（留背景），绝不闪设置页
+      //   ④ 查完且确实没配置 → 设置页
       Widget currentChild;
       if (appState.isConfigLoaded.value) {
         currentChild = _buildMainTabView();
-      } else if (_hasSavedConfig && phase != LoadingPhase.idle) {
+      } else if (_hasSavedConfig) {
         currentChild = _buildLoadingView();
+      } else if (!_configChecked) {
+        currentChild = const SizedBox.shrink();
       } else {
         currentChild = _buildSetupView();
       }

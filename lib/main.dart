@@ -303,14 +303,25 @@ void main() async {
     AppLog.instance.log('[Subscription] 启动校正失败: $e');
   }
 
-  // 接口地址的**文件备份**：老装机首次升级时补上（之后由 ApiConfig.persistApiUrl 维护）。
-  // prefs 被写坏时它就是兜底，避免"重启回第一页要重新填源"。
+  // 接口地址的**文件备份** + 首帧同步值 + 配置预取（原因见下）
+  //
+  //  ① 文件备份：老装机首次升级时补上（之后由 ApiConfig.persistApiUrl 维护）。
+  //     prefs 被写坏时它就是兜底，避免"重启回第一页要重新填源"。
+  //  ② startupSavedApiUrl：ContentView 首帧要用它判断"用户有没有配置" ——
+  //     prefs 只有异步 API，不提前给就会先渲染一帧「填入订阅」页（"闪一哈"）。
+  //  ③ 配置预取：ContentView 要等第一帧之后才发起这次网络请求，而 ApiConfig
+  //     有 20s 的原始配置缓存 ⇒ 这里先 fire-and-forget 拉一遍，等它真正解析时
+  //     直接命中缓存，少等一次完整网络往返（用户反馈"启动要好久"）。
   try {
     final prefs = await SharedPreferences.getInstance();
     final cur = prefs.getString(AppConstants.apiUrl) ?? '';
-    if (cur.isNotEmpty) await ApiConfig.persistApiUrl(cur);
+    if (cur.isNotEmpty) {
+      await ApiConfig.persistApiUrl(cur);
+      AppState.startupSavedApiUrl = cur;
+      unawaited(ApiConfig.prefetchConfig(cur));
+    }
   } catch (e) {
-    AppLog.instance.log('[ApiConfig] 接口地址备份初始化失败: $e');
+    AppLog.instance.log('[ApiConfig] 接口地址备份/预取初始化失败: $e');
   }
 
   // 「随启动自动同步」：只对勾了自动更新的订阅生效。

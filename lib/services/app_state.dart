@@ -76,6 +76,17 @@ extension LoadingPhaseDesc on LoadingPhase {
 /// 应用状态控制器 - 对应 Swift AppState
 /// 管理整个配置加载生命周期
 class AppState extends GetxController {
+  /// main() 里**同步**读到的「已保存的点播接口地址」——给首帧用。
+  ///
+  /// 为什么要有它（用户 2026-10-13：「打开软件会闪一哈，相当于第一次打开那个
+  /// 填入订阅页面重新加载一遍」）：
+  ///   `shared_preferences` 只有异步 API，而 `ContentView._hasSavedConfig`
+  ///   初值是 false、要等 `_loadSavedConfig()` 跑完才变 true ⇒ 冷启动时
+  ///   **第一帧先渲染「填入订阅」页**，紧接着才切成加载页 → 视觉上"闪一哈"。
+  ///   而 main() 早就 await 过 prefs 并读到了这个值 ⇒ 顺手静态存一份，
+  ///   ContentView 首帧就知道"用户有配置"，那一帧设置页根本不会渲染。
+  static String startupSavedApiUrl = '';
+
   final loadingPhase = LoadingPhase.idle.obs;
   final isConfigLoaded = false.obs;
   final currentSourceKey = ''.obs;
