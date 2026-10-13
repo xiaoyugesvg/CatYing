@@ -1447,6 +1447,30 @@ class MusicApi {
         .toList();
   }
 
+  /// QQ 歌单广场分类（**带数字 categoryId**）。
+  ///
+  /// 为什么要单独开一个（用户 2026-10-13：「音乐模块里面 QQ 分类的歌单分类
+  /// 怎么没有内容」）：
+  ///   · 通用 [playlistCatlist] 只回**名字**（网易云/酷狗的 cat 就是名字）；
+  ///   · 而 QQ 的 `playlistSquare(cat:)` 收的是**数字 categoryId**
+  ///     （Node 侧 `Number(cat) || 10000000`，见 qq_source.playlistSquare）；
+  ///   · Node 的 `playlistCategories()` 其实**已经把 id 一起回了**
+  ///     （`[{id, name}]`），是 Dart 这边把它丢掉的 ⇒ 之前只能"拿名字去搜"，
+  ///     点"华语"经常搜不出内容（看起来像坏了）。
+  Future<List<({int id, String name})>> playlistCatlistQq() async {
+    final r = await _call({
+      'action': 'playlistCatlist',
+      'source': SongSource.qq.key,
+    });
+    final out = <({int id, String name})>[];
+    for (final e in _listOf(r, 'list')) {
+      final id = asInt(e['id']);
+      final name = (e['name'] ?? '').toString().trim();
+      if (id > 0 && name.isNotEmpty) out.add((id: id, name: name));
+    }
+    return out;
+  }
+
   /// 新歌速递
   Future<List<Song>> newSongs({int limit = 10, SongSource source = SongSource.netease}) async {
     final r = await _call({'action': 'newSongs', 'limit': limit, 'source': source.key});

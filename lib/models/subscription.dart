@@ -10,32 +10,40 @@ import '../services/app_log.dart';
 
 /// 订阅的「导入分类」——用于在订阅管理里按来源分组显示。
 ///
+/// 2026-10-13 用户指定分类（订阅页「新增分类」按这两行三列排）：
+///   CatVod / TvBox / CMS / PY源 / T4源 / JS源
+///
 /// 注意：这是**展示/归类**用的，不影响是否激活、也不影响配置加载。
-/// 旧数据没有这个字段时，[SubscriptionKind.inferKind] 会按 url 猜一个，
-/// 猜不出就落到 [SubscriptionKind.unknown]，**绝不**默认成 [videoConfig]（避免误判）。
+/// [unknown] 只是**旧数据的兜底**（老版本存的是 videoConfig/live/… 那套名字，
+/// 解析不出就落这里），选择器里**不提供**它。
 enum SubscriptionKind {
-  videoConfig,
-  live,
-  bookSource,
-  comicSource,
-  xtream,
+  catvod,
+  tvbox,
+  cms,
+  py,
+  t4,
+  js,
   unknown;
 
-  /// 按地址推断导入分类（猜不出返回 [unknown]，不擅自猜成影视配置）
-  ///
-  /// 规则：
-  ///   · 含 `get.php?username=` → Xtream 账号
-  ///   · 路径以 `.m3u` / `.m3u8` / `.txt` 结尾 → 直播源
-  ///   · 其余 → 未分类
+  /// 可在「新增/编辑订阅」里手选的分类（就是用户点名的那 6 个）
+  static const List<SubscriptionKind> selectable = [
+    catvod,
+    tvbox,
+    cms,
+    py,
+    t4,
+    js,
+  ];
+
+  /// 旧数据兜底：只做**很保守**的推断（.py → PY源、.js → JS源），
+  /// 其余一律 [unknown] —— 猜错的分类比"未分类"更误导人。
   static SubscriptionKind inferKind(String url) {
     final u = url.trim().toLowerCase();
     if (u.isEmpty) return SubscriptionKind.unknown;
-    if (u.contains('get.php?username=')) return SubscriptionKind.xtream;
     final path = Uri.tryParse(u)?.path ?? u;
-    if (path.endsWith('.m3u') ||
-        path.endsWith('.m3u8') ||
-        path.endsWith('.txt')) {
-      return SubscriptionKind.live;
+    if (path.endsWith('.py')) return SubscriptionKind.py;
+    if (path.endsWith('.js') || path.endsWith('.js.md5')) {
+      return SubscriptionKind.js;
     }
     return SubscriptionKind.unknown;
   }
@@ -45,16 +53,18 @@ extension SubscriptionKindX on SubscriptionKind {
   /// 中文名（分组标题 / 徽标用）
   String get label {
     switch (this) {
-      case SubscriptionKind.videoConfig:
-        return '影视配置';
-      case SubscriptionKind.live:
-        return '直播源';
-      case SubscriptionKind.bookSource:
-        return '书源';
-      case SubscriptionKind.comicSource:
-        return '漫画源';
-      case SubscriptionKind.xtream:
-        return 'Xtream 账号';
+      case SubscriptionKind.catvod:
+        return 'CatVod';
+      case SubscriptionKind.tvbox:
+        return 'TvBox';
+      case SubscriptionKind.cms:
+        return 'CMS';
+      case SubscriptionKind.py:
+        return 'PY源';
+      case SubscriptionKind.t4:
+        return 'T4源';
+      case SubscriptionKind.js:
+        return 'JS源';
       case SubscriptionKind.unknown:
         return '未分类';
     }
@@ -63,16 +73,18 @@ extension SubscriptionKindX on SubscriptionKind {
   /// 图标（与现有 Material 图标风格一致）
   IconData get icon {
     switch (this) {
-      case SubscriptionKind.videoConfig:
-        return Icons.movie_outlined;
-      case SubscriptionKind.live:
-        return Icons.live_tv_outlined;
-      case SubscriptionKind.bookSource:
-        return Icons.menu_book_outlined;
-      case SubscriptionKind.comicSource:
-        return Icons.auto_stories_outlined;
-      case SubscriptionKind.xtream:
-        return Icons.vpn_key_outlined;
+      case SubscriptionKind.catvod:
+        return Icons.movie_filter_outlined;
+      case SubscriptionKind.tvbox:
+        return Icons.tv_outlined;
+      case SubscriptionKind.cms:
+        return Icons.dns_outlined;
+      case SubscriptionKind.py:
+        return Icons.terminal_outlined;
+      case SubscriptionKind.t4:
+        return Icons.settings_input_antenna_outlined;
+      case SubscriptionKind.js:
+        return Icons.code_outlined;
       case SubscriptionKind.unknown:
         return Icons.rss_feed;
     }

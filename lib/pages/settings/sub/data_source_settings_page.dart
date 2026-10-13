@@ -71,23 +71,9 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                 onTap: _showApiEditDialog,
               ),
             ),
-            // 把「当前手填的接口地址」一键存成订阅。
-            // 否则用户手填了地址，订阅列表一直显示"未添加"，
-            // 没有一个明确的转化入口（你截图里就是这个情况）。
-            Obx(() {
-              final cur = controller.vodApiUrl.value.trim();
-              if (cur.isEmpty) return const SizedBox.shrink();
-              final already = SubscriptionService.instance.subscriptions.any(
-                (s) => s.url.trim() == cur,
-              );
-              if (already) return const SizedBox.shrink();
-              return SettingsRow(
-                icon: Icons.playlist_add,
-                title: '存为订阅',
-                value: '当前地址',
-                onTap: _saveCurrentAsSubscription,
-              );
-            }),
+            // 「存为订阅」入口已删（用户 2026-10-13：「第一次输入的那个源不要还
+            // 他么的存为订阅，而是直接就是存为订阅」）——
+            // 现在**输入/加载地址就等于存订阅**，见 _autoSaveAsSubscription()。
             Obx(
               () => SettingsRow(
                 icon: Icons.dns_outlined,
@@ -186,21 +172,30 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
   }
 
   // ============================================================
-  // 存为订阅
+  // 自动存为订阅
   // ============================================================
 
-  /// 把手填的接口地址存进订阅列表并设为激活。
-  Future<void> _saveCurrentAsSubscription() async {
+  /// 输入/加载接口地址 = **自动存为订阅**（不再需要单独的「存为订阅」按钮）。
+  ///
+  /// 幂等：地址已在订阅列表里就只切激活，不重复添加。
+  Future<void> _autoSaveAsSubscription() async {
     final url = controller.vodApiUrl.value.trim();
-    if (url.isEmpty) {
-      AppToast.message('还没有接口地址');
+    if (url.isEmpty) return;
+    final svc = SubscriptionService.instance;
+    Subscription? exist;
+    for (final s in svc.subscriptions) {
+      if (s.url.trim() == url) {
+        exist = s;
+        break;
+      }
+    }
+    if (exist != null) {
+      if (svc.activeId.value != exist.id) await svc.setActive(exist.id);
       return;
     }
-    final svc = SubscriptionService.instance;
-    // 带上分类：能按地址识别就识别，识别不出归「未分类」
+    // 分类按地址保守推断（.py → PY源、.js → JS源，其余未分类）
     final s = await svc.add(url: url, kind: SubscriptionKind.inferKind(url));
     await svc.setActive(s.id);
-    AppToast.message('已存为订阅：${s.name}');
   }
 
   // ============================================================
@@ -427,6 +422,8 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                         : () {
                             controller.vodApiUrl.value = vodController.text
                                 .trim();
+                            // 用户 2026-10-13：输入地址即订阅（不再要点「存为订阅」）
+                            _autoSaveAsSubscription();
                             controller.loadConfig();
                             Navigator.pop(ctx);
                           },

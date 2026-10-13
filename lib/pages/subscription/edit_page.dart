@@ -27,18 +27,12 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
   late bool _autoUpdate;
   late bool _locked;
 
-  /// 所选分类；[_autoKind] 为 true 时表示"自动识别"（保存时按 url 推断）
+  /// 所选分类。
+  ///
+  /// 2026-10-13 用户要求：**去掉「自动识别」**，分类固定为
+  /// CatVod / TvBox / CMS / PY源 / T4源 / JS源（见 [SubscriptionKind.selectable]），
+  /// 一行排 2 个。新建时默认 [SubscriptionKind.tvbox]。
   late SubscriptionKind _kind;
-  late bool _autoKind;
-
-  /// 可手动选择的分类（不含「未分类」，未分类由自动识别兜底）
-  static const List<SubscriptionKind> _selectableKinds = [
-    SubscriptionKind.videoConfig,
-    SubscriptionKind.live,
-    SubscriptionKind.bookSource,
-    SubscriptionKind.comicSource,
-    SubscriptionKind.xtream,
-  ];
 
   bool get isNew => widget.subscription == null;
 
@@ -50,9 +44,8 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
     _nameCtrl = TextEditingController(text: s?.name ?? '');
     _autoUpdate = s?.autoUpdate ?? true;
     _locked = s?.locked ?? false;
-    _kind = s?.kind ?? SubscriptionKind.unknown;
-    // 新建时默认「自动识别」，编辑时沿用已有分类
-    _autoKind = s == null;
+    // 新建默认 TvBox；编辑沿用已有分类（旧数据解析不出会是"未分类"）
+    _kind = s?.kind ?? SubscriptionKind.tvbox;
   }
 
   @override
@@ -154,28 +147,27 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
                     ),
                   ),
                   const SizedBox(height: AppTheme.spacingSM),
-                  Wrap(
-                    spacing: AppTheme.spacingSM,
-                    runSpacing: AppTheme.spacingSM,
-                    children: [
-                      // 新建时可选「自动识别」（按地址推断）
-                      if (isNew)
-                        SelectableChip(
-                          title: '自动识别',
-                          isSelected: _autoKind,
-                          onTap: () => setState(() => _autoKind = true),
-                        ),
-                      for (final k in _selectableKinds)
-                        SelectableChip(
-                          title: k.label,
-                          isSelected: !_autoKind && _kind == k,
-                          onTap: () => setState(() {
-                            _autoKind = false;
-                            _kind = k;
-                          }),
-                        ),
-                    ],
-                  ),
+                  // 一行 2 个（用户 2026-10-13 要求）：
+                  // CatVod / TvBox / CMS / PY源 / T4源 / JS源 —— 无「自动识别」。
+                  for (var i = 0;
+                      i < SubscriptionKind.selectable.length;
+                      i += 2)
+                    Padding(
+                      padding: EdgeInsets.only(
+                          top: i == 0 ? 0 : AppTheme.spacingSM),
+                      child: Row(
+                        children: [
+                          Expanded(
+                              child: _kindChip(SubscriptionKind.selectable[i])),
+                          const SizedBox(width: AppTheme.spacingSM),
+                          Expanded(
+                            child: (i + 1 < SubscriptionKind.selectable.length)
+                                ? _kindChip(SubscriptionKind.selectable[i + 1])
+                                : const SizedBox(),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -348,6 +340,13 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
     );
   }
 
+  /// 分类选项（一行两个用 Expanded 撑满半宽）
+  Widget _kindChip(SubscriptionKind k) => SelectableChip(
+        title: k.label,
+        isSelected: _kind == k,
+        onTap: () => setState(() => _kind = k),
+      );
+
   Widget _switchRow({
     required IconData icon,
     required String title,
@@ -488,8 +487,8 @@ class _SubscriptionEditPageState extends State<SubscriptionEditPage> {
       return;
     }
     final name = _nameCtrl.text.trim();
-    // 「自动识别」按地址推断，否则用用户选的分类
-    final chosenKind = _autoKind ? SubscriptionKind.inferKind(url) : _kind;
+    // 分类由用户手选（「自动识别」已按用户要求去掉）
+    final chosenKind = _kind;
 
     if (isNew) {
       final s = await svc.add(url: url, name: name, kind: chosenKind);

@@ -66,15 +66,20 @@ class _DiscoverPageState extends State<DiscoverPage>
   /// QQ 歌单广场（免登录可拿，实测 20 个歌单）
   List<Playlist> _qqSquare = const [];
 
-  /// QQ 歌单广场分类名（实测 40 个）。
+  /// QQ 歌单广场分类（**带数字 categoryId**，实测 40 个）。
   ///
-  /// ⚠️ **只用来展示"有哪些分类"，不做切换** ——
-  /// QQ 的 `categoryId` 是**数字**（如 10000000=全部），而 Dart 侧
-  /// `playlistCatlist()` 的返回被设计成**名字列表**（网易云/酷狗用名字）。
-  /// 名字 → 数字 id 的映射在 Node 侧没暴露，所以硬做切换会把 id 猜错 →
-  /// 用户点了"华语"却拿到"全部"（**假功能**）。
-  /// 宁可不给切换，也不要给一个点了没用的按钮。
-  List<String> _qqCats = const [];
+  /// ── 2026-10-13 修（用户：「QQ 分类的歌单分类怎么没有内容」）──────────
+  /// 以前这里只有**名字**：Dart 的 `playlistCatlist()` 把 Node 已经返回的
+  /// `id` 丢掉了，而 QQ 的 `playlistSquare` 收的是**数字 categoryId** ⇒
+  /// 点分类只能退化成"拿名字去搜索"，点「华语」经常搜不出东西（像坏了）。
+  /// 现在换成 [MusicApi.playlistCatlistQq]，id 一起拿，点分类就是**真的切分类**。
+  List<({int id, String name})> _qqCats = const [];
+
+  /// 当前选中的 QQ 歌单分类 id（10000000 = 全部，Node 侧兜底值）
+  int _qqCatId = 10000000;
+
+  /// 正在切分类（拉数据中，给个反馈免得以为点了没用）
+  bool _qqCatLoading = false;
 
   /// QQ「热门歌手」—— **带真头像**（头像模板实测可用）。
   ///
@@ -173,16 +178,15 @@ class _DiscoverPageState extends State<DiscoverPage>
     try {
       final results = await Future.wait([
         api.topLists(source: SongSource.qq),
-        // ⚠️ Dart 侧 `playlistSquare` 的参数是 **`cat`（分类名）**，
-        //    QQ 的 Node 实现会把它当 categoryId 解析 ——
-        //    不传时用 "全部"（Node 侧会兜底成 10000000）。
-        api.playlistSquare(cat: '全部', limit: 12, source: SongSource.qq),
-        api.playlistCatlist(source: SongSource.qq),
+        // QQ 的 `playlistSquare(cat:)` 收的是**数字 categoryId**
+        //（Node 侧 `Number(cat) || 10000000`）→ 传 id 字符串就是真·切分类。
+        api.playlistSquare(cat: '$_qqCatId', limit: 20, source: SongSource.qq),
+        api.playlistCatlistQq(),
       ]);
       if (!mounted) return;
       _qqTopLists = results[0] as List<TopList>;
       _qqSquare = results[1] as List<Playlist>;
-      _qqCats = (results[2] as List<String>).take(20).toList();
+      _qqCats = (results[2] as List<({int id, String name})>).take(24).toList();
     } catch (e) {
       // 免登录接口失败不该阻塞整页（热搜/搜索仍可用）
       AppLog.instance.log('[Discover] QQ 发现页数据加载失败: $e');
@@ -195,6 +199,24 @@ class _DiscoverPageState extends State<DiscoverPage>
     final artists = await api.topArtists(topId: 26, limit: 14);
     if (!mounted) return;
     _qqArtists = artists;
+  }
+
+  /// 切 QQ 歌单广场的分类：**按 categoryId 重新拉**（不是拿名字去搜）。
+  Future<void> _selectQqCat(int id) async {
+    if (id == _qqCatId || _qqCatLoading) return;
+    setState(() {
+      _qqCatId = id;
+      _qqCatLoading = true;
+    });
+    final list =
+        await api.playlistSquare(cat: '$id', limit: 20, source: SongSource.qq);
+    if (!mounted) return;
+    setState(() {
+      // 空列表也照实换掉：这分类确实没内容时，用户看到空比看到"上一个分类的
+      // 内容"更不容易误会（否则会以为切换没生效）。
+      _qqSquare = list;
+      _qqCatLoading = false;
+    });
   }
 
   // ── 音乐平台（网易云 / 酷狗）──────────────────────────────────────
@@ -960,17 +982,13 @@ class _DiscoverPageState extends State<DiscoverPage>
       out.add(const SliverToBoxAdapter(
           child: SectionTitle(title: 'QQ歌单广场')));
 
-      // ── 分类名横滑 ────────────────────────────────────────────
+      // ── 分类横滑：**真的切分类**（2026-10-13 修）──────────────────
       //
-      // ⚠️ 这些**不是"切换分类"按钮** —— 因为 QQ 的 categoryId 是数字，
-      //    而 Dart 侧 `playlistCatlist()` 只回了**名字**，名字→数字 id
-      //    的映射没暴露。硬做切换就是把 id 猜错，用户点"华语"却拿到"全部"
-      //    （**假功能**，比没有更糟）。
-      //
-      // 所以改成**点名字 → 直接用这个名字搜 QQ**：
-      //     · 语义干净（用户点"华语"就是想看华语歌）
-      //     · 真的有效（搜索是免登录可用的）
-      //     · 不假装自己是分类切换
+      // 以前这里是"点名字 → 拿名字去搜索"的退路：那时拿不到 QQ 的数字
+      // categoryId（Dart 只取了名字）⇒ 点「华语」经常搜不出东西，看起来像坏了
+      //（用户：「音乐模块里面 QQ 分类的歌单分类怎么没有内容」）。
+      // 现在 `playlistCatlistQq()` 把 id 一起拿回来了 → 点分类就是
+      // `playlistSquare(cat: id)`，下面那排歌单会**真的换成该分类**。
       if (_qqCats.isNotEmpty) {
         out.add(SliverToBoxAdapter(
           child: SizedBox(
@@ -981,25 +999,25 @@ class _DiscoverPageState extends State<DiscoverPage>
               itemCount: _qqCats.length,
               separatorBuilder: (_, __) => const SizedBox(width: 8),
               itemBuilder: (c, i) {
-                final name = _qqCats[i];
+                final tag = _qqCats[i];
+                final active = tag.id == _qqCatId;
                 return GestureDetector(
-                  onTap: () => showSearch<void>(
-                    context: context,
-                    delegate: _QuickSearchDelegate(
-                        source: SongSource.qq, initialQuery: name),
-                  ),
+                  onTap: _qqCatLoading ? null : () => _selectQqCat(tag.id),
                   child: Container(
                     alignment: Alignment.center,
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
-                      color: MusicTheme.fill,
+                      color: active ? MusicTheme.tint : MusicTheme.fill,
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
-                      name,
+                      tag.name,
                       style: TextStyle(
-                          color: MusicTheme.secondary,
-                          fontSize: AppTheme.fontCaption),
+                        color: active ? Colors.white : MusicTheme.secondary,
+                        fontSize: AppTheme.fontCaption,
+                        fontWeight:
+                            active ? FontWeight.w600 : FontWeight.w400,
+                      ),
                     ),
                   ),
                 );

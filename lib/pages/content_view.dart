@@ -10,6 +10,7 @@ import 'home/view.dart';
 import 'shelf/view.dart';
 import '../reading/widgets/jelly_nav_bar.dart';
 import '../services/api_config.dart';
+import '../models/subscription.dart';
 import '../services/nav_feature_service.dart';
 import 'live/view.dart';
 import '../reading/pages/home_page.dart' as reading_app;
@@ -552,6 +553,9 @@ class _ContentViewState extends State<ContentView>
         if (_settingsVM != null) {
           await _settingsVM!.addToApiHistory(vodUrl);
         }
+        // 用户 2026-10-13：「第一次输入的那个源不要还他么的存为订阅，
+        // 而是直接就是存为订阅」→ 首屏填入的源**直接进订阅列表并激活**。
+        await _autoSubscribe(vodUrl);
       } else {
         setState(() {
           _isLoadingConfig = false;
@@ -564,6 +568,30 @@ class _ContentViewState extends State<ContentView>
         _configError = e.toString();
       });
     }
+  }
+
+  /// 首屏填入的接口地址 → **直接成为订阅**（幂等：已存在则只切激活）。
+  ///
+  /// ⚠️ [SubscriptionService.add] 本身**不去重**（每次都会新建一条），
+  /// 所以这里必须先自己按 url 查一遍，否则每次启动都会多出一条重复订阅。
+  Future<void> _autoSubscribe(String url) async {
+    final u = url.trim();
+    if (u.isEmpty) return;
+    final svc = SubscriptionService.instance;
+    Subscription? exist;
+    for (final s in svc.subscriptions) {
+      if (s.url.trim() == u) {
+        exist = s;
+        break;
+      }
+    }
+    if (exist != null) {
+      if (svc.activeId.value != exist.id) await svc.setActive(exist.id);
+      return;
+    }
+    // 分类按地址保守推断（.py → PY源、.js → JS源，其余未分类）
+    final s = await svc.add(url: u, kind: SubscriptionKind.inferKind(u));
+    await svc.setActive(s.id);
   }
 
   /// 从剪贴板粘贴 - 对应 Swift readPasteboardText()
