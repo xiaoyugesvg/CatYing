@@ -303,11 +303,16 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
         AppTheme.spacingMD,
         110,
       ),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 140,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        // 用户 2026-10-13：默认视图**一排 4 个**
+        //（原来用 maxCrossAxisExtent:140 在 iPhone 上算出 3 列）
+        crossAxisCount: 4,
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
-        childAspectRatio: 0.78,
+        // 4 列后卡宽 ≈76~80pt，卡内固定 52pt 图标 + 两行文字已接近高度上限，
+        // 窄屏（iPhone SE 375pt）下 0.68 会差一点点 → RenderFlex overflow，
+        // 故放宽到 0.62 留余量。
+        childAspectRatio: 0.62,
       ),
       itemCount: apps.length,
       itemBuilder: (context, index) {

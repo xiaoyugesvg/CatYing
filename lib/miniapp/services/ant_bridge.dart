@@ -235,7 +235,7 @@ class AntBridge {
     final method = (req['method'] ?? '').toString();
     final argsRaw = req['args'];
     final args = argsRaw is Map
-        ? Map<String, dynamic>.from(argsRaw as Map)
+        ? Map<String, dynamic>.from(argsRaw)
         : <String, dynamic>{};
     try {
       _checkPermission(method);
@@ -432,7 +432,7 @@ class AntBridge {
         'headers': _headersToMap(resp.headers),
         'data': data,
         'responseType': responseType,
-        'url': resp.realUri?.toString() ?? url,
+        'url': resp.realUri.toString(),
       };
     } on DioException catch (e) {
       // 有 HTTP 响应 → 原样返回（不 reject）；纯网络失败 → REQUEST_FAILED

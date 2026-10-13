@@ -3,22 +3,18 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../common/theme.dart';
 import '../../services/app_log.dart';
 import '../services/ant_bridge.dart';
 
-/// 小程序 WebView 页：加载内置资产 + 官方 ant SDK v4 桥注入。
+/// 小程序 WebView 页：加载远端/本地小程序页面 + 官方 ant SDK v4 桥注入。
 ///
-/// - 读 `$assetRoot/manifest.json`（appId / name / permissions / entry）
+/// - manifest 由服务层传入（`manifestJson`）或从本地目录读取
 /// - 页面加载完成后注入 `window.ant`（走 `AntBridge` channel）
 /// - 相对路径页面跳转由 JS 侧 location 完成
 class MiniAppWebPage extends StatefulWidget {
-  /// 内置资产根目录（`assets/...` 相对 flutter assets 路径）
-  final String? assetRoot;
-
   /// 在线站点型小程序：直接加载远端页面（市场里的 manifest.json 型）
   final String? remoteUrl;
 
@@ -30,7 +26,6 @@ class MiniAppWebPage extends StatefulWidget {
 
   const MiniAppWebPage({
     super.key,
-    this.assetRoot,
     this.remoteUrl,
     this.localRoot,
     this.manifestJson,
@@ -80,7 +75,7 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
     await _loadEntry();
   }
 
-  /// 按来源加载入口页：远端 URL > 本地目录（zip 安装）> 内置资产
+  /// 按来源加载入口页：远端 URL > 本地目录（zip 安装）
   Future<void> _loadEntry() async {
     try {
       final remote = widget.remoteUrl?.trim() ?? '';
@@ -91,18 +86,13 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
       final local = widget.localRoot?.trim() ?? '';
       if (local.isNotEmpty) {
         await _controller.loadFile('$local/$_entry');
-        return;
-      }
-      final root = widget.assetRoot?.trim() ?? '';
-      if (root.isNotEmpty) {
-        await _controller.loadFlutterAsset('$root/$_entry');
       }
     } catch (e) {
       AppLog.instance.log('[MiniAppWeb] 入口页加载失败: $e');
     }
   }
 
-  /// 读 manifest：优先用传入的文本（市场安装时服务层已取到）→ 本地目录 → 内置资产
+  /// 读 manifest：优先用传入的文本（市场安装时服务层已取到）→ 本地目录
   Future<void> _initManifest() async {
     try {
       var raw = widget.manifestJson?.trim() ?? '';
@@ -111,11 +101,6 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
         if (local.isNotEmpty) {
           final f = File('$local/manifest.json');
           if (await f.exists()) raw = await f.readAsString();
-        } else {
-          final root = widget.assetRoot?.trim() ?? '';
-          if (root.isNotEmpty) {
-            raw = await rootBundle.loadString('$root/manifest.json');
-          }
         }
       }
       if (raw.isEmpty) return;

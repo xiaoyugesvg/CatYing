@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
-import '../../common/theme.dart';
 import '../../widgets/video_player.dart';
 
 /// URL 直播放页（ant.player.open 用）。

@@ -10,6 +10,7 @@ import 'sub/unified_theme_settings_page.dart';
 import 'sub/cache_settings_page.dart';
 import 'sub/danmu_settings_page.dart';
 import 'sub/data_source_settings_page.dart';
+import 'sub/engine_settings_page.dart';
 import 'sub/home_pages_settings_page.dart';
 import 'sub/metadata_settings_page.dart';
 import 'sub/playback_settings_page.dart';
@@ -106,6 +107,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: Icons.widgets_outlined,
                 title: '程序管理',
                 onTap: () => Get.to(() => const MiniAppListPage()),
+              ),
+              const SizedBox(height: AppTheme.spacingMD),
+              // 引擎管理：Node / Python 运行时引擎的手动加载（用户 2026-10-13）
+              _categoryTile(
+                icon: Icons.memory_outlined,
+                title: '引擎管理',
+                onTap: () => Get.to(() => const EngineSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingMD),
 

@@ -237,6 +237,66 @@ class AppState extends GetxController {
     await _ensureNodeJSAndLoadSource();
   }
 
+  // ============================================================
+  // 手动加载引擎（设置 → 引擎管理）
+  // ============================================================
+
+  /// 手动加载 Node 引擎。返回一句可直接展示的结果文案。
+  ///
+  /// 与启动流程的区别：
+  ///   · **始终**尝试拉起 Node 进程（不再要求配置里必须有 js/jar 源）——
+  ///     用户按这个按钮就是想强制把引擎拉起来，不该被前置条件挡住；
+  ///   · 有主 js/jar spider 源且本次会话尚未载入时，顺带把它载入并刷新线路清单；
+  ///   · **不改动 loadingPhase**，避免在设置页里搅乱主界面的加载态。
+  Future<String> manualLoadNodeEngine() async {
+    try {
+      if (!_nodeJSStarted || !NodeJSManager.instance.isRunning) {
+        final started = await NodeJSManager.instance.startNodeJS();
+        if (!started) return 'Node 引擎启动失败（详见 App 日志）';
+        _nodeJSStarted = true;
+      }
+      final portOk = await NodeJSManager.instance.waitForSpiderPort();
+      if (!portOk) return 'Node 已启动，但 spider 端口未就绪';
+
+      // 有主 js/jar spider 源且本次尚未载入 → 载入并刷新线路清单
+      final main = ApiConfig.instance.sourceBeanList.firstWhereOrNull((s) =>
+          s.isSpiderSource &&
+          !s.key.startsWith('app_') &&
+          !s.isPythonScriptSource);
+      if (main != null && main.api.isNotEmpty && !_sourceLoadedThisSession) {
+        final (loadOk, msg) =
+            await NodeJSManager.instance.loadSource(main.api);
+        if (!loadOk) return 'Node 已就绪，但源加载失败：${msg ?? "未知错误"}';
+        SpiderService.instance.mainScriptUrl = main.api;
+        _sourceLoadedThisSession = true;
+        final cfg = await SpiderService.instance.getCatConfig();
+        if (cfg != null) {
+          await ApiConfig.instance.updateSourceBeansFromSpiderConfig(cfg, '');
+        }
+      }
+      return 'Node 引擎已就绪（端口 ${NodeJSManager.instance.spiderPort}）';
+    } catch (e) {
+      return 'Node 引擎加载异常：$e';
+    }
+  }
+
+  /// 手动加载 Python 引擎。返回一句可直接展示的结果文案。
+  ///
+  /// 启动 CPython 解释器并把已导入的 .py 源同步进引擎；非 iOS 直接提示不支持。
+  Future<String> manualLoadPythonEngine() async {
+    if (!PythonManager.instance.isIOS) return 'Python 引擎仅支持 iOS';
+    try {
+      final ok = await PythonManager.instance.ensureStarted();
+      if (!ok) {
+        return PythonManager.instance.lastError.value ?? 'Python 引擎启动失败';
+      }
+      await PythonSourcesService.instance.syncToEngine();
+      return 'Python 引擎已就绪';
+    } catch (e) {
+      return 'Python 引擎加载异常：$e';
+    }
+  }
+
   /// 确保 Node.js 已启动并加载 Spider 源 - 对应 Swift ensureNodeJSAndLoadSource
   Future<void> _ensureNodeJSAndLoadSource() async {
     // 🔴 2026-10-13 修（用户：「导入猫源还有 tvbox 源后导入 py 源，重启后订阅里

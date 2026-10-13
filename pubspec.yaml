@@ -116,12 +116,9 @@ flutter:
     - assets/python-project/
     # Python 运行时版本元信息（BeeWare 3.12-b11 基线）
     - assets/python-runtime/version.json
-    # 新影视库（Nemby）H5 小程序：OK影视风格影视浏览器（ant 桥运行时）
-    - assets/miniapps/nemby/
-    # 官方市场小程序：影视库（com.ant.emby，Emby 风格影视浏览器）
-    - assets/miniapps/emby/
-    # 官方市场小程序：网页跳转示例（com.leospring.web_links）
-    - assets/miniapps/web-links/
+    # 内置小程序（nemby / emby / web-links）已移除（用户 2026-10-13）：
+    #   小程序改为全部由「市场」或本地导入，代码里对这些内置资产已无任何引用，
+    #   继续随包只会白占体积，故连同 pubspec 声明一并删除。
     # 猫爪（猫咪）Logo：用于接口配置引导页主视觉
     - assets/images/
     # 阅读模块用到的图标（logo / 文件夹 / 魔棒）：
