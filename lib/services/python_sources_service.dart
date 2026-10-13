@@ -26,6 +26,15 @@ class PythonSourcesService {
 
   PythonSourcesService._internal();
 
+  /// 本会话内**已注册进引擎**的源（key = "kind/key"）。
+  ///
+  /// 用途：`PythonScriptSources` 判断"启动时的 [syncToEngine] 是不是已经把它注册过了"
+  /// —— 注册过就不必再写一次文件 + 重新编译一遍模块。
+  final Set<String> _registered = {};
+
+  bool isRegisteredInSession(String kind, String key) =>
+      _registered.contains('$kind/$key');
+
   /// 源根目录：<Documents>/python-project/src/spider
   Future<Directory> _spiderRoot() async {
     final docs = await getApplicationDocumentsDirectory();
@@ -70,6 +79,8 @@ class PythonSourcesService {
       );
       if (!r.ok) {
         AppLog.instance.w('[Python] 源注册失败 ${item.kind}/${item.key}: ${r.error}');
+      } else {
+        _registered.add('${item.kind}/${item.key}');
       }
     }
     if (items.isNotEmpty) {
@@ -121,6 +132,7 @@ class PythonSourcesService {
     if (detail?['ok'] != true) {
       return (ok: false, message: detail?['message'] as String? ?? '注册失败');
     }
+    _registered.add('$kind/$key');
     return (ok: true, message: null);
   }
 
@@ -143,6 +155,7 @@ class PythonSourcesService {
     if (!r.ok) {
       return (ok: false, message: r.error ?? '卸载失败');
     }
+    _registered.remove('$kind/$key');
     return (ok: true, message: null);
   }
 }

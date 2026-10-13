@@ -44,6 +44,14 @@ class PythonScriptSources {
     final key = keyFor(u);
     if (_registeredThisSession.contains(key)) return key;
 
+    // 启动时的 syncToEngine() 已经把 <Documents> 下所有 .py 全量注册过一遍
+    // （我们的 psrc_*.py 就写在那里）⇒ 这时不必再写一次文件 + 重新编译模块，
+    // 直接返回 key 即可。免掉每次冷启动每个 py 源的一次重复注册。
+    if (PythonSourcesService.instance.isRegisteredInSession('video', key)) {
+      _registeredThisSession.add(key);
+      return key;
+    }
+
     if (!PythonManager.instance.isIOS) {
       AppLog.instance.w('[PyScript] 远端 .py 源仅 iOS 支持：$u');
       return null;
