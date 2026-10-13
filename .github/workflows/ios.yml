@@ -491,16 +491,29 @@ jobs:
           APP_PATH=${{ steps.locate.outputs.APP_PATH }}
           FW_SRC="build/ios/Frameworks/NodeMobile.xcframework"
           mkdir -p "$APP_PATH/Frameworks"
-          # 1) NodeMobile.xcframework (整包 copy，TrollStore 接受)
+          # 1) NodeMobile.xcframework (TrollStore 接受整包 copy)
           cp -R "$FW_SRC" "$APP_PATH/Frameworks/"
-          # 2) Python.xcframework (整包 copy；Xcode embed phase 会把选中 slice 的
-          #    Python.framework 拷到 Frameworks/ 根，这里再物理塞一份整包兜底)
+          # 2) Python.xcframework
           if [ -d "build/ios/Frameworks/Python.xcframework" ]; then
             cp -R build/ios/Frameworks/Python.xcframework "$APP_PATH/Frameworks/"
           else
             echo "❌ Python.xcframework 缺失（应已被下载步骤产出）"
             exit 1
           fi
+          # 2.5) 🔴 删掉 .app 里的**模拟器 / macCatalyst / macOS slice**
+          #      原来是把整个 xcframework 原样塞进 .app ⇒ 模拟器那份（Python 12.6MB、
+          #      NodeMobile 更大）也跟着进了包，真机（TrollStore/arm64）根本用不到。
+          #      这是"软件为啥这么大"的最大单项。Info.plist 里对应条目缺失不影响真机加载。
+          for XCF in "$APP_PATH/Frameworks/"*.xcframework; do
+            [ -d "$XCF" ] || continue
+            rm -rf "$XCF"/ios-arm64_x86_64-simulator \
+                   "$XCF"/ios-x86_64-simulator \
+                   "$XCF"/ios-arm64_x86_64-maccatalyst \
+                   "$XCF"/ios-arm64_i386-simulator \
+                   "$XCF"/macos-arm64_x86_64 \
+                   "$XCF"/macos-arm64 2>/dev/null || true
+            echo "🧹 已清理模拟器 slice: $(basename "$XCF") → $(ls "$XCF" | tr '\n' ' ')"
+          done
           # 3) main.js (NodeMobile 启动入口)
           mkdir -p "$APP_PATH/nodejs-project"
           cp assets/nodejs-project/dist/main.js   "$APP_PATH/nodejs-project/main.js"
@@ -520,6 +533,24 @@ jobs:
           ls -la "$APP_PATH/python-home/"
           ls "$APP_PATH/python-home/lib/python3.12/" | head -20
           ls "$APP_PATH/python-home/lib/python3.12/site-packages/" | head -20
+
+      - name: 产物体积明细（定位"为什么这么大"）
+        # 纯诊断，不改变产物：把 .app 各目录 / 各 framework / 最大的文件都打出来，
+        # 这样"软件为啥这么大"有数据可查，不用猜（用户 2026-10-13 问过）。
+        run: |
+          APP_PATH=${{ steps.locate.outputs.APP_PATH }}
+          echo "==== .app 总大小 ===="
+          du -sh "$APP_PATH" || true
+          echo "==== 一级条目（小→大）===="
+          du -sh "$APP_PATH"/* 2>/dev/null | sort -h | tail -20 || true
+          echo "==== Frameworks 内（小→大）===="
+          du -sh "$APP_PATH"/Frameworks/* 2>/dev/null | sort -h | tail -25 || true
+          echo "==== 最大的 25 个文件 ===="
+          find "$APP_PATH" -type f -exec du -k {} + 2>/dev/null | sort -n | tail -25 \
+            | awk '{printf "%8.2f MB  %s\n", $1/1024, $2}' || true
+          echo "==== assets 里打进包的部分 ===="
+          du -sh "$APP_PATH"/flutter_assets 2>/dev/null || true
+          du -sh "$APP_PATH"/flutter_assets/* 2>/dev/null | sort -h | tail -15 || true
 
       - name: Strip original code signature
         run: |

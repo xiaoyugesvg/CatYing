@@ -417,7 +417,6 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
             remoteUrl: isRemote ? src : null,
             localRoot: isRemote ? null : src,
             manifestJson: app.rawJson,
-            title: app.name,
           ));
       return;
     }

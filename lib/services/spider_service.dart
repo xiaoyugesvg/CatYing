@@ -195,6 +195,14 @@ class SpiderService {
     return k.isEmpty ? 'demo' : k;
   }
 
+  /// 最近一次失败的**可读原因**。
+  ///
+  /// 为什么要暴露出来：这些失败以前只写日志，上层拿到的是 null → 首页/列表
+  /// 只是"一片空白"，用户只能看到"啥都没有"（用户 2026-10-13：
+  /// 「py 源里面没有内容，啥都没有，还显示网络加载失败」）。
+  /// 上层（SourceService）现在会把它抛成错误信息显示出来。
+  String? lastError;
+
   /// 调 Python 引擎执行源方法（module=video.<key>，args 为 kwargs）
   Future<Map<String, dynamic>?> _pythonCall(
     String moduleKey,
@@ -207,13 +215,27 @@ class SpiderService {
       args,
     );
     if (!r.ok) {
-      AppLog.instance
-          .w('[SpiderService] Python 源 $moduleKey.$action 失败: ${r.error}');
+      lastError = 'Python 源执行失败: ${r.error}';
+      AppLog.instance.w('[SpiderService] $lastError');
       return null;
     }
     final data = r.json;
-    if (data is Map<String, dynamic>) return data;
+
+    // 🔴 关键：`spider_runner.call()` 内部把异常**包成 JSON** 返回
+    //    （`{ok:false, error, trace}`），通道层面 `r.ok` 仍然是 true ⇒
+    //    以前这里直接当成"正常结果"返回，上层只看到空列表、完全不知道出错原因。
+    //    必须在这里识别并把原因记下来。
+    if (data is Map<String, dynamic>) {
+      if (data['ok'] == false) {
+        lastError = 'Python 源报错: ${data['error'] ?? '未知错误'}';
+        AppLog.instance.w('[SpiderService] $lastError'
+            '${data['trace'] != null ? "\n${data['trace']}" : ""}');
+        return null;
+      }
+      return data;
+    }
     if (data is List) return {'list': data};
+    lastError = 'Python 源返回了非预期类型: ${data.runtimeType}';
     return null;
   }
 
@@ -296,13 +318,21 @@ class SpiderService {
     required Map<String, dynamic> pyArgs,
   }) async {
     final script = _scriptUrl(api, ext);
+    // 每轮清一次：否则上一次失败的旧原因会粘住（`??=` 会保留它），
+    // 让用户看到与本次无关的错误。
+    lastError = null;
 
     // ── Python 引擎（.py）────────────────────────────────────
     if (script.isNotEmpty && _isPythonScript(script)) {
       final moduleKey = script.startsWith('http')
           ? await PythonScriptSources.instance.ensureInstalled(script)
           : _pythonModuleKey(script);
-      if (moduleKey == null) return null;
+      if (moduleKey == null) {
+        lastError =
+            PythonScriptSources.instance.lastError ?? 'Python 源准备失败';
+        AppLog.instance.w('[SpiderService] $lastError');
+        return null;
+      }
       return _pythonCall(moduleKey, action, pyArgs);
     }
 
@@ -311,7 +341,10 @@ class SpiderService {
     if (script.isNotEmpty) {
       // 聚合配置里的脚本源：按需载入脚本，用引擎自报的真实 key
       final k = await _ensureNodeScript(script, fallback: key);
-      if (k == null) return null;
+      if (k == null) {
+        lastError ??= '脚本源加载失败: $script';
+        return null;
+      }
       engineKey = k;
     } else if (mainScriptUrl.isNotEmpty && _loadedScriptUrl != mainScriptUrl) {
       // 主源（单 js spider 配置）：api 由 /config 下发、通常为空。若期间被程序
@@ -320,7 +353,10 @@ class SpiderService {
       if (k != null) engineKey = k;
     }
 
-    if (!isSpiderReady) return null;
+    if (!isSpiderReady) {
+      lastError ??= 'Node 引擎未就绪（spider 服务没起来）';
+      return null;
+    }
     final url = _buildSpiderUrl(engineKey, type, _nodeBase(api), action);
     AppLog.instance.log('[SpiderService] $action: $url');
     return _postJSON(url, nodeArgs);

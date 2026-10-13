@@ -29,6 +29,9 @@ class PythonScriptSources {
   /// 本会话内已确认注册进引擎的 key（避免每次调用都重跑 install_source）
   final Set<String> _registeredThisSession = {};
 
+  /// 最近一次失败的**可读原因**（供上层显示，别让用户只看到"啥都没有"）
+  String? lastError;
+
   /// URL → 引擎 key（确定性哈希，纯 ASCII，满足引擎的 key 校验）
   static String keyFor(String url) {
     final h = md5.convert(utf8.encode(url.trim())).toString();
@@ -37,10 +40,14 @@ class PythonScriptSources {
 
   /// 确保 [url] 的 .py 已落盘并注册进引擎，返回引擎 key；失败返回 null。
   ///
-  /// 本会话已注册过 → 直接返回 key（零开销）。
+  /// 本会话已注册过 → 直接返回 key（零开销）。失败时把原因写进 [lastError]。
   Future<String?> ensureInstalled(String url) async {
     final u = url.trim();
-    if (u.isEmpty) return null;
+    lastError = null; // 每轮清一次，避免把上次源的原因报给这次
+    if (u.isEmpty) {
+      lastError = '脚本地址为空';
+      return null;
+    }
     final key = keyFor(u);
     if (_registeredThisSession.contains(key)) return key;
 
@@ -53,10 +60,12 @@ class PythonScriptSources {
     }
 
     if (!PythonManager.instance.isIOS) {
+      lastError = 'Python 引擎仅支持 iOS';
       AppLog.instance.w('[PyScript] 远端 .py 源仅 iOS 支持：$u');
       return null;
     }
     if (!await PythonManager.instance.ensureStarted()) {
+      lastError = 'Python 引擎启动失败（${PythonManager.instance.lastError.value ?? "详见日志"}）';
       AppLog.instance.w('[PyScript] Python 引擎未就绪，无法注册 $u');
       return null;
     }
@@ -67,10 +76,12 @@ class PythonScriptSources {
       try {
         code = await NetworkManager.instance.getString(u);
       } catch (e) {
+        lastError = '脚本下载失败: $e';
         AppLog.instance.w('[PyScript] 下载 .py 失败 $u: $e');
         return null;
       }
-      if (code == null || code.trim().isEmpty) {
+      if (code.trim().isEmpty) {
+        lastError = '脚本下载内容为空（$u）';
         AppLog.instance.w('[PyScript] 下载 .py 内容为空 $u');
         return null;
       }
@@ -79,6 +90,7 @@ class PythonScriptSources {
     final r =
         await PythonSourcesService.instance.installSource('video', key, code);
     if (!r.ok) {
+      lastError = '脚本注册失败: ${r.message}';
       AppLog.instance.w('[PyScript] 注册 .py 源失败 $u: ${r.message}');
       return null;
     }

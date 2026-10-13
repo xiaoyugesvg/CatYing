@@ -727,7 +727,13 @@ class SourceService {
     // 获取首页内容
     final result =
         await spider.getHomeContent(key, sourceBean.type, api, ext: ext);
-    if (result == null) return (<SortData>[], <Video>[]);
+    if (result == null) {
+      // 以前这里直接返回"空分类 + 空列表" ⇒ 首页一片空白，用户只知道"啥都没有"，
+      // 根本分不清是引擎没起来、脚本没下下来、脚本报错，还是源站挂了
+      //（用户 2026-10-13：「py 源里面没有内容，啥都没有，还显示网络加载失败」）。
+      // 现在把真实原因抛出去 → 首页错误态会原样显示，可定位。
+      throw Exception(spider.lastError ?? '该源没有返回任何内容');
+    }
 
     final sorts = <SortData>[];
     final homeVideos = <Video>[];

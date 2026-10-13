@@ -28,16 +28,12 @@ class MiniAppWebPage extends StatefulWidget {
   /// 已知的 manifest 内容（远程/本地安装时由服务层传入，省一次 IO）
   final String? manifestJson;
 
-  /// 显式标题；不传则读 manifest 的 name
-  final String? title;
-
   const MiniAppWebPage({
     super.key,
     this.assetRoot,
     this.remoteUrl,
     this.localRoot,
     this.manifestJson,
-    this.title,
   });
 
   @override
@@ -47,13 +43,11 @@ class MiniAppWebPage extends StatefulWidget {
 class _MiniAppWebPageState extends State<MiniAppWebPage> {
   late final WebViewController _controller;
   int _loadingProgress = 0;
-  String _title = '小程序';
   String _entry = 'index.html';
 
   @override
   void initState() {
     super.initState();
-    _title = widget.title ?? '小程序';
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(AppTheme.backgroundPrimary)
@@ -127,16 +121,12 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
       if (raw.isEmpty) return;
       final map = jsonDecode(raw) as Map<String, dynamic>;
       final appId = (map['appId'] ?? '').toString();
-      final name = (map['name'] ?? '').toString();
       final entry = (map['entry'] ?? 'index.html').toString();
       final perms = (map['permissions'] as List?)
               ?.map((e) => e.toString())
               .toList() ??
           const <String>[];
       AntBridge.configure(appId: appId, permissions: perms);
-      if (mounted && widget.title == null && name.isNotEmpty) {
-        setState(() => _title = name);
-      }
       if (entry.isNotEmpty) {
         // 入口页统一交给 _loadEntry 加载（assets / 本地 / 远端同一套）
         _entry = entry;
@@ -172,62 +162,50 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 用户 2026-10-13：「小程序打开界面不要顶栏」。
+    // 去掉原来的「返回 + 标题 + 刷新」那一行 —— 很多小程序页面自带 header，
+    // 再叠一层宿主标题栏很难看。只保留两样**不占内容高度**的东西：
+    //   · 贴顶 2px 的加载进度条（只在加载中出现）
+    //   · 左上角一个半透明小圆返回钮（浮在内容上）—— 不然没地方退出去
     return Scaffold(
       backgroundColor: AppTheme.backgroundPrimary,
       body: SafeArea(
         bottom: false,
-        child: Column(
+        child: Stack(
           children: [
-            // 顶栏：返回 + 标题 + 刷新
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  AppTheme.spacingSM, AppTheme.spacingSM, 0, 0),
-              child: Row(
-                children: [
-                  InkWell(
-                    borderRadius: BorderRadius.circular(20),
-                    onTap: () => Navigator.maybePop(context),
-                    child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Icon(Icons.arrow_back_ios_new,
-                          size: 18, color: AppTheme.textPrimary),
-                    ),
-                  ),
-                  Expanded(
-                    child: Text(
-                      _title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontTitle3,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '刷新',
-                    visualDensity: VisualDensity.compact,
-                    icon: Icon(Icons.refresh,
-                        size: 20, color: AppTheme.textPrimary),
-                    onPressed: () => _controller.reload(),
-                  ),
-                  const SizedBox(width: 4),
-                ],
-              ),
-            ),
+            Positioned.fill(child: WebViewWidget(controller: _controller)),
             if (_loadingProgress > 0 && _loadingProgress < 100)
-              LinearProgressIndicator(
-                value: _loadingProgress / 100.0,
-                minHeight: 2,
-                backgroundColor: AppTheme.borderLight,
-                valueColor:
-                    AlwaysStoppedAnimation<Color>(AppTheme.accentColor),
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: LinearProgressIndicator(
+                  value: _loadingProgress / 100.0,
+                  minHeight: 2,
+                  backgroundColor: AppTheme.borderLight,
+                  valueColor:
+                      AlwaysStoppedAnimation<Color>(AppTheme.accentColor),
+                ),
               ),
-            Expanded(
-              child: WebViewWidget(controller: _controller),
-            ),
+            Positioned(left: 6, top: 6, child: _floatBackButton()),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// 悬浮返回钮：不占内容高度、半透明，尽量不挡小程序自己的 UI
+  Widget _floatBackButton() {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.30),
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => Navigator.maybePop(context),
+        child: const SizedBox(
+          width: 34,
+          height: 34,
+          child: Icon(Icons.arrow_back_ios_new, size: 15, color: Colors.white),
         ),
       ),
     );
