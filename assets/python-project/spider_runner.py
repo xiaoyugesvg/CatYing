@@ -57,14 +57,61 @@ sys.meta_path.insert(0, _ImportGuard())
 
 
 # ---- 源对象解析 -----------------------------------------------------
-# 兼容两种形态：
+# 兼容三种形态：
 #   1. 模块级函数（def home(...)/search(...)）
 #   2. drpy 风格类（class Spider: 实例方法同名）
+#   3. catvod 风格类（class Spider(BaseSpider): homeContent / categoryContent /
+#      detailContent / playerContent / searchContent，构造时自动 init(extend)）
+_CATVOD_ALIAS = {
+    "home": "homeContent",
+    "category": "categoryContent",
+    "detail": "detailContent",
+    "play": "playerContent",
+    "search": "searchContent",
+}
+
+
+def _catvod_args(method, args):
+    """把统一的 action 参数适配成 catvod 风格方法的形参。"""
+    a = dict(args or {})
+    if method == "home":
+        return {"filter": bool(a.get("filter"))}
+    if method == "category":
+        return {
+            "tid": a.get("tid", ""),
+            "pg": a.get("pg", 1),
+            "filter": bool(a.get("filter")),
+            "extend": a.get("extend", {}) or {},
+        }
+    if method == "detail":
+        ids = a.get("ids")
+        if isinstance(ids, str):
+            ids = [ids]
+        return {"ids": ids or []}
+    if method == "play":
+        return {
+            "flag": a.get("flag", ""),
+            "id": a.get("id", ""),
+            "vipFlags": a.get("vipFlags", []) or [],
+        }
+    if method == "search":
+        return {
+            "key": a.get("wd") or a.get("key") or "",
+            "quick": bool(a.get("quick")),
+            "pg": a.get("pg", 1),
+        }
+    return a
+
+
 def _resolve_target(mod, method):
     if hasattr(mod, "Spider"):
         try:
             inst = mod.Spider()
             if callable(getattr(inst, method, None)):
+                return inst
+            # catvod 风格：方法名带 Content 后缀，也算可路由
+            alias = _CATVOD_ALIAS.get(method)
+            if alias and callable(getattr(inst, alias, None)):
                 return inst
         except Exception:
             pass
@@ -88,8 +135,18 @@ def call(module, method, args_json):
             return result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
         mod = importlib.import_module("src.spider." + module)
         target = _resolve_target(mod, method)
-        fn = getattr(target, method)
-        result = fn(**args)
+        fn = getattr(target, method, None)
+        call_args = args
+        if fn is None:
+            # catvod 风格：走 xxxContent 别名 + 参数适配
+            alias = _CATVOD_ALIAS.get(method)
+            fn = getattr(target, alias, None) if alias else None
+            if fn is not None:
+                call_args = _catvod_args(method, args)
+        if not callable(fn):
+            raise AttributeError("{} 中没有可调用的 {}".format(
+                getattr(mod, "__name__", "?"), method))
+        result = fn(**call_args)
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         # 返回错误 JSON（Swift 侧拿不到 traceback，拼进 error 方便排查）
