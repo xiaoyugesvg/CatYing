@@ -111,8 +111,7 @@ class SettingsController extends GetxController {
 
       await ApiConfig.instance.loadConfigs(vodApiUrl: trimmedVod);
 
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(AppConstants.apiUrl, trimmedVod);
+      await ApiConfig.persistApiUrl(trimmedVod);
       vodApiUrl.value = trimmedVod;
       await addToApiHistory(trimmedVod);
       configSuccess.value = true;
@@ -279,6 +278,8 @@ class SettingsController extends GetxController {
   Future<bool> resetConfig() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(AppConstants.apiUrl);
+    // 备份也要清，否则"重置"后重启又被恢复回来
+    await ApiConfig.clearApiUrlBackup();
     await prefs.remove(AppConstants.homeApi);
     await prefs.remove('api_history');
 

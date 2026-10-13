@@ -742,9 +742,9 @@ class AntBridge {
       final key = bean.key.startsWith('nodejs_')
           ? bean.key.substring(7)
           : bean.key;
-      final apiBase = bean.api.startsWith('http') ? '' : bean.api;
-      final r = await SpiderService.instance
-          .getPlayUrl(key, bean.type, apiBase, flag, id);
+      final r = await SpiderService.instance.getPlayUrl(
+          key, bean.type, bean.api, flag, id,
+          ext: bean.ext ?? '');
       return {
         'parse': r?['parse'] ?? 0,
         'jx': r?['jx'] ?? 0,

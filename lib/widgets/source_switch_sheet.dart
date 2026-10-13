@@ -36,6 +36,9 @@ class SourceSwitchSheet extends StatefulWidget {
 
 class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   final TextEditingController _searchController = TextEditingController();
+
+  /// 源列表滚动控制器（「定位」按钮要滚到当前选中的源）
+  final ScrollController _scrollController = ScrollController();
   String _keyword = '';
 
   /// false=单列列表 / true=双排网格（默认双排，与参考截图一致）
@@ -44,34 +47,52 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  /// 定位到当前选中的源（用户 2026-10-13：「搜索源页面要加个定位功能」）。
+  ///
+  /// 网格/单列两种形态都按**算术**算行偏移（不用 GlobalKey + ensureVisible：
+  /// 选中的源常常在很下面、还没被 build，拿不到 context 就定位不了）。
+  void _locateSelected(List<SourceBean> list, String? selectedKey) {
+    if (selectedKey == null || !_scrollController.hasClients) return;
+    final idx = list.indexWhere((s) => s.key == selectedKey);
+    if (idx < 0) return;
+    final panelW = context.size?.width ?? MediaQuery.of(context).size.width;
+    double offset;
+    if (_gridMode) {
+      // 与 _buildBody 的网格参数保持一致：2 列 / 间距 10 / 纵横比 3.4 / 行距 8
+      final itemW = (panelW - 32 - 10) / 2;
+      final rowH = itemW / 3.4 + 8;
+      offset = 4 + (idx ~/ 2) * rowH;
+    } else {
+      // 单列行高：_SourceRow = 底距 6 + 容器上下内边距 22 + 图标 28
+      offset = 4 + idx * 56.0;
+    }
+    final pos = _scrollController.position;
+    final target = (offset - pos.viewportDimension / 3)
+        .clamp(0.0, pos.maxScrollExtent);
+    _scrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOut,
+    );
+  }
+
+  /// 当前主页源 key（列表里高亮 + 定位用）
+  String? get _selectedKey => ApiConfig.instance.homeSourceBean.value?.key;
+
+  /// 按搜索词过滤（列表体与「定位」按钮共用同一份口径）
+  List<SourceBean> _filteredSourcesFrom(List<SourceBean> all) {
+    if (_keyword.isEmpty) return all;
+    final kw = _keyword.toLowerCase();
+    return all.where((s) => s.name.toLowerCase().contains(kw)).toList();
   }
 
   void _selectSource(SourceBean source) {
     ApiConfig.instance.setHomeSource(source);
     Navigator.of(context).pop(true);
-  }
-
-  /// 固定分组顺序；只返回非空分组，组内保持列表原顺序。
-  static const List<SourceKind> _kindOrder = [
-    SourceKind.cms,
-    SourceKind.js,
-    SourceKind.t4,
-    SourceKind.jar,
-    SourceKind.unknown,
-  ];
-
-  List<MapEntry<SourceKind, List<SourceBean>>> _groupByKind(
-      List<SourceBean> list) {
-    final bucket = <SourceKind, List<SourceBean>>{};
-    for (final s in list) {
-      bucket.putIfAbsent(s.sourceKind, () => []).add(s);
-    }
-    return [
-      for (final kind in _kindOrder)
-        if (bucket[kind]?.isNotEmpty ?? false)
-          MapEntry(kind, bucket[kind]!),
-    ];
   }
 
   @override
@@ -120,6 +141,29 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                       ),
                     ),
                     const Spacer(),
+                    // 定位：滚到当前选中的源（用户 2026-10-13 要求）
+                    GestureDetector(
+                      onTap: () {
+                        // ignore: invalid_use_of_protected_member
+                        final all = ApiConfig.instance.sourceBeanList.value;
+                        _locateSelected(
+                            _filteredSourcesFrom(all), _selectedKey);
+                      },
+                      child: Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: AppTheme.backgroundTertiary,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.my_location_rounded,
+                          size: 15,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     GestureDetector(
                       onTap: () => setState(() => _gridMode = !_gridMode),
                       child: Container(
@@ -155,15 +199,8 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                 child: Obx(() {
                   // ignore: invalid_use_of_protected_member
                   final all = ApiConfig.instance.sourceBeanList.value;
-                  final selectedKey =
-                      ApiConfig.instance.homeSourceBean.value?.key;
-                  final list = _keyword.isEmpty
-                      ? all
-                      : all
-                          .where((s) => s.name
-                              .toLowerCase()
-                              .contains(_keyword.toLowerCase()))
-                          .toList();
+                  final selectedKey = _selectedKey;
+                  final list = _filteredSourcesFrom(all);
                   if (list.isEmpty) {
                     return Padding(
                       padding: EdgeInsets.symmetric(vertical: 32),
@@ -175,46 +212,41 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                       ),
                     );
                   }
-                  // 按源类型分组：组标题 = 类型名 + 数量，组内保持原有交互
-                  // （网格/单列两种形态都沿用，只是前面插一行分组标题）。
-                  final groups = _groupByKind(list);
+                  // 用户 2026-10-13：「搜索源里面不要需要区分分类，例如 CMS 还有 js 这些」
+                  // ⇒ 不再按源类型分组（去掉 CMS/JS/T4/Jar 组标题），平铺展示。
                   return ListView(
+                    controller: _scrollController,
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [
-                      for (final g in groups) ...[
-                        _SourceGroupHeader(
-                            kind: g.key, count: g.value.length),
-                        if (_gridMode)
-                          GridView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            padding: const EdgeInsets.only(bottom: 8),
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              mainAxisSpacing: 8,
-                              crossAxisSpacing: 10,
-                              childAspectRatio: 3.4,
-                            ),
-                            itemCount: g.value.length,
-                            itemBuilder: (context, index) {
-                              final source = g.value[index];
-                              return _SourceTile(
-                                name: source.name,
-                                selected: source.key == selectedKey,
-                                onTap: () => _selectSource(source),
-                              );
-                            },
-                          )
-                        else
-                          for (final source in g.value)
-                            _SourceRow(
+                      if (_gridMode)
+                        GridView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            mainAxisSpacing: 8,
+                            crossAxisSpacing: 10,
+                            childAspectRatio: 3.4,
+                          ),
+                          itemCount: list.length,
+                          itemBuilder: (context, index) {
+                            final source = list[index];
+                            return _SourceTile(
                               name: source.name,
                               selected: source.key == selectedKey,
                               onTap: () => _selectSource(source),
-                            ),
-                      ],
+                            );
+                          },
+                        )
+                      else
+                        for (final source in list)
+                          _SourceRow(
+                            name: source.name,
+                            selected: source.key == selectedKey,
+                            onTap: () => _selectSource(source),
+                          ),
                     ],
                   );
                 }),
@@ -222,41 +254,6 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-/// 分组标题：源类型中文名 + 数量
-class _SourceGroupHeader extends StatelessWidget {
-  final SourceKind kind;
-  final int count;
-
-  const _SourceGroupHeader({required this.kind, required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8, bottom: 6, left: 2),
-      child: Row(
-        children: [
-          Text(
-            kind.label,
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: AppTheme.fontCaption,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            '$count',
-            style: TextStyle(
-              color: AppTheme.textTertiary,
-              fontSize: AppTheme.fontCaption,
-            ),
-          ),
-        ],
       ),
     );
   }

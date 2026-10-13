@@ -9,6 +9,7 @@ import '../services/app_log.dart';
 import 'home/view.dart';
 import 'shelf/view.dart';
 import '../reading/widgets/jelly_nav_bar.dart';
+import '../services/api_config.dart';
 import '../services/nav_feature_service.dart';
 import 'live/view.dart';
 import '../reading/pages/home_page.dart' as reading_app;
@@ -137,7 +138,9 @@ class _ContentViewState extends State<ContentView>
   /// 对应 Swift onAppear - 加载已保存的配置
   Future<void> _loadSavedConfig() async {
     final prefs = await SharedPreferences.getInstance();
-    final savedVodUrl = prefs.getString(AppConstants.apiUrl) ?? '';
+    var savedVodUrl = prefs.getString(AppConstants.apiUrl) ?? '';
+    // prefs 丢了就用手写那份文件备份兜底（防"重启又要重新填源"）
+    savedVodUrl = await ApiConfig.restoreApiUrlIfLost(savedVodUrl);
 
     if (savedVodUrl.isNotEmpty) {
       _hasSavedConfig = true;
@@ -506,9 +509,8 @@ class _ContentViewState extends State<ContentView>
       _configError = null;
     });
 
-    // 保存配置 URL
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(AppConstants.apiUrl, vodUrl);
+    // 保存配置 URL（同时落一份文件备份，见 ApiConfig.persistApiUrl）
+    await ApiConfig.persistApiUrl(vodUrl);
 
     try {
       await appState.loadConfig(vodUrl: vodUrl);

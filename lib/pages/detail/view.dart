@@ -360,16 +360,17 @@ class _DetailPageState extends State<DetailPage> {
     final info = _controller.vodInfo.value;
     if (info == null) return;
     final spiderInfo = SpiderService.instance.getCurrentSpiderInfo();
-    if (spiderInfo.$1.isEmpty) {
+    if (spiderInfo.key.isEmpty) {
       AppToast.message('当前源不是 Spider 源，无法搜索候选');
       return;
     }
     // 用片名在当前源搜索（search 不修改当前 Spider 上下文，只发请求）
     final res = await SpiderService.instance.search(
-      spiderInfo.$1,
-      spiderInfo.$2,
-      spiderInfo.$3,
+      spiderInfo.key,
+      spiderInfo.type,
+      spiderInfo.api,
       info.name,
+      ext: spiderInfo.ext,
     );
     if (!mounted) return;
     if (res == null || res['list'] is! List) {

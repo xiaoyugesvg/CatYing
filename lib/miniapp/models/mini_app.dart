@@ -42,6 +42,9 @@ class MiniApp {
   /// 是否为麦优直播订阅应用
   bool get isMaiyou => type == 'maiyou';
 
+  /// 是否为「网页型」小程序（市场安装的在线站点 / 本地解包的 H5）
+  bool get isWebApp => type == 'webapp';
+
   /// 解析后的内容（每次从 rawJson 现算，不缓存——避免过期脏数据）
   MiniAppParsed get parsed => MiniAppParsed.parse(rawJson);
 
@@ -62,6 +65,78 @@ class MiniApp {
         rawJson: json['rawJson'] as String? ?? '{}',
         createdAt: json['createdAt'] as int? ?? 0,
       );
+}
+
+/// 「小程序市场」清单里的一项（顶层 `{"apps":[…]}`，ant-video 市场格式）。
+///
+/// 每个市场项：`url` 要么指向 **zip 包**（下载解包安装），要么指向
+/// **manifest.json**（在线站点型，直接按 manifest 打开远端页面）。
+class MiniAppMarketEntry {
+  final String appId;
+  final String name;
+  final String version;
+  final String url;
+  final String author;
+  final String description;
+  final int size;
+
+  const MiniAppMarketEntry({
+    required this.appId,
+    required this.name,
+    required this.version,
+    required this.url,
+    required this.author,
+    required this.description,
+    required this.size,
+  });
+
+  /// zip 包（需要下载解包）
+  bool get isZip => url.toLowerCase().split('?').first.endsWith('.zip');
+
+  /// 在线站点型（manifest.json）
+  bool get isManifestJson =>
+      url.toLowerCase().split('?').first.endsWith('.json');
+
+  static MiniAppMarketEntry? fromJson(Map<dynamic, dynamic> m) {
+    final appId = (m['appId'] ?? '').toString().trim();
+    final url = (m['url'] ?? '').toString().trim();
+    if (appId.isEmpty || url.isEmpty) return null;
+    return MiniAppMarketEntry(
+      appId: appId,
+      name: (m['name'] ?? appId).toString().trim(),
+      version: (m['version'] ?? '').toString().trim(),
+      url: url,
+      author: (m['author'] ?? '').toString().trim(),
+      description: (m['description'] ?? '').toString().trim(),
+      size: (m['size'] is num) ? (m['size'] as num).toInt() : 0,
+    );
+  }
+}
+
+/// 判断一段文本是不是「小程序市场」清单（`{"apps":[…]}`）。
+/// 导入时据此决定：走市场（列出+安装）还是走单配置导入。
+bool looksLikeMiniAppMarket(String raw) {
+  try {
+    final decoded = jsonDecode(raw);
+    return decoded is Map && decoded['apps'] is List && (decoded['apps'] as List).isNotEmpty;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// 解析市场清单（失败/不是市场 → 空列表）
+List<MiniAppMarketEntry> parseMiniAppMarket(String raw) {
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map || decoded['apps'] is! List) return const [];
+    return (decoded['apps'] as List)
+        .whereType<Map>()
+        .map(MiniAppMarketEntry.fromJson)
+        .whereType<MiniAppMarketEntry>()
+        .toList();
+  } catch (_) {
+    return const [];
+  }
 }
 
 /// TVBox JSON 配置的解析结果

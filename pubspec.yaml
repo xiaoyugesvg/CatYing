@@ -132,8 +132,11 @@ flutter:
     # 内置阅读背景壁纸（14 张，来自 cmbok ✓）
     #   ⚠️ 目录式声明**不递归**，所以要单独声明这个子目录 ✓
     - assets/images/reader_bg/
-    # 出厂内置漫画源（15 个官方源明文，装上即有源；文档目录 sources.json 云端覆盖层优先）
-    - assets/config/
+    # ── 内置源已全部移除（用户 2026-10-13）──────────────────────────
+    #   漫画源（sources.json 16 个）与书源（book_sources.json 20 个 +
+    #   legado_sources.json 673 个）不再随包内置，改为由用户通过
+    #   漫画源仓库的云端地址 / 书源仓库的「网络导入」自行导入。
+    #   对应代码已去掉内置兜底（SourceConfigStore.loadLocal / BookSourceStore）。
     # ── 🔴 出厂内置**音乐源**（之前漏声明 → 从没打进包）───────────────
     #
     # 用户 2026 要求：「这些源全部要加进去」（MusicFree 官方索引里的 50 个）。

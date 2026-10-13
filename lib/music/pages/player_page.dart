@@ -21,21 +21,24 @@ import '../../common/theme.dart';
 ///   · **封面 ⇄ 歌词 双视图**：点封面区切换，封面旋转、歌词居中滚动高亮
 ///   · **封面取色背景**：用封面的主色做整页渐变背景（Beans 的 CoverPalette）
 ///   · 黑胶/CD 形态的旋转封面 + 唱臂（简化版）
-///   · 顶部：下箭头 / 歌名歌手 / 更多
-///   · 中部：封面或歌词
-///   · 下部：进度条（可拖动）+ 时间 / 播放控制 / 底部动作栏
-///   · 底部动作栏：播放模式 / 上一首 / 播放 / 下一首 / 队列
+///   · 顶部：下箭头 / 播放位置 `N / M` / 播放器设置；歌名·歌手紧随其下（居中）
+///   · 中部：封面或歌词（封面下带 **3 行**歌词预览：上一行 / 当前行 / 下一行）
+///   · 底部（2026-10-13 对齐参考图）：图标动作行 → 播放行 → 进度条
+///   · 动作行：收藏 / 快退10s / 音量 / 歌词 / 快进10s / 更多 / 设置（纯图标）
+///   · 播放行：播放模式 / 上一首 / 播放(主题色实心圆) / 下一首 / 队列
 ///
 /// 没做的（Beans 有、这里略）：音效均衡器、DJ 可视化、评论、
 /// 下载、歌单编辑、分享 —— 这些依赖账号或额外依赖，按需求裁剪。
-/// 底部控制栏（进度条 + 控制行 + 指示线）占的高度。
+/// 底部控制区（动作行 + 播放行 + 进度条）占的高度。
 ///
-/// 对齐 Beans 的 `deckInset = 116`：**内容区必须按这个值避让**，
-/// 否则歌名 / 预览歌词 / 歌词末行会被控制栏盖住。
+/// **内容区必须按这个值避让**，否则歌名 / 预览歌词 / 歌词末行会被控制栏盖住。
 ///
-/// ⚠️ Beans 是**硬编码 116**（不是自动测量）—— 照抄这个做法：
-/// 稳定、可预测；自动测量会在控制栏内容变化时抖动。
-const double _kDeckInset = 116;
+/// ⚠️ 用**硬编码**（不是自动测量）—— 稳定、可预测；
+/// 自动测量会在控制栏内容变化时抖动。
+///
+/// 2026-10-13 改版（对齐用户提供的参考图）：底部由「进度条 → 播放行 → 动作行」
+/// 三段组成，比旧版（进度条 + 控制行 + 6 个带文字按钮）略高，故 116 → 200。
+const double _kDeckInset = 200;
 
 class MusicPlayerPage extends StatefulWidget {
   const MusicPlayerPage({super.key});
@@ -312,6 +315,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
             child: Column(
               children: [
                 _topBar(song),
+                _titleBlock(song),
                 Expanded(
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
@@ -322,12 +326,13 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                     ),
                   ),
                 ),
+                // 底部三段（对齐参考图）：动作行 → 播放行 → 进度条
+                _actionRow(song),
+                const SizedBox(height: 6),
+                _playRow(),
+                const SizedBox(height: 2),
                 _progressBar(),
                 const SizedBox(height: 6),
-                _controls(),
-                const SizedBox(height: 10),
-                _bottomBar(),
-                const SizedBox(height: 8),
               ],
             ),
           ),
@@ -415,75 +420,78 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
     );
   }
 
+  /// 顶栏：`⌄`（收起）· 播放位置 `N / M` · `⚙`（播放器设置）。
+  ///
+  /// 2026-10-13 改版（对齐用户参考图）：原来顶栏塞了「下箭头 / 歌名歌手 /
+  /// 队列 / 音量 / 更多」五个元素，太挤。现在歌名歌手移到顶栏**下方**独立一块
+  /// （见 [_titleBlock]）；队列 / 音量 / 更多归位到动作行与播放行；顶栏只留 3 项。
   Widget _topBar(dynamic song) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      padding: const EdgeInsets.fromLTRB(6, 4, 6, 0),
       child: Row(
         children: [
           IconButton(
+            tooltip: '收起',
             icon: const Icon(Icons.keyboard_arrow_down_rounded,
                 color: Colors.white, size: 30),
             onPressed: () => Navigator.maybePop(context),
           ),
           Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  song.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: AppTheme.fontHeadline,
-                      fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  song.artists,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.6),
-                      fontSize: AppTheme.fontFootnote),
-                ),
-              ],
+            child: Text(
+              player.queue.isEmpty
+                  ? ''
+                  : '${player.currentIndex + 1} / ${player.queue.length}',
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.72),
+                  fontSize: AppTheme.fontFootnote,
+                  fontWeight: FontWeight.w600),
             ),
           ),
-          // #11：播放队列入口。
-          // 原来队列只在 manager 内部存在，用户看不到"接下来播什么"。
           IconButton(
-            tooltip: '播放队列',
-            icon: const Icon(Icons.queue_music_rounded,
-                color: Colors.white, size: 24),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(settings: const RouteSettings(name: 'music:page'),
-                builder: (_) => const MusicQueuePage(),
-              ),
+            tooltip: '播放器设置',
+            icon: const Icon(Icons.settings_rounded,
+                color: Colors.white, size: 22),
+            onPressed: () => showMusicSheet<void>(
+              context: context,
+              backgroundColor: MusicTheme.card,
+              builder: (_) => const PlayerSettingsSheet(),
             ),
           ),
-          // #16：音量入口。
-          //
-          // `MusicPlayerManager` 一直有 `volume`（0~100）和 `setVolume()`，
-          // 但**播放器页没有任何入口** —— 功能存在却用不到，
-          // 用户想调音量只能按物理键（那调的是系统音量，不是播放器音量）。
-          IconButton(
-            icon: Icon(
-              player.volume.value <= 0
-                  ? Icons.volume_off_rounded
-                  : (player.volume.value < 50
-                      ? Icons.volume_down_rounded
-                      : Icons.volume_up_rounded),
-              color: Colors.white,
-              size: 24,
-            ),
-            onPressed: () => _showVolumeSheet(),
+        ],
+      ),
+    );
+  }
+
+  /// 歌名（粗体）+ 歌手（次要色），顶栏正下方居中 —— 对齐参考图。
+  Widget _titleBlock(dynamic song) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 2, 28, 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            song.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: AppTheme.fontHeadline,
+                fontWeight: FontWeight.w700),
           ),
-          IconButton(
-            icon: const Icon(Icons.more_horiz, color: Colors.white, size: 24),
-            onPressed: () => showSongActions(context, song),          ),
+          const SizedBox(height: 4),
+          Text(
+            song.artists,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.6),
+                fontSize: AppTheme.fontFootnote),
+          ),
         ],
       ),
     );
@@ -506,24 +514,33 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
         };
         return Center(
           key: const ValueKey('cover'),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              cover,
-              const SizedBox(height: 22),
-              _qualityChip(),
-              const SizedBox(height: 10),
-              // 封面下方：自动显示当前歌词行（滚动更新）；无歌词时给提示。
-              SizedBox(height: 60, child: _coverLyricPreview()),
-            ],
+          // 固定 280 宽 + scaleDown：小屏（如 iPhone SE）竖向不够时整体等比缩小，
+          // 而不是抛 RenderFlex overflow（改版后底部多了一行、标题也独立成块，
+          // 竖向余量变小，这道兜底必须有）。
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: SizedBox(
+              width: 280,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  cover,
+                  const SizedBox(height: 22),
+                  _qualityChip(),
+                  const SizedBox(height: 6),
+                  // 封面下方：上一行 / 当前行 / 下一行歌词（对齐参考图）；无歌词给提示。
+                  SizedBox(height: 78, child: _coverLyricPreview()),
+                ],
+              ),
+            ),
           ),
         );
       },
     );
   }
 
-  /// 封面下方的歌词预览 —— 显示当前正在唱的行（最多 2 行，超出省略）。
-  /// 点击封面任意处（整块 Expanded 的 GestureDetector）进入全屏歌词。
+  /// 封面下方的歌词预览 —— 上一行 / 当前行 / 下一行（对齐参考图）。
+  /// 当前行加粗放大、上下两行压暗；点封面任意处进入全屏歌词。
   Widget _coverLyricPreview() {
     return ValueListenableBuilder<List<LyricLine>>(
       valueListenable: player.lyrics,
@@ -543,33 +560,46 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
         return ValueListenableBuilder<int>(
           valueListenable: player.lyricIndex,
           builder: (context, idx, ___) {
-            final li = (idx < 0 ? 0 : idx).clamp(0, lines.length - 1);
-            final line = lines[li];
-            final text = (line.translation != null && line.translation!.isNotEmpty)
-                ? '${line.text} · ${line.translation}'
-                : line.text;
-            return AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
-              child: Align(
-                key: ValueKey('lyric-preview-$li-$text'),
-                alignment: Alignment.center,
-                child: Text(
-                  text,
-                  textAlign: TextAlign.center,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.92),
-                    fontSize: AppTheme.fontBody,
-                    fontWeight: FontWeight.w600,
-                    height: 1.3,
-                  ),
-                ),
-              ),
+            final cur = (idx < 0 ? 0 : idx).clamp(0, lines.length - 1);
+            String at(int i) =>
+                (i >= 0 && i < lines.length) ? lines[i].text.trim() : '';
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _lyricPreviewLine(at(cur - 1), active: false),
+                _lyricPreviewLine(at(cur), active: true),
+                _lyricPreviewLine(at(cur + 1), active: false),
+              ],
             );
           },
         );
       },
+    );
+  }
+
+  /// 预览行：当前行加粗放大、其余压暗。空行给固定占位高度，
+  /// 避免歌词滚动时整块高度跳动。
+  Widget _lyricPreviewLine(String text, {required bool active}) {
+    if (text.isEmpty) {
+      return SizedBox(height: active ? 26 : 22);
+    }
+    return AnimatedDefaultTextStyle(
+      duration: const Duration(milliseconds: 220),
+      style: TextStyle(
+        color: active
+            ? Colors.white.withValues(alpha: 0.95)
+            : Colors.white.withValues(alpha: 0.42),
+        fontSize: active ? AppTheme.fontBody : AppTheme.fontFootnote,
+        fontWeight: active ? FontWeight.w700 : FontWeight.w400,
+        height: 1.35,
+      ),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
     );
   }
 
@@ -648,21 +678,13 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
               ),
             ),
           ),
-          // 唱臂（不做真实动画，静态摆位即可 —— 动起来反而分心）
-          Positioned(
-            right: 6,
-            top: 10,
-            child: Transform.rotate(
-              angle: 0.35,
-              child: Container(
-                width: 5,
-                height: 96,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.28),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            ),
+          // 唱臂：轴心在盘右下方，臂身斜向左上、唱头压住盘面右上（对齐参考图）。
+          // 轴心位置 = right 18 / top 82（换算后落在 (250,230) 附近）——
+          // 旋转绕轴心，所以臂身整体向左上展开，不会超出 280 画布被 Stack 裁掉。
+          const Positioned(
+            right: 18,
+            top: 82,
+            child: _VinylTonearm(),
           ),
         ],
       ),
@@ -1131,89 +1153,112 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
   // 播放控制
   // ============================================================
 
-  Widget _controls() {
+  /// 播放行（对齐参考图）：模式 · 上一首 · 大播放键 · 下一首 · 队列。
+  Widget _playRow() {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        _circleBtn(Icons.replay_10_rounded, () =>
-            player.seekBy(const Duration(seconds: -10))),
-        const SizedBox(width: 26),
-        // 播放/暂停（玻璃球）
-        GestureDetector(
-          onTap: () => player.toggle(),
-          child: Container(
-            width: 68,
-            height: 68,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white.withValues(alpha: 0.14),
-              border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.22), width: 0.8),
-            ),
-            child: ValueListenableBuilder<bool>(
-              valueListenable: player.isPlaying,
-              builder: (context, playing, _) => Icon(
-                playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                color: Colors.white,
-                size: 34,
-              ),
-            ),
-          ),
+        // 播放模式（列表循环 / 单曲循环 / 随机）
+        ValueListenableBuilder<PlayMode>(
+          valueListenable: player.mode,
+          builder: (context, mode, _) {
+            final (icon, label) = switch (mode) {
+              PlayMode.list => (Icons.repeat_rounded, '列表循环'),
+              PlayMode.single => (Icons.repeat_one_rounded, '单曲循环'),
+              PlayMode.shuffle => (Icons.shuffle_rounded, '随机播放'),
+            };
+            return _plainIcon(icon, label,
+                () => setState(() => player.cycleMode()));
+          },
         ),
-        const SizedBox(width: 26),
-        _circleBtn(Icons.forward_10_rounded, () =>
-            player.seekBy(const Duration(seconds: 10))),
+        _plainIcon(
+            Icons.skip_previous_rounded, '上一首', () => player.previous()),
+        _bigPlayButton(),
+        _plainIcon(Icons.skip_next_rounded, '下一首', () => player.next()),
+        // 播放队列（原来在顶栏，改版后归到这里）
+        _plainIcon(Icons.queue_music_rounded, '播放队列',
+            () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    settings: const RouteSettings(name: 'music:page'),
+                    builder: (_) => const MusicQueuePage(),
+                  ),
+                )),
       ],
     );
   }
 
-  Widget _circleBtn(IconData icon, VoidCallback onTap) => GestureDetector(
+  /// 大播放键：**主题色实心圆**（对齐参考图；原来是半透明"玻璃球"）。
+  /// 前景色按底色亮度自动取黑/白 —— 浅色调下白图标会看不清。
+  Widget _bigPlayButton() {
+    final fg = _tint.computeLuminance() > 0.6 ? Colors.black87 : Colors.white;
+    return GestureDetector(
+      onTap: () => player.toggle(),
+      child: Container(
+        width: 64,
+        height: 64,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: _tint,
+          boxShadow: [
+            BoxShadow(
+                color: _tint.withValues(alpha: 0.45),
+                blurRadius: 18,
+                offset: const Offset(0, 6)),
+          ],
+        ),
+        child: ValueListenableBuilder<bool>(
+          valueListenable: player.isPlaying,
+          builder: (context, playing, _) => Icon(
+            playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            color: fg,
+            size: 34,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 纯图标按钮（无文字标签）—— 播放行 / 动作行共用。
+  Widget _plainIcon(IconData icon, String tooltip, VoidCallback onTap,
+      {Color? color, double size = 26}) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(10),
           child: Icon(icon,
-              color: Colors.white.withValues(alpha: 0.85), size: 30),
+              color: color ?? Colors.white.withValues(alpha: 0.9), size: size),
         ),
-      );
+      ),
+    );
+  }
 
   // ============================================================
   // 底部动作栏
   // ============================================================
 
-  Widget _bottomBar() {
+  /// 动作行（纯图标、无文字标签，对齐参考图）：
+  /// 收藏 · 快退10s · 音量 · 歌词/封面 · 快进10s · 更多 · 设置。
+  ///
+  /// 2026-10-13 改版：原来是 6 个**带文字**的按钮（模式/收藏/上一首/歌词/下一首/设置），
+  /// 现在按参考图统一成图标行；模式/上一首/下一首/队列移到播放行，
+  /// 快退/快进 10s 从播放行挪到这里（功能不减，只是归位）。
+  Widget _actionRow(dynamic song) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        _actionBtn(
-          icon: switch (player.mode.value) {
-            PlayMode.list => Icons.repeat_rounded,
-            PlayMode.single => Icons.repeat_one_rounded,
-            PlayMode.shuffle => Icons.shuffle_rounded,
-          },
-          label: player.mode.value.label,
-          onTap: () => setState(() => player.cycleMode()),
-        ),
-        // #5：收藏（红心）。原来音乐模块**完全没有收藏功能** ——
-        // 听到喜欢的歌没法存，下次只能靠记忆搜。
-        // 用 ListenableBuilder 监听 store，点一下立刻变实心。
+        // 收藏（红心）
         ListenableBuilder(
           listenable: MusicLibraryStore.instance,
           builder: (context, _) {
-            final song = player.currentSong;
-            final fav = song != null &&
-                MusicLibraryStore.instance.isFavorite(song);
-            if (song == null) return const SizedBox.shrink();
-            return _actionBtn(
-              icon: fav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-              label: fav ? '已收藏' : '收藏',
-              // 收藏时用**深底专用**强调色（同上：`MusicTheme.tint` 在
-              // 全局浅色下是暗色，压在深色播放页上红心几乎看不见 ✗）；
-              // 未收藏保持默认灰白
-              color: fav ? _darkTint : null,
-              onTap: () {
-                // 用 unawaited 包一层：onTap 要求 VoidCallback，
-                // 不能直接给 async 闭包（返回 Future）。
+            final fav = MusicLibraryStore.instance.isFavorite(song);
+            return _plainIcon(
+              fav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+              fav ? '已收藏' : '收藏',
+              () {
+                // onTap 要 VoidCallback，async 闭包返回 Future → 用 unawaited 包一层。
                 unawaited(() async {
                   final now =
                       await MusicLibraryStore.instance.toggleFavorite(song);
@@ -1226,64 +1271,116 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
                   );
                 }());
               },
+              // 收藏时用深底专用强调色（MusicTheme.tint 在全局浅色下是暗色，
+              // 压在深色播放页上红心几乎看不见）
+              color: fav ? _darkTint : null,
+              size: 24,
             );
           },
         ),
-        _actionBtn(
-          icon: Icons.skip_previous_rounded,
-          label: '上一首',
-          onTap: () => player.previous(),
+        _plainIcon(Icons.replay_10_rounded, '快退 10 秒',
+            () => player.seekBy(const Duration(seconds: -10)),
+            size: 24),
+        // 音量（原来在顶栏）
+        ValueListenableBuilder<double>(
+          valueListenable: player.volume,
+          builder: (context, v, _) => _plainIcon(
+            v <= 0
+                ? Icons.volume_off_rounded
+                : (v < 50
+                    ? Icons.volume_down_rounded
+                    : Icons.volume_up_rounded),
+            '音量',
+            () => _showVolumeSheet(),
+            size: 24,
+          ),
         ),
-        _actionBtn(
-          icon: showLyric ? Icons.album_rounded : Icons.lyrics_rounded,
-          label: showLyric ? '封面' : '歌词',
-          onTap: () => setState(() => showLyric = !showLyric),
+        // 封面 ⇄ 歌词
+        _plainIcon(
+          showLyric ? Icons.album_rounded : Icons.lyrics_rounded,
+          showLyric ? '看封面' : '看歌词',
+          () => setState(() => showLyric = !showLyric),
+          size: 24,
         ),
-        _actionBtn(
-          icon: Icons.skip_next_rounded,
-          label: '下一首',
-          onTap: () => player.next(),
-        ),
-        _actionBtn(
-          icon: Icons.tune_rounded,
-          label: '设置',
-          onTap: () => showMusicSheet<void>(
+        _plainIcon(Icons.forward_10_rounded, '快进 10 秒',
+            () => player.seekBy(const Duration(seconds: 10)),
+            size: 24),
+        _plainIcon(Icons.more_horiz_rounded, '更多操作',
+            () => showSongActions(context, song),
+            size: 24),
+        _plainIcon(
+          Icons.tune_rounded,
+          '播放器设置',
+          () => showMusicSheet<void>(
             context: context,
             backgroundColor: MusicTheme.card,
             builder: (_) => const PlayerSettingsSheet(),
           ),
+          size: 24,
         ),
       ],
     );
   }
+}
 
-  Widget _actionBtn({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
+/// 黑胶唱臂：轴心在下、臂身向上、顶端是唱头。
+///
+/// 2026-10-13 改版（对齐用户参考图）：原来是"一根圆角细棒随便斜一下"，
+/// 现在补上**轴心底座 + 唱头**，并改成"绕轴心旋转"——
+/// 臂身自然向左上展开、轴心始终钉在盘右下方（静态摆位，不做动画，避免分心）。
+class _VinylTonearm extends StatelessWidget {
+  const _VinylTonearm();
 
-    /// 图标/文字颜色覆盖（#5：已收藏时用主题色）。
-    /// 为 null 时用默认的"白色半透明"，与其它按钮一致。
-    Color? color,
-  }) {
-    final c = color;
-    final iconColor =
-        c?.withValues(alpha: 0.95) ?? Colors.white.withValues(alpha: 0.75);
-    final labelColor =
-        c?.withValues(alpha: 0.85) ?? Colors.white.withValues(alpha: 0.45);
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: iconColor, size: 22),
-            const SizedBox(height: 3),
-            Text(label, style: TextStyle(color: labelColor, fontSize: AppTheme.fontCaption)),
-          ],
-        ),
+  @override
+  Widget build(BuildContext context) {
+    return Transform.rotate(
+      // -22°：臂身向左上倾（参考图角度）
+      angle: -0.38,
+      // 绕**底部中心**转 —— 底部中心即轴心
+      alignment: Alignment.bottomCenter,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 唱头（压在唱片盘面上的那一端）
+          Container(
+            width: 15,
+            height: 20,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(4),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    blurRadius: 6),
+              ],
+            ),
+          ),
+          // 臂身
+          Container(
+            width: 4.5,
+            height: 104,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.88),
+              borderRadius: BorderRadius.circular(3),
+            ),
+          ),
+          // 轴心底座
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white.withValues(alpha: 0.95),
+              border: Border.all(color: Colors.black.withValues(alpha: 0.12)),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2)),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

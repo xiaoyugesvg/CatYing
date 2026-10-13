@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+
+import '../../../services/api_config.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -430,6 +432,8 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
       case CleanTarget.subscriptionConfig:
         // 订阅当前的接口地址与主页源选择
         await prefs.remove(AppConstants.apiUrl);
+        // 接口地址的文件备份一起清（否则清理后重启被恢复回来）
+        await ApiConfig.clearApiUrlBackup();
         await prefs.remove(AppConstants.homeApi);
         break;
 

@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../../common/theme.dart';
@@ -10,6 +11,7 @@ import '../models/mini_app.dart';
 import '../services/mini_app_service.dart';
 import 'mini_app_detail_page.dart';
 import 'mini_app_maiyou_page.dart';
+import 'mini_app_market_page.dart';
 import 'mini_app_web_page.dart';
 
 /// 「程序」tab 主页：已安装小程序网格 + 导入入口。
@@ -23,14 +25,63 @@ class MiniAppListPage extends StatefulWidget {
   State<MiniAppListPage> createState() => _MiniAppListPageState();
 }
 
+/// 程序列表排序方式
+enum _AppSort {
+  custom('自定义'),
+  name('名称'),
+  newest('最近添加');
+
+  const _AppSort(this.label);
+  final String label;
+}
+
 class _MiniAppListPageState extends State<MiniAppListPage> {
   MiniAppService get service => MiniAppService.instance;
   bool _busy = false;
+
+  /// 视图：true = 网格 / false = 列表
+  bool _gridMode = true;
+
+  /// 排序（自定义 = 按存储顺序，可拖动调整）
+  _AppSort _sort = _AppSort.custom;
+
+  /// 顶栏搜索
+  bool _searching = false;
+  final _searchCtrl = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     service.ensureLoaded();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  /// 过滤 + 排序后的「已安装」程序（内置那几张卡不参与）
+  List<MiniApp> _visibleApps() {
+    var list = service.apps.toList();
+    final q = _query.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      list = list
+          .where((a) =>
+              a.name.toLowerCase().contains(q) ||
+              a.source.toLowerCase().contains(q))
+          .toList();
+    }
+    switch (_sort) {
+      case _AppSort.custom:
+        break;
+      case _AppSort.name:
+        list.sort((a, b) => a.name.compareTo(b.name));
+      case _AppSort.newest:
+        list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    }
+    return list;
   }
 
   @override
@@ -53,44 +104,58 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                 ),
                 child: Row(
                   children: [
-                    const SizedBox(width: 48),
-                    Expanded(
-                      child: Center(
-                        child: Text(
-                          '程序',
+                    // 左：标题「程序」（搜索时换成输入框）
+                    if (_searching)
+                      Expanded(
+                        child: TextField(
+                          controller: _searchCtrl,
+                          autofocus: true,
                           style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: AppTheme.fontTitle3,
-                            fontWeight: FontWeight.bold,
+                              color: AppTheme.textPrimary, fontSize: 14),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            hintText: '搜索程序…',
+                            hintStyle:
+                                TextStyle(color: AppTheme.textSecondary),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide:
+                                  BorderSide(color: AppTheme.borderMedium),
+                            ),
                           ),
+                          onChanged: (v) => setState(() => _query = v),
                         ),
-                      ),
-                    ),
-                    // 添加程序
-                    InkWell(
-                      borderRadius: BorderRadius.circular(24),
-                      onTap: _showAddSheet,
-                      child: Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: Icon(
-                          Icons.add_circle_outline,
-                          size: 22,
+                      )
+                    else
+                      Text(
+                        '程序',
+                        style: TextStyle(
                           color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontTitle3,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
+                    const Spacer(),
+                    // 右：搜索 / 设置 / 添加
+                    _topIcon(
+                      _searching ? Icons.close_rounded : Icons.search_rounded,
+                      _searching ? '关闭搜索' : '搜索',
+                      () => setState(() {
+                        _searching = !_searching;
+                        if (!_searching) {
+                          _searchCtrl.clear();
+                          _query = '';
+                        }
+                      }),
                     ),
+                    _topIcon(Icons.tune_rounded, '设置', _showSettingsSheet),
+                    _topIcon(Icons.add_circle_outline, '添加程序', _showAddSheet),
                   ],
                 ),
               ),
               const SizedBox(height: AppTheme.spacingMD),
 
-              Expanded(
-                child: Obx(() {
-                  final apps = service.apps;
-                  // 网格第一个位置固定是内置「新影视库」，后面是已导入程序
-                  return _buildGrid(apps);
-                }),
-              ),
+              Expanded(child: Obx(() => _buildBody())),
             ],
           ),
         ),
@@ -156,9 +221,57 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     );
   }
 
-  // ── 网格 ──────────────────────────────────────────────────────
-  Widget _buildGrid(List<MiniApp> apps) {
+  // ── 顶栏小图标 ────────────────────────────────────────────────
+  Widget _topIcon(IconData icon, String tip, VoidCallback onTap) {
+    return Tooltip(
+      message: tip,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Icon(icon, size: 21, color: AppTheme.textPrimary),
+        ),
+      ),
+    );
+  }
+
+  // ── 主体：内置卡片 + 已装程序（网格/列表、可搜索/排序）────────
+  Widget _buildBody() {
     final builtins = builtinMiniApps;
+    final apps = _visibleApps();
+    if (builtins.isEmpty && apps.isEmpty) {
+      return Center(
+        child: Text(
+          _query.trim().isEmpty ? '还没有程序，点右上角 + 导入' : '没有匹配的程序',
+          style: TextStyle(color: AppTheme.textTertiary, fontSize: 13),
+        ),
+      );
+    }
+    if (!_gridMode) {
+      // 列表模式：一行一个（长按同样出菜单）
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(
+            AppTheme.spacingMD, 0, AppTheme.spacingMD, 110),
+        children: [
+          for (final b in builtins)
+            _listRow(
+              title: b.name,
+              subtitle: b.tag,
+              icon: b.icon,
+              onTap: () => Get.to(() => MiniAppWebPage(assetRoot: b.assetRoot)),
+            ),
+          for (final a in apps)
+            _listRow(
+              title: a.name,
+              subtitle: _appTag(a),
+              icon: Icons.widgets_outlined,
+              onTap: () => _openApp(a),
+              onLongPress: () => _showAppMenu(a),
+            ),
+        ],
+      );
+    }
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(
         AppTheme.spacingMD,
@@ -178,31 +291,334 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
           return _builtinCard(builtins[index]);
         }
         final app = apps[index - builtins.length];
-        if (app.isMaiyou) {
-          return _MiniAppCard(
-            app: app,
-            tag: '直播订阅 · 麦优',
-            onTap: () => Get.to(() => MiniAppMaiyouPage(appId: app.id)),
-            onLongPress: () => _confirmRemove(app),
-          );
-        }
-        final parsed = app.parsed;
-        final videoCount =
-            parsed.cmsSites.length + parsed.spiderSites.length;
-        final liveCount = parsed.liveGroups
-            .fold<int>(0, (sum, g) => sum + g.channels.length);
-        final tags = <String>[
-          if (videoCount > 0) '影视 $videoCount',
-          if (liveCount > 0) '频道 $liveCount',
-          if (parsed.hasInlineSpider) '内嵌脚本',
-        ];
         return _MiniAppCard(
           app: app,
-          tag: tags.join(' · '),
-          onTap: () => Get.to(() => MiniAppDetailPage(appId: app.id)),
-          onLongPress: () => _confirmRemove(app),
+          tag: _appTag(app),
+          onTap: () => _openApp(app),
+          onLongPress: () => _showAppMenu(app),
         );
       },
+    );
+  }
+
+  /// 程序副标题：影视 N / 频道 N / 在线站点…
+  String _appTag(MiniApp app) {
+    if (app.isWebApp) {
+      return app.source.startsWith('http') ? '在线站点' : '本地网页程序';
+    }
+    if (app.isMaiyou) return '直播订阅 · 麦优';
+    final parsed = app.parsed;
+    final videoCount = parsed.cmsSites.length + parsed.spiderSites.length;
+    final liveCount =
+        parsed.liveGroups.fold<int>(0, (sum, g) => sum + g.channels.length);
+    return [
+      if (videoCount > 0) '影视 $videoCount',
+      if (liveCount > 0) '频道 $liveCount',
+      if (parsed.hasInlineSpider) '内嵌脚本',
+    ].join(' · ');
+  }
+
+  /// 打开程序（按类型分派：网页型 / 麦优订阅 / TVBox 配置）
+  void _openApp(MiniApp app) {
+    if (app.isWebApp) {
+      final src = app.source;
+      final isRemote = src.startsWith('http');
+      Get.to(() => MiniAppWebPage(
+            remoteUrl: isRemote ? src : null,
+            localRoot: isRemote ? null : src,
+            manifestJson: app.rawJson,
+            title: app.name,
+          ));
+      return;
+    }
+    if (app.isMaiyou) {
+      Get.to(() => MiniAppMaiyouPage(appId: app.id));
+      return;
+    }
+    Get.to(() => MiniAppDetailPage(appId: app.id));
+  }
+
+  Widget _listRow({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required VoidCallback onTap,
+    VoidCallback? onLongPress,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: AppTheme.backgroundTertiary,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          onLongPress: onLongPress,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Row(
+              children: [
+                Icon(icon, size: 20, color: AppTheme.textSecondary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600)),
+                      if (subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                color: AppTheme.textTertiary, fontSize: 11)),
+                      ],
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded,
+                    size: 18, color: AppTheme.textTertiary),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── 设置弹层：排序 / 视图 / 调整顺序 ──────────────────────────
+  void _showSettingsSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Text('程序设置',
+                    style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold)),
+              ),
+              _sheetGroupTitle('排序'),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final s in _AppSort.values)
+                    _sheetChip(s.label, _sort == s, () {
+                      setState(() => _sort = s);
+                      setSheet(() {});
+                    }),
+                ],
+              ),
+              _sheetGroupTitle('视图'),
+              Wrap(
+                spacing: 8,
+                children: [
+                  _sheetChip('网格', _gridMode, () {
+                    setState(() => _gridMode = true);
+                    setSheet(() {});
+                  }),
+                  _sheetChip('列表', !_gridMode, () {
+                    setState(() => _gridMode = false);
+                    setSheet(() {});
+                  }),
+                ],
+              ),
+              const SizedBox(height: 6),
+              if (service.apps.length > 1)
+                ListTile(
+                  leading: Icon(Icons.reorder_rounded,
+                      color: AppTheme.textSecondary),
+                  title: Text('调整顺序（拖动）',
+                      style: TextStyle(color: AppTheme.textPrimary)),
+                  onTap: () {
+                    Get.back();
+                    _showReorderSheet();
+                  },
+                ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _sheetGroupTitle(String t) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 6),
+        child: Text(t,
+            style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: 12,
+                fontWeight: FontWeight.w600)),
+      );
+
+  Widget _sheetChip(String label, bool selected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.accentColor : AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppTheme.borderLight, width: 0.5),
+        ),
+        child: Text(label,
+            style: TextStyle(
+                color: selected ? Colors.white : AppTheme.textSecondary,
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500)),
+      ),
+    );
+  }
+
+  // ── 长按菜单：分享 / 移动 / 删除 ──────────────────────────────
+  void _showAppMenu(MiniApp app) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(app.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading:
+                  Icon(Icons.share_outlined, color: AppTheme.textSecondary),
+              title:
+                  Text('分享', style: TextStyle(color: AppTheme.textPrimary)),
+              onTap: () {
+                Get.back();
+                _shareApp(app);
+              },
+            ),
+            ListTile(
+              leading:
+                  Icon(Icons.reorder_rounded, color: AppTheme.textSecondary),
+              title:
+                  Text('移动', style: TextStyle(color: AppTheme.textPrimary)),
+              onTap: () {
+                Get.back();
+                _showReorderSheet();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+              title:
+                  const Text('删除', style: TextStyle(color: Colors.redAccent)),
+              onTap: () {
+                Get.back();
+                _confirmRemove(app);
+              },
+            ),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 分享：复制程序链接/配置到剪贴板（应用内没有分享 SDK，统一走复制）
+  Future<void> _shareApp(MiniApp app) async {
+    final text =
+        app.source.trim().isNotEmpty ? app.source.trim() : app.rawJson;
+    await Clipboard.setData(ClipboardData(text: text));
+    AppToast.message('已复制程序链接');
+  }
+
+  /// 拖动排序（列表顺序即自定义顺序，落盘）
+  void _showReorderSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: SizedBox(
+          height: MediaQuery.of(ctx).size.height * 0.6,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  children: [
+                    Text('调整顺序',
+                        style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold)),
+                    const Spacer(),
+                    Text('拖动右侧把手',
+                        style: TextStyle(
+                            color: AppTheme.textTertiary, fontSize: 11)),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Obx(
+                  () => ReorderableListView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                    itemCount: service.apps.length,
+                    onReorder: (o, n) => service.reorder(o, n),
+                    itemBuilder: (c, i) {
+                      final a = service.apps[i];
+                      return ListTile(
+                        key: ValueKey(a.id),
+                        title: Text(a.name,
+                            style: TextStyle(color: AppTheme.textPrimary)),
+                        subtitle: Text(_appTag(a),
+                            style: TextStyle(
+                                color: AppTheme.textTertiary, fontSize: 11)),
+                        trailing: Icon(Icons.drag_handle_rounded,
+                            color: AppTheme.textTertiary),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -273,7 +689,18 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
               _AddTile(
                 icon: Icons.link,
                 title: '网络导入',
-                subtitle: '输入 TVBox 配置 JSON 地址',
+                subtitle: 'TVBox 配置地址，或小程序市场链接',
+                onTap: () {
+                  Get.back();
+                  _importFromUrlDialog();
+                },
+              ),
+              const SizedBox(height: AppTheme.spacingMD),
+              // 小程序市场：导入市场清单 → 列出里面的程序 → 点「安装」下载导入
+              _AddTile(
+                icon: Icons.storefront_outlined,
+                title: '小程序市场',
+                subtitle: '导入市场链接，列出里面的程序并安装',
                 onTap: () {
                   Get.back();
                   _importFromUrlDialog();
@@ -399,7 +826,7 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
       AppToast.message('地址不能为空');
       return;
     }
-    await _run(() => service.importFromUrl(url));
+    await _importByUrlSmart(url);
   }
 
   Future<void> _importFromTextDialog() async {
@@ -437,17 +864,43 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     await _run(() => service.importFromText(controller.text));
   }
 
+  /// 网络导入 / 小程序市场：一次下载判断——
+  /// 内容是市场清单 `{"apps":[…]}` → 打开市场页（列出 + 安装按钮）；
+  /// 否则按普通 TVBox 配置导入。
+  Future<void> _importByUrlSmart(String url) async {
+    if (_busy) return;
+    _busy = true;
+    try {
+      final r = await service.importUrlSmart(url);
+      final market = r.market;
+      if (!mounted) return;
+      if (market != null) {
+        await Get.to(
+            () => MiniAppMarketPage(marketUrl: url, preloaded: market));
+      } else {
+        AppToast.message(r.ok ? '导入成功' : (r.error ?? '导入失败'));
+      }
+    } finally {
+      _busy = false;
+    }
+  }
+
   Future<void> _importFromFile() async {
     try {
       final result = await FilePicker.pickFiles(
         type: FileType.custom,
-        allowedExtensions: const ['json', 'txt'],
+        // zip = 小程序包（解包安装为网页型程序）；json/txt = TVBox 配置
+        allowedExtensions: const ['json', 'txt', 'zip'],
       );
       if (result.isEmpty) return;
       final f = result.first;
       final path = f.path;
       if (path == null) {
         AppToast.message('读不出这个文件（没有本地路径）');
+        return;
+      }
+      if (path.toLowerCase().endsWith('.zip')) {
+        await _run(() => service.installFromZipFile(path));
         return;
       }
       await _run(() => service.importFromFile(path));

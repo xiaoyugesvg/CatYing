@@ -228,6 +228,14 @@ class AppState extends GetxController {
 
   /// 确保 Node.js 已启动并加载 Spider 源 - 对应 Swift ensureNodeJSAndLoadSource
   Future<void> _ensureNodeJSAndLoadSource() async {
+    // 只有「整包就是一个 js/jar spider」的配置才在这里启动 Node 并让 /config
+    // 决定线路（见 ApiConfig.isSingleScriptSpider）。聚合 TVBox 配置里
+    // sites[] 的 type=3 脚本源各自按需载入引擎，不走这条流程 ——
+    // 否则会把第一个 .py 当 index.js 交给 Node，载入失败 → /config 空 → 首页报错。
+    if (!ApiConfig.instance.isSingleScriptSpider.value) {
+      AppLog.instance.log('[AppState] 非单 Spider 配置，跳过 Node 启动/加载流程');
+      return;
+    }
     final hasSpiderSource =
         ApiConfig.instance.sourceBeanList.any((s) => s.isSpiderSource);
     if (!hasSpiderSource) return;
@@ -266,9 +274,8 @@ class AppState extends GetxController {
     // 「程序」模块的 spider 源（key 前缀 app_）不走全局加载链路：
     // 它们由程序详情页惰性加载（Node 引擎单源架构，全局加载会触发
     // /config 线路替换并覆盖主源），这里只加载主订阅源里的蜘蛛源。
-    final spiderSource = ApiConfig.instance.sourceBeanList
-        .firstWhereOrNull(
-            (s) => s.isSpiderSource && !s.key.startsWith('app_'));
+    final spiderSource = ApiConfig.instance.sourceBeanList.firstWhereOrNull(
+        (s) => s.isSpiderSource && !s.key.startsWith('app_') && !s.isPythonScriptSource);
     if (spiderSource == null || spiderSource.api.isEmpty) return;
 
     // **会话级复用**: 本次启动已成功加载过源, 直接复用,
@@ -296,6 +303,9 @@ class AppState extends GetxController {
       AppLog.instance.log('[AppState] Spider 源加载失败: ${loadMessage ?? "未知错误"}');
       return;
     }
+    // 登记「主源脚本」：程序脚本源按需载入时会把 Node 的单源槽位顶替掉，
+    // 回到主源时 SpiderService 需要靠它把主源脚本重新载入。
+    SpiderService.instance.mainScriptUrl = spiderSource.api;
     AppLog.instance.log('[AppState] Spider 源加载成功');
     _sourceLoadedThisSession = true;
 
@@ -339,21 +349,19 @@ class AppState extends GetxController {
       final firstSource = ApiConfig.instance.sourceBeanList.firstOrNull;
       if (firstSource != null) {
         loadingPhase.value = LoadingPhase.initializingSpider;
-        // 对应 Swift: apiBase = firstSource.api
-        // Spider config 返回的 api 字段可能是空字符串或相对路径
-        final apiBase = firstSource.api.startsWith('http') ? '' : firstSource.api;
-        // 设置当前 Spider（用于详情页等非并发场景）
+        // 传**原始 api**（SpiderService 内部再决定走 Node 还是 Python 引擎）
         SpiderService.instance.setCurrentSpider(
           firstSource.key,
           firstSource.type,
-          apiBase,
+          firstSource.api,
           ext: firstSource.ext,
           jar: firstSource.jar,
         );
         // 对应 Swift try? await - 忽略初始化错误
         try {
           await SpiderService.instance.initSpider(
-            firstSource.key, firstSource.type, apiBase);
+              firstSource.key, firstSource.type, firstSource.api,
+              ext: firstSource.ext ?? '');
         } catch (e) {
         AppLog.instance.log('[app_state] swallowed: $e');
       }

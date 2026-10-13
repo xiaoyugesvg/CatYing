@@ -17,6 +17,7 @@ import 'controller.dart';
 import '../../widgets/home_search_bar.dart';
 import '../../services/main_tab_controller.dart';
 import '../../services/nav_feature_service.dart';
+import '../../reading/services/settings_service.dart';
 
 /// 首页 - 对应 Swift HomeView
 class HomePage extends StatefulWidget {
@@ -873,10 +874,29 @@ class _HomePageState extends State<HomePage> {
                     padding: const EdgeInsets.only(
                         top: AppTheme.spacingXS, bottom: 8),
                     child: homeVideos.isEmpty
-                        ? const _BannerPlaceholder()
-                        : _RecommendBanner(videos: homeVideos.length > 6
-                            ? homeVideos.sublist(0, 6)
-                            : List<Video>.from(homeVideos)),
+                        // 幻灯片兜底策略见 HomeController._fillBannerFromCategory：
+                        //   · 还在加载 → 占位块（避免顶部高度跳一下）
+                        //   · 加载完仍为空（源连分类列表都没有）→ **整块隐藏**，
+                        //     不再留一块空白占位
+                        ? (isLoading
+                            ? const _BannerPlaceholder()
+                            : const SizedBox.shrink())
+                        : ListenableBuilder(
+                            // 样式变化（设置里切换）时立即重建；
+                            // key 带上 style → 换样式时 State/PageController 一起重建
+                            // （viewportFraction 只能在构造时给，复用旧 controller 会错位）
+                            listenable: SettingsService(),
+                            builder: (context, _) {
+                              final st = SettingsService().homeBannerStyle;
+                              return _RecommendBanner(
+                                key: ValueKey('banner-${st.index}'),
+                                style: st,
+                                videos: homeVideos.length > 6
+                                    ? homeVideos.sublist(0, 6)
+                                    : List<Video>.from(homeVideos),
+                              );
+                            },
+                          ),
                   ),
                 ),
                 if (sorts.isNotEmpty)
@@ -993,17 +1013,45 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// 首页顶部推荐横幅（自动轮播）：横版大图 + 左下标题 + 右下源角标
+/// 首页顶部推荐横幅（自动轮播）。两种样式，由「设置 → 菜单设置 → 首页幻灯片」切换：
+///   · `wide`  横版大图（原样式）：16:9 大图 + 左下标题 + 右下来源角标
+///   · `cards` 卡片轮播（新增）：竖版海报居中放大，两侧海报缩小 / 倾斜 / 压暗露出
+///            （coverflow 观感，对齐用户 2026-10-13 给的参考图）
+///
+/// ⚠️ 两种样式的 `viewportFraction` 不同，而它**只能在 PageController 构造时**给
+/// → 切换样式时由调用方换 `key`，让整个 State + PageController 重建
+///   （见 home/view 的调用点）。
+const double _kBannerWideHeight = 196;
+
+// ── 卡片轮播的尺寸（对齐参考图的比例，不是在真机上量的，但关系是对的）──
+//   · 中心卡 ≈ 0.44 屏宽、竖版（170×250，比例 0.68）
+//   · 侧卡缩到 0.62 → ≈105 宽，与参考图里"两侧小卡完整露出、只被屏幕边裁一点"
+//     一致 ⇒ 页间距（viewportFraction）要**小于**卡宽，卡才会比自己的槽位宽、
+//     互相轻微叠压（这正是 coverflow 的关键，参考图里中心卡压着两侧卡）。
+const double _kBannerCardsViewport = 0.34; // ≈0.34 屏宽的页间距
+const double _kBannerCardsCardW = 170;
+const double _kBannerCardsCardH = 250;
+const double _kBannerCardsHeight = 282; // 画布：卡 250 + 两侧下沉/缩放的余量
+
 class _RecommendBanner extends StatefulWidget {
   final List<Video> videos;
-  const _RecommendBanner({required this.videos});
+  final HomeBannerStyle style;
+
+  const _RecommendBanner({
+    super.key,
+    required this.videos,
+    this.style = HomeBannerStyle.wide,
+  });
 
   @override
   State<_RecommendBanner> createState() => _RecommendBannerState();
 }
 
 class _RecommendBannerState extends State<_RecommendBanner> {
-  final _pageCtrl = PageController(viewportFraction: 0.92);
+  late final PageController _pageCtrl = PageController(
+    viewportFraction:
+        widget.style == HomeBannerStyle.cards ? _kBannerCardsViewport : 0.92,
+  );
   int _index = 0;
   Timer? _autoTimer;
 
@@ -1054,16 +1102,18 @@ class _RecommendBannerState extends State<_RecommendBanner> {
   @override
   Widget build(BuildContext context) {
     if (widget.videos.isEmpty) return const SizedBox.shrink();
+    final cards = widget.style == HomeBannerStyle.cards;
     return Column(
       children: [
         SizedBox(
-          // 横版 16:9 观感（高度按宽度估算，PageView 内再 AspectRatio）
-          height: 196,
+          // wide：横版 16:9 观感；cards：竖版海报轮播需要的更高画布
+          height: cards ? _kBannerCardsHeight : _kBannerWideHeight,
           child: PageView.builder(
             controller: _pageCtrl,
             itemCount: widget.videos.length,
             onPageChanged: (i) => setState(() => _index = i),
             itemBuilder: (_, i) {
+              if (cards) return _coverflowItem(context, i);
               final v = widget.videos[i];
               final badge = VodCard.badgeText(v);
               return GestureDetector(
@@ -1172,6 +1222,130 @@ class _RecommendBannerState extends State<_RecommendBanner> {
           }),
         ),
       ],
+    );
+  }
+
+  /// 卡片轮播的一项：竖版海报 + 底部标题 + 右上角标。
+  ///
+  /// 按与当前页的**连续**距离 `delta` 做 缩放 / 侧倾 / 下沉 / 压暗 ——
+  /// 拖动过程中 `page` 是小数，所以这些变化是平滑的（不会只在翻页那一刻跳变）。
+  Widget _coverflowItem(BuildContext context, int i) {
+    final v = widget.videos[i];
+    final badge = VodCard.badgeText(v);
+
+    double page = _index.toDouble();
+    if (_pageCtrl.hasClients && _pageCtrl.position.haveDimensions) {
+      page = _pageCtrl.page ?? page;
+    }
+    final delta = (i - page).clamp(-1.5, 1.5);
+    final absD = delta.abs().clamp(0.0, 1.0);
+    final scale = 1 - 0.38 * absD; // 两侧缩到 0.62（对齐参考图里的小卡）
+    final rotY = -0.16 * delta; // 两侧 ±9° 侧倾
+    final dy = 12.0 * absD; // 两侧轻微下沉
+    final dim = (1 - 0.45 * absD).clamp(0.0, 1.0); // 两侧压暗
+
+    return Transform(
+      alignment: Alignment.center,
+      transform: Matrix4.identity()
+        ..setEntry(3, 2, 0.0012) // 透视
+        ..rotateY(rotY)
+        ..scale(scale)
+        ..translate(0.0, dy),
+      child: Opacity(
+        opacity: dim,
+        // 卡比自己的槽位（viewportFraction 0.34 ≈ 133）宽 → 居中后轻微叠压两侧，
+        // 形成参考图那种"中心卡压住两侧卡"的层次
+        child: Center(
+          child: SizedBox(
+            width: _kBannerCardsCardW,
+            height: _kBannerCardsCardH,
+            child: GestureDetector(
+              onTap: () => Get.toNamed('/detail', arguments: v),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  color: AppTheme.backgroundSecondary,
+                  border:
+                      Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.35),
+                        blurRadius: 16,
+                        offset: const Offset(0, 8)),
+                  ],
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _BannerImage(url: v.pic),
+                    // 底部渐变 + 标题（竖版海报也要能一眼看出片名）
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: 76,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: 0.78),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 10,
+                      right: 10,
+                      bottom: 10,
+                      child: Text(
+                        v.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: AppTheme.fontFootnote,
+                          fontWeight: FontWeight.w600,
+                          height: 1.25,
+                          shadows: [
+                            Shadow(blurRadius: 8, color: Colors.black54)
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (badge.isNotEmpty)
+                      Positioned(
+                        right: 8,
+                        top: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.55),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            badge,
+                            maxLines: 1,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: AppTheme.fontCaption,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 小说书源模型与存储。
@@ -228,28 +227,6 @@ class BookSourceStore {
   // 它只是个 **prefs 键名常量** ✓，删掉**不影响**用户已有的数据 ✓
   //（那个键仍留在 prefs 里，只是没人再用它了 ✓）
   static const _key = 'book_sources_v1';
-  // 出厂内置明文 config 书源（装上即有源，与漫画源同款兜底体验）
-  static const _kBundledSourcesPath = 'assets/config/book_sources.json';
-  // 出厂内置 Legado 书源包（精选 10 源；装上即有、与 cmbok 同体验）
-  static const _kBundledLegadoPath = 'assets/config/legado_sources.json';
-  // 内置源一次性初始化标记：首次启动补入内置源后置位，
-  // 之后用户增删/改名/改规则均以用户状态为准，不再被内置重置。
-  // （新版本已由 _kBundledFp 指纹机制接管；保留常量兼容旧数据。）
-  // 内置源资产指纹：assets 内置文件内容变化（内置包更新/首次安装）时
-  // 重新补入（同 id 跳过、不清已有）；指纹不变则永不重复补入，
-  // 用户增删改不受影响。与漫画源 SourceConfigStore 同一套语义。
-  static const _kBundledFp = 'book_sources_bundled_fp';
-  // 旧内置残留清理标记：一次性。删除本地 prefs 里不在「当前内置」
-  // （`book_sources.json` 里那批精选源）中的旧源
-  //（旧版 224 条 legado 源包 / 更早的 763 精选包残留），
-  // 仓库回到「只有当前内置」。
-  //
-  // ⚠️ 2026-10-07：**key 从 v1 换成 v2** ✓ —— 用户要求"其余书源去掉"：
-  //   老设备上 `v1` 那次清理**早就跑过了** ✗ ⇒ 不换 key 就**永远不会再清** ✗
-  //   ⇒ 那 224 条会一直留在仓库里 ✓。换成 v2 后本机制**再跑一次** ✓，
-  //   把不在当前内置里的源全部清掉（清理前照旧先整份备份进 prefs ✓ 可人工恢复 ✓）。
-  // 之后用户手动导入的新源不受影响。
-  static const _kLegacyPruneDone = 'book_sources_legacy_prune_v2';
 
   final List<BookSource> _items = [];
   List<BookSource> get all => List.unmodifiable(_items);
@@ -260,6 +237,9 @@ class BookSourceStore {
   final revision = ValueNotifier<int>(0);
 
   Future<void> init() async {
+    // 内置书源已移除（用户 2026-10-13）：只加载用户自己导入/仓库导入的源。
+    // 首装/清缓存后书源仓库为空是**预期行为**，由用户在「书源仓库 → 网络导入」
+    // 或「云端仓库地址」自行导入。
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_key);
@@ -268,191 +248,10 @@ class BookSourceStore {
           ..clear()
           ..addAll(_decode(raw));
       }
-      // 出厂内置明文书源：装上即有（用户已导入同 id 则跳过，不清已有）
-      await _loadBundled();
-      // 旧内置残留清理：删除不在当前内置中的旧源（仅一次）。
-      await _pruneLegacyBundled();
     } catch (e) {
       debugPrint('[BookSource] 加载失败: $e');
     }
     revision.value++;
-  }
-
-  /// 加载 assets 内置书源：明文 config 源（`book_sources.json`）
-  /// + Legado 源包（`legado_sources.json`）。
-  ///
-  /// ⚠️ **现状已更正**（恢复 backup3 后重新内置 ✓）：
-  ///   · `book_sources.json` ✓ 内容为空数组（config 源暂空，可用源见下）
-  ///   · **`legado_sources.json` 已重新内置 224 条书源** ✓✓
-  ///     （来源：cmbok 导出 224 条明文展开，UTF-8 无 BOM，首次安装/指纹变化时补入 ✓）
-  ///   · **漫画源不受影响** ✓（`assets/config/sources.json` 16 个源原样保留 ✓）
-  ///   ℹ️ 本方法对"空数组 / 文件缺失"**都安全** ✓：读取包在 `try` 里 ✓，
-  ///     且逐文件读取走 [_loadBundledFile]（自带 `try`）✓ ⇒ 解析出 0 个源、**不抛异常** ✓
-  /// 仅在**首次**启动补入（内置补入标记）；之后用户增删/
-  /// 改名/改规则均以用户状态为准，内置源不再重复补入或重置。
-  ///
-  /// V2 指纹机制：以 assets 内容指纹为准 —— 指纹变化（内置包更新/
-  /// 全新安装）才补入（同 id 跳过、不清已有）；指纹不变永不重复补入。
-  Future<void> _loadBundled() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      // 两个内置文件的合并指纹：任一文件内容变化都会触发补入。
-      final textA = await rootBundle.loadString(_kBundledSourcesPath);
-      final textB = await rootBundle.loadString(_kBundledLegadoPath);
-      final fp = '${textA.length + textB.length}:'
-          '${textA.hashCode ^ textB.hashCode}';
-      if ((prefs.getString(_kBundledFp) ?? '') == fp) return;
-      var added = 0;
-      added += await _loadBundledFile(_kBundledSourcesPath);
-      added += await _loadBundledFile(_kBundledLegadoPath);
-      if (added > 0) {
-        debugPrint('[BookSource] 内置书源补入/同步 $added 个');
-        await _persist();
-      }
-      await prefs.setString(_kBundledFp, fp);
-    } catch (e) {
-      debugPrint('[BookSource] 内置书源初始化失败: $e');
-    }
-  }
-
-  /// 旧内置残留清理：删除本地 prefs 里不在「当前内置」id 集合中的旧源
-  /// （旧版 763 精选包残留），仓库回到仅当前内置（224）。
-  /// 用 SharedPreferences 标记保证仅执行一次（失败不置位，下次重试）；
-  /// 之后用户手动导入的新源不受影响。
-  Future<void> _pruneLegacyBundled() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      if (prefs.getBool(_kLegacyPruneDone) ?? false) return;
-      final builtin = <String>{};
-      for (final path in [_kBundledSourcesPath, _kBundledLegadoPath]) {
-        final text = await rootBundle.loadString(path);
-        final decoded = jsonDecode(text);
-        void take(dynamic e) {
-          if (e is! Map) return;
-          final id = (e['bookSourceUrl'] as String?) ?? '';
-          if (id.isNotEmpty) builtin.add(id);
-        }
-
-        if (decoded is List) {
-          for (final e in decoded) {
-            take(e);
-          }
-        } else if (decoded is Map) {
-          final m = decoded.cast<String, dynamic>();
-          if (m['sources'] is List) {
-            for (final e in (m['sources'] as List)) {
-              take(e);
-            }
-          } else {
-            take(m);
-          }
-        }
-      }
-      final before = _items.length;
-      // 🔴 原实现直接 `removeWhere(!builtin.contains(id))`：而 `builtin` 只收
-      // `bookSourceUrl`（见上面 :289）→ **config 型源**（id = `config:<名字>`）
-      // 和**用户自己导入的源**都不在其中 ✗ → 一旦这个"一次性"清理**重试**
-      // （:277 注释明说"失败不置位，下次重试"），用户导入的源会被一并删掉，
-      // 而且**没有任何恢复途径** ✗✗（注释 :278 承诺的"之后导入的新源不受影响"
-      // 只在它成功跑过之后才成立 ✗）。
-      //
-      // 修法：删除前把**将被删除的条目整体备份**进 prefs（可人工恢复）✓；
-      // 备份写不进去就**不删**——宁可留下旧内置残留，也不能不可恢复地删用户数据 ✓
-      final doomed = _items.where((s) => !builtin.contains(s.id)).toList();
-      if (doomed.isNotEmpty) {
-        try {
-          await prefs.setString(
-            'book_sources_pruned_backup_v1',
-            jsonEncode(doomed.map((s) => s.raw).toList()),
-          );
-          debugPrint('[BookSource] 已备份待清理的 ${doomed.length} 个源'
-              '（键 book_sources_pruned_backup_v1），随后才执行清理');
-        } catch (e) {
-          debugPrint('[BookSource] 备份失败 → 跳过本次清理（不删任何源）: $e');
-          return;
-        }
-      }
-      _items.removeWhere((s) => !builtin.contains(s.id));
-      if (_items.length != before) {
-        debugPrint('[BookSource] 清理旧内置书源: $before -> ${_items.length}');
-        await _persist();
-      }
-      await prefs.setBool(_kLegacyPruneDone, true);
-      debugPrint('[BookSource] 旧内置书源清理完成');
-    } catch (e) {
-      debugPrint('[BookSource] 旧内置书源清理失败: $e');
-    }
-  }
-
-  Future<int> _loadBundledFile(String path) async {
-    try {
-      final bundled = await rootBundle.loadString(path);
-      final defs = <BookSource>[];
-      void take(dynamic e) {
-        if (e is! Map) return;
-        final s = BookSource.fromJson(e.cast<String, dynamic>());
-        if (s != null) defs.add(s);
-      }
-
-      final decoded = jsonDecode(bundled);
-      if (decoded is List) {
-        for (final e in decoded) {
-          take(e);
-        }
-      } else if (decoded is Map) {
-        final m = decoded.cast<String, dynamic>();
-        if (m['sources'] is List) {
-          for (final e in (m['sources'] as List)) {
-            take(e);
-          }
-        } else {
-          take(m);
-        }
-      }
-      var added = 0;
-      for (final s in defs) {
-        final i = _items.indexWhere((e) => e.id == s.id);
-        if (i < 0) {
-          _items.add(s);
-          added++;
-          continue;
-        }
-        // 🔴 内置包维护的字段，回灌到**本地已有**的同 id 源上：
-        //   · enabledExplore：内置包显式标成「无发现」时**单向关闭**
-        //     —— 内置源声明了 enabledExplore 就绕过了 [_applyAutoExplore] 的
-        //     自动判定（见 :483 "显式声明 → 尊重"），于是「能搜索但没有发现」的
-        //     源依然会出现在书源页发现 chips 里，点进去只报错（用户 2026-10-13）。
-        //     只单向关闭：内置包为 true 时绝不动本地值，尊重用户手动开启。
-        //   · bookSourceName / bookSourceGroup：内置源的**命名与分组**统一由内置包
-        //     维护（用户 2026-10-13：「（修复版）这段文字去掉」「就只有两个分组
-        //     🔍搜索 / 📕文学」「名称前面加图标，去掉既有的前面的图标」）——
-        //     老装机本地已存了旧名字/旧分组，不在这同步就永远看不到新分组。
-        //   只在资产指纹变化（内置包更新）时执行一次；用户之后手动改名改分组
-        //   不会被反复覆盖（指纹不变 ⇒ `_loadBundled` 直接 return）。
-        final cur = _items[i];
-        final m = Map<String, dynamic>.of(cur.raw);
-        var dirty = false;
-        if (s.raw['enabledExplore'] == false && cur.enabledExplore) {
-          m['enabledExplore'] = false;
-          dirty = true;
-        }
-        for (final k in const ['bookSourceName', 'bookSourceGroup']) {
-          final nv = s.raw[k];
-          if (nv is String && nv.isNotEmpty && m[k] != nv) {
-            m[k] = nv;
-            dirty = true;
-          }
-        }
-        if (dirty) {
-          _items[i] = BookSource(raw: m, id: cur.id);
-          added++; // 计入"有变更"（触发持久化）
-        }
-      }
-      return added;
-    } catch (e) {
-      debugPrint('[BookSource] 内置书源加载失败($path): $e');
-      return 0;
-    }
   }
 
   /// 兼容三种落盘形态：数组 / 单个对象 / {"sources":[...]}

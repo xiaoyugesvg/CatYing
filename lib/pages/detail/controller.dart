@@ -556,13 +556,13 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     final token = _newUuid();
     _spiderResolveToken = token;
 
-    // 获取当前 Spider 的 key/type/apiBase
+    // 获取当前 Spider 的 key/type/api/ext
     final spiderInfo = SpiderService.instance.getCurrentSpiderInfo();
     // **2026-09-26 修复**：从历史/收藏直接进入 Spider 源详情时，
     // 当前 Spider 上下文可能未设置（key 为空）。此时不再请求
     // Spider 服务（路径会是非法 / /type/play），而是降级为把
     // 集数 URL 当作直链直接播放，避免进入详情页崩溃/黑屏。
-    if (spiderInfo.$1.isEmpty) {
+    if (spiderInfo.key.isEmpty) {
       final looksLikeUrl =
           id.startsWith('http://') || id.startsWith('https://');
       if (!looksLikeUrl) {
@@ -582,8 +582,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       try {
         final result =
             await SpiderService.instance.getPlayUrl(
-          spiderInfo.$1, spiderInfo.$2, spiderInfo.$3,
-          flag, id);
+          spiderInfo.key, spiderInfo.type, spiderInfo.api,
+          flag, id,
+          ext: spiderInfo.ext);
 
         if (_spiderResolveToken != token) return;
         if (result == null) {

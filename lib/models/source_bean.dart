@@ -45,6 +45,39 @@ class SourceBean {
 
   bool get isSpiderSource => type == 3;
 
+  /// 脚本源（type=3）实际要加载/执行的脚本地址。
+  ///
+  /// TVBox 聚合配置里脚本源有两种写法：
+  ///   · `api` 直接就是脚本 URL（如 `…/腾讯视频.py`）→ 用 api；
+  ///   · `api` 是 drpy2 运行时、`ext` 才是站点脚本（如 `api=drpy2.min.js` +
+  ///     `ext=官综.js`）→ 用 ext。
+  String get scriptUrl {
+    final e = (ext ?? '').trim();
+    if (type == 3 && e.isNotEmpty) {
+      final p = e.toLowerCase().split('?').first;
+      if (e.startsWith('http://') ||
+          e.startsWith('https://') ||
+          p.endsWith('.js') ||
+          p.endsWith('.py')) {
+        return e;
+      }
+    }
+    return api.trim();
+  }
+
+  /// 脚本地址是不是 Python（.py）→ 由 CPython 引擎执行
+  bool get isPythonScriptSource {
+    if (type != 3) return false;
+    return scriptUrl.toLowerCase().split('?').first.endsWith('.py');
+  }
+
+  /// 脚本地址是不是 JS（.js）→ 由 Node/drpy2 引擎执行
+  bool get isJsScriptSource {
+    if (type != 3 || isPythonScriptSource) return false;
+    final p = scriptUrl.toLowerCase().split('?').first;
+    return p.endsWith('.js') || p.endsWith('.js.md5');
+  }
+
   bool get isIndexSite => indexs == 1 || key == 'douban';
 
   bool get isConfigCenter => key == 'baseset';
@@ -59,16 +92,17 @@ class SourceBean {
     if (type == 4) return SourceKind.t4;
     if (type == 3) {
       // type==3 → Spider（isSpiderSource，typeDescription='Spider'）。
-      // 再按 jar/api 后缀区分 JS 与 Jar（api_config._isSpiderSourceUrl 认
-      // .js / .js.md5 / .jar / .jar.md5）。
+      // 再按 jar/api/ext 后缀区分 Python / JS / Jar（api_config._isSpiderSourceUrl
+      // 认 .js / .js.md5 / .jar / .jar.md5）。
       if ((jar ?? '').isNotEmpty) return SourceKind.jar;
-      final probe = api.toLowerCase();
+      final probe = scriptUrl.toLowerCase();
       final path = Uri.tryParse(probe)?.path ?? probe;
+      if (path.endsWith('.py')) return SourceKind.python;
       if (path.endsWith('.jar') || path.endsWith('.jar.md5')) {
         return SourceKind.jar;
       }
       // TVBox 约定：api 形如 csp_xxx 的自定义 spider 由 jar 提供。
-      if (probe.startsWith('csp_')) return SourceKind.jar;
+      if (api.toLowerCase().startsWith('csp_')) return SourceKind.jar;
       return SourceKind.js;
     }
     // type==0（XML）/ 1（JSON）→ 苹果 CMS（macCMS）点播接口。
@@ -140,6 +174,9 @@ enum SourceKind {
   /// T3 Spider 源：type 3，脚本为 .js
   js,
 
+  /// T3 Spider 源：type 3，脚本为 .py（CPython 引擎执行）
+  python,
+
   /// T3 Spider 源：type 3，由 .jar 提供
   jar,
 
@@ -155,6 +192,8 @@ enum SourceKind {
         return 'T4';
       case SourceKind.js:
         return 'JS';
+      case SourceKind.python:
+        return 'Python';
       case SourceKind.jar:
         return 'Jar';
       case SourceKind.unknown:

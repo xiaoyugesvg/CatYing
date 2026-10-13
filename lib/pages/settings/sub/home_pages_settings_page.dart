@@ -83,7 +83,74 @@ class HomePagesSettingsPage extends StatelessWidget {
             );
           },
         ),
+        // ---------- 首页幻灯片（顶部轮播）样式 ----------
+        ListenableBuilder(
+          listenable: SettingsService(),
+          builder: (context, _) {
+            final s = SettingsService();
+            return SettingsGroup(
+              title: '首页幻灯片',
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('幻灯样式',
+                                style: TextStyle(
+                                    color: AppTheme.textPrimary,
+                                    fontSize: AppTheme.fontSubhead + 0.5,
+                                    fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 2),
+                            Text('切换首页顶部轮播的呈现方式',
+                                style: TextStyle(
+                                    color: AppTheme.textTertiary,
+                                    fontSize: AppTheme.fontCaption)),
+                          ],
+                        ),
+                      ),
+                      for (final st in HomeBannerStyle.values)
+                        _styleChip(
+                          st,
+                          s.homeBannerStyle == st,
+                          () => s.setHomeBannerStyle(st),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
       ],
+    );
+  }
+
+  /// 幻灯片样式选项（选中=强调色实底）
+  Widget _styleChip(HomeBannerStyle st, bool selected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(left: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.accentColor : AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppTheme.glassBorderSoft, width: 0.5),
+        ),
+        child: Text(
+          st.label,
+          style: TextStyle(
+            color: selected ? Colors.white : AppTheme.textSecondary,
+            fontSize: AppTheme.fontCaption + 0.5,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+          ),
+        ),
+      ),
     );
   }
 

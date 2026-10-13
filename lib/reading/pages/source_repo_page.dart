@@ -165,32 +165,16 @@ class _SourceRepoPageState extends State<SourceRepoPage> {
                         child: const Text('清空',
                             style: TextStyle(fontSize: AppTheme.fontSubhead)),
                       ),
-                    // ✅ **恢复内置源**（本轮新增 ✓）—— 与「清空」**互斥显示** ✓：
-                    //   有源时显示「清空」✓；**无源时才显示「恢复内置源」** ✓✓
-                    //   —— 用户清空之后一眼就知道"怎么回去" ✓（原来这里什么都没有 ✗，
-                    //      `_kSourcesCleared` 一旦置位就**永远无源且看不出原因** ✗✗）。
-                    // 动作 ✓：`clearClearedFlag()` ✓ —— **只清标记 ✓ 不动任何文件** ✓；
-                    //   清掉后 `loadLocal()` 会**自动回退出厂内置源** ✓
-                    //   （`assets/config/sources.json` ✓，`pubspec.yaml:89-90` 已声明 ✓）。
-                    // ⚠️ **有意不用** `resetToLocal()` ✗ —— 那是「清空」用的（见 `_clearAll` ✓），
-                    //   它会删掉用户**导入/编辑过的覆盖层** ✗✓；"恢复内置源"不该动用户数据 ✓。
-                    // ℹ️ **如实说明语义** ✓：恢复的是**出厂内置源** ✓；被「清空」删掉的那层
-                    //   用户导入**不会**因此回来 ✓（它已备份为 `sources.json.bak` ✓，需人工处理 ✓）。
+                    // 内置漫画源已移除（用户 2026-10-13）：原来这里在"无源"时显示
+                    // 「恢复内置源」按钮，现在没有内置源可恢复 → 按钮一并去掉。
+                    // 无源时改为提示用户去上面的云端卡片填地址 / 导入 JSON。
                     if (SourceManager().sources.isEmpty)
-                      TextButton(
-                        onPressed: () async {
-                          await SourceConfigStore().clearClearedFlag();
-                          await SourceManager().reload();
-                          if (!mounted) return;
-                          setState(() {});
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('已恢复出厂内置源（装上即有源的那批）'),
-                            ),
-                          );
-                        },
-                        child: const Text('恢复内置源',
-                            style: TextStyle(fontSize: AppTheme.fontSubhead)),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: Text('在上方填云端地址或导入 JSON',
+                            style: TextStyle(
+                                fontSize: AppTheme.fontSubhead,
+                                color: JellyTheme.textSecondary)),
                       ),
                   ],
                 ),

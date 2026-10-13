@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/book_source.dart';
 import '../models/bookshelf.dart';
+import '../utils/html_text.dart';
 import '../services/book_source_service.dart';
 import '../services/book_source_download_service.dart';
 import '../services/browse_history_service.dart';
@@ -151,13 +152,17 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
   // 详情接口返回的 Map 里这几个键恒存在但值可能是空字符串，
   // 直接用 ?? 不会回退（空串非 null）→ 需手动判空回退到搜索结果带过来的初值，
   // 否则加载完目录后封面/书名/作者/简介会"消失"。
-  String _pick(String key, String fallback) {
+  //
+  // 回退值与源站值**都过一遍 [stripHtmlText]** —— 搜索阶段拿到的名字同样可能带
+  // `<br>`（清洗逻辑已提到 `utils/html_text.dart`，与搜索结果共用一份）。
+  String _pick(String key, String fallback, {bool singleLine = false}) {
     final v = _info[key]?.toString().trim();
-    return (v != null && v.isNotEmpty) ? v : fallback;
+    final s = (v != null && v.isNotEmpty) ? v : fallback;
+    return stripHtmlText(s, singleLine: singleLine);
   }
 
-  String get _name => _pick('name', _result.name);
-  String get _author => _pick('author', _result.author);
+  String get _name => _pick('name', _result.name, singleLine: true);
+  String get _author => _pick('author', _result.author, singleLine: true);
   String get _cover => _pick('coverUrl', _result.coverUrl);
   String get _intro => _pick('intro', _result.intro);
 
@@ -392,9 +397,13 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
   /// 最新章节名：优先用详情页 `ruleBookInfo.lastChapter` 的结果，
   /// 取不到再回退到已拉取的目录最后一章（都是真实数据，不编造）。
   String get _latestChapterName {
-    final fromInfo = (_info['lastChapter'] ?? '').toString().trim();
+    // 章节名也可能被源站塞进 HTML 片段 → 同样过一遍清洗（单行）
+    final fromInfo = stripHtmlText((_info['lastChapter'] ?? '').toString().trim(),
+        singleLine: true);
     if (fromInfo.isNotEmpty) return fromInfo;
-    if (_chapters.isNotEmpty) return _chapters.last.name;
+    if (_chapters.isNotEmpty) {
+      return stripHtmlText(_chapters.last.name, singleLine: true);
+    }
     return '';
   }
 
@@ -438,7 +447,8 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
   String _infoFirst(List<String> keys) {
     for (final k in keys) {
       final v = _info[k]?.toString().trim();
-      if (v != null && v.isNotEmpty) return v;
+      // 单行字段（更新时间 / 分数 / 状态 / 分类）→ 一样要剥 HTML
+      if (v != null && v.isNotEmpty) return stripHtmlText(v, singleLine: true);
     }
     return '';
   }

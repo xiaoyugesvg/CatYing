@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:get/get.dart';
+import 'package:path_provider/path_provider.dart';
 import 'app_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_config.dart';
@@ -60,6 +62,16 @@ class ApiConfig extends GetxController {
   final dohList = <(String, String)>[].obs;
   final isLoaded = false.obs;
   final configUrl = ''.obs;
+
+  /// 整包是否为「单个 js/jar spider」配置（点播接口地址本身就是 .js/.jar）。
+  ///
+  /// true  → 按老流程：启动时把整包当 Node 的 index.js 载入，`/config` 返回的
+  ///         线路列表**整表替换** sourceBeanList（这是唯一事实来源）。
+  /// false → 聚合 TVBox 配置（sites[] 里混着 type=3 脚本源，如 huahua.json）：
+  ///         脚本源各自按需载入引擎，**不能**走 /config 整表替换 ——
+  ///         否则聚合线路会被单个脚本的站点列表冲掉，且首个脚本是 .py 时
+  ///         Node 载入失败 → /config 为空 → 首页直接报错（用户 2026-10-13）。
+  final isSingleScriptSpider = false.obs;
 
   /// 源配置阶段的错误（非空表示线路清单没拿到）。
   ///
@@ -184,6 +196,136 @@ class ApiConfig extends GetxController {
     await prefs.setString(AppConstants.homeApi, source.key);
   }
 
+  // ============================================================
+  // 接口地址的「文件级」备份（防"重启后又要重新填源"）
+  // ============================================================
+
+  /// 为什么要在 prefs 之外再存一份文件：
+  /// 首屏是否弹「填接口」**只看 prefs 里 `apiUrl` 是否为空**（content_view
+  /// `_loadSavedConfig`）。而进程被硬打断（例如 CPython `Py_Initialize` 失败后
+  /// `exit(1)`，见 Runner-2026-10-13-180034.ips）时，整个 prefs plist 可能没落盘/
+  /// 被写坏 ⇒ 接口地址一起丢 ⇒ 重启"回到第一页要重新输入源"。
+  /// 文件写是独立的一次 write(flush)，不受 plist 影响，用它兜底恢复。
+  static const String _apiUrlBackupName = 'api_url.bak';
+
+  static Future<File> _apiUrlBackupFile() async {
+    final docs = await getApplicationDocumentsDirectory();
+    return File('${docs.path}/$_apiUrlBackupName');
+  }
+
+  /// 保存接口地址：prefs + 文件备份（所有写入点都走这里）
+  static Future<void> persistApiUrl(String url) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(AppConstants.apiUrl, url);
+    try {
+      final f = await _apiUrlBackupFile();
+      await f.writeAsString(url, flush: true);
+    } catch (e) {
+      AppLog.instance.log('[ApiConfig] 接口地址备份写入失败: $e');
+    }
+  }
+
+  /// 启动时兜底：prefs 里为空、但备份文件在 → 用它恢复（返回可用地址）
+  static Future<String> restoreApiUrlIfLost(String current) async {
+    if (current.trim().isNotEmpty) return current;
+    try {
+      final f = await _apiUrlBackupFile();
+      if (!await f.exists()) return current;
+      final v = (await f.readAsString()).trim();
+      if (v.isEmpty) return current;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(AppConstants.apiUrl, v);
+      AppLog.instance.log('[ApiConfig] 接口地址已从文件备份恢复');
+      return v;
+    } catch (e) {
+      AppLog.instance.log('[ApiConfig] 接口地址备份恢复失败: $e');
+      return current;
+    }
+  }
+
+  /// 清掉备份（「重置配置」「数据清理」时必须同步调用，否则清完又被恢复）
+  static Future<void> clearApiUrlBackup() async {
+    try {
+      final f = await _apiUrlBackupFile();
+      if (await f.exists()) await f.delete();
+    } catch (e) {
+      AppLog.instance.log('[ApiConfig] 清除接口地址备份失败: $e');
+    }
+  }
+
+  // ============================================================
+  // 用户手动导入的视频线路（如 py 源）
+  // ============================================================
+
+  /// 用户线路落盘键。
+  ///
+  /// 为什么单独存：`updateSourceBeansFromSpiderConfig` / `loadFromConfig` 每次都是
+  /// **整表替换** `sourceBeanList`（以接口下发的 sites 为准），用户自己导入的线路
+  /// 会被一起冲掉 —— 表现就是「重启/切源后 py 线路在源列表里消失了，切不到」
+  /// （用户 2026-10-13）。所以用户线路单独落盘，并在每次整表替换后合并回来
+  /// （同 key 以接口下发的为准，避免和接口线路打架）。
+  static const String _kUserVideoSources = 'user_video_sources';
+
+  /// 导入一条用户视频线路：入列表 + 落盘
+  Future<void> addUserVideoSource(SourceBean bean) async {
+    sourceBeanList.removeWhere((s) => s.key == bean.key || s.api == bean.api);
+    sourceBeanList.add(bean);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getStringList(_kUserVideoSources) ?? <String>[];
+      raw.removeWhere((e) {
+        try {
+          return ((jsonDecode(e) as Map)['key'] ?? '').toString() == bean.key;
+        } catch (_) {
+          return false;
+        }
+      });
+      raw.add(jsonEncode({
+        'key': bean.key,
+        'name': bean.name,
+        'api': bean.api,
+        'type': bean.type,
+      }));
+      await prefs.setStringList(_kUserVideoSources, raw);
+      AppLog.instance.log('[ApiConfig] 已保存用户视频线路 ${bean.key}（共 ${raw.length} 条）');
+    } catch (e) {
+      AppLog.instance.log('[ApiConfig] 保存用户视频线路失败: $e');
+    }
+  }
+
+  /// 把落盘的用户线路合并进 [target]（按 key 去重；接口已下发的同 key 不覆盖）
+  Future<void> _mergeUserVideoSources(List<SourceBean> target) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getStringList(_kUserVideoSources) ?? const <String>[];
+      if (raw.isEmpty) return;
+      var added = 0;
+      for (final e in raw) {
+        final m = jsonDecode(e) as Map;
+        final key = (m['key'] ?? '').toString().trim();
+        if (key.isEmpty || target.any((s) => s.key == key)) continue;
+        target.add(SourceBean(
+          key: key,
+          name: (m['name'] ?? key).toString(),
+          api: (m['api'] ?? '').toString(),
+          searchable: 1,
+          filterable: 0,
+          quickSearch: 0,
+          playerType: 0,
+          type: (m['type'] as num?)?.toInt() ?? 3,
+          ext: null,
+          indexs: 0,
+        ));
+        added++;
+      }
+      if (added > 0) {
+        AppLog.instance.log('[ApiConfig] 已合并用户视频线路 $added 条');
+      }
+    } catch (e) {
+      AppLog.instance.log('[ApiConfig] 合并用户视频线路失败: $e');
+    }
+  }
+
   /// 从 Spider /config 更新源列表
   Future<void> updateSourceBeansFromSpiderConfig(
     Map<String, dynamic> config,
@@ -236,6 +378,9 @@ class ApiConfig extends GetxController {
     }
     apiConfigError.value = null;
 
+    // 用户手动导入的线路（py 源等）并回来：接口下发的 sites 不包含它们，
+    // 不合并就会出现「导入的 py 线路切源/重启后消失」
+    await _mergeUserVideoSources(newSources);
     sourceBeanList.value = newSources;
 
     // 关键修复：当前 homeSourceBean 可能是之前 _createSpiderSourceConfig
@@ -423,6 +568,9 @@ class ApiConfig extends GetxController {
     if (_activeLoadToken != loadToken) return;
 
     if (includeSources) {
+      // 整包是不是「单个 js/jar spider」配置（决定后面对 homeSourceBean 的处置）
+      isSingleScriptSpider.value = _isSpiderSourceUrl(apiUrl);
+
       // 解析站点列表
       final sources = <SourceBean>[];
       if (config.sites != null) {
@@ -441,6 +589,8 @@ class ApiConfig extends GetxController {
           ));
         }
       }
+      // 同上：把用户导入的线路（py 源等）并回列表
+      await _mergeUserVideoSources(sources);
       sourceBeanList.value = sources;
 
       // 直播 lives：交给 LiveService 解析（内嵌 channels 或 m3u URL）
@@ -475,16 +625,15 @@ class ApiConfig extends GetxController {
         AppLog.instance.log('[ApiConfig] lives 解析失败: $e');
       }
 
-      // 关键修复：如果当前解析结果包含 Spider 源（type=3），
-      // 那么 sources 列表里那个 SourceBean 是 _createSpiderSourceConfig
-      // 基于 .js URL 派生的**占位** SourceBean（name='Spider源(host)'），
-      // 真正的站点列表需要等 NodeJS 启动 + getCatConfig 后才会出现。
-      // 此处**不**把占位 SourceBean 设为 homeSourceBean，避免
-      // PopupMenu 显示"基于源地址的占位线路"。等 updateSourceBeansFromSpiderConfig
-      // 在 _fetchSpiderConfig 完成后用真实 sites 列表重置 homeSourceBean。
-      final hasSpiderSource = sources.any((s) => s.isSpiderSource);
-      if (hasSpiderSource) {
-        AppLog.instance.log('[ApiConfig] 当前 config 含 Spider 源，homeSourceBean 等待 getCatConfig 完成后设置');
+      // 关键修复：只有「整包就是一个 js/jar spider」的配置，sources 里那个
+      // SourceBean 才是 _createSpiderSourceConfig 基于 .js URL 派生的**占位**
+      // SourceBean（name='Spider源(host)'），真正的站点列表要等 NodeJS 启动 +
+      // getCatConfig 后才会出现 —— 这种才**不**设 homeSourceBean。
+      //
+      // 聚合 TVBox 配置（sites[] 里混着 type=3 脚本源）不算：它的 sites 就是
+      // 真实线路，脚本源按需载入引擎，不该让 /config 整表替换冲掉聚合线路。
+      if (isSingleScriptSpider.value) {
+        AppLog.instance.log('[ApiConfig] 当前 config 是单个 Spider 源，homeSourceBean 等待 getCatConfig 完成后设置');
       } else {
         // 普通源：按优先级选第一个
         await _restoreHomeSource(sources);

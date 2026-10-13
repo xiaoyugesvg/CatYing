@@ -101,9 +101,10 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: AppTheme.spacingMD),
               // 程序（独立小程序模块：TVBox 配置 影视+直播）
+              // 用户 2026-10-13：设置里这项叫「程序管理」（不是「小程序」）
               _categoryTile(
                 icon: Icons.widgets_outlined,
-                title: '小程序',
+                title: '程序管理',
                 onTap: () => Get.to(() => const MiniAppListPage()),
               ),
               const SizedBox(height: AppTheme.spacingMD),

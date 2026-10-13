@@ -44,6 +44,21 @@ enum DefaultHomePage { manga, book, bookshelf, favorites, me }
 /// 收藏/书架/下载三页默认显示的内容类型
 enum PageDefaultContent { manga, book }
 
+/// 首页顶部幻灯片（轮播）样式 —— 用户可在「设置 → 菜单设置」切换。
+enum HomeBannerStyle {
+  /// 横版大图（原样式）：16:9 大图铺满，左下标题 + 右下来源角标
+  wide,
+
+  /// 卡片轮播（新增）：中间竖版海报放大居中，两侧海报缩小 / 倾斜 / 压暗露出
+  /// （coverflow 观感，对齐用户 2026-10-13 给的参考图）
+  cards;
+
+  String get label => switch (this) {
+        HomeBannerStyle.wide => '横版大图',
+        HomeBannerStyle.cards => '卡片轮播',
+      };
+}
+
 /// NavTab 与 DefaultHomePage 的双向转换辅助（两者值一一对应）
 extension NavTabDefaultHomePageX on NavTab {
   DefaultHomePage toDefaultHomePage() => DefaultHomePage.values[index];
@@ -110,6 +125,7 @@ class SettingsService extends ChangeNotifier {
   static const _kNavOrderVersionKey =
       'nav_order_version'; // 导航 tab 顺序版本（v2: 书架与收藏互换）
   static const _kPageTabsFollowNavKey = 'page_tabs_follow_nav';
+  static const _kHomeBannerStyleKey = 'home_banner_style'; // 首页幻灯片样式
   static const _kPageDefaultContentKey = 'page_default_content';
   // 翻页按钮反转：左点下一页、右点上一页（默认关）
   static const _kReverseTapKey = 'reader_reverse_tap';
@@ -255,6 +271,8 @@ class SettingsService extends ChangeNotifier {
   bool _navFloating = true; // 导航栏是否悬浮（胶囊型毛玻璃样式），默认开启
   bool _navIconOnly = false; // 导航栏只显示图标（隐藏文字标签），默认关
   bool _pageTabsFollowNav = true; // 收藏/书架/下载页 tab 是否跟随导航栏 manga/book 可见性
+  HomeBannerStyle _homeBannerStyle =
+      HomeBannerStyle.wide; // 首页幻灯片样式（默认保持原样：横版大图）
   PageDefaultContent _pageDefaultContent =
       PageDefaultContent.manga; // 收藏/书架/下载页默认显示内容
   bool _reverseTap = false; // 翻页按钮反转（左下一、右上一）
@@ -406,6 +424,7 @@ class SettingsService extends ChangeNotifier {
   bool get navFloating => _navFloating;
   bool get navIconOnly => _navIconOnly;
   bool get pageTabsFollowNav => _pageTabsFollowNav;
+  HomeBannerStyle get homeBannerStyle => _homeBannerStyle;
   PageDefaultContent get pageDefaultContent => _pageDefaultContent;
   bool get reverseTap => _reverseTap;
   bool get doublePage => _doublePage;
@@ -654,6 +673,11 @@ class SettingsService extends ChangeNotifier {
       }
       // 收藏/书架/下载页 tab 跟随导航栏
       _pageTabsFollowNav = prefs.getBool(_kPageTabsFollowNavKey) ?? true;
+      // 首页幻灯片样式（存 index，越界/缺失都回落默认 wide）
+      final hbsIdx = prefs.getInt(_kHomeBannerStyleKey) ?? 0;
+      if (hbsIdx >= 0 && hbsIdx < HomeBannerStyle.values.length) {
+        _homeBannerStyle = HomeBannerStyle.values[hbsIdx];
+      }
       final pdcIdx = prefs.getInt(_kPageDefaultContentKey);
       if (pdcIdx != null &&
           pdcIdx >= 0 &&
@@ -1646,6 +1670,19 @@ class SettingsService extends ChangeNotifier {
       await prefs.setBool(_kPageTabsFollowNavKey, value);
     } catch (e) {
       _log('保存页面tab跟随导航栏失败: $e');
+    }
+  }
+
+  /// 设置：首页幻灯片（轮播）样式
+  Future<void> setHomeBannerStyle(HomeBannerStyle value) async {
+    if (_homeBannerStyle == value) return;
+    _homeBannerStyle = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_kHomeBannerStyleKey, value.index);
+    } catch (e) {
+      _log('保存首页幻灯片样式失败: $e');
     }
   }
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -16,12 +17,28 @@ import '../services/ant_bridge.dart';
 /// - 相对路径页面跳转由 JS 侧 location 完成
 class MiniAppWebPage extends StatefulWidget {
   /// 内置资产根目录（`assets/...` 相对 flutter assets 路径）
-  final String assetRoot;
+  final String? assetRoot;
+
+  /// 在线站点型小程序：直接加载远端页面（市场里的 manifest.json 型）
+  final String? remoteUrl;
+
+  /// zip 安装的小程序：本地目录（页面从 `<localRoot>/<entry>` 加载）
+  final String? localRoot;
+
+  /// 已知的 manifest 内容（远程/本地安装时由服务层传入，省一次 IO）
+  final String? manifestJson;
 
   /// 显式标题；不传则读 manifest 的 name
   final String? title;
 
-  const MiniAppWebPage({super.key, required this.assetRoot, this.title});
+  const MiniAppWebPage({
+    super.key,
+    this.assetRoot,
+    this.remoteUrl,
+    this.localRoot,
+    this.manifestJson,
+    this.title,
+  });
 
   @override
   State<MiniAppWebPage> createState() => _MiniAppWebPageState();
@@ -37,7 +54,6 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
   void initState() {
     super.initState();
     _title = widget.title ?? '小程序';
-    _initManifest();
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(AppTheme.backgroundPrimary)
@@ -60,15 +76,55 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
                 '[MiniAppWeb] 资源错误: ${error.errorCode} ${error.description} url=${error.url}');
           },
         ),
-      )
-      ..loadFlutterAsset('${widget.assetRoot}/index.html');
+      );
+    // 先读 manifest（拿到 appId/permissions/entry），再按来源加载入口页
+    _loadManifestThenEntry();
   }
 
-  /// 读 manifest.json：appId / permissions / name / entry
+  Future<void> _loadManifestThenEntry() async {
+    await _initManifest();
+    await _loadEntry();
+  }
+
+  /// 按来源加载入口页：远端 URL > 本地目录（zip 安装）> 内置资产
+  Future<void> _loadEntry() async {
+    try {
+      final remote = widget.remoteUrl?.trim() ?? '';
+      if (remote.isNotEmpty) {
+        await _controller.loadRequest(Uri.parse(remote));
+        return;
+      }
+      final local = widget.localRoot?.trim() ?? '';
+      if (local.isNotEmpty) {
+        await _controller.loadFile('$local/$_entry');
+        return;
+      }
+      final root = widget.assetRoot?.trim() ?? '';
+      if (root.isNotEmpty) {
+        await _controller.loadFlutterAsset('$root/$_entry');
+      }
+    } catch (e) {
+      AppLog.instance.log('[MiniAppWeb] 入口页加载失败: $e');
+    }
+  }
+
+  /// 读 manifest：优先用传入的文本（市场安装时服务层已取到）→ 本地目录 → 内置资产
   Future<void> _initManifest() async {
     try {
-      final raw = await rootBundle
-          .loadString('${widget.assetRoot}/manifest.json');
+      var raw = widget.manifestJson?.trim() ?? '';
+      if (raw.isEmpty) {
+        final local = widget.localRoot?.trim() ?? '';
+        if (local.isNotEmpty) {
+          final f = File('$local/manifest.json');
+          if (await f.exists()) raw = await f.readAsString();
+        } else {
+          final root = widget.assetRoot?.trim() ?? '';
+          if (root.isNotEmpty) {
+            raw = await rootBundle.loadString('$root/manifest.json');
+          }
+        }
+      }
+      if (raw.isEmpty) return;
       final map = jsonDecode(raw) as Map<String, dynamic>;
       final appId = (map['appId'] ?? '').toString();
       final name = (map['name'] ?? '').toString();
@@ -81,9 +137,9 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
       if (mounted && widget.title == null && name.isNotEmpty) {
         setState(() => _title = name);
       }
-      if (entry.isNotEmpty && entry != 'index.html') {
+      if (entry.isNotEmpty) {
+        // 入口页统一交给 _loadEntry 加载（assets / 本地 / 远端同一套）
         _entry = entry;
-        await _controller.loadFlutterAsset('${widget.assetRoot}/$entry');
       }
     } catch (e) {
       AppLog.instance.log('[MiniAppWeb] manifest 解析失败: $e');

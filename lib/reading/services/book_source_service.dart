@@ -12,6 +12,7 @@ import '../models/book_source.dart';
 // ✅ **Legado → BookSiteConfig 转换**（本轮重构 ✓）：让书源**先走 Dart（含 WebView 兜底 ✓）**，
 //   失败 / 含 `@js:` 才回落 Node 引擎 ✓（Node 那段保持原样 ✓ 只增不减 ✓）
 import '../source/global_proxy.dart';
+import '../utils/html_text.dart';
 import '../utils/source_fail_text.dart';
 import 'book_source_dart_engine.dart';
 import 'book_source_python_engine.dart';
@@ -62,17 +63,26 @@ class BookSourceResult {
   }
 
   static BookSourceResult? fromJson(Map<String, dynamic> j, BookSource src) {
-    final name = (j['name'] ?? '').toString().trim();
+    // 搜索/详情接口返回的这几个字段经常混着 `<br>` / `&nbsp;` 之类 HTML
+    // ⇒ 在这里统一剥掉（**唯一收敛点**）：
+    //   搜索结果列表、详情页、书架/收藏存的 name/author 全都来自这里。
+    // 书名不能带换行（会劈成两行）→ singleLine。
+    final name = stripHtmlText((j['name'] ?? '').toString().trim(),
+        singleLine: true);
     if (name.isEmpty) return null;
     return BookSourceResult(
       source: src,
       name: name,
-      author: (j['author'] ?? '').toString().trim(),
+      author: stripHtmlText((j['author'] ?? '').toString().trim(),
+          singleLine: true),
       bookUrl: (j['bookUrl'] ?? '').toString().trim(),
       coverUrl: (j['coverUrl'] ?? '').toString().trim(),
-      intro: (j['intro'] ?? '').toString().trim(),
-      kind: (j['kind'] ?? '').toString().trim(),
-      lastChapter: (j['lastChapter'] ?? '').toString().trim(),
+      // 简介保留换行（分段可读），只是去掉标签
+      intro: stripHtmlText((j['intro'] ?? '').toString().trim()),
+      kind: stripHtmlText((j['kind'] ?? '').toString().trim(),
+          singleLine: true),
+      lastChapter: stripHtmlText((j['lastChapter'] ?? '').toString().trim(),
+          singleLine: true),
       wordCount: (j['wordCount'] ?? '').toString().trim(),
     );
   }

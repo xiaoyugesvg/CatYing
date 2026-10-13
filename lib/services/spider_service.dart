@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'app_log.dart';
 import 'dio_factory.dart';
 import 'nodejs_manager.dart';
 import 'python_manager.dart';
+import 'python_script_sources.dart';
 
 /// Spider 服务 - 对应 Swift SpiderService
 /// 与本地 Node.js Spider 服务通信
@@ -136,23 +138,51 @@ class SpiderService {
   }
 
   // ============================================================
-  // Python 源分支（T3 Python spider：每站一个 .py，走 CPython 引擎）
+  // 脚本源路由（TVBox type=3 脚本源）
   // ============================================================
-  // 识别：apiBase 以 .py 结尾（TVBox type=3 Python 源惯例，api=py_xxx.py）
-  //       或 key 以 py_ 开头。
-  // 模块映射：`py_demo.py` / `py_demo` → `demo`（对应 src/spider/video/demo.py）
-  // 返回格式与 Node spider 服务同构（{class,list} / {list} / {parse,playUrl}），
-  // 调用方 source_service 无需感知引擎差异。
+  // 聚合配置（如 huahua.json）里 type=3 的脚本源有几种写法：
+  //   · api = 远端 .py                     → CPython 引擎（下载 + 注册后执行）
+  //   · api = py_xxx.py（设置页手动导入）   → CPython 引擎（模块名映射）
+  //   · api = drpy2 运行时 + ext = 站点.js  → Node/drpy2（按需把 ext 载入引擎）
+  //   · api = 远端 .js / .js.md5           → Node/drpy2（按需把 api 载入引擎）
+  //
+  // **为什么必须"按需载入"**：两个引擎都是「单源」架构 —— Node 同一时刻只有一份
+  // index.js，Python 是「一个 key 一个模块」。所以脚本源只在被访问时才把对应脚本
+  // 载入引擎，而不是像「整包就是一个 js spider」的配置那样在启动时统一加载。
 
-  bool _isPythonSource(String key, int type, String apiBase) {
-    if (type != 3) return false;
-    if (apiBase.toLowerCase().endsWith('.py')) return true;
-    return key.toLowerCase().startsWith('py_');
+  /// 脚本源实际要载入的脚本地址：ext 优先（drpy2 模式），否则用 api
+  static String _scriptUrl(String api, String ext) {
+    final e = ext.trim();
+    if (e.isNotEmpty) {
+      final p = e.toLowerCase().split('?').first;
+      if (e.startsWith('http://') ||
+          e.startsWith('https://') ||
+          p.endsWith('.js') ||
+          p.endsWith('.py')) {
+        return e;
+      }
+    }
+    return api.trim();
   }
 
-  /// apiBase → Python 模块 key（去 .py 后缀 + py_ 前缀）
-  String _pythonModuleKey(String apiBase) {
-    var k = apiBase;
+  static bool _isPythonScript(String script) =>
+      script.toLowerCase().split('?').first.endsWith('.py');
+
+  /// Node 侧路径基址：api 是 http URL 时退化为 /{key}/{type}/{action}
+  static String _nodeBase(String api) =>
+      api.trim().startsWith('http') ? '' : api.trim();
+
+  /// 「主源脚本」地址（整包就是一个 js spider 的配置）：由 AppState 在加载主源时
+  /// 登记。用于「打开过程序脚本源后回到主源」时把主源脚本重新载入引擎。
+  String mainScriptUrl = '';
+
+  /// 当前已载入 Node 引擎的脚本地址 + 该脚本在引擎里的真实站点 key
+  String _loadedScriptUrl = '';
+  String _loadedScriptKey = '';
+
+  /// script → Python 模块 key（去 .py 后缀 + py_ 前缀）
+  String _pythonModuleKey(String script) {
+    var k = script.trim();
     if (k.toLowerCase().endsWith('.py')) {
       k = k.substring(0, k.length - 3);
     }
@@ -187,8 +217,120 @@ class SpiderService {
     return null;
   }
 
+  /// 确保 [script] 已载入 Node 引擎，返回引擎里的**真实站点 key**。
+  ///
+  /// 真实 key 以引擎 `/config` 返回的站点列表为准 —— 聚合配置里写的 key 是 TVBox
+  /// 的 key，和 drpy2 模块自报的 key 未必一致；取不到时退回 [fallback]。
+  Future<String?> _ensureNodeScript(String script,
+      {required String fallback}) async {
+    if (_loadedScriptUrl == script) {
+      return _loadedScriptKey.isNotEmpty ? _loadedScriptKey : fallback;
+    }
+    try {
+      // Node 已在跑（主源/音乐模块起过）就别再调一次启动
+      if (NodeJSManager.instance.spiderPort <= 0) {
+        final ok = await NodeJSManager.instance.startNodeJS();
+        if (!ok) {
+          AppLog.instance.w('[SpiderService] Node 启动失败，脚本源无法加载: $script');
+          return null;
+        }
+      }
+      if (!await NodeJSManager.instance.waitForSpiderPort()) {
+        AppLog.instance.w('[SpiderService] 等待 spiderPort 超时: $script');
+        return null;
+      }
+      final (loaded, msg) = await NodeJSManager.instance.loadSource(script);
+      if (!loaded) {
+        AppLog.instance.w('[SpiderService] 脚本载入失败 $script: ${msg ?? "未知错误"}');
+        return null;
+      }
+      _loadedScriptUrl = script;
+      _loadedScriptKey = '';
+      // 脚本自身的站点 key 只有引擎知道：读 /config 取第一个。
+      // 模块的 start() 是异步的，载入后首次 /config 可能还没注册完 → 小退避重试。
+      for (var attempt = 0; attempt < 4 && _loadedScriptKey.isEmpty; attempt++) {
+        if (attempt > 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 400));
+        }
+        final cfg = await getCatConfig();
+        for (final s in _extractSites(cfg)) {
+          final k = (s['key'] ?? '').toString().trim();
+          if (k.isNotEmpty) {
+            _loadedScriptKey = k;
+            break;
+          }
+        }
+      }
+      AppLog.instance.log('[SpiderService] 脚本已载入 $script，'
+          '引擎 key=${_loadedScriptKey.isEmpty ? fallback : _loadedScriptKey}');
+      return _loadedScriptKey.isNotEmpty ? _loadedScriptKey : fallback;
+    } catch (e) {
+      AppLog.instance.w('[SpiderService] 脚本载入异常 $script: $e');
+      return null;
+    }
+  }
+
+  /// 从 /config 响应里取站点列表（兼容 {video:{sites}} 与 {sites}）
+  static List<Map<String, dynamic>> _extractSites(Map<String, dynamic>? cfg) {
+    if (cfg == null) return const [];
+    final video = cfg['video'];
+    final dynamic sites = video is Map ? video['sites'] : cfg['sites'];
+    if (sites is! List) return const [];
+    return sites
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  /// 统一分发：按脚本类型把 [action] 交给 Python 或 Node 引擎执行。
+  ///
+  /// [nodeArgs] / [pyArgs] 是同名 action 在两个引擎里的参数形状
+  /// （Node 用 id/page/filters，Python 用 ids/tid/extend）。
+  Future<Map<String, dynamic>?> _dispatchScript({
+    required String key,
+    required int type,
+    required String api,
+    required String ext,
+    required String action,
+    required Map<String, dynamic> nodeArgs,
+    required Map<String, dynamic> pyArgs,
+  }) async {
+    final script = _scriptUrl(api, ext);
+
+    // ── Python 引擎（.py）────────────────────────────────────
+    if (script.isNotEmpty && _isPythonScript(script)) {
+      final moduleKey = script.startsWith('http')
+          ? await PythonScriptSources.instance.ensureInstalled(script)
+          : _pythonModuleKey(script);
+      if (moduleKey == null) return null;
+      return _pythonCall(moduleKey, action, pyArgs);
+    }
+
+    // ── Node 引擎（JS / 无脚本地址）──────────────────────────
+    var engineKey = key;
+    if (script.isNotEmpty) {
+      // 聚合配置里的脚本源：按需载入脚本，用引擎自报的真实 key
+      final k = await _ensureNodeScript(script, fallback: key);
+      if (k == null) return null;
+      engineKey = k;
+    } else if (mainScriptUrl.isNotEmpty && _loadedScriptUrl != mainScriptUrl) {
+      // 主源（单 js spider 配置）：api 由 /config 下发、通常为空。若期间被程序
+      // 脚本源顶替过，这里把主源脚本重新载入。
+      final k = await _ensureNodeScript(mainScriptUrl, fallback: key);
+      if (k != null) engineKey = k;
+    }
+
+    if (!isSpiderReady) return null;
+    final url = _buildSpiderUrl(engineKey, type, _nodeBase(api), action);
+    AppLog.instance.log('[SpiderService] $action: $url');
+    return _postJSON(url, nodeArgs);
+  }
+
   // ============================================================
-  // Spider API - 所有方法都接受 key/type/apiBase 参数
+  // Spider API - 所有方法都接受 key/type/api/ext 参数
+  //   · api = 原始 api（可能是远端脚本 URL / py_xxx.py / csp_xxx / ''）
+  //   · ext = drpy2 模式下的站点脚本地址（普通源为空）
+  // 引擎（Node / Python）与 key 的解析全在 _dispatchScript 内部完成。
   // ============================================================
 
   /// 获取 Spider 配置 - 对应 Swift getCatConfig
@@ -231,100 +373,117 @@ class SpiderService {
   }
 
   /// 初始化 Spider - 对应 Swift initSpider
-  Future<Map<String, dynamic>?> initSpider(String key, int type, String apiBase) async {
+  ///
+  /// Python 源没有 init 概念（引擎里注册即就绪）；JS 脚本源把脚本载入引擎即完成 init。
+  Future<Map<String, dynamic>?> initSpider(String key, int type, String api,
+      {String ext = ''}) async {
+    final script = _scriptUrl(api, ext);
+    if (script.isNotEmpty && _isPythonScript(script)) return null;
+
+    // key 的解析必须与 [_dispatchScript] **完全一致** —— 聚合配置里的脚本源
+    // 配置 key 和引擎自报 key 不是一回事，这里用配置 key 会 init 404、
+    // 而后五个接口却能通（init 失败会被调用方 catch 掉，问题很隐蔽）。
+    var engineKey = key;
+    if (script.isNotEmpty) {
+      final k = await _ensureNodeScript(script, fallback: key);
+      if (k != null) engineKey = k;
+    } else if (mainScriptUrl.isNotEmpty && _loadedScriptUrl != mainScriptUrl) {
+      final k = await _ensureNodeScript(mainScriptUrl, fallback: key);
+      if (k != null) engineKey = k;
+    }
     if (!isSpiderReady) return null;
 
-    final url = _buildSpiderUrl(key, type, apiBase, 'init');
+    final url = _buildSpiderUrl(engineKey, type, _nodeBase(api), 'init');
     AppLog.instance.log('[SpiderService] initSpider: $url');
 
     return _postJSON(url, <String, dynamic>{});
   }
 
   /// 获取首页内容 - 对应 Swift getHomeContent
-  Future<Map<String, dynamic>?> getHomeContent(String key, int type, String apiBase) async {
-    if (_isPythonSource(key, type, apiBase)) {
-      return _pythonCall(_pythonModuleKey(apiBase), 'home', {});
-    }
-    if (!isSpiderReady) return null;
-
-    final url = _buildSpiderUrl(key, type, apiBase, 'home');
-    AppLog.instance.log('[SpiderService] getHomeContent: $url');
-
-    return _postJSON(url, <String, dynamic>{});
+  Future<Map<String, dynamic>?> getHomeContent(String key, int type, String api,
+      {String ext = ''}) {
+    return _dispatchScript(
+      key: key,
+      type: type,
+      api: api,
+      ext: ext,
+      action: 'home',
+      nodeArgs: const {},
+      pyArgs: const {},
+    );
   }
 
   /// 获取分类内容 - 对应 Swift getCategoryContent
   Future<Map<String, dynamic>?> getCategoryContent(
-    String key, int type, String apiBase,
+    String key,
+    int type,
+    String api,
     String id, {
     int page = 1,
     Map<String, dynamic>? filters,
-  }) async {
-    if (_isPythonSource(key, type, apiBase)) {
-      return _pythonCall(_pythonModuleKey(apiBase), 'category', {
+    String ext = '',
+  }) {
+    return _dispatchScript(
+      key: key,
+      type: type,
+      api: api,
+      ext: ext,
+      action: 'category',
+      nodeArgs: <String, dynamic>{
+        'id': id,
+        'page': page,
+        'filter': filters != null && filters.isNotEmpty,
+        'filters': filters ?? {},
+      },
+      pyArgs: <String, dynamic>{
         'tid': id,
         'pg': page,
         'filter': filters != null && filters.isNotEmpty,
         'extend': filters ?? {},
-      });
-    }
-    if (!isSpiderReady) return null;
-
-    final url = _buildSpiderUrl(key, type, apiBase, 'category');
-    AppLog.instance.log('[SpiderService] getCategoryContent: $url, id=$id, page=$page');
-
-    final body = <String, dynamic>{
-      'id': id,
-      'page': page,
-      'filter': filters != null && filters.isNotEmpty,
-      'filters': filters ?? {},
-    };
-
-    return _postJSON(url, body);
+      },
+    );
   }
 
   /// 获取详情 - 对应 Swift getDetail
-  Future<Map<String, dynamic>?> getDetail(String key, int type, String apiBase, String id) async {
-    if (_isPythonSource(key, type, apiBase)) {
-      return _pythonCall(_pythonModuleKey(apiBase), 'detail', {'ids': id});
-    }
-    if (!isSpiderReady) return null;
-
-    final url = _buildSpiderUrl(key, type, apiBase, 'detail');
-    AppLog.instance.log('[SpiderService] getDetail: $url, id=$id');
-
-    return _postJSON(url, {'id': id});
+  Future<Map<String, dynamic>?> getDetail(
+      String key, int type, String api, String id, {String ext = ''}) {
+    return _dispatchScript(
+      key: key,
+      type: type,
+      api: api,
+      ext: ext,
+      action: 'detail',
+      nodeArgs: <String, dynamic>{'id': id},
+      pyArgs: <String, dynamic>{'ids': id},
+    );
   }
 
   /// 获取播放 URL - 对应 Swift getPlayUrl
-  Future<Map<String, dynamic>?> getPlayUrl(
-      String key, int type, String apiBase, String flag, String id) async {
-    if (_isPythonSource(key, type, apiBase)) {
-      return _pythonCall(_pythonModuleKey(apiBase), 'play', {'flag': flag, 'id': id});
-    }
-    if (!isSpiderReady) return null;
-
-    final url = _buildSpiderUrl(key, type, apiBase, 'play');
-    AppLog.instance.log('[SpiderService] getPlayUrl: $url, flag=$flag, id=$id');
-
-    return _postJSON(url, {'flag': flag, 'id': id});
+  Future<Map<String, dynamic>?> getPlayUrl(String key, int type, String api,
+      String flag, String id, {String ext = ''}) {
+    return _dispatchScript(
+      key: key,
+      type: type,
+      api: api,
+      ext: ext,
+      action: 'play',
+      nodeArgs: <String, dynamic>{'flag': flag, 'id': id},
+      pyArgs: <String, dynamic>{'flag': flag, 'id': id},
+    );
   }
 
   /// 搜索 - 对应 Swift search
-  Future<Map<String, dynamic>?> search(
-      String key, int type, String apiBase, String keyword, {int page = 1}) async {
-    if (_isPythonSource(key, type, apiBase)) {
-      return _pythonCall(_pythonModuleKey(apiBase), 'search', {
-        'wd': keyword,
-        'pg': page,
-      });
-    }
-    if (!isSpiderReady) return null;
-
-    final url = _buildSpiderUrl(key, type, apiBase, 'search');
-    AppLog.instance.log('[SpiderService] search: $url, keyword=$keyword, page=$page');
-
-    return _postJSON(url, {'wd': keyword, 'page': page});
+  Future<Map<String, dynamic>?> search(String key, int type, String api,
+      String keyword, {int page = 1, String ext = ''}) {
+    return _dispatchScript(
+      key: key,
+      type: type,
+      api: api,
+      ext: ext,
+      action: 'search',
+      nodeArgs: <String, dynamic>{'wd': keyword, 'page': page},
+      pyArgs: <String, dynamic>{'wd': keyword, 'pg': page},
+    );
   }
 
   // ============================================================
@@ -337,18 +496,17 @@ class SpiderService {
   Future<Map<String, dynamic>?> searchWithSpider({
     required String spiderKey,
     required int spiderType,
-    required String apiBase,
+    required String api,
     required String keyword,
     int page = 1,
+    String ext = '',
   }) async {
-    if (!isSpiderReady) return null;
-
-    // 对应 Swift: 先 init（忽略错误），再 search
+    // 先 init（忽略错误），再 search
     try {
-      await initSpider(spiderKey, spiderType, apiBase);
+      await initSpider(spiderKey, spiderType, api, ext: ext);
     } catch (e) { /* ignore */ }
 
-    return search(spiderKey, spiderType, apiBase, keyword, page: page);
+    return search(spiderKey, spiderType, api, keyword, page: page, ext: ext);
   }
 
   // ============================================================
@@ -356,26 +514,36 @@ class SpiderService {
   // 用于非并发场景（如首页加载、详情页）
   // ============================================================
 
-  /// 当前 Spider 会话（原子替换，避免多字段读到不一致组合）
-  ({String key, int type, String apiBase})? _currentSpider;
+  /// 当前 Spider 会话（原子替换，避免多字段读到不一致组合）。
+  ///
+  /// 必须带上 [ext]：drpy2 脚本源的站点脚本在 ext 里（api 只是运行时），
+  /// 详情页拿这个上下文调 getPlayUrl 时少了 ext 就会加载错脚本。
+  ({String key, int type, String api, String ext})? _currentSpider;
 
   /// 设置当前 Spider 信息 - 对应 Swift setCurrentSpider
-  /// 仅用于非并发场景
-  void setCurrentSpider(String key, int type, String? apiBase,
+  /// 仅用于非并发场景。[api] 传**原始 api**（可能是远端脚本 URL）。
+  void setCurrentSpider(String key, int type, String? api,
       {String? ext, String? jar}) {
-    _currentSpider = (key: key, type: type, apiBase: apiBase ?? '');
-    AppLog.instance.log('[SpiderService] setCurrentSpider: key=$key, type=$type, apiBase=$apiBase');
+    _currentSpider =
+        (key: key, type: type, api: api ?? '', ext: ext ?? '');
+    AppLog.instance.log(
+        '[SpiderService] setCurrentSpider: key=$key, type=$type, api=$api, ext=$ext');
   }
 
-  /// 获取当前 Spider 的 key/type/apiBase
+  /// 获取当前 Spider 的 key/type/api/ext
   /// 用于非并发场景（如详情页获取播放 URL）
   /// **2026-09-26 修复**：原实现 `_currentKey!` / `_currentType!` 强解包，
   /// 若用户从未经过首页/分类加载（如从历史/收藏直接进 Spider 源详情），
   /// `_currentKey` 为 null，强解包抛空安全异常 → App 崩溃"像重启一样"。
-  /// 改为空安全返回：未设置时返回 ('', 0, '')，调用方自行降级。
-  (String, int, String) getCurrentSpiderInfo() {
+  /// 改为空安全返回：未设置时返回空值，调用方自行降级。
+  ({String key, int type, String api, String ext}) getCurrentSpiderInfo() {
     final s = _currentSpider;
-    return (s?.key ?? '', s?.type ?? 0, s?.apiBase ?? '');
+    return (
+      key: s?.key ?? '',
+      type: s?.type ?? 0,
+      api: s?.api ?? '',
+      ext: s?.ext ?? '',
+    );
   }
 
   /// 使当前 Spider 会话失效 - 对应 Swift invalidateSession
@@ -383,6 +551,9 @@ class SpiderService {
   /// dio 复用的 socket 已被系统断开，所有请求会静默失败
   void invalidateSession() {
     _currentSpider = null;
+    // 引擎侧已载入的脚本状态也一并作废（Node 可能已被系统回收）
+    _loadedScriptUrl = '';
+    _loadedScriptKey = '';
     try {
       _dio.close(force: true);
     } catch (e) { /* ignore */ }

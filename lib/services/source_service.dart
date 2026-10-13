@@ -703,26 +703,30 @@ class SourceService {
       SourceBean sourceBean) async {
     final spider = SpiderService.instance;
 
-    // 对应 Swift: key 去掉 nodejs_ 前缀，apiBase 在 api 是 HTTP URL 时为空
+    // 对应 Swift: key 去掉 nodejs_ 前缀；脚本路由见下方 api/ext 说明
     final key = sourceBean.key.startsWith('nodejs_')
         ? sourceBean.key.substring(7)
         : sourceBean.key;
-    final apiBase =
-        sourceBean.api.startsWith('http') ? '' : sourceBean.api;
+    // 传**原始 api + ext**：脚本源（.py / drpy2 ext）的路由由 SpiderService 内部
+    // 判定 —— 之前在这里把 http URL 的 api 清空成 ''，导致远端 .py 永远进不了
+    // Python 引擎（用户 2026-10-13：huahua.json 的 py 源"显示不了影视内容"）。
+    final api = sourceBean.api;
+    final ext = sourceBean.ext ?? '';
 
     // 对应 Swift: setCurrentSpider 设置全局状态（供详情页 getPlayUrl 使用）
-    spider.setCurrentSpider(key, sourceBean.type, apiBase,
+    spider.setCurrentSpider(key, sourceBean.type, api,
         ext: sourceBean.ext, jar: sourceBean.jar);
 
     // 初始化 Spider - 对应 Swift: try await spider.initSpider()
     try {
-      await spider.initSpider(key, sourceBean.type, apiBase);
+      await spider.initSpider(key, sourceBean.type, api, ext: ext);
     } catch (e) {
         AppLog.instance.log('[source_service] swallowed: $e');
       }
 
     // 获取首页内容
-    final result = await spider.getHomeContent(key, sourceBean.type, apiBase);
+    final result =
+        await spider.getHomeContent(key, sourceBean.type, api, ext: ext);
     if (result == null) return (<SortData>[], <Video>[]);
 
     final sorts = <SortData>[];
@@ -761,23 +765,24 @@ class SourceService {
   }) async {
     final spider = SpiderService.instance;
 
-    // 对应 Swift: key 去掉 nodejs_ 前缀，apiBase 在 api 是 HTTP URL 时为空
+    // 对应 Swift: key 去掉 nodejs_ 前缀；脚本路由见下方 api/ext 说明
     final key = sourceBean.key.startsWith('nodejs_')
         ? sourceBean.key.substring(7)
         : sourceBean.key;
-    final apiBase =
-        sourceBean.api.startsWith('http') ? '' : sourceBean.api;
+    final api = sourceBean.api;
+    final ext = sourceBean.ext ?? '';
 
     // 对应 Swift: setCurrentSpider 设置全局状态
-    spider.setCurrentSpider(key, sourceBean.type, apiBase,
+    spider.setCurrentSpider(key, sourceBean.type, api,
         ext: sourceBean.ext, jar: sourceBean.jar);
 
     // 获取分类内容
     final result = await spider.getCategoryContent(
-      key, sourceBean.type, apiBase,
+      key, sourceBean.type, api,
       sortData.id,
       page: page,
       filters: filters?.map((k, v) => MapEntry(k, v)),
+      ext: ext,
     );
 
     if (result == null) return [];
@@ -791,19 +796,20 @@ class SourceService {
       SourceBean sourceBean, String vodId) async {
     final spider = SpiderService.instance;
 
-    // 对应 Swift: key 去掉 nodejs_ 前缀，apiBase 在 api 是 HTTP URL 时为空
+    // 对应 Swift: key 去掉 nodejs_ 前缀；脚本路由见下方 api/ext 说明
     final key = sourceBean.key.startsWith('nodejs_')
         ? sourceBean.key.substring(7)
         : sourceBean.key;
-    final apiBase =
-        sourceBean.api.startsWith('http') ? '' : sourceBean.api;
+    final api = sourceBean.api;
+    final ext = sourceBean.ext ?? '';
 
     // 对应 Swift: setCurrentSpider 设置全局状态（供详情页 getPlayUrl 使用）
-    spider.setCurrentSpider(key, sourceBean.type, apiBase,
+    spider.setCurrentSpider(key, sourceBean.type, api,
         ext: sourceBean.ext, jar: sourceBean.jar);
 
     // 获取详情 - 对应 Swift: getDetail 只发送 id
-    final result = await spider.getDetail(key, sourceBean.type, apiBase, vodId);
+    final result =
+        await spider.getDetail(key, sourceBean.type, api, vodId, ext: ext);
     if (result == null) return null;
 
     final list = result['list'] as List<dynamic>?;
@@ -841,22 +847,23 @@ class SourceService {
       SourceBean sourceBean, String keyword) async {
     final spider = SpiderService.instance;
 
-    // 对应 Swift: key 去掉 nodejs_ 前缀，apiBase 在 api 是 HTTP URL 时为空
+    // 对应 Swift: key 去掉 nodejs_ 前缀；脚本路由见下方 api/ext 说明
     final key = sourceBean.key.startsWith('nodejs_')
         ? sourceBean.key.substring(7)
         : sourceBean.key;
-    final apiBase =
-        sourceBean.api.startsWith('http') ? '' : sourceBean.api;
+    final api = sourceBean.api;
+    final ext = sourceBean.ext ?? '';
 
-    AppLog.instance.log('[SourceService] _spiderSearch: key=$key, type=${sourceBean.type}, apiBase=$apiBase, keyword=$keyword');
+    AppLog.instance.log('[SourceService] _spiderSearch: key=$key, type=${sourceBean.type}, api=$api, keyword=$keyword');
 
     // 对应 Swift searchWithSpider: 原子操作，先 init 再 search
     // 不依赖全局状态，避免并发搜索时竞态条件
     final result = await spider.searchWithSpider(
       spiderKey: key,
       spiderType: sourceBean.type,
-      apiBase: apiBase,
+      api: api,
       keyword: keyword,
+      ext: ext,
     );
     if (result == null) {
       AppLog.instance.log('[SourceService] _spiderSearch: searchWithSpider 返回 null');

@@ -162,11 +162,11 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         AppToast.message('注册失败：${installed.message ?? '未知错误'}');
         return;
       }
-      // 加一条线路（重名则先移除旧线路，避免重复）
+      // 加一条线路（重名则先移除旧线路，避免重复），并**落盘**：
+      // 接口配置每次都整表替换 sourceBeanList，不落盘这条线路下次加载就被冲掉了
+      // （用户 2026-10-13：「py 源线路…切换显示不了」）
       final api = 'py_$key.py';
-      final beans = ApiConfig.instance.sourceBeanList;
-      beans.removeWhere((s) => s.key == key || s.api == api);
-      beans.add(SourceBean(
+      await ApiConfig.instance.addUserVideoSource(SourceBean(
         key: key,
         name: key,
         api: api,
@@ -178,7 +178,8 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         ext: null,
         indexs: 0,
       ));
-      AppToast.message('已导入 Python 视频源「$key」（线路 ${beans.length} 条）');
+      AppToast.message(
+          '已导入 Python 视频源「$key」（线路 ${ApiConfig.instance.sourceBeanList.length} 条）');
     } catch (e) {
       AppToast.message('导入失败：${e.toString().split('\n').first}');
     }

@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:archive/archive.dart';
 import 'package:get/get.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../models/app_config.dart';
@@ -95,6 +97,186 @@ class MiniAppService extends GetxService {
   /// 从粘贴的 JSON 文本导入
   Future<({bool ok, String? error})> importFromText(String text) =>
       importRaw(text, source: '手动粘贴');
+
+  // ── 小程序市场（顶层 `{"apps":[…]}`，ant-video 市场格式）────────
+
+  /// 拉取市场清单。返回 null = 「这不是市场清单」（交给普通配置导入）；
+  /// 网络异常照常抛出，由调用方兜。
+  Future<List<MiniAppMarketEntry>?> fetchMarket(String url) async {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return null;
+    final body = await NetworkManager.instance.getString(trimmed);
+    if (!looksLikeMiniAppMarket(body)) return null;
+    final list = parseMiniAppMarket(body);
+    return list.isEmpty ? null : list;
+  }
+
+  /// 智能导入（一次下载搞定）：
+  /// - 内容是市场清单 `{"apps":[…]}` → 返回 [market]，由 UI 打开市场页（列出 + 安装）
+  /// - 否则按普通 TVBox 配置导入
+  Future<({bool ok, String? error, List<MiniAppMarketEntry>? market})>
+      importUrlSmart(String url) async {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return (ok: false, error: '地址不能为空', market: null);
+    try {
+      final body = await NetworkManager.instance.getString(trimmed);
+      if (body.trim().isEmpty) {
+        return (ok: false, error: '下载内容为空', market: null);
+      }
+      if (looksLikeMiniAppMarket(body)) {
+        final list = parseMiniAppMarket(body);
+        if (list.isNotEmpty) return (ok: true, error: null, market: list);
+      }
+      final r = await importRaw(body, source: trimmed);
+      return (ok: r.ok, error: r.error, market: null);
+    } catch (e) {
+      return (ok: false, error: '下载失败: $e', market: null);
+    }
+  }
+
+  /// 把 zip 解到 `<Documents>/miniapps/<appId>/`，返回其中的 manifest 文本
+  Future<String> _unpackZipToDir(List<int> bytes, String appId) async {
+    final dir = await _appDir(appId);
+    await dir.create(recursive: true);
+    // 覆盖安装：先清空旧文件，避免残留旧版本资源
+    for (final f in dir.listSync()) {
+      try {
+        f.deleteSync(recursive: true);
+      } catch (_) {}
+    }
+    final archive = ZipDecoder().decodeBytes(bytes);
+    for (final f in archive) {
+      if (!f.isFile) continue;
+      final out = File('${dir.path}/${f.name}');
+      await out.parent.create(recursive: true);
+      await out.writeAsBytes(f.content as List<int>);
+    }
+    final mf = File('${dir.path}/manifest.json');
+    return await mf.exists() ? await mf.readAsString() : '{}';
+  }
+
+  /// 本地 zip 小程序包安装（「本地文件」选 .zip）
+  Future<({bool ok, String? error})> installFromZipFile(String path) async {
+    try {
+      final file = File(path);
+      if (!await file.exists()) return (ok: false, error: '文件不存在');
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) return (ok: false, error: '文件为空');
+      // appId 先用文件名占位，读到 manifest 再纠正为真实 appId
+      final fallbackId = path.split(RegExp(r'[/\\]')).last.replaceAll('.zip', '');
+      var manifestBody = await _unpackZipToDir(bytes, fallbackId);
+      final realId = _manifestAppId(manifestBody) ?? fallbackId;
+      if (realId != fallbackId) {
+        manifestBody = await _unpackZipToDir(bytes, realId);
+      }
+      final name = _manifestName(manifestBody) ?? fallbackId;
+      final app = MiniApp(
+        id: realId,
+        name: name,
+        type: 'webapp',
+        source: (await _appDir(realId)).path,
+        rawJson: manifestBody.isEmpty ? '{}' : manifestBody,
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      final idx = apps.indexWhere((a) => a.id == app.id);
+      if (idx >= 0) {
+        apps[idx] = app;
+      } else {
+        apps.add(app);
+      }
+      await _persist();
+      AppLog.instance.log('[MiniApp] 已安装本地 zip ${app.id}');
+      return (ok: true, error: null);
+    } catch (e) {
+      return (ok: false, error: '安装失败: $e');
+    }
+  }
+
+  /// 该 appId 是否已安装
+  bool isInstalled(String appId) => apps.any((a) => a.id == appId);
+
+  /// 安装市场项 → `type=webapp` 的网页型小程序
+  /// - `url` 指向 **manifest.json**（在线站点型）：按 manifest 打开**远端页面**；
+  /// - `url` 指向 **zip**：下载解包到 `<Documents>/miniapps/<appId>/`，
+  ///   按目录内的 manifest 打开本地页面。
+  Future<({bool ok, String? error})> installMarketEntry(
+      MiniAppMarketEntry e) async {
+    try {
+      var name = e.name;
+      late String source;
+      var manifestBody = '{}';
+
+      if (e.isZip) {
+        final bytes = await NetworkManager.instance.getData(e.url);
+        if (bytes.isEmpty) return (ok: false, error: '下载内容为空');
+        manifestBody = await _unpackZipToDir(bytes, e.appId);
+        name = _manifestName(manifestBody) ?? e.name;
+        source = (await _appDir(e.appId)).path;
+      } else {
+        manifestBody = await NetworkManager.instance.getString(e.url);
+        name = _manifestName(manifestBody) ?? e.name;
+        final base = e.url.substring(0, e.url.lastIndexOf('/') + 1);
+        source = '$base${_manifestEntry(manifestBody)}';
+      }
+
+      final app = MiniApp(
+        id: e.appId, // 用市场 appId 当 id：重复安装 = 升级，不会装出两份
+        name: name,
+        type: 'webapp',
+        source: source,
+        rawJson: manifestBody.isEmpty ? '{}' : manifestBody,
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      final idx = apps.indexWhere((a) => a.id == app.id);
+      if (idx >= 0) {
+        apps[idx] = app;
+      } else {
+        apps.add(app);
+      }
+      await _persist();
+      AppLog.instance.log('[MiniApp] 已安装 ${e.appId} → $source');
+      return (ok: true, error: null);
+    } catch (e) {
+      return (ok: false, error: '安装失败: $e');
+    }
+  }
+
+  /// 安装目录：`<Documents>/miniapps/<appId>`
+  Future<Directory> _appDir(String appId) async {
+    final docs = await getApplicationDocumentsDirectory();
+    final safe = appId.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    return Directory('${docs.path}/miniapps/$safe');
+  }
+
+  String? _manifestName(String body) {
+    try {
+      final m = jsonDecode(body) as Map;
+      final n = (m['name'] ?? '').toString().trim();
+      return n.isEmpty ? null : n;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? _manifestAppId(String body) {
+    try {
+      final m = jsonDecode(body) as Map;
+      final v = (m['appId'] ?? '').toString().trim();
+      return v.isEmpty ? null : v;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _manifestEntry(String body) {
+    try {
+      final m = jsonDecode(body) as Map;
+      final en = (m['entry'] ?? 'index.html').toString().trim();
+      return en.isEmpty ? 'index.html' : en;
+    } catch (_) {
+      return 'index.html';
+    }
+  }
 
   /// 导入麦优直播订阅（单独的应用类型，不走 TVBox 配置解析）。
   ///
@@ -231,8 +413,8 @@ class MiniAppService extends GetxService {
   void _registerVideoSources(MiniApp app) {
     final parsed = app.parsed;
 
-    // 麦优订阅应用不注册影视源（独立直播订阅形态）
-    if (parsed.maiyouUrl.isNotEmpty) return;
+    // 麦优订阅 / 网页型小程序都不注册影视源（都不是 TVBox 影视配置）
+    if (app.isWebApp || parsed.maiyouUrl.isNotEmpty) return;
 
     // 清理该程序旧的注册（避免重复导入叠加）
     ApiConfig.instance.sourceBeanList.removeWhere(
@@ -280,6 +462,17 @@ class MiniAppService extends GetxService {
     }
   }
 
+  /// 拖动排序后落盘（列表顺序即自定义顺序）
+  Future<void> reorder(int oldIndex, int newIndex) async {
+    if (oldIndex < 0 || oldIndex >= apps.length) return;
+    if (newIndex > oldIndex) newIndex -= 1;
+    if (newIndex < 0) newIndex = 0;
+    if (newIndex >= apps.length) newIndex = apps.length - 1;
+    final item = apps.removeAt(oldIndex);
+    apps.insert(newIndex, item);
+    await _persist();
+  }
+
   /// 删除程序（同时从视频源列表移除其注册的源）
   Future<void> remove(MiniApp app) async {
     apps.removeWhere((a) => a.id == app.id);
@@ -287,6 +480,15 @@ class MiniAppService extends GetxService {
         .removeWhere((s) => s.key.startsWith('${app.id}_'));
     // 一并移除该程序注册的解析接口（按 url 精确匹配，避免误删用户自建的）
     _removeRegisteredParses(app);
+    // 网页型小程序（zip 装到本地的）：把解包目录也删掉，别留垃圾
+    if (app.isWebApp && !app.source.startsWith('http')) {
+      try {
+        final dir = Directory(app.source);
+        if (await dir.exists()) await dir.delete(recursive: true);
+      } catch (e) {
+        AppLog.instance.log('[MiniApp] 删除程序目录失败: $e');
+      }
+    }
     await _persist();
   }
 

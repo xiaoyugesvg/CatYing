@@ -8,7 +8,6 @@ import '../../models/live_models.dart';
 import '../../models/movie.dart';
 import '../../services/main_tab_controller.dart';
 import '../../services/network_manager.dart';
-import '../../services/nodejs_manager.dart';
 import '../../services/spider_service.dart';
 import '../../widgets/glass.dart';
 import '../models/mini_app.dart';
@@ -170,9 +169,6 @@ class _MiniAppVideoController extends GetxController {
   String get _sourceKey =>
       _isSpider ? '${_app!.id}_s0' : '${_app!.id}_0';
 
-  /// 引擎脚本是否已为本程序加载（Node 引擎单源架构，惰性加载）
-  bool _spiderReady = false;
-
   final loading = false.obs;
   final error = RxnString();
   final classes = <({String id, String name})>[].obs;
@@ -202,45 +198,23 @@ class _MiniAppVideoController extends GetxController {
     await _fetch(page: 1, tid: '');
   }
 
-  /// 惰性加载本程序的蜘蛛脚本（Node 引擎单源：加载会切换引擎持有的脚本，
-  /// 仅影响蜘蛛引擎本身；主订阅源若非蜘蛛源则无影响）。
-  Future<bool> _ensureSpiderLoaded() async {
-    if (_spiderReady) return true;
-    final site = _spiderSite;
-    if (site == null) return false;
-    try {
-      final (ok, msg) = await NodeJSManager.instance.loadSource(site.ext);
-      if (!ok) {
-        error.value = '蜘蛛脚本加载失败: ${msg ?? "未知错误"}';
-        return false;
-      }
-      await SpiderService.instance.initSpider(_sourceKey, 3, '');
-      _spiderReady = true;
-      return true;
-    } catch (e) {
-      error.value = '蜘蛛脚本加载失败: $e';
-      return false;
-    }
-  }
-
   Future<void> _fetch({required int page, required String tid}) async {
     final token = ++_loadToken;
     loading.value = true;
     try {
       final Map<String, dynamic>? decoded;
       if (_isSpider) {
-        // Spider 源 → Node 引擎 SpiderService 五接口
-        if (!await _ensureSpiderLoaded()) {
-          if (token == _loadToken) loading.value = false;
-          return;
-        }
+        // 脚本源 → SpiderService 统一路由：
+        //   .py 走 CPython（自动下载+注册），.js/drpy2 按需载入 Node 引擎，
+        //   key 也由引擎 /config 决定 —— 不再用自造的 app_xxx_s0 去请求。
+        final site = _spiderSite!;
         if (page == 1 && tid.isEmpty) {
           decoded = await SpiderService.instance
-              .getHomeContent(_sourceKey, 3, '');
+              .getHomeContent(_sourceKey, 3, site.api, ext: site.ext);
         } else {
           decoded = await SpiderService.instance.getCategoryContent(
-              _sourceKey, 3, '', tid,
-              page: page);
+              _sourceKey, 3, site.api, tid,
+              page: page, ext: site.ext);
         }
       } else {
         final url =
@@ -314,16 +288,14 @@ class _MiniAppVideoController extends GetxController {
       } else {
         final Map<String, dynamic>? decoded;
         if (_isSpider) {
-          // Spider 源 → 原子 init + search
-          if (!await _ensureSpiderLoaded()) {
-            if (token == _loadToken) searching.value = false;
-            return;
-          }
+          // 脚本源 → 原子 init + search（路由同 _fetch）
+          final site = _spiderSite!;
           decoded = await SpiderService.instance.searchWithSpider(
             spiderKey: _sourceKey,
             spiderType: 3,
-            apiBase: '',
+            api: site.api,
             keyword: kw,
+            ext: site.ext,
           );
         } else {
           final url =

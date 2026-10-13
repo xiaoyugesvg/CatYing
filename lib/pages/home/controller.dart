@@ -72,8 +72,11 @@ class HomeController extends GetxController {
     try {
       final result = await SourceService.instance.getSort(source);
       sorts.value = result.$1;
-      homeVideos.value = result.$2;
+      // ⚠️ 只在**非空**时才覆盖：py/js 脚本源的 home() 只返回分类、没有推荐列表，
+      // 直接赋值会把上面刚读出来的「幻灯片缓存」清成空 → 顶部闪一下空白，
+      // 然后再被 _fillBannerFromCategory 兜底填回来（用户会看到抖动）。
       if (result.$2.isNotEmpty) {
+        homeVideos.value = result.$2;
         // 异步写缓存，不阻塞（列表页不显示简介 → 用 toJsonLite 省 56% 体积）
         CacheStore.instance.setJsonCache(
           cacheKey,
@@ -88,6 +91,8 @@ class HomeController extends GetxController {
         currentPage.value = 1;
         hasMore.value = true;
         await _loadCategoryVideos(page: 1, sort: sorts.first);
+        // 源没给推荐列表时用第一个分类兜底当幻灯片
+        _fillBannerFromCategory(source.key);
       }
     } catch (e) {
       errorMessage.value = _friendlyErrorMessage(e);
@@ -252,6 +257,28 @@ class HomeController extends GetxController {
     return true;
   }
 
+  /// 幻灯片兜底：部分源 —— **尤其 type=3 的 py / js 脚本源** —— 的 `home()`
+  /// 只返回分类（`class`）、不带推荐列表（`list`）⇒ 首页顶部会空一块。
+  ///
+  /// 这里用**刚加载好的第一个分类**当幻灯片：
+  ///   · 复用同一份数据 ⇒ **不额外发请求**（py 源走 CPython，一次请求不便宜）
+  ///   · 顺手写进首页缓存 `home_videos:<源>` ⇒ 下次冷启动走缓存立刻有图
+  ///
+  /// 连分类列表都为空时什么都不做 —— 顶部由 `_buildContentArea` 整块隐藏。
+  void _fillBannerFromCategory(String sourceKey) {
+    if (homeVideos.isNotEmpty || videos.isEmpty) return;
+    final picks = videos.take(6).toList();
+    homeVideos.assignAll(picks);
+    try {
+      CacheStore.instance.setJsonCache(
+        'home_videos:$sourceKey',
+        picks.map((v) => v.toJsonLite()).toList(),
+      );
+    } catch (e) {
+      AppLog.instance.log('[controller] 写幻灯片兜底缓存失败: $e');
+    }
+  }
+
   Future<void> loadMore() async {
     if (!hasMore.value || isLoading.value) return;
     final sort = selectedSort.value;
@@ -284,8 +311,9 @@ class HomeController extends GetxController {
     try {
       final result = await SourceService.instance.getSort(source);
       sorts.value = result.$1;
-      homeVideos.value = result.$2;
+      // 同 loadSorts：只在非空时覆盖，别把兜底/缓存的幻灯片清掉
       if (result.$2.isNotEmpty) {
+        homeVideos.value = result.$2;
         CacheStore.instance.setJsonCache(
           'home_videos:${source.key}',
           result.$2.map((v) => v.toJsonLite()).toList(),
@@ -309,6 +337,8 @@ class HomeController extends GetxController {
       hasMore.value = true;
       // 不清空旧列表：请求回来再替换，避免刷新时白屏
       await _loadCategoryVideos(page: 1, sort: sort);
+      // 与 loadSorts 同一套兜底：源没给推荐列表就用第一个分类当幻灯片
+      _fillBannerFromCategory(source.key);
     } catch (e) {
       errorMessage.value = _friendlyErrorMessage(e);
     }
