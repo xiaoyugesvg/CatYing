@@ -85,3 +85,10 @@ class Spider(object):
 
     def manualVideoCheck(self):
         return False
+
+
+# catvod 生态里 `BaseSpider` 和 `Spider` 两种名字都有人用
+#   from base.spider import Spider as BaseSpider   （剧迷那种）
+#   from base.spider import BaseSpider             （肉漫屋这种）
+# 统一导出两个名字，指向同一个基类。
+BaseSpider = Spider
