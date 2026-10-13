@@ -40,12 +40,15 @@ import Python
     /// 当前超时预算（ms）；截止时刻用 static（C 回调无捕获，只能访问全局）
     private var timeoutMs: Int64 = 10000
     private static var sharedDeadlineNanos: Int64 = 0
-    /// 正在执行 Python 代码的线程状态（PyThreadState_Get 的 borrowed 引用；
-    /// 执行期间该 state 保持有效，watchdog 只读用它做 SetAsyncExc 目标）
-    private static var sharedExecTstate: OpaquePointer?
+    /// 正在执行 Python 代码的**线程 id**（PyThreadState_GetID 的结果）。
+    /// ⚠️ CPython 的 `PyThreadState_SetAsyncExc(unsigned long id, PyObject *exc)`
+    ///   第一参是线程 id **不是** PyThreadState*（3.7 起改成 id），所以这里存 id。
+    private static var sharedExecTid: UInt = 0
     private static var sharedWatchdog: DispatchWorkItem?
     /// spider_runner 模块（new reference，dispose 时 DecRef）
-    private var mainModule: OpaquePointer?
+    /// 类型必须是 CPython 的 `PyObject *`（Swift 导入为 UnsafeMutablePointer<PyObject>）——
+    /// 之前的 OpaquePointer 与头文件签名不兼容（CI 报 Cannot convert ... OpaquePointer）。
+    private var mainModule: UnsafeMutablePointer<PyObject>?
 
     @objc init(messenger: FlutterBinaryMessenger) {
         self.messenger = messenger
@@ -119,7 +122,7 @@ import Python
             Py_DecRef(m)
         }
         mainModule = nil
-        PythonBridge.sharedExecTstate = nil
+        PythonBridge.sharedExecTid = 0
         started = false
     }
 
@@ -194,9 +197,14 @@ import Python
         resetDeadline()
         defer { cancelDeadline() }
         // 捕获 stdout：把 sys.stdout 换成 io.StringIO
+        // ⚠️ `PyObject_CallMethod` 在 CPython 头里是 varargs 宏
+        //    （`#define PyObject_CallMethod _PyObject_CallMethod_SizeT`），
+        //    Swift 明确不可用（CI: 'PyObject_CallMethod' is unavailable: Variadic
+        //    function is unavailable）⇒ 一律走 pyCallNoArg / pyCall3Strings
+        //    （GetAttrString + CallObject，全部是普通函数）
         let oldOut = PySys_GetObject("stdout")
         let stringIO = PyImport_ImportModule("io")
-        let buffer = PyObject_CallMethod(stringIO, "StringIO", nil)
+        let buffer = pyCallNoArg(stringIO, "StringIO")
         PySys_SetObject("stdout", buffer)
         defer {
             PySys_SetObject("stdout", oldOut)
@@ -205,7 +213,7 @@ import Python
         // 取捕获输出
         var output = ""
         if let buf = buffer {
-            let val = PyObject_CallMethod(buf, "getvalue", nil)
+            let val = pyCallNoArg(buf, "getvalue")
             output = pyObjectToString(val) ?? ""
             if let val = val { Py_DecRef(val) }
             Py_DecRef(buf)
@@ -229,13 +237,9 @@ import Python
         defer { cancelDeadline() }
         // 拼 args 为 JSON 字符串传给 Python 侧适配层（Python 自己 json.loads）
         // spider_runner.call(module, method, args_json)
-        // ⚠️ Swift 的 String 不是 CVarArg：C varargs 必须显式转 C 字符串
-        let result = PyObject_CallMethod(
-            main, "call", "sss",
-            (module as NSString).utf8String,
-            (method as NSString).utf8String,
-            (argsJson as NSString).utf8String
-        )
+        // ⚠️ `PyObject_CallMethod` 是 varargs 宏，Swift 调不了（见 eval 里的说明）
+        //    ⇒ 手动拼 tuple + PyObject_CallObject
+        let result = pyCall3Strings(main, "call", module, method, argsJson)
         if result == nil {
             let err = pyLastErrorString() ?? "未知错误"
             PyErr_Clear()
@@ -258,7 +262,15 @@ import Python
         let now = Int64(DispatchTime.now().uptimeNanoseconds)
         let deadline = now + timeoutMs * 1_000_000
         PythonBridge.sharedDeadlineNanos = deadline
-        PythonBridge.sharedExecTstate = PyThreadState_Get()
+        // ⚠️ SetAsyncExc 要的是**线程 id**（unsigned long），不是 PyThreadState*。
+        //    旧代码把 PyThreadState_Get() 的指针直接传进去 ⇒
+        //    CI: "Cannot convert value of type 'OpaquePointer' to expected argument
+        //    type 'UInt'"。用 PyThreadState_GetID 取 id。
+        if let tstate = PyThreadState_Get() {
+            PythonBridge.sharedExecTid = UInt(PyThreadState_GetID(tstate))
+        } else {
+            PythonBridge.sharedExecTid = 0
+        }
         // 取消上一轮残留的 watchdog
         PythonBridge.sharedWatchdog?.cancel()
         let watchdog = DispatchWorkItem {
@@ -280,9 +292,11 @@ import Python
 
     /// watchdog 触发：向正在执行的线程抛 TimeoutError
     private static func fireTimeout() {
-        guard let tstate = PythonBridge.sharedExecTstate else { return }
-        // 不依赖调用线程持有 GIL（_PyEval_SignalAsyncExc 通过信号打断目标线程）
-        PyThreadState_SetAsyncExc(tstate, PyExc_TimeoutError)
+        let tid = PythonBridge.sharedExecTid
+        guard tid != 0 else { return }
+        // 不依赖调用线程持有 GIL（内部通过信号打断目标线程）
+        // 签名：int PyThreadState_SetAsyncExc(unsigned long id, PyObject *exc)
+        PyThreadState_SetAsyncExc(tid, PyExc_TimeoutError)
         print("[PythonBridge] ⏱ watchdog 触发：Python 脚本超时中断")
     }
 
@@ -290,7 +304,41 @@ import Python
     // 工具
     // ============================================================
 
-    private func pyObjectToString(_ obj: OpaquePointer?) -> String? {
+    /// 调 `obj.name()`（无参）。
+    /// 为什么不用 PyObject_CallMethod：它是 varargs 宏，Swift 不可用。
+    private func pyCallNoArg(
+        _ obj: UnsafeMutablePointer<PyObject>?,
+        _ name: String
+    ) -> UnsafeMutablePointer<PyObject>? {
+        guard let obj = obj, let fn = PyObject_GetAttrString(obj, name) else { return nil }
+        defer { Py_DecRef(fn) }
+        return PyObject_CallObject(fn, nil)
+    }
+
+    /// 调 `obj.name(a, b, c)`（三个字符串参数）。
+    /// 同理绕开 varargs：手动组 tuple 再 CallObject（PyTuple_SetItem 会接手引用，
+    /// 失败时才需要自己 DecRef）。
+    private func pyCall3Strings(
+        _ obj: UnsafeMutablePointer<PyObject>?,
+        _ name: String,
+        _ a: String,
+        _ b: String,
+        _ c: String
+    ) -> UnsafeMutablePointer<PyObject>? {
+        guard let obj = obj, let fn = PyObject_GetAttrString(obj, name) else { return nil }
+        defer { Py_DecRef(fn) }
+        guard let args = PyTuple_New(3) else { return nil }
+        defer { Py_DecRef(args) }
+        let s1 = PyUnicode_FromString(a)
+        if PyTuple_SetItem(args, 0, s1) != 0, let s1 = s1 { Py_DecRef(s1) }
+        let s2 = PyUnicode_FromString(b)
+        if PyTuple_SetItem(args, 1, s2) != 0, let s2 = s2 { Py_DecRef(s2) }
+        let s3 = PyUnicode_FromString(c)
+        if PyTuple_SetItem(args, 2, s3) != 0, let s3 = s3 { Py_DecRef(s3) }
+        return PyObject_CallObject(fn, args)
+    }
+
+    private func pyObjectToString(_ obj: UnsafeMutablePointer<PyObject>?) -> String? {
         guard let obj = obj else { return nil }
         let utf8 = PyUnicode_AsUTF8String(obj)
         guard let utf8 = utf8 else { return nil }
@@ -302,9 +350,9 @@ import Python
     }
 
     private func pyLastErrorString() -> String? {
-        var ptype: OpaquePointer?
-        var pvalue: OpaquePointer?
-        var ptraceback: OpaquePointer?
+        var ptype: UnsafeMutablePointer<PyObject>?
+        var pvalue: UnsafeMutablePointer<PyObject>?
+        var ptraceback: UnsafeMutablePointer<PyObject>?
         PyErr_Fetch(&ptype, &pvalue, &ptraceback)
         guard let value = pvalue else { return nil }
         defer {
