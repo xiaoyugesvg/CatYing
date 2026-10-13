@@ -259,15 +259,46 @@ jobs:
         run: |
           set -e
           echo "=== 构建 python-home ==="
-          STDLIB_SRC=$(find build/ios/Frameworks/Python.xcframework -path "*ios-arm64/lib-arm64/python3.12" -type d | head -1)
+          # ── 🔴 stdlib 与 C 扩展在**两个不同目录**（实测 xcframework 内容）──
+          #   Python.xcframework/lib/python3.12/                      ← 纯 Python 标准库
+          #       （含 encodings/ —— Py_Initialize 阶段**必须**能找到它）
+          #   Python.xcframework/<slice>/lib-arm64/python3.12/lib-dynload/  ← C 扩展 .so
+          # ❗原实现只拷了后者（`-path "*ios-arm64/lib-arm64/python3.12"`）⇒
+          #   python-home/lib/python3.12 里只有 lib-dynload、**没有 encodings**
+          #   ⇒ Py_Initialize 直接 "Fatal Python error: init_fs_encoding..." →
+          #     Py_ExitStatusException → exit(1)，进程当场死、Swift 侧拦不住
+          #     （崩溃报告 Runner-2026-10-13-180034.ips：栈顶就是 Py_InitializeEx，
+          #      随后在退出流程的 C++ finalizer 里二次崩 EXC_BAD_ACCESS 0x60）。
+          XCF=build/ios/Frameworks/Python.xcframework
+          STDLIB_SRC=""
+          for d in "$XCF/lib/python3.12" "$XCF"/ios-arm64/lib-arm64/python3.12; do
+            if [ -f "$d/encodings/__init__.py" ]; then STDLIB_SRC="$d"; break; fi
+          done
           if [ -z "$STDLIB_SRC" ]; then
-            echo "❌ 找不到 stdlib: ios-arm64/lib-arm64/python3.12"
+            echo "❌ 找不到含 encodings 的 stdlib（纯 Python 标准库应在 $XCF/lib/python3.12）"
+            echo "=== xcframework 顶层 ==="
+            ls "$XCF"
             exit 1
           fi
+          echo "stdlib(纯 Python) ← $STDLIB_SRC"
           mkdir -p build/python-home/lib/python3.12
           cp -R "$STDLIB_SRC/." build/python-home/lib/python3.12/
+          # C 扩展：CPython 默认在 $PYTHONHOME/lib/python3.12/lib-dynload 找 .so
+          DYNL_SRC=$(find "$XCF" -path "*lib-arm64/python3.12/lib-dynload" -type d | head -1)
+          if [ -z "$DYNL_SRC" ]; then
+            echo "❌ 找不到 lib-dynload（C 扩展 .so）"
+            exit 1
+          fi
+          echo "lib-dynload ← $DYNL_SRC"
+          mkdir -p build/python-home/lib/python3.12/lib-dynload
+          cp -R "$DYNL_SRC/." build/python-home/lib/python3.12/lib-dynload/
+          # 硬自检：没有 encodings 就一定会在 Py_Initialize 崩，这里先拦住
+          test -f build/python-home/lib/python3.12/encodings/__init__.py \
+            || { echo "❌ python-home 里缺 encodings/__init__.py"; exit 1; }
           echo "=== stdlib 就绪 ==="
           ls build/python-home/lib/python3.12 | head -20
+          echo "=== lib-dynload 就绪（前 10 个 .so）==="
+          ls build/python-home/lib/python3.12/lib-dynload | head -10
           echo "=== pip install 三件套 (--target site-packages) ==="
           mkdir -p build/python-home/lib/python3.12/site-packages
           python3 -m pip install --quiet --target build/python-home/lib/python3.12/site-packages \

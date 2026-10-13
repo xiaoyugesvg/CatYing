@@ -133,18 +133,38 @@ import Python
     private func ensureStarted() -> Bool {
         if started { return true }
 
-        // 1. 定位 bundle 内的 python-home（stdlib + site-packages）
-        //    BeeWare xcframework 自带 stdlib 在 Python.framework/Versions/3.12/lib，
-        //    但我们固定用 bundle 的 python-home 目录（CI 打包，含三件套库），
-        //    找不到才回退 framework 内置 lib。
+        // 1. 定位 stdlib 根（PYTHONHOME）
+        //    ⚠️ 必须先**校验 <home>/lib/python3.12/encodings/__init__.py 存在**：
+        //       PYTHONHOME 指错（或该目录里只有 lib-dynload、没有 encodings）时，
+        //       Py_Initialize 会打 "Fatal Python error: init_fs_encoding..." 然后
+        //       Py_ExitStatusException → exit(1)——进程当场死，Swift 侧拦不住
+        //       （崩溃报告 Runner-2026-10-13-180034.ips：栈顶就是 Py_InitializeEx，
+        //        随后在退出流程的 C++ finalizer 里二次崩 EXC_BAD_ACCESS at 0x60）。
+        //       所以先在候选里挑一个**真的含 encodings** 的目录；挑不到就干净返回
+        //       false（只打日志，不把进程交给 CPython 的 fatal 路径）。
+        //
+        //    ⚠️ 旧代码的回退 `Python.framework/Versions/3.12/lib` 在 iOS 上不存在
+        //       （iOS 的 Python.framework 是扁平结构，没有 Versions/），一旦走到
+        //       那个分支就是必崩 —— 已换成 xcframework 根（它自带 lib/python3.12）。
         let bundle = Bundle.main
-        var pythonHome: String? = bundle.path(forResource: "python-home", ofType: nil, inDirectory: nil)
-        if pythonHome == nil,
-           let fwPath = bundle.path(forResource: "Python", ofType: "framework") {
-            pythonHome = "\(fwPath)/Versions/3.12/lib"
+        let candidates: [String] = [
+            // ① CI 打包并塞进 bundle 的 python-home（stdlib + site-packages + 适配层）
+            bundle.path(forResource: "python-home", ofType: nil, inDirectory: nil) ?? "",
+            // ② 随包发布的 xcframework 自带的 stdlib
+            //    （Runner.app/Frameworks/Python.xcframework/lib/python3.12）
+            bundle.bundlePath + "/Frameworks/Python.xcframework",
+        ]
+        var pythonHome: String?
+        for c in candidates where !c.isEmpty {
+            if FileManager.default.fileExists(
+                atPath: "\(c)/lib/python3.12/encodings/__init__.py") {
+                pythonHome = c
+                break
+            }
         }
         guard let home = pythonHome else {
-            print("[PythonBridge] ❌ python-home 不在 bundle 中")
+            print("[PythonBridge] ❌ 没有可用的 stdlib（需 <home>/lib/python3.12/encodings/__init__.py）"
+                + "，候选：\(candidates)")
             return false
         }
         print("[PythonBridge] PYTHONHOME = \(home)")
