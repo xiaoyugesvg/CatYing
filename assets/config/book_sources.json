@@ -3,8 +3,8 @@
  "sources": [
   {
    "bookSourceComment": "by二月无雪\n交流群：756138903",
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "无极书院（修复版）",
+   "bookSourceGroup": "🔍搜索",
+   "bookSourceName": "🔍无极书院",
    "bookSourceType": 0,
    "bookSourceUrl": "http://m.wjzxchina.com#fix",
    "customButton": false,
@@ -57,8 +57,8 @@
   },
   {
    "bookSourceComment": "",
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "快眼看书（修复版）",
+   "bookSourceGroup": "🔍搜索",
+   "bookSourceName": "🔍快眼看书",
    "bookSourceType": 0,
    "bookSourceUrl": "http://www.xbotaodz.info#fix",
    "customButton": false,
@@ -98,8 +98,8 @@
    "weight": 0
   },
   {
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "365小说网（修复版）",
+   "bookSourceGroup": "🔍搜索",
+   "bookSourceName": "🔍365小说网",
    "bookSourceType": 0,
    "bookSourceUrl": "http://www.shukuge.com#fix",
    "customButton": false,
@@ -146,8 +146,8 @@
   },
   {
    "bookSourceComment": "",
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "东滩小说（修复版）",
+   "bookSourceGroup": "🔍搜索",
+   "bookSourceName": "🔍东滩小说",
    "bookSourceType": 0,
    "bookSourceUrl": "http://www.dongtanxs.com#fix",
    "customButton": false,
@@ -190,8 +190,8 @@
    "weight": 0
   },
   {
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "错层小说（修复版）",
+   "bookSourceGroup": "📕文学",
+   "bookSourceName": "📕错层小说",
    "bookSourceType": 0,
    "bookSourceUrl": "https://m.cuoceng.com#fix",
    "customButton": false,
@@ -246,7 +246,7 @@
    "weight": 0
   },
   {
-   "bookSourceName": "八零小说（修复版）",
+   "bookSourceName": "🔍八零小说",
    "bookSourceUrl": "http://wap.80ge.info#fix",
    "bookSourceType": 0,
    "searchUrl": "/modules/article/search.php,{\"method\":\"POST\",\"body\":\"searchkey={{key}}&searchtype=articlename\"}",
@@ -276,13 +276,13 @@
    "ruleContent": {
     "content": "id.nr1@html"
    },
-   "bookSourceGroup": "✅ 可用书源",
+   "bookSourceGroup": "🔍搜索",
    "customOrder": -24,
    "enabled": true,
    "enabledExplore": false
   },
   {
-   "bookSourceName": "无极书院电脑版",
+   "bookSourceName": "🔍无极书院电脑版",
    "bookSourceUrl": "http://www.wjzxchina.com#fix",
    "bookSourceType": 0,
    "searchUrl": "/search/?q={{key}}",
@@ -315,15 +315,15 @@
    "header": {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0 Safari/537.36"
    },
-   "bookSourceGroup": "✅ 可用书源",
+   "bookSourceGroup": "🔍搜索",
    "customOrder": -23,
    "enabled": true,
    "enabledExplore": false
   },
   {
    "bookSourceComment": "备用地址：https://sma.yueyouxs.com",
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "阅友小说",
+   "bookSourceGroup": "📕文学",
+   "bookSourceName": "📕阅友小说",
    "bookSourceType": 0,
    "bookSourceUrl": "http://m.suixkan.com#fix",
    "customButton": false,
@@ -378,8 +378,8 @@
   },
   {
    "bookSourceComment": "",
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "安之原创",
+   "bookSourceGroup": "📕文学",
+   "bookSourceName": "📕安之原创",
    "bookSourceType": 0,
    "bookSourceUrl": "http://www.azycjd.com#fix",
    "customButton": false,
@@ -420,8 +420,8 @@
   },
   {
    "bookSourceComment": "",
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "欧诺文学",
+   "bookSourceGroup": "📕文学",
+   "bookSourceName": "📕欧诺文学",
    "bookSourceType": 0,
    "bookSourceUrl": "http://wap.115wx.xyz#fix",
    "bookUrlPattern": "http://\\w+.wap.115wx.org/",
@@ -469,8 +469,8 @@
    "weight": 0
   },
   {
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "灵猫小说",
+   "bookSourceGroup": "📕文学",
+   "bookSourceName": "📕灵猫小说",
    "bookSourceType": 0,
    "bookSourceUrl": "http://quickapi.biduwenxue.com#fix",
    "customButton": false,
@@ -526,8 +526,8 @@
   },
   {
    "bookSourceComment": "网站打不开",
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "快手趣阁",
+   "bookSourceGroup": "🔍搜索",
+   "bookSourceName": "🔍快手趣阁",
    "bookSourceType": 0,
    "bookSourceUrl": "http://api.sxwlyhzp.com#fix",
    "customButton": false,
@@ -575,8 +575,8 @@
   },
   {
    "bookSourceComment": "",
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "爱奇电子",
+   "bookSourceGroup": "🔍搜索",
+   "bookSourceName": "🔍爱奇电子",
    "bookSourceType": 0,
    "bookSourceUrl": "http://m.bingfengxs.com/",
    "customButton": false,
@@ -623,8 +623,8 @@
   },
   {
    "bookSourceComment": "",
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "无双小说",
+   "bookSourceGroup": "📕文学",
+   "bookSourceName": "📕无双小说",
    "bookSourceType": 0,
    "bookSourceUrl": "http://www.buxia.la/",
    "customButton": false,
@@ -679,8 +679,8 @@
   },
   {
    "bookSourceComment": "",
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "天堂深圳",
+   "bookSourceGroup": "🔍搜索",
+   "bookSourceName": "🔍天堂深圳",
    "bookSourceType": 0,
    "bookSourceUrl": "http://tiantangxiangzuoshenzhenwangyou.qwyd.net",
    "customButton": false,
@@ -716,8 +716,8 @@
   },
   {
    "bookSourceComment": "",
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "久久小说网",
+   "bookSourceGroup": "📕文学",
+   "bookSourceName": "📕久久小说网",
    "bookSourceType": 0,
    "bookSourceUrl": "https://www.aijjxs.com",
    "bookUrlPattern": "https://www\\.aijjxs\\.com/txt/\\d+\\.html",
@@ -766,8 +766,8 @@
   },
   {
    "bookSourceComment": "by猿神启动",
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "9559小说",
+   "bookSourceGroup": "📕文学",
+   "bookSourceName": "📕9559小说",
    "bookSourceType": 0,
    "bookSourceUrl": "https://www.95590.org",
    "bookUrlPattern": "https://www.95590.org/books/.*",
@@ -810,8 +810,8 @@
   },
   {
    "bookSourceComment": "精准搜索",
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "笔趣阁",
+   "bookSourceGroup": "📕文学",
+   "bookSourceName": "📕笔趣阁",
    "bookSourceType": 0,
    "bookSourceUrl": "https://www.biquge99.cc/#pb1101",
    "bookUrlPattern": "https://www.biquge99.cc/book/\\d+/",
@@ -867,8 +867,8 @@
   },
   {
    "bookSourceComment": "源作者:qaz1749，该书源无发现功能，网站目前暂时不需要梯子，也没有机器人验证和登录要求",
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "新笔趣阁",
+   "bookSourceGroup": "🔍搜索",
+   "bookSourceName": "🔍新笔趣阁",
    "bookSourceType": 0,
    "bookSourceUrl": "https://www.biquges123.com",
    "bookUrlPattern": "https://www.biquges123.com\\d+",
@@ -912,8 +912,8 @@
   },
   {
    "bookSourceComment": "",
-   "bookSourceGroup": "✅ 可用书源",
-   "bookSourceName": "书斋阁",
+   "bookSourceGroup": "📕文学",
+   "bookSourceName": "📕书斋阁",
    "bookSourceType": 0,
    "bookSourceUrl": "https://www.shuzhaige.com",
    "bookUrlPattern": "https://www\\.shuzhaige\\.com/(?!e/search/).+/",

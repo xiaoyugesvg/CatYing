@@ -417,19 +417,34 @@ class BookSourceStore {
           added++;
           continue;
         }
-        // 🔴 内置包把该源显式标成「无发现」（enabledExplore:false）时，
-        //   同步关掉**本地已有**该源的发现开关 —— 内置源声明了 enabledExplore
-        //   就绕过了 [_applyAutoExplore] 的自动判定（见 :483 "显式声明 → 尊重"），
-        //   于是「能搜索但没有发现」的源（无 exploreUrl）依然会出现在书源页
-        //   发现 chips 里，点进去只报错（用户 2026-10-13：「书源内置，这些能
-        //   搜索但是没有发现的就关闭发现，不要显示」）。
-        //   只**单向关闭**：内置包为 true 时绝不动本地值，尊重用户手动开启；
-        //   且只在资产指纹变化（本次内置包更新）时执行，用户之后重新开启
-        //   不会被再次覆盖（指纹不变 ⇒ `_loadBundled` 直接 return）。
-        if (s.raw['enabledExplore'] == false && _items[i].enabledExplore) {
-          final m = Map<String, dynamic>.of(_items[i].raw)
-            ..['enabledExplore'] = false;
-          _items[i] = BookSource(raw: m, id: _items[i].id);
+        // 🔴 内置包维护的字段，回灌到**本地已有**的同 id 源上：
+        //   · enabledExplore：内置包显式标成「无发现」时**单向关闭**
+        //     —— 内置源声明了 enabledExplore 就绕过了 [_applyAutoExplore] 的
+        //     自动判定（见 :483 "显式声明 → 尊重"），于是「能搜索但没有发现」的
+        //     源依然会出现在书源页发现 chips 里，点进去只报错（用户 2026-10-13）。
+        //     只单向关闭：内置包为 true 时绝不动本地值，尊重用户手动开启。
+        //   · bookSourceName / bookSourceGroup：内置源的**命名与分组**统一由内置包
+        //     维护（用户 2026-10-13：「（修复版）这段文字去掉」「就只有两个分组
+        //     🔍搜索 / 📕文学」「名称前面加图标，去掉既有的前面的图标」）——
+        //     老装机本地已存了旧名字/旧分组，不在这同步就永远看不到新分组。
+        //   只在资产指纹变化（内置包更新）时执行一次；用户之后手动改名改分组
+        //   不会被反复覆盖（指纹不变 ⇒ `_loadBundled` 直接 return）。
+        final cur = _items[i];
+        final m = Map<String, dynamic>.of(cur.raw);
+        var dirty = false;
+        if (s.raw['enabledExplore'] == false && cur.enabledExplore) {
+          m['enabledExplore'] = false;
+          dirty = true;
+        }
+        for (final k in const ['bookSourceName', 'bookSourceGroup']) {
+          final nv = s.raw[k];
+          if (nv is String && nv.isNotEmpty && m[k] != nv) {
+            m[k] = nv;
+            dirty = true;
+          }
+        }
+        if (dirty) {
+          _items[i] = BookSource(raw: m, id: cur.id);
           added++; // 计入"有变更"（触发持久化）
         }
       }
