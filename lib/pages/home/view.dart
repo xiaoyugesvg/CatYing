@@ -1111,6 +1111,22 @@ const double _kBannerGridHeight = 300;
 const int _kBannerGridPerPage = 6;
 const int _kBannerGridCols = 3;
 
+// ── 左右双卡（duo，2026-10-15 新增）──
+//   一页 = **2 张竖版大海报并排**，整屏高度。张数最少、单张最大。
+const double _kBannerDuoHeight = 300;
+const int _kBannerDuoPerPage = 2;
+
+// ── 九宫格（nine，2026-10-15 新增）──
+//   一页 = **3 行 × 3 列 = 9 张**小海报。与「双排海报」（2×3=6）拉开密度差。
+const double _kBannerNineHeight = 380;
+const int _kBannerNinePerPage = 9;
+const int _kBannerNineCols = 3;
+
+// ── 交错瀑布（masonry，2026-10-15 新增）──
+//   2 列错位：左边 1 张**满高**大卡，右边上下 2 张短卡。
+const double _kBannerMasonryHeight = 300;
+const int _kBannerMasonryPerPage = 3;
+
 class _RecommendBanner extends StatefulWidget {
   final List<Video> videos;
   final HomeBannerStyle style;
@@ -1130,10 +1146,14 @@ class _RecommendBannerState extends State<_RecommendBanner>
   /// 循环轮播的起始**绝对**页（取足够大的整数，前后都能滑，实现无限循环）
   static const int _kLoopAnchor = 100000;
 
-  /// 一页几条：分组样式（主次三栏 / 双排海报）一页多条，其余一页一条。
+  /// 一页几条：分组样式（主次三栏 / 双排海报 / 左右双卡 / 九宫格 / 交错瀑布）
+  /// 一页多条，其余一页一条。
   int get _perPage => switch (widget.style) {
         HomeBannerStyle.feature => _kBannerFeaturePerPage,
         HomeBannerStyle.grid => _kBannerGridPerPage,
+        HomeBannerStyle.duo => _kBannerDuoPerPage,
+        HomeBannerStyle.nine => _kBannerNinePerPage,
+        HomeBannerStyle.masonry => _kBannerMasonryPerPage,
         _ => 1,
       };
 
@@ -1163,6 +1183,9 @@ class _RecommendBannerState extends State<_RecommendBanner>
       HomeBannerStyle.hero => 1.0, // 满宽出血
       HomeBannerStyle.feature => 1.0, // 一页 = 整屏（1 大 + 3 小）
       HomeBannerStyle.grid => 1.0, // 一页 = 整屏（6 张）
+      HomeBannerStyle.duo => 1.0, // 一页 = 整屏（2 张大）
+      HomeBannerStyle.nine => 1.0, // 一页 = 整屏（9 张）
+      HomeBannerStyle.masonry => 1.0, // 一页 = 整屏（1 大 + 2 短）
       HomeBannerStyle.wide => 0.92,
     },
   );
@@ -1255,6 +1278,9 @@ class _RecommendBannerState extends State<_RecommendBanner>
             HomeBannerStyle.hero => _kBannerHeroHeight,
             HomeBannerStyle.feature => _kBannerFeatureHeight,
             HomeBannerStyle.grid => _kBannerGridHeight,
+            HomeBannerStyle.duo => _kBannerDuoHeight,
+            HomeBannerStyle.nine => _kBannerNineHeight,
+            HomeBannerStyle.masonry => _kBannerMasonryHeight,
           },
           child: PageView.builder(
             controller: _pageCtrl,
@@ -1269,6 +1295,9 @@ class _RecommendBannerState extends State<_RecommendBanner>
               HomeBannerStyle.hero => _heroItem(context, i),
               HomeBannerStyle.feature => _featurePage(context, i),
               HomeBannerStyle.grid => _gridPage(context, i),
+              HomeBannerStyle.duo => _duoPage(context, i),
+              HomeBannerStyle.nine => _ninePage(context, i),
+              HomeBannerStyle.masonry => _masonryPage(context, i),
               HomeBannerStyle.wide => _wideItem(context, i),
             },
           ),
@@ -1658,6 +1687,89 @@ class _RecommendBannerState extends State<_RecommendBanner>
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// 左右双卡（duo，2026-10-15 新增）：一页 = **2 张竖版大海报并排**，整屏高。
+  /// 张数最少、单张最大 —— 与「双排海报」的 6 张 / 「九宫格」的 9 张形成密度梯度。
+  Widget _duoPage(BuildContext context, int i) {
+    final start = i * _kBannerDuoPerPage;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          for (var c = 0; c < _kBannerDuoPerPage; c++) ...[
+            if (c > 0) const SizedBox(width: 10),
+            Expanded(
+              child: _tileAt(start + c, radius: BorderRadius.circular(16)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 九宫格（nine，2026-10-15 新增）：一页 = **3 行 × 3 列 = 9 张**小海报。
+  /// 一眼看得最多，和「双排海报」（2×3=6）拉开密度差。
+  Widget _ninePage(BuildContext context, int i) {
+    final start = i * _kBannerNinePerPage;
+    const rows = 3;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        children: [
+          for (var r = 0; r < rows; r++) ...[
+            if (r > 0) const SizedBox(height: 8),
+            Expanded(
+              child: Row(
+                children: [
+                  for (var c = 0; c < _kBannerNineCols; c++) ...[
+                    if (c > 0) const SizedBox(width: 8),
+                    Expanded(
+                      child: _tileAt(start + r * _kBannerNineCols + c),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 交错瀑布（masonry，2026-10-15 新增）：左边 1 张**满高**大卡 +
+  /// 右边上下 2 张短卡。比"规整网格"更有节奏感。
+  Widget _masonryPage(BuildContext context, int i) {
+    final start = i * _kBannerMasonryPerPage;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            flex: 3,
+            child: _tileAt(start, radius: BorderRadius.circular(16)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 2,
+            child: Column(
+              children: [
+                Expanded(
+                  child: _tileAt(start + 1,
+                      radius: BorderRadius.circular(14)),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: _tileAt(start + 2,
+                      radius: BorderRadius.circular(14)),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );

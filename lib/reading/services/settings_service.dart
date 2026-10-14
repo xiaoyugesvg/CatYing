@@ -70,7 +70,19 @@ enum HomeBannerStyle {
   /// 双排海报（2026-10-14 **换掉**原「三格海报轨」）：一页 **2 行 × 3 列 = 6 张**
   /// 竖版海报（名称压在图上）。原来一页只有 3 张、还被压在一行里、整块又矮
   /// ⇒ 像缩略图列表 ✗。
-  grid;
+  grid,
+
+  /// 左右双卡（2026-10-15 新增）：一页 **2 张竖版大海报并排**，整屏高度。
+  /// 张数最少、单张最大 ⇒ 适合"就想看两张大的"。
+  duo,
+
+  /// 九宫格（2026-10-15 新增）：一页 **3 行 × 3 列 = 9 张**小海报。
+  /// 一眼看得最多，和「双排海报」（2×3）拉开密度差。
+  nine,
+
+  /// 交错瀑布（2026-10-15 新增）：2 列错位 —— 左边 1 张**满高**大卡，
+  /// 右边上下 2 张短卡。比"规整网格"更有节奏感。
+  masonry;
 
   String get label => switch (this) {
         // 名称统一**最多 4 个字**（用户 2026-10-14：多了去掉，卡片宽度才一致）
@@ -79,6 +91,9 @@ enum HomeBannerStyle {
         HomeBannerStyle.hero => '沉浸大图',
         HomeBannerStyle.feature => '主次三栏',
         HomeBannerStyle.grid => '双排海报',
+        HomeBannerStyle.duo => '左右双卡',
+        HomeBannerStyle.nine => '九宫格',
+        HomeBannerStyle.masonry => '交错瀑布',
       };
 }
 

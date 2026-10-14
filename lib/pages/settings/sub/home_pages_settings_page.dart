@@ -318,6 +318,50 @@ class HomePagesSettingsPage extends StatelessWidget {
                     ),
               ],
             );
+
+          // 左右双卡（新增）：2 张竖版大海报并排
+          case HomeBannerStyle.duo:
+            return Stack(
+              children: [
+                Positioned(
+                    left: w * 0.06, top: h * 0.08, child: rect(0.40, 0.84, block)),
+                Positioned(
+                    right: w * 0.06,
+                    top: h * 0.08,
+                    child: rect(0.40, 0.84, block)),
+              ],
+            );
+
+          // 九宫格（新增）：3 行 × 3 列 = 9 张小海报
+          case HomeBannerStyle.nine:
+            return Stack(
+              children: [
+                for (var r = 0; r < 3; r++)
+                  for (var c = 0; c < 3; c++)
+                    Positioned(
+                      left: w * (0.07 + c * 0.30),
+                      top: h * (0.07 + r * 0.31),
+                      child: rect(0.25, 0.24, block, r: 2),
+                    ),
+              ],
+            );
+
+          // 交错瀑布（新增）：左 1 张满高大卡 + 右侧上下 2 张短卡
+          case HomeBannerStyle.masonry:
+            return Stack(
+              children: [
+                Positioned(
+                    left: w * 0.06, top: h * 0.08, child: rect(0.34, 0.84, block)),
+                Positioned(
+                    right: w * 0.06,
+                    top: h * 0.08,
+                    child: rect(0.48, 0.38, blockSoft)),
+                Positioned(
+                    right: w * 0.06,
+                    top: h * 0.54,
+                    child: rect(0.48, 0.38, blockSoft)),
+              ],
+            );
         }
       },
     );

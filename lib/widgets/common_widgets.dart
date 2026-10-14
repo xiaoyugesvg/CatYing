@@ -659,3 +659,232 @@ Widget kbSheet(Widget child) => Builder(
         child: child,
       ),
     );
+
+// ============================================================================
+// 卡片式网格（弹层用）
+//
+// 用户 2026-10-15：「弹窗也太丑了，要卡片式的，一行 2-3 个这种」——
+// 原来"切换网页 / 切换订阅源 / 导入菜单"这类弹层都是**一行一个**的 ListTile，
+// 项一多就变成一条长长的列表，很占位置。这里统一成**等宽卡片网格**。
+//
+// 用法：
+//   CardGrid(columns: 2, children: [
+//     for (final x in list) CardGridItem(title: x.name, subtitle: x.url, ...),
+//   ])
+// ============================================================================
+
+/// 等宽卡片网格：一行固定 [columns] 个，每格自动等宽（按可用宽度算）。
+class CardGrid extends StatelessWidget {
+  const CardGrid({
+    super.key,
+    required this.children,
+    this.columns = 2,
+    this.gap = 8,
+  });
+
+  final List<Widget> children;
+
+  /// 一行几个（2 或 3）
+  final int columns;
+  final double gap;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, c) {
+        final n = columns < 1 ? 1 : columns;
+        final w = (c.maxWidth - gap * (n - 1)) / n;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            for (final ch in children) SizedBox(width: w, child: ch),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// 网格里的一张卡片：图标块 + 标题 +（可选）副标题。
+///
+/// [selected] 只改**描边和图标底色**，卡片底色保持中性（与全项目一致）。
+class CardGridItem extends StatelessWidget {
+  const CardGridItem({
+    super.key,
+    this.icon,
+    this.leading,
+    required this.title,
+    this.subtitle,
+    this.selected = false,
+    this.enabled = true,
+    this.onTap,
+    this.titleMaxLines = 1,
+    this.subtitleMaxLines = 1,
+    this.vertical = false,
+  });
+
+  final IconData? icon;
+
+  /// 自定义左侧内容（不传 [icon] 时用，比如首字头像）
+  final Widget? leading;
+  final String title;
+  final String? subtitle;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback? onTap;
+  final int titleMaxLines;
+  final int subtitleMaxLines;
+
+  /// 竖排（图标在上、标题在下）—— 一行 3 个这种窄格子用，横排会被挤成省略号。
+  final bool vertical;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = AppTheme.accentColor;
+    final sub = (subtitle ?? '').trim();
+    final iconBox = leading ??
+        Container(
+          width: 34,
+          height: 34,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected
+                ? accent.withValues(alpha: 0.18)
+                : accent.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon,
+              size: 18, color: selected ? accent : AppTheme.textSecondary),
+        );
+    final titleText = Text(
+      title,
+      maxLines: titleMaxLines,
+      overflow: TextOverflow.ellipsis,
+      textAlign: vertical ? TextAlign.center : TextAlign.start,
+      style: TextStyle(
+        fontSize: AppTheme.fontSubhead,
+        fontWeight: FontWeight.w600,
+        color: enabled ? AppTheme.textPrimary : AppTheme.textTertiary,
+      ),
+    );
+    final subText = sub.isEmpty
+        ? null
+        : Text(
+            sub,
+            maxLines: subtitleMaxLines,
+            overflow: TextOverflow.ellipsis,
+            textAlign: vertical ? TextAlign.center : TextAlign.start,
+            style: TextStyle(
+              fontSize: AppTheme.fontCaption,
+              color: AppTheme.textTertiary,
+            ),
+          );
+
+    return Opacity(
+      opacity: enabled ? 1 : 0.55,
+      child: Material(
+        color: AppTheme.backgroundSecondary,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: enabled ? onTap : null,
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: selected ? accent : AppTheme.borderLight,
+                width: selected ? 1.2 : 0.5,
+              ),
+            ),
+            child: vertical
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      iconBox,
+                      const SizedBox(height: 8),
+                      titleText,
+                      if (subText != null) ...[
+                        const SizedBox(height: 2),
+                        subText,
+                      ],
+                    ],
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      iconBox,
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            titleText,
+                            if (subText != null) ...[
+                              const SizedBox(height: 2),
+                              subText,
+                            ],
+                          ],
+                        ),
+                      ),
+                      if (selected)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 4),
+                          child:
+                              Icon(Icons.check_circle, size: 16, color: accent),
+                        ),
+                    ],
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 弹层顶部把手（40×4），弹层统一用它，避免每处自己画一条粗细不一。
+class SheetHandle extends StatelessWidget {
+  const SheetHandle({super.key});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 40,
+        height: 4,
+        decoration: BoxDecoration(
+          color: AppTheme.textTertiary.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(10),
+        ),
+      );
+}
+
+/// 卡片网格里的「首字头像」（源没有图标字段时用它，比灰方块好认）。
+class CardGridAvatar extends StatelessWidget {
+  const CardGridAvatar(this.name, {super.key, this.selected = false});
+
+  final String name;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = AppTheme.accentColor;
+    return Container(
+      width: 34,
+      height: 34,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: selected ? 0.18 : 0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        name.isNotEmpty ? name.characters.first : '?',
+        style: TextStyle(
+          fontSize: AppTheme.fontSubhead,
+          fontWeight: FontWeight.bold,
+          color: accent,
+        ),
+      ),
+    );
+  }
+}

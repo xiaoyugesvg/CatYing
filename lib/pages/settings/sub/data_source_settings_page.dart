@@ -109,23 +109,31 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             ),
             // 网页管理（用户 2026-10-14）：内置/订阅/本地导入的网页源，
             // 可切换、可拖动排序 —— 与「网页」页顶栏右边的设置按钮是同一页。
-            Obx(
-              () => SettingsRow(
-                icon: Icons.language_outlined,
-                title: '网页管理',
-                value: '${WebHomePrefs.instance.sources.length} 个网页',
-                onTap: () => Get.to(() => const WebHomeManagePage()),
-              ),
+            //
+            // ⚠️ 这里**不能包 `Obx`**（用户 2026-10-15 报「订阅管理里一条长白条」）：
+            //   `WebHomePrefs.sources` 是**普通 List**、不是 Rx，`Obx` 找不到
+            //   observable 会直接抛错 ⇒ 该子树塌成 ErrorWidget（就是那条灰白条），
+            //   并把下面所有行一起吃掉 ✗。改成「返回本页后 setState 刷新」。
+            SettingsRow(
+              icon: Icons.language_outlined,
+              title: '网页管理',
+              value: '${WebHomePrefs.instance.sources.length} 个网页',
+              onTap: () async {
+                await Get.to(() => const WebHomeManagePage());
+                if (mounted) setState(() {});
+              },
             ),
             // RSS 管理（用户 2026-10-15）：订阅源导入（JSON / OPML / 本地文件）、
-            // 启用停用、排序 —— 与「RSS」页顶栏右边的 ⚙ 是同一页。
-            Obx(
-              () => SettingsRow(
-                icon: Icons.rss_feed_outlined,
-                title: 'RSS 管理',
-                value: '${RssStore.instance.sources.length} 个订阅源',
-                onTap: () => Get.to(() => const RssManagePage()),
-              ),
+            // 启用停用、删除 —— 与「RSS」页顶栏右边的 ⚙ 是同一页。
+            // ⚠️ 同「网页管理」：`RssStore.sources` 也不是 Rx，别用 `Obx`。
+            SettingsRow(
+              icon: Icons.rss_feed_outlined,
+              title: 'RSS 管理',
+              value: '${RssStore.instance.sources.length} 个订阅源',
+              onTap: () async {
+                await Get.to(() => const RssManagePage());
+                if (mounted) setState(() {});
+              },
             ),
             // 引擎管理（Node / Python 手动加载）—— 用户 2026-10-13：
             // 从「通用设置」挪到这里（订阅管理页）

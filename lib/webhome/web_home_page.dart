@@ -9,6 +9,7 @@ import '../miniapp/services/ant_bridge.dart';
 import '../services/app_log.dart';
 import '../services/main_tab_controller.dart';
 import '../services/webview_page_color.dart';
+import '../widgets/common_widgets.dart';
 import 'web_home_fm_shim.dart';
 import 'web_home_manage_page.dart';
 import 'web_home_prefs.dart';
@@ -206,106 +207,75 @@ class _WebHomePageState extends State<WebHomePage> {
     );
   }
 
-  /// 源切换弹层：列出全部网页源，点一条即切换。
+  /// 切换网页：**卡片网格**（一行 2 个）—— 用户 2026-10-15：
+  /// 「弹窗也太丑了，要卡片式的，一行 2-3 个这种」。
   Future<void> _pickSource() async {
     final prefs = WebHomePrefs.instance;
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppTheme.backgroundSecondary,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => SafeArea(
         top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 10),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppTheme.textTertiary.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 6),
-              child: Row(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SheetHandle(),
+              const SizedBox(height: 14),
+              Row(
                 children: [
                   Text('切换网页',
                       style: TextStyle(
                           color: AppTheme.textPrimary,
-                          fontSize: AppTheme.fontHeadline,
+                          fontSize: AppTheme.fontTitle3,
                           fontWeight: FontWeight.w600)),
                   const Spacer(),
-                  Text('长按/拖动排序在「网页管理」',
+                  Text('长按拖动排序在「网页管理」',
                       style: TextStyle(
                           color: AppTheme.textTertiary,
                           fontSize: AppTheme.fontCaption)),
                 ],
               ),
-            ),
-            Flexible(
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  for (final s in prefs.sources)
-                    ListTile(
-                      dense: true,
-                      leading: Icon(
-                        s.id == prefs.selectedId
-                            ? Icons.radio_button_checked
-                            : Icons.radio_button_unchecked,
-                        size: 20,
-                        color: s.id == prefs.selectedId
-                            ? AppTheme.accentColor
-                            : AppTheme.textTertiary,
-                      ),
-                      title: Text(s.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: AppTheme.fontSubhead)),
-                      subtitle: Text(
-                        s.kind == WebHomeSourceKind.url
-                            ? s.value
-                            : '${s.kind.label} · ${s.value.split('/').last}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: AppTheme.textTertiary,
-                            fontSize: AppTheme.fontCaption),
-                      ),
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        if (s.id != prefs.selectedId) prefs.select(s.id);
-                      },
-                    ),
-                ],
+              const SizedBox(height: 14),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: CardGrid(
+                    columns: 2,
+                    children: [
+                      for (final s in prefs.sources)
+                        CardGridItem(
+                          title: s.name,
+                          subtitle: s.kind == WebHomeSourceKind.url
+                              ? s.value
+                              : '${s.kind.label} · ${s.value.split('/').last}',
+                          selected: s.id == prefs.selectedId,
+                          leading: CardGridAvatar(s.name,
+                              selected: s.id == prefs.selectedId),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            if (s.id != prefs.selectedId) prefs.select(s.id);
+                          },
+                        ),
+                    ],
+                  ),
+                ),
               ),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              dense: true,
-              leading: Icon(Icons.settings_outlined,
-                  size: 20, color: AppTheme.textSecondary),
-              title: Text('网页管理',
-                  style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: AppTheme.fontSubhead)),
-              subtitle: Text('导入订阅链接 / 本地文件、排序、改名、删除',
-                  style: TextStyle(
-                      color: AppTheme.textTertiary,
-                      fontSize: AppTheme.fontCaption)),
-              onTap: () {
-                Navigator.pop(ctx);
-                _openManage();
-              },
-            ),
-            const SizedBox(height: 6),
-          ],
+              const SizedBox(height: 12),
+              CardGridItem(
+                icon: Icons.settings_outlined,
+                title: '网页管理',
+                subtitle: '导入订阅链接 / 本地文件、排序、改名、删除',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openManage();
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );

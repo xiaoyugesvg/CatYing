@@ -12,6 +12,7 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
+import '../../widgets/common_widgets.dart';
 import '../models/rss_article.dart';
 import '../models/rss_source.dart';
 import '../services/rss_reader.dart';
@@ -147,8 +148,21 @@ class _RssPageState extends State<RssPage> {
     );
   }
 
+  /// 顶栏动作图标：内边距清零 + 固定 36 热区 ⇒ 视觉上**紧贴右边**。
+  Widget _topIcon(IconData icon, String tooltip, VoidCallback? onTap) =>
+      IconButton(
+        tooltip: tooltip,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+        iconSize: 20,
+        onPressed: onTap,
+        icon: Icon(icon, color: AppTheme.textPrimary),
+      );
+
+  /// 切换订阅源：**卡片网格**（一行 2 个）—— 用户 2026-10-15：
+  /// 「弹窗也太丑了，要卡片式的，一行 2-3 个这种」。
   Future<void> _pickSource() async {
-    final list = store.sources;
+    final list = store.sources.where((e) => e.enabled).toList();
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppTheme.backgroundSecondary,
@@ -157,26 +171,19 @@ class _RssPageState extends State<RssPage> {
       ),
       builder: (ctx) => SafeArea(
         top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 10),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppTheme.textTertiary.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 6),
-              child: Row(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SheetHandle(),
+              const SizedBox(height: 14),
+              Row(
                 children: [
                   Text('切换订阅源',
                       style: TextStyle(
                           color: AppTheme.textPrimary,
-                          fontSize: AppTheme.fontHeadline,
+                          fontSize: AppTheme.fontTitle3,
                           fontWeight: FontWeight.w600)),
                   const Spacer(),
                   Text('停用的源不显示',
@@ -185,63 +192,40 @@ class _RssPageState extends State<RssPage> {
                           fontSize: AppTheme.fontCaption)),
                 ],
               ),
-            ),
-            Flexible(
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  for (final s in list.where((e) => e.enabled))
-                    ListTile(
-                      dense: true,
-                      leading: Icon(
-                        s.id == store.selectedId
-                            ? Icons.radio_button_checked
-                            : Icons.radio_button_unchecked,
-                        size: 20,
-                        color: s.id == store.selectedId
-                            ? AppTheme.accentColor
-                            : AppTheme.textTertiary,
-                      ),
-                      title: Text(s.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: AppTheme.fontSubhead)),
-                      subtitle: Text(s.url,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: AppTheme.textTertiary,
-                              fontSize: AppTheme.fontCaption)),
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        if (s.id != store.selectedId) store.select(s.id);
-                      },
-                    ),
-                ],
+              const SizedBox(height: 14),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: CardGrid(
+                    columns: 2,
+                    children: [
+                      for (final s in list)
+                        CardGridItem(
+                          title: s.name,
+                          subtitle: s.url,
+                          selected: s.id == store.selectedId,
+                          leading: CardGridAvatar(s.name,
+                              selected: s.id == store.selectedId),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            if (s.id != store.selectedId) store.select(s.id);
+                          },
+                        ),
+                    ],
+                  ),
+                ),
               ),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              dense: true,
-              leading: Icon(Icons.settings_outlined,
-                  size: 20, color: AppTheme.textSecondary),
-              title: Text('RSS 管理',
-                  style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: AppTheme.fontSubhead)),
-              subtitle: Text('导入订阅链接 / OPML / 本地文件、排序、删除',
-                  style: TextStyle(
-                      color: AppTheme.textTertiary,
-                      fontSize: AppTheme.fontCaption)),
-              onTap: () {
-                Navigator.pop(ctx);
-                _openManage();
-              },
-            ),
-            const SizedBox(height: 6),
-          ],
+              const SizedBox(height: 12),
+              CardGridItem(
+                icon: Icons.settings_outlined,
+                title: 'RSS 管理',
+                subtitle: '导入订阅链接 / OPML / 本地文件',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openManage();
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -258,14 +242,14 @@ class _RssPageState extends State<RssPage> {
         children: [
           SizedBox(height: topInset),
           SizedBox(
-            height: 48,
+            height: 46,
             child: Row(
               children: [
                 const SizedBox(width: 16),
                 Text('RSS',
                     style: TextStyle(
                         color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontTitle2,
+                        fontSize: AppTheme.fontTitle3,
                         fontWeight: FontWeight.w600)),
                 const SizedBox(width: 8),
                 if (src != null)
@@ -280,29 +264,13 @@ class _RssPageState extends State<RssPage> {
                     ),
                   ),
                 const Spacer(),
-                IconButton(
-                  tooltip: '切换订阅源',
-                  visualDensity: VisualDensity.compact,
-                  iconSize: 20,
-                  onPressed: _pickSource,
-                  icon: Icon(Icons.swap_horiz_rounded,
-                      color: AppTheme.textPrimary),
-                ),
-                IconButton(
-                  tooltip: '刷新',
-                  visualDensity: VisualDensity.compact,
-                  iconSize: 20,
-                  onPressed: _loading ? null : _reload,
-                  icon: Icon(Icons.refresh_rounded, color: AppTheme.textPrimary),
-                ),
-                IconButton(
-                  tooltip: 'RSS 管理',
-                  visualDensity: VisualDensity.compact,
-                  iconSize: 20,
-                  onPressed: _openManage,
-                  icon: Icon(Icons.tune_rounded, color: AppTheme.textPrimary),
-                ),
-                const SizedBox(width: 4),
+                // ⚠️ 三个图标必须**贴到右边**（用户 2026-10-15：「图标没有到边」）：
+                //   IconButton 自带 8px 内边距 + 末尾 4px 留白 ⇒ 视觉上离屏幕边
+                //   还有一段。这里把内边距清零、只留 36 的点击热区 + 末尾 2px。
+                _topIcon(Icons.swap_horiz_rounded, '切换订阅源', _pickSource),
+                _topIcon(Icons.refresh_rounded, '刷新', _loading ? null : _reload),
+                _topIcon(Icons.tune_rounded, 'RSS 管理', _openManage),
+                const SizedBox(width: 2),
               ],
             ),
           ),
@@ -369,6 +337,22 @@ class _RssPageState extends State<RssPage> {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
     if (_articles.isEmpty) {
+      // 站点型源（Legado `singleUrl`）：它本来就没有文章列表 ⇒ 别报"没抓到内容"，
+      // 直接告诉用户这是站点型、给「用网页打开」出口（用户 2026-10-15 导入的
+      // 源仓库 / Yiove / 使用文档 这批都属于这种）。
+      if (_error.isEmpty && src.isSiteOnly) {
+        return _emptyView(
+          icon: Icons.public_rounded,
+          title: '「${src.name}」是站点型订阅源',
+          hint: '它本身是一个网站、没有文章列表，所以抓不到文章。\n可以用网页直接打开看。',
+          btnText: '用网页打开',
+          onBtn: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => RssWebViewPage(url: src.url, title: src.name),
+            ),
+          ),
+        );
+      }
       return RefreshIndicator(
         onRefresh: () async => _reload(),
         color: AppTheme.accentColor,

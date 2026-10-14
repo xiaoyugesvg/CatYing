@@ -1,4 +1,4 @@
-// lib/rss/pages/rss_article_page.dart
+﻿// lib/rss/pages/rss_article_page.dart
 //
 // 文章正文页：封面 + 标题 + 来源·时间 + 正文（纯文本，块级换行）。
 // 右上角「用网页打开」兜底（正文提取失败 / 想看图 / 想评论时用）。
@@ -67,7 +67,7 @@ class _RssArticlePageState extends State<RssArticlePage> {
                 size: 20, color: AppTheme.textSecondary),
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
-                builder: (_) => _WebViewPage(url: a.link, title: a.title),
+                builder: (_) => RssWebViewPage(url: a.link, title: a.title),
               ),
             ),
           ),
@@ -126,7 +126,7 @@ class _RssArticlePageState extends State<RssArticlePage> {
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) =>
-                            _WebViewPage(url: a.link, title: a.title),
+                            RssWebViewPage(url: a.link, title: a.title),
                       ),
                     ),
                     icon: const Icon(Icons.open_in_browser_rounded, size: 16),
@@ -140,17 +140,17 @@ class _RssArticlePageState extends State<RssArticlePage> {
 }
 
 /// 极简网页查看页（RSS 模块自带，不依赖小程序 / 网页模块的宿主）。
-class _WebViewPage extends StatefulWidget {
-  const _WebViewPage({required this.url, required this.title});
+class RssWebViewPage extends StatefulWidget {
+  const RssWebViewPage({super.key, required this.url, required this.title});
 
   final String url;
   final String title;
 
   @override
-  State<_WebViewPage> createState() => _WebViewPageState();
+  State<RssWebViewPage> createState() => _RssWebViewPageState();
 }
 
-class _WebViewPageState extends State<_WebViewPage> {
+class _RssWebViewPageState extends State<RssWebViewPage> {
   late final WebViewController _c;
   int _progress = 0;
 

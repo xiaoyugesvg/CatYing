@@ -26,6 +26,7 @@ import 'package:flutter/services.dart';
 import '../../common/theme.dart';
 import '../../reading/pages/book_source_qr_scan_page.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/common_widgets.dart';
 import '../models/rss_source.dart';
 import '../services/rss_store.dart';
 
@@ -147,37 +148,8 @@ class _RssManagePageState extends State<RssManagePage> {
             if (store.sources.isEmpty) return;
             _share(store.sources);
           }),
-        PopupMenuButton<String>(
-          tooltip: '导入 / 新建',
-          icon: Icon(Icons.menu_rounded, color: AppTheme.textPrimary),
-          onSelected: (v) async {
-            switch (v) {
-              case 'new':
-                await _createSource();
-              case 'file':
-                await _importFile();
-              case 'net':
-                await _importNet();
-              case 'qr':
-                await _importQr();
-              case 'default':
-                final n = await store.restoreBuiltins();
-                AppToast.message(n == 0 ? '内置订阅源都在' : '已导入 $n 个内置订阅源');
-              case 'share':
-                if (store.sources.isEmpty) return;
-                await _share(store.sources);
-            }
-          },
-          itemBuilder: (_) => [
-            _menuItem('new', Icons.add_rounded, '新建源'),
-            _menuItem('file', Icons.folder_open_rounded, '本地导入'),
-            _menuItem('net', Icons.cloud_download_outlined, '网络导入'),
-            _menuItem('qr', Icons.qr_code_scanner_rounded, '二维码导入'),
-            _menuItem('default', Icons.restore_rounded, '导入默认'),
-            _menuItem('share', Icons.ios_share_rounded, '分享'),
-          ],
-        ),
-        const SizedBox(width: 4),
+        _appBarIcon(Icons.menu_rounded, '导入 / 新建', _showImportSheet),
+        const SizedBox(width: 2),
       ],
     );
   }
@@ -185,22 +157,94 @@ class _RssManagePageState extends State<RssManagePage> {
   Widget _appBarIcon(IconData icon, String tooltip, VoidCallback onTap) =>
       IconButton(
         tooltip: tooltip,
-        visualDensity: VisualDensity.compact,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
         icon: Icon(icon, color: AppTheme.textPrimary),
         onPressed: onTap,
       );
 
-  PopupMenuItem<String> _menuItem(String v, IconData icon, String text) =>
-      PopupMenuItem<String>(
-        value: v,
-        child: Row(
-          children: [
-            Icon(icon, size: 18, color: AppTheme.textSecondary),
-            const SizedBox(width: 10),
-            Text(text, style: TextStyle(color: AppTheme.textPrimary)),
-          ],
+  // ── 导入 / 新建菜单（卡片网格）──────────────────────────────────
+
+  /// 六个入口：一行 3 张卡 × 2 行（原来是一行一个的长列表，用户嫌丑且占地）
+  static const List<(String, IconData, String)> _importActions = [
+    ('new', Icons.add_rounded, '新建源'),
+    ('file', Icons.folder_open_rounded, '本地导入'),
+    ('net', Icons.cloud_download_outlined, '网络导入'),
+    ('qr', Icons.qr_code_scanner_rounded, '二维码导入'),
+    ('default', Icons.restore_rounded, '导入默认'),
+    ('share', Icons.ios_share_rounded, '分享'),
+  ];
+
+  Future<void> _showImportSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SheetHandle(),
+              const SizedBox(height: 14),
+              Text('导入订阅源',
+                  style: TextStyle(
+                      fontSize: AppTheme.fontTitle3,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary)),
+              const SizedBox(height: 4),
+              Text('支持 JSON / OPML / 纯文本 / 二维码',
+                  style: TextStyle(
+                      fontSize: AppTheme.fontFootnote,
+                      color: AppTheme.textTertiary)),
+              const SizedBox(height: 16),
+              CardGrid(
+                columns: 3,
+                children: [
+                  for (final a in _importActions)
+                    CardGridItem(
+                      icon: a.$2,
+                      title: a.$3,
+                      vertical: true,
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _runImportAction(a.$1);
+                      },
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
-      );
+      ),
+    );
+  }
+
+  Future<void> _runImportAction(String v) async {
+    switch (v) {
+      case 'new':
+        await _createSource();
+      case 'file':
+        await _importFile();
+      case 'net':
+        await _importNet();
+      case 'qr':
+        await _importQr();
+      case 'default':
+        final n = await store.restoreBuiltins();
+        AppToast.message(n == 0 ? '内置订阅源都在' : '已导入 $n 个内置订阅源');
+      case 'share':
+        if (store.sources.isEmpty) {
+          AppToast.message('还没有订阅源');
+          return;
+        }
+        await _share(store.sources);
+    }
+  }
 
   // ── 常驻导入卡片 ────────────────────────────────────────────────
 
@@ -799,14 +843,7 @@ class _RssManagePageState extends State<RssManagePage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: 12),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppTheme.textTertiary.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
+            const SheetHandle(),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
               child: Column(

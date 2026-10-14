@@ -124,6 +124,13 @@ class RssSource {
   /// 而没有 `ruleArticles` 的源，按文档仍属"标准 RSS 源"。
   bool get hasRules => (ruleArticles ?? '').trim().isNotEmpty;
 
+  /// 「站点型」源：Legado 的 `singleUrl`（源本身就是**一个站**，不是 RSS 列表）
+  /// 且**没有列表规则** ⇒ 它没有文章列表，只能当网页看。
+  ///
+  /// 用户 2026-10-15 导入的那份 txt（源仓库 / Yiove / 喵公子 / 使用文档…）
+  /// 全是这种：能导入 ✓，但抓不出文章（本来就设计成"直开站点"）。
+  bool get isSiteOnly => singleUrl && !hasRules;
+
   RssSource copyWith({String? name, String? group, bool? enabled, String? sortUrl}) =>
       RssSource(
         id: id,
