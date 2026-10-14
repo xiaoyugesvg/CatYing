@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'prefs_mirror.dart';
+
 /// 底部导航栏可管理的一项。
 ///
 /// ── ⚠️ 图标与 tab 下标为什么放在枚举里 ──────────────────────────
@@ -95,7 +97,10 @@ class NavFeatureService extends GetxService {
   @override
   void onInit() {
     super.onInit();
-    load();
+    // ⚠️ 这里**不要**再调 load()：`main.dart:254` 已经显式 `await
+    // NavFeatureService.instance.load()` 过一次。两处都调会让 load() 并发跑两遍
+    // （两次读同一个值、两次 _persist 并发写盘），纯属浪费且有竞态。
+    // 保留 main 里那次显式 await —— 它保证"恢复设置之后、界面用到之前"已经加载完。
   }
 
   Future<void> load() async {
@@ -145,7 +150,15 @@ class NavFeatureService extends GetxService {
 
     enabled.assignAll(on);
     disabled.assignAll(off);
-    await _persist();
+    // 🔴 2026-10-14：**没有持久化记录时不要回写**。
+    //   原来无条件 _persist()：一旦 `_enabledKey` 因为没落盘而丢失，
+    //   `enabledSet == null` 会被当成"全部启用"，紧接着把这份"全部启用"
+    //   写回磁盘 —— 用户的配置就从"暂时丢了"变成"永久没了"。
+    //   现在只有确实读到了持久化记录才回写，缺记录时保持不动：
+    //   界面照常按默认值渲染，但不会覆盖掉任何可能存在的数据。
+    if (enabledRaw != null) {
+      await _persist();
+    }
   }
 
   static NavFeature? _byId(String id) {
@@ -160,6 +173,12 @@ class NavFeatureService extends GetxService {
     await prefs.setStringList(_enabledKey, enabled.map((f) => f.id).toList());
     await prefs.setString(
         _orderKey, jsonEncode([...enabled, ...disabled].map((f) => f.id).toList()));
+    // 🔴 2026-10-14：菜单栏改动**立刻**落进文件镜像。
+    //   用户实测「用菜单设置改了菜单栏，重启后又没了」——周期快照 15s 一次，
+    //   改完马上杀 App 就丢；而这个键一丢，`load()` 会把"没有任何持久化记录"
+    //   当成"全部启用"，再 _persist() 写回，用户的配置就被**永久**冲掉了。
+    //   （恢复侧由 PrefsMirror.restoreIfLost 的逐键补齐兜底。）
+    PrefsMirror.snapshotSoon();
   }
 
   Future<void> setEnabled(NavFeature f, bool v) async {

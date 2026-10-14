@@ -132,14 +132,19 @@ class KSPlayer extends AppPlayer {
     _duration = Duration.zero;
     stream.addPosition(Duration.zero);
     stream.addDuration(Duration.zero);
-    await _channel.invokeMethod('open', {
-      'url': media.url,
-      'headers': media.httpHeaders ?? const <String, String>{},
-      'positionMs': (media.start?.inMilliseconds ?? 0),
-      // 直播流原生侧 AVPlayer 优先（FFmpeg 拆 DVB 数据轨会野指针闪退，
-      // 见 KSEngine.open 的 live 分支注释）
-      'live': live,
-    });
+    // ⚠️ 2026-10-14：加超时 —— 原生 `open` 若卡住（挂起直链 / 原生异常未回
+    //   result），`MethodChannel.invokeMethod` 的 Future 会**永久 pending**，
+    //   起播链路后面的逻辑全部不执行。
+    await _channel
+        .invokeMethod('open', {
+          'url': media.url,
+          'headers': media.httpHeaders ?? const <String, String>{},
+          'positionMs': (media.start?.inMilliseconds ?? 0),
+          // 直播流原生侧 AVPlayer 优先（FFmpeg 拆 DVB 数据轨会野指针闪退，
+          // 见 KSEngine.open 的 live 分支注释）
+          'live': live,
+        })
+        .timeout(const Duration(seconds: 30));
     if (!play) {
       await pause();
     } else {

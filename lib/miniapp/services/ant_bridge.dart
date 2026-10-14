@@ -384,8 +384,9 @@ class AntBridge {
         : const <String, String>{};
     final body = args['data'];
 
+    Dio? client; // 见 finally：局部 Dio 必须显式释放
     try {
-      final resp = await Dio(BaseOptions(
+      final dio = client = Dio(BaseOptions(
         connectTimeout: Duration(milliseconds: timeoutMs),
         receiveTimeout: Duration(milliseconds: timeoutMs),
         followRedirects: followRedirects == true,
@@ -393,7 +394,8 @@ class AntBridge {
             ? ResponseType.bytes
             : ResponseType.plain,
         headers: {'User-Agent': 'okhttp/4.12.0', ...headers},
-      )).request<dynamic>(
+      ));
+      final resp = await dio.request<dynamic>(
         url,
         data: body is Map ? jsonEncode(body) : body,
         options: Options(method: method),
@@ -477,6 +479,9 @@ class AntBridge {
         };
       }
       throw AntError('REQUEST_FAILED', '网络请求失败: ${e.message}');
+    } finally {
+      // 局部新建的 Dio 内部持有 HttpClient，不显式关闭会泄漏连接池
+      client?.close(force: true);
     }
   }
 

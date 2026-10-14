@@ -8,6 +8,7 @@ spider_runner.py —— Python spider 源适配层标准入口
 模块路由（相对本文件所在根目录）：
   - src.spider.video.<源名>    T3 视频源（TVBox/drpy 风格）
   - src.spider.book.<源名>     书源（search/bookInfo/toc/content）
+  - src.spider.img.<源名>      图源/漫画源（search/detail/images）
 
 返回值约定：
   - 成功：可 JSON 序列化对象（dict/list/str/int…）→ json.dumps(ensure_ascii=False)
@@ -157,9 +158,21 @@ def call(module, method, args_json):
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         # 返回错误 JSON（Swift 侧拿不到 traceback，拼进 error 方便排查）
+        msg = "{}: {}".format(type(e).__name__, e)
+        # 附上 base.spider 记下的**真实网络失败原因**。
+        # 为什么必须附（用户 2026-10-14）：`fetch()` 失败时返回 None，
+        # 源脚本接着 `.json()` 只会抛 "AttributeError: 'NoneType' object has
+        # no attribute 'json'" —— 光看这句根本不知道是域名解析失败还是超时还是 404。
+        # base.spider 会把原因记在模块级 LAST_ERROR 上，这里取出来拼在末尾。
+        try:
+            from base import spider as _base_spider
+            if getattr(_base_spider, "LAST_ERROR", ""):
+                msg += "（真实原因：{}）".format(_base_spider.LAST_ERROR)
+        except Exception:
+            pass
         return json.dumps({
             "ok": False,
-            "error": "{}: {}".format(type(e).__name__, e),
+            "error": msg,
             "trace": traceback.format_exc(),
         }, ensure_ascii=False)
 
@@ -167,7 +180,7 @@ def call(module, method, args_json):
 def list_sources():
     """列出已安装的 Python 源（仓库页/调试用）。"""
     import pkgutil
-    out = {"video": [], "book": []}
+    out = {"video": [], "book": [], "img": []}
     for kind in out:
         pkg = importlib.import_module("src.spider." + kind)
         for m in pkgutil.iter_modules(pkg.__path__):
@@ -220,8 +233,8 @@ def _load_module(kind, key, code):
 
 def install_source(kind, key, code):
     """对外入口：注册/更新一个 Python 源。kind=video|book。"""
-    if kind not in ("video", "book"):
-        return json.dumps({"ok": False, "error": "kind 必须是 video/book"})
+    if kind not in ("video", "book", "img"):
+        return json.dumps({"ok": False, "error": "kind 必须是 video/book/img"})
     ok, msg = _load_module(kind, key, code)
     return json.dumps({"ok": ok, "message": msg}, ensure_ascii=False)
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../common/theme.dart';
+import '../../../services/prefs_mirror.dart';
 import '../../../widgets/common_widgets.dart';
 
 /// 设置子页的共享构件。
@@ -155,7 +156,7 @@ class SettingsDialogs {
 /// 分类子页的统一外壳：标题栏 + 可滚动的分组内容。
 ///
 /// 让 8 个子页外观一致，也省掉每页重复写 Scaffold/AppBar。
-class SettingsSubPage extends StatelessWidget {
+class SettingsSubPage extends StatefulWidget {
   final String title;
   final List<Widget> children;
 
@@ -168,6 +169,31 @@ class SettingsSubPage extends StatelessWidget {
     required this.children,
     this.action,
   });
+
+  @override
+  State<SettingsSubPage> createState() => _SettingsSubPageState();
+}
+
+class _SettingsSubPageState extends State<SettingsSubPage> {
+  // 转发到 widget.* —— 这样下面 `_buildPage` 里原有的 `title` / `children` /
+  // `action` 引用**一行都不用改**（改动面越小越不容易出错）。
+  String get title => widget.title;
+  List<Widget> get children => widget.children;
+  Widget? get action => widget.action;
+
+  /// 离开设置子页就落一次盘。
+  ///
+  /// 为什么放这里（用户 2026-10-14）：这个 App 被崩溃/信号硬杀是常态，
+  /// 而设置项的写入点只接了少数几处（菜单栏 / 悬浮样式 / 只显示图标 / 幻灯样式），
+  /// 其余（播放、弹幕、订阅、主题…）以前只能等 15s 周期快照或切后台 ——
+  /// **改完立刻被杀就丢**。设置子页是这些改动的唯一出口，
+  /// 在这里落一次盘就把覆盖面补全了。
+  /// `snapshotSoon()` 内部会先 `flushNow()`（让 plist 立即落盘）再写镜像文件。
+  @override
+  void dispose() {
+    PrefsMirror.snapshotSoon();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

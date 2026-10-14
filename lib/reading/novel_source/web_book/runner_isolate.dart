@@ -100,6 +100,12 @@ class BookSourceRunner {
     Duration? timeout,
   }) async {
     final receive = ReceivePort();
+    // ── worker 崩溃 / 提前退出的**即时感知**（2026-10-14）────────────
+    //   原来只 `receive.first.timeout(60s)`：worker 里若发生 try/catch 之外的
+    //   致命错误（OOM、isolate 被杀）⇒ **一条消息都收不到** ⇒ 调用方白等满
+    //   60s 才拿到 timeout ✗。补上 onError / onExit 两个端口，崩溃立刻返回。
+    final errorPort = ReceivePort();
+    final exitPort = ReceivePort();
     Isolate? isolate;
     try {
       // 代理必须在**主 isolate**（= 本方法所在）启动：worker 里发起同步请求会
@@ -142,25 +148,54 @@ class BookSourceRunner {
           fetchJs,
         ],
         debugName: 'book-source-runner',
+        onError: errorPort.sendPort, // worker 内未捕获异常 → [error, stack]
+        onExit: exitPort.sendPort, // worker 结束 → null
       );
-      final msg = await receive.first.timeout(
+      // 四路竞速：正常回包 / worker 异常 / worker 退出 / 超时。
+      final done = Completer<Map<String, Object?>>();
+      receive.listen((m) {
+        if (done.isCompleted) return;
+        done.complete(m is Map
+            ? m.cast<String, Object?>()
+            : <String, Object?>{
+                'ok': false,
+                'error': 'isolate 返回了意外类型: ${m.runtimeType}',
+              });
+      });
+      errorPort.listen((e) {
+        if (done.isCompleted) return;
+        final detail = (e is List && e.isNotEmpty) ? e.first : e;
+        done.complete(
+            <String, Object?>{'ok': false, 'error': 'worker isolate 异常: $detail'});
+      });
+      // exit 事件在 isolate **真正终止后**才发出；而 `reply.send` 是异步投递，
+      // 两者可能竞争 ⇒ 给 50ms 宽限，避免把「正常回包 + 随即退出」误判成失败。
+      exitPort.listen((_) async {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        if (done.isCompleted) return;
+        done.complete(const <String, Object?>{
+          'ok': false,
+          'error': 'worker isolate 提前退出（无结果）',
+        });
+      });
+      final msg = await done.future.timeout(
         timeout ?? defaultTimeout,
         onTimeout: () => const <String, Object?>{'ok': false, 'error': 'timeout'},
       );
-      if (msg is Map) {
-        return RunnerResult(
-          ok: msg['ok'] == true,
-          data: msg['data'],
-          error: msg['error']?.toString(),
-        );
-      }
-      return RunnerResult(ok: false, error: 'isolate 返回了意外类型: ${msg.runtimeType}');
+      return RunnerResult(
+        ok: msg['ok'] == true,
+        data: msg['data'],
+        error: msg['error']?.toString(),
+      );
     } catch (e) {
       return RunnerResult(ok: false, error: '$e');
     } finally {
       // ⚠️ 必须杀：sync_http 无超时能力，超时后 isolate 仍可能卡在阻塞 socket 上
       isolate?.kill(priority: Isolate.immediate);
+      // close() 会连带取消上面三个 listen 的订阅，无需单独 cancel
       receive.close();
+      errorPort.close();
+      exitPort.close();
     }
   }
 

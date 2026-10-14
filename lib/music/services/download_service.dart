@@ -178,6 +178,7 @@ class MusicDownloadService extends ChangeNotifier {
     d.progress = 0;
     d.error = '';
     notifyListeners();
+    Dio? client; // 局部新建的 Dio（见下）必须在 finally 里显式释放，否则连接池泄漏
     try {
       final q = SettingsStore.instance.audioQuality.value;
       // 地址 + headers 都要（喜马拉雅的直链必须带 UA）
@@ -191,9 +192,22 @@ class MusicDownloadService extends ChangeNotifier {
       }
 
       final dir = await _dir();
-      final file = File(
-        '${dir.path}/${d.song.source.key}-${d.song.id}${_ext(info.url, info.type)}',
+      // 洞 V（2026-10-14）：文件名前两段（`source.key` / `song.id`）来自平台
+      //   或**第三方插件**，是不可信输入 —— 含 `/`、`\`、`..` 时会拼出
+      //   `../../xxx` 逃出下载目录（zip slip 同款）。这里先净化成单层安全
+      //   文件名，再做 `startsWith(base)` 前缀校验兜底；扩展名由 `_ext`
+      //   限定在白名单内，本来就安全。
+      final name = _safeFileName(
+        '${d.song.source.key}-${d.song.id}${_ext(info.url, info.type)}',
       );
+      final base = '${dir.path}/';
+      final file = File('$base$name');
+      if (name.isEmpty || !file.path.startsWith(base)) {
+        d.status = MusicDownloadStatus.failed;
+        d.error = '文件名非法，已拒绝写入';
+        notifyListeners();
+        return;
+      }
       // 同名残留先删掉，避免追加写入出一个坏文件
       if (file.existsSync()) {
         try {
@@ -206,7 +220,7 @@ class MusicDownloadService extends ChangeNotifier {
       // 遇到"只回 headers 不给 body"的源，这次 await **永不返回**，
       // 而 `_pump()` 的串行循环就卡在这里 → **整个下载队列永久停摆** ✗
       //（用户之后点多少首都不会开始下载，也没有取消入口）。
-      final dio = Dio(BaseOptions(
+      final dio = client = Dio(BaseOptions(
         connectTimeout: const Duration(seconds: 15),
         receiveTimeout: const Duration(seconds: 60), // 大文件给足
       ));
@@ -249,6 +263,10 @@ class MusicDownloadService extends ChangeNotifier {
       d.bytes = 0;
       // 下载失败以前**既不写日志也不提示**（模块里唯一没有日志的失败分支）✗
       AppLog.instance.log('[Music] 下载失败 ${d.song.name}: $e');
+    } finally {
+      // 洞：这个 Dio 每下首歌都新建一次，不 close 会持续遗留 HttpClient 连接池
+      //（每首歌一个，靠 15s idleTimeout 才回收）。下载已结束，可安全强关。
+      client?.close(force: true);
     }
     notifyListeners();
   }
@@ -289,6 +307,16 @@ class MusicDownloadService extends ChangeNotifier {
     final dir = Directory('${docs.path}/music');
     if (!dir.existsSync()) dir.createSync(recursive: true);
     return dir;
+  }
+
+  /// 洞 V：下载文件名净化 —— 把路径分隔符与文件系统敏感字符替换成 `_`
+  /// （`../x` → `.._x`），保证结果是**单层安全文件名**，不会穿越出下载目录。
+  /// 调用方仍会做 `startsWith(base)` 前缀校验兜底。
+  static String _safeFileName(String raw) {
+    var s = raw.replaceAll(RegExp(r'[\x00-\x1f]'), '');
+    s = s.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    if (s == '.' || s == '..') return '';
+    return s;
   }
 
   /// 扩展名：优先用接口给的 type，其次从 URL 猜，最后 mp3

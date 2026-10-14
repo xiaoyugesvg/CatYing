@@ -102,7 +102,11 @@ class LegadoHttpProxy {
       //（worker isolate 里的 `AnalyzeUrl` / `java.webView` 只发请求 ✓）
       final browserMode = req.headers.value('x-legado-browser');
       if (browserMode != null && browserMode.isNotEmpty) {
-        await _handleBrowser(res, target, browserMode);
+        // 可选：`java.webView(content, url, js)` 的注入 js（base64，见
+        // legado_java_prelude.dart 的 `_browser`）—— 非空时回 js 执行结果，
+        // 为空时回渲染后 HTML。
+        await _handleBrowser(
+            res, target, browserMode, req.headers.value('x-legado-js'));
         return;
       }
 
@@ -188,12 +192,22 @@ class LegadoHttpProxy {
   static Future<void> _handleBrowser(
     HttpResponse res,
     String target,
-    String mode,
-  ) async {
+    String mode, [
+    String? jsB64,
+  ]) async {
     try {
       String text = '';
       if (mode == 'fetch') {
-        text = await WebViewImageFetcher().fetchHtml(target);
+        // 注入 js（可选）：`java.webView(content, url, js)` 的第三参 ——
+        // 非空时返回 js 在页面上下文的执行结果（如 `document.cookie`），
+        // 为空时返回渲染后 HTML。
+        var js = '';
+        if (jsB64 != null && jsB64.isNotEmpty) {
+          try {
+            js = utf8.decode(base64.decode(jsB64), allowMalformed: true);
+          } catch (_) {/* 解码失败 → 降级为「无 js」 */}
+        }
+        text = await WebViewImageFetcher().fetchHtml(target, js);
       } else {
         _openInAppBrowser(target);
       }

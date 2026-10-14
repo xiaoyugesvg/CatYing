@@ -1047,8 +1047,8 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
 //
 // 2026-10-14 改版（用户要求）：
 //   · 去掉卡面上的「本地网页程序 / 在线站点 / 影视 N」副标题 —— 卡面只留封面；
-//   · **名称移到卡片外面**、居中显示（与阅读模块同一套"封面与名称分离"结构：
-//     只有封面带卡片外壳，名称在卡外、不带任何装饰）；
+//   · 名称位置：先按"移到卡片外面居中"做过一版，用户随后改主意 ——
+//     最终要**压在封面底部、居中**（配一层底部压暗渐变保证白字可读）；
 //   · 封面卡改成**每个程序一个稳定随机色**（按 id 哈希取色）——
 //     同一个程序每次进来同色，不会每帧乱跳；不同程序之间颜色错开。
 class _MiniAppCard extends StatelessWidget {
@@ -1069,36 +1069,39 @@ class _MiniAppCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final initial = app.name.isNotEmpty ? app.name.characters.first : '程';
-    return Column(
-      children: [
-        // 封面卡：彩色圆角方块 + 首字
-        Expanded(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: onTap,
-            onLongPress: onLongPress,
-            child: Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    tint.withValues(alpha: 0.92),
-                    tint.withValues(alpha: 0.60),
-                  ],
-                ),
-                // 用同色系投影代替玻璃描边：彩色卡配灰色描边会显脏
-                boxShadow: [
-                  BoxShadow(
-                    color: tint.withValues(alpha: 0.28),
-                    blurRadius: 12,
-                    offset: const Offset(0, 5),
-                  ),
-                ],
-              ),
-              alignment: Alignment.center,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: Container(
+        width: double.infinity,
+        // antiAlias：底部那层压暗渐变要跟着圆角裁，否则四角会露出方角
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              tint.withValues(alpha: 0.92),
+              tint.withValues(alpha: 0.60),
+            ],
+          ),
+          // 用同色系投影代替玻璃描边：彩色卡配灰色描边会显脏
+          boxShadow: [
+            BoxShadow(
+              color: tint.withValues(alpha: 0.28),
+              blurRadius: 12,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 首字：略往上挪，给底部名称留出位置，别挤在一起
+            Align(
+              alignment: const Alignment(0, -0.22),
               child: Text(
                 initial,
                 style: const TextStyle(
@@ -1108,22 +1111,49 @@ class _MiniAppCard extends StatelessWidget {
                 ),
               ),
             ),
-          ),
+            // 底部压暗：白字直接压在彩色底上会糊，这层保证可读
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 46,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        Colors.black.withValues(alpha: 0.45),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // 名称：**压在封面底部、居中**（用户 2026-10-14）
+            Positioned(
+              left: 6,
+              right: 6,
+              bottom: 6,
+              child: Text(
+                app.name,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11.5,
+                  height: 1.15,
+                  fontWeight: FontWeight.w600,
+                  shadows: [Shadow(blurRadius: 6, color: Colors.black54)],
+                ),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 6),
-        // 名称：卡**外**、居中、无装饰
-        Text(
-          app.name,
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
+      ),
     );
   }
 }

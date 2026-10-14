@@ -84,22 +84,27 @@ class RemoteConfigService extends ChangeNotifier {
     //     → 直接挂**安全** ✓✓
     //   · 代理**关闭** ✓ → 返回 false ✓ **一行不改** ✓（与从前完全一致 ✓✓）
     applyGlobalProxy(dio);
-    final SharedPreferences prefs;
+    // 局部新建的 Dio 必须显式释放，否则遗留 HttpClient 连接池
     try {
-      prefs = await SharedPreferences.getInstance();
-    } catch (e) {
-      _log('获取 prefs 失败（保留缓存）: $e');
-      return;
-    }
+      final SharedPreferences prefs;
+      try {
+        prefs = await SharedPreferences.getInstance();
+      } catch (e) {
+        _log('获取 prefs 失败（保留缓存）: $e');
+        return;
+      }
 
-    // 1. 公告
-    final notificationChanged = await _fetchNotification(dio, prefs);
+      // 1. 公告
+      final notificationChanged = await _fetchNotification(dio, prefs);
 
-    // 2. 地址配置（与公告独立，始终执行）
-    final urlChanged = await _fetchUrlConfig(dio, prefs);
+      // 2. 地址配置（与公告独立，始终执行）
+      final urlChanged = await _fetchUrlConfig(dio, prefs);
 
-    if (notificationChanged || urlChanged) {
-      notifyListeners();
+      if (notificationChanged || urlChanged) {
+        notifyListeners();
+      }
+    } finally {
+      dio.close(force: true);
     }
   }
 

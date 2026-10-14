@@ -546,8 +546,9 @@ class ZlibraryService extends ChangeNotifier {
   ///
   /// 失败/超时一律静默：不阻塞 init、不影响既有选优流程。
   Future<void> _discoverDomainsFromEapi() async {
+    Dio? client; // 见 finally：局部 Dio 必须显式释放
     try {
-      final dio = Dio(
+      final dio = client = Dio(
         BaseOptions(
           connectTimeout: const Duration(seconds: 8),
           receiveTimeout: const Duration(seconds: 8),
@@ -591,6 +592,8 @@ class ZlibraryService extends ChangeNotifier {
       _log('官方 eapi 域名发现：候选里没有能应答的节点（忽略）');
     } catch (e) {
       _log('官方 eapi 域名发现失败（忽略）：$e');
+    } finally {
+      client?.close(force: true); // 局部新建的 Dio 必须显式释放，否则遗留 HttpClient 连接池
     }
   }
 
@@ -2239,9 +2242,21 @@ class ZlibraryService extends ChangeNotifier {
   void _writeBuiltinCount(String today, int count) {
     _builtinCountCache = {'date': today, 'count': count};
     final raw = jsonEncode(_builtinCountCache);
-    SharedPreferences.getInstance().then(
-      (p) => p.setString(_kBuiltinCount, raw),
-    );
+    // ⚠️ 2026-10-14：这里仍是 fire-and-forget 写盘 —— 因为调用方
+    //   `reserveBuiltinDownload()` 是**同步**方法（下载流程要同步判定额度），
+    //   改成 await 会波及整条调用链（`book_download_service` 两处）。
+    //   本次只补**错误处理**：原来 `.then` 里失败是未处理的异步异常。若还要
+    //   消除"预留后立刻被杀 → 计数没落盘"的窗口，需要把那条链一起 async 化。
+    unawaited(_persistBuiltinCount(raw));
+  }
+
+  Future<void> _persistBuiltinCount(String raw) async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(_kBuiltinCount, raw);
+    } catch (e) {
+      _log('内置账号计数落盘失败: $e');
+    }
   }
 
   Map<String, dynamic> _decode(String? raw) {
@@ -2442,49 +2457,54 @@ class ZlibraryService extends ChangeNotifier {
     //   开关关着时 `applyGlobalProxy` **连适配器都不换** ✓（零副作用 ✓ 不影响其它模块 ✓）。
     applyGlobalProxy(dio);
 
-    // ── [PATCH-19] ① 先用 eapi 判健康（首页 503 但 eapi 200 的节点不能被误杀）──
-    final eapiProbe = await _probeEapi(dio, target, url);
-    if (eapiProbe != null) return eapiProbe;
+    // 局部新建的 Dio 必须显式释放，否则遗留 HttpClient 连接池
+    try {
+      // ── [PATCH-19] ① 先用 eapi 判健康（首页 503 但 eapi 200 的节点不能被误杀）──
+      final eapiProbe = await _probeEapi(dio, target, url);
+      if (eapiProbe != null) return eapiProbe;
 
-    // ── ② eapi 不通时退回首页探测（见方法头注释的取舍说明）──
-    // 连接异常重试 1 次（对抗跨境网络瞬时抖动，避免单次超时误判不可用）
-    for (var attempt = 0; attempt < 2; attempt++) {
-      try {
-        final sw = Stopwatch()..start();
-        final resp = await dio.get(target);
-        final latency = sw.elapsedMilliseconds / 1000.0;
-        // 取最终落地域名（跟随重定向后）
-        String finalHost;
-        if (resp.redirects.isNotEmpty) {
-          final h = resp.redirects.last.location.host;
-          finalHost = h.isNotEmpty ? h : url;
-        } else {
-          finalHost = Uri.tryParse(target)?.host ?? url;
-        }
-        // 业务校验：空响应 / CF 挑战页 / 拦截页不算"可用"，
-        // 否则会出现"探测通过但页面拉不到内容"的假象
-        final body = resp.data;
-        if (body is String) {
-          final t = body.toLowerCase();
-          if (body.isEmpty ||
-              t.contains('just a moment') ||
-              t.contains('cf-chl') ||
-              t.contains('challenge-platform') ||
-              t.contains('__cf_chl')) {
-            _log('探测 $url 返回空内容或 Cloudflare 挑战页，判不可用');
-            return null;
+      // ── ② eapi 不通时退回首页探测（见方法头注释的取舍说明）──
+      // 连接异常重试 1 次（对抗跨境网络瞬时抖动，避免单次超时误判不可用）
+      for (var attempt = 0; attempt < 2; attempt++) {
+        try {
+          final sw = Stopwatch()..start();
+          final resp = await dio.get(target);
+          final latency = sw.elapsedMilliseconds / 1000.0;
+          // 取最终落地域名（跟随重定向后）
+          String finalHost;
+          if (resp.redirects.isNotEmpty) {
+            final h = resp.redirects.last.location.host;
+            finalHost = h.isNotEmpty ? h : url;
+          } else {
+            finalHost = Uri.tryParse(target)?.host ?? url;
           }
+          // 业务校验：空响应 / CF 挑战页 / 拦截页不算"可用"，
+          // 否则会出现"探测通过但页面拉不到内容"的假象
+          final body = resp.data;
+          if (body is String) {
+            final t = body.toLowerCase();
+            if (body.isEmpty ||
+                t.contains('just a moment') ||
+                t.contains('cf-chl') ||
+                t.contains('challenge-platform') ||
+                t.contains('__cf_chl')) {
+              _log('探测 $url 返回空内容或 Cloudflare 挑战页，判不可用');
+              return null;
+            }
+          }
+          return _Probe(finalHost, latency);
+        } on DioException catch (e) {
+          _log('探测 $url 第${attempt + 1}次失败: $e');
+          if (attempt == 1) return null;
+        } catch (e) {
+          _log('探测 $url 失败: $e');
+          return null;
         }
-        return _Probe(finalHost, latency);
-      } on DioException catch (e) {
-        _log('探测 $url 第${attempt + 1}次失败: $e');
-        if (attempt == 1) return null;
-      } catch (e) {
-        _log('探测 $url 失败: $e');
-        return null;
       }
+      return null;
+    } finally {
+      dio.close(force: true);
     }
-    return null;
   }
 
   /// 定时健康检查（30 分钟）：先探当前域名，可用则保持；不可用才从候选重新选最优。

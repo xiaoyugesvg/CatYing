@@ -498,10 +498,12 @@ class _DanmuLayerState extends State<DanmuLayer>
         oldWidget.blockBottom != widget.blockBottom;
     if (filtersChanged) {
       _sorted = _sortedOf(widget.danmus);
-      _active.clear();
-      _pendingCatchup.clear();
-      _nextIndex = 0;
-      _lastPosSec = null;
+      // ⚠️ 2026-10-14：这里**不能**把游标直接置 0（原实现）—— spawn 循环每帧
+      //   只处理 `_spawnPerFrame` 条、且把"已过去"的整批丢弃 ⇒ 游标要从第 0 条
+      //   一路"爬"到当前播放位置，播放中切一下屏蔽类型就会**空白一两秒**
+      //   并空转 CPU。复用 seek 路径已验证的 `_resetToPosition` 精确重定位
+      //  （它内部会清 `_active` / `_pendingCatchup` / 轨道边缘）。
+      _resetToPosition(_lastPosSec ?? 0);
       return;
     }
 
@@ -669,7 +671,12 @@ class _DanmuLayerState extends State<DanmuLayer>
 
     // 补播队列分帧铺开：每帧最多 `_catchupPerFrame` 条，
     // 避免"列表就绪瞬间几十条文本布局"挤在同一帧造成单次掉帧。
-    final drained = _pendingCatchup.isNotEmpty ? _drainCatchup(pos) : 0;
+    // ⚠️ 2026-10-14：补播与正常 spawn **共享同一帧预算** —— 原来两者各自封顶
+    //   （12 + 10）⇒ 单帧最多新增 22 条弹幕，每条 cache-miss 都是一次
+    //   `TextPainter.layout`，正是 `_spawnPerFrame` 想避免的"单帧 20ms+ 掉帧"。
+    final drained = _pendingCatchup.isNotEmpty
+        ? _drainCatchup(pos, budget: _spawnPerFrame - spawnCount)
+        : 0;
 
     // 位置在前进（dt>0）说明画面还在动 → 需要重绘；
     // 或本帧有增减（生成/回收/补播）→ 也需要重绘。
@@ -725,11 +732,15 @@ class _DanmuLayerState extends State<DanmuLayer>
   /// 每帧从补播队列铺最多 `_catchupPerFrame` 条上屏。
   /// 位置按**当前**播放位置现算（队列等待期间播放仍在走）✓。
   /// 返回本帧铺上屏的条数（>0 时需要重绘）。
-  int _drainCatchup(double pos) {
+  /// [budget]：本帧**总**新增预算（与正常 spawn 共用）。默认 `_catchupPerFrame`；
+  /// 正常 spawn 已经用掉一部分时会传入更小的值，保证单帧合计不超过
+  /// `_spawnPerFrame` 条。
+  int _drainCatchup(double pos, {int? budget}) {
+    final limit = (budget ?? _catchupPerFrame).clamp(0, _catchupPerFrame);
     final startX = _viewportWidth > 0 ? _viewportWidth : 0.0;
     var done = 0;
     var idx = 0;
-    while (idx < _pendingCatchup.length && done < _catchupPerFrame) {
+    while (idx < _pendingCatchup.length && done < limit) {
       if (_active.length >= _maxActive) break;
       final d = _pendingCatchup[idx++];
       final elapsed = pos - d.time;

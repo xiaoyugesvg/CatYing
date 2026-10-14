@@ -1,5 +1,6 @@
 import 'package:get/get.dart';
 import '../../services/app_log.dart';
+import '../../services/prefs_mirror.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/player_engine.dart';
 import '../../services/player_prefs.dart';
@@ -282,6 +283,10 @@ class SettingsController extends GetxController {
     await ApiConfig.clearApiUrlBackup();
     await prefs.remove(AppConstants.homeApi);
     await prefs.remove('api_history');
+    // 🔴 2026-10-14：重置删的是 prefs 键，镜像文件里还留着旧值。
+    // 若重置后进程被硬杀（没走 paused 快照），下次启动 restoreIfLost 会把
+    // 刚重置掉的接口地址**补回来** ⇒ "重置"白做。这里立刻把镜像刷成新状态。
+    PrefsMirror.snapshotSoon();
 
     // 清内存中的状态
     vodApiUrl.value = '';

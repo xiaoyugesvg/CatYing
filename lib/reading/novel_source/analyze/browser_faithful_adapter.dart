@@ -159,7 +159,19 @@ class BrowserFaithfulHttpClientAdapter implements HttpClientAdapter {
       }
     } on Object {
       // 任何异常（TLS/解析/超时等）回落到内置适配器，保证不比现状更差。
-      return _fallback.fetch(options, requestStream, cancelFuture);
+      //
+      // ⚠️ 2026-10-14 修：上面已经把 `requestStream` **读空**了（`await for`），
+      //   而它是**单订阅流** —— 原样再交给内置适配器会抛
+      //   "Stream has already been listened to"，让"回落"这条兜底在中途失效
+      //   （带 body 的 POST 必现；无 body 的 GET 不受影响）。这里用已读到的
+      //   字节重建一个单元素流交过去，语义完全等价。
+      return _fallback.fetch(
+        options,
+        body == null
+            ? requestStream
+            : Stream<Uint8List>.value(Uint8List.fromList(body)),
+        cancelFuture,
+      );
     }
   }
 

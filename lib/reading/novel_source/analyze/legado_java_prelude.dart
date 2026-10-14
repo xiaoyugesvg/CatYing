@@ -87,9 +87,13 @@ var java = (function () {
   }
 
   // ════ ② 浏览器栈（协议同 java.ajax：抛标记 → 主 isolate 代理代劳 → 重放）════
-  //   mode: 'fetch' 回渲染后 HTML；'open' 打开内置浏览器（不阻塞）
-  function _browser(url, mode) {
-    var key = 'BROWSER ' + mode + ' ' + String(url);
+  //   mode: 'fetch' 回渲染后 HTML（或注入 js 的执行结果）；'open' 打开内置浏览器（不阻塞）
+  //   js（可选）：legado `java.webView(content, url, js)` 的第三个参数 —— 在页面
+  //   上下文里执行的 JS（如 `"document.cookie"`），其**返回值**即本调用结果。
+  //   经 base64 走 `x-legado-js` 头（头值必须是可见 ASCII，js 可能含中文/换行）。
+  function _browser(url, mode, js) {
+    var extra = (js === undefined || js === null || js === '') ? '' : String(js);
+    var key = 'BROWSER ' + mode + ' ' + String(url) + (extra ? ' #' + extra : '');
     var box = (typeof httpCache !== 'undefined' && httpCache) ? httpCache : {};
     if (Object.prototype.hasOwnProperty.call(box, key)) {
       var v = box[key];
@@ -98,9 +102,14 @@ var java = (function () {
       }
       return (v === null || v === undefined) ? '' : v;
     }
+    var h = { 'x-legado-browser': mode };
+    if (extra) {
+      var b64 = base64Encode(extra);
+      // 头值过大（本机代理对请求头有尺寸上限）⇒ 放弃注入，退回渲染后 HTML
+      if (b64.length <= 4096) h['x-legado-js'] = b64;
+    }
     _err(_NEED + JSON.stringify({
-      k: key, m: 'BROWSER', u: String(url),
-      h: { 'x-legado-browser': mode }, b: null
+      k: key, m: 'BROWSER', u: String(url), h: h, b: null
     }));
   }
 
@@ -378,10 +387,11 @@ var java = (function () {
     // ── 浏览器栈（实测 10 处 startBrowserAwait + 1 处 webView）──
     // legado 语义：webView(content, url, js) 用 WebView 加载 url（可注入 js）
     // 后返回结果；未传 content 时按 url 加载。
-    // ⚠️ 我们回的是**渲染后 HTML**（注入 js 暂不支持 —— 见 http_proxy 的说明）。
+    // · 传了 js ⇒ 回**该 js 在页面上下文的执行结果**（如 `"document.cookie"` ⇒ cookie 串）
+    // · 未传 js ⇒ 回**渲染后 HTML**（Cloudflare 等反爬站用）
     webView: function (content, url, js) {
       var target = (url === null || url === undefined || url === '') ? String(content) : String(url);
-      return _browser(target, 'fetch');
+      return _browser(target, 'fetch', js);
     },
     // 打开内置浏览器（登录 / 加群 / 通过人机验证），不阻塞求值。
     // startBrowserAwait 在 legado 里会等用户关闭页面，但本引擎的 worker

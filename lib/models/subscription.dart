@@ -243,6 +243,24 @@ class SubscriptionService extends GetxService {
     return File('${docs.path}/$_backupName');
   }
 
+  /// 删掉文件备份（清理订阅列表 / 重置时必须一起删）。
+  ///
+  /// 2026-10-14 修：`data_cleanup_page` 的「订阅列表」只删了 prefs 两个键，
+  /// **没删这份 .bak** ⇒ 重启时 `load()` 发现 prefs 空 → 从备份恢复 →
+  /// **订阅全回来了，清理等于没清**。
+  /// `api_url.bak` 那边早就有 `clearApiUrlBackup()`，这里补齐同款。
+  static Future<void> clearBackup() async {
+    try {
+      // 这里不能用 `_backupFile()` —— 它是实例方法，静态方法里访问不了；
+      // 路径规则与它保持一致（Documents/<名字>）即可，不重复抽象。
+      final docs = await getApplicationDocumentsDirectory();
+      final f = File('${docs.path}/$_backupName');
+      if (await f.exists()) await f.delete();
+    } catch (e) {
+      AppLog.instance.log('[Subscription] 删备份失败: $e');
+    }
+  }
+
   /// 解析一段 JSON 文本为订阅列表（失败返回空，不抛）
   List<Subscription> _tryDecode(String raw) {
     if (raw.isEmpty) return const [];
@@ -538,8 +556,9 @@ class SubscriptionService extends GetxService {
     if (syncingId.value.isNotEmpty) return SyncResult.busy;
 
     syncingId.value = id;
+    Dio? client; // 见 finally：局部 Dio 必须显式释放
     try {
-      final dio = Dio(BaseOptions(
+      final dio = client = Dio(BaseOptions(
         connectTimeout: const Duration(seconds: 15),
         receiveTimeout: const Duration(seconds: 20),
       ));
@@ -574,6 +593,7 @@ class SubscriptionService extends GetxService {
       return SyncResult.failed;
     } finally {
       syncingId.value = '';
+      client?.close(force: true); // 局部新建的 Dio 必须显式释放，否则遗留 HttpClient 连接池
     }
   }
 

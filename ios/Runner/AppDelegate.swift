@@ -15,6 +15,13 @@ import AVFoundation
   ) -> Bool {
     application.applicationSupportsShakeToEdit = false // Disable shake to undo
 
+    // ── 把「可再生的大目录」排除出 iCloud 备份（2026-10-14）────────────
+    //   iOS 默认把 Documents/ **全量**备份进 iCloud。而本 App 在 Documents 下
+    //   放了 Node 运行时（nodejs-project/）与插件脚本缓存（musicfree_plugins/）——
+    //   它们都能从包内/网络重新生成，却会实打实吃掉用户的 iCloud 备份配额。
+    //   排除它们**不影响数据安全**：书架 / 收藏 / 设置 / 传书等用户数据一律不动。
+    excludeReproducibleDirsFromBackup()
+
     // **2026-07-08 方案 A (Background Audio)**:
     // 启动 silent audio playback, 让 iOS 把 app 当作 "audio app",
     // 维持 app 在后台 / 锁屏时不挂起 embed library (Node.js 进程).
@@ -44,6 +51,33 @@ import AVFoundation
     )
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  /// 把 Documents 下**可再生**的大目录标记为「不参与 iCloud 备份」。
+  ///
+  /// · `nodejs-project/`    —— Node 运行时 + app.log（可从包内重新解压）
+  /// · `musicfree_plugins/` —— MusicFree 插件脚本文件缓存（可重新下载）
+  ///
+  /// ⚠️ 目录不存在时**安全跳过**（首次启动时它们尚未创建 ⇒ 下次启动会被标记）。
+  /// ⚠️ 这里**只加标记、绝不删除任何文件**。
+  /// ⚠️ 只排除这两项：Hive（书架/收藏/记录）、`prefs_mirror.json`、
+  ///    `reading_state.bak`、`music/`（用户下载的歌）都是用户数据，**必须保留备份**。
+  private func excludeReproducibleDirsFromBackup() {
+    guard let docs = FileManager.default.urls(
+      for: .documentDirectory, in: .userDomainMask
+    ).first else { return }
+    for name in ["nodejs-project", "musicfree_plugins"] {
+      var url = docs.appendingPathComponent(name, isDirectory: true)
+      guard FileManager.default.fileExists(atPath: url.path) else { continue }
+      var values = URLResourceValues()
+      values.isExcludedFromBackup = true
+      do {
+        try url.setResourceValues(values)
+        NSLog("[AppDelegate] 已排除 iCloud 备份: \(name)")
+      } catch {
+        NSLog("[AppDelegate] 排除 iCloud 备份失败 \(name): \(error)")
+      }
+    }
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
@@ -135,5 +169,69 @@ import AVFoundation
     } else {
       print("[AppDelegate] ❌ 无法获取 MusicNowPlaying 的 registrar")
     }
+
+    // 注册 PrefsFlush（让 NSUserDefaults 立刻落盘）
+    //
+    // 用户 2026-10-14：「为啥非要恢复备份呢？就不能改了就是改了？」
+    // iOS 的 defaults 只在系统愿意的时候写盘，App 被硬杀时**本次会话改过的
+    // 键**会跟着内存一起丢（表现：刚改的设置没了、别的还在）。
+    // 设置改完后由 Dart 侧调这个通道强制 synchronize()，从根上做到"改了就是改了"。
+    if let prefsRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "PrefsFlush") {
+      PrefsFlush.shared.register(messenger: prefsRegistrar.messenger())
+    } else {
+      print("[AppDelegate] ❌ 无法获取 PrefsFlush 的 registrar")
+    }
+  }
+}
+
+// MARK: - PrefsFlush
+
+/// 让 `NSUserDefaults` **立刻落盘** 的极小通道。
+///
+/// ── 为什么需要（用户 2026-10-14）──────────────────────────────
+/// 用户的原话："为啥非要恢复备份呢？就不能改了就是改了？"
+/// 问得对 —— 备份是补丁，根因是**那次写没有落到磁盘**：
+///
+/// iOS 的 `NSUserDefaults` 不是每次 set 就写盘，系统只在"它愿意的时候"
+/// （周期刷新 / 进后台 / 正常退出）把**整个域**写进 Library/Preferences 的 plist。
+/// 于是磁盘上那份永远是"**上一次落盘时的快照**"：
+///   · 上次落盘时就存在的键 → 一直在；
+///   · 本次会话新写 / 改过的键 → 还没进 plist 就随进程一起没了（被硬杀时）。
+/// 表现正是用户看到的：**「我刚改的那个设置没了，别的都还在」**。
+///
+/// ⇒ 正确做法不是"事后恢复"，而是**写完就落盘**：设置改完立刻 synchronize()，
+///   内存与 plist 一致，"改了就是真的改了"。
+///
+/// ── 关于 synchronize() ──────────────────────────────────────
+/// Apple 从 iOS 12 起把它标记为"通常不需要"（自动落盘时机已足够激进），
+/// 但**它并没有失效**，仍是"强制立刻写盘"的唯一公开手段，代价只是一次
+/// 几 KB 的写盘。调用时机很克制：设置被改动后（见 Dart 侧
+/// `PrefsMirror.snapshotSoon` / `snapshot`）。
+///
+/// ⚠️ 刻意**不新建 .swift 文件**：本工程 project.pbxproj 是逐文件登记的
+/// （PBXBuildFile + PBXFileReference + group + Sources 四处都要加），
+/// 新文件漏登记就是"编译不过或根本没编进去"。放在 AppDelegate 这个
+/// 已在编译列表里的文件内，零工程文件改动。
+final class PrefsFlush {
+  static let shared = PrefsFlush()
+  private static let channelName = "tvbox/prefs_flush"
+
+  private var channel: FlutterMethodChannel?
+
+  func register(messenger: FlutterBinaryMessenger) {
+    let ch = FlutterMethodChannel(name: Self.channelName, binaryMessenger: messenger)
+    ch.setMethodCallHandler { call, result in
+      switch call.method {
+      case "flush":
+        // 强制把内存里的所有 defaults 写进 plist。
+        // `_ =` 是必须的：synchronize() 有 Bool 返回值，忽略它 Swift 会给
+        // "result of call is unused" 警告（CI 里是噪音）。
+        _ = UserDefaults.standard.synchronize()
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    channel = ch
   }
 }

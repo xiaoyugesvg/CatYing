@@ -744,8 +744,9 @@ class SourceImportParser {
   }
 
   static Future<String> _fetchOnce(String target) async {
+    Dio? client; // 见 finally：局部 Dio 必须显式释放
     try {
-      final dio = Dio(BaseOptions(
+      final dio = client = Dio(BaseOptions(
         connectTimeout: const Duration(seconds: 12),
         receiveTimeout: const Duration(seconds: 20),
         // 音源站点五花八门，有的返回非 200 但内容是脚本；仍然按内容判断
@@ -763,6 +764,8 @@ class SourceImportParser {
       rethrow;
     } catch (e) {
       throw SourceImportException(SourceImportError.network, _shortError(e));
+    } finally {
+      client?.close(force: true); // 局部新建的 Dio 必须显式释放，否则遗留 HttpClient 连接池
     }
   }
 

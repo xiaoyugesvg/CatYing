@@ -274,8 +274,16 @@ class _ReaderPageState extends State<ReaderPage> {
 
   @override
   void dispose() {
-    PlatformService.onVolumeKey = null;
-    PlatformService.setVolumeKeyNav(false);
+    // ⚠️ 2026-10-14：**只在"当前注册的还是我"时才清空**。`onVolumeKey` 是全局
+    //   单点（`PlatformService` 是静态字段），若同时存在两个阅读器（栈上叠加 /
+    //   转场尚未销毁），先退出者原来会无条件把它清成 null 并关掉音量键翻页 ⇒
+    //   **仍在用的那个**阅读器音量键立刻失效。
+    //   用 `==` 而非 `identical`：Dart 的实例方法 tear-off 对"同一实例 + 同一
+    //   方法"用 `==` 判定为相等（`identical` 不保证）。
+    if (PlatformService.onVolumeKey == _onVolumeKey) {
+      PlatformService.onVolumeKey = null;
+      PlatformService.setVolumeKeyNav(false);
+    }
     _itemPositionsListener.itemPositions.removeListener(
       _onItemPositionsChanged,
     );

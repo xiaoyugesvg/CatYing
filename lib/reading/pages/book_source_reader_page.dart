@@ -840,7 +840,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     try {
       final p = await SharedPreferences.getInstance();
       await p.setInt(_progressKey, _index);
-    } catch (_) {}
+    } catch (e) {
+      // ⚠️ 2026-10-14：原来是空 `catch (_) {}` —— 写盘失败（磁盘满 / 平台异常）
+      //   完全静默：用户下次进来莫名回到旧位置，日志里也查不到原因。补日志。
+      debugPrint('[阅读] 保存阅读进度失败: $e');
+    }
   }
 
   /// 切章时把书签**按章换入换出**（修复串章，见 `_bookmarksChapter`）。
@@ -932,7 +936,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
       return;
     }
 
+    // 听书连播标记：**读走即清**（只在"可见加载"时消费）—— 这样后面任何
+    // 提前 return（纯图章 / 加载失败）都不会把它残留到别的章节上。
+    var ttsAutoNext = false;
     if (!prefetchOnly) {
+      ttsAutoNext = _ttsAutoNext;
+      _ttsAutoNext = false;
       setState(() {
         // 同上：书签换章在 `_loadChapter` 开头统一处理 ✓（这里原来是死代码 ✓）
         _loading = true;
@@ -1004,6 +1013,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         _paginate();
         if (_pageCtrl.hasClients) _pageCtrl.jumpToPage(0);
         await _saveProgress();
+        // 听书连播：上一章念完预约了续读、且本章正文**已就绪** ⇒ 现在开读
+        if (ttsAutoNext) unawaited(_startTts());
       }
       _prefetch(i + 1);
     } catch (e) {
@@ -5286,6 +5297,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     );
   }
 
+  /// 听书「念完自动续下一章」的预约标记。
+  ///
+  /// 为什么需要它（2026-10-14 修）：原实现是 `onFinished → _go(1)` 之后用
+  /// `addPostFrameCallback` **下一帧**就调 `_startTts()`。但 `_go` 只发起
+  /// **异步**加载（`_loadChapter` 会先把 `_paragraphs` 清空，新正文要等网络
+  /// 回来），下一帧 `_paragraphs` 仍是空 ⇒ `_startTts()` 误判"这一章没有可
+  /// 朗读的正文" ⇒ **自动连播当场中断** ✗。现在改成"预约"：真正的续读发生在
+  /// `_loadChapter` 的正文就绪处。
+  bool _ttsAutoNext = false;
+
   static const _ttsTabs = ['声音', '跟读', '定时', '高级'];
 
   /// 开始朗读本章
@@ -5298,11 +5319,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     // 念完自动进下一章（长按连续听书）
     _tts.onFinished = () {
       if (!mounted) return;
-      _go(1);
-      // 下一章加载后自动续读
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _tts.isSpeaking.value == false) _startTts();
-      });
+      // 已是最后一章 → 不预约（否则 `_go` 会被拒绝，标记会残留到下次加载）
+      if (_index + 1 >= widget.chapters.length) return;
+      _ttsAutoNext = true;
+      _go(1); // 只发起加载；续读交给 `_loadChapter` 正文就绪处
     };
     // TtsService 自己切段（splitSegments 会按标点再切过长段）
     // A4 双音色：逐段音色覆盖（对话段 → 对话音色，其余 → 旁白音色）✓

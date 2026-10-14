@@ -150,9 +150,53 @@ class SpiderService {
   // index.js，Python 是「一个 key 一个模块」。所以脚本源只在被访问时才把对应脚本
   // 载入引擎，而不是像「整包就是一个 js spider」的配置那样在启动时统一加载。
 
+  /// 归一化脚本地址：剥掉配置里常见的包裹字符，并把非 ASCII 路径按 URL 规则编码。
+  ///
+  /// 为什么需要（用户 2026-10-14 给的配置实例）：
+  ///     "api": "`https://x.muiu.site/xiaomao/Mayi/js/drpy2.min.js`"
+  ///     "ext": "`https://x.muiu.site/xiaomao/Mayi/js/🐱官综.js`"
+  /// 两个值都被**反引号包住**（从 JS 模板字符串里复制出来的常见走样）。
+  /// 而全项目的判断都以 `startsWith('http')` 为准 ⇒ 反引号开头 ⇒ 认不出是
+  /// 远端脚本 ⇒ 被当"相对路径"拦下（报"暂不支持的源协议"），整条线路白给。
+  ///
+  /// 第二件事：路径里带中文/emoji（`🐱官综.js`）时，直接丢给 Dio/Uri 会抛异常，
+  /// 这里用 `Uri.encodeFull` 编码 —— 它保留 `:/?&=` 这些结构字符，只编码非 ASCII，
+  /// 正是这种场景要的。
+  static String _normalizeScriptUrl(String raw) {
+    var u = raw.trim();
+    const wraps = ['`', '"', "'"];
+    // 1) 成对的首尾包裹，可能叠层（如 `"http://..."` ），循环剥
+    var changed = true;
+    while (changed && u.length >= 2) {
+      changed = false;
+      for (final w in wraps) {
+        if (u.startsWith(w) && u.endsWith(w)) {
+          u = u.substring(1, u.length - 1).trim();
+          changed = true;
+        }
+      }
+    }
+    // 2) 只剩单边包裹的（配置里偶见残缺）
+    while (u.isNotEmpty && wraps.contains(u[0])) {
+      u = u.substring(1).trim();
+    }
+    while (u.isNotEmpty && wraps.contains(u[u.length - 1])) {
+      u = u.substring(0, u.length - 1).trim();
+    }
+    // 3) 远端地址编码：中文/emoji 路径必须编码后才能请求
+    if (u.startsWith('http://') || u.startsWith('https://')) {
+      try {
+        return Uri.encodeFull(u);
+      } catch (_) {
+        return u;
+      }
+    }
+    return u;
+  }
+
   /// 脚本源实际要载入的脚本地址：ext 优先（drpy2 模式），否则用 api
   static String _scriptUrl(String api, String ext) {
-    final e = ext.trim();
+    final e = _normalizeScriptUrl(ext);
     if (e.isNotEmpty) {
       final p = e.toLowerCase().split('?').first;
       if (e.startsWith('http://') ||
@@ -162,7 +206,7 @@ class SpiderService {
         return e;
       }
     }
-    return api.trim();
+    return _normalizeScriptUrl(api);
   }
 
   static bool _isPythonScript(String script) =>
@@ -170,7 +214,10 @@ class SpiderService {
 
   /// Node 侧路径基址：api 是 http URL 时退化为 /{key}/{type}/{action}
   static String _nodeBase(String api) {
-    final a = api.trim();
+    // ⚠️ 必须先归一化：配置里的 api 可能被反引号包住（`` `https://…` ``），
+    //    不归一化就会 `startsWith('http') == false` → 被当成路径基址 →
+    //    拼出 `` `https://…`/play `` 这种非法 URL。
+    final a = _normalizeScriptUrl(api);
     // csp_ 占位不是路径基址：拼进 URL 会产出 `csp_xxx/play` 这种非法路径，
     // 必须退化为标准 /{key}/{type}/{action} 形态。
     if (a.toLowerCase().startsWith('csp_')) return '';
@@ -184,6 +231,17 @@ class SpiderService {
   /// 当前已载入 Node 引擎的脚本地址 + 该脚本在引擎里的真实站点 key
   String _loadedScriptUrl = '';
   String _loadedScriptKey = '';
+
+  /// Node 槽位里当前驻留的脚本是不是 [url]。
+  ///
+  /// 为什么需要（洞 E）：Node 是**单源架构**，程序脚本源载入后会顶掉主源。
+  /// 上层判断"主源本会话已加载、不用再 loadSource"时必须连这个一起看 ——
+  /// 否则会直接去取 `/config`，拿回来的是**那个脚本的站点表**，
+  /// 整表替换后线路全错（表现为"切了源但内容不对"）。
+  bool isScriptLoaded(String url) {
+    final u = url.trim();
+    return u.isNotEmpty && _loadedScriptUrl == u;
+  }
 
   /// script → Python 模块 key（去 .py 后缀 + py_ 前缀）
   String _pythonModuleKey(String script) {
@@ -244,6 +302,26 @@ class SpiderService {
     return null;
   }
 
+  /// 向引擎 `/config` 问"当前驻留脚本的真实站点 key"。
+  ///
+  /// 抽成独立方法是为了两处复用（洞 D）：初次载入脚本后问一次；如果当时没问到
+  /// （`_loadedScriptKey` 仍为空），**下次再进 `_ensureNodeScript` 时还能再问一次**，
+  /// 而不是永远退回 fallback。
+  /// 模块的 `start()` 是异步的，载入后首次 /config 可能还没注册完 → 小退避重试。
+  Future<String> _queryEngineScriptKey() async {
+    for (var attempt = 0; attempt < 4; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+      }
+      final cfg = await getCatConfig();
+      for (final s in _extractSites(cfg)) {
+        final k = (s['key'] ?? '').toString().trim();
+        if (k.isNotEmpty) return k;
+      }
+    }
+    return '';
+  }
+
   /// 确保 [script] 已载入 Node 引擎，返回引擎里的**真实站点 key**。
   ///
   /// 真实 key 以引擎 `/config` 返回的站点列表为准 —— 聚合配置里写的 key 是 TVBox
@@ -251,7 +329,21 @@ class SpiderService {
   Future<String?> _ensureNodeScript(String script,
       {required String fallback}) async {
     if (_loadedScriptUrl == script) {
-      return _loadedScriptKey.isNotEmpty ? _loadedScriptKey : fallback;
+      if (_loadedScriptKey.isNotEmpty) return _loadedScriptKey;
+      // 🔴 2026-10-14 修（洞 D：key 缓存降级）：
+      //   脚本上次载入过、但当时没能从 /config 问到引擎真实 key
+      //   （模块 start() 还没注册完等）。以前这里**直接返回 fallback**，
+      //   而 `_loadedScriptUrl` 已经置位 ⇒ 之后永远走这个分支、**再也不会重试**，
+      //   那条线路就一直拿错的 key 去请求（404 / 空），永远恢复不了。
+      //   现在补一次"重新问 key"，仍拿不到才退回 fallback。
+      final retried = await _queryEngineScriptKey();
+      if (retried.isNotEmpty) {
+        _loadedScriptKey = retried;
+        AppLog.instance
+            .log('[SpiderService] 补问到引擎真实 key: $retried（$script）');
+        return retried;
+      }
+      return fallback;
     }
     try {
       // Node 已在跑（主源/音乐模块起过）就别再调一次启动
@@ -272,22 +364,7 @@ class SpiderService {
         return null;
       }
       _loadedScriptUrl = script;
-      _loadedScriptKey = '';
-      // 脚本自身的站点 key 只有引擎知道：读 /config 取第一个。
-      // 模块的 start() 是异步的，载入后首次 /config 可能还没注册完 → 小退避重试。
-      for (var attempt = 0; attempt < 4 && _loadedScriptKey.isEmpty; attempt++) {
-        if (attempt > 0) {
-          await Future<void>.delayed(const Duration(milliseconds: 400));
-        }
-        final cfg = await getCatConfig();
-        for (final s in _extractSites(cfg)) {
-          final k = (s['key'] ?? '').toString().trim();
-          if (k.isNotEmpty) {
-            _loadedScriptKey = k;
-            break;
-          }
-        }
-      }
+      _loadedScriptKey = await _queryEngineScriptKey();
       AppLog.instance.log('[SpiderService] 脚本已载入 $script，'
           '引擎 key=${_loadedScriptKey.isEmpty ? fallback : _loadedScriptKey}');
       return _loadedScriptKey.isNotEmpty ? _loadedScriptKey : fallback;

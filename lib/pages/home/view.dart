@@ -1257,23 +1257,35 @@ class _RecommendBannerState extends State<_RecommendBanner> {
     }
     final delta = (i - page).clamp(-1.5, 1.5);
     final absD = delta.abs().clamp(0.0, 1.0);
-    final scale = 1 - 0.38 * absD; // 两侧缩到 0.62（对齐参考图里的小卡）
-    final rotY = -0.26 * delta; // 两侧 ±≈15° 侧倾（V 形的斜边）
-    final dy = 18.0 * absD; // 两侧下沉（V 形的下坠）
-    final dz = -55.0 * absD; // 两侧后退（透视里更「远」，强化 V 形纵深）
-    final dim = (1 - 0.45 * absD).clamp(0.0, 1.0); // 两侧压暗
+    // 中间卡略放大、两侧缩到 0.62 —— 落差本身就是 V 形的观感来源
+    final scale = 1.04 - 0.42 * absD;
+    final rotY = -0.26 * delta; // 两侧 ±≈15° 侧倾（V 形的两条斜边）
+    final dy = 26.0 * absD; // 两侧下沉（V 形的下坠）
+    final dz = -60.0 * absD; // 两侧后退（透视里更「远」，强化纵深）
+    final dim = (1 - 0.45 * absD).clamp(0.0, 1.0); // 两侧压暗到 0.55
 
     return Transform(
       alignment: Alignment.center,
+      // ⚠️ **顺序就是效果本身，不要调换**（2026-10-14 修的真 bug）：
+      //   `Matrix4` 是**后乘**，几何按**从右往左**依次作用，所以这里实际是
+      //     scale（缩放卡）→ rotateY（侧倾）→ translate（整体位移）→ 透视投影
+      //
+      //   旧写法把 `translate` 写在最后（= 几何上最先作用），位移会被紧接着的
+      //   `scale` 再乘一遍：`dy = 18` 真正只沉了 `18 × 0.62 ≈ 11px`，
+      //   在 282 高的画布上几乎看不出来 —— 这就是"代码写着 V 形、真机上却是
+      //   三张齐平"的原因（用户 2026-10-14：「按上次的来」，即要 V 形效果）。
       transform: Matrix4.identity()
         ..setEntry(3, 2, 0.0012) // 透视
+        ..translate(0.0, dy, dz)
         ..rotateY(rotY)
-        ..scale(scale)
-        ..translate(0.0, dy, dz),
+        ..scale(scale),
       child: Opacity(
         opacity: dim,
-        // 卡比自己的槽位（viewportFraction 0.34 ≈ 133）宽 → 居中后轻微叠压两侧，
-        // 形成参考图那种"中心卡压住两侧卡"的层次
+        // 卡宽由槽位（viewportFraction 0.30 ≈ 117pt）决定：`Center` 会把下面那个
+        // `SizedBox(width: 170)` 约束回槽位宽度，所以**三张卡是紧挨着、不重叠**的。
+        // 中间那张靠「更大 + 不压暗 + 投影落在两侧卡上」拉出层次，
+        // 不去做真正的叠压 —— PageView 的绘制顺序是按下标来的，
+        // 真叠压时**右侧**那张会盖在中间卡上（左侧不会），反而不像"中间在最上层"。
         child: Center(
           child: SizedBox(
             width: _kBannerCardsCardW,

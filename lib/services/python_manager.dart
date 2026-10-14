@@ -35,6 +35,20 @@ class PythonManager {
   int _timeoutMs = 10000;
   int get timeoutMs => _timeoutMs;
 
+  // ── 引擎「卡死」标记（2026-10-14）──────────────────────────────
+  //
+  // 原生侧靠 watchdog 的 `PyThreadState_SetAsyncExc` 抛 TimeoutError 中断超时
+  // 脚本；但若脚本把该异常吞掉、或在**纯 C 扩展**里死循环，执行线程不会退出
+  // ⇒ 原生那条串行 `workQueue` 被**永久占用** ⇒ 之后所有 Python 调用都排在
+  // 它后面，Dart 侧表现为"点了永远没反应"（MethodChannel 本身没有超时）✗。
+  //
+  // Dart 侧能做的兜底：
+  //   ① 每次调用加**硬超时**（预算 + 3s）——不再无限等待；
+  //   ② 超时即置 [_stuck]，后续调用**立刻失败**并说明原因，
+  //      不再排队堆积（把"静默卡死"变成"明确报错"，用户知道要重启）。
+  bool _stuck = false;
+  bool get isStuck => _stuck;
+
   PythonManager._internal() {
     if (!Platform.isIOS) {
       AppLog.instance.w('[Python] 非 iOS 平台：Python spider 引擎未实现（仅 iOS 一期）');
@@ -97,18 +111,36 @@ class PythonManager {
 
   /// 执行一段 Python 代码（调试/编辑器用），返回 {ok, output, error}
   Future<Map<String, dynamic>> eval(String code) async {
+    if (_stuck) {
+      return {'ok': false, 'error': _stuckMsg};
+    }
     if (!await ensureStarted()) {
       return {'ok': false, 'error': lastError.value ?? '未启动'};
     }
     try {
-      final r = await _channelImpl.invokeMapMethod<String, dynamic>(
-        'eval', {'code': code});
+      final r = await _channelImpl
+          .invokeMapMethod<String, dynamic>('eval', {'code': code})
+          .timeout(_hardTimeout);
       return r ?? {'ok': false, 'error': '空返回'};
+    } on TimeoutException {
+      _markStuck('eval');
+      return {'ok': false, 'error': _stuckMsg};
     } on PlatformException catch (e) {
       return {'ok': false, 'error': e.message ?? e.code};
     } catch (e) {
       return {'ok': false, 'error': '$e'};
     }
+  }
+
+  /// 单次调用的硬超时：原生预算 + 3s 余量（原生的中断本身也要时间）。
+  Duration get _hardTimeout => Duration(milliseconds: _timeoutMs + 3000);
+
+  static const String _stuckMsg = 'Python 引擎已卡死（上次执行未能被中断，原生队列已堵住）。'
+      '请重启 App 后重试。';
+
+  void _markStuck(String where) {
+    _stuck = true;
+    AppLog.instance.w('[Python] $where 超时未返回（预算 ${_timeoutMs}ms）→ 引擎标记为卡死');
   }
 
   /// 调用适配层方法：module=spider_runner 下的逻辑模块，
@@ -119,17 +151,21 @@ class PythonManager {
     String method,
     Map<String, dynamic> args,
   ) async {
+    if (_stuck) {
+      return PythonCallResult(ok: false, error: _stuckMsg, json: null);
+    }
     if (!await ensureStarted()) {
       return PythonCallResult(
           ok: false, error: lastError.value ?? '未启动', json: null);
     }
     try {
-      final r = await _channelImpl.invokeMapMethod<String, dynamic>(
-        'call', {
-          'module': module,
-          'method': method,
-          'argsJson': jsonEncode(args),
-        });
+      final r = await _channelImpl
+          .invokeMapMethod<String, dynamic>('call', {
+            'module': module,
+            'method': method,
+            'argsJson': jsonEncode(args),
+          })
+          .timeout(_hardTimeout);
       final ok = r?['ok'] == true;
       if (ok) {
         final raw = r?['result'] as String?;
@@ -146,6 +182,9 @@ class PythonManager {
       }
       return PythonCallResult(
           ok: false, error: r?['error'] as String? ?? '未知错误', json: null);
+    } on TimeoutException {
+      _markStuck('call($module.$method)');
+      return PythonCallResult(ok: false, error: _stuckMsg, json: null);
     } on PlatformException catch (e) {
       return PythonCallResult(ok: false, error: e.message ?? e.code, json: null);
     } catch (e) {

@@ -9,7 +9,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../common/constants.dart';
 import '../../../common/theme.dart';
 import '../../../models/cache_store.dart';
+import '../../../models/subscription.dart';
 import '../../../services/app_log.dart';
+import '../../../services/prefs_mirror.dart';
 import '../../../widgets/app_toast.dart';
 import '../../../services/cache_manager_service.dart';
 
@@ -427,6 +429,11 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
       case CleanTarget.subscriptionList:
         await prefs.remove('subscriptions_v1');
         await prefs.remove('active_subscription_id');
+        // 🔴 2026-10-14 修：必须连**文件备份**一起删。
+        //   订阅的 load() 在"prefs 空"时会从 `subscriptions.bak` 恢复
+        //   （日志实证：`[Subscription] prefs 丢失/损坏，已从文件备份恢复 1 条`）
+        //   ⇒ 只删 prefs 两个键的话，重启后订阅**原样全回来**，清理等于没清。
+        await SubscriptionService.clearBackup();
         break;
 
       case CleanTarget.subscriptionConfig:
@@ -514,6 +521,12 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
         }
         break;
     }
+    // 🔴 2026-10-14 修（清理与镜像冲突）：
+    //   上面删的都是 prefs 键，但 **<Documents>/prefs_mirror.json 里还留着**。
+    //   若清理后 App 被崩溃/信号杀掉（这个 App 上很常见，没走到 paused 快照），
+    //   下次启动 `restoreIfLost` 会把刚删掉的键**当"缺失"补回来** ⇒ 清理白清。
+    //   ⇒ 清理一结束就把镜像刷成"删除后"的状态（snapshotSoon 会立刻写）。
+    PrefsMirror.snapshotSoon();
   }
 
   /// 清空目录内容（保留目录本身）

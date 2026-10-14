@@ -149,6 +149,14 @@ class _LivePageState extends State<LivePage> {
         } catch (e) {
           /* ignore */
         }
+        // ⚠️ 2026-10-14 补：FF 内核（`_ksPlayer`）原来在这漏了 —— 切走 tab
+        //   后它仍会在后台出声。恢复分支本来就区分了 `_iosUseKs`，暂停却漏，
+        //   属不对称遗漏。
+        try {
+          _ksPlayer?.pause();
+        } catch (e) {
+          /* ignore */
+        }
       } else {
         // 切回直播：已在播就不动；已开过流但被暂停 → 直接恢复播放
         //（避免每次切回都重新 open 拉流闪断）；从没开过流才自动开播。
@@ -206,6 +214,16 @@ class _LivePageState extends State<LivePage> {
       } catch (e) {
         /* 暂停失败不影响其它方，AudioFocus 会记日志 */
       }
+      // ⚠️ 2026-10-14 补：iOS 上实际在播的是 `_avPlayer`（AVPlayer 内核）或
+      //   `_ksPlayer`（FF 内核），`_player`（media_kit）在 iOS 这两条路径下
+      //   **根本没开流** —— 原来只 pause 它，等于点播/音乐出声时**直播继续响**
+      //   （正是"双声"）。这里把三个内核都停掉（没建实例的 `?.` 自然是空操作）。
+      try {
+        _avPlayer?.pause();
+      } catch (_) {}
+      try {
+        _ksPlayer?.pause();
+      } catch (_) {}
     });
     // 直播子页面 push/pop 监听：
     //   · push 进子页面 → 暂停直播（界面切走了还响着很烦）
@@ -219,6 +237,8 @@ class _LivePageState extends State<LivePage> {
         if (VideoPlayerPip.instance.isIosActive) return;
         try { _player?.pause(); } catch (_) {}
         try { _avPlayer?.pause(); } catch (_) {}
+        // ⚠️ 2026-10-14 补：同切 tab，FF 内核也必须停（原来漏了）。
+        try { _ksPlayer?.pause(); } catch (_) {}
       } else {
         // 回到直播根 → 恢复播放
         // 注意：只在"开过流且当前被暂停"时恢复，
@@ -389,7 +409,12 @@ class _LivePageState extends State<LivePage> {
     _errSub?.cancel();
     _switchReadySub?.cancel();
     _playSub?.cancel();
-    _switchTimer?.cancel();
+    // ⚠️ 2026-10-14：这里**不能**再 cancel `_switchTimer` —— 它正是上面
+    //   （`_switching = true` 之后）刚新建的 20 秒兜底计时器。原来这行把
+    //   "上一轮的旧 timer"和"刚建的兜底"一起取消了 ⇒ 兜底永不触发 ⇒ 遇到
+    //   "连上了但不发数据、也不报错"的挂起流时，中央「正在加载…」会**永久
+    //   转圈**（且没有 error 事件，重试按钮也不出现，只能强杀页面）。
+    //   旧 timer 已在上面单独 cancel 过，这里无需重复。
     _playingConfirmTimer?.cancel();
     final useAv = Platform.isIOS && !_iosUseMpv && !_iosUseKs && _avPlayer != null;
     // ⚠️ 不能用 `useAv ? _avPlayer!.stream : _player!.stream` 三元：

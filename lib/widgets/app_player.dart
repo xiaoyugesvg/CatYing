@@ -188,7 +188,10 @@ class AppPlayer {
     _s.duration = Duration.zero;
     stream.addBuffering(true);
     try {
-      await vc.initialize();
+      // ⚠️ 2026-10-14：加超时 —— 挂起型直链（收下请求不发数据也不断开）会让
+      //   `initialize()` 的 Future **永久 pending**，其后所有逻辑（seek / 续播
+      //   兜底）永不执行，用户点重试还会不断叠加挂起的原生调用。
+      await vc.initialize().timeout(const Duration(seconds: 30));
       if (_disposed) {
         await vc.dispose();
         return;

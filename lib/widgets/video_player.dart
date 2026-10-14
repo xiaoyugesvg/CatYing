@@ -180,6 +180,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   late final _PersistedPlayerState _persisted;
   late final String _cacheKey;
 
+  /// 本实例在 `AudioFocus` 中使用的 key（见 `initState` 的注册处）。
+  ///
+  /// ⚠️ 2026-10-14：原来所有播放器实例共用常量 `'video'`，而 `AudioFocus`
+  ///   内部是 `Map<String, pauser>` **单槽** —— 后注册者覆盖先者，且任一实例
+  ///   `dispose` 时的 `unregister` 会把**对方仍在用的**回调一起删掉 ⇒ 被误销
+  ///   的一方在音乐/直播抢焦点时不再被暂停（双声）。带上实例标识后两个播放器
+  ///   可安全并存，各自独立注册/注销。
+  late final String _focusKey = 'video#${identityHashCode(this)}';
+
   bool _isPlaying = false;
 
   /// iOS 自动画中画进行中（防止退后台重复触发）
@@ -243,11 +252,19 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   /// 上次弹幕请求失败的时间（失败重试节流）。
   ///
-  /// 失败是可重试的（`_danmuLoaded` 不置位），但重试触发点是
-  /// **每秒一次**的位置回调 —— 不加节流的话，服务挂掉时会变成
-  /// 每秒一个请求 + 每秒一条失败日志，刷爆日志也拖累服务 ✗。
+  /// 失败是可重试的（`_danmuLoaded` 不置位），重试由 [_scheduleDanmuRetry]
+  /// 排的一次性定时器驱动；节流避免对挂掉的服务密集打请求。
   /// 失败后 10s 内不再重试；换集/换地址时清零（见各 `_danmuLoaded = false` 处）。
   DateTime? _danmuLastFailAt;
+
+  /// 弹幕失败后的延迟重试定时器（见 [_scheduleDanmuRetry]）。
+  Timer? _danmuRetryTimer;
+
+  /// **未按屏蔽词过滤**的原始弹幕列表（见 `_filterByBlockWords`）。
+  ///
+  /// ⚠️ 2026-10-14：保留它是为了让"播放中修改屏蔽词"能立刻生效 ——
+  ///   改屏蔽词后用它重新过滤一遍即可，不用重新请求弹幕。
+  List<DanmuItem> _danmusRaw = const [];
 
   /// 弹幕**设置**是否已从 prefs 读出来（`_loadDanmuSettings` 是异步的）。
   /// 首帧它还是 false，此时不能因为 `_danmuApiUrl` 为空就显示成"未配置"
@@ -367,6 +384,30 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   /// 同一集重进时直接返回，连 `comment/$episodeId` 都不用发 → 秒出。
   static final Map<String, List<DanmuItem>> _danmuTitleListCache = {};
 
+  /// 上面两个静态弹幕缓存（`_danmuEpCache` / `_danmuTitleListCache`）的条目上限。
+  static const int _danmuCacheLimit = 40;
+
+  /// 写入"整集弹幕"结果缓存，并**限定总量**（`Map` 保持插入序 ⇒ 淘汰最旧的）。
+  ///
+  /// ⚠️ 2026-10-14：这两个静态 Map 原来是**无上限、永不淘汰**的进程级缓存，
+  ///   `_danmuTitleListCache` 的 value 还是整集弹幕列表（可达数千条）⇒ 长时间
+  ///   使用会持续涨内存；同时它们让"同名不同年的剧集"长期互相命中。
+  ///   加上限后旧条目自然滚出，两个问题一起缓解。
+  static void _rememberDanmuList(String key, List<DanmuItem> list) {
+    _danmuTitleListCache[key] = list;
+    while (_danmuTitleListCache.length > _danmuCacheLimit) {
+      _danmuTitleListCache.remove(_danmuTitleListCache.keys.first);
+    }
+  }
+
+  /// 写入"片名→episodeId"缓存，同样限定总量（理由见 [_rememberDanmuList]）。
+  static void _rememberDanmuEp(String key, int episodeId) {
+    _danmuEpCache[key] = episodeId;
+    while (_danmuEpCache.length > _danmuCacheLimit) {
+      _danmuEpCache.remove(_danmuEpCache.keys.first);
+    }
+  }
+
   late VideoFitType _videoFit;
   double _volume = 1.0;
 
@@ -474,7 +515,18 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     super.initState();
     // iOS 退后台自动画中画需要监听 App 生命周期
     WidgetsBinding.instance.addObserver(this);
-    _cacheKey = widget.key?.toString() ?? '_VideoPlayerWidget_default_';
+    // ⚠️ 2026-10-14：key 里带上"播放器实例"标识 —— 原来只用
+    //   `widget.key?.toString()`，而详情页传的是 `ObjectKey(_player)`、且
+    //   `AppPlayer` 没重写 toString ⇒ 不同实例产出**同一个字符串** ⇒ 两个
+    //   播放器同时存在时会共用同一条 `_persisted`（`isImmersive` /
+    //   `isNativeFullscreen` / `resumeApplied` 互相污染：新片以"全屏布局"打开，
+    //   或跳过续播兜底）。
+    //   带上实例身份后：同一个播放器重建 → 仍命中同一条 ✓（原意保留）；
+    //   不同播放器 → 天然隔离 ✓。
+    final playerId = widget.player != null
+        ? identityHashCode(widget.player)
+        : identityHashCode(widget.key ?? this);
+    _cacheKey = '${widget.key?.toString() ?? '_default_'}@$playerId';
     _persisted = _stateCache.putIfAbsent(
       _cacheKey,
       () => _PersistedPlayerState(),
@@ -506,7 +558,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     // 现在三方都注册到 AudioFocus，任一方出声都让另两方闭嘴。
     // 用闭包而不是直接传方法引用：initState 时 `_player` 可能还没建好，
     // 闭包在真正被调用时才去取它。
-    AudioFocus.register('video', () async {
+    AudioFocus.register(_focusKey, () async {
       try {
         // 守卫：没在播就不动它（避免无谓的暂停调用打乱播放器状态）。
         // ⚠️ 字段名是 `state.playing`，不是 `state.isPlaying`
@@ -571,6 +623,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
             }
           });
           if (playing) {
+            // ⚠️ 2026-10-14：**任何**开始播放的路径都要抢音频焦点 —— 原来只有
+            //   用户手动点播放 / 进出全屏 / 进出 PiP 才 `request`，于是"进详情页
+            //   自动起播"时音乐 / 直播仍在响（双声），要等用户点一下暂停再播放
+            //   才纠正。放在 `playing` 变 true 这一处即可覆盖全部路径
+            //  （自动起播 / 手动播放 / 换集 / 从暂停恢复）。
+            unawaited(AudioFocus.request(_focusKey));
             _scheduleHideControls();
             widget.onPlaying?.call();
             _applyPendingResumeSeek();
@@ -1163,9 +1221,55 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     return b;
   }
 
+  /// 按当前 [_danmuBlockWords] 过滤（原始列表 → 上屏列表）。
+  ///
+  /// 抽出来是为了让"改屏蔽词后重新过滤"和"首次请求返回时过滤"共用同一套规则。
+  List<DanmuItem> _filterByBlockWords(List<DanmuItem> src) {
+    if (_danmuBlockWords.isEmpty) return src;
+    return src
+        .where(
+          (d) => !_danmuBlockWords.any(
+            (w) => w.isNotEmpty && d.text.contains(w),
+          ),
+        )
+        .toList();
+  }
+
+  /// 回到前台时重读弹幕显示类设置，并用新的屏蔽词重新过滤**已加载**的弹幕。
+  ///
+  /// ⚠️ 2026-10-14：屏蔽词原来只在"请求返回时"过滤一次，`DanmuLayer` 也不感知
+  ///   它 ⇒ 播放中从设置页改完屏蔽词回来**完全无效**，必须重进播放页。
+  ///   这里在 `resumed`（从设置页/别的 App 回来）重读一次并就地重新过滤。
+  Future<void> _reloadDanmuDisplaySettings() async {
+    final before = _danmuBlockWords.join('\u0001');
+    await _loadDanmuSettings();
+    if (!mounted) return;
+    final changed = before != _danmuBlockWords.join('\u0001');
+    setState(() {
+      if (changed) _danmus = _filterByBlockWords(_danmusRaw);
+    });
+  }
+
+  /// 弹幕请求失败后，安排**一次**延迟重试。
+  ///
+  /// ⚠️ 2026-10-14 修：`_danmuLastFailAt` 原来的注释写"重试触发点是每秒一次的
+  ///   位置回调"，但代码里**根本不存在**这个周期性调用点 —— 全项目只有
+  ///   initState / `playing` 变 true / 换集 / 读设置这四处会调
+  ///   `_ensureDanmuLoaded`。于是某集首次请求失败后，只要用户**不暂停、不切集**，
+  ///   这一集就再也不会重试（10s 节流形同虚设，用户看到的是"这集永远没弹幕"）✗。
+  ///   这里在失败点排一个 10s 后的一次性重试；若仍失败会再排一次 —— 与
+  ///   "10s 节流"的意图一致（不会退化成每秒一枪）。
+  void _scheduleDanmuRetry(String url) {
+    _danmuRetryTimer?.cancel();
+    _danmuRetryTimer = Timer(const Duration(seconds: 10), () {
+      if (!mounted || _danmuLoaded || _danmuApiUrl.isEmpty) return;
+      _ensureDanmuLoaded(urlOverride: url);
+    });
+  }
+
   Future<void> _ensureDanmuLoaded({String? urlOverride}) async {
     if (_danmuLoaded || _danmuApiUrl.isEmpty) return;
-    final loadGen = ++_danmuLoadGen;
+    // ⚠️ 2026-10-14：代次自增**必须放到下面的"去重判断"之后**（见那里的说明）。
     // ⚠️ 必须优先用调用方传入的新地址：
     // 换集分支里 _ensureDanmuLoaded() 在 _openMedia() **之前**执行，此时
     // _player.state.playlist 仍是上一集的 URL → 会把上一集的弹幕贴到新一集上。
@@ -1191,6 +1295,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     //   现在：请求成功 / 明确 0 条才置位 ✓；失败则留着让下次还能重试 ✓。
     //   ⚠️ 去重：**同一个地址**正在加载时不重复发 ✓（换集地址不同 → 照常放行 ✓）。
     if (_danmuInFlightUrl == url) return;
+    // ⚠️ 2026-10-14：**只有真要发这次请求时才推进代次**。原来它在函数开头就
+    //   `++_danmuLoadGen` ⇒ "同地址的第二次调用"虽被上面这行去重直接 return，
+    //   却已经把代次推进 ⇒ 先前那次**真正在飞的**请求返回时代次校验失败、
+    //   结果被丢弃，且 `_danmuLoaded` 不会置位 ⇒ **该集一条弹幕都不出** ✗
+    //  （首次进播放页时 `_loadDanmuSettings` 与 `playing` 监听会几乎同时调到，
+    //    属高频路径。）
+    final loadGen = ++_danmuLoadGen;
     _danmuInFlightUrl = url;
     try {
       await _doLoadDanmu(url, loadGen);
@@ -1235,7 +1346,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     //    否则一次网络波动就把本次播放会话的弹幕永久锁死。
     final urlBody = await urlFuture;
     if (urlBody == null) {
-      if (loadGen == _danmuLoadGen) _danmuLastFailAt = DateTime.now();
+      if (loadGen == _danmuLoadGen) {
+        _danmuLastFailAt = DateTime.now();
+        _scheduleDanmuRetry(url); // 见该方法的说明：确保失败后真的还会重试
+      }
       AppLog.instance.log('[video_player] danmu URL 探测失败，等待重试');
       return;
     }
@@ -1256,7 +1370,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       );
       if (fb == null) {
         // 兜底链路请求失败：同上，不置位，等待重试
-        if (loadGen == _danmuLoadGen) _danmuLastFailAt = DateTime.now();
+        if (loadGen == _danmuLoadGen) {
+          _danmuLastFailAt = DateTime.now();
+          _scheduleDanmuRetry(url); // 同上：让失败真的可重试
+        }
         AppLog.instance.log('[video_player] danmu 片名兜底请求失败，等待重试');
         return;
       }
@@ -1264,15 +1381,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (list.isNotEmpty) danmuSource = 'title';
     }
 
-    if (_danmuBlockWords.isNotEmpty) {
-      list = list
-          .where(
-            (d) => !_danmuBlockWords.any(
-              (w) => w.isNotEmpty && d.text.contains(w),
-            ),
-          )
-          .toList();
-    }
+    // ⚠️ 2026-10-14：**先留一份未按屏蔽词过滤的原始列表** —— 播放中修改屏蔽词时
+    //   用它重新过滤。原来只在"请求返回时"过滤一次，而 `DanmuLayer` 也不感知
+    //   屏蔽词 ⇒ 改屏蔽词对**已加载的这一集**完全无效，必须重进播放页。
+    _danmusRaw = list;
+    list = _filterByBlockWords(list);
     AppLog.instance.log(
       '[video_player] danmu loaded: ${list.length} 条 (source=$danmuSource, title=$title)',
     );
@@ -1441,8 +1554,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     var clean = TmdbService.cleanTitle(title);
     // 该服务搜索对「【】」等括号敏感，直接搜原始标题命中率反而更高
     if (clean.isEmpty) clean = title;
-    // 年份用于缓存键隔离（同名不同年的剧不要互相串缓存）
-    final year = TmdbService.extractYear('', '');
+    // 年份用于缓存键隔离（同名不同年的剧不要互相串缓存）。
+    // ⚠️ 2026-10-14：原来写的是 `extractYear('', '')` —— 两个入参都是空串，
+    //   年份**恒为空**，缓存键实际退化成"片名 + 集号" ⇒ 同名不同年的剧会互相
+    //   串缓存（第二部贴上第一部的弹幕），且进程存活期内不会自愈。
+    //   改成从**原始标题**里提取（`extractYear(note, yearField)` 会先试 yearField、
+    //   失败再用正则从 note 里找 4 位年份；我们只有标题，所以传它 + 空 yearField）。
+    final year = TmdbService.extractYear(title, '');
 
     final cacheKey =
         '${clean.toLowerCase()}|${year ?? ''}|${widget.selectedEpisodeIndex}';
@@ -1460,7 +1578,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         '[video_player] danmu title-fallback episodeId 命中: $cacheKey',
       );
       final list = await _danmuFetchComments(base, cached);
-      if (list != null && list.isNotEmpty) _danmuTitleListCache[cacheKey] = list;
+      if (list != null && list.isNotEmpty) _rememberDanmuList(cacheKey, list);
       return list; // null（请求失败）向上传播 → 调用方保留重试
     }
 
@@ -1520,7 +1638,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
     if (episodeId == 0) return const [];
 
-    _danmuEpCache[cacheKey] = episodeId;
+    _rememberDanmuEp(cacheKey, episodeId);
     AppLog.instance.log(
       '[video_player] danmu title-fallback 命中: "$firstName" episodeId=$episodeId',
     );
@@ -1712,7 +1830,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (_player.state.playing) {
       _player.pause();
     } else {
-      AudioFocus.request('video');
+      AudioFocus.request(_focusKey);
       _player.play();
     }
     _scheduleHideControls();
@@ -1798,7 +1916,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
     try {
       if (!_player.state.playing) {
-        await AudioFocus.request('video');
+        await AudioFocus.request(_focusKey);
         await _player.play();
       }
     } catch (e) {
@@ -1831,7 +1949,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     await SystemUiController.exit('videoDrama');
     try {
       if (!_player.state.playing) {
-        await AudioFocus.request('video');
+        await AudioFocus.request(_focusKey);
         await _player.play();
       }
     } catch (e) {
@@ -1890,7 +2008,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     );
     try {
       if (!_player.state.playing) {
-        await AudioFocus.request('video');
+        await AudioFocus.request(_focusKey);
         await _player.play();
       }
     } catch (e) {
@@ -1921,7 +2039,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     await SystemUiController.exit('videoDouyin');
     try {
       if (!_player.state.playing) {
-        await AudioFocus.request('video');
+        await AudioFocus.request(_focusKey);
         await _player.play();
       }
     } catch (e) {
@@ -1991,7 +2109,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (mounted) _onWindowFullScreenChanged();
     try {
       if (!_player.state.playing) {
-        await AudioFocus.request('video');
+        await AudioFocus.request(_focusKey);
         await _player.play();
       }
     } catch (e) {
@@ -2028,6 +2146,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _persisted.isNativeFullscreen = false;
     }
     widget.onFullScreenChanged?.call(false);
+    // ⚠️ 2026-10-14：**必须同时退出 SystemUiController 的入栈现场** ——
+    //   原来这里只清本地标志，`'videoDrama'` / `'videoDouyin'` 的快照会永久
+    //   留在栈里 ⇒ 系统栏停在 immersiveSticky，退出全屏后**状态栏/导航栏不回来**
+    //   （只有走 `_exitDramaMode` / `_exitDouyinMode` 才清，而短剧/抖音模式下按
+    //   返回或点全屏键走的是本函数）。`exit()` 对"没有现场记录"是幂等的
+    //   （会回到默认），所以这里无条件调用是安全的。
+    await SystemUiController.exit('videoDrama');
+    await SystemUiController.exit('videoDouyin');
     try {
       await WindowFullScreen.instance.exit();
       AppLog.instance.log('=== _exitFullScreen: WindowFullScreen exit OK ===');
@@ -2052,7 +2178,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (mounted) _onWindowFullScreenChanged();
     try {
       if (!_player.state.playing) {
-        await AudioFocus.request('video');
+        await AudioFocus.request(_focusKey);
         await _player.play();
       }
     } catch (e) {
@@ -2181,7 +2307,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
   @override
   void dispose() {
-    AudioFocus.unregister('video');
+    AudioFocus.unregister(_focusKey);
     WidgetsBinding.instance.removeObserver(this);
     WindowFullScreen.instance.activeNotifier.removeListener(
       _onWindowFullScreenChanged,
@@ -2196,6 +2322,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _timeTimer?.cancel();
     _hintClearTimer?.cancel();
     _stallTimer?.cancel();
+    _danmuRetryTimer?.cancel(); // 弹幕失败重试（见 _scheduleDanmuRetry）
 
     // 还原「优先横屏」强制过的方向，避免退出播放器后整个 App 卡在横屏
     if (_landscapeForcedByPref) {
@@ -2215,6 +2342,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (_ownsPlayer) {
       _player.dispose();
     }
+    // ⚠️ 2026-10-14：把这个 key 对应的持久化状态一并清掉。`_cacheKey` 取自
+    //   `widget.key?.toString()`，而详情页用的是 `ObjectKey(_player)` ——
+    //   `ObjectKey.toString()` 会把 value 的 toString 拼进去，而 AppPlayer 未
+    //   重写 toString ⇒ **不同影片的播放器会得到同一个 key 字符串** ⇒ 共用同一条
+    //   `_persisted`：`resumeApplied` 已为 true 会让新片跳过续播兜底；
+    //   `isNativeFullscreen` / `isImmersive` 残留会让新片以"全屏布局"打开。
+    //   在真正的销毁（dispose）里移除即可 —— rebuild 不会走 dispose，原意保留。
+    _stateCache.remove(_cacheKey);
     super.dispose();
   }
 
@@ -4381,7 +4516,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           await _player.seek(resume);
         }
         await Future<void>.delayed(const Duration(milliseconds: 120));
-        await AudioFocus.request('video');
+        await AudioFocus.request(_focusKey);
         await _player.play();
       } catch (e) {
         AppLog.instance.log('[video_player] resume after pip failed: $e');
@@ -4402,6 +4537,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       if (VideoPlayerPip.instance.isIosActive) {
         final resume = VideoPlayerPip.instance.iosLastPosition;
         await VideoPlayerPip.instance.exitIos();
+        // ⚠️ 2026-10-14：`exitIos()` 是异步原生调用，await 期间页面可能已被销毁
+        if (!mounted) return;
         setState(() => _pipActive = false);
         if (resume > Duration.zero) {
           try {
@@ -4411,7 +4548,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
           }
         }
         try {
-          AudioFocus.request('video');
+          AudioFocus.request(_focusKey);
           _player.play();
         } catch (e) {
           AppLog.instance.log('[video_player] swallowed: $e');
@@ -4471,7 +4608,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       );
       if (!entered) {
         try {
-          AudioFocus.request('video');
+          AudioFocus.request(_focusKey);
           _player.play();
         } catch (e) {
           AppLog.instance.log('[video_player] swallowed: $e');
@@ -4498,6 +4635,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         return;
       }
       _autoEnterPipOnBackground();
+      return;
+    }
+    if (state == AppLifecycleState.resumed) {
+      // ⚠️ 2026-10-14：回到前台时重读弹幕显示类设置 —— 覆盖"去设置页改完屏蔽词
+      //   再回来"这条路径（原来改了完全不生效，必须重进播放页）。见
+      //   `_reloadDanmuDisplaySettings` 的说明。
+      unawaited(_reloadDanmuDisplaySettings());
     }
   }
 
@@ -4562,9 +4706,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         },
       );
       if (!entered) {
-        setState(() => _pipActive = false);
+        // ⚠️ 2026-10-14：同上 —— `enterIos` 是异步的，回来时 State 可能已销毁
+        if (mounted) setState(() => _pipActive = false);
         try {
-          AudioFocus.request('video');
+          AudioFocus.request(_focusKey);
           _player.play();
         } catch (e) {
           AppLog.instance.log('[video_player] swallowed: $e');

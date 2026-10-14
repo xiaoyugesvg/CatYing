@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
 import 'app_log.dart';
+import 'prefs_mirror.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/live_models.dart';
@@ -935,6 +936,7 @@ class LiveService extends GetxService {
       rethrow;
     } finally {
       hardTimeout.cancel();
+      dio.close(force: true); // 局部新建的 Dio 必须显式释放，否则遗留 HttpClient 连接池
     }
   }
 
@@ -1118,6 +1120,10 @@ class LiveService extends GetxService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('live_url', url);
       _persistedUrl = url;
+      // 🔴 2026-10-14 修（洞 J）：单源模式这两个键以前**只写 prefs、没备份也没刷镜像**
+      //   —— 多源（live_lives）有 .bak，单源没有，而 prefs 整域丢失正是常见情形。
+      //   这里补一次"改完即落盘 + 刷新文件镜像"，与其它设置写入点保持一致。
+      PrefsMirror.snapshotSoon();
     } catch (e) { /* ignore */ }
   }
 
@@ -1126,6 +1132,7 @@ class LiveService extends GetxService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('live_name', name);
       _persistedName = name;
+      PrefsMirror.snapshotSoon();
     } catch (e) { /* ignore */ }
   }
 

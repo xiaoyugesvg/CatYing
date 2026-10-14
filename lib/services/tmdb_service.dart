@@ -277,8 +277,9 @@ class TmdbService extends GetxService {
   /// 测试 API 代理是否可用（发一个最轻的请求）
   Future<({bool ok, String message})> testApiProxy() async {
     final base = effectiveApiBase;
+    Dio? client; // 见 finally：局部 Dio 必须显式释放
     try {
-      final dio = Dio(BaseOptions(
+      final dio = client = Dio(BaseOptions(
         connectTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 12),
       ));
@@ -291,14 +292,17 @@ class TmdbService extends GetxService {
       return (ok: false, message: '连接失败：${e.type.name}');
     } catch (e) {
       return (ok: false, message: '连接失败：$e');
+    } finally {
+      client?.close(force: true); // 局部新建的 Dio 必须显式释放，否则遗留 HttpClient 连接池
     }
   }
 
   /// 测试图片代理是否可用（取一张已知存在的极小图）
   Future<({bool ok, String message})> testImgProxy() async {
     final base = effectiveImgBase;
+    Dio? client; // 见 finally：局部 Dio 必须显式释放
     try {
-      final dio = Dio(BaseOptions(
+      final dio = client = Dio(BaseOptions(
         connectTimeout: const Duration(seconds: 10),
         receiveTimeout: const Duration(seconds: 12),
       ));
@@ -314,6 +318,8 @@ class TmdbService extends GetxService {
       return (ok: false, message: '连接失败：${e.type.name}');
     } catch (e) {
       return (ok: false, message: '连接失败：$e');
+    } finally {
+      client?.close(force: true); // 局部新建的 Dio 必须显式释放，否则遗留 HttpClient 连接池
     }
   }
 
@@ -487,6 +493,8 @@ class TmdbService extends GetxService {
     if (out.isEmpty && lastSearchError.value == null) {
       lastSearchError.value = '搜索无结果（TMDB 可能未收录该片）';
     }
+    // 局部新建的 Dio 必须显式释放，否则遗留 HttpClient 连接池
+    dio.close(force: true);
     return out;
   }
 

@@ -206,9 +206,23 @@ class MiniAppService extends GetxService {
       } catch (_) {}
     }
     final archive = ZipDecoder().decodeBytes(bytes);
+    // 解包目录的规范化前缀（末尾带分隔符，避免 `/a/bc` 误判成 `/a/b` 的子路径）
+    final basePath = dir.path.endsWith('/') ? dir.path : '${dir.path}/';
     for (final f in archive) {
       if (!f.isFile) continue;
-      final out = File('${dir.path}/${f.name}');
+      // 🔴 2026-10-14 修（zip slip 路径穿越）：
+      //   `f.name` 是**压缩包条目里的字符串**，可以写成 `../../x` 甚至多级穿越；
+      //   而下面那句 `out.parent.create(recursive: true)` 会照样把目录建到解包目录
+      //   之外 —— 于是恶意 zip 能覆盖 Documents 下的关键文件，包括
+      //   `sources.json`、`api_config` 的 `api_url.bak`、`prefs_mirror.json`。
+      //   这里把目标路径规范化（吃掉 `..` / `.`）后强制校验仍在解包目录内，
+      //   越界条目直接丢弃。（不用引 package:path：Uri.normalizePath 就够。）
+      final outPath =
+          Uri.file('$basePath${f.name}').normalizePath().toFilePath();
+      if (!outPath.startsWith(basePath)) {
+        continue; // 越界条目：静默丢弃（这是攻击/坏包场景，不是用户操作）
+      }
+      final out = File(outPath);
       await out.parent.create(recursive: true);
       await out.writeAsBytes(f.content as List<int>);
     }

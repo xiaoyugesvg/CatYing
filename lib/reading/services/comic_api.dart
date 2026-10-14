@@ -265,9 +265,10 @@ class ComicApi {
     final offset = page * limit;
     _log('分类筛选: theme=$theme, page=$page($offset), limit=$limit');
 
+    Dio? client; // 见 finally：局部 Dio 必须显式释放
     try {
       // 独立 Dio：www 网页域头不能带 webp:0（致 SSR 返空），不复用主 dio interceptor
-      final webDio = Dio(
+      final webDio = client = Dio(
         BaseOptions(
           connectTimeout: const Duration(seconds: 15),
           receiveTimeout: const Duration(seconds: 15),
@@ -358,6 +359,9 @@ class ComicApi {
     } catch (e) {
       _log('分类筛选失败: $e');
       rethrow;
+    } finally {
+      // 局部新建的 webDio 内部持有 HttpClient，不显式关闭会泄漏连接池
+      client?.close(force: true);
     }
   }
 

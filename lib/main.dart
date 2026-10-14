@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/material.dart';
 import 'common/theme.dart';
@@ -17,6 +18,7 @@ import 'services/api_config.dart';
 import 'services/nav_feature_service.dart';
 import 'services/app_log.dart';
 import 'services/prefs_mirror.dart';
+import 'reading/cores/reader_core_prefs.dart';
 import 'services/app_state.dart';
 import 'services/background_service.dart';
 import 'services/epg_service.dart';
@@ -44,6 +46,8 @@ import 'reading/services/favorites_service.dart';
 import 'reading/services/browse_history_service.dart';
 import 'reading/services/download_service.dart';
 import 'reading/services/reading_progress_service.dart';
+import 'reading/novel_source/analyze/cookie_store.dart';
+import 'reading/novel_source/web_book/runner_isolate.dart';
 import 'reading/services/trim_preset_service.dart';
 import 'reading/services/view_mode.dart';
 import 'reading/services/book_view_mode.dart';
@@ -75,6 +79,41 @@ void main() async {
     if (message != null) AppLog.instance.log(message);
   };
 
+  // ── 全局异常兜底（2026-10-14）─────────────────────────────────
+  //   原来全项目没有 `FlutterError.onError` / `PlatformDispatcher.onError`：
+  //   · widget 构建错误 → 框架默认 handler 走 `debugPrint`，而上面刚把
+  //     `debugPrint` 重定向进 AppLog ⇒ 其实能落盘 ✓（这条是白捡的）；
+  //   · 真正裸奔的是**未捕获的异步异常** ✗ —— release 下被静默丢弃，
+  //     连一个字都不落盘 ⇒ 用户报"点了没反应"时日志里查无此案 ✗✗。
+  //   这里把两者统一收进「软件日志」；异步异常回 `true`（已处理）——
+  //   避免它冒泡成进程崩溃，同时留下可查的现场。
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details); // 保留框架原有行为（debug 下仍红屏/打印）
+    AppLog.instance.log('[FlutterError] ${details.exceptionAsString()}');
+    if (details.stack != null) AppLog.instance.log('${details.stack}');
+  };
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    AppLog.instance.log('[未捕获异步异常] $error');
+    AppLog.instance.log('$stack');
+    return true; // 已处理：不让它把 App 带走
+  };
+
+  // ── 启动期「恢复类」步骤的超时保护（2026-10-14，N4）──────────────
+  //   下面这几步都是**读文件**（Documents 下的镜像 / json / prefs）：万一
+  //   文件句柄耗尽或文件系统异常导致读不返回，`await` 会永久挂住 `main()`
+  //   ⇒ 用户看到的是**永久黑屏启动**，只能强杀 ✗。
+  //   超时后**跳过本次恢复继续启动**：代价仅是"这次没吃上备份"，备份文件
+  //   仍在，下次启动会再恢复 ✓。
+  //   ⚠️ 刻意**不**包注册类步骤（`Get.putAsync` / 各 `Service.init`）：那些
+  //      被跳过会造成状态不一致（UI `Get.find` 找不到实例直接抛）✗——比卡住更糟。
+  Future<void> bootRestore(String name, Future<void> Function() step) async {
+    try {
+      await step().timeout(const Duration(seconds: 5));
+    } catch (e) {
+      AppLog.instance.w('[启动] $name 超时/失败，跳过本次恢复: $e');
+    }
+  }
+
   // 初始化 media_kit（备用 MPV 内核；AVPlayer 为主时也需 init，设置里可切换）
   MediaKit.ensureInitialized();
 
@@ -86,7 +125,17 @@ void main() async {
   //    iOS 上设置全在一个 NSUserDefaults plist 里，App 被信号直接杀死时
   //    （见 prefs_mirror.dart 顶部说明）plist 可能整域丢失 ⇒ 重启后音乐/
   //    阅读/弹幕/直播/小程序的设置全没。这里从独立文件镜像把 prefs 救回来。
-  await PrefsMirror.restoreIfLost();
+  await bootRestore('PrefsMirror.restoreIfLost', PrefsMirror.restoreIfLost);
+
+  // 阅读核心（ReaderCore）选择与配置：必须紧跟镜像恢复之后 —— 它读的
+  // `reader_core_id` / `reader_core_source_url` 也可能被镜像修正过。
+  // 未配置时 activeCore 返回 null ⇒ 阅读器一律回落现有链路，**不影响现存功能**。
+  await bootRestore('ReaderCorePrefs.init', ReaderCorePrefs.instance.init);
+
+  // 书源 Cookie 落盘恢复（洞 Q）：原来只在内存（`_byHost`），重启即丢 ——
+  // 晋江这类"先登录、再带 Cookie 拉正文"的源每次都要重新登录。
+  // 必须早于任何书源求值，故在此处（与其它启动期 restore 并列）恢复一次。
+  await bootRestore('SourceCookieStore.load', SourceCookieStore.instance.load);
 
   // 播放内核与选项
   // #10：字号缩放是外观设置，由 AppTheme 负责加载（PlayerPrefs 是兼容壳）
@@ -118,6 +167,15 @@ void main() async {
   // 书架/收藏/历史/进度之间会在 init 里互相查询（例如书架要为已下载的书
   // 回填收藏角标），顺序错了会出现"首次启动状态丢失"。改动前先看 cmbok。
   //
+  // 🔴 2026-10-14 补接线：书源求值走 **worker isolate**。
+  //   这个开关此前**从未被打开**（`runner_isolate.dart` 里只有注释示例），
+  //   于是 `web_book.dart` 的五个入口永远走主 isolate 同步路径 ⇒
+  //   `SyncHttpBridge.allowBlockingOnCurrentIsolate` 永远是 false（它只在
+  //   worker 里被置 true）⇒ 所有 `java.ajax` 命中闸门拦截、拿不到内容 ✗
+  //   （按代码自己的统计：45 处 / 25 条源在用 `java.ajax`）。
+  //   打开后：worker 内开闸，同步抓取只发生在 worker，不卡 UI ✓。
+  BookSourceRunner.enabled = true;
+
   await SettingsService().init();
   await ReaderOverrideService().init();
   await BookFontService().init();
@@ -321,7 +379,13 @@ void main() async {
   //     直接命中缓存，少等一次完整网络往返（用户反馈"启动要好久"）。
   try {
     final prefs = await SharedPreferences.getInstance();
-    final cur = prefs.getString(AppConstants.apiUrl) ?? '';
+    var cur = prefs.getString(AppConstants.apiUrl) ?? '';
+    // 🔴 2026-10-14 修（洞 H）：先用**文件备份**修正可能已过期的 prefs 值，再落盘。
+    //   旧逻辑直接 `persistApiUrl(cur)` —— 等于把过期的 prefs 值写回 .bak，
+    //   把好备份覆盖掉（**反向破坏**），之后重启就彻底回旧源。
+    //   这段是无条件执行的（**不依赖有没有订阅**），所以"首屏手动换源后被硬杀"
+    //   这种情况也一起修好了。
+    cur = await ApiConfig.restoreApiUrlIfLost(cur);
     if (cur.isNotEmpty) {
       await ApiConfig.persistApiUrl(cur);
       AppState.startupSavedApiUrl = cur;

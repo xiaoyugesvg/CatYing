@@ -33,6 +33,17 @@ void _log(String message) {
 const _kDocFileName = 'sources.json';
 // 云端源迁移标记：升级到本版本时一次性清除本地源覆盖层（旧版本缓存/自定义）。
 const _kCloudOnlyMigrationDone = 'source_cloud_only_migration_done';
+// 同一个标记的**文件版**（洞 I，2026-10-14）：
+//
+// prefs 就是 NSUserDefaults，这个 App 上会**整域随机丢失**（日志实证：
+// 同一份日志里订阅的键丢过、`[Subscription] prefs 丢失/损坏` 报过）。
+// 标记一旦没落盘，重启后 `_migrateOnceIfNeeded` 就以为"还没迁移过" →
+// **重跑迁移** → 把用户导入/云端更新的书源覆盖层再次改名清空
+// （.bak 还在但 UI 不会读回）⇒ 表现为"重启后书源没了"，
+// 而且这是**主动清掉**，不是丢数据 —— 比单纯丢失危险得多。
+// ⇒ 标记落一份**独立文件**，与 prefs 解耦；判断时
+//   "文件在 **或** prefs 标记为 true" 都算已迁移。
+const _kMigrationMarkerFileName = 'sources_migration.done';
 // 用户主动「清空」标记（保留：saveLocal 会清除它，兼容老装机遗留值）。
 const _kSourcesCleared = 'sources_cleared';
 
@@ -52,10 +63,25 @@ class SourceConfigStore {
   /// 用 SharedPreferences 标记保证仅执行一次（失败不置位，下次重试）。
   Future<void> _migrateOnceIfNeeded() async {
     try {
+      final dir = await getApplicationDocumentsDirectory();
+      final marker = File('${dir.path}/$_kMigrationMarkerFileName');
       final prefs = await SharedPreferences.getInstance();
-      if (prefs.getBool(_kCloudOnlyMigrationDone) ?? false) return;
+      // 任一个来源说"迁移过了"就返回 —— 文件标记是主依据（prefs 会丢、文件不会）
+      if (marker.existsSync() ||
+          (prefs.getBool(_kCloudOnlyMigrationDone) ?? false)) {
+        return;
+      }
       await resetToLocal();
       await prefs.setBool(_kCloudOnlyMigrationDone, true);
+      // 🔴 关键：把标记落到**文件**上。上面那句 prefs 写入可能因为
+      //   NSUserDefaults 没落盘而丢失 —— 只靠它的话，重启就会再清一次用户书源。
+      try {
+        await marker.writeAsString(
+            'cleared at ${DateTime.now().toIso8601String()}',
+            flush: true);
+      } catch (e) {
+        _log('迁移标记文件写入失败（重启后可能重跑迁移）: $e');
+      }
       _log('已执行云端源迁移：清除本地源覆盖层');
     } catch (e) {
       _log('云端源迁移失败（下次重试）: $e');
@@ -160,8 +186,9 @@ class SourceConfigStore {
       _log('未配置云端仓库地址，跳过远端拉取');
       return null;
     }
+    Dio? client; // 见 finally：局部 Dio 必须显式释放
     try {
-      final dio = Dio(
+      final dio = client = Dio(
         BaseOptions(
           connectTimeout: const Duration(seconds: 10),
           receiveTimeout: const Duration(seconds: 15),
@@ -191,6 +218,9 @@ class SourceConfigStore {
     } catch (e) {
       _log('云端 sources.json 拉取失败（保留本地）: $e');
       return null;
+    } finally {
+      // 局部新建的 Dio 内部持有 HttpClient，不显式关闭会泄漏连接池
+      client?.close(force: true);
     }
   }
 

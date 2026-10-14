@@ -379,6 +379,10 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       return (false, '仅支持 http(s) / 本地路径');
     }
 
+    // 每次前台开始加载源就递增代次号 → 在飞的后台刷新会被判定作废
+    // （见 _sourceLoadGeneration 的说明）
+    _sourceLoadGeneration++;
+
     final sourcePath = await getDocumentsSourcePath();
     final indexJSPath = '$sourcePath/index.js';
     final indexMd5Path = '$sourcePath/index.js.md5';
@@ -575,12 +579,25 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
 
   /// 后台异步刷新源文件：本地缓存存在时, 静默下载远程 MD5 比对,
   /// 发现源已更新则重新下载并替换本地缓存。不阻塞启动、不显示下载文案。
+  /// 源加载代次号：**每次前台开始加载源就 +1**。
+  ///
+  /// 为什么需要（切源竞态，用户 2026-10-14 提的"洞 B"）：
+  ///   本地缓存命中时，前台会顺手启动一个**后台刷新**（重新下载 index.js 并替换）。
+  ///   如果这期间用户切到了别的源，那份后台下载完成时就会把**旧源的内容写进
+  ///   index.js** —— 而 Node 里驻留的已经是新源 ⇒ 脚本与引擎不一致，
+  ///   表现为「切了源但内容不对 / 半截文件」。
+  /// ⇒ 后台任务记下发起时的号，**写文件之前**校验；不一致就整份丢弃。
+  /// （同源并发写内容相同、无害，所以不需要额外加互斥锁。）
+  static int _sourceLoadGeneration = 0;
+
   void _refreshSourceInBackground(String normalizedUrl, String sourcePath) {
-    unawaited(_refreshSourceAsync(normalizedUrl, sourcePath));
+    // 记下发起时的代次：期间只要有人开始加载新源，这个号就会变
+    final gen = _sourceLoadGeneration;
+    unawaited(_refreshSourceAsync(normalizedUrl, sourcePath, gen));
   }
 
   Future<void> _refreshSourceAsync(
-      String normalizedUrl, String sourcePath) async {
+      String normalizedUrl, String sourcePath, int gen) async {
     try {
       final indexJSPath = '$sourcePath/index.js';
       final indexMd5Path = '$sourcePath/index.js.md5';
@@ -626,6 +643,14 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
       final actualMd5 = md5.convert(jsData).toString();
       if (actualMd5 != remoteMd5) {
         AppLog.instance.log('[IOSNodeJS] 后台下载 MD5 校验失败, 丢弃');
+        return;
+      }
+
+      // 🔴 写之前再校验一次代次号（见 _sourceLoadGeneration）：
+      // 下载这段网络时间里用户可能已经切到别的源，这份内容就不能再写进去了，
+      // 否则会把新源的脚本覆盖成旧源的。
+      if (gen != _sourceLoadGeneration) {
+        AppLog.instance.log('[IOSNodeJS] 后台刷新作废（下载期间已切源）');
         return;
       }
 

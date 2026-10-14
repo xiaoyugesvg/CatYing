@@ -85,7 +85,19 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
       }
       final local = widget.localRoot?.trim() ?? '';
       if (local.isNotEmpty) {
-        await _controller.loadFile('$local/$_entry');
+        // 🔴 2026-10-14 修（洞 O：entry 路径穿越读）：
+        //   `_entry` 来自 manifest，可以写成 `../x.html` ⇒ 会把**小程序目录之外**
+        //   的本地 HTML 加载进这个**注入了 ant 桥**的 WebView（能调 request /
+        //   storage / player）。配合"解包 zip slip"（已在 mini_app_service 修掉）
+        //   就是一条完整利用链，所以这里必须挡住。
+        //   做法同 zip slip：规范化后校验仍在 localRoot 内，越界就拒绝加载。
+        final base = local.endsWith('/') ? local : '$local/';
+        final target = Uri.file('$base$_entry').normalizePath().toFilePath();
+        if (target.startsWith(base)) {
+          await _controller.loadFile(target);
+        } else {
+          AppLog.instance.log('[MiniAppWeb] 入口页越界，已拒绝加载: $_entry');
+        }
       }
     } catch (e) {
       AppLog.instance.log('[MiniAppWeb] 入口页加载失败: $e');

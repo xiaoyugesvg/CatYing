@@ -88,7 +88,21 @@ class PeerTransferService extends ChangeNotifier {
 
   // ===================== 初始化 =====================
 
+  /// init 幂等守卫（2026-10-14 补）。
+  ///
+  /// 🔴 原来 `init()` **全项目没有任何调用点** ⇒ 后果有两层：
+  ///   · `_peerId` / `_peerName` 一直是空串 ⇒ `_startBroadcast` 用空 name
+  ///     广播（`BonsoirService(name: _peerId)`）⇒ **发现不到设备**；
+  ///   · 已配对表 `_peers` 从不 `_loadPeers` ⇒ 重启后配对关系全丢，
+  ///     每次传书都要重新配对 ✗。
+  /// 现在在 `enterReceiveMode` / `enterSendMode` 里补上调用；同时加这道守卫，
+  /// 保证反复进出传书页不会重复创建下面那个 `_cleanupTimer`（旧的会失去引用
+  /// 却仍在跑，属定时器泄漏）。
+  bool _initialized = false;
+
   Future<void> init() async {
+    if (_initialized) return;
+    _initialized = true;
     final prefs = await SharedPreferences.getInstance();
     _peerId = prefs.getString(_kPeerId) ?? '';
     if (_peerId.isEmpty) {
@@ -130,6 +144,7 @@ class PeerTransferService extends ChangeNotifier {
       );
     }
 
+    _cleanupTimer?.cancel(); // 保险：即便守卫被绕过也只保留一个定时器
     _cleanupTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _cleanupOffers(),
@@ -566,6 +581,7 @@ class PeerTransferService extends ChangeNotifier {
 
   /// 接收模式：起服务 + 广播 + 前台保活（息屏可收）。
   Future<bool> enterReceiveMode() async {
+    await init(); // 幂等：确保 _peerId/_peerName 与已配对表就绪（见 init 的说明）
     final ok = await _startServer();
     if (!ok) return false;
     await _startBroadcast();
@@ -601,7 +617,12 @@ class PeerTransferService extends ChangeNotifier {
 
   /// 发送模式：发现对端（前端选中文件后调 [sendToPeer]）。
   /// 也可单独用于刷新对端列表。
-  Future<void> enterSendMode() => startDiscovery();
+  Future<void> enterSendMode() async {
+    // 幂等 init：发送模式要按已配对表列设备，`_peers` 只有 init 会加载
+    //（见 init 的说明）。不调这里就会出现"之前配对过的设备列表是空的"。
+    await init();
+    await startDiscovery();
+  }
   Future<void> exitSendMode() => stopDiscovery();
 
   /// 快速探活对端：TCP 连其 HTTP 端口（2s 超时）。失败则标记离线并通知。

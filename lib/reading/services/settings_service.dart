@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../common/module_theme_sync.dart';
 import '../../common/theme_mode_store.dart';
+import '../../services/prefs_mirror.dart';
 import '../theme/jelly_palette.dart';
 import '../theme/jelly_theme.dart';
 import '../utils/constants.dart';
@@ -1681,6 +1682,9 @@ class SettingsService extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(_kHomeBannerStyleKey, value.index);
+      // 立刻落进文件镜像：这个值在「设置 → 菜单设置」里改，用户改完常直接
+      // 杀 App，等 15s 周期快照就来不及了（见 prefs_mirror.snapshotSoon 说明）
+      PrefsMirror.snapshotSoon();
     } catch (e) {
       _log('保存首页幻灯片样式失败: $e');
     }
@@ -2034,6 +2038,7 @@ class SettingsService extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_kNavFloatingKey, value);
+      PrefsMirror.snapshotSoon();
     } catch (e) {
       _log('保存导航栏悬浮开关失败: $e');
     }
@@ -2047,6 +2052,7 @@ class SettingsService extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_kNavIconOnlyKey, value);
+      PrefsMirror.snapshotSoon();
     } catch (e) {
       _log('保存导航栏纯图标开关失败: $e');
     }

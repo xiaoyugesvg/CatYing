@@ -150,6 +150,9 @@ class AiService extends ChangeNotifier {
       throw '请求失败：${e.message ?? e}$detail';
     } catch (e) {
       throw '请求异常：$e';
+    } finally {
+      // 局部新建的 Dio 内部持有 HttpClient，不显式关闭会泄漏连接池
+      dio.close(force: true);
     }
   }
 }

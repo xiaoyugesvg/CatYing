@@ -278,9 +278,13 @@ class AppState extends GetxController {
         if (!loadOk) return 'Node 已就绪，但源加载失败：${msg ?? "未知错误"}';
         SpiderService.instance.mainScriptUrl = main.api;
         _sourceLoadedThisSession = true;
+        // 记下"请求发起时"的配置地址：/config 回来时若已不是它，说明期间切了源
+        // → 这份线路表作废（见 updateSourceBeansFromSpiderConfig 的竞态校验）
+        final cfgUrlAtRequest = ApiConfig.instance.configUrl.value;
         final cfg = await SpiderService.instance.getCatConfig();
         if (cfg != null) {
-          await ApiConfig.instance.updateSourceBeansFromSpiderConfig(cfg, '');
+          await ApiConfig.instance
+              .updateSourceBeansFromSpiderConfig(cfg, cfgUrlAtRequest);
         }
       }
       return 'Node 引擎已就绪（端口 ${NodeJSManager.instance.spiderPort}）';
@@ -306,8 +310,35 @@ class AppState extends GetxController {
     }
   }
 
+  /// Node 加载流程的并发锁（洞 F，2026-10-14）。
+  ///
+  /// 问题：快速连切两个源时，两次 `_ensureNodeJSAndLoadSource` 会**并发**跑
+  /// `loadSource`，同时往**同一个 `index.js`** 写 → 文件被交替写坏 → 源加载失败。
+  ///
+  /// 做法：同一时刻只允许一条流程在跑；后来的**复用前一条的 Future**
+  /// （而不是直接丢弃）—— 这样调用方仍然会等到加载真正结束。
+  /// `finally` 里清位是必须的：否则任何一次异常都会让锁永久 latch，
+  /// 变成"Node 引擎再也加载不了"，比并发写坏文件严重得多。
+  static Future<void>? _nodeLoadInFlight;
+
   /// 确保 Node.js 已启动并加载 Spider 源 - 对应 Swift ensureNodeJSAndLoadSource
   Future<void> _ensureNodeJSAndLoadSource() async {
+    final inFlight = _nodeLoadInFlight;
+    if (inFlight != null) {
+      AppLog.instance.log('[AppState] Node 加载流程已在跑，复用同一条流程（不并发）');
+      return inFlight;
+    }
+    final fut = _ensureNodeJSAndLoadSourceInner();
+    _nodeLoadInFlight = fut;
+    try {
+      await fut;
+    } finally {
+      _nodeLoadInFlight = null;
+    }
+  }
+
+  /// 真正的加载流程 —— 并发锁由外层 [_ensureNodeJSAndLoadSource] 负责。
+  Future<void> _ensureNodeJSAndLoadSourceInner() async {
     // 🔴 2026-10-13 修（用户：「导入猫源还有 tvbox 源后导入 py 源，重启后订阅里
     // 面全空了，并且这些猫源还有 tvbox 源全部没有内容」）：
     //
@@ -369,7 +400,13 @@ class AppState extends GetxController {
     // **会话级复用**: 本次启动已成功加载过**同一个**源（api 一致）才复用；
     // 切订阅后 api 变了必须重新 loadSource，否则 Node 驻留旧脚本、
     // /config 拿回旧线路表并整表替换 → 新订阅线路被旧订阅冲掉。
-    if (_sourceLoadedThisSession && _loadedSpiderApi == spiderSource.api) {
+    if (_sourceLoadedThisSession &&
+        _loadedSpiderApi == spiderSource.api &&
+        // 🔴 2026-10-14 修（洞 E）：还要确认 **Node 槽位里驻留的仍是这个主源脚本**。
+        // Node 是单源架构，中途可能被"程序脚本源"（_ensureNodeScript）顶替过；
+        // 那时直接去取 /config 会拿到**那个脚本的站点表**，整表替换后线路全错。
+        // 脚本已不在槽位里 → 老老实实重新 loadSource。
+        SpiderService.instance.isScriptLoaded(spiderSource.api)) {
       AppLog.instance.log('[AppState] 源已在本次会话加载, 跳过下载阶段');
       loadingPhase.value = LoadingPhase.waitingSpiderPort;
       final portReady = await NodeJSManager.instance.waitForSpiderPort();
@@ -426,6 +463,8 @@ class AppState extends GetxController {
     // 对应 Swift: getCatConfig 不需要 setCurrentSpider
     // /config 是全局端点，不需要 key/type
     try {
+      // 请求发起时的源快照（供 updateSourceBeansFromSpiderConfig 做切源竞态校验）
+      final cfgUrlAtRequest = ApiConfig.instance.configUrl.value;
       final config = await SpiderService.instance.getCatConfig();
       if (config == null) {
         loadingPhase.value = LoadingPhase.failed;
@@ -433,7 +472,7 @@ class AppState extends GetxController {
         return;
       }
       await ApiConfig.instance
-          .updateSourceBeansFromSpiderConfig(config, '');
+          .updateSourceBeansFromSpiderConfig(config, cfgUrlAtRequest);
 
       // 对应 Swift: 用第一个源设置 currentSpider 并初始化
       final firstSource = ApiConfig.instance.sourceBeanList.firstOrNull;

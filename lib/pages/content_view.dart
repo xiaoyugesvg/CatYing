@@ -162,6 +162,31 @@ class _ContentViewState extends State<ContentView>
     }
   }
 
+  /// 系统内存告警（iOS 的 `didReceiveMemoryWarning`）。
+  ///
+  /// ── 为什么补这个（2026-10-14）────────────────────────────────
+  /// 全项目原来**零处**实现它。本 App 同时挂着 Node + CPython + FFmpeg/KSPlayer，
+  /// 内存压力本来就大；系统发警告时我们不主动放掉任何东西 ⇒ 更容易被
+  /// Jetsam 强杀（强杀时连生命周期回调都没有）。
+  /// 这里只做**最可控**的一件事：清 Flutter 自己的图片解码缓存 ——
+  /// 它可随时重新解码（`Image.file` 的源文件仍在），代价只是正在显示的图
+  /// 短暂重载；却能立刻腾出最大一块可控内存。
+  /// ⚠️ 刻意**不**清 `cmbok_blob_temp` 临时文件：漫画阅读中的章节图就来自那里，
+  ///    删了会当场变成破图（那是"缓存"但不能随手删）。
+  @override
+  void didHaveMemoryPressure() {
+    super.didHaveMemoryPressure();
+    try {
+      final cache = PaintingBinding.instance.imageCache;
+      final before = cache.currentSizeBytes;
+      cache.clear();
+      cache.clearLiveImages();
+      AppLog.instance.log('[内存压力] 已清理图片缓存（释放前 $before 字节）');
+    } catch (e) {
+      AppLog.instance.w('[内存压力] 清理图片缓存失败: $e');
+    }
+  }
+
   /// 对应 Swift onAppear - 加载已保存的配置
   Future<void> _loadSavedConfig() async {
     // 首帧已用 main() 的同步值填过（见 initState）→ 这里就不必再读一遍 prefs

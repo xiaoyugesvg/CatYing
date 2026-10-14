@@ -126,9 +126,23 @@ class SourceCoverCache {
     }
   }
 
-  /// 缓存键：URL 哈希的十六进制（同一 app 版本内稳定，升级后失效重下无害）
+  /// 缓存键：URL 的 **FNV-1a 64 位**内容哈希（十六进制）。
+  ///
+  /// 🔴 2026-10-14 改：原来用 `url.hashCode & 0x7fffffff`（有效仅 **31 位**）。
+  ///   而 `_doLocalize` 的逻辑是"**文件在就直接返回**"⇒ 两个不同 URL 一旦撞到
+  ///   同一个键，第二本漫画会**直接显示第一本的封面** ✗（几千张时约 0.6% 概率）。
+  ///   换成 64 位内容哈希后碰撞概率可忽略；键与 URL 内容一一对应、跨运行稳定。
+  /// ⚠️ 副作用：升级后旧键文件成为孤儿（在 Caches 里，会被系统回收），封面会
+  ///   重下一遍 —— 纯粹是缓存，无数据风险。
   String _cacheKey(String url) {
-    final h = url.hashCode;
-    return (h & 0x7fffffff).toRadixString(16);
+    var hash = 0xcbf29ce484222325; // FNV-1a 64 位 offset basis
+    for (final b in utf8.encode(url)) {
+      hash ^= b;
+      hash = hash * 0x100000001b3; // 溢出按 64 位回绕（Dart int 语义）
+    }
+    // 取 63 位非负：`toRadixString` 对负数会输出 '-' 前缀，直接去掉会让
+    // `x` 与 `-x` 落到同一个键（反而制造碰撞）⇒ 这里先抹掉符号位。
+    final h = hash & 0x7FFFFFFFFFFFFFFF;
+    return h.toRadixString(16).padLeft(16, '0');
   }
 }

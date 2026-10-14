@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../../reading/cores/core_reader_page.dart';
+import '../../reading/cores/reader_core_prefs.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import '../../services/live_service.dart';
@@ -1287,6 +1289,7 @@ class _DetailPageState extends State<DetailPage> {
                         ),
                       ),
                     ),
+                    _buildReadCoreIconButton(),
                     const SizedBox(width: AppTheme.spacingSM),
                     _buildCollectIconButton(),
                   ],
@@ -1902,6 +1905,70 @@ class _DetailPageState extends State<DetailPage> {
     if (_quickSearchInput.text != kw) _quickSearchInput.text = kw;
     _quickSearch.keyword.value = kw;
     await _quickSearch.search();
+  }
+
+  /// 阅读核心入口（方案 A，用户 2026-10-14）——
+  /// **只在配置了「阅读核心」时出现**，点了用核心取图 / 取正文，进独立的阅读页。
+  ///
+  /// 为什么不自动判断：订阅里的源没有"图/文/视频"标记（type 都是 3，区别只在
+  /// 脚本内容里），猜错就是点漫画起播放器 —— 所以做成**显式入口**。
+  /// 没配核心 → 返回空；取不到内容 → 提示一句，**绝不影响现有播放**。
+  Widget _buildReadCoreIconButton() {
+    final core = ReaderCorePrefs.instance.activeCore;
+    final src = ReaderCorePrefs.instance.sourceUrl;
+    if (core == null || src.isEmpty) return const SizedBox.shrink();
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () async {
+        final info = _controller.vodInfo.value;
+        if (info == null) return;
+        final id = '$src|${info.id}';
+        try {
+          final imgs = await core.images(id, 0);
+          if (!mounted) return;
+          if (imgs.isNotEmpty) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) =>
+                    CoreReaderPage(title: info.name, images: imgs),
+              ),
+            );
+            return;
+          }
+          final txt = await core.content(id, 0);
+          if (!mounted) return;
+          if (txt.trim().isNotEmpty) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CoreReaderPage(title: info.name, text: txt),
+              ),
+            );
+            return;
+          }
+        } catch (_) {
+          /* 核心失败：不影响播放 */
+        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('该源没取到内容（可换源 / 检查阅读核心设置）')),
+        );
+      },
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          Icons.menu_book_rounded,
+          size: 18,
+          color: AppTheme.accentColor,
+        ),
+      ),
+    );
   }
 
   /// 收藏按钮（小图标版）- 前置在视频名称前

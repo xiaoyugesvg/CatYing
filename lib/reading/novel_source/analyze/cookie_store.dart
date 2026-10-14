@@ -23,16 +23,77 @@
 /// · [getKey] 是 legado `cookie.getKey(url)` 的**近似实现**（返回 host），
 ///   用于"同一站点共用登录信息"的键 —— 没逐字对齐 legado 的实现。
 ///
-/// ⚠️ 进程级单例（与 `JsEngine.shared` 的全局 `cookie` 对应）；不持久化到磁盘。
+/// ── 持久化（2026-10-14 补）──────────────────────────────────
+/// 进程级单例（与 `JsEngine.shared` 的全局 `cookie` 对应），但 **落盘到
+/// `<Documents>/book_cookies.json`**（[load]/[save]）：否则晋江这类"先登录、
+/// 再带 Cookie 拉正文"的源每次重启都要重新登录。写入走 800ms 去抖，避免
+/// 频繁 setCookie 时反复写文件。
 library;
 
-/// 书源 Cookie 存储（进程级单例）。
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:path_provider/path_provider.dart';
+
+/// 书源 Cookie 存储（进程级单例，带文件持久化）。
 class SourceCookieStore {
   SourceCookieStore._();
   static final SourceCookieStore instance = SourceCookieStore._();
 
+  static const String _fileName = 'book_cookies.json';
+
   /// host → {cookieName: value}
   final Map<String, Map<String, String>> _byHost = <String, Map<String, String>>{};
+
+  Timer? _saveTimer;
+  bool _loaded = false;
+
+  /// 启动期从磁盘恢复（幂等；由 `main.dart` 在任何书源求值前调用一次）。
+  Future<void> load() async {
+    if (_loaded) return;
+    _loaded = true;
+    try {
+      final f = await _file();
+      if (f == null || !await f.exists()) return;
+      final raw = await f.readAsString();
+      if (raw.trim().isEmpty) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+      decoded.forEach((k, v) {
+        if (v is Map) {
+          _byHost[k.toString()] =
+              v.map((kk, vv) => MapEntry(kk.toString(), vv?.toString() ?? ''));
+        }
+      });
+    } catch (_) {/* 读失败按「无 Cookie」起步，不影响功能 */}
+  }
+
+  Future<File?> _file() async {
+    try {
+      final d = await getApplicationDocumentsDirectory();
+      return File('${d.path}/$_fileName');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 800ms 去抖落盘（[setCookie]/[removeCookie]/[clear] 后调用）。
+  void _scheduleSave() {
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 800), () {
+      unawaited(save());
+    });
+  }
+
+  /// 立刻写盘（诊断/退出前可主动调）。
+  Future<void> save() async {
+    try {
+      final f = await _file();
+      if (f == null) return;
+      await f.writeAsString(jsonEncode(_byHost), flush: true);
+    } catch (_) {/* 写失败忽略：下次写入再试 */}
+  }
 
   /// cookie jar 总开关（对应书源 `enabledCookieJar`）。
   ///
@@ -46,7 +107,10 @@ class SourceCookieStore {
   /// 该 host 的 Cookie 是否为空（诊断用）。
   bool isEmptyFor(String url) => (_byHost[_hostOf(url)] ?? const {}).isEmpty;
 
-  void clear() => _byHost.clear();
+  void clear() {
+    _byHost.clear();
+    _scheduleSave();
+  }
 
   /// 当前所有 host（诊断/自测用）。
   List<String> get hosts => _byHost.keys.toList();
@@ -87,6 +151,7 @@ class SourceCookieStore {
       }
       jar[name] = value;
     }
+    _scheduleSave();
   }
 
   /// 从响应头吸收 `Set-Cookie`（可能多条被 `,` 连接，见 [ingestResponseHeader]）。
@@ -107,9 +172,11 @@ class SourceCookieStore {
     final host = _hostOf(url);
     if (name == null || name.isEmpty) {
       _byHost.remove(host);
+      _scheduleSave();
       return;
     }
     _byHost[host]?.remove(name);
+    _scheduleSave();
   }
 
   /// legado `cookie.getKey(url)` 的**近似实现**：返回 host。

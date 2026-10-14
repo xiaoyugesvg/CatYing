@@ -133,11 +133,14 @@ class IosAvPlayer extends AppPlayer {
     _url = media.url;
     _buffering = true;
     stream.addBuffering(true);
-    await _channel.invokeMethod('open', {
-      'url': media.url,
-      'headers': media.httpHeaders ?? const <String, String>{},
-      'positionMs': (media.start?.inMilliseconds ?? 0),
-    });
+    // ⚠️ 2026-10-14：加超时（原因同 ks_player：原生 open 卡住会让 await 永久 pending）
+    await _channel
+        .invokeMethod('open', {
+          'url': media.url,
+          'headers': media.httpHeaders ?? const <String, String>{},
+          'positionMs': (media.start?.inMilliseconds ?? 0),
+        })
+        .timeout(const Duration(seconds: 30));
     if (!play) {
       await pause();
     } else {

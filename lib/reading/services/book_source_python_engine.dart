@@ -24,6 +24,7 @@
 import 'dart:convert';
 
 import '../../services/python_manager.dart';
+import '../cores/python_core.dart';
 
 class BookSourcePythonEngine {
   BookSourcePythonEngine._();
@@ -52,11 +53,70 @@ class BookSourcePythonEngine {
     return null;
   }
 
+  /// 取源地址（与 [_pythonKeyOf] 同形：raw 可能是 JSON 串或 Map）
+  String? _sourceUrlOf(dynamic source) {
+    String? pick(Map m) {
+      for (final k in const ['bookSourceUrl', 'url', 'api']) {
+        final v = m[k]?.toString().trim();
+        if (v != null && v.isNotEmpty) return v;
+      }
+      return null;
+    }
+
+    if (source is! Map) return null;
+    final raw = source['raw'];
+    if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        final j = jsonDecode(raw);
+        if (j is Map) return pick(j);
+      } catch (_) {}
+    }
+    if (raw is Map) return pick(raw);
+    return pick(source);
+  }
+
+  /// 把懒安装拿到的 key 写回 raw（下次不必再装；界面也能显示成"Python 源"）
+  void _injectPythonKey(dynamic source, String key) {
+    if (source is! Map) return;
+    final raw = source['raw'];
+    if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        final j = jsonDecode(raw);
+        if (j is Map) {
+          j['pythonKey'] = key;
+          source['raw'] = jsonEncode(j);
+          return;
+        }
+      } catch (_) {}
+    }
+    if (raw is Map) {
+      raw['pythonKey'] = key;
+      return;
+    }
+    source['pythonKey'] = key;
+  }
+
   /// 入口：接管则返回契约 JSON；未接管/失败返回 null（回落既有链路）
   Future<Map<String, dynamic>?> handle(Map<String, dynamic> body) async {
     final action = body['action'] as String?;
     if (action == null || !_supported.contains(action)) return null;
-    final key = _pythonKeyOf(body['source']);
+    var key = _pythonKeyOf(body['source']);
+    if (key == null || key.isEmpty) {
+      // 🔴 2026-10-14 修（"py 书源用不了"的直接原因）：
+      //   JSON 书源仓库导入的 py 源，raw 里**没有 pythonKey**（全项目只有
+      //   "手动选 .py 文件导入"那条路会写它）⇒ 这类源永远不走 CPython，
+      //   表现为"py 书打不开 / 目录报错 / 正文空"。
+      //   这里补一次**懒安装**：地址是 .py 就下载 + 注册进 CPython 拿到 key，
+      //   并写回 raw（下次不用再装，界面也能正确显示成"Python 源"）。
+      final u = _sourceUrlOf(body['source']);
+      if (u != null && u.toLowerCase().split('?').first.endsWith('.py')) {
+        final k = await PythonCore.instance.ensureInstalled(u, 'book');
+        if (k != null) {
+          key = k;
+          _injectPythonKey(body['source'], k);
+        }
+      }
+    }
     if (key == null || key.isEmpty) return null;
 
     final args = <String, dynamic>{};

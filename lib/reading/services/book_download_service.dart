@@ -231,8 +231,16 @@ class BookDownloadService extends ChangeNotifier {
       if (raw != null) {
         final list = jsonDecode(raw) as List;
         for (final item in list) {
-          final t = BookDownloadTask.fromJson(item as Map<String, dynamic>);
-          _tasks[t.bookId] = t;
+          // ⚠️ 2026-10-14：**逐条**隔离 —— 原来整个循环只包在一个外层 try 里，
+          //   只要有一条记录的字段类型不符（旧版本格式 / 手改 / 别的写入方），
+          //   `fromJson` 抛 TypeError 就会**中断整个循环**⇒ 其后所有下载记录
+          //   静默丢弃（文件还在，界面上却看不到"已下载的书"）。
+          try {
+            final t = BookDownloadTask.fromJson(item as Map<String, dynamic>);
+            _tasks[t.bookId] = t;
+          } catch (e) {
+            _log('跳过一条损坏的图书下载记录: $e');
+          }
         }
       }
       _log('已加载 ${_tasks.length} 条图书下载记录');

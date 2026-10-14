@@ -239,14 +239,21 @@ class DownloadService extends ChangeNotifier {
       if (raw != null) {
         final list = jsonDecode(raw) as List;
         for (final item in list) {
-          final task = DownloadTask.fromJson(item as Map<String, dynamic>);
-          _tasks[task.key] = task;
-          // 仅 completed/paused 视为已下载（有本地文件）；failed 不计入，
-          // 否则 isChapterDownloaded 误判、downloadChapters 会跳过重下。
-          if (task.status == DownloadStatus.completed ||
-              task.status == DownloadStatus.paused) {
-            _downloaded.putIfAbsent(task.comicPathWord, () => <String>{});
-            _downloaded[task.comicPathWord]!.add(task.chapterId);
+          // ⚠️ 2026-10-14：**逐条**隔离 —— 原来整个循环只包在一个外层 try 里，
+          //   任一条记录字段类型不符就会让 `fromJson` 抛错、**中断整个循环**，
+          //   其后所有漫画下载记录静默丢失（图片还在本地，界面却显示未下载）。
+          try {
+            final task = DownloadTask.fromJson(item as Map<String, dynamic>);
+            _tasks[task.key] = task;
+            // 仅 completed/paused 视为已下载（有本地文件）；failed 不计入，
+            // 否则 isChapterDownloaded 误判、downloadChapters 会跳过重下。
+            if (task.status == DownloadStatus.completed ||
+                task.status == DownloadStatus.paused) {
+              _downloaded.putIfAbsent(task.comicPathWord, () => <String>{});
+              _downloaded[task.comicPathWord]!.add(task.chapterId);
+            }
+          } catch (e) {
+            _log('跳过一条损坏的漫画下载记录: $e');
           }
         }
       }

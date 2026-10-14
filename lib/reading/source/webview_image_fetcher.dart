@@ -64,7 +64,13 @@ class WebViewImageFetcher {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageFinished: (_) => _pageCompleter?.complete(),
+          // ⚠️ 必须判 `isCompleted`（2026-10-14 修）：重定向 / SPA 会让
+          //   onPageFinished **多次触发**，对已完成的 Future 再 complete() 会抛
+          //   StateError（发生在平台回调里，未捕获）。
+          onPageFinished: (_) {
+            final c = _pageCompleter;
+            if (c != null && !c.isCompleted) c.complete();
+          },
           onWebResourceError: (e) {
             // 子资源错误（如 ORB 阻止的跨域图片、广告、favicon 等）很常见，
             // 不应中断主页面加载。只记日志，页面是否成功以 onPageFinished 为准，
@@ -109,9 +115,13 @@ class WebViewImageFetcher {
   /// 用于 Cloudflare 防护等 Dio 无法直连的站点：搜索/分类/详情/章节走此通道，
   /// ConfigMangaSource._fetchHtml 在 useWebViewFetch=true 时调用。复用单例 WebView
   /// + 串行队列（与取图串行，避免 loadRequest 冲突）。
-  Future<String> fetchHtml(String url) async {
+  ///
+  /// [js]（可选）：legado `java.webView(content, url, js)` 的注入脚本 ——
+  /// **非空**时在页面上下文执行它并返回**执行结果**（如 `"document.cookie"`
+  /// ⇒ cookie 串），而非 outerHTML；**为空**时行为与从前完全一致。
+  Future<String> fetchHtml(String url, [String js = '']) async {
     init();
-    final f = _last.then((_) => _doFetchHtml(url));
+    final f = _last.then((_) => _doFetchHtml(url, js));
     _last = f.then((_) {}, onError: (_) {});
     return f;
   }
@@ -295,12 +305,18 @@ $chapterJsonScript
   }
 
   /// 加载页面并等待 onPageFinished（复用 _pageCompleter）。
+  ///
+  /// ⚠️ 2026-10-14 修：超时/失败时把字段**让出去**（置空）。否则这个永远
+  ///   不完成的 completer 会一直留在字段上，等**下一次**加载的
+  ///   `onPageFinished` 到来时被"张冠李戴"地完成 ⇒ 提前放行，于是拿
+  ///   **未渲染 / 加载失败的页面**去取图、取章节（白屏 / 图片为空）✗。
   Future<void> _loadPage(String url) async {
-    _pageCompleter = Completer<void>();
+    final completer = _pageCompleter = Completer<void>();
     await controller.loadRequest(Uri.parse(url));
     try {
-      await _pageCompleter!.future.timeout(const Duration(seconds: 30));
+      await completer.future.timeout(const Duration(seconds: 30));
     } catch (e) {
+      if (identical(_pageCompleter, completer)) _pageCompleter = null;
       _log('页面加载失败: $url -> $e');
       rethrow;
     }
@@ -386,14 +402,8 @@ $scriptBody
 
   Future<List<String>> _doFetch(String url, SiteConfig site) async {
     _log('取图开始: $url');
-    _pageCompleter = Completer<void>();
-    await controller.loadRequest(Uri.parse(url));
-    try {
-      await _pageCompleter!.future.timeout(const Duration(seconds: 30));
-    } catch (e) {
-      _log('页面加载失败: $e');
-      rethrow;
-    }
+    // 统一走 _loadPage：那里有"超时让出 completer"的修复（见其说明）
+    await _loadPage(url);
     // 等懒加载/JS 渲染稳定（spike 经验：加载完成后再等 ~800ms 拿全）
     await Future.delayed(const Duration(milliseconds: 800));
 
@@ -570,18 +580,25 @@ $scriptBody
     }
   }
 
-  Future<String> _doFetchHtml(String url) async {
-    _log('抓取页面: $url');
-    _pageCompleter = Completer<void>();
-    await controller.loadRequest(Uri.parse(url));
-    try {
-      await _pageCompleter!.future.timeout(const Duration(seconds: 30));
-    } catch (e) {
-      _log('页面加载失败: $e');
-      rethrow;
-    }
+  Future<String> _doFetchHtml(String url, [String js = '']) async {
+    _log('抓取页面: $url${js.trim().isEmpty ? "" : "（注入 js: ${js.length} 字符）"}');
+    // 统一走 _loadPage：那里有"超时让出 completer"的修复（见其说明）
+    await _loadPage(url);
     // 等 SPA/Alpine 渲染稳定（列表页内容较多，给足时间）
     await Future.delayed(const Duration(milliseconds: 1000));
+    // legado `java.webView(content, url, js)`：在页面上下文执行注入脚本，
+    // 返回值即本次调用结果（如 `document.cookie` 取该域 Cookie）。用 eval
+    // 兼容「表达式」与「语句」两种写法；出错回空串（不抛，避免整条规则失败）。
+    if (js.trim().isNotEmpty) {
+      final raw = await controller.runJavaScriptReturningResult(
+        '(function(){try{var __r=eval(${jsonEncode(js)});'
+        'return (__r===null||__r===undefined)?"":String(__r);}'
+        'catch(e){return "";}})()',
+      );
+      final out = _unwrapJsString(raw);
+      _log('注入 js 结果: ${out.length > 120 ? "${out.substring(0, 120)}..." : out}');
+      return out;
+    }
     // blob 图片还原（摸摸漫画等站封面图是 blob URL）
     await _restoreBlobImages();
     // outerHTML 经 JSON.stringify -> _unwrapJsString -> jsonDecode 还原
@@ -813,6 +830,11 @@ $scriptBody
     } catch (e) {
       _log('URL 规律直下异常: $e');
       return [];
+    } finally {
+      // 洞：这个 Dio 是**每次取图新建**的局部实例（见上面 `final dio = Dio(...)`），
+      // 不 close 会把它内部的 HttpClient 连接池一直挂着 ⇒ 每次翻页/切章节都泄漏
+      // 一个池（靠 15s idleTimeout 才回收）。这里显式释放。
+      dio.close(force: true);
     }
   }
 
@@ -824,6 +846,7 @@ $scriptBody
     List<String> urls,
     SiteConfig site,
   ) async {
+    Dio? client; // 见 finally：局部新建的 Dio 必须显式释放
     try {
       // Referer 用章节页地址（防盗链 CDN 通常要求）
       String pageUrl = site.url;
@@ -834,7 +857,7 @@ $scriptBody
         final u = _unwrapJsString(raw);
         if (u.startsWith('http')) pageUrl = u;
       } catch (_) {}
-      final dio = Dio(
+      final dio = client = Dio(
         BaseOptions(
           responseType: ResponseType.bytes,
           connectTimeout: const Duration(seconds: 15),
@@ -910,6 +933,10 @@ $scriptBody
     } catch (e) {
       _log('直下解密异常: $e');
       return [];
+    } finally {
+      // 同 fetchByPattern：局部新建的 Dio 必须显式释放，否则每次解密取图
+      // 都遗留一个 HttpClient 连接池。
+      client?.close(force: true);
     }
   }
 

@@ -95,8 +95,17 @@ class BookChapterList {
       final ruleUpdateTime = analyzeRule.splitSourceRule(tocRule.updateTime ?? '');
 
       for (int i = 0; i < elements.length; i++) {
-        analyzeRule.setContent(elements[i]);
-        analyzeRule.setBaseUrl(redirectUrl ?? baseUrl);
+        try {
+          analyzeRule.setContent(elements[i]);
+          analyzeRule.setBaseUrl(redirectUrl ?? baseUrl);
+        } catch (e) {
+          // ⚠️ 2026-10-14：这两句原来在**内层 try 之外**，一旦某个元素不能作为
+          //   解析上下文（类型不符等），异常会冒到最外层那个空 catch ⇒ **整个
+          //   目录解析中断**、只返回前半段章节（读者以为"书就这么多章"）。
+          //   这里改成跳过该元素，不影响其余章节。
+          AppLog.instance.d('[书源目录] 跳过无法解析的元素 #$i: $e');
+          continue;
+        }
 
         final bookChapter = XiaoshuoBookChapter(
           bookUrl: book.bookUrl,
@@ -198,7 +207,13 @@ class BookChapterList {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      // ⚠️ 2026-10-14：原来是空 `catch (_) {}` —— 万一还有异常从这里冒出来，
+      //   原本是**完全静默**的（用户与日志都看不出"目录被截断了"）。只补日志，
+      //   不改变控制流。
+      AppLog.instance.w('[书源目录] 解析中断（已解析 ${chapters.length} 章）: '
+          '源=${bookSource.bookSourceName} 规则=$listRule 错误=$e');
+    }
 
     if (reverse) {
       final reversed = chapters.reversed.toList();

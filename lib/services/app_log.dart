@@ -27,6 +27,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -201,8 +202,13 @@ class AppLog {
     final human = e.formatHuman();
     final json = e.formatJson();
     // 同步 print（**不要**再调 AppLog.log()，那会 entry→log→entry 无限递归）
-    // ignore: avoid_print
-    print(human);
+    // ⚠️ 2026-10-14：加 `kDebugMode` 守卫 —— release 下不再往 stdout 打
+    //    （iOS 的 stdout 走系统日志，高频日志同样有锁与格式化开销）；
+    //    文件日志照写不误，排查不受影响。
+    if (kDebugMode) {
+      // ignore: avoid_print
+      print(human);
+    }
     if (!_initialized) return;
     _writeBoth(human, json);
   }
@@ -603,11 +609,18 @@ class AppLog {
   final dir = _runtimeDir;
   if (dir != null) await _ensureToday(dir);
   await _maybeRotate(_logFile);
+        // ⚠️ 2026-10-14 改 `flush: true` → `false`：原来每条日志都是一次
+        //    **fsync**，而全项目的 `debugPrint` 已被重定向进 AppLog（见
+        //    main.dart）⇒ 播放器每秒轮询、书源 HTTP、弹幕这类**高频日志**
+        //    会变成持续刷盘，掉帧 + 闪存写入放大。
+        //    `flush: false` 依然写进文件（进内核页缓存），**进程崩溃/被信号
+        //    杀死时数据仍在**，只有断电那类极端情况才会丢最后几 KB ——
+        //    对"事后排查"完全够用。
         await _logFile?.writeAsString('$humanLine\n',
-            mode: FileMode.append, flush: true);
+            mode: FileMode.append, flush: false);
         await _maybeRotate(_jsonlFile);
         await _jsonlFile?.writeAsString('$jsonLine\n',
-            mode: FileMode.append, flush: true);
+            mode: FileMode.append, flush: false);
       } catch (_) {
         // 写文件失败不能 crash app
       }

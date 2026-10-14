@@ -39,6 +39,32 @@ class PluginScriptCache {
     return d;
   }
 
+  /// 文件名净化（洞 W，2026-10-14）：[fileName] 来自插件清单 URL 的末段，
+  /// 是不可信输入 —— `Uri.pathSegments` 返回的是**已解码**的段，`%2e%2e%2f`
+  /// 会变成 `../`，直接拼进路径即穿越出缓存目录（zip slip 同款）。
+  /// 这里只保留「单层安全文件名」；返回 null 表示该名字不可用（调用方跳过）。
+  static String? _safeName(String fileName) {
+    var s = fileName.trim();
+    if (s.isEmpty) return null;
+    s = s.replaceAll('\\', '/');
+    final idx = s.lastIndexOf('/');
+    if (idx >= 0) s = s.substring(idx + 1);
+    s = s.replaceAll(RegExp(r'[\x00-\x1f]'), '');
+    s = s.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    if (s.isEmpty || s == '.' || s == '..') return null;
+    return s;
+  }
+
+  /// 解析成缓存目录下的文件，并做 **`startsWith(base)` 前缀校验**兜底
+  /// （净化后理论上不可能越界，这是第二道保险，与 zip slip 那套一致）。
+  static File? _fileIn(Directory d, String rawName) {
+    final name = _safeName(rawName);
+    if (name == null) return null;
+    final base = '${d.path}/';
+    final f = File('$base$name');
+    return f.path.startsWith(base) ? f : null;
+  }
+
   /// 读缓存；没有（或读失败）返回 null。
   ///
   /// ⚠️ **不抛异常**：缓存只是加速手段，它坏了应该安静地回落到"重新下载"，
@@ -47,8 +73,8 @@ class PluginScriptCache {
     if (fileName.trim().isEmpty) return null;
     try {
       final d = await _ensureDir();
-      final f = File('${d.path}/$fileName');
-      if (!await f.exists()) return null;
+      final f = _fileIn(d, fileName); // 洞 W：净化 + 前缀校验
+      if (f == null || !await f.exists()) return null;
       final s = await f.readAsString();
       return s.trim().isEmpty ? null : s;
     } catch (e) {
@@ -62,7 +88,9 @@ class PluginScriptCache {
     if (fileName.trim().isEmpty || script.trim().isEmpty) return;
     try {
       final d = await _ensureDir();
-      await File('${d.path}/$fileName').writeAsString(script);
+      final f = _fileIn(d, fileName); // 洞 W：净化 + 前缀校验
+      if (f == null) return;
+      await f.writeAsString(script);
     } catch (e) {
       debugPrint('[PluginCache] 写 $fileName 失败: $e');
     }
@@ -97,8 +125,8 @@ class PluginScriptCache {
     if (fileName.trim().isEmpty) return;
     try {
       final d = await _ensureDir();
-      final f = File('${d.path}/$fileName');
-      if (await f.exists()) await f.delete();
+      final f = _fileIn(d, fileName); // 洞 W：净化 + 前缀校验
+      if (f != null && await f.exists()) await f.delete();
     } catch (e) {
       debugPrint('[PluginCache] 删 $fileName 失败: $e');
     }

@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
 import 'app_log.dart';
+import 'prefs_mirror.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_config.dart';
 import '../models/source_bean.dart';
@@ -244,6 +245,10 @@ class ApiConfig extends GetxController {
           : (jsonDecode(raw) as Map).cast<String, dynamic>();
       map[scope] = source.key;
       await prefs.setString(_kHomeApiMap, jsonEncode(map));
+      // 🔴 2026-10-14 修（洞 G）：切主页源也要"改完即落盘 + 刷镜像"。
+      // 这里以前漏了 snapshotSoon —— 切完主页源立刻被硬杀（这个 App 的常态），
+      // 重启就回到旧主页源。其它设置写入点都调了，就这两处没调。
+      PrefsMirror.snapshotSoon();
     } catch (e) {
       AppLog.instance.log('[ApiConfig] 保存主页源(按订阅)失败: $e');
     }
@@ -278,17 +283,24 @@ class ApiConfig extends GetxController {
     }
   }
 
-  /// 启动时兜底：prefs 里为空、但备份文件在 → 用它恢复（返回可用地址）
+  /// 启动时校正接口地址：**文件备份是权威**，与 prefs 不同就以备份为准。
+  ///
+  /// 🔴 2026-10-14 修（洞 H）：原来是 `if (current.trim().isNotEmpty) return current;`
+  ///   —— 只有"prefs 里连键都没有"才用备份。但 prefs 的常态是**部分丢失**
+  ///   （键还在、值是旧的），而备份才是权威：每次 `persistApiUrl` 都带
+  ///   `flush: true` 写它，它永远不会比 prefs 旧。那道门把备份挡在外面，
+  ///   于是"改完立刻被硬杀 → 重启回旧源"。
   static Future<String> restoreApiUrlIfLost(String current) async {
-    if (current.trim().isNotEmpty) return current;
     try {
       final f = await _apiUrlBackupFile();
       if (!await f.exists()) return current;
       final v = (await f.readAsString()).trim();
-      if (v.isEmpty) return current;
+      // 备份为空、或与 prefs 一致 → 没什么可修正的
+      if (v.isEmpty || v == current.trim()) return current;
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(AppConstants.apiUrl, v);
-      AppLog.instance.log('[ApiConfig] 接口地址已从文件备份恢复');
+      AppLog.instance
+          .log('[ApiConfig] 接口地址以文件备份为准修正（prefs 里的值已过期或缺失）');
       return v;
     } catch (e) {
       AppLog.instance.log('[ApiConfig] 接口地址备份恢复失败: $e');
@@ -340,6 +352,9 @@ class ApiConfig extends GetxController {
         'type': bean.type,
       }));
       await prefs.setStringList(_kUserVideoSources, raw);
+      // 🔴 2026-10-14 修（洞 G）：导入自定义线路同样要立刻落盘 + 刷镜像，
+      // 否则导入完被硬杀 → 重启线路没了。
+      PrefsMirror.snapshotSoon();
       AppLog.instance.log('[ApiConfig] 已保存用户视频线路 ${bean.key}（共 ${raw.length} 条）');
     } catch (e) {
       AppLog.instance.log('[ApiConfig] 保存用户视频线路失败: $e');
@@ -402,6 +417,17 @@ class ApiConfig extends GetxController {
       return;
     }
 
+    // 🔴 2026-10-14 修（切源竞态）：这份 /config 属于**发起请求那一刻**的那个源。
+    // 用户快速连切 A→B（或 A→B→A）时，A 的响应可能晚于 B 返回；没有这道校验
+    // 就会把 **B 的线路表整表覆盖成 A 的**，而 Node 里驻留的已经是 B 的脚本 ——
+    // 线路表与引擎不一致，表现为「切了但内容还是旧的 / 错乱」。
+    // ⚠️ 调用方必须传"**请求前**的 configUrl 快照"（以前传的是空串，等于没校验）。
+    if (spiderUrl.isNotEmpty && configUrl.value != spiderUrl) {
+      AppLog.instance.log(
+          '[ApiConfig] /config 回填作废（请求期间源已切换：$spiderUrl → ${configUrl.value}）');
+      return;
+    }
+
     final video = config['video'] as Map<String, dynamic>?;
     final sites = video?['sites'] as List<dynamic>?;
     if (video == null || sites == null) {
@@ -452,6 +478,23 @@ class ApiConfig extends GetxController {
     // 用户手动导入的线路（py 源等）并回来：接口下发的 sites 不包含它们，
     // 不合并就会出现「导入的 py 线路切源/重启后消失」
     await _mergeUserVideoSources(newSources);
+
+    // 🔴 2026-10-14 简修（洞 L）：整表替换时**保留"程序模块"注册的影视源**。
+    //   它们 key 以 `app_` 开头，不在 /config 下发的站点里；而
+    //   `MiniAppService.ensureLoaded` 有 `_loaded` 标志只跑一次，切源后**不会**
+    //   重新注册 ⇒ 整表替换把它们清掉后，表现为"切源后程序里的影视源消失，
+    //   重启才回来"（用户 2026-10-14 报）。这里原样带上（按 key 去重，避免重复）。
+    final alreadyKeys = newSources.map((s) => s.key).toSet();
+    var keptApp = 0;
+    for (final s in sourceBeanList.where((s) => s.key.startsWith('app_'))) {
+      if (alreadyKeys.contains(s.key)) continue;
+      newSources.add(s);
+      keptApp++;
+    }
+    if (keptApp > 0) {
+      AppLog.instance.log('[ApiConfig] /config 整表替换：保留 $keptApp 条程序源(app_)');
+    }
+
     sourceBeanList.value = newSources;
 
     // 关键修复：当前 homeSourceBean 可能是之前 _createSpiderSourceConfig
@@ -704,6 +747,14 @@ class ApiConfig extends GetxController {
       isSingleScriptSpider.value = _isSpiderSourceUrl(apiUrl) ||
           ((config.spider ?? '').trim().isNotEmpty);
 
+      // 🔴 2026-10-14 修（洞 C：错误提示残留）：
+      //   走到这里说明本次配置**解析成功**（站点已经拿到），要把上一条源留下的
+      //   错误清掉。以前只有 spider `/config` 成功路径
+      //   （updateSourceBeansFromSpiderConfig）里会清，于是
+      //   「先加载一个坏 js 源（留下 error）→ 切到好的聚合/py 源」时，
+      //   首页内容已经正常，却还一直挂着"加载失败"（用户 2026-10-14 实测）。
+      apiConfigError.value = null;
+
       // 解析站点列表
       final sources = <SourceBean>[];
       if (config.sites != null) {
@@ -725,9 +776,23 @@ class ApiConfig extends GetxController {
       // CatVod 类配置常常 `sites: []`（线路全部由 jar 自己下发）→ 这里先塞一个
       // 基于 spider 地址的**占位线路**，保证首页/源切换有默认源；
       // /config 返回后由 updateSourceBeansFromSpiderConfig 整表替换掉。
-      if (sources.isEmpty &&
-          isSingleScriptSpider.value &&
-          (config.spider ?? '').trim().isNotEmpty) {
+      //
+      // 🔴 2026-10-14 修（用户：「没加 py 源之前是不是支持猫源和 tvbox？」）：
+      //   原来是 `sources.isEmpty && ...` —— **只在站点列表为空时**才补这条占位。
+      //   但 CatVod/tvbox 那类配置是 **`spider` 字段 + 非空 `sites[]`**（站点是
+      //   数字 key / `csp_` 占位，真正的实现全在 spider 脚本里）：
+      //     · sites 非空 ⇒ 不会补占位 ⇒ 列表里没有任何 js 源 bean
+      //     · AppState 于是判定「无 js/jar spider 源」→ **直接跳过 Node 启动**
+      //       （用户日志实证：`[ApiConfig] 单个 Spider 配置：先给兜底主页源 …`
+      //        紧接着 `[AppState] 无 js/jar spider 源，跳过 Node 启动/加载流程`）
+      //     ⇒ spider 脚本永远不加载、所有线路没内容（看起来像"订阅空了"）。
+      //   现在改成：只要声明了 `spider`、且列表里**没有任何 js 源 bean**，就补一条。
+      //   （已有 js 源时不重复补，避免多出一条假线路。）
+      final hasJsBean = sources
+          .any((s) => s.isSpiderSource && !s.isPythonScriptSource);
+      if (isSingleScriptSpider.value &&
+          (config.spider ?? '').trim().isNotEmpty &&
+          !hasJsBean) {
         final ph = _createSpiderSourceConfig(config.spider!.trim());
         final ps = ph.sites?.firstOrNull;
         if (ps != null) {
@@ -956,7 +1021,14 @@ class ApiConfig extends GetxController {
         path.endsWith('.py.md5');
   }
 
-  static AppConfigData _createSpiderSourceConfig(String url) {
+  static AppConfigData _createSpiderSourceConfig(String rawUrl) {
+    // 🔴 2026-10-14 修（TVBox 的 `;md5;<hash>` 语法）：
+    //   配置里的 spider 常见写成 `https://host/Omnibox.jar;md5;cc3b3d…` ——
+    //   分号后面是**校验和**，不是 URL 的一部分。直接拿整串去下载只会拿到一个
+    //   2KB 的错误页（实测：干净地址 5,489,871 字节，带后缀只有 2,020 字节）。
+    //   ⇒ 只取第一个分号前的真实地址；key / 名字的派生也顺带干净了
+    //   （否则 key 会变成 `Omnibox;md5;cc3b…` 这种带分号的非法值）。
+    final url = rawUrl.split(';').first.trim();
     final uri = Uri.tryParse(url);
     final pathSegments = uri?.pathSegments ?? [];
 

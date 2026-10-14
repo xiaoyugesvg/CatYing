@@ -74,13 +74,21 @@ class BackgroundAudio {
         do {
             // 1. 配置 audio session - playback category
             let session = AVAudioSession.sharedInstance()
+            // ⚠️ 必须带 `.mixWithOthers`（2026-10-14 修）：
+            //   原来这里是 `options: []`，注释写"我们是唯一 audio source" ——
+            //   **这个前提是错的**：用户很可能正戴着耳机听 Apple Music / 播客。
+            //   非混音的 `.playback` 一旦 setActive，系统会把**其它 App 的音频
+            //   中断掉**，而我们这边循环播放的是**静音** buffer ⇒ 用户看到的是
+            //   "外部音乐莫名停了，本 App 却一点声音都没有" ✗✗。
+            //   加上 `.mixWithOthers` 后：本 App 依然被系统视为"正在播放音频"
+            //   （后台保活效果不变），但**不抢占音频焦点**，外部音乐照常播 ✓。
             try session.setCategory(
                 .playback,
                 mode: .default,
-                options: []  // 不需要 .mixWithOthers (我们是唯一 audio source)
+                options: [.mixWithOthers]
             )
             try session.setActive(true, options: [])
-            NSLog("[BackgroundAudio] AVAudioSession activated (.playback)")
+            NSLog("[BackgroundAudio] AVAudioSession activated (.playback, mixWithOthers)")
 
             // 2. 创建静音 buffer
             guard let format = AVAudioFormat(
@@ -173,8 +181,14 @@ class BackgroundAudio {
             _ = TvBoxTryCatch({
                 self.player.stop()
                 self.audioEngine.stop()
-                try? AVAudioSession.sharedInstance().setActive(
-                    false, options: .notifyOthersOnDeactivation)
+                // ⚠️ 2026-10-14：这里**不再** `setActive(false, ...)`。
+                //   `AVAudioSession` 是**进程级单例** —— 影视/音乐播放器用的是
+                //   同一个 session。保活音频停止时把整个 session deactivate，
+                //   会连带把用户正在听的**本 App 播放器一起静音/暂停** ✗。
+                //   而且 `.notifyOthersOnDeactivation` 的语义是"我是唯一
+                //   audio source、我要让位"，与事实不符（通常还有外部音乐 App）。
+                //   停掉我们自己的 engine 就够了：没有音频输出时 iOS 会自行把
+                //   App 挂起，不需要、也不该由这里关掉全局音频会话 ✓。
             })
             isStarted = false
             NSLog("[BackgroundAudio] stopped")

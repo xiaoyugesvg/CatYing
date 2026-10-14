@@ -197,6 +197,8 @@ class QreadApi {
   Dio get _client {
     final cfg = QreadServerConfig.instance;
     if (_dio == null || _dio!.options.baseUrl != cfg.normalizedBase) {
+      // 重建前先释放旧实例，避免 baseUrl 变更时旧 HttpClient 连接池泄漏
+      _dio?.close(force: true);
       _dio = Dio(BaseOptions(
         baseUrl: cfg.normalizedBase,
         connectTimeout: const Duration(seconds: 12),
