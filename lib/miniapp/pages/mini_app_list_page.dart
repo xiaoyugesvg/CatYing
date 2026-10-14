@@ -5,7 +5,7 @@ import 'package:get/get.dart';
 
 import '../../common/theme.dart';
 import '../../widgets/app_toast.dart';
-import '../../widgets/glass.dart';
+import '../../widgets/home_search_bar.dart';
 import '../models/mini_app.dart';
 import '../services/mini_app_service.dart';
 import 'mini_app_detail_page.dart';
@@ -44,8 +44,7 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
   /// 排序（自定义 = 按存储顺序，可拖动调整）
   _AppSort _sort = _AppSort.custom;
 
-  /// 顶栏搜索
-  bool _searching = false;
+  /// 顶栏搜索（输入框由 `HomeSearchBar` 自己持有展开态，这里只跟着它过滤）
   final _searchCtrl = TextEditingController();
   String _query = '';
 
@@ -64,6 +63,13 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
   void initState() {
     super.initState();
     service.ensureLoaded();
+    // 监听 controller 而不是用 TextField.onChanged：
+    // 点「×」清空、收起时清空都是**程序化** clear()，不会触发 onChanged，
+    // 只挂 onChanged 会让 `_query` 停在旧值（列表显示的还是过滤后的结果）。
+    _searchCtrl.addListener(() {
+      if (!mounted) return;
+      setState(() => _query = _searchCtrl.text);
+    });
   }
 
   @override
@@ -114,54 +120,34 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                 ),
                 child: Row(
                   children: [
-                    // 左：标题「程序」（搜索时换成输入框）
-                    if (_searching)
-                      Expanded(
-                        child: TextField(
-                          controller: _searchCtrl,
-                          autofocus: true,
-                          style: TextStyle(
-                              color: AppTheme.textPrimary, fontSize: 14),
-                          decoration: InputDecoration(
-                            isDense: true,
-                            hintText: '搜索程序…',
-                            hintStyle:
-                                TextStyle(color: AppTheme.textSecondary),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide:
-                                  BorderSide(color: AppTheme.borderMedium),
-                            ),
-                          ),
-                          onChanged: (v) => setState(() => _query = v),
-                        ),
-                      )
-                    else
-                      Text(
-                        '程序',
-                        style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: AppTheme.fontTitle3,
-                          fontWeight: FontWeight.bold,
-                        ),
+                    // 左：标题「程序」
+                    // （原来是"搜索时把标题整条换成输入框"，现在搜索框自带走起，
+                    //   标题始终在，和影视首页一致）
+                    Text(
+                      '程序',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontTitle3,
+                        fontWeight: FontWeight.bold,
                       ),
+                    ),
                     const Spacer(),
                     // 右：搜索 / 设置 / 添加
                     // 搜索只作用于「已安装」，在「市场」Tab 下不显示（免得是个死按钮）
+                    //
+                    // 🔴 2026-10-14：换成影视首页同一个 `HomeSearchBar`
+                    // （用户："程序的搜索图标点开后的框和影视不一样"）。
+                    // 原来这里是个自带 `OutlineInputBorder` 的裸 TextField：
+                    // 方角描边、撑满整行，和影视那个"圆钮→透明小胶囊"完全是两套东西。
                     if (_tab == 0)
-                      _topIcon(
-                        _searching
-                            ? Icons.close_rounded
-                            : Icons.search_rounded,
-                        _searching ? '关闭搜索' : '搜索',
-                        () => setState(() {
-                          _searching = !_searching;
-                          if (!_searching) {
-                            _searchCtrl.clear();
-                            _query = '';
-                          }
-                        }),
+                      HomeSearchBar(
+                        hintText: '搜索程序',
+                        controller: _searchCtrl,
+                        // 已安装列表是本地过滤，不需要"进搜索页"，空提交即收起
+                        onSubmitted: (_) {},
+                        onTapEmpty: () {},
                       ),
+                    const SizedBox(width: 4),
                     _topIcon(Icons.tune_rounded, '设置', _showSettingsSheet),
                     _topIcon(Icons.add_circle_outline, '添加程序', _showAddSheet),
                   ],
@@ -248,6 +234,10 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
     //   读早了拿到空串 → 地址栏空白、也不会自动加载（看着像"没记住地址"）。
     if (i == 1) await service.ensureLoaded();
     if (!mounted) return;
+    // 切到「市场」时搜索框会被移除（那里的搜索只作用于已安装列表），
+    // 不清空的话回到「已安装」会看到"列表被过滤过、但输入框是收起的"。
+    // 放在 setState 外面：clear() 会同步触发上面挂的监听器，那里已经 setState 了。
+    if (i != 0) _searchCtrl.clear();
     setState(() {
       _tab = i;
       _marketVisited = true;
@@ -319,7 +309,8 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
         final app = apps[index];
         return _MiniAppCard(
           app: app,
-          tag: _appTag(app),
+          // 稳定随机色：按 id（不是 name —— 同名不同来源要能区分）取色
+          tint: _tintFor(app.id.isNotEmpty ? app.id : app.name),
           onTap: () => _openApp(app),
           onLongPress: () => _showAppMenu(app),
         );
@@ -1053,85 +1044,86 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
 }
 
 // ── 卡片 ────────────────────────────────────────────────────────
+//
+// 2026-10-14 改版（用户要求）：
+//   · 去掉卡面上的「本地网页程序 / 在线站点 / 影视 N」副标题 —— 卡面只留封面；
+//   · **名称移到卡片外面**、居中显示（与阅读模块同一套"封面与名称分离"结构：
+//     只有封面带卡片外壳，名称在卡外、不带任何装饰）；
+//   · 封面卡改成**每个程序一个稳定随机色**（按 id 哈希取色）——
+//     同一个程序每次进来同色，不会每帧乱跳；不同程序之间颜色错开。
 class _MiniAppCard extends StatelessWidget {
   final MiniApp app;
-  final String tag;
+
+  /// 封面底色（由外层按 app.id 稳定取色后传入）
+  final Color tint;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
   const _MiniAppCard({
     required this.app,
-    required this.tag,
+    required this.tint,
     required this.onTap,
     required this.onLongPress,
   });
 
   @override
   Widget build(BuildContext context) {
-    final palette = AppTheme.palette;
-    final color = palette.primary;
     final initial = app.name.isNotEmpty ? app.name.characters.first : '程';
-    return GlassPanel(
-      radius: 16,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        onLongPress: onLongPress,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 图标：圆角渐变块 + 首字
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      color.withValues(alpha: 0.85),
-                      color.withValues(alpha: 0.55),
-                    ],
+    return Column(
+      children: [
+        // 封面卡：彩色圆角方块 + 首字
+        Expanded(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onTap,
+            onLongPress: onLongPress,
+            child: Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    tint.withValues(alpha: 0.92),
+                    tint.withValues(alpha: 0.60),
+                  ],
+                ),
+                // 用同色系投影代替玻璃描边：彩色卡配灰色描边会显脏
+                boxShadow: [
+                  BoxShadow(
+                    color: tint.withValues(alpha: 0.28),
+                    blurRadius: 12,
+                    offset: const Offset(0, 5),
                   ),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  initial,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
+                ],
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                initial,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 26,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-              const Spacer(),
-              Text(
-                app.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                tag,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 11,
-                ),
-              ),
-            ],
+            ),
           ),
         ),
-      ),
+        const SizedBox(height: 6),
+        // 名称：卡**外**、居中、无装饰
+        Text(
+          app.name,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 }

@@ -102,6 +102,15 @@ class AppState extends GetxController {
   /// 再次启动加载流程时直接复用, 不再走"下载源文件"检查与提示。
   bool _sourceLoadedThisSession = false;
 
+  /// 本次会话已载入 Node 的主源脚本 api（与 [_sourceLoadedThisSession] 配套）。
+  ///
+  /// 为什么必须按 api 记忆而不是一个裸 bool：切换订阅后新订阅的主源 api
+  /// 变了，若仍凭「本会话加载过」跳过 loadSource，Node 引擎里驻留的还是
+  /// **上一个订阅的脚本**，随后 /config 拿回旧线路表并整表替换——
+  /// 表现为「切订阅后线路还是旧的/全乱了」（用户 2026-10-14：
+  /// 花蚁 py 聚合、OmniBox tvbox、猫源 catvod 三种互切都不顺）。
+  String _loadedSpiderApi = '';
+
   /// 重入 guard - 避免 lifecycle 抖动导致 handleSceneActive 嵌套跑
   /// 第二次及以后的调用直接跳过, 不浪费 CPU 也不互相覆盖 loadingPhase
   bool _isHandleSceneActiveRunning = false;
@@ -357,9 +366,10 @@ class AppState extends GetxController {
         (s) => s.isSpiderSource && !s.key.startsWith('app_') && !s.isPythonScriptSource);
     if (spiderSource == null || spiderSource.api.isEmpty) return;
 
-    // **会话级复用**: 本次启动已成功加载过源, 直接复用,
-    // 不再显示"正在下载源文件..."、不再发 MD5/下载请求
-    if (_sourceLoadedThisSession) {
+    // **会话级复用**: 本次启动已成功加载过**同一个**源（api 一致）才复用；
+    // 切订阅后 api 变了必须重新 loadSource，否则 Node 驻留旧脚本、
+    // /config 拿回旧线路表并整表替换 → 新订阅线路被旧订阅冲掉。
+    if (_sourceLoadedThisSession && _loadedSpiderApi == spiderSource.api) {
       AppLog.instance.log('[AppState] 源已在本次会话加载, 跳过下载阶段');
       loadingPhase.value = LoadingPhase.waitingSpiderPort;
       final portReady = await NodeJSManager.instance.waitForSpiderPort();
@@ -387,6 +397,7 @@ class AppState extends GetxController {
     SpiderService.instance.mainScriptUrl = spiderSource.api;
     AppLog.instance.log('[AppState] Spider 源加载成功');
     _sourceLoadedThisSession = true;
+    _loadedSpiderApi = spiderSource.api;
 
     loadingPhase.value = LoadingPhase.waitingSpiderPort;
     final portReady = await NodeJSManager.instance.waitForSpiderPort();

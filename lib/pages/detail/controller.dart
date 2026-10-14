@@ -622,7 +622,23 @@ class DetailController extends GetxController with WidgetsBindingObserver {
         if (_spiderResolveToken != token) return;
 
         if (resolvedUrl != null && resolvedUrl.isNotEmpty) {
-          playUrl.value = resolvedUrl;
+          // 2026-10-14：Spider 返回 http(s) 网页地址时，旧逻辑把非媒体后缀的
+          // 地址一律当"网页播放页"丢给 WebView —— 用户点播放就直接弹出原网页。
+          // 现在先过一遍配置里的解析接口尝试提取真实直链：拿到直链走原生播放；
+          // 解析接口不可用 / 未命中 / 只解出网页时保持原地址，由播放区 WebView 兜底。
+          var playCandidate = resolvedUrl;
+          if (!_looksLikeDirectMedia(playCandidate) &&
+              ParseService.instance.enabled) {
+            final outcome =
+                await ParseService.instance.parseOutcome(playCandidate);
+            if (outcome != null && outcome.url.isNotEmpty && outcome.direct) {
+              AppLog.instance.log(
+                  '[Play] 解析接口「${outcome.sourceName}」提取直链成功 → ${outcome.url}');
+              playCandidate = outcome.url;
+            }
+          }
+          if (_spiderResolveToken != token) return;
+          playUrl.value = playCandidate;
           playHeaders.value = headers;
           playbackSessionId.value = _newUuid();
           isPlaying.value = true;

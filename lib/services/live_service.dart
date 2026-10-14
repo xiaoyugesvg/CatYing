@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:get/get.dart';
+import 'package:path_provider/path_provider.dart';
 import 'app_log.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -31,7 +32,18 @@ class LiveService extends GetxService {
   Future<void> _restoreLives() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final saved = prefs.getString('live_lives');
+      var saved = prefs.getString('live_lives');
+      // prefs 里没有（或 plist 整域丢失）→ 尝试文件备份兜底。
+      // 与 api_url.bak / subscriptions.bak 同款：进程被硬打断时 plist 可能没落盘，
+      // 文件写是独立的，用它把直播源救回来，避免「直播源随重启/切源变化」。
+      if (saved == null || saved.isEmpty) {
+        final backup = await _readLivesBackup();
+        if (backup != null && backup.isNotEmpty) {
+          saved = backup;
+          await prefs.setString('live_lives', backup);
+          AppLog.instance.log('[Live] 直播源已从文件备份恢复');
+        }
+      }
       if (saved != null && saved.isNotEmpty) {
         final list = jsonDecode(saved);
         if (list is List && list.isNotEmpty) {
@@ -50,6 +62,27 @@ class LiveService extends GetxService {
         await loadFromUrl(url);
       }
     } catch (e) { /* ignore */ }
+  }
+
+  static const String _livesBackupName = 'live_lives.bak';
+
+  static Future<File?> _livesBackupFile() async {
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      return File('${docs.path}/$_livesBackupName');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  static Future<String?> _readLivesBackup() async {
+    try {
+      final f = await _livesBackupFile();
+      if (f == null || !await f.exists()) return null;
+      return await f.readAsString();
+    } catch (e) {
+      return null;
+    }
   }
 
   Future<void> _restoreBlocked() async {
@@ -838,12 +871,19 @@ class LiveService extends GetxService {
     return _persistedUrl;
   }
 
-  /// 持久化多源配置到本地
+  /// 持久化多源配置到本地（prefs + 文件备份）
   Future<void> _persistLives() async {
     if (_rawLives == null) return;
     try {
+      final json = jsonEncode(_rawLives);
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('live_lives', jsonEncode(_rawLives));
+      await prefs.setString('live_lives', json);
+      try {
+        final f = await _livesBackupFile();
+        await f?.writeAsString(json, flush: true);
+      } catch (e) {
+        AppLog.instance.log('[Live] 直播源备份写入失败: $e');
+      }
     } catch (e) { /* ignore */ }
   }
 
@@ -1118,6 +1158,9 @@ class LiveService extends GetxService {
       await prefs.remove('live_url');
       await prefs.remove('live_lives');
       await prefs.remove('live_name');
+      // 同步清掉文件备份，否则下次启动又被 _restoreLives 兜回来
+      final f = await _livesBackupFile();
+      if (f != null && await f.exists()) await f.delete();
     } catch (e) { /* ignore */ }
     _persistedUrl = null;
     _persistedName = null;

@@ -12,6 +12,7 @@ import '../../../services/python_sources_service.dart';
 import '../../subscription/view.dart';
 import '../../../widgets/common_widgets.dart';
 import '../controller.dart';
+import 'engine_settings_page.dart';
 import 'settings_shared.dart';
 import '../../../widgets/app_toast.dart';
 
@@ -88,6 +89,14 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
               title: '导入 Python 视频源',
               value: '.py 文件 → 注册为线路',
               onTap: _importPythonVideoSource,
+            ),
+            // 引擎管理（Node / Python 手动加载）—— 用户 2026-10-13：
+            // 从「通用设置」挪到这里（订阅管理页）
+            SettingsRow(
+              icon: Icons.memory_outlined,
+              title: '引擎管理',
+              value: 'Node / Python 手动加载',
+              onTap: () => Get.to(() => const EngineSettingsPage()),
             ),
             SettingsRow(
               icon: Icons.restart_alt,

@@ -41,7 +41,12 @@ class PythonScriptSources {
   /// 确保 [url] 的 .py 已落盘并注册进引擎，返回引擎 key；失败返回 null。
   ///
   /// 本会话已注册过 → 直接返回 key（零开销）。失败时把原因写进 [lastError]。
-  Future<String?> ensureInstalled(String url) async {
+  ///
+  /// [force] = true 时**忽略所有"本会话已注册"的缓存判断**，重新走一遍
+  /// install_source。用途：引擎实际报 `No module named 'src.spider...'`
+  /// ——说明 Dart 侧的"已注册"记录与解释器里的 sys.modules 不一致
+  /// （解释器重建 / 上一次注册被超时中断在半路等），必须真注册一次才能救回来。
+  Future<String?> ensureInstalled(String url, {bool force = false}) async {
     final u = url.trim();
     lastError = null; // 每轮清一次，避免把上次源的原因报给这次
     if (u.isEmpty) {
@@ -49,14 +54,16 @@ class PythonScriptSources {
       return null;
     }
     final key = keyFor(u);
-    if (_registeredThisSession.contains(key)) return key;
+    if (!force) {
+      if (_registeredThisSession.contains(key)) return key;
 
-    // 启动时的 syncToEngine() 已经把 <Documents> 下所有 .py 全量注册过一遍
-    // （我们的 psrc_*.py 就写在那里）⇒ 这时不必再写一次文件 + 重新编译模块，
-    // 直接返回 key 即可。免掉每次冷启动每个 py 源的一次重复注册。
-    if (PythonSourcesService.instance.isRegisteredInSession('video', key)) {
-      _registeredThisSession.add(key);
-      return key;
+      // 启动时的 syncToEngine() 已经把 <Documents> 下所有 .py 全量注册过一遍
+      // （我们的 psrc_*.py 就写在那里）⇒ 这时不必再写一次文件 + 重新编译模块，
+      // 直接返回 key 即可。免掉每次冷启动每个 py 源的一次重复注册。
+      if (PythonSourcesService.instance.isRegisteredInSession('video', key)) {
+        _registeredThisSession.add(key);
+        return key;
+      }
     }
 
     if (!PythonManager.instance.isIOS) {

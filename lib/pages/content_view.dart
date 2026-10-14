@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -12,6 +14,7 @@ import '../reading/widgets/jelly_nav_bar.dart';
 import '../services/api_config.dart';
 import '../models/subscription.dart';
 import '../services/nav_feature_service.dart';
+import '../services/prefs_mirror.dart';
 import 'live/view.dart';
 import '../reading/pages/home_page.dart' as reading_app;
 import '../music/pages/root_view.dart';
@@ -137,6 +140,13 @@ class _ContentViewState extends State<ContentView>
 
     _lastLifecycleState = state;
     _lastLifecycleChangeAt = now;
+
+    // 进后台/失活时立刻落一份设置快照：崩溃/被系统回收时最多丢这一次之后的改动。
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      unawaited(PrefsMirror.snapshot());
+    }
 
     if (state == AppLifecycleState.resumed) {
       final appState = Get.find<AppState>();

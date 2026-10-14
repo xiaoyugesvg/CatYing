@@ -20,6 +20,13 @@ import os
 import sys
 import traceback
 
+# pylib 目录直接挂进 sys.path：源脚本写 `from pyquery import PyQuery` /
+# `from lxml import etree`（不带 pylib 前缀）时，命中 pylib 里的纯 Python 垫片
+# （真 pyquery/lxml 依赖 C 扩展，iOS 装不了）。pylib 与本文件同级。
+_PYLIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pylib')
+if os.path.isdir(_PYLIB) and _PYLIB not in sys.path:
+    sys.path.insert(0, _PYLIB)
+
 # ---- 安全基线 ------------------------------------------------------
 # iOS 无 fork/exec；把危险通道直接禁用，避免源脚本误用
 try:

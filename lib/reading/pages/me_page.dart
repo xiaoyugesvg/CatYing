@@ -141,10 +141,52 @@ class _MePageState extends State<MePage> {
                   spacing: spacing,
                   runSpacing: spacing,
                   children: [
-                    // 1. 主题风格
+                    // 用户 2026-10-13：把「图书使用内置账号」「主题跟随系统」
+                    // 两张开关卡挪到「主题风格」**前面**。
+                    // 0. 图书使用内置账号
+                    StaggeredEntrance(
+                      key: ValueKey('${_session}_0'),
+                      index: 0,
+                      child: SizedBox(
+                        width: itemWidth,
+                        child: ListenableBuilder(
+                          listenable: SettingsService(),
+                          builder: (context, _) => _buildSwitchTile(
+                            isDark,
+                            icon: Icons.lock_person_rounded,
+                            iconBg: JellyTheme.primary,
+                            title: '图书使用内置账号',
+                            subtitle: '关闭后需登录才能下载',
+                            value: SettingsService().useBuiltinAccount,
+                            onChanged: SettingsService().setUseBuiltinAccount,
+                          ),
+                        ),
+                      ),
+                    ),
+                    // 1. 主题跟随系统
+                    StaggeredEntrance(
+                      key: ValueKey('${_session}_theme_follow'),
+                      index: 1,
+                      child: SizedBox(
+                        width: itemWidth,
+                        child: ListenableBuilder(
+                          listenable: SettingsService(),
+                          builder: (context, _) => _buildSwitchTile(
+                            isDark,
+                            icon: Icons.brightness_auto_rounded,
+                            iconBg: JellyTheme.primary,
+                            title: '主题跟随系统',
+                            subtitle: '随系统明暗自动切换',
+                            value: SettingsService().themeFollowSystem,
+                            onChanged: SettingsService().setThemeFollowSystem,
+                          ),
+                        ),
+                      ),
+                    ),
+                    // 2. 主题风格
                     StaggeredEntrance(
                       key: ValueKey('${_session}_theme_style'),
-                      index: 0,
+                      index: 2,
                       child: SizedBox(
                         width: itemWidth,
                         child: ListenableBuilder(
@@ -161,10 +203,10 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 2. 显示设置
+                    // 3. 显示设置
                     StaggeredEntrance(
                       key: ValueKey('${_session}_5'),
-                      index: 1,
+                      index: 3,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -182,10 +224,10 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 3. 阅读设置
+                    // 4. 阅读设置
                     StaggeredEntrance(
                       key: ValueKey('${_session}_4'),
-                      index: 2,
+                      index: 4,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -203,11 +245,11 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 4. 漫画源仓库 —— 服务**漫画**（SiteConfig 网页源，取图片）
+                    // 5. 漫画源仓库 —— 服务**漫画**（SiteConfig 网页源，取图片）
                     // 与下面的「书源仓库」是两个独立体系，别合并
                     StaggeredEntrance(
                       key: ValueKey('${_session}_source_repo'),
-                      index: 3,
+                      index: 5,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -225,7 +267,7 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 5. 书源仓库 —— 服务**小说**（Legado BookSource，取文字）
+                    // 6. 书源仓库 —— 服务**小说**（Legado BookSource，取文字）
                     //
                     // 与「漫画源仓库」是**两套独立体系**：
                     //   漫画源 = SiteConfig（取图片）
@@ -233,7 +275,7 @@ class _MePageState extends State<MePage> {
                     // 老桌面版也是分开的两项，这里保持一致。
                     StaggeredEntrance(
                       key: ValueKey('${_session}_book_source_repo'),
-                      index: 4,
+                      index: 6,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -251,10 +293,10 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 6. 下载设置
+                    // 7. 下载设置
                     StaggeredEntrance(
                       key: ValueKey('${_session}_2'),
-                      index: 5,
+                      index: 7,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -272,10 +314,10 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 7. 下载记录
+                    // 8. 下载记录
                     StaggeredEntrance(
                       key: ValueKey('${_session}_download_record'),
-                      index: 6,
+                      index: 8,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -296,10 +338,10 @@ class _MePageState extends State<MePage> {
                         ),
                       ),
                     ),
-                    // 8. 足迹（原「浏览记录」入口，跳转不变）
+                    // 9. 足迹（原「浏览记录」入口，跳转不变）
                     StaggeredEntrance(
                       key: ValueKey('${_session}_browse_history'),
-                      index: 7,
+                      index: 9,
                       child: SizedBox(
                         width: itemWidth,
                         child: _buildMenuItem(
@@ -313,45 +355,6 @@ class _MePageState extends State<MePage> {
                             MaterialPageRoute(
                               builder: (_) => const BrowseHistoryPage(),
                             ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    // ── 以下为原有开关 / 入口：仅调整位置，逻辑与跳转全部保留 ──
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_0'),
-                      index: 8,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: ListenableBuilder(
-                          listenable: SettingsService(),
-                          builder: (context, _) => _buildSwitchTile(
-                            isDark,
-                            icon: Icons.lock_person_rounded,
-                            iconBg: JellyTheme.primary,
-                            title: '图书使用内置账号',
-                            subtitle: '关闭后需登录才能下载',
-                            value: SettingsService().useBuiltinAccount,
-                            onChanged: SettingsService().setUseBuiltinAccount,
-                          ),
-                        ),
-                      ),
-                    ),
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_theme_follow'),
-                      index: 9,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: ListenableBuilder(
-                          listenable: SettingsService(),
-                          builder: (context, _) => _buildSwitchTile(
-                            isDark,
-                            icon: Icons.brightness_auto_rounded,
-                            iconBg: JellyTheme.primary,
-                            title: '主题跟随系统',
-                            subtitle: '随系统明暗自动切换',
-                            value: SettingsService().themeFollowSystem,
-                            onChanged: SettingsService().setThemeFollowSystem,
                           ),
                         ),
                       ),

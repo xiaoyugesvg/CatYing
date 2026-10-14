@@ -68,11 +68,20 @@ class MusicPlayerPage extends StatefulWidget {
 }
 
 class _MusicPlayerPageState extends State<MusicPlayerPage>
-    with SingleTickerProviderStateMixin {
+    // 必须是 TickerProvider 的**复数版**：本页有 _spin(唱片转动) / _arm(落针) /
+    // _pulse(氛围脉冲) 三个 AnimationController，SingleTickerProviderStateMixin
+    // 只允许创建一次 ticker，第二个 controller 起就会在 debug 下直接抛断言。
+    with TickerProviderStateMixin {
   final player = MusicPlayerManager.instance;
 
 /// 封面旋转动画
   late final AnimationController _spin;
+
+  /// 黑胶唱臂落针动画（0 = 抬起待机，1 = 落到盘面播放）。
+  ///
+  /// 之前唱臂是**纯静态**摆件（参考图角度写死 -0.38），用户反馈"指针不能动吗"。
+  /// 现在播放时落针、暂停时抬臂 —— 与真实唱机一致，也是黑胶形态最有辨识度的一处动态。
+  late final AnimationController _arm;
 
   /// true = 显示歌词；false = 显示封面
   bool showLyric = false;
@@ -102,6 +111,11 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
     _spin = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 24),
+    );
+    // 落针 500ms：比唱片转动快得多，符合"手臂落下"的真实观感
+    _arm = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 520),
     );
     // #18：氛围层（浮尘/星点）的脉冲时钟。
     //
@@ -137,6 +151,7 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
     player.removeListener(_onPlayerChanged);
     player.isPlaying.removeListener(_syncSpin);
     _spin.dispose();
+    _arm.dispose();
     _pulse.dispose();
     _lyricScroll.dispose();
     super.dispose();
@@ -184,6 +199,13 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
   /// `animateTo(下一个整圈)` + `Curves.decelerate`：
   /// 从当前角度平滑转到下一个整圈后自然停止（不会倒转、也不会突变）。
   void _syncSpin() {
+    // 落针/抬臂：播放时把唱臂压到盘面，暂停时抬回待机位。
+    // 与唱片转动方向一致，但节奏独立（手臂动作快，唱片是慢转）。
+    if (player.isPlaying.value) {
+      _arm.forward();
+    } else {
+      _arm.reverse();
+    }
     // #18：脉冲与唱片同步启停（暂停时画面静止，不空转耗电）
     if (player.isPlaying.value) {
       if (!_pulse.isAnimating) _pulse.repeat(reverse: true);
@@ -626,6 +648,12 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
   }
 
   // ── 封面形态 1：黑胶（默认）—— 唱片盘面 + 中心标签 + 唱臂 ──
+  //
+  // 2026-10-14 美化（用户："黑胶唱片那个指针不能动吗？能不能美化一哈"）：
+  //   · 盘面：纯色圆片 → **径向渐变** + 斜向高光，转起来有体积感；
+  //   · 纹路：一道 border → `_VinylGroovesPainter` 十余道不等距同心圆；
+  //   · 中心标签：加一圈细环，与盘面分层；
+  //   · 唱臂：静态摆件 → `_arm` 驱动的**落针/抬臂**动画。
   Widget _vinylCover(dynamic song) {
     return SizedBox(
       width: 280,
@@ -642,14 +670,17 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
               height: 246,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                // V9：原来是 `MusicTheme.isDark ? 深 : 浅`，而本页底色**恒为黑** ——
-                // 音乐选浅色时盘面反而变亮，成了"黑底上放一块更亮的盘"。
-                // 固定取原**深色档**的值，与整页的黑底/白字自洽。
-                color: const Color(0xFF141416),
-                // 唱片纹路：几道同心圆描边
-                border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.06),
-                    width: 0.8),
+                // 2026-10-14 美化：径向渐变替代原来的纯色圆片 ——
+                // 中心受光稍亮、外缘压暗，唱片转起来才看得出层次，
+                // 不然就是"黑底上放一块黑塑料"。
+                gradient: const RadialGradient(
+                  colors: [
+                    Color(0xFF232327),
+                    Color(0xFF111113),
+                    Color(0xFF0A0A0C),
+                  ],
+                  stops: [0.0, 0.55, 1.0],
+                ),
                 boxShadow: [
                   BoxShadow(
                       color: Colors.black.withValues(alpha: 0.4),
@@ -660,12 +691,45 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
               child: Stack(
                 alignment: Alignment.center,
                 children: [
-                  // 中心标签（就是封面）
-                  ClipOval(
-                    child:
-                        CoverImage(url: song.coverUrl, size: 132, circle: true),
+                  // 唱片纹路：十几道不等距同心圆（原来只有一道 border，
+                  // 看着更像塑料片而不是唱片）
+                  const Positioned.fill(
+                    child: CustomPaint(painter: _VinylGroovesPainter()),
                   ),
-                // 中心轴孔
+                  // 斜向高光：一笔即可，多了反而像塑料
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Colors.white.withValues(alpha: 0.10),
+                              Colors.white.withValues(alpha: 0.0),
+                            ],
+                            stops: const [0.0, 0.45],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // 中心标签（就是封面）：加一圈细环，把标签和盘面分开
+                  Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: const Color(0xFF0F0F11),
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.10)),
+                    ),
+                    child: ClipOval(
+                      child: CoverImage(
+                          url: song.coverUrl, size: 128, circle: true),
+                    ),
+                  ),
+                  // 中心轴孔
                   Container(
                     width: 8,
                     height: 8,
@@ -681,10 +745,15 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
           // 唱臂：轴心在盘右下方，臂身斜向左上、唱头压住盘面右上（对齐参考图）。
           // 轴心位置 = right 18 / top 82（换算后落在 (250,230) 附近）——
           // 旋转绕轴心，所以臂身整体向左上展开，不会超出 280 画布被 Stack 裁掉。
-          const Positioned(
+          //
+          // 2026-10-14：由 `_arm` 驱动**落针/抬臂**（原来写死角度、纯静态摆件）。
+          Positioned(
             right: 18,
             top: 82,
-            child: _VinylTonearm(),
+            child: AnimatedBuilder(
+              animation: _arm,
+              builder: (_, __) => _VinylTonearm(t: _arm.value),
+            ),
           ),
         ],
       ),
@@ -742,34 +811,45 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
     );
   }
 
-  // ── 封面形态 3：方形 —— 统一改成圆形旋转 CD 盘（原方形形态废弃）──
+  // ── 封面形态 3：方形 —— 静止的圆角封面卡 ──
+  //
+  // ⚠️ 历史遗留：这里一度被改成"圆形旋转 CD 盘"，于是「方形封面」点出来
+  //    和「CD 圆盘」长得一模一样（选项标签在说谎）。用户 2026-10-14 问
+  //    "除了黑胶、CD 还有其他的吗"，现在把它还原成**真正的方形卡**：
+  //    圆角矩形封面 + 柔和投影 + 内描边，且**不旋转**（静图才有"方"的稳定感）。
   Widget _squareCover(dynamic song) {
     return SizedBox(
-      width: 280,
-      height: 280,
+      width: 260,
+      height: 260,
       child: Stack(
         alignment: Alignment.center,
         children: [
-          _glow(280, 0.35),
-          RotationTransition(
-            turns: _spin,
+          _glow(260, 0.35),
+          Container(
+            width: 244,
+            height: 244,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(22),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    blurRadius: 26,
+                    offset: const Offset(0, 10)),
+              ],
+            ),
             child: Stack(
-              alignment: Alignment.center,
+              fit: StackFit.expand,
               children: [
-                ClipOval(
-                  child:
-                      CoverImage(url: song.coverUrl, size: 244, circle: true),
-                ),
-                // 中心孔
-                Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: const Color(0xFF0A0A0C),
-                    border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.18),
-                        width: 1),
+                CoverImage(
+                    url: song.coverUrl, size: 244, cornerRadius: 22),
+                // 内描边：浅色封面上也能看出卡片边界
+                IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.12)),
+                    ),
                   ),
                 ),
               ],
@@ -1327,15 +1407,29 @@ class _MusicPlayerPageState extends State<MusicPlayerPage>
 ///
 /// 2026-10-13 改版（对齐用户参考图）：原来是"一根圆角细棒随便斜一下"，
 /// 现在补上**轴心底座 + 唱头**，并改成"绕轴心旋转"——
-/// 臂身自然向左上展开、轴心始终钉在盘右下方（静态摆位，不做动画，避免分心）。
+/// 臂身自然向左上展开、轴心始终钉在盘右下方。
+///
+/// 2026-10-14：由**静态**改成**可动落针**（用户："那个指针不能动吗"）——
+/// [t] = 0 抬起待机（臂身近竖直，唱头离开盘面）；
+/// [t] = 1 落到盘面（压到参考图角度）。
+/// 角度由外层 `_arm` 动画控制器插值，播放 `forward()`、暂停 `reverse()`。
 class _VinylTonearm extends StatelessWidget {
-  const _VinylTonearm();
+  const _VinylTonearm({required this.t});
+
+  /// 0 = 抬起待机，1 = 落到盘面
+  final double t;
+
+  /// 抬起时的角度：近竖直，唱头明显离开盘面（不能为 0，否则臂身像插在轴上）
+  static const double _liftedAngle = -0.03;
+
+  /// 落针后的角度（对齐参考图）
+  static const double _playingAngle = -0.40;
 
   @override
   Widget build(BuildContext context) {
+    final angle = _liftedAngle + (_playingAngle - _liftedAngle) * t;
     return Transform.rotate(
-      // -22°：臂身向左上倾（参考图角度）
-      angle: -0.38,
+      angle: angle,
       // 绕**底部中心**转 —— 底部中心即轴心
       alignment: Alignment.bottomCenter,
       child: Column(
@@ -1384,6 +1478,37 @@ class _VinylTonearm extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 唱片纹路：十几道**不等距**同心圆。
+///
+/// 间距刻意不均匀（越靠外越密），这才是真实唱片"密纹"的观感；
+/// 等距圆环看起来像靶纸。全部用极低透明度描边，转动时只留下细腻的纹理感。
+class _VinylGroovesPainter extends CustomPainter {
+  const _VinylGroovesPainter();
+
+  /// 纹路从中心标签外缘（半径 66）一直铺到接近盘缘（半径 121）
+  static const List<double> _radii = [
+    68, 71, 75, 80, 86, 92, 97, 101, 104, 107, 109, 111, 112, 113, 114,
+    115, 116, 117, 118, 119, 120,
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    // 外侧纹路更亮一点点：光源在盘面上方，边缘反射更强
+    for (var i = 0; i < _radii.length; i++) {
+      final alpha = 0.020 + 0.022 * (i / (_radii.length - 1));
+      final paint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = i.isEven ? 0.7 : 0.5
+        ..color = Colors.white.withValues(alpha: alpha);
+      canvas.drawCircle(center, _radii[i], paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _VinylGroovesPainter oldDelegate) => false;
 }
 
 /// 播放器氛围层：浮尘 / 星点。

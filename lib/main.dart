@@ -16,6 +16,7 @@ import 'models/subscription.dart';
 import 'services/api_config.dart';
 import 'services/nav_feature_service.dart';
 import 'services/app_log.dart';
+import 'services/prefs_mirror.dart';
 import 'services/app_state.dart';
 import 'services/background_service.dart';
 import 'services/epg_service.dart';
@@ -80,6 +81,12 @@ void main() async {
   // 初始化 Hive 数据目录
   final appDir = await getApplicationDocumentsDirectory();
   Hive.init(appDir.path);
+
+  // 🔴 设置项整体兜底：必须在**任何服务读 prefs 之前**跑。
+  //    iOS 上设置全在一个 NSUserDefaults plist 里，App 被信号直接杀死时
+  //    （见 prefs_mirror.dart 顶部说明）plist 可能整域丢失 ⇒ 重启后音乐/
+  //    阅读/弹幕/直播/小程序的设置全没。这里从独立文件镜像把 prefs 救回来。
+  await PrefsMirror.restoreIfLost();
 
   // 播放内核与选项
   // #10：字号缩放是外观设置，由 AppTheme 负责加载（PlayerPrefs 是兼容壳）
@@ -342,6 +349,10 @@ void main() async {
   // 用 App 已有的 `VideoPlayerPip.navigatorKey`（就是 GetMaterialApp 的
   // navigatorKey），这样气泡挂在 root Overlay 上，浮在所有路由之上。
   AppToast.init(VideoPlayerPip.navigatorKey);
+
+  // 设置项整体快照：低频周期写（崩溃时最多丢 15s 内的改动），
+  // 配合启动期的 PrefsMirror.restoreIfLost() 形成完整兜底闭环。
+  PrefsMirror.startAutoSnapshot();
 
   runApp(const TVBoxApp());
 }

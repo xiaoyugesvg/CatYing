@@ -7,7 +7,6 @@ import '../../miniapp/pages/mini_app_list_page.dart';
 import 'controller.dart';
 import 'sub/about_settings_page.dart';
 import 'sub/unified_theme_settings_page.dart';
-import 'sub/cache_settings_page.dart';
 import 'sub/danmu_settings_page.dart';
 import 'sub/data_source_settings_page.dart';
 import 'sub/general_settings_page.dart';
@@ -110,14 +109,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 onTap: () => Get.to(() => const MiniAppListPage()),
               ),
               const SizedBox(height: AppTheme.spacingMD),
-              // 通用设置（软件日志 / 缓存清理 / 同步与备份）—— 与阅读「我的」里的
-              // 「通用设置」复用同一个页面，两模块入口保持一致（用户 2026-10-13）
-              _categoryTile(
-                icon: Icons.settings_rounded,
-                title: '通用设置',
-                onTap: () => Get.to(() => const GeneralSettingsPage()),
-              ),
-              const SizedBox(height: AppTheme.spacingMD),
 
               // 播放
               _categoryTile(
@@ -148,10 +139,14 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: AppTheme.spacingMD),
 
               // 存储与信息
+              // 「缓存管理」已并入「通用设置」（用户 2026-10-13：
+              // 设置里不再单独占一格，整块挪进通用设置）
+              //
+              // 通用设置（软件日志 / 缓存管理 / 引擎管理）—— 排在「关于」之前
               _categoryTile(
-                icon: Icons.cleaning_services_outlined,
-                title: '缓存管理',
-                onTap: () => Get.to(() => const CacheSettingsPage()),
+                icon: Icons.settings_rounded,
+                title: '通用设置',
+                onTap: () => Get.to(() => const GeneralSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingMD),
               _categoryTile(

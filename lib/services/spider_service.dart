@@ -169,8 +169,13 @@ class SpiderService {
       script.toLowerCase().split('?').first.endsWith('.py');
 
   /// Node 侧路径基址：api 是 http URL 时退化为 /{key}/{type}/{action}
-  static String _nodeBase(String api) =>
-      api.trim().startsWith('http') ? '' : api.trim();
+  static String _nodeBase(String api) {
+    final a = api.trim();
+    // csp_ 占位不是路径基址：拼进 URL 会产出 `csp_xxx/play` 这种非法路径，
+    // 必须退化为标准 /{key}/{type}/{action} 形态。
+    if (a.toLowerCase().startsWith('csp_')) return '';
+    return a.startsWith('http') ? '' : a;
+  }
 
   /// 「主源脚本」地址（整包就是一个 js spider 的配置）：由 AppState 在加载主源时
   /// 登记。用于「打开过程序脚本源后回到主源」时把主源脚本重新载入引擎。
@@ -333,12 +338,50 @@ class SpiderService {
         AppLog.instance.w('[SpiderService] $lastError');
         return null;
       }
-      return _pythonCall(moduleKey, action, pyArgs);
+      final r = await _pythonCall(moduleKey, action, pyArgs);
+
+      // 🔴 2026-10-14 修（用户实测：`ModuleNotFoundError: No module named
+      //    'src.spider.video.psrc_xxx'`）：
+      //    Dart 侧记录"本会话已注册"，但解释器的 sys.modules 里并没有这个模块
+      //    （典型成因：上次 install_source 被超时中断在半路，`sys.modules[...]`
+      //     那行没执行到，而 Dart 侧的 `_registered` 集合已经写进去了）。
+      //    此时直接返回 null，上层只看到"源没有内容"。
+      //    ⇒ 命中该错误就**强制真注册一次**再试，能自愈，不必让用户重进 App。
+      if (r == null &&
+          script.startsWith('http') &&
+          (lastError?.contains('No module named') ?? false)) {
+        AppLog.instance.w(
+            '[SpiderService] 引擎缺模块 $moduleKey，强制重新注册后重试');
+        final retried =
+            await PythonScriptSources.instance.ensureInstalled(script, force: true);
+        if (retried != null) return _pythonCall(retried, action, pyArgs);
+      }
+      return r;
     }
 
     // ── Node 引擎（JS / 无脚本地址）──────────────────────────
     var engineKey = key;
-    if (script.isNotEmpty) {
+    // 🔴 2026-10-14 修（猫源 CatVod 切换不顺）：
+    // `csp_xxx` 是「由当前已驻留 spider 脚本内置类处理」的占位 api，
+    // 不是脚本地址——把它当脚本 loadSource('csp_xxx') 必然失败，
+    // 导致 CatVod /config 下发的所有 csp_ 线路全部加载失败。
+    // 同理，非 http 的相对路径（如 OmniBox 私有协议 /spider/<key>/<n>）
+    // 也不是可下载脚本，Node 加载不了，必须直接给明确错误而不是硬塞。
+    final isCspPlaceholder = script.toLowerCase().startsWith('csp_');
+    final isUnsupportedRelative = script.isNotEmpty &&
+        !script.startsWith('http') &&
+        !_isPythonScript(script) &&
+        !script.toLowerCase().split('?').first.endsWith('.js') &&
+        !script.toLowerCase().split('?').first.endsWith('.js.md5') &&
+        !RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(script) &&
+        !script.startsWith('file://');
+    if (isUnsupportedRelative) {
+      lastError = '该线路使用了暂不支持的源协议（$script），'
+          '请换其他线路或改用整包 spider 订阅';
+      AppLog.instance.w('[SpiderService] $lastError');
+      return null;
+    }
+    if (script.isNotEmpty && !isCspPlaceholder) {
       // 聚合配置里的脚本源：按需载入脚本，用引擎自报的真实 key
       final k = await _ensureNodeScript(script, fallback: key);
       if (k == null) {
@@ -347,8 +390,8 @@ class SpiderService {
       }
       engineKey = k;
     } else if (mainScriptUrl.isNotEmpty && _loadedScriptUrl != mainScriptUrl) {
-      // 主源（单 js spider 配置）：api 由 /config 下发、通常为空。若期间被程序
-      // 脚本源顶替过，这里把主源脚本重新载入。
+      // 主源（单 js spider 配置）：api 由 /config 下发、通常为空或 csp_ 占位。
+      // 若期间被程序脚本源顶替过，这里把主源脚本重新载入。
       final k = await _ensureNodeScript(mainScriptUrl, fallback: key);
       if (k != null) engineKey = k;
     }

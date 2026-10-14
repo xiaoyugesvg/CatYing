@@ -361,12 +361,29 @@ import Python
     }
 
     /// watchdog 触发：向正在执行的线程抛 TimeoutError
+    ///
+    /// 🔴 2026-10-13 崩溃根因（Runner-2026-10-13-230423.ips，EXC_BAD_ACCESS /
+    ///    SIGSEGV，far=0x10，线程 com.tvbox.python.watchdog，帧
+    ///    PyThreadState_SetAsyncExc +44）：
+    ///    CPython 3.12 的 `PyThreadState_SetAsyncExc(unsigned long, PyObject*)`
+    ///    内部走 `_PyInterpreterState_GET()` = `_PyThreadState_GET()->interp`
+    ///    —— **要求调用线程自己有 PyThreadState**。watchdog 跑在 GCD 队列上、
+    ///    没有线程状态 ⇒ 解引用 `NULL->interp`（偏移 0x10）⇒ 段错误。
+    ///    而这一崩，App 进程被 SIGSEGV 直接杀死，NSUserDefaults 来不及落盘
+    ///    ⇒「重启后音乐/阅读/弹幕/直播/小程序的设置全部丢失」。
+    ///    ⇒ 必须先 `PyGILState_Ensure()` 取得线程状态再调用。
+    ///    说明：目标线程若正持有 GIL，Ensure 会在它下一个字节码边界让出后拿到
+    ///    （纯 Python 死循环也能拿到），超时中断依然生效，只是 watchdog 线程会
+    ///    短暂等待。
     private static func fireTimeout() {
         let tid = PythonBridge.sharedExecTid
         guard tid != 0 else { return }
-        // 不依赖调用线程持有 GIL（内部通过信号打断目标线程）
+        // 解释器已销毁 / 未初始化时不能再碰 Python C API
+        guard Py_IsInitialized() != 0 else { return }
+        let gil = PyGILState_Ensure()
         // 签名：int PyThreadState_SetAsyncExc(unsigned long id, PyObject *exc)
         PyThreadState_SetAsyncExc(tid, PyExc_TimeoutError)
+        PyGILState_Release(gil)
         print("[PythonBridge] ⏱ watchdog 触发：Python 脚本超时中断")
     }
 

@@ -3096,6 +3096,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
               onTap: () => _safeTap(_toggleCast),
             ),
 
+            // 弹幕开关 + 播放器核心切换：**2026-10-14 从底部功能栏移到顶栏**
+            // （用户：「弹幕和引擎放到顶栏就行」）。
+            // 原来底栏右侧一排挤了 7 个图标（音量/选集/弹幕/引擎/短剧/抖音/全屏），
+            // 手机宽度下已经明显发密；这两个正好是"设置类"而非"播放控制类"，
+            // 放到顶栏与投屏/画中画同一组更合理。底栏右侧因此只剩 5 个。
+            _danmuToggleButton(),
+            _engineSwitchButton(),
+
             if (_isNativeFullscreen) ...[
               const SizedBox(width: 4),
               _buildStatusBarInfo(),
@@ -3207,11 +3215,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         setState(() => _showEpisodeSheet = true);
                       },
                     ),
-                  // 弹幕开关：已在底部功能栏（**常显**，不再按是否配置弹幕源隐藏 ——
-                  // 隐藏会让用户完全看不到这个功能。未配置时点击会引导去设置页）
-                  _danmuToggleButton(),
-                  // 播放器核心切换（点击弹出菜单，由用户选择当前平台可用的引擎）
-                  _engineSwitchButton(),
+                  // 弹幕开关 / 播放器核心切换：**2026-10-14 已移到顶栏**
+                  // （见 `_buildHeaderBar` 里对应说明）。底栏只留播放控制类按钮，
+                  // 右侧从 7 个降到 5 个，与顶栏数量不再悬殊。
                   // 短剧模式：纯竖屏全屏
                   _dramaModeButton(),
                   _douyinModeButton(),

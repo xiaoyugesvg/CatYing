@@ -220,11 +220,33 @@ class ApiConfig extends GetxController {
     return result;
   }
 
+  /// 主页源选择：按**订阅（配置地址）分别记住**。
+  ///
+  /// 之前只存一个全局 `homeApi` ⇒ 换了订阅、或换个订阅再切回来，都只能拿到
+  /// "另一个订阅" 的那次选择（key 对不上就退回第一个）。用户 2026-10-13：
+  /// 「不管是哪种线路，退出再开应该还是上次退出前的那个源」。
+  static const String _kHomeApiMap = 'home_api_map';
+
+  String get _homeScopeKey => configUrl.value.trim();
+
   /// 设置主页源
   Future<void> setHomeSource(SourceBean source) async {
     homeSourceBean.value = source;
     final prefs = await SharedPreferences.getInstance();
+    // 仍写一份全局键，兼容旧逻辑/旧数据
     await prefs.setString(AppConstants.homeApi, source.key);
+    final scope = _homeScopeKey;
+    if (scope.isEmpty) return;
+    try {
+      final raw = prefs.getString(_kHomeApiMap);
+      final map = (raw == null || raw.isEmpty)
+          ? <String, dynamic>{}
+          : (jsonDecode(raw) as Map).cast<String, dynamic>();
+      map[scope] = source.key;
+      await prefs.setString(_kHomeApiMap, jsonEncode(map));
+    } catch (e) {
+      AppLog.instance.log('[ApiConfig] 保存主页源(按订阅)失败: $e');
+    }
   }
 
   // ============================================================
@@ -362,6 +384,24 @@ class ApiConfig extends GetxController {
     Map<String, dynamic> config,
     String spiderUrl,
   ) async {
+    // 🔴 2026-10-14 修（用户：「花蚁/OmniBox/猫源三种订阅互切都不顺」）：
+    // 整表替换**只**对两类配置合法：
+    //   ① 整包就是一个 js/jar spider（点播接口地址本身 = .js/.jar）——
+    //     sites 是 _createSpiderSourceConfig 造的占位，必须换成 /config 真实线路；
+    //   ② CatVod 类 csp_ 占位配置——sites[].api 全是 csp_xxx 占位字符串，
+    //     真实线路同样由 spider /config 下发。
+    // 聚合配置（sites 里是真实 http/.py 线路，如 huahua.json）**不能**被
+    // /config 冲掉——之前这里没有守卫，Node 一旦启动（聚合里含 js 源就会
+    // 启动），/config 一返回就把聚合自己的线路整表替换，表现为「切换不顺」。
+    final wholePackIsSpider = _isSpiderSourceUrl(configUrl.value);
+    final allPlaceholder = sourceBeanList.isNotEmpty &&
+        sourceBeanList.every((s) =>
+            s.api.isEmpty || s.api.toLowerCase().startsWith('csp_'));
+    if (!wholePackIsSpider && !allPlaceholder) {
+      AppLog.instance.log('[ApiConfig] 聚合配置（线路自持），跳过 /config 整表替换');
+      return;
+    }
+
     final video = config['video'] as Map<String, dynamic>?;
     final sites = video?['sites'] as List<dynamic>?;
     if (video == null || sites == null) {
@@ -682,18 +722,44 @@ class ApiConfig extends GetxController {
           ));
         }
       }
+      // CatVod 类配置常常 `sites: []`（线路全部由 jar 自己下发）→ 这里先塞一个
+      // 基于 spider 地址的**占位线路**，保证首页/源切换有默认源；
+      // /config 返回后由 updateSourceBeansFromSpiderConfig 整表替换掉。
+      if (sources.isEmpty &&
+          isSingleScriptSpider.value &&
+          (config.spider ?? '').trim().isNotEmpty) {
+        final ph = _createSpiderSourceConfig(config.spider!.trim());
+        final ps = ph.sites?.firstOrNull;
+        if (ps != null) {
+          sources.add(SourceBean(
+            key: ps.key ?? '',
+            name: ps.name ?? 'Spider源',
+            api: ps.api ?? '',
+            searchable: ps.searchable?.value ?? 1,
+            filterable: ps.filterable?.value ?? 1,
+            quickSearch: ps.quickSearch?.value ?? 0,
+            playerType: ps.playerType?.value ?? 0,
+            type: ps.type?.value ?? 3,
+            ext: ps.ext?.stringValue,
+            indexs: ps.indexs?.value ?? 0,
+          ));
+        }
+      }
       // 同上：把用户导入的线路（py 源等）并回列表
       await _mergeUserVideoSources(sources);
       sourceBeanList.value = sources;
 
       // 直播 lives：交给 LiveService 解析（内嵌 channels 或 m3u URL）
+      //
+      // 用户 2026-10-13：「直播能不能从订阅获取，不要随源切换变化」。
+      // ⇒ 只在**本地一条直播源都没有**时，才用当前订阅的 lives 首次导入；
+      //   一旦本地已有直播源（user managed / 内存里已有），切点播源一律不动它。
       try {
         final lives = config.lives;
         if (lives != null && lives.isNotEmpty) {
-          // 用户手动增删改过直播源后以本地为准，接口下发的 lives 不再覆盖，
-          // 否则「设置页删了源，重启又被接口配置整个灌回来」。
-          if (await LiveService.instance.livesUserManaged) {
-            AppLog.instance.log('[ApiConfig] 用户已手动管理直播源，跳过接口 lives 覆盖');
+          final localHas = LiveService.instance.sources.isNotEmpty;
+          if (await LiveService.instance.livesUserManaged || localHas) {
+            AppLog.instance.log('[ApiConfig] 本地已有直播源，跳过接口 lives 覆盖（不随源切换变化）');
           } else {
             final raw = lives
                 .map((e) => {
@@ -725,17 +791,24 @@ class ApiConfig extends GetxController {
       //
       // 聚合 TVBox 配置（sites[] 里混着 type=3 脚本源）不算：它的 sites 就是
       // 真实线路，脚本源按需载入引擎，不该让 /config 整表替换冲掉聚合线路。
+      // 用户 2026-10-13：「TVBox 和 catvod 切换的时候，没有默认源」。
+      // 之前单 Spider 配置**故意不设** homeSourceBean（等 /config 下发真实线路），
+      // 一旦 /config 慢或失败（日志里就是 `sourceLoaded:false` + 500），首页就
+      // 一直没有默认源。现在改为：**所有配置**都先落一个兜底主页源（用户选过的
+      // 按订阅命中优先）；单 Spider 的线路清单随后由 /config 再校正一次。
+      await _restoreHomeSource(sources);
+      // 兜底条件必须包含「旧主页源不在新列表」：切换订阅后 homeSourceBean
+      // 残留的是上一个订阅的 key（非 null），只判 null 不会重置 → 首页继续
+      // 指向已不存在的源，表现为「切了订阅但首页还是旧源/空白」。
+      final curKey = homeSourceBean.value?.key;
+      final curInList =
+          curKey != null && sources.any((s) => s.key == curKey);
+      if (!curInList) {
+        homeSourceBean.value = sources.firstOrNull;
+      }
       if (isSingleScriptSpider.value) {
-        AppLog.instance.log('[ApiConfig] 当前 config 是单个 Spider 源，homeSourceBean 等待 getCatConfig 完成后设置');
-      } else {
-        // 用户 2026-10-13：「改成按你列表里的第一个来，不要你跳」
-        //   ⇒ 默认主页源 = 列表第一个（**不再**优先挑非 Spider 源，
-        //     py/js 脚本源也不再被排到最后）。若用户手动选过源，_restoreHomeSource
-        //     已按保存的 key 命中并优先，这里只在没有保存选择时兜底。
-        await _restoreHomeSource(sources);
-        if (homeSourceBean.value == null) {
-          homeSourceBean.value = sources.firstOrNull;
-        }
+        AppLog.instance.log('[ApiConfig] 单个 Spider 配置：先给兜底主页源 '
+            '${homeSourceBean.value?.key}，/config 返回后再校正');
       }
 
       // 解析解析器列表
@@ -768,7 +841,18 @@ class ApiConfig extends GetxController {
   Future<void> _restoreHomeSource(List<SourceBean> sources) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final saved = prefs.getString(AppConstants.homeApi);
+      String? saved;
+      // 先按当前订阅（配置地址）取 —— 每个订阅各记各的主页源
+      final scope = _homeScopeKey;
+      if (scope.isNotEmpty) {
+        final raw = prefs.getString(_kHomeApiMap);
+        if (raw != null && raw.isNotEmpty) {
+          final map = jsonDecode(raw);
+          if (map is Map) saved = map[scope]?.toString();
+        }
+      }
+      // 再退回旧的全局键
+      saved ??= prefs.getString(AppConstants.homeApi);
       if (saved != null) {
         final found = sources.where((s) => s.key == saved).firstOrNull;
         if (found != null) {
@@ -860,12 +944,16 @@ class ApiConfig extends GetxController {
 
   static bool _isSpiderSourceUrl(String url) {
     final lower = url.toLowerCase();
-    // 检查路径后缀
+    // 检查路径后缀（.py 也是单脚本源：直接填 py 地址作为点播接口时，
+    // 必须在这里被识别为脚本源，否则会被当成 JSON 配置去拉取，解析失败，
+    // homeSourceBean 停在旧站点不动 —— 表现为「切了 py 源但首页还是旧猫源」）
     final path = Uri.tryParse(lower)?.path ?? lower;
     return path.endsWith('.js') ||
         path.endsWith('.js.md5') ||
         path.endsWith('.jar') ||
-        path.endsWith('.jar.md5');
+        path.endsWith('.jar.md5') ||
+        path.endsWith('.py') ||
+        path.endsWith('.py.md5');
   }
 
   static AppConfigData _createSpiderSourceConfig(String url) {
@@ -878,7 +966,9 @@ class ApiConfig extends GetxController {
           .replaceAll('.js.md5', '')
           .replaceAll('.js', '')
           .replaceAll('.jar.md5', '')
-          .replaceAll('.jar', '');
+          .replaceAll('.jar', '')
+          .replaceAll('.py.md5', '')
+          .replaceAll('.py', '');
       key = fileName.isEmpty ? uri.host : fileName;
     } else if (uri != null && uri.host.isNotEmpty) {
       key = uri.host;

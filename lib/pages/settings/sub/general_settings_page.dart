@@ -4,14 +4,14 @@ import 'package:get/get.dart';
 import '../../../reading/pages/general_settings_page.dart' show AppLogPage;
 import '../../../widgets/common_widgets.dart';
 import 'cache_settings_page.dart';
-import 'engine_settings_page.dart';
 import 'settings_shared.dart';
 
 /// 设置 → 通用设置（**影视模块专用**）
 ///
-/// 用户 2026-10-13：影视这边的通用设置内容与阅读不同 —— 只放
-/// 「软件日志 + 缓存清理」，并把「引擎管理」也并进这一页
-/// （阅读那边是 软件日志 / 缓存清理 / 同步与备份，两模块内容不同）。
+/// 用户 2026-10-13：影视这边的通用设置内容与阅读不同 —— 放
+/// 「软件日志 + 缓存管理」：
+///   · 「缓存管理」= 设置里原来那个独立入口整块挪进来（不再单独占一格）；
+///   · 「引擎管理」（Node / Python 手动加载）挪去**订阅管理**页。
 class GeneralSettingsPage extends StatelessWidget {
   const GeneralSettingsPage({super.key});
 
@@ -30,15 +30,9 @@ class GeneralSettingsPage extends StatelessWidget {
             ),
             SettingsRow(
               icon: Icons.cleaning_services_rounded,
-              title: '缓存清理',
+              title: '缓存管理',
               value: '按维度清理',
               onTap: () => Get.to(() => const CacheSettingsPage()),
-            ),
-            SettingsRow(
-              icon: Icons.memory_outlined,
-              title: '引擎管理',
-              value: 'Node / Python 手动加载',
-              onTap: () => Get.to(() => const EngineSettingsPage()),
             ),
           ],
         ),
