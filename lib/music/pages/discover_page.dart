@@ -94,6 +94,15 @@ class _DiscoverPageState extends State<DiscoverPage>
   ///（"王"/"G"/"K"）—— 用户对比参考图后指出"差远了"。
   List<({String name, String avatar, String mid})> _qqArtists = const [];
 
+  /// QQ「每日推荐」的歌曲 —— **新歌榜**里取（免登录可拿）。
+  ///
+  /// ── 为什么不是 `newSongs`（用户 2026-10-14：「内容有点少…也加个每日推荐」）
+  /// QQ 的 `newSongs`（新歌速递）**需要登录态**（Node 侧明确返回
+  /// `ok:false`：「QQ 该接口需要登录态」）⇒ 原来 QQ 页干脆整块不显示。
+  /// 但 QQ 的**新歌榜**（`topListSongs`）是免登录的、和排行榜/歌单广场同一批
+  /// 接口 ⇒ 用它当"每日推荐"：语义一致（每天在变），且点得动。
+  List<Song> _qqDaily = const [];
+
   // 喜马拉雅数据
   List<({String id, String name})> _xmCategories = const [];
   List<Song> _xmFeatured = const []; // 精选专辑（取若干分类的头部内容）
@@ -186,10 +195,38 @@ class _DiscoverPageState extends State<DiscoverPage>
       if (!mounted) return;
       _qqTopLists = results[0] as List<TopList>;
       _qqSquare = results[1] as List<Playlist>;
-      _qqCats = (results[2] as List<({int id, String name})>).take(24).toList();
+      _qqCats = (results[2] as List<({int id, String name})>)
+          // 🔴 去掉「全部」（id 10000000，Node 侧兜底塞的第一个）。
+          //    用户 2026-10-14：「QQ 歌单广场去掉那个"全部"分类」——
+          //    它不切换任何东西（就是默认的全量列表），一个**选不中任何东西**
+          //    的胶囊占着第一个位置，把真正的分类挤到后面。
+          //    默认状态本来就是"全部"（`_qqCatId` 初值不变），不需要一个
+          //    可点的胶囊来代表它。
+          .where((c) => c.id != 10000000 && c.name != '全部')
+          .take(24)
+          .toList();
     } catch (e) {
       // 免登录接口失败不该阻塞整页（热搜/搜索仍可用）
       AppLog.instance.log('[Discover] QQ 发现页数据加载失败: $e');
+    }
+
+    // ── 每日推荐（用**新歌榜**的歌，免登录可拿；见 `_qqDaily` 的说明）──
+    //
+    // 榜单列表里找「新歌榜」；找不到就退回热歌榜(26) —— 都是 QQ 的固定 topId。
+    try {
+      var topId = 26;
+      for (final t in _qqTopLists) {
+        if (t.name.contains('新歌')) {
+          topId = t.id;
+          break;
+        }
+      }
+      final daily =
+          await api.topListSongs(topId, limit: 30, source: SongSource.qq);
+      if (!mounted) return;
+      _qqDaily = daily.ok ? daily.list : const [];
+    } catch (e) {
+      AppLog.instance.log('[Discover] QQ 每日推荐加载失败: $e');
     }
 
     // ── 热门歌手（**带真头像**）──────────────────────────────────
@@ -259,6 +296,17 @@ class _DiscoverPageState extends State<DiscoverPage>
       _square = const [];
       _cats = const ['全部'];
     }
+
+    // ── 热搜关键词 ────────────────────────────────────────────────
+    //
+    // 网易云 / 酷狗**都支持** `hotSearch`（见 `music_source.js` 的
+    // `case 'hotSearch'`），但原来只有 QQ 页渲染了它 ⇒ 酷狗页明明有这个接口
+    // 却一格都不显示（用户 2026-10-14：「酷狗也是能多加点吗」）。
+    //
+    // 注意：必须**每个平台都重取一次** —— 否则从 QQ 切到酷狗时，
+    // `_hotKeywords` 还留着 QQ 的热搜词，点下去会用酷狗去搜 QQ 的热搜 ✗
+    final hot = await api.hotSearchResult(source: src);
+    _hotKeywords = hot.ok ? hot.list : const [];
   }
 
   Future<void> _switchCat(String cat) async {
@@ -352,14 +400,15 @@ class _DiscoverPageState extends State<DiscoverPage>
   // ============================================================
 
   Widget _bigCards(DiscoverStyle style) {
-    // ── 这两张卡依赖"新歌速递"和"收藏"──────────────────────────
-    // 新歌速递（`newSongs`）在 QQ / 喜马拉雅下**不可用**
-    // （QQ 侧 Node 明确返回 ok:false，需要登录态）。
-    // 所以 QQ 页如果照常渲染，会得到一个**点不动的"每日推荐"假卡**
-    // （用户实测截图：副标题停在兜底文案"每天更新的新歌"）✗
-    //
-    // 宁可**不显示**，也不要给一个按下去没反应的入口。
-    if (_source == SongSource.qq) return const SizedBox.shrink();
+    // ── 「每日推荐」的数据源按平台取（这两张卡依赖"每日歌"和"收藏"）──
+    //   · 网易云 / 酷狗 → 新歌速递（`newSongs` 免登录可用）
+    //   · QQ           → **新歌榜**的歌曲（`newSongs` 在 QQ 需要登录态，
+    //                     Node 侧明确 ok:false，见 `_qqDaily`）
+    // 以前 QQ 是**整块不显示**（怕给一个点不动的假卡）✗ ——
+    // 用户 2026-10-14：「内容有点少…也加个每日推荐、私人漫游」⇒ 现在换成
+    // 用 QQ 真实拿得到的歌填，仍然是**点得动的真入口**。
+    final List<Song> daily =
+        _source == SongSource.qq ? _qqDaily : _newSongs;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
@@ -368,16 +417,16 @@ class _DiscoverPageState extends State<DiscoverPage>
           Expanded(
             child: _bigCard(
               title: '每日推荐',
-              subtitle: _newSongs.isEmpty
+              subtitle: daily.isEmpty
                   ? '每天更新的新歌'
-                  : '${_newSongs.length} 首 · 每天更新',
+                  : '${daily.length} 首 · 每天更新',
               icon: Icons.calendar_month_rounded,
-              // 用当天新歌第一首的封面做底图（Beans 的「每日推荐」就是封面大图）
-              coverUrl: _newSongs.isEmpty ? null : _newSongs.first.coverUrl,
-              onTap: _newSongs.isEmpty
+              // 用当天第一首的封面做底图（Beans 的「每日推荐」就是封面大图）
+              coverUrl: daily.isEmpty ? null : daily.first.coverUrl,
+              onTap: daily.isEmpty
                   ? null
                   : () =>
-                      MusicPlayerManager.instance.playQueue(_newSongs, index: 0),
+                      MusicPlayerManager.instance.playQueue(daily, index: 0),
             ),
           ),
           const SizedBox(width: 10),
@@ -780,27 +829,128 @@ class _DiscoverPageState extends State<DiscoverPage>
       return _buildTing15Sections();
     }
     if (_source == SongSource.qq) {
-      return _buildQQSections();
+      return _buildQQSections(style);
     }
     return _buildMusicSections(style);
+  }
+
+  /// 热搜关键词横滑卡（QQ 页与网易云/酷狗页**共用一套**）。
+  ///
+  /// 卡片视觉主体是**大号名次**（热搜词没有封面），前三名用主题色描边 +
+  /// 更大的数字，一眼看出热度；点击就用当前平台搜这个词。
+  /// 提取成公共方法是因为：QQ 页早就有热搜，而**网易云/酷狗也支持
+  /// `hotSearch`**（`music_source.js` 的 `case 'hotSearch'`），
+  /// 但只有 QQ 页渲染了 —— 用户 2026-10-14：「酷狗也是能多加点吗」。
+  List<Widget> _hotKeywordSlivers(String title, SongSource source) {
+    if (_hotKeywords.isEmpty) return const [];
+    return [
+      SliverToBoxAdapter(child: SectionTitle(title: title)),
+      SliverToBoxAdapter(
+        child: SizedBox(
+          height: 116,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: _hotKeywords.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            itemBuilder: (c, i) {
+              final kw = _hotKeywords[i];
+              final hot = i < 3;
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => showSearch<void>(
+                  context: context,
+                  delegate: _QuickSearchDelegate(
+                      source: source, initialQuery: kw),
+                ),
+                child: Container(
+                  width: 132,
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                  decoration: BoxDecoration(
+                    // 与 `PresetCard` 一致的观感：填充 + 大圆角
+                    color: MusicTheme.fill,
+                    borderRadius: BorderRadius.circular(18),
+                    border: hot
+                        ? Border.all(
+                            color: MusicTheme.tint.withValues(alpha: 0.45),
+                            width: 1)
+                        : null,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // 大号名次（前三名主题色 + 更重）
+                      Text(
+                        '${i + 1}',
+                        style: TextStyle(
+                          color: hot ? MusicTheme.tint : MusicTheme.secondary,
+                          fontSize: hot ? 30 : 24,
+                          fontWeight: FontWeight.w800,
+                          height: 1.0,
+                        ),
+                      ),
+                      Text(
+                        kw,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: MusicTheme.label,
+                          fontSize: AppTheme.fontSubhead,
+                          fontWeight: FontWeight.w500,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    ];
   }
 
   /// QQ 音乐板块。
   ///
   /// ── 与网易云/酷狗的差别（决定了这里的排版）──────────────────────
-  /// QQ 是**免登录只有搜索类接口**的平台（见 `music_source.js` 里
-  /// `isQq` 分支的 action 白名单）。所以没有：
-  ///   · 排行榜（`topLists`）        → 不造假数据
-  ///   · 歌单广场（`playlistSquare`）→ 同上
-  ///   · 新歌速递（`newSongs`）      → 同上
-  ///   · 歌手列表（`searchArtists`）→ 用**搜索派生**的真实歌手替代
+  /// QQ 是**免登录只有发现类接口**的平台（见 `music_source.js` 里
+  /// `isQq` 分支的 action 白名单）。免登录能拿到：排行榜、榜单歌曲、
+  /// 歌单广场 + 分类、热门歌手（派生）、热搜；**拿不到**：新歌速递
+  /// （`newSongs` 要登录）、推荐歌单（`code=500003`）、评论 / 相似 / 歌手专辑。
   ///
-  /// 能拿到并真正有用的就三样，正好按"大→小"的视觉节奏排：
+  /// 所以这里的板块是（按"大 → 小"的视觉节奏）：
+  ///   · 每日推荐 —— 横滑歌卡（数据 = **新歌榜**的歌，见 [\_qqDaily]）
   ///   · 热门歌手 —— 圆头像行（和网易云的"歌手"行同款视觉）
   ///   · 热搜关键词 —— 前三名用主题色
-  ///   · 能力说明 —— 明确告诉用户"想听什么直接搜"
-  List<Widget> _buildQQSections() {
+  ///   · 排行榜 / 歌单广场 —— 横滑大卡
+  ///   · 能力说明 —— 明确告诉用户"能看不能直接播"
+  List<Widget> _buildQQSections(DiscoverStyle style) {
     final out = <Widget>[];
+
+    // ── 每日推荐（横滑歌卡，与网易云页共用 `DailySongsRow`）──────────
+    //
+    // 数据 = QQ **新歌榜**的歌（免登录可拿，见 `_qqDaily` 的说明）。
+    // 原来 QQ 页**一个"歌"的行都没有**（只有卡片/歌手/关键词）⇒
+    // 用户 2026-10-14：「内容有点少…也加个每日推荐」。
+    if (_qqDaily.isNotEmpty) {
+      out.add(const SliverToBoxAdapter(child: SectionTitle(title: '每日推荐')));
+      out.add(SliverToBoxAdapter(
+        // 必须监听 player：否则点歌后"正在播放"徽标不动（同 `_buildMusicSections`）
+        child: ListenableBuilder(
+          listenable: MusicPlayerManager.instance,
+          builder: (context, _) => DailySongsRow(
+            style: style,
+            songs: _qqDaily,
+            playingKey: MusicPlayerManager.instance.currentSong?.identityKey,
+            isPlaying: MusicPlayerManager.instance.isPlaying.value,
+            onPlay: (i) =>
+                MusicPlayerManager.instance.playQueue(_qqDaily, index: i),
+          ),
+        ),
+      ));
+    }
 
     // ── 热门歌手（圆头像行，视觉上对齐网易云的"歌手"）──────────
     if (_qqArtists.isNotEmpty) {
@@ -861,83 +1011,8 @@ class _DiscoverPageState extends State<DiscoverPage>
       ));
     }
 
-    // ── 热搜关键词（两列，前三名用主题色）─────────────────────
-    if (_hotKeywords.isNotEmpty) {
-      out.add(const SliverToBoxAdapter(child: SectionTitle(title: 'QQ音乐热搜')));
-      // ── 横滑卡片（用户 2026 要求：「弄成卡片式的横向滑动」）────────
-      //
-      // 原来是一个**2 列网格**、每格只有 48 高的一条窄行（序号 + 关键词），
-      // 跟下面「排行榜」「歌单广场」的横滑大卡**不是一套观感**，
-      // 整页看起来像两种设计拼起来的。
-      //
-      // 热搜词**没有封面**（它就是个词），所以卡片的视觉主体用
-      // **大号名次数字** + 关键词 —— 参考网易云/QQ 的"热搜榜"卡，
-      // 前三名用主题色，一眼看出热度排序。
-      out.add(SliverToBoxAdapter(
-        child: SizedBox(
-          height: 116,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: _hotKeywords.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 10),
-            itemBuilder: (c, i) {
-              final kw = _hotKeywords[i];
-              final hot = i < 3;
-              return GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => showSearch<void>(
-                  context: context,
-                  delegate: _QuickSearchDelegate(
-                      source: SongSource.qq, initialQuery: kw),
-                ),
-                child: Container(
-                  width: 132,
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                  decoration: BoxDecoration(
-                    // 与 `PresetCard` 一致的观感：填充 + 大圆角
-                    color: MusicTheme.fill,
-                    borderRadius: BorderRadius.circular(18),
-                    border: hot
-                        ? Border.all(
-                            color: MusicTheme.tint.withValues(alpha: 0.45),
-                            width: 1)
-                        : null,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      // 大号名次（前三名主题色 + 更重）
-                      Text(
-                        '${i + 1}',
-                        style: TextStyle(
-                          color: hot ? MusicTheme.tint : MusicTheme.secondary,
-                          fontSize: hot ? 30 : 24,
-                          fontWeight: FontWeight.w800,
-                          height: 1.0,
-                        ),
-                      ),
-                      Text(
-                        kw,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: MusicTheme.label,
-                          fontSize: AppTheme.fontSubhead,
-                          fontWeight: FontWeight.w500,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ));
-    }
+    // ── 热搜关键词（横滑卡片，前三名主题色）─────────────────────
+    out.addAll(_hotKeywordSlivers('QQ音乐热搜', SongSource.qq));
 
     // ── QQ 排行榜（**免登录可拿**，实测 30 个榜单）──────────────
     //
@@ -990,12 +1065,16 @@ class _DiscoverPageState extends State<DiscoverPage>
       // 现在 `playlistCatlistQq()` 把 id 一起拿回来了 → 点分类就是
       // `playlistSquare(cat: id)`，下面那排歌单会**真的换成该分类**。
       if (_qqCats.isNotEmpty) {
+        // ── 分类 UI（用户 2026-10-14：「这个 QQ 分类的 UI 做好看点」）──
+        //   · 选中：主题色实底 + 白字 + **✓** + 一层同色柔光投影（"选中的感觉"）
+        //   · 未选中：低调填充 + **细描边**（原来没描边，浅色底上几乎看不出边界）
+        //   · 切换用 `AnimatedContainer`，点下去有个 160ms 的过渡，不是硬跳
         out.add(SliverToBoxAdapter(
           child: SizedBox(
-            height: 38,
+            height: 40,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+              padding: const EdgeInsets.fromLTRB(16, 3, 16, 6),
               itemCount: _qqCats.length,
               separatorBuilder: (_, __) => const SizedBox(width: 8),
               itemBuilder: (c, i) {
@@ -1003,21 +1082,49 @@ class _DiscoverPageState extends State<DiscoverPage>
                 final active = tag.id == _qqCatId;
                 return GestureDetector(
                   onTap: _qqCatLoading ? null : () => _selectQqCat(tag.id),
-                  child: Container(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    curve: Curves.easeOut,
                     alignment: Alignment.center,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 13),
                     decoration: BoxDecoration(
                       color: active ? MusicTheme.tint : MusicTheme.fill,
                       borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      tag.name,
-                      style: TextStyle(
-                        color: active ? Colors.white : MusicTheme.secondary,
-                        fontSize: AppTheme.fontCaption,
-                        fontWeight:
-                            active ? FontWeight.w600 : FontWeight.w400,
+                      border: Border.all(
+                        color: active
+                            ? MusicTheme.tint
+                            : MusicTheme.divider,
+                        width: 1,
                       ),
+                      boxShadow: active
+                          ? [
+                              BoxShadow(
+                                color: MusicTheme.tint.withValues(alpha: 0.32),
+                                blurRadius: 10,
+                                offset: const Offset(0, 3),
+                              ),
+                            ]
+                          : null,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (active) ...[
+                          const Icon(Icons.check_rounded,
+                              size: 13, color: Colors.white),
+                          const SizedBox(width: 4),
+                        ],
+                        Text(
+                          tag.name,
+                          style: TextStyle(
+                            color:
+                                active ? Colors.white : MusicTheme.secondary,
+                            fontSize: AppTheme.fontCaption,
+                            fontWeight:
+                                active ? FontWeight.w600 : FontWeight.w400,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 );
@@ -1080,8 +1187,8 @@ class _DiscoverPageState extends State<DiscoverPage>
                             fontWeight: FontWeight.w600)),
                     const SizedBox(height: 4),
                     Text(
-                      '搜索 / 热搜 / 歌手 / 排行榜 / 歌单广场都是免登录的；\n'
-                      '但 QQ 的播放地址必须登录（会员校验）。\n'
+                      '搜索 / 每日推荐 / 热搜 / 歌手 / 排行榜 / 歌单广场\n'
+                      '都是免登录的；但 QQ 的播放地址必须登录（会员校验）。\n'
                       '想听 QQ 的歌，请把声音源导进来 —— 点歌失败时会自动'
                       '尝试你导入的源，并让你挑用哪个。',
                       style: TextStyle(
@@ -1221,6 +1328,9 @@ class _DiscoverPageState extends State<DiscoverPage>
         ),
       ));
     }
+
+    // ── 热搜关键词（网易云 / 酷狗 都有这个接口，见 `_loadMusicPlatform`）──
+    out.addAll(_hotKeywordSlivers('${_source.displayName}热搜', _source));
     return out;
   }
 

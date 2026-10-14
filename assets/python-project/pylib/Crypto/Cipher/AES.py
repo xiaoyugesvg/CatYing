@@ -10,9 +10,12 @@ pylib/Crypto/Cipher/AES.py —— AES 纯 Python 垫片
     ct = cipher.encrypt(pad(data, 16))
     pt = unpad(cipher.decrypt(ct), 16)
 
-MODE_* 常量数值与 pycryptodome 完全一致；已实现 ECB / CBC / CFB / OFB / CTR。
+MODE_* 常量数值与 pycryptodome 完全一致；已实现 ECB / CBC / CFB / OFB / CTR / **GCM**。
 性能：纯 Python 每 16 字节块约数十微秒，解几百字节密钥串无感；解 MB 级会慢。
 """
+
+import binascii
+import os
 
 # 与 pycryptodome 数值一致
 MODE_ECB = 1
@@ -389,6 +392,174 @@ class _CtrMode(_AesBase):
     decrypt = _xor_stream
 
 
+# ---- GCM（SP 800-38D）---------------------------------------------------
+#
+# 为什么必须补：**封面签名 / 播放地址加密**里 GCM 是最常见的一种（腾讯/爱奇艺系的
+# 私有接口、不少猫源都用它）。以前 MODE_GCM 只有常量没有实现，源一调用就报错，
+# 表现就是"封面或视频解密不出来"。
+#
+# 结构：AES 块加密复用上面的 _encrypt_block；认证走 GHASH（GF(2^128) 乘法）；
+# 数据加密用 GCTR（只对低 32 位做 inc32）。与 pycryptodome 双向对拍验证过。
+
+def _gcm_inc32(x):
+    """GCTR 的计数器步进：**只对最低 32 位加 1**（SP 800-38D 的 inc32）。
+
+    ⚠️ 这里原来写成 `x & 0xFFFFFFFF00000000` —— 那是 **64 位**掩码，
+      会把 128 位计数器的**高 64 位抹掉**。用全零 IV 的 NIST 向量时高 64 位
+       本来就是 0，所以侥幸通过；一旦 IV 非零（源里几乎必然），从**第一块**
+       开始计数块就错，表现为"解出来是乱码/封面地址拿不到"。
+       正确写法是只保留低 32 位以外的全部高位：`x & ~0xFFFFFFFF`。
+    """
+    return (x & ~0xFFFFFFFF) | ((x + 1) & 0xFFFFFFFF)
+
+
+def _gcm_blocks(data):
+    """按 16 字节切块（末尾按需零补齐）。"""
+    if len(data) % 16:
+        data = data + b"\x00" * (16 - len(data) % 16)
+    return [data[i:i + 16] for i in range(0, len(data), 16)]
+
+
+def _gcm_mul(x, y):
+    """GF(2^128) 乘法（SP 800-38D 的位序：左起高位，右移 + 0xE1 归约）。"""
+    z = 0
+    v = y
+    for i in range(128):
+        if (x >> (127 - i)) & 1:
+            z ^= v
+        if v & 1:
+            v = (v >> 1) ^ 0xE1000000000000000000000000000000
+        else:
+            v >>= 1
+    return z
+
+
+def _gcm_ghash(h, blocks):
+    x = 0
+    for b in blocks:
+        x = _gcm_mul(x ^ int.from_bytes(b, "big"), h)
+    return x
+
+
+def _tags_equal(a, b):
+    """定长比较（不早退，避免 tag 比较被计时侧信道——与实际安全无关，但照惯例做）。"""
+    if len(a) != len(b):
+        return False
+    diff = 0
+    for x, y in zip(bytearray(a), bytearray(b)):
+        diff |= x ^ y
+    return diff == 0
+
+
+class _GcmMode(_AesBase):
+    """AES-GCM，方法面严格对齐 pycryptodome：
+
+        update(aad) / encrypt / decrypt / digest / hexdigest
+        verify / hexverify / encrypt_and_digest / decrypt_and_verify
+        nonce / block_size
+    """
+
+    block_size = 16
+    mode = "GCM"
+
+    def __init__(self, key, w, nr, nonce=None, mac_len=16):
+        _AesBase.__init__(self, key, w, nr)
+        if mac_len not in (4, 8, 12, 13, 14, 15, 16):
+            raise ValueError(
+                "MAC length must be 4, 8, 12, 13, 14, 15 or 16 bytes")
+        self.mac_len = mac_len
+        # 不传 nonce 时与 pycryptodome 一样随机 16 字节（注意：此时走的是
+        # "非 12 字节 IV" 那条 J0 计算路径，必须算对）
+        self.nonce = os.urandom(16) if nonce is None else bytes(nonce)
+        self._h = int.from_bytes(_encrypt_block(b"\x00" * 16, w, nr), "big")
+        if len(self.nonce) == 12:
+            # 推荐路径：J0 = IV || 0x00000001
+            self._j0 = int.from_bytes(self.nonce + b"\x00\x00\x00\x01", "big")
+        else:
+            # J0 = GHASH_H(IV || 0^(s+64) || [len(IV)]_64)（长度是**位**数）
+            pad = b"\x00" * ((16 - len(self.nonce) % 16) % 16)
+            tail = b"\x00" * 8 + (len(self.nonce) * 8).to_bytes(8, "big")
+            self._j0 = _gcm_ghash(self._h, _gcm_blocks(self.nonce + pad + tail))
+        self._aad = bytearray()
+        self._ct = bytearray()
+        self._started = False
+        # 最近一次是加密还是解密 —— pycryptodome 在"加密态"下调 verify() 会抛
+        # TypeError("verify() cannot be called when encrypting a message")，这里对齐
+        self._mode = None
+
+    # -- GCTR：从 [icb] 开始逐块加密，只对低 32 位 inc32 --
+    def _gctr(self, icb, data):
+        out = bytearray()
+        counter = icb
+        for i in range(0, len(data), 16):
+            ks = _encrypt_block(counter.to_bytes(16, "big"), self._w, self._nr)
+            out += bytes(a ^ b for a, b in zip(data[i:i + 16], ks))
+            counter = _gcm_inc32(counter)
+        return bytes(out)
+
+    def _data_ctr(self):
+        # 数据部分从 inc32(J0) 开始（tag 才用 J0 本身）
+        return _gcm_inc32(self._j0)
+
+    # -- pycryptodome 的公开方法面 --
+    def update(self, aad):
+        if self._started:
+            raise TypeError(
+                "You cannot call update() after encrypt() or decrypt()")
+        self._aad += bytes(aad)
+
+    def encrypt(self, plaintext):
+        self._started = True
+        self._mode = "enc"
+        ct = self._gctr(self._data_ctr(), bytes(plaintext))
+        self._ct += ct
+        return ct
+
+    def decrypt(self, ciphertext):
+        self._started = True
+        self._mode = "dec"
+        self._ct += bytes(ciphertext)
+        return self._gctr(self._data_ctr(), bytes(ciphertext))
+
+    def digest(self):
+        aad = bytes(self._aad)
+        ct = bytes(self._ct)
+        a_pad = b"\x00" * ((16 - len(aad) % 16) % 16)
+        c_pad = b"\x00" * ((16 - len(ct) % 16) % 16)
+        blob = (aad + a_pad + ct + c_pad
+                + (len(aad) * 8).to_bytes(8, "big")
+                + (len(ct) * 8).to_bytes(8, "big"))
+        s = _gcm_ghash(self._h, _gcm_blocks(blob))
+        return self._gctr(self._j0, s.to_bytes(16, "big"))[:self.mac_len]
+
+    def hexdigest(self):
+        # ⚠️ pycryptodome 这里是 `binascii.hexlify(...).decode()` ⇒ 返回 **str**
+        #    （不是 bytes）。源脚本常直接拿它拼进 URL，返回 bytes 会拼出
+        #    "b'...'" 这种垃圾串，所以必须同类型。
+        return binascii.hexlify(self.digest()).decode()
+
+    def verify(self, received_mac_tag):
+        if self._mode == "enc":
+            raise TypeError("verify() cannot be called when encrypting a message")
+        if not _tags_equal(self.digest(), bytes(received_mac_tag)):
+            raise ValueError("MAC check failed")
+
+    def hexverify(self, hex_mac_tag):
+        # 真库这里对 str 会崩（内部按 bytes 处理）；垫片**兼容两种**输入，
+        # 比真库宽松一点，不会因此算错。
+        if isinstance(hex_mac_tag, str):
+            hex_mac_tag = hex_mac_tag.encode("ascii")
+        self.verify(binascii.unhexlify(hex_mac_tag))
+
+    def encrypt_and_digest(self, plaintext):
+        return self.encrypt(plaintext), self.digest()
+
+    def decrypt_and_verify(self, ciphertext, received_mac_tag):
+        plaintext = self.decrypt(ciphertext)
+        self.verify(received_mac_tag)
+        return plaintext
+
+
 # ---- 工厂 -------------------------------------------------------------
 
 def new(key, mode, *args, **kwargs):
@@ -421,10 +592,18 @@ def new(key, mode, *args, **kwargs):
         return _CtrMode(key, w, nr, kwargs.get('nonce'),
                         kwargs.get('initial_value'), kwargs.get('counter'))
 
-    if mode in (MODE_GCM, MODE_CCM, MODE_EAX, MODE_SIV, MODE_OCB):
+    if mode == MODE_GCM:
+        # nonce 支持位置参数（AES.new(key, MODE_GCM, nonce_bytes)）与关键字
+        nonce = kwargs.get('nonce')
+        if nonce is None and args:
+            nonce = args[0]
+        return _GcmMode(key, w, nr, nonce=nonce,
+                        mac_len=kwargs.get('mac_len', 16))
+
+    if mode in (MODE_CCM, MODE_EAX, MODE_SIV, MODE_OCB):
         raise NotImplementedError(
-            "AES %s 模式尚未在纯 Python 垫片中实现；电视源里通常用 CBC/ECB"
-            % {MODE_GCM: 'GCM', MODE_CCM: 'CCM', MODE_EAX: 'EAX',
+            "AES %s 模式尚未在纯 Python 垫片中实现；电视源里通常用 CBC/ECB/GCM"
+            % {MODE_CCM: 'CCM', MODE_EAX: 'EAX',
                MODE_SIV: 'SIV', MODE_OCB: 'OCB'}[mode])
 
     raise ValueError("Unknown AES mode %r" % (mode,))

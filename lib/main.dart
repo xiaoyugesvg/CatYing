@@ -48,6 +48,7 @@ import 'reading/services/download_service.dart';
 import 'reading/services/reading_progress_service.dart';
 import 'reading/novel_source/analyze/cookie_store.dart';
 import 'reading/novel_source/web_book/runner_isolate.dart';
+import 'rss/services/rss_store.dart';
 import 'webhome/web_home_prefs.dart';
 import 'reading/services/trim_preset_service.dart';
 import 'reading/services/view_mode.dart';
@@ -136,6 +137,8 @@ void main() async {
   // 「网页首页」模块的配置（首页地址）：同属启动期读 prefs/文件的恢复类步骤，
   // 走同一套 5s 超时保护（见 bootRestore 说明）。
   await bootRestore('WebHomePrefs.load', WebHomePrefs.instance.load);
+  // RSS 订阅源（设置里的「RSS 管理」+ 底栏 RSS 模块）
+  await bootRestore('RssStore.load', RssStore.instance.load);
 
   // 解析线路（parses）落盘恢复：订阅下发的线路只并入、不再整表清空，
   // 所以必须早于 ApiConfig 首次加载配置（见 ParseStore 顶部说明）。

@@ -24,6 +24,8 @@ enum NavFeature {
   apps('apps', '程序', false, tabIndex: 7),
   // 「网页首页」模块（独立于小程序体系：加载用户自配的 HTML 首页）
   webhome('webhome', '网页', false, tabIndex: 8),
+  // 「RSS」模块（订阅源阅读：Legado RSS 源 / 标准 RSS / OPML）
+  rss('rss', 'RSS', false, tabIndex: 9),
   shelf('shelf', '史藏', false, tabIndex: 1),
   settings('settings', '设置', true, tabIndex: 3),
   search('search', '搜索', false, tabIndex: 0);
@@ -51,6 +53,7 @@ enum NavFeature {
         NavFeature.books => Icons.menu_book_outlined,
         NavFeature.apps => Icons.widgets_outlined,
         NavFeature.webhome => Icons.language_outlined,
+        NavFeature.rss => Icons.rss_feed_outlined,
         NavFeature.shelf => Icons.schedule_outlined,
         NavFeature.settings => Icons.settings_outlined,
         NavFeature.search => Icons.search,
@@ -64,6 +67,7 @@ enum NavFeature {
         NavFeature.books => Icons.menu_book,
         NavFeature.apps => Icons.widgets,
         NavFeature.webhome => Icons.language,
+        NavFeature.rss => Icons.rss_feed,
         NavFeature.shelf => Icons.schedule,
         NavFeature.settings => Icons.settings,
         NavFeature.search => Icons.search,
@@ -138,9 +142,10 @@ class NavFeatureService extends GetxService {
     for (final f in order) {
       // ⚠️ 2026-10-14：「网页首页」是新增的可选模块，**无记录时也默认关闭** ——
       //   否则全新安装（或老用户升级）后底栏会凭空多出一项，而用户从没开过它。
+      // ⚠️ 2026-10-15：「RSS」同理（用户明确要求 RSS 与网页**都默认关闭**）。
       //   其余项保持原有语义（无记录 = 启用），不动既有行为。
       final isOn = enabledSet == null
-          ? f != NavFeature.webhome
+          ? (f != NavFeature.webhome && f != NavFeature.rss)
           : enabledSet.contains(f);
       // 必需页面强制启用
       if (f.required) {

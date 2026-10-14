@@ -2034,7 +2034,48 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         decorationThickness: _underlineWidth,
       );
 
-  /// A1 对话气泡容器：圆角卡片 + 三套配色（浅 / 深 / 护眼），跟随全局明暗。
+  // ── A1 对话气泡几何 ────────────────────────────────────────────
+  //
+  // 🔴 这 4 个常量是**渲染与分页共用的唯一真源** ✗：气泡把对话段落缩窄 +
+  //    加内衬 ✗，分页若仍按正文全宽度量 ✓，渲染就会比量出来高 ⇒ 整页溢出
+  //    屏幕底部 ✗（用户实测："气泡以及里面的文字容易出整个屏幕" ✓）。
+  //    改这里两边一起变 ✓，不可能再各算一套 ✓。
+  static const double _kBubbleWidthFactor = 0.72; // 气泡最大宽 = 视口宽 × 此系数
+  static const double _kBubblePadH = 12; // 左右内衬
+  static const double _kBubblePadV = 8; // 上下内衬
+  static const double _kBubbleBorder = 1; // 边框
+
+  /// 气泡外层最大宽度。用**渲染同一视口** `_viewport`（不用 MediaQuery）——
+  /// 分页度量也按它算，两边才不会各算一套 ✗。
+  ///
+  /// 并且要和**正文内容区宽度**取小 ✓：左右边距调得很大时，`0.72×宽` 会超过
+  /// 内容区 ✗ → 渲染被父级夹窄 ✓ 而度量仍按 0.72×宽 ✓ ⇒ 又变成"度量宽、渲染
+  /// 窄"的老毛病 ✗。取小后两边一致 ✓。
+  double get _bubbleMaxWidth {
+    final w = _viewport.width > 0
+        ? _viewport.width
+        : MediaQuery.of(context).size.width;
+    final factorW = w * _kBubbleWidthFactor;
+    final contentW = w - _padLeft - _padRight;
+    return (contentW > 0 && contentW < factorW) ? contentW : factorW;
+  }
+
+  /// 气泡**文字区**宽度（= 最大宽 - 左右内衬 - 边框）→ 交给分页器度量
+  double get _bubbleTextWidth =>
+      _bubbleMaxWidth - (_kBubblePadH + _kBubbleBorder) * 2;
+
+  /// 每个气泡**额外占的高度**（上下内衬 + 上下边框）→ 交给分页器计入
+  double get _bubbleExtraV => (_kBubblePadV + _kBubbleBorder) * 2;
+
+  /// 自定义气泡底色：没挑过色时用一个低调的浅底（跟随前景派生）
+  Color get _customBubbleBg =>
+      Color(_rs.bubbleBgColor ?? _fg.withValues(alpha: 0.08).toARGB32());
+
+  /// 自定义气泡文字色：没挑过色时跟随正文前景
+  Color get _customBubbleText =>
+      Color(_rs.bubbleTextColor ?? _fg.toARGB32());
+
+  /// A1 对话气泡容器：圆角卡片 + 配色（浅 / 深 / 护眼 / 自定义），跟随全局明暗。
   /// [alignRight] 为真时右对齐（对称气泡的偶数段）。
   Widget _bubbleWrap(
       String text, Color fg, bool alignRight, BubblePalette palette) {
@@ -2053,18 +2094,22 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         bg = isDark ? const Color(0xFF1F2E24) : const Color(0xFFE9F5EC);
         border = isDark ? const Color(0xFF31463A) : const Color(0xFFC9E4D0);
         textColor = isDark ? const Color(0xFFD9E9DD) : const Color(0xFF2E4A38);
+      case BubblePalette.custom:
+        // 用户自选底色 / 文字色；描边只画淡淡的（对比交给底色本身）
+        bg = _customBubbleBg;
+        border = fg.withValues(alpha: 0.12);
+        textColor = _customBubbleText;
     }
     return Align(
       alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.72,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        constraints: BoxConstraints(maxWidth: _bubbleMaxWidth),
+        padding: const EdgeInsets.symmetric(
+            horizontal: _kBubblePadH, vertical: _kBubblePadV),
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: border),
+          border: Border.all(color: border, width: _kBubbleBorder),
         ),
         child: Text(
           text,
@@ -2391,8 +2436,16 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                     //   对称模式按段落下标奇偶左右交错。识别在渲染层动态做
                     //   （不重建块数据，书签/笔记定位零影响 ✓）
                     final bubbleOn = _rs.bubbleMode != BubbleMode.none;
-                    final isBubble =
-                        bubbleOn && paragraphKindOf(paraText) == ParagraphKind.dialogue;
+                    // 🔴 判定必须用**整段原文**、不能用 `paraText` ✗：
+                    //    长对话段被分页切成多块时，第 2 块起的 `partialText`
+                    //    已不含开头的引号 ✓ ⇒ 按 `paraText` 判会把后半段判成
+                    //    旁白、渲染成平铺 ✗（同一段"半截气泡半截平铺" ✓），
+                    //    而分页器是按**整段**判的 ✓ ⇒ 两边不一致 ⇒ 页底留白/漂移 ✗。
+                    final fullPara = (pi >= 0 && pi < _paragraphs.length)
+                        ? _paragraphs[pi]
+                        : paraText;
+                    final isBubble = bubbleOn &&
+                        paragraphKindOf(fullPara) == ParagraphKind.dialogue;
                     final bubbleRight = isBubble &&
                         _rs.bubbleMode == BubbleMode.symmetric &&
                         pi.isOdd;
@@ -3401,6 +3454,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
         viewportHeight: textAreaH,
         typo: typo,
         chapterStarts: const {0},
+        // ✅ A1 气泡：把渲染用的气泡内宽 / 内衬高度**交给分页器** ✗ ⇒
+        //    对话段落按气泡宽度量、并计入内衬，渲染与度量一致 ⇒ 不再溢出屏 ✓
+        //    （关闭气泡时两个参数为 0 ✓，分页行为与改动前完全相同 ✓）
+        bubbleInnerWidth:
+            _rs.bubbleMode == BubbleMode.none ? 0 : _bubbleTextWidth,
+        bubbleExtraV: _bubbleExtraV,
       );
       final out = <BookPage>[];
       // ✅ **今天修好的一处真·UI 冻结** ✓（原来这里**只有注释、没有实现** ✗）：
@@ -6832,6 +6891,10 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                               setState(() =>
                                   _rs = _rs.copyWith(bubbleMode: bm));
                               _scheduleSavePrefs();
+                              // 🔴 必须重排：气泡把对话段落**变窄 ⇒ 折行更多、更高** ✗
+                              //    ⇒ 沿用旧分页会立刻溢出屏幕 ✗（用户实测的
+                              //    "弄成对话气泡后容易出整个屏幕" 一半来自这里 ✓）
+                              _repaginateLayout();
                             }, compact: true),
                         ],
                       ),
@@ -6848,6 +6911,28 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                                     _rs = _rs.copyWith(bubblePalette: bp));
                                 _scheduleSavePrefs();
                               }, compact: true),
+                          ],
+                        ),
+                      ),
+                    // 选了「自定义」→ 给两个取色入口（底色 / 文字色）。
+                    // 颜色**不改变布局** ⇒ 不需要重排 ✓
+                    if (_rs.bubbleMode != BubbleMode.none &&
+                        _rs.bubblePalette == BubblePalette.custom)
+                      _setRowRight(
+                        '气泡颜色',
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            _bubbleColorChip('底色', _customBubbleBg, (c) {
+                              setState(() => _rs = _rs
+                                  .copyWith(bubbleBgColor: c.toARGB32()));
+                              _scheduleSavePrefs();
+                            }),
+                            _bubbleColorChip('文字', _customBubbleText, (c) {
+                              setState(() => _rs = _rs
+                                  .copyWith(bubbleTextColor: c.toARGB32()));
+                              _scheduleSavePrefs();
+                            }),
                           ],
                         ),
                       ),
@@ -7006,6 +7091,46 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
           ),
           Switch(value: value, onChanged: onChanged),
         ],
+      ),
+    );
+  }
+
+  /// 自定义气泡颜色入口：色块 + 名称，点开 HSV 取色器。
+  /// （改色**不影响排版** ⇒ 不需要 `_repaginateLayout()` ✓）
+  Widget _bubbleColorChip(
+      String label, Color color, ValueChanged<Color> onPicked) {
+    return GestureDetector(
+      onTap: () async {
+        final picked = await ColorPickerDialog.show(
+          context,
+          initial: color,
+          title: '气泡$label',
+        );
+        if (picked == null || !mounted) return;
+        onPicked(picked);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: _fg.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 16,
+              height: 16,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(5),
+                border: Border.all(color: _fg.withValues(alpha: 0.25)),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 13, color: _fg)),
+          ],
+        ),
       ),
     );
   }

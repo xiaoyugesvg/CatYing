@@ -63,10 +63,33 @@ try:
 except Exception as _e:  # pragma: no cover - 没有 requests 时静默跳过
     print('[spider_runner] requests 超时兜底未生效: {}'.format(_e))
 
-# 二级兜底：裸 socket / urllib / 其它库没显式设超时时，用默认值（20s）。
+# 二级兜底：裸 socket / urllib 等没显式设超时的路径。
+#
+# ⚠️ 这里**必须 ≤ 8s、与上面 requests 同一个数**（原来是 20s，是个坑）：
+#   原生 watchdog 预算 10s，若二级兜底给 20s，走 urllib/裸 socket 的源就会
+#   "活过"看门狗 —— 看门狗 10s 时标记卡死并把这次调用判失败，但**原生串行队列
+#   还被它占着**，要等它 20s 才返回。App 侧若在那之后不再重试，就表现成
+#   "永久卡死、必须重启"。现在 8s < 10s，任何网络路径都会在看门狗之前返回。
 try:
     import socket as _socket
-    _socket.setdefaulttimeout(20.0)
+    _socket.setdefaulttimeout(_PY_DEFAULT_TIMEOUT)
+except Exception:  # pragma: no cover
+    pass
+
+# 三级兜底：urllib 显式注入 timeout。
+#   urllib 默认走 socket 的全局默认（上面已设），但显式注入更稳、语义也更清楚；
+#   源自己传了 timeout 的仍然尊重它。
+try:
+    import urllib.request as _urlreq
+
+    _orig_urlopen = _urlreq.urlopen
+
+    def _urlopen_with_timeout(url, data=None, timeout=None, *a, **kw):
+        if timeout is None or timeout is _socket._GLOBAL_DEFAULT_TIMEOUT:
+            timeout = _PY_DEFAULT_TIMEOUT
+        return _orig_urlopen(url, data=data, timeout=timeout, *a, **kw)
+
+    _urlreq.urlopen = _urlopen_with_timeout
 except Exception:  # pragma: no cover
     pass
 

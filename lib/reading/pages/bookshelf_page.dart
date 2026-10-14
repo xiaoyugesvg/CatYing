@@ -3690,7 +3690,6 @@ class _ComicShelfTab extends StatelessWidget {
                 itemId: item.itemId,
                 coverUrl: c.cover,
                 title: c.title,
-                subtitle: c.author ?? '',
                 type: BookshelfItemType.comic,
                 onTap: () => _onTapComic(context, c),
                 index: i,
@@ -4073,7 +4072,6 @@ class _BookShelfTab extends StatelessWidget {
                 itemId: item.itemId,
                 coverUrl: b.cover ?? '',
                 title: b.title,
-                subtitle: b.author ?? '',
                 type: BookshelfItemType.book,
                 onTap: () => _onTap(context, b),
                 index: i,
@@ -4187,13 +4185,13 @@ class _BookShelfTab extends StatelessWidget {
 // ============================================================
 // 书架书本卡片（竖立书本样式）
 // ============================================================
-/// 书架条目数据（封面 + 书名/作者 + 点击/长按）
+/// 书架条目数据（封面 + 点击/长按；名称行已从书架移除，
+/// `title` 仅用于长按菜单顶部显示是哪本书）
 class _ShelfEntry {
   final String id;
   final String itemId; // 书架条目 ID（漫画=pathWord，图书=id），用于移出/移动
   final String coverUrl;
   final String title;
-  final String subtitle;
   final BookshelfItemType type;
   final VoidCallback onTap;
   final int index;
@@ -4210,7 +4208,6 @@ class _ShelfEntry {
     required this.itemId,
     required this.coverUrl,
     required this.title,
-    required this.subtitle,
     required this.type,
     required this.onTap,
     required this.index,
@@ -4260,12 +4257,9 @@ class _BookshelfRow extends StatelessWidget {
         ),
         const SizedBox(height: 4), // 书与架板间距，阴影投在架上
         _ShelfBoard(isDark: isDark),
-        const SizedBox(height: 6),
-        // 书名/作者行（架板下）
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: _captionSlots(),
-        ),
+        // 🔴 2026-10-14：架板下的「书名 / 作者」**整行去掉** ✓ —— 用户要求
+        //    书架里不再显示漫画名 / 书籍名 ✓（名称在**长按条目菜单**顶部仍有 ✓，
+        //    不会因为这里不显示就查不到是哪本书 ✓）
         const SizedBox(height: 20),
       ],
     );
@@ -4303,25 +4297,6 @@ class _BookshelfRow extends StatelessWidget {
               isSelecting: isSelecting,
               selected: selectedIds.contains(e.itemId),
             ),
-          ),
-        ),
-      );
-    }
-    return list;
-  }
-
-  List<Widget> _captionSlots() {
-    final list = <Widget>[];
-    for (var i = 0; i < entries.length; i++) {
-      final e = entries[i];
-      if (i > 0) list.add(SizedBox(width: spacing));
-      list.add(
-        SizedBox(
-          width: cellWidth,
-          child: _ShelfCaption(
-            title: e.title,
-            subtitle: e.subtitle,
-            onTap: isSelecting ? () => onSelect(e.itemId) : e.onTap,
           ),
         ),
       );
@@ -4593,63 +4568,7 @@ class _ShelfCoverState extends State<_ShelfCover> {
   }
 }
 
-/// 书名/作者（架板下的标签，点击同封面）
-class _ShelfCaption extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  const _ShelfCaption({
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 书名（单行）
-          Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: AppTheme.fontFootnote,
-              fontWeight: FontWeight.w600,
-              height: 1.3,
-              color: isDark ? Colors.white : JellyTheme.textPrimaryLight,
-            ),
-          ),
-          const SizedBox(height: 2),
-          // 作者（单行；strutStyle 强制行高，保证等高）
-          Text(
-            subtitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            strutStyle: const StrutStyle(
-              fontSize: AppTheme.fontCaption,
-              height: 1.3,
-              forceStrutHeight: true,
-            ),
-            style: TextStyle(
-              fontSize: AppTheme.fontCaption,
-              color: isDark ? Colors.white54 : JellyTheme.textSecondary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 书架内容：按屏宽分列，每行封面立在架板上、书名/作者在架板下
+/// 书架内容：按屏宽分列，每行封面立在架板上（名称行已移除，见 `_BookshelfRow`）
 Widget _buildShelfContent({
   required List<_ShelfEntry> entries,
   required ScrollController scrollController,

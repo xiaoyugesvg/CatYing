@@ -31,6 +31,52 @@ class HomePagesSettingsPage extends StatelessWidget {
     return SettingsSubPage(
       title: '主页页面',
       children: [
+        // ---------- 首页幻灯片（顶部轮播）样式 ----------
+        // 用户 2026-10-14：这一组要排在「主页页面」的**最前面**
+        //   （原来排在「悬浮导航栏」之后）。
+        ListenableBuilder(
+          listenable: SettingsService(),
+          builder: (context, _) {
+            final s = SettingsService();
+            return SettingsGroup(
+              title: '首页幻灯片',
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('幻灯样式',
+                          style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: AppTheme.fontSubhead + 0.5,
+                              fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 2),
+                      Text('切换首页顶部轮播的呈现方式',
+                          style: TextStyle(
+                              color: AppTheme.textTertiary,
+                              fontSize: AppTheme.fontCaption)),
+                      const SizedBox(height: 10),
+                      // 用户 2026-10-14：卡片**一样宽**、**一行多排几个**
+                      //   （原来是按文字宽度的胶囊 + Wrap，宽窄不齐、一行几个碰运气）
+                      _styleGrid([
+                        for (final st in HomeBannerStyle.values)
+                          _styleCard(
+                            st,
+                            s.homeBannerStyle == st,
+                            () => s.setHomeBannerStyle(st),
+                          ),
+                      ]),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: AppTheme.spacingLG),
+
         Obx(() {
           final on = svc.enabled;
           return Column(
@@ -84,77 +130,196 @@ class HomePagesSettingsPage extends StatelessWidget {
             );
           },
         ),
-        // ---------- 首页幻灯片（顶部轮播）样式 ----------
-        ListenableBuilder(
-          listenable: SettingsService(),
-          builder: (context, _) {
-            final s = SettingsService();
-            return SettingsGroup(
-              title: '首页幻灯片',
+      ],
+    );
+  }
+
+  /// 样式卡片网格：**定宽**卡片 + 一行 3~4 个。
+  ///   · 内宽 ≥ 300 → 4 列，否则 3 列（窄屏才降级）；
+  ///   · ⚠️ 这里的 `box.maxWidth` 是**卡片内层**宽度 = 屏宽 − 页面 16×2 −
+  ///     卡片 12×2 − 我的 14×2 ⇒ 390 宽的手机上约 306 ⇒ 走 4 列 ✓；
+  ///   · 用 `Wrap` + 定宽子项（不是 `GridView`）—— 行高按内容自适应，
+  ///     外层本来就在滚动容器里。
+  Widget _styleGrid(List<Widget> cards) {
+    return LayoutBuilder(
+      builder: (context, box) {
+        const gap = 10.0;
+        final cols = box.maxWidth >= 300 ? 4 : 3;
+        final w = (box.maxWidth - gap * (cols - 1)) / cols;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            for (final c in cards) SizedBox(width: w, child: c),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 幻灯片样式卡片 = 上方**迷你示意图** + 下方名称（选中 = 强调色描边 + 加粗）。
+  ///
+  /// 示意图全部用 Flutter 画（不用图片资源）：一眼能看出这个样式长什么样。
+  /// 用户 2026-10-14：「叠卡堆 / 三格海报需要重画」⇒ 这两张的示意按**实际
+  /// 版式**重新画的（叠卡堆 = 后卡向上错位露头；三格海报 = 三张竖版海报 + 图外小字）。
+  Widget _styleCard(HomeBannerStyle st, bool selected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            height: 56,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: AppTheme.backgroundTertiary,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: selected
+                    ? AppTheme.accentColor
+                    : AppTheme.glassBorderSoft,
+                width: selected ? 1.6 : 0.5,
+              ),
+            ),
+            child: _stylePreview(st),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            st.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: selected ? AppTheme.textPrimary : AppTheme.textSecondary,
+              fontSize: AppTheme.fontCaption,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 每个样式的**迷你示意图**（纯 Flutter 图形，尺寸跟随卡片）。
+  Widget _stylePreview(HomeBannerStyle st) {
+    return LayoutBuilder(
+      builder: (context, box) {
+        final w = box.maxWidth;
+        final h = box.maxHeight;
+        final accent = AppTheme.accentColor;
+        final block = accent.withValues(alpha: 0.42);
+        final blockSoft = accent.withValues(alpha: 0.20);
+        final line = AppTheme.textTertiary.withValues(alpha: 0.45);
+
+        Widget rect(double rw, double rh, Color c, {double r = 3}) => Container(
+              width: w * rw,
+              height: h * rh,
+              decoration: BoxDecoration(
+                  color: c, borderRadius: BorderRadius.circular(r)),
+            );
+        // 迷你"文字条"（代表标题行）
+        Widget bar(double bw, {double bh = 2.6}) => Container(
+              width: w * bw,
+              height: bh,
+              decoration: BoxDecoration(
+                  color: line, borderRadius: BorderRadius.circular(2)),
+            );
+
+        switch (st) {
+          // 横版大图：16:9 大图 + 左下标题
+          case HomeBannerStyle.wide:
+            return Stack(
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                Positioned(
+                    left: w * 0.07,
+                    top: h * 0.18,
+                    child: rect(0.86, 0.62, block)),
+                Positioned(left: w * 0.12, top: h * 0.56, child: bar(0.42)),
+                Positioned(left: w * 0.12, top: h * 0.68, child: bar(0.26)),
+              ],
+            );
+
+          // 卡片轮播：中间竖版大卡，两侧小卡
+          case HomeBannerStyle.cards:
+            return Stack(
+              children: [
+                Positioned(
+                    left: w * 0.09, top: h * 0.30, child: rect(0.24, 0.46, blockSoft)),
+                Positioned(
+                    right: w * 0.09, top: h * 0.30, child: rect(0.24, 0.46, blockSoft)),
+                Positioned(
+                    left: w * 0.34, top: h * 0.12, child: rect(0.32, 0.62, block)),
+              ],
+            );
+
+          // 沉浸大图：满宽出血 + 底部文字 + 分段进度条
+          case HomeBannerStyle.hero:
+            return Stack(
+              children: [
+                Positioned.fill(child: rect(1, 1, block, r: 0)),
+                Positioned(left: w * 0.08, top: h * 0.46, child: bar(0.48)),
+                Positioned(left: w * 0.08, top: h * 0.60, child: bar(0.30)),
+                Positioned(
+                  left: w * 0.08,
+                  top: h * 0.76,
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text('幻灯样式',
-                          style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontSize: AppTheme.fontSubhead + 0.5,
-                              fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 2),
-                      Text('切换首页顶部轮播的呈现方式',
-                          style: TextStyle(
-                              color: AppTheme.textTertiary,
-                              fontSize: AppTheme.fontCaption)),
-                      const SizedBox(height: 10),
-                      // ⚠️ 样式从 2 种加到 5 种后，原来"和标题挤在同一行"必然溢出
-                      //    ⇒ 标题/说明单独一行，选项用 Wrap 自动换行。
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (final st in HomeBannerStyle.values)
-                            _styleChip(
-                              st,
-                              s.homeBannerStyle == st,
-                              () => s.setHomeBannerStyle(st),
+                      for (var i = 0; i < 3; i++)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 3),
+                          child: Container(
+                            width: w * 0.16,
+                            height: 3,
+                            decoration: BoxDecoration(
+                              color: i == 0 ? accent : line,
+                              borderRadius: BorderRadius.circular(2),
                             ),
-                        ],
-                      ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
               ],
             );
-          },
-        ),
-      ],
-    );
-  }
 
-  /// 幻灯片样式选项（选中=强调色实底）。
-  /// 间距由外层 `Wrap` 的 spacing/runSpacing 给，这里不再自带 margin。
-  Widget _styleChip(HomeBannerStyle st, bool selected, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected ? AppTheme.accentColor : AppTheme.backgroundTertiary,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppTheme.glassBorderSoft, width: 0.5),
-        ),
-        child: Text(
-          st.label,
-          style: TextStyle(
-            color: selected ? Colors.white : AppTheme.textSecondary,
-            fontSize: AppTheme.fontCaption + 0.5,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-          ),
-        ),
-      ),
+          // 主次三栏：左边一张大竖版海报 + 右侧竖排 3 条小卡
+          case HomeBannerStyle.feature:
+            return Stack(
+              children: [
+                // 左：大海报
+                Positioned(
+                    left: w * 0.06, top: h * 0.08, child: rect(0.34, 0.84, block)),
+                // 右：3 条小卡（缩略图 + 标题条）
+                for (var k = 0; k < 3; k++) ...[
+                  Positioned(
+                      left: w * 0.46,
+                      top: h * (0.10 + k * 0.28),
+                      child: rect(0.16, 0.20, blockSoft)),
+                  Positioned(
+                      left: w * 0.66,
+                      top: h * (0.16 + k * 0.28),
+                      child: bar(0.26)),
+                ],
+              ],
+            );
+
+          // 双排海报：2 行 × 3 列 = 6 张竖版海报
+          case HomeBannerStyle.grid:
+            return Stack(
+              children: [
+                for (var r = 0; r < 2; r++)
+                  for (var c = 0; c < 3; c++)
+                    Positioned(
+                      left: w * (0.06 + c * 0.32),
+                      top: h * (0.08 + r * 0.48),
+                      child: rect(0.26, 0.40, block),
+                    ),
+              ],
+            );
+        }
+      },
     );
   }
 

@@ -124,6 +124,11 @@ class SelectableChip extends StatelessWidget {
         ),
         child: Text(
           title,
+          // 定宽单元格（首页筛选 / 分类屏蔽的 3~4 列网格）里必须单行省略，
+          // 否则长分类名会折行把 32 高的胶囊撑破（黄黑条）。
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
           style: TextStyle(
             // 选中不再用强调色（那会带色彩倾向，与黑白灰的水墨调不符），
             // 改用主文字色；未选中用次要文字色

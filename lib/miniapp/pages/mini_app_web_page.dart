@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../common/theme.dart';
 import '../../services/app_log.dart';
+import '../../services/webview_page_color.dart';
 import '../services/ant_bridge.dart';
 
 /// 小程序 WebView 页：加载远端/本地小程序页面 + 官方 ant SDK v4 桥注入。
@@ -40,6 +42,18 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
   int _loadingProgress = 0;
   String _entry = 'index.html';
 
+  /// 当前网页的**主色**（meta theme-color → body/html 背景色）。
+  /// 用来把**状态栏那一条**刷成和网页一样的颜色（用户 2026-10-14 要求：
+  /// 「包含小程序里面也是一样的」）；null = 没取到 ⇒ 那条透明、透出壁纸。
+  Color? _pageColor;
+
+  /// 探一次页面主色（有些页面的颜色是脚本随后才设的 ⇒ 加载后会补探一次）。
+  Future<void> _probePageColor() async {
+    final c = await probeWebViewPageColor(_controller);
+    if (!mounted || c == null || c == _pageColor) return;
+    setState(() => _pageColor = c);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -63,6 +77,11 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
           onPageFinished: (url) {
             // 每次页面加载完都注入 ant 桥，保证内部页面也有
             _controller.runJavaScript(AntBridge.injectScript);
+            // 顶栏跟随网页配色：立刻探一次 + 稍后补探一次（颜色常是异步设的）
+            _probePageColor();
+            Future<void>.delayed(const Duration(milliseconds: 600), () {
+              if (mounted) _probePageColor();
+            });
           },
           onWebResourceError: (error) {
             AppLog.instance.log(
@@ -168,29 +187,55 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
     // 再叠一层宿主标题栏很难看。
     // 用户 2026-10-13 追加：「已经有个返回了，去掉新增的那个返回按钮」
     //   ⇒ 连左上角那个悬浮返回圆钮也去掉，只保留**完全不占位**的贴顶进度条。
-    return Scaffold(
+    //
+    // 用户 2026-10-14：「顶栏要跟着不同页面的颜色变,和网页一样」⇒
+    //   状态栏那一条刷成网页主色（取不到时透明，行为与改造前一致）。
+    final topInset = MediaQuery.paddingOf(context).top;
+    final pageColor = _pageColor;
+    Widget page = Scaffold(
       backgroundColor: AppTheme.backgroundPrimary,
-      body: SafeArea(
-        bottom: false,
-        child: Stack(
-          children: [
-            Positioned.fill(child: WebViewWidget(controller: _controller)),
-            if (_loadingProgress > 0 && _loadingProgress < 100)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: LinearProgressIndicator(
-                  value: _loadingProgress / 100.0,
-                  minHeight: 2,
-                  backgroundColor: AppTheme.borderLight,
-                  valueColor:
-                      AlwaysStoppedAnimation<Color>(AppTheme.accentColor),
-                ),
+      body: Column(
+        children: [
+          Container(height: topInset, color: pageColor),
+          Expanded(
+            // 只保留**左右**安全区（横屏刘海），上下自己管：
+            // 上 = 上面那条颜色条，下 = 交给底栏/内容（与改造前的 SafeArea 同款行为）
+            child: SafeArea(
+              top: false,
+              bottom: false,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                      child: WebViewWidget(controller: _controller)),
+                  if (_loadingProgress > 0 && _loadingProgress < 100)
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: LinearProgressIndicator(
+                        value: _loadingProgress / 100.0,
+                        minHeight: 2,
+                        backgroundColor: AppTheme.borderLight,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                            AppTheme.accentColor),
+                      ),
+                    ),
+                ],
               ),
-          ],
-        ),
+            ),
+          ),
+        ],
       ),
     );
+    // 状态栏图标明暗跟着那条颜色走（否则浅色网页 + 深色主题时图标看不见）
+    if (pageColor != null) {
+      page = AnnotatedRegion<SystemUiOverlayStyle>(
+        value: pageColor.computeLuminance() > 0.5
+            ? SystemUiOverlayStyle.dark
+            : SystemUiOverlayStyle.light,
+        child: page,
+      );
+    }
+    return page;
   }
 }

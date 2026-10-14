@@ -410,7 +410,7 @@ class AppState extends GetxController {
         final recovered = await PythonManager.instance.recover();
         if (!recovered) {
           return 'Python 引擎仍被上次执行占住（原生队列堵塞）。'
-              '自动恢复没成功，请重启 App 后再加载。';
+              '已开始自动恢复，请稍等几秒再点一次「加载」。';
         }
         return 'Python 引擎已从「卡死」中恢复';
       }

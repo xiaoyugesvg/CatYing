@@ -19,6 +19,7 @@ import 'live/view.dart';
 import '../reading/pages/home_page.dart' as reading_app;
 import '../music/pages/root_view.dart';
 import '../miniapp/pages/mini_app_list_page.dart';
+import '../rss/pages/rss_page.dart';
 import '../webhome/web_home_page.dart';
 import 'settings/view.dart';
 import 'search/view.dart';
@@ -696,6 +697,9 @@ class _ContentViewState extends State<ContentView>
         // 注入 window.ant 后可直接搜片 / 播放 / 存取（默认不进底栏，
         // 用户在「设置 → 主页页面」里自行开启；见 lib/webhome/）
         const WebHomePage(),
+        // RSS（索引 9）—— 订阅源阅读（Legado RSS 源 / 标准 RSS / OPML；
+        // 见 lib/rss/）。用户 2026-10-15 要求"直接加个 RSS 分类"
+        const RssPage(),
       ];
     }
     return _tabPagesCache!;

@@ -2,8 +2,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../common/theme.dart';
+import '../../services/prefs_mirror.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/home_search_bar.dart';
 import '../models/mini_app.dart';
@@ -16,9 +18,14 @@ import 'mini_app_web_page.dart';
 /// 「程序」tab 主页：已安装小程序网格 + 导入入口。
 ///
 /// 作为影视悬浮导航栏的独立分类页使用（NavFeature.apps / tabIndex 7），
-/// 也是设置页「小程序」管理入口的目标页。
+/// 也是设置页「程序管理」入口的目标页。
 class MiniAppListPage extends StatefulWidget {
-  const MiniAppListPage({super.key});
+  const MiniAppListPage({super.key, this.initialTab = 0});
+
+  /// 进来先看哪个 Tab：0 = 已安装 / 1 = **市场**。
+  /// 设置里的「程序管理」直接进市场（用户 2026-10-14：「就是一个加载
+  /// 程序市场页面」）。
+  final int initialTab;
 
   @override
   State<MiniAppListPage> createState() => _MiniAppListPageState();
@@ -34,12 +41,38 @@ enum _AppSort {
   final String label;
 }
 
+/// 「已安装」的视图：一行几个（或列表）
+enum _AppViewMode {
+  two('一行两个', 2),
+  three('一行三个', 3),
+  four('一行四个', 4),
+  list('列表', 0);
+
+  const _AppViewMode(this.label, this.columns);
+
+  final String label;
+
+  /// 0 = 列表模式（不支持多列）
+  final int columns;
+
+  bool get isList => columns == 0;
+}
+
+/// 「已安装」网格的**行高**。
+///
+/// 用户 2026-10-14：「卡片高度太高了，只要现在的三分之二」——
+/// 原来 4 列时卡宽 ≈82.5pt、`childAspectRatio: 0.62` ⇒ 高 ≈133pt，
+/// 取 2/3 ≈ **88pt**（对一行两个/三个也统一用这个高度，见 `_buildBody` 的说明）。
+const double _kCardHeight = 88;
+
 class _MiniAppListPageState extends State<MiniAppListPage> {
   MiniAppService get service => MiniAppService.instance;
   bool _busy = false;
 
-  /// 视图：true = 网格 / false = 列表
-  bool _gridMode = true;
+  /// 「已安装」的视图（一行两个 / 三个 / 四个 / 列表）—— 用户 2026-10-14。
+  /// 存 prefs，重启保持。
+  static const String _kViewMode = 'miniapp_view_mode';
+  _AppViewMode _viewMode = _AppViewMode.four;
 
   /// 排序（自定义 = 按存储顺序，可拖动调整）
   _AppSort _sort = _AppSort.custom;
@@ -62,7 +95,21 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
   @override
   void initState() {
     super.initState();
-    service.ensureLoaded();
+    // 进来就要看「市场」（设置 → 程序管理）：⚠️ 市场页的 initState 只会读一次
+    // `service.marketUrl`，读早了拿到空串 ⇒ **读完 prefs 再建它**。
+    //
+    // ⚠️ 这里**只能调一次** `ensureLoaded()`：它内部是"先把 _loaded 置 true
+    //    再 await 读盘"⇒ 第二次调用会**立刻返回**（读还没完）✗。
+    //    所以 initialTab==1 时把 `.then` 挂在**同一次**调用上。
+    if (widget.initialTab == 1) {
+      _tab = 1;
+      service.ensureLoaded().then((_) {
+        if (mounted) setState(() => _marketVisited = true);
+      });
+    } else {
+      service.ensureLoaded();
+    }
+    _restoreViewMode();
     // 监听 controller 而不是用 TextField.onChanged：
     // 点「×」清空、收起时清空都是**程序化** clear()，不会触发 onChanged，
     // 只挂 onChanged 会让 `_query` 停在旧值（列表显示的还是过滤后的结果）。
@@ -70,6 +117,30 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
       if (!mounted) return;
       setState(() => _query = _searchCtrl.text);
     });
+  }
+
+  /// 读回上次选的视图（缺省/越界都用「一行四个」）。
+  Future<void> _restoreViewMode() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final i = p.getInt(_kViewMode) ?? _AppViewMode.four.index;
+      if (i >= 0 && i < _AppViewMode.values.length && mounted) {
+        setState(() => _viewMode = _AppViewMode.values[i]);
+      }
+    } catch (_) {
+      // 读失败就用默认视图，不影响使用
+    }
+  }
+
+  Future<void> _setViewMode(_AppViewMode m) async {
+    setState(() => _viewMode = m);
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setInt(_kViewMode, m.index);
+    } catch (_) {
+      // 写失败不抛：本次会话仍生效
+    }
+    PrefsMirror.snapshotSoon();
   }
 
   @override
@@ -270,7 +341,7 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
         ),
       );
     }
-    if (!_gridMode) {
+    if (_viewMode.isList) {
       // 列表模式：一行一个（长按同样出菜单）
       return ListView(
         padding: const EdgeInsets.fromLTRB(
@@ -293,16 +364,20 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
         AppTheme.spacingMD,
         110,
       ),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        // 用户 2026-10-13：默认视图**一排 4 个**
-        //（原来用 maxCrossAxisExtent:140 在 iPhone 上算出 3 列）
-        crossAxisCount: 4,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        // 用户 2026-10-14：视图可选**一行两个 / 三个 / 四个**（存 prefs）
+        crossAxisCount: _viewMode.columns,
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
-        // 4 列后卡宽 ≈76~80pt，卡内固定 52pt 图标 + 两行文字已接近高度上限，
-        // 窄屏（iPhone SE 375pt）下 0.68 会差一点点 → RenderFlex overflow，
-        // 故放宽到 0.62 留余量。
-        childAspectRatio: 0.62,
+        // ── 🔴 用**固定行高**（mainAxisExtent）而不是 childAspectRatio ──
+        //
+        // 用户 2026-10-14：「卡片高度太高了，只要现在（133pt）的三分之二」
+        //   ⇒ 2/3 ≈ 88pt。写死 aspectRatio 的话，切到"一行两个"时卡宽翻倍、
+        //     高度也跟着翻到 ~190pt（又变回"太高"）✗ —— 高度该由**这一条**
+        //     决定，而不是由列数决定 ✓。
+        // 卡片本身是 Stack（渐变底 + 压住的首字 + 底部名称），高度变了不会
+        // 溢出（内容贴着底/居中布局）✓。
+        mainAxisExtent: _kCardHeight,
       ),
       itemCount: apps.length,
       itemBuilder: (context, index) {
@@ -496,18 +571,18 @@ class _MiniAppListPageState extends State<MiniAppListPage> {
                 _settingDivider(),
                 _settingRow(
                   title: '视图',
-                  desc: '网格看图方便，列表信息更全',
+                  desc: '一行几个，或列表（列表信息更全）',
                   control: Wrap(
                     spacing: 8,
+                    runSpacing: 8,
                     children: [
-                      _sheetChip('网格', _gridMode, () {
-                        setState(() => _gridMode = true);
-                        setSheet(() {});
-                      }),
-                      _sheetChip('列表', !_gridMode, () {
-                        setState(() => _gridMode = false);
-                        setSheet(() {});
-                      }),
+                      // 用户 2026-10-14：从「网格 / 列表」两档扩成
+                      // **一行两个 / 一行三个 / 一行四个 / 列表** ✓（存 prefs）
+                      for (final m in _AppViewMode.values)
+                        _sheetChip(m.label, _viewMode == m, () {
+                          _setViewMode(m);
+                          setSheet(() {});
+                        }),
                     ],
                   ),
                 ),

@@ -47,15 +47,21 @@ class PythonManager {
   //   ② 超时即置 [_stuck]，后续调用**立刻失败**并说明原因，不再排队堆积。
   //   ③ 🔴 2026-10-14 补：**自动恢复**（见 [_scheduleAutoRecover]）——
   //      卡死的最常见根因是"脚本里不带 timeout 的网络请求永久阻塞"，已经在
-  //      Python 侧兜住（spider_runner 给 `Session.request` 补了 8s 默认超时）
-  //      ⇒ 卡住的那次调用会在超时内自己返回、原生队列随之解开。所以这里不再
-  //      要求"重启 App"，而是隔几秒探一次队列，通了就自动救回来。
+  //      Python 侧兜住（spider_runner 给 `Session.request` / `urlopen` /
+  //      socket 全局默认都补了 **8s** 超时，且**必须 < 原生 watchdog 的 10s**）
+  //      ⇒ 卡住的那次调用会在超时内自己返回、原生队列随之解开。
+  //   ④ 🔴 2026-10-14 二次修：恢复探针原来**只探 3 次（6/12/18s）就放弃**，
+  //      而二级兜底当时给的是 20s ⇒ 那通请求 20s 才返回时，三个探针全部落空，
+  //      标记**永久留在卡死态**（即使队列 2 秒后已经通了）—— 这才是用户抱怨
+  //      "必须重启 App"的直接原因。现在改成**一直探到通为止**，且用
+  //      [_probeInFlight] 防止探针自己往原生队列里堆积。
   bool _stuck = false;
   bool get isStuck => _stuck;
 
-  /// 自动恢复：探针轮数 / 每轮间隔（都刻意很小，最多占用十几秒）
-  static const int _kRecoverAttempts = 3;
-  static const Duration _kRecoverInterval = Duration(seconds: 6);
+  /// 自动恢复：探针间隔（一直探到通为止，通了就停）+ 探针在飞标记
+  static const Duration _kRecoverInterval = Duration(seconds: 4);
+  Timer? _recoverTimer;
+  bool _probeInFlight = false;
 
   PythonManager._internal() {
     if (!Platform.isIOS) {
@@ -81,18 +87,32 @@ class PythonManager {
       return false;
     }
     try {
-      final ok = await _channelImpl.invokeMethod<bool>('ensureStarted') ?? false;
+      // 🔴 2026-10-14：必须加超时 —— ensureStarted 也走原生那条串行 workQueue，
+      //    队列被上次执行占住时它会一直排队（MethodChannel 本身没有超时），
+      //    表现就是「点加载半天没反应」。超时后按卡死处理 → 自动恢复接管。
+      final ok = await _channelImpl
+              .invokeMethod<bool>('ensureStarted')
+              .timeout(_ensureTimeout) ??
+          false;
       ready.value = ok;
       if (!ok) {
         lastError.value = 'Python 引擎启动失败（详见 App 日志）';
       }
       return ok;
+    } on TimeoutException {
+      _markStuck('ensureStarted');
+      lastError.value = _stuckMsg;
+      return false;
     } catch (e) {
       lastError.value = 'Python 引擎启动异常: $e';
       AppLog.instance.w('[Python] ensureStarted 异常: $e');
       return false;
     }
   }
+
+  /// 启动/握手超时预算：冷启动要解 Py_Initialize + 导入适配层，给宽一点，
+  /// 但**必须有限**（绝不能无限等原生队列）。
+  static const Duration _ensureTimeout = Duration(seconds: 20);
 
   /// 设置超时预算（原生 watchdog 按此中断死循环脚本）
   Future<void> setTimeout(int ms) async {
@@ -105,6 +125,8 @@ class PythonManager {
   }
 
   Future<void> dispose() async {
+    _recoverTimer?.cancel();
+    _recoverTimer = null;
     if (isIOS && ready.value) {
       try {
         await _channelImpl.invokeMethod('dispose');
@@ -143,9 +165,11 @@ class PythonManager {
   /// 单次调用的硬超时：原生预算 + 3s 余量（原生的中断本身也要时间）。
   Duration get _hardTimeout => Duration(milliseconds: _timeoutMs + 3000);
 
-  static const String _stuckMsg = 'Python 引擎已卡死（上次执行未能被中断，原生队列已堵住）。'
-      '正在自动重试恢复…若一直不好，请到「设置 → 订阅管理 → 引擎管理」点一次「加载」，'
-      '或重启 App。';
+  // 文案刻意**不再提"重启 App"**：现在恢复是自动且一定能等到队列解开的，
+  // 让用户去重启只会制造"必须重启"的错觉（用户 2026-10-14 的抱怨点）。
+  static const String _stuckMsg = 'Python 引擎正忙（上一次执行超时未返回）。'
+      '正在自动重试，请等几秒再试一次；'
+      '若长时间没反应，可到「设置 → 订阅管理 → 引擎管理」点一次「加载」。';
 
   void _markStuck(String where) {
     _stuck = true;
@@ -155,22 +179,36 @@ class PythonManager {
 
   /// 卡死后**自动尝试救回**，而不是让用户重启 App。
   ///
-  /// 为什么现在救得回来：卡死的最常见根因是"脚本里不带 timeout 的网络请求永久
-  /// 阻塞"，已在 Python 侧兜住（`spider_runner` 给 `Session.request` 补了 8s 默认
-  /// 超时）⇒ 卡住的那次调用会在超时内自己返回、原生 workQueue 随之解开。
-  /// 这里隔 6/12/18 秒探一次「原生队列是否已通」——探针带 3s 超时，
-  /// **绝不会把 Dart 也挂住**。通了就清标记，后续调用自动恢复正常。
+  /// 为什么救得回来：卡死的最常见根因是"脚本里不带 timeout 的网络请求永久
+  /// 阻塞"，已在 Python 侧兜住（`spider_runner` 给 `Session.request` / `urlopen`
+  /// / socket 全局默认都补了 8s 超时，**短于**原生 watchdog 的 10s）
+  /// ⇒ 卡住的那次调用必然自己返回、原生 workQueue 随之解开。
+  ///
+  /// 所以这里**每 4 秒探一次、一直探到通为止**（通了立刻清标记并停表）：
+  ///   · 探针带 3s 超时 —— 绝不会把 Dart 也挂住；
+  ///   · [_probeInFlight] 保证同一时刻只有一发探针在飞 —— 否则卡死期间每轮都
+  ///     往原生队列里塞一个块，越积越多。
   void _scheduleAutoRecover() {
-    for (var i = 0; i < _kRecoverAttempts; i++) {
-      Future.delayed(_kRecoverInterval * (i + 1), () async {
-        if (!_stuck) return; // 已被手动/上一轮探针救回
-        if (await recover()) {
-          AppLog.instance.log('[Python] 已自动恢复（第 ${i + 1} 轮探针）');
-        } else if (i == _kRecoverAttempts - 1) {
-          AppLog.instance.w('[Python] 自动恢复失败：原生队列仍被占住（需重启 App）');
-        }
-      });
-    }
+    _recoverTimer?.cancel();
+    var ticks = 0;
+    _recoverTimer = Timer.periodic(_kRecoverInterval, (timer) async {
+      if (!_stuck) {
+        timer.cancel();
+        return;
+      }
+      if (_probeInFlight) return; // 上一发探针还在队列里排队
+      _probeInFlight = true;
+      ticks++;
+      final ok = await recover();
+      _probeInFlight = false;
+      if (ok) {
+        timer.cancel();
+        AppLog.instance.log('[Python] 已自动恢复（第 $ticks 发探针），后续调用恢复正常');
+      } else if (ticks == 3 || ticks % 15 == 0) {
+        // 别刷屏，但也别静默：让日志能看出"卡了多久"
+        AppLog.instance.w('[Python] 仍在等原生队列解开（已探 ${ticks * 4}s）');
+      }
+    });
   }
 
   /// 从「卡死」中恢复；返回原生队列是否已通。

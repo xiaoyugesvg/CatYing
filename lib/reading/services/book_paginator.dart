@@ -140,6 +140,20 @@ class BookPaginator {
   /// 避免整本增量分页时章标题接在上一章末尾页）
   final Set<int> chapterStarts;
 
+  /// A1 对话气泡：**对话段落的渲染内宽**（气泡最大宽 - 左右内衬 - 边框）。
+  /// >0 时，`paragraphKindOf(text) == dialogue` 的段落按这个宽度度量，
+  /// 否则按内容区全宽 📌。
+  ///
+  /// 🔴 为什么必须传进来：气泡把对话段落缩到约 72% 屏宽再套 12px 内衬 ✗，
+  ///    而正文分页原来一律按全宽度量 ✓ ⇒ 渲染比量出来**多折很多行** ⇒
+  ///    整页内容高于页高、溢出屏幕底部 ✗（用户实测："气泡以及里面的文字容易
+  ///    出整个屏幕" ✓）。0 = 关闭气泡（行为与改动前**一字不变** ✓）。
+  final double bubbleInnerWidth;
+
+  /// 气泡上下内衬 + 上下边框的合计高度（每渲染一个气泡就多占这么多）✗ 同上，
+  /// 度量必须计入，否则每个对话段落在页底累积溢出 ✓。
+  final double bubbleExtraV;
+
   BookPaginator({
     required this.blocks,
     required this.viewportWidth,
@@ -148,6 +162,8 @@ class BookPaginator {
     this.imageAspectRatios = const {},
     this.imageNaturalWidths = const {},
     this.chapterStarts = const {},
+    this.bubbleInnerWidth = 0,
+    this.bubbleExtraV = 0,
   });
 
   /// 断点续分页：从持久化的 partial 状态恢复，继续 stepInto。
@@ -162,6 +178,8 @@ class BookPaginator {
     this.imageAspectRatios = const {},
     this.imageNaturalWidths = const {},
     this.chapterStarts = const {},
+    this.bubbleInnerWidth = 0,
+    this.bubbleExtraV = 0,
     required int resumeBlockIndex,
     required List<PageEntry> cur,
     required int curFirst,
@@ -269,15 +287,24 @@ class BookPaginator {
         ? typo.headingStrut(block.level)
         : typo.paragraphStrut;
 
+    // ✅ A1 对话气泡：渲染侧会把这个段落缩进气泡（窄 + 上下内衬）✗ ⇒
+    //    度量必须用**同一内宽**并计入内衬，否则渲染比量出来高，页底溢出 ✗
+    //    （识别函数与渲染侧**同一个** paragraphKindOf ✓，不可能两边不一致 ✓）
+    final isBubble = !isHeading &&
+        bubbleInnerWidth > 0 &&
+        paragraphKindOf(text) == ParagraphKind.dialogue;
+    final measureWidth = isBubble ? bubbleInnerWidth : _contentWidth;
+    final extraV = isBubble ? bubbleExtraV : 0.0;
+
     final tp = TextPainter(
       text: TextSpan(text: text, style: style),
       strutStyle: strut,
       textScaler: typo.textScaler,
       textHeightBehavior: typo.textHeightBehavior,
       textDirection: TextDirection.ltr,
-    )..layout(maxWidth: _contentWidth);
+    )..layout(maxWidth: measureWidth);
     // 标题渲染带 Padding(top:4)（见 _buildEntry），度量须计入，否则标题页累积溢出。
-    final totalH = tp.height + (isHeading ? 4.0 : 0.0);
+    final totalH = tp.height + (isHeading ? 4.0 : 0.0) + extraV;
 
     if (totalH + _kEps <= _remaining) {
       // 整块放得下
@@ -297,18 +324,19 @@ class BookPaginator {
         textScaler: typo.textScaler,
         textHeightBehavior: typo.textHeightBehavior,
         textDirection: TextDirection.ltr,
-      )..layout(maxWidth: _contentWidth);
+      )..layout(maxWidth: measureWidth);
       // 当前页可用高度：当前页已有内容用 _remaining，空页用 _pageHeight
       final avail = _cur.isNotEmpty ? _remaining : _pageHeight;
-      if (tp2.height + _kEps <= avail) {
+      // 气泡被切成多段时，**每一段**都各是一个气泡 ⇒ 每段都要算一次内衬 ✓
+      if (tp2.height + extraV + _kEps <= avail) {
         // 剩余全部放得下当前页
         _cur.add(PageEntry(block,
             partialText: firstChunk ? null : rest, blockIndex: _i));
-        _remaining = avail - tp2.height - typo.blockSpacing;
+        _remaining = avail - tp2.height - extraV - typo.blockSpacing;
         rest = '';
       } else {
-        // 按行切分填满 avail
-        var fitEnd = _fitOffset(tp2, avail);
+        // 按行切分填满 avail（气泡要把内衬高度先扣掉再算能放几行）
+        var fitEnd = _fitOffset(tp2, avail - extraV, measureWidth);
         if (fitEnd <= 0) {
           if (_cur.isNotEmpty) {
             // 当前页剩余放不下一行：提交当前页（留白 < 一行高），新页继续
@@ -364,7 +392,10 @@ class BookPaginator {
   /// 用实测 partialText 高度判准（与渲染同源 TextPainter），避免 computeLineMetrics
   /// 的行高与 forceStrutHeight 实际渲染行高有 sub-pixel 偏差导致多放一行/半行而溢出。
   /// 二分定位最多可放行数，O(log 行数) 次度量。
-  int _fitOffset(TextPainter tp, double maxHeight) {
+  ///
+  /// [maxWidth] 必须与调用方度量 [tp] 时用的宽度**一致**（气泡段落是气泡内宽，
+  /// 普通段落是内容区全宽）—— 否则二分试出的行高与行数对不上 ✗。
+  int _fitOffset(TextPainter tp, double maxHeight, double maxWidth) {
     final metrics = tp.computeLineMetrics();
     if (metrics.isEmpty) return 0;
     // 收集各行末偏移
@@ -388,7 +419,7 @@ class BookPaginator {
         textScaler: scaler,
         textHeightBehavior: typo.textHeightBehavior,
         textDirection: TextDirection.ltr,
-      )..layout(maxWidth: _contentWidth);
+      )..layout(maxWidth: maxWidth);
       final h = p.height;
       p.dispose();
       return h;

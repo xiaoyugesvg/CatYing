@@ -1,29 +1,33 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../common/theme.dart';
 import '../miniapp/services/ant_bridge.dart';
 import '../services/app_log.dart';
 import '../services/main_tab_controller.dart';
+import '../services/webview_page_color.dart';
+import 'web_home_fm_shim.dart';
+import 'web_home_manage_page.dart';
 import 'web_home_prefs.dart';
+import 'web_home_source.dart';
 
 /// 「网页首页」模块 —— **独立于小程序体系**的一个 WebView 宿主。
 ///
 /// ── 它是什么 ──────────────────────────────────────────────────
-/// 加载**用户自己配的 HTML 首页**（未配置时用内置默认页
-/// `assets/webhome/index.html`），并注入 `window.ant` SDK。
+/// 加载**用户选的网页源**（内置 5 个：默认网页 + 裤佬音乐 / 歪比巴卜 /
+/// 漫蛙动漫 / 追更助手；也支持订阅链接导入、本地 HTML 导入），
+/// 并注入 `window.ant` SDK（+ `window.fm` 垫片，见 [kWebHomeFmShim]）。
 /// 于是网页里可以直接：
 ///   · `ant.source.search({siteKey, wd})` / `ant.source.detail(...)` 搜片取详情
 ///   · `ant.player.open({url, title})` 用猫影自己的播放器播放
-///   · `ant.storage.*` 存数据（按 `webhome` 前缀隔离，与任何小程序都不冲突）
+///   · `ant.storage.*` 存数据（按 `webhome` 前缀隔离）
 ///   · `ant.request(...)` 发请求（本地 Dio，不受浏览器 CORS 限制）
 ///
-/// ── 为什么只复用 `AntBridge` ──────────────────────────────────
-/// JSAPI 底座是通用的，重写一遍没有意义；除此之外本模块**完全独立**：
-/// 自己的目录（`lib/webhome/`）、自己的配置（[WebHomePrefs]）、
-/// 自己的底栏入口（`NavFeature.webhome`），**不进入小程序列表**。
+/// ── 顶栏（用户 2026-10-14 要求）────────────────────────────────
+/// 左边「网页」二字，右边两个按钮：**源切换** + **设置**（进「网页管理」）。
 class WebHomePage extends StatefulWidget {
   const WebHomePage({super.key});
 
@@ -32,10 +36,7 @@ class WebHomePage extends StatefulWidget {
 }
 
 class _WebHomePageState extends State<WebHomePage> {
-  /// 内置默认页（未配置地址时用）。⚠️ 必须与 `pubspec.yaml` 的 assets 声明一致。
-  static const String _kBuiltinEntry = 'assets/webhome/index.html';
-
-  /// 本模块固定的 appId（`ant.storage` 的分区前缀）—— 与会任何小程序都不同。
+  /// 本模块固定的 appId（`ant.storage` 的分区前缀）—— 与任何小程序都不同。
   static const String _appId = 'webhome';
 
   /// 放行的能力：这是**本模块自己**的内置页面（不是第三方小程序包），
@@ -51,6 +52,14 @@ class _WebHomePageState extends State<WebHomePage> {
   late final WebViewController _controller;
   int _progress = 0;
   bool _failed = false;
+
+  /// 当前**已加载**的源 id（用来判断"是不是换源了、要不要重新加载"）。
+  String _loadedSourceId = '';
+
+  /// 当前网页的**主色**（meta theme-color → body/html 背景色）。
+  /// 用来把**状态栏那一条**刷成和网页一样的颜色（用户 2026-10-14 要求）；
+  /// null = 没取到 ⇒ 那条保持透明、透出壁纸（与改造前一致）。
+  Color? _pageColor;
 
   @override
   void initState() {
@@ -83,8 +92,16 @@ class _WebHomePageState extends State<WebHomePage> {
             }
           },
           onPageFinished: (url) {
-            // 每次加载完都注入：站内跳转产生的新页面同样需要 window.ant
-            _controller.runJavaScript(AntBridge.injectScript);
+            // 每次加载完都注入：站内跳转产生的新页面同样需要 window.ant / window.fm
+            _controller
+              ..runJavaScript(AntBridge.injectScript)
+              ..runJavaScript(kWebHomeFmShim);
+            // 顶栏跟随网页配色：立刻探一次；不少页面的颜色是脚本随后才设的
+            //（或主题异步就绪），再补探一次兜住。
+            _probePageColor();
+            Future<void>.delayed(const Duration(milliseconds: 600), () {
+              if (mounted) _probePageColor();
+            });
           },
           onWebResourceError: (e) {
             AppLog.instance.log('[WebHome] 资源错误: ${e.errorCode} '
@@ -96,23 +113,61 @@ class _WebHomePageState extends State<WebHomePage> {
           },
         ),
       );
+    // 网页源列表/选中项变化（管理页增删改排序 / 切换）→ 跟着刷新
+    webHomeSourcesTick.addListener(_onSourcesChanged);
     _loadEntry();
   }
 
-  /// 加载入口：配了地址就加载它，否则加载内置默认页。
+  @override
+  void dispose() {
+    webHomeSourcesTick.removeListener(_onSourcesChanged);
+    super.dispose();
+  }
+
+  /// 源列表变了：换了源就重新加载，只是顺序/名字变了就只重建界面。
+  void _onSourcesChanged() {
+    if (!mounted) return;
+    final cur = WebHomePrefs.instance.current.id;
+    if (cur != _loadedSourceId) {
+      setState(() {
+        _failed = false;
+        _progress = 0;
+      });
+      _loadEntry();
+    } else {
+      setState(() {});
+    }
+  }
+
+  /// 探一次页面主色。
+  Future<void> _probePageColor() async {
+    final c = await probeWebViewPageColor(_controller);
+    if (!mounted || c == null || c == _pageColor) return;
+    setState(() => _pageColor = c);
+  }
+
+  /// 加载**当前选中的网页源**。
+  ///
+  /// 三种形态分别走：远端 `loadRequest` / 内置 `loadFlutterAsset` /
+  /// 本地文件 `loadFile`（用户在手机上导入的那种）。
   Future<void> _loadEntry() async {
     if (!WebHomePrefs.instance.loaded) {
       await WebHomePrefs.instance.load();
     }
-    final url = WebHomePrefs.instance.url;
+    if (!mounted) return;
+    final src = WebHomePrefs.instance.current;
+    _loadedSourceId = src.id;
     try {
-      if (url.isNotEmpty) {
-        await _controller.loadRequest(Uri.parse(url));
-      } else {
-        await _controller.loadFlutterAsset(_kBuiltinEntry);
+      switch (src.kind) {
+        case WebHomeSourceKind.url:
+          await _controller.loadRequest(Uri.parse(src.value));
+        case WebHomeSourceKind.asset:
+          await _controller.loadFlutterAsset(src.value);
+        case WebHomeSourceKind.file:
+          await _controller.loadFile(src.value);
       }
     } catch (e) {
-      AppLog.instance.log('[WebHome] 首页加载失败: $e');
+      AppLog.instance.log('[WebHome] 网页加载失败（${src.name}）: $e');
       if (mounted) setState(() => _failed = true);
     }
   }
@@ -144,148 +199,284 @@ class _WebHomePageState extends State<WebHomePage> {
     }
   }
 
-  /// 配置首页地址（右上角小按钮 → 弹窗）。
-  Future<void> _editUrl() async {
-    final ctrl = TextEditingController(text: WebHomePrefs.instance.url);
-    final v = await showDialog<String>(
+  /// 打开「网页管理」（设置里的同一页）。
+  void _openManage() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const WebHomeManagePage()),
+    );
+  }
+
+  /// 源切换弹层：列出全部网页源，点一条即切换。
+  Future<void> _pickSource() async {
+    final prefs = WebHomePrefs.instance;
+    await showModalBottomSheet<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.backgroundSecondary,
-        title: const Text('网页首页地址'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          maxLines: 1,
-          keyboardType: TextInputType.url,
-          decoration: const InputDecoration(
-            hintText: 'https://example.com/home.html',
-            helperText: '留空 = 使用内置默认页',
-          ),
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppTheme.textTertiary.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 6),
+              child: Row(
+                children: [
+                  Text('切换网页',
+                      style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  Text('长按/拖动排序在「网页管理」',
+                      style: TextStyle(
+                          color: AppTheme.textTertiary,
+                          fontSize: AppTheme.fontCaption)),
+                ],
+              ),
+            ),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final s in prefs.sources)
+                    ListTile(
+                      dense: true,
+                      leading: Icon(
+                        s.id == prefs.selectedId
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked,
+                        size: 20,
+                        color: s.id == prefs.selectedId
+                            ? AppTheme.accentColor
+                            : AppTheme.textTertiary,
+                      ),
+                      title: Text(s.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: AppTheme.fontSubhead)),
+                      subtitle: Text(
+                        s.kind == WebHomeSourceKind.url
+                            ? s.value
+                            : '${s.kind.label} · ${s.value.split('/').last}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: AppTheme.textTertiary,
+                            fontSize: AppTheme.fontCaption),
+                      ),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        if (s.id != prefs.selectedId) prefs.select(s.id);
+                      },
+                    ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              dense: true,
+              leading: Icon(Icons.settings_outlined,
+                  size: 20, color: AppTheme.textSecondary),
+              title: Text('网页管理',
+                  style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontSubhead)),
+              subtitle: Text('导入订阅链接 / 本地文件、排序、改名、删除',
+                  style: TextStyle(
+                      color: AppTheme.textTertiary,
+                      fontSize: AppTheme.fontCaption)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _openManage();
+              },
+            ),
+            const SizedBox(height: 6),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, ''),
-            child: const Text('恢复默认'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text),
-            child: const Text('确定'),
-          ),
-        ],
       ),
     );
-    // null = 取消（不做任何事）；'' = 恢复内置默认页
-    if (v == null) return;
-    await WebHomePrefs.instance.setUrl(v);
-    if (!mounted) return;
-    setState(() => _failed = false);
-    await _loadEntry();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    // 状态栏那一条：刷成**当前网页的主色**（取不到就透明 ⇒ 透出壁纸，与改造前一致）。
+    final topInset = MediaQuery.paddingOf(context).top;
+    final pageColor = _pageColor;
+    Widget page = Scaffold(
       backgroundColor: AppTheme.backgroundPrimary,
-      body: SafeArea(
-        bottom: false,
-        child: Stack(
-          children: [
-            Positioned.fill(child: WebViewWidget(controller: _controller)),
-
-            // 贴顶加载进度（不占位，与小程序宿主一致）
-            if (_progress > 0 && _progress < 100)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: LinearProgressIndicator(
-                  value: _progress / 100.0,
-                  minHeight: 2,
-                  backgroundColor: AppTheme.borderLight,
-                  valueColor:
-                      AlwaysStoppedAnimation<Color>(AppTheme.accentColor),
-                ),
-              ),
-
-            // 右上角：首页地址设置（低存在感的半透明小按钮）
-            Positioned(
-              top: 6,
-              right: 8,
-              child: Opacity(
-                opacity: 0.55,
-                child: IconButton(
-                  tooltip: '网页首页地址',
+      body: Column(
+        children: [
+          Container(height: topInset, color: pageColor),
+          // ── 顶栏：左「网页」+ 右「源切换 / 设置」──
+          SizedBox(
+            height: 46,
+            child: Row(
+              children: [
+                const SizedBox(width: 16),
+                Text('网页',
+                    style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontTitle3,
+                        fontWeight: FontWeight.w600)),
+                const Spacer(),
+                // 顺带显示"当前是哪个网页"，一眼知道在看哪个
+                const _CurrentSourceLabel(),
+                IconButton(
+                  tooltip: '切换网页',
                   iconSize: 20,
-                  onPressed: _editUrl,
-                  icon: Icon(Icons.tune_rounded,
+                  onPressed: _pickSource,
+                  icon: Icon(Icons.swap_horiz_rounded,
                       color: AppTheme.textPrimary),
                 ),
-              ),
+                IconButton(
+                  tooltip: '网页管理',
+                  iconSize: 20,
+                  onPressed: _openManage,
+                  icon: Icon(Icons.tune_rounded, color: AppTheme.textPrimary),
+                ),
+                const SizedBox(width: 4),
+              ],
             ),
+          ),
+          Expanded(
+            // 只保留**左右**安全区（横屏刘海），上下自己管：
+            // 上 = 顶栏；下 = 与改造前一致（不额外留白）
+            child: SafeArea(
+              top: false,
+              bottom: false,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                      child: WebViewWidget(controller: _controller)),
 
-            // 主文档加载失败：给明确原因 + 重试/换地址入口（而不是白屏）
-            if (_failed)
-              Positioned.fill(
-                child: ColoredBox(
-                  color: AppTheme.backgroundPrimary,
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.public_off_rounded,
-                            size: 42, color: AppTheme.textSecondary),
-                        const SizedBox(height: 12),
-                        Text(
-                          WebHomePrefs.instance.url.isEmpty
-                              ? '内置首页未能加载'
-                              : '网页首页打不开',
-                          style: TextStyle(
-                              color: AppTheme.textPrimary, fontSize: 15),
-                        ),
-                        const SizedBox(height: 6),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 32),
-                          child: Text(
-                            WebHomePrefs.instance.url.isEmpty
-                                ? '可以先配置一个自己的 HTML 地址'
-                                : WebHomePrefs.instance.url,
-                            textAlign: TextAlign.center,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                color: AppTheme.textSecondary, fontSize: 12),
+                  // 贴顶加载进度（不占位，与小程序宿主一致）
+                  if (_progress > 0 && _progress < 100)
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: LinearProgressIndicator(
+                        value: _progress / 100.0,
+                        minHeight: 2,
+                        backgroundColor: AppTheme.borderLight,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                            AppTheme.accentColor),
+                      ),
+                    ),
+
+                  // 主文档加载失败：给明确原因 + 重试/换源入口（而不是白屏）
+                  if (_failed)
+                    Positioned.fill(
+                      child: ColoredBox(
+                        color: AppTheme.backgroundPrimary,
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.public_off_rounded,
+                                  size: 42, color: AppTheme.textSecondary),
+                              const SizedBox(height: 12),
+                              Text(
+                                '「${WebHomePrefs.instance.current.name}」打不开',
+                                style: TextStyle(
+                                    color: AppTheme.textPrimary, fontSize: 15),
+                              ),
+                              const SizedBox(height: 6),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 32),
+                                child: Text(
+                                  WebHomePrefs.instance.current.value,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      color: AppTheme.textSecondary,
+                                      fontSize: 12),
+                                ),
+                              ),
+                              const SizedBox(height: 18),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  TextButton(
+                                    onPressed: () {
+                                      setState(() => _failed = false);
+                                      _loadEntry();
+                                    },
+                                    child: const Text('重试'),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  TextButton(
+                                    onPressed: _pickSource,
+                                    child: const Text('换一个网页'),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 18),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            TextButton(
-                              onPressed: () {
-                                setState(() => _failed = false);
-                                _loadEntry();
-                              },
-                              child: const Text('重试'),
-                            ),
-                            const SizedBox(width: 8),
-                            TextButton(
-                              onPressed: _editUrl,
-                              child: const Text('设置地址'),
-                            ),
-                          ],
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
+                ],
               ),
-          ],
-        ),
+            ),
+          ),
+        ],
       ),
+    );
+    // 状态栏图标的明暗必须跟着那条颜色走 —— 否则「浅色网页 + 深色主题」时
+    // 深色图标压在浅底上、或浅图标压在浅底上，等于看不见状态栏。
+    if (pageColor != null) {
+      page = AnnotatedRegion<SystemUiOverlayStyle>(
+        value: pageColor.computeLuminance() > 0.5
+            ? SystemUiOverlayStyle.dark
+            : SystemUiOverlayStyle.light,
+        child: page,
+      );
+    }
+    return page;
+  }
+}
+
+/// 顶栏里显示"当前网页名"的小组件（跟随 [webHomeSourcesTick] 重建）。
+///
+/// 单独抽出来是为了让**只有它**跟着源列表刷新，不把整个 WebView 重建。
+class _CurrentSourceLabel extends StatelessWidget {
+  const _CurrentSourceLabel();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: webHomeSourcesTick,
+      builder: (context, _, _) {
+        final sources = WebHomePrefs.instance.sources;
+        if (sources.isEmpty) return const SizedBox.shrink();
+        return ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 120),
+          child: Text(
+            WebHomePrefs.instance.current.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+                color: AppTheme.textSecondary, fontSize: AppTheme.fontCaption),
+          ),
+        );
+      },
     );
   }
 }

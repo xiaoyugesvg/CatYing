@@ -471,7 +471,11 @@ class MiniAppService extends GetxService {
     return (ok: true, error: null);
   }
 
-  /// 校验并保存一份配置
+  /// 校验并保存一份配置（TVBox 配置）
+  ///
+  /// ⚠️ RSS / 资讯订阅源**不在这里**处理：App 已有独立的 RSS 模块
+  /// （底栏「RSS」分类 + 设置里的「RSS 管理」），订阅源走那边导入；
+  /// 这里只收 TVBox 配置，避免把订阅源错映射成"网页型小程序"。
   Future<({bool ok, String? error})> importRaw(
     String raw, {
     String source = '',

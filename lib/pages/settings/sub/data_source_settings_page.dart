@@ -10,6 +10,10 @@ import '../../../models/subscription.dart';
 import '../../../services/api_config.dart';
 import '../../../services/python_sources_service.dart';
 import '../../../services/source_kind.dart';
+import '../../../rss/pages/rss_manage_page.dart';
+import '../../../rss/services/rss_store.dart';
+import '../../../webhome/web_home_manage_page.dart';
+import '../../../webhome/web_home_prefs.dart';
 import '../../subscription/view.dart';
 import '../../../widgets/common_widgets.dart';
 import '../../../widgets/source_kind_badge.dart';
@@ -102,6 +106,26 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
               title: '导入 Python 视频源',
               value: '.py 文件 → 注册为线路',
               onTap: _importPythonVideoSource,
+            ),
+            // 网页管理（用户 2026-10-14）：内置/订阅/本地导入的网页源，
+            // 可切换、可拖动排序 —— 与「网页」页顶栏右边的设置按钮是同一页。
+            Obx(
+              () => SettingsRow(
+                icon: Icons.language_outlined,
+                title: '网页管理',
+                value: '${WebHomePrefs.instance.sources.length} 个网页',
+                onTap: () => Get.to(() => const WebHomeManagePage()),
+              ),
+            ),
+            // RSS 管理（用户 2026-10-15）：订阅源导入（JSON / OPML / 本地文件）、
+            // 启用停用、排序 —— 与「RSS」页顶栏右边的 ⚙ 是同一页。
+            Obx(
+              () => SettingsRow(
+                icon: Icons.rss_feed_outlined,
+                title: 'RSS 管理',
+                value: '${RssStore.instance.sources.length} 个订阅源',
+                onTap: () => Get.to(() => const RssManagePage()),
+              ),
             ),
             // 引擎管理（Node / Python 手动加载）—— 用户 2026-10-13：
             // 从「通用设置」挪到这里（订阅管理页）

@@ -322,39 +322,64 @@ class _HomePageState extends State<HomePage> {
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              // 底部筛选菜单的原生入口（原来只有 RFW 主题能调起来，见方法注释）
-              _optionTile(
-                icon: Icons.tune,
-                label: '筛选条件',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _openFilterSheet();
-                },
-              ),
-              _optionTile(
-                icon: Icons.block,
-                label: '分类屏蔽',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _openCategoryBlockSheet();
-                },
-              ),
-              _optionTile(
-                icon: Icons.filter_alt_outlined,
-                label: prefs.hideFilters.value ? '显示筛选' : '隐藏筛选',
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  await prefs.setHideFilters(!prefs.hideFilters.value);
-                  setSheet(() {});
-                },
-              ),
-              _optionTile(
-                icon: Icons.grid_view,
-                label: '切换布局',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _openLayoutSheet();
-                },
+              // 菜单项：**一行两个**（用户 2026-10-14：这类菜单别一行一个，太占位置）
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _optionTile(
+                            icon: Icons.tune,
+                            label: '筛选条件',
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              _openFilterSheet();
+                            },
+                          ),
+                        ),
+                        Expanded(
+                          child: _optionTile(
+                            icon: Icons.block,
+                            label: '分类屏蔽',
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              _openCategoryBlockSheet();
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _optionTile(
+                            icon: Icons.filter_alt_outlined,
+                            label:
+                                prefs.hideFilters.value ? '显示筛选' : '隐藏筛选',
+                            onTap: () async {
+                              Navigator.pop(ctx);
+                              await prefs
+                                  .setHideFilters(!prefs.hideFilters.value);
+                              setSheet(() {});
+                            },
+                          ),
+                        ),
+                        Expanded(
+                          child: _optionTile(
+                            icon: Icons.grid_view,
+                            label: '切换布局',
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              _openLayoutSheet();
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 8),
             ],
@@ -364,6 +389,9 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// 菜单项（图标 + 文字）。
+  /// ⚠️ 现在挂在**一行两个**的 `Row + Expanded` 里 ⇒ 内边距与图标-文字间距
+  /// 都要收窄，否则半宽下文字会被挤断（原来是一行一个的宽排版）。
   Widget _optionTile({
     required IconData icon,
     required String label,
@@ -371,18 +399,48 @@ class _HomePageState extends State<HomePage> {
   }) {
     return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         child: Row(
           children: [
             Icon(icon, size: 20, color: AppTheme.textPrimary),
-            const SizedBox(width: 16),
-            Text(label,
-                style: TextStyle(
-                    color: AppTheme.textPrimary, fontSize: AppTheme.fontHeadline)),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: AppTheme.fontHeadline)),
+            ),
           ],
         ),
       ),
+    );
+  }
+
+  /// 把一堆选项排成**固定列数**的网格。
+  ///
+  /// 用户 2026-10-14：「选项多的别一行一个，很占位置」⇒ 统一 3~4 列。
+  ///   · 宽 ≥ 340 → 4 列，否则 3 列（"一行三个或 4 个"）；
+  ///   · 用 `Wrap` + **定宽子项**而不是 `GridView`：行高按内容自适应 —— 外层
+  ///     本来就在可滚动的弹窗里，`GridView` 的固定 `childAspectRatio` 反而会
+  ///     把行高撑高（那就又"占位置"了）。
+  Widget _chipGrid(List<Widget> chips) {
+    return LayoutBuilder(
+      builder: (context, box) {
+        const gap = 8.0;
+        final cols = box.maxWidth >= 340 ? 4 : 3;
+        final w = (box.maxWidth - gap * (cols - 1)) / cols;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            for (final c in chips) SizedBox(width: w, child: c),
+          ],
+        );
+      },
     );
   }
 
@@ -424,20 +482,17 @@ class _HomePageState extends State<HomePage> {
               Flexible(
                 child: Obx(() => SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (final s in _controller.sorts)
-                            SelectableChip(
-                              title: s.name,
-                              isSelected:
-                                  prefs.blockedCategories.contains(s.name),
-                              onTap: () =>
-                                  prefs.toggleBlockCategory(s.name),
-                            ),
-                        ],
-                      ),
+                      // 一行 3~4 个（分类名可能几十个，一行一个太占位置）
+                      child: _chipGrid([
+                        for (final s in _controller.sorts)
+                          SelectableChip(
+                            title: s.name,
+                            isSelected:
+                                prefs.blockedCategories.contains(s.name),
+                            onTap: () =>
+                                prefs.toggleBlockCategory(s.name),
+                          ),
+                      ]),
                     )),
               ),
             ],
@@ -748,26 +803,23 @@ class _HomePageState extends State<HomePage> {
                                       fontSize: AppTheme.fontSubhead,
                                       fontWeight: FontWeight.w600)),
                               const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  // 与行筛选一致：不再追加固定「全部」，
-                                  // 源 filters 自带「全部/默认」首项，避免重复一列
-                                  for (final v in f.values)
-                                    SelectableChip(
-                                      title: v.n,
-                                      isSelected: v.v == ''
-                                          ? _controller
-                                                  .selectedFilters[f.key] ==
-                                              null
-                                          : _controller.selectedFilters[f.key] ==
-                                              v.v,
-                                      onTap: () => _controller
-                                          .selectFilter(f.key, v.v),
-                                    ),
-                                ],
-                              ),
+                              // 一行 3~4 个（筛选值可能几十个，一行一个太占位置）
+                              _chipGrid([
+                                // 与行筛选一致：不再追加固定「全部」，
+                                // 源 filters 自带「全部/默认」首项，避免重复一列
+                                for (final v in f.values)
+                                  SelectableChip(
+                                    title: v.n,
+                                    isSelected: v.v == ''
+                                        ? _controller
+                                                .selectedFilters[f.key] ==
+                                            null
+                                        : _controller.selectedFilters[f.key] ==
+                                            v.v,
+                                    onTap: () =>
+                                        _controller.selectFilter(f.key, v.v),
+                                  ),
+                              ]),
                               const SizedBox(height: 18),
                             ],
                           ],
@@ -1013,15 +1065,13 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// 首页顶部推荐横幅（自动轮播）。样式由「设置 → 菜单设置 → 首页幻灯片」切换：
+/// 首页顶部推荐横幅（自动轮播）。样式由「设置 → 主页页面 → 首页幻灯片」切换：
 ///   · `wide` 横版大图（原样式）：16:9 大图 + 左下标题 + 右下来源角标
 ///   · `cards` 卡片轮播：竖版海报居中放大，两侧缩小 / 倾斜 / 压暗（coverflow / V 形）
-///   · `hero` 沉浸大图（新增）：满宽出血 + 底部重渐变 + 大字标题 + 元信息 + 播放钮，
+///   · `hero` 沉浸大图：满宽出血 + 底部重渐变 + 大字标题 + 元信息 + 播放钮，
 ///            指示器换成**分段进度条**（参考 Disney+ hero carousel）
-///   · `deck` 叠卡堆（新增）：大卡在前、后面两张向上错位缩小露出，**不侧倾**
-///            （参考 Swiper `effect: 'cards'` —— 与 coverflow 刻意区分）
-///   · `rail` 三格海报轨（新增）：一行 3 张竖版海报，整组横滑，海报下方小字标题
-///            （参考 Swiper「Photo Gallery - Minimal」/ App Store 横滑行）
+///   · `feature` 主次三栏：左边一张大竖版海报 + 右侧竖排 3 条小卡（杂志排版）
+///   · `grid` 双排海报：**2 行 × 3 列 = 6 张**竖版海报（发现墙）
 ///
 /// ⚠️ 各样式 `viewportFraction` 不同，而它**只能在 PageController 构造时**给
 /// → 切换样式时由调用方换 `key`，让整个 State + PageController 重建
@@ -1045,20 +1095,21 @@ const double _kBannerCardsHeight = 282; // 画布：卡 250 + 两侧下沉/缩�
 //   高度比 wide 高一档，给"大字标题 + 元信息 + 播放钮"留出呼吸。
 const double _kBannerHeroHeight = 236;
 
-// ── 叠卡堆（deck）──
-//   槽位 0.54 屏宽：中心卡 ≈ 198×232（竖版 0.85，接近参考图里海报的样子），
-//   两侧各露出约 90pt。后卡**向上**错位 + 缩小 ⇒ 像一叠牌，
-//   与 coverflow（向下 + 侧倾）完全不同。
-//   ⚠️ 画布高度要留够"上移量"：卡 232 居中 ⇒ 上下各 (276-232)/2 = 22 的余量，
-//      上移 20 才不会被 PageView 的 viewport 裁掉顶边。
-const double _kBannerDeckViewport = 0.54;
-const double _kBannerDeckCardH = 232;
-const double _kBannerDeckHeight = 276;
+// ── 主次三栏（feature）──
+//   一页 = 左边**一张大竖版海报**（约 42% 宽，2:3）+ 右侧**竖排 3 条小卡**
+//   （缩略图 + 标题 + 角标）。杂志排版：一条主推 + 三条次要。
+const double _kBannerFeatureHeight = 250;
+const int _kBannerFeaturePerPage = 4; // 1 大 + 3 小
 
-// ── 三格海报轨（rail）──
-//   一页 = 3 张竖版海报（3:4），等宽留缝、不缩放；下方小字标题 + 年份。
-const double _kBannerRailHeight = 198;
-const int _kBannerRailPerPage = 3;
+// ── 双排海报（grid）──
+//   一页 = **2 行 × 3 列 = 6 张**竖版海报（名称压在图上）。
+//
+//   ── 为什么换掉原来的「三格海报轨」（用户 2026-10-14：「太丑」）──
+//   原来一页只有 3 张、被压在一行里，看着像缩略图列表；而且整块矮（198）
+//   显得空。现在两行铺满：海报 ≈114×146（≈3:4），一屏 6 条 ✓。
+const double _kBannerGridHeight = 300;
+const int _kBannerGridPerPage = 6;
+const int _kBannerGridCols = 3;
 
 class _RecommendBanner extends StatefulWidget {
   final List<Video> videos;
@@ -1079,17 +1130,23 @@ class _RecommendBannerState extends State<_RecommendBanner>
   /// 循环轮播的起始**绝对**页（取足够大的整数，前后都能滑，实现无限循环）
   static const int _kLoopAnchor = 100000;
 
-  /// 页数：`rail` 一页 = 3 条（页数 = 分组数），其余样式一页一条。
+  /// 一页几条：分组样式（主次三栏 / 双排海报）一页多条，其余一页一条。
+  int get _perPage => switch (widget.style) {
+        HomeBannerStyle.feature => _kBannerFeaturePerPage,
+        HomeBannerStyle.grid => _kBannerGridPerPage,
+        _ => 1,
+      };
+
+  /// 页数：分组样式按"几条一页"分组，其余一条一页。
   int get _pageCount {
     final len = widget.videos.length;
     if (len <= 0) return 0;
-    return widget.style == HomeBannerStyle.rail
-        ? (len / _kBannerRailPerPage).ceil()
-        : len;
+    final per = _perPage;
+    return per > 1 ? (len / per).ceil() : len;
   }
 
-  /// `rail` 不做无限循环：分组后取模会错位（组数常常不是条数的约数）。
-  bool get _loops => widget.style != HomeBannerStyle.rail;
+  /// 分组样式**不做无限循环**：分组后取模会错位（组数常常不是条数的约数）。
+  bool get _loops => _perPage <= 1;
 
   /// 起始绝对页：取页数的整数倍，保证首屏显示的是第 0 页
   int get _loopStart {
@@ -1103,9 +1160,9 @@ class _RecommendBannerState extends State<_RecommendBanner>
     // 各样式页宽不同；切换样式时调用方会换 key ⇒ 整个 State 重建，这里只读一次
     viewportFraction: switch (widget.style) {
       HomeBannerStyle.cards => _kBannerCardsViewport,
-      HomeBannerStyle.deck => _kBannerDeckViewport,
       HomeBannerStyle.hero => 1.0, // 满宽出血
-      HomeBannerStyle.rail => 1.0, // 一页 = 整行
+      HomeBannerStyle.feature => 1.0, // 一页 = 整屏（1 大 + 3 小）
+      HomeBannerStyle.grid => 1.0, // 一页 = 整屏（6 张）
       HomeBannerStyle.wide => 0.92,
     },
   );
@@ -1196,12 +1253,12 @@ class _RecommendBannerState extends State<_RecommendBanner>
             HomeBannerStyle.wide => _kBannerWideHeight,
             HomeBannerStyle.cards => _kBannerCardsHeight,
             HomeBannerStyle.hero => _kBannerHeroHeight,
-            HomeBannerStyle.deck => _kBannerDeckHeight,
-            HomeBannerStyle.rail => _kBannerRailHeight,
+            HomeBannerStyle.feature => _kBannerFeatureHeight,
+            HomeBannerStyle.grid => _kBannerGridHeight,
           },
           child: PageView.builder(
             controller: _pageCtrl,
-            // rail 有固定页数（分组）；其余不传 itemCount = 无限循环（用户 2026-10-13）
+            // 分组样式有固定页数；其余不传 itemCount = 无限循环（用户 2026-10-13）
             itemCount: _loops ? null : _pageCount,
             onPageChanged: (i) {
               setState(() => _page = i);
@@ -1210,8 +1267,8 @@ class _RecommendBannerState extends State<_RecommendBanner>
             itemBuilder: (_, i) => switch (style) {
               HomeBannerStyle.cards => _coverflowItem(context, i),
               HomeBannerStyle.hero => _heroItem(context, i),
-              HomeBannerStyle.deck => _deckItem(context, i),
-              HomeBannerStyle.rail => _railPage(context, i),
+              HomeBannerStyle.feature => _featurePage(context, i),
+              HomeBannerStyle.grid => _gridPage(context, i),
               HomeBannerStyle.wide => _wideItem(context, i),
             },
           ),
@@ -1490,163 +1547,115 @@ class _RecommendBannerState extends State<_RecommendBanner>
     );
   }
 
-  /// 叠卡堆（deck）：大卡在前，后面两张**向上错位 + 缩小**露出，不侧倾。
+
+  /// 一张竖版海报瓦片（**名称压在图上**）—— 「双排海报」与「主次三栏」共用。
   ///
-  /// 与 `cards` 的差别（刻意做开）：coverflow 是"中间凸出、两侧下沉 + 侧倾"的
-  /// 对称 V 形；这里是**同向向上错位**的洗牌堆 —— 侧卡往上冒出来当"底牌"。
-  Widget _deckItem(BuildContext context, int i) {
-    final v = _videoAt(i);
+  /// 左上角是角标（更新到第 N 集 / 完结…），底部一行名称 + 一层压暗渐变
+  /// （白字直接压在彩色海报上会糊）。
+  Widget _posterTile(BuildContext context, Video v, {BorderRadius? radius}) {
     final badge = VodCard.badgeText(v);
-
-    double page = _page.toDouble();
-    if (_pageCtrl.hasClients && _pageCtrl.position.haveDimensions) {
-      page = _pageCtrl.page ?? page;
-    }
-    final delta = (i - page).clamp(-1.5, 1.5);
-    final absD = delta.abs().clamp(0.0, 1.0);
-    // 侧卡往上错位（-20，小于画布上下余量 22，顶边不会被裁）并缩小
-    final dy = -20.0 * absD;
-    final scale = 1.0 - 0.10 * absD;
-    final dim = (1 - 0.30 * absD).clamp(0.0, 1.0);
-
-    return Transform.translate(
-      offset: Offset(0, dy),
-      child: Transform.scale(
-        scale: scale,
-        child: Opacity(
-          opacity: dim,
-          child: Center(
-            child: GestureDetector(
-              onTap: () => Get.toNamed('/detail', arguments: v),
-              child: SizedBox(
-                height: _kBannerDeckCardH,
-                child: Container(
+    return GestureDetector(
+      onTap: () => Get.toNamed('/detail', arguments: v),
+      child: ClipRRect(
+        borderRadius: radius ?? BorderRadius.circular(14),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(
+              color: AppTheme.backgroundSecondary,
+              child: _BannerImage(url: v.pic),
+            ),
+            // 底部压暗：保证白字可读
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 62,
+              child: IgnorePointer(
+                child: DecoratedBox(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(20),
-                    color: AppTheme.backgroundSecondary,
-                    border:
-                        Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.38),
-                        blurRadius: 18,
-                        offset: const Offset(0, 10),
-                      ),
-                    ],
-                  ),
-                  margin: const EdgeInsets.symmetric(horizontal: 6),
-                  clipBehavior: Clip.antiAlias,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      _BannerImage(url: v.pic),
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        height: 84,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                Colors.transparent,
-                                Colors.black.withValues(alpha: 0.80),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      // 右上角年份小胶囊（对齐用户给的参考图：年份压在右上角）
-                      if (v.year.trim().isNotEmpty)
-                        Positioned(
-                          right: 10,
-                          top: 10,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.55),
-                              borderRadius: BorderRadius.circular(9),
-                            ),
-                            child: Text(
-                              v.year.trim(),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: AppTheme.fontCaption,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ),
-                      Positioned(
-                        left: 12,
-                        right: 12,
-                        bottom: 12,
-                        child: Text(
-                          v.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: AppTheme.fontBody,
-                            height: 1.25,
-                            fontWeight: FontWeight.w700,
-                            shadows: [
-                              Shadow(blurRadius: 8, color: Colors.black54)
-                            ],
-                          ),
-                        ),
-                      ),
-                      if (badge.isNotEmpty)
-                        Positioned(
-                          left: 12,
-                          top: 12,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.55),
-                              borderRadius: BorderRadius.circular(9),
-                            ),
-                            child: Text(
-                              badge,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: AppTheme.fontCaption,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        Colors.black.withValues(alpha: 0.78),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: 7,
+              child: Text(
+                v.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: AppTheme.fontFootnote,
+                  fontWeight: FontWeight.w700,
+                  height: 1.15,
+                  shadows: [Shadow(blurRadius: 6, color: Colors.black54)],
+                ),
+              ),
+            ),
+            if (badge.isNotEmpty)
+              Positioned(
+                left: 6,
+                top: 6,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    badge,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: AppTheme.fontCaption - 1,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
   }
 
-  /// 三格海报轨（rail）：一页 = 3 张竖版海报（等宽留缝、不缩放），
-  /// 下方小字标题 + 年份（**文字在图外**，不压画面 —— Minimal gallery 的做法）。
-  Widget _railPage(BuildContext context, int i) {
-    final start = i * _kBannerRailPerPage;
+  /// 双排海报（grid）：一页 = **2 行 × 3 列 = 6 张**竖版海报。
+  ///
+  /// ── 为什么换掉原来的「三格海报轨」（用户 2026-10-14：「太他妈丑」）──
+  /// 原来一页只有 3 张、被压在一行里、整块还矮（198）⇒ 看着像缩略图列表、
+  /// 又空又小 ✗。现在**两行铺满**：海报 ≈114×146（≈3:4），一屏 6 条 ✓，
+  /// 名称也压进图里（不再在图片外单占一行）✓。
+  Widget _gridPage(BuildContext context, int i) {
+    final start = i * _kBannerGridPerPage;
+    const rows = 2;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
         children: [
-          for (var k = 0; k < _kBannerRailPerPage; k++) ...[
-            if (k > 0) const SizedBox(width: 8),
-            // 末组可能不满 3 条：空位留白，不越界取值（RangeError）
+          for (var r = 0; r < rows; r++) ...[
+            if (r > 0) const SizedBox(height: 8),
             Expanded(
-              child: start + k < widget.videos.length
-                  ? _railCard(context, widget.videos[start + k])
-                  : const SizedBox.shrink(),
+              child: Row(
+                children: [
+                  for (var c = 0; c < _kBannerGridCols; c++) ...[
+                    if (c > 0) const SizedBox(width: 8),
+                    Expanded(
+                      child: _tileAt(start + r * _kBannerGridCols + c),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ],
         ],
@@ -1654,44 +1663,99 @@ class _RecommendBannerState extends State<_RecommendBanner>
     );
   }
 
-  Widget _railCard(BuildContext context, Video v) {
-    return GestureDetector(
-      onTap: () => Get.toNamed('/detail', arguments: v),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+  /// 主次三栏（feature）：一页 = **左边一张大竖版海报 + 右侧竖排 3 条小卡**。
+  ///
+  /// 杂志排版：一条主推 + 三条次要。信息密度比"一排海报"高，观感也和
+  /// 横版大图 / 卡片轮播 / 沉浸大图 都不重复 ✓。
+  Widget _featurePage(BuildContext context, int i) {
+    final start = i * _kBannerFeaturePerPage;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // 海报 3:4
-          AspectRatio(
-            aspectRatio: 3 / 4,
+          // 左：大竖版海报（≈42% 屏宽，250 高 ⇒ 约 2:3 ✓ 标准海报比例）
+          SizedBox(
+            width: MediaQuery.of(context).size.width * 0.42,
+            child: _tileAt(start, radius: BorderRadius.circular(16)),
+          ),
+          const SizedBox(width: 10),
+          // 右：竖排 3 条小卡
+          Expanded(
+            child: Column(
+              children: [
+                for (var k = 1; k < _kBannerFeaturePerPage; k++) ...[
+                  if (k > 1) const SizedBox(height: 8),
+                  Expanded(child: _featureRowAt(start + k)),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 取第 [idx] 条的海报瓦片；越界（最后不满一页）留白，不越界取值。
+  Widget _tileAt(int idx, {BorderRadius? radius}) {
+    if (idx < 0 || idx >= widget.videos.length) return const SizedBox.shrink();
+    return _posterTile(context, widget.videos[idx], radius: radius);
+  }
+
+  /// 主次三栏右侧的一条小卡：缩略图 + 标题 + 角标。
+  Widget _featureRowAt(int idx) {
+    if (idx < 0 || idx >= widget.videos.length) return const SizedBox.shrink();
+    final v = widget.videos[idx];
+    final badge = VodCard.badgeText(v);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => Get.toNamed('/detail', arguments: v),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 56,
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: Container(
+              borderRadius: BorderRadius.circular(10),
+              child: ColoredBox(
                 color: AppTheme.backgroundSecondary,
                 child: _BannerImage(url: v.pic),
               ),
             ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            v.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: AppTheme.fontCaption + 0.5,
-              fontWeight: FontWeight.w600,
+          const SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  v.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontFootnote + 0.5,
+                    fontWeight: FontWeight.w700,
+                    height: 1.2,
+                  ),
+                ),
+                if (badge.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    badge,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppTheme.textTertiary,
+                      fontSize: AppTheme.fontCaption - 0.5,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
-          if (v.year.trim().isNotEmpty)
-            Text(
-              v.year.trim(),
-              maxLines: 1,
-              style: TextStyle(
-                color: AppTheme.textTertiary,
-                fontSize: AppTheme.fontCaption - 0.5,
-              ),
-            ),
         ],
       ),
     );

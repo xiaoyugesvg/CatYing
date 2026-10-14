@@ -62,21 +62,23 @@ enum HomeBannerStyle {
   /// 参考 Disney+ 新版 hero carousel：让画面主体"顶到边"，文字压在渐变上。
   hero,
 
-  /// 叠卡堆（新增）：大卡在前，后面两张**向上错位 + 缩小**露出（洗牌堆观感），
-  /// 不做侧倾 —— 与 coverflow 的"左右对称 V 形"刻意区分开。
-  /// 参考 Swiper `effect: 'cards'`。
-  deck,
+  /// 主次三栏（2026-10-14 **换掉**原「叠卡堆」）：左边一张大竖版海报 +
+  /// 右侧竖排 3 条小卡（缩略图 + 标题）。杂志排版：一条主推 + 三条次要。
+  /// 用户原话：「叠卡堆和三格海报太他妈丑了，这两个换其他样式」。
+  feature,
 
-  /// 三格海报轨（新增）：一行 **3 张竖版海报**（等宽留缝、不缩放），整组横滑，
-  /// 海报下方小字标题 + 年份。参考 Swiper「Photo Gallery - Minimal」/ App Store 横滑行。
-  rail;
+  /// 双排海报（2026-10-14 **换掉**原「三格海报轨」）：一页 **2 行 × 3 列 = 6 张**
+  /// 竖版海报（名称压在图上）。原来一页只有 3 张、还被压在一行里、整块又矮
+  /// ⇒ 像缩略图列表 ✗。
+  grid;
 
   String get label => switch (this) {
+        // 名称统一**最多 4 个字**（用户 2026-10-14：多了去掉，卡片宽度才一致）
         HomeBannerStyle.wide => '横版大图',
         HomeBannerStyle.cards => '卡片轮播',
         HomeBannerStyle.hero => '沉浸大图',
-        HomeBannerStyle.deck => '叠卡堆',
-        HomeBannerStyle.rail => '三格海报轨',
+        HomeBannerStyle.feature => '主次三栏',
+        HomeBannerStyle.grid => '双排海报',
       };
 }
 

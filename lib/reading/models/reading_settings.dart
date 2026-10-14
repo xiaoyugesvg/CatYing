@@ -28,6 +28,8 @@ class ReadingSettings {
     this.sleepMode = SleepMode.defaultMode,
     this.bubbleMode = BubbleMode.none,
     this.bubblePalette = BubblePalette.light,
+    this.bubbleBgColor,
+    this.bubbleTextColor,
     this.convertMode = ChineseConvertMode.none,
     this.eyeBreakEnabled = false,
     this.eyeBreakMinutes = 30,
@@ -62,8 +64,14 @@ class ReadingSettings {
   /// 对话气泡样式（A1）：关 / 对话左气泡 / 对称气泡
   final BubbleMode bubbleMode;
 
-  /// 气泡配色（A1）：浅色 / 深色 / 护眼
+  /// 气泡配色（A1）：浅色 / 深色 / 护眼 / 自定义
   final BubblePalette bubblePalette;
+
+  /// 自定义气泡底色（A1，ARGB 整数）。null = 还没挑过色（用主题派生色）
+  final int? bubbleBgColor;
+
+  /// 自定义气泡文字色（A1，ARGB 整数）。null = 跟随正文前景
+  final int? bubbleTextColor;
 
   /// 繁简转换（A2）：原始 / 繁→简 / 简→繁
   final ChineseConvertMode convertMode;
@@ -87,6 +95,8 @@ class ReadingSettings {
     SleepMode? sleepMode,
     BubbleMode? bubbleMode,
     BubblePalette? bubblePalette,
+    int? bubbleBgColor,
+    int? bubbleTextColor,
     ChineseConvertMode? convertMode,
     bool? eyeBreakEnabled,
     int? eyeBreakMinutes,
@@ -103,6 +113,8 @@ class ReadingSettings {
       sleepMode: sleepMode ?? this.sleepMode,
       bubbleMode: bubbleMode ?? this.bubbleMode,
       bubblePalette: bubblePalette ?? this.bubblePalette,
+      bubbleBgColor: bubbleBgColor ?? this.bubbleBgColor,
+      bubbleTextColor: bubbleTextColor ?? this.bubbleTextColor,
       convertMode: convertMode ?? this.convertMode,
       eyeBreakEnabled: eyeBreakEnabled ?? this.eyeBreakEnabled,
       eyeBreakMinutes: eyeBreakMinutes ?? this.eyeBreakMinutes,
@@ -134,6 +146,8 @@ class ReadingSettings {
         'sleepMode': sleepMode.name,
         'bubbleMode': bubbleMode.name,
         'bubblePalette': bubblePalette.name,
+        'bubbleBgColor': bubbleBgColor,
+        'bubbleTextColor': bubbleTextColor,
         'convertMode': convertMode.name,
         'eyeBreakEnabled': eyeBreakEnabled,
         'eyeBreakMinutes': eyeBreakMinutes,
@@ -194,6 +208,8 @@ class ReadingSettings {
       sleepMode: sm,
       bubbleMode: bm,
       bubblePalette: bp,
+      bubbleBgColor: j['bubbleBgColor'] as int?,
+      bubbleTextColor: j['bubbleTextColor'] as int?,
       convertMode: cm,
       eyeBreakEnabled: eyeOn,
       eyeBreakMinutes: eyeMin,
@@ -221,7 +237,11 @@ enum BubbleMode {
 enum BubblePalette {
   light('浅色'),
   dark('深色'),
-  eye('护眼');
+  eye('护眼'),
+
+  /// 自定义底色 / 文字色（见 [ReadingSettings.bubbleBgColor] /
+  /// [ReadingSettings.bubbleTextColor]）
+  custom('自定义');
 
   const BubblePalette(this.label);
   final String label;
