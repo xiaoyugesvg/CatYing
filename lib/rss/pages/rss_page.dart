@@ -13,11 +13,13 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../common/theme.dart';
+import '../../widgets/app_toast.dart';
 import '../../widgets/common_widgets.dart';
 import '../models/rss_article.dart';
 import '../models/rss_source.dart';
 import '../services/rss_reader.dart';
 import '../services/rss_store.dart';
+import '../widgets/rss_login_sheet.dart';
 import 'rss_article_page.dart';
 import 'rss_manage_page.dart';
 
@@ -131,7 +133,8 @@ class _RssPageState extends State<RssPage> {
     if (!mounted) return;
     _page = 1;
     _nextUrl = '';
-    _load(append: false);
+    // 用户主动刷新 ⇒ 绕过 `cacheFirst` 的缓存
+    _load(append: false, fresh: true);
   }
 
   /// 求分类列表（纯文本直接拆；`<js>` / `@js:` 型走规则引擎求值）。
@@ -154,7 +157,7 @@ class _RssPageState extends State<RssPage> {
     });
   }
 
-  Future<void> _load({required bool append}) async {
+  Future<void> _load({required bool append, bool fresh = false}) async {
     final src = store.current;
     if (src == null) return;
     // 站点型源不抓文章列表 —— 直接内嵌网页（见 [_webFor]）
@@ -187,6 +190,7 @@ class _RssPageState extends State<RssPage> {
         channel: ch,
         page: _page,
         pageUrl: append ? _nextUrl : null,
+        ignoreCache: fresh,
       );
       if (!mounted || my != _seq) return;
       final list = res.articles;
@@ -236,6 +240,29 @@ class _RssPageState extends State<RssPage> {
         onPressed: onTap,
         icon: Icon(icon, color: AppTheme.textPrimary),
       );
+
+  /// 登录 / 源站设置 —— 按源的 `loginUi` 动态生成表单，
+  /// 保存后调源自己的 jsLib 钩子（`upLoginData`）并重载分类与列表。
+  Future<void> _openLogin() async {
+    final src = store.current;
+    if (src == null) return;
+    final fields = RssLoginField.parse(src.loginUi);
+    if (fields.isEmpty) {
+      AppToast.message('这个源没有可配置的登录项');
+      return;
+    }
+    final v = await showRssLoginSheet(
+      context,
+      title: src.name,
+      fields: fields,
+      initial: RssReader.loginInfo(src),
+    );
+    if (v == null || !mounted) return;
+    await RssReader.saveLogin(src, v);
+    if (!mounted) return;
+    AppToast.message('已保存，正在按新设置重载');
+    _reload();
+  }
 
   /// 切换订阅源：**卡片网格**（一行 2 个）—— 用户 2026-10-15：
   /// 「弹窗也太丑了，要卡片式的，一行 2-3 个这种」。
@@ -346,6 +373,10 @@ class _RssPageState extends State<RssPage> {
                 //   IconButton 自带 8px 内边距 + 末尾 4px 留白 ⇒ 视觉上离屏幕边
                 //   还有一段。这里把内边距清零、只留 36 的点击热区 + 末尾 2px。
                 _topIcon(Icons.swap_horiz_rounded, '切换订阅源', _pickSource),
+                // 源配了 `loginUi` 才出「登录 / 源站设置」（如「影视聚合(资源站)」
+                // 靠它切 27 个影视源站）
+                if ((src?.loginUi ?? '').trim().isNotEmpty)
+                  _topIcon(Icons.key_rounded, '登录 / 源站设置', _openLogin),
                 _topIcon(Icons.refresh_rounded, '刷新', _loading ? null : _reload),
                 _topIcon(Icons.tune_rounded, 'RSS 管理', _openManage),
                 const SizedBox(width: 2),

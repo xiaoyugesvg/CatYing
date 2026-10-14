@@ -13,6 +13,7 @@
 // 正文：有 `ruleContent` 就用规则取；没写就抓文章页 + 简易正文提取（去脚本/
 // 样式/导航，按块级标签换行）—— 不追求完美，取不到就让用户"用网页打开" ✓。
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -27,6 +28,7 @@ import '../../reading/novel_source/analyze/js_engine.dart';
 import '../../reading/source/global_proxy.dart';
 import '../models/rss_article.dart';
 import '../models/rss_source.dart';
+import 'rss_store.dart';
 
 /// 抓一页的结果：文章列表 + 下一页地址（空 = 到底了）+ 是否"其实是个网页"。
 typedef RssFetchResult = ({List<RssArticle> articles, String nextUrl, bool siteLike});
@@ -46,13 +48,21 @@ class RssReader {
     RssChannel? channel,
     int page = 1,
     String? pageUrl,
+    bool ignoreCache = false,
   }) async {
     final ch = channel ?? source.channels.first;
     final url = (pageUrl != null && pageUrl.trim().isNotEmpty)
         ? pageUrl.trim()
         : resolveUrl(ch.url, source.url, page);
-    final body = await _get(url, source);
+    final body = await _body(source, url, ignoreCache: ignoreCache);
     final arts = _blacklist(source, parseArticles(source, body, url));
+
+    // `preload`：列表就绪后**预取第一条的正文**进缓存 —— 用户在列表里最可能
+    // 点开第一条；配合 `cacheFirst` 就是"点开秒开"。
+    if (source.preload && page == 1 && arts.isNotEmpty) {
+      unawaited(fetchContent(source, arts.first).catchError(
+          (_) => (text: '', image: '', isHtml: false)));
+    }
 
     return (
       articles: arts,
@@ -117,6 +127,14 @@ class RssReader {
     } catch (_) {
       // 注入失败不影响规则本身（与阅读模块同一处理）
     }
+    // 把**落盘的登录信息**回灌给 JS 侧：`SourceVariableStore` 是内存态，重启会丢，
+    // 而源在规则里会用 `source.getLoginInfoMap()` 读它来选源站 / 带鉴权参数。
+    final li = source.loginInfo.trim();
+    if (li.isNotEmpty) {
+      try {
+        AnalyzeRule().getString('@js:source.putLoginInfo(${jsonEncode(li)});""');
+      } catch (_) {/* 回灌失败不影响主流程 */}
+    }
     return AnalyzeRule()
       ..setContent(body, pageUrl)
       // 规则里可能用 source.getVariable(...) / java.put，需要源身份做分组
@@ -149,6 +167,78 @@ class RssReader {
     } catch (_) {
       return source.channels;
     }
+  }
+
+  // ── 登录（`loginUi` / `loginUrl` + jsLib 钩子）─────────────────
+
+  /// 当前源的登录信息（落盘副本；空 = 还没配过）。
+  ///
+  /// 值可能是字符串（select/text）或**布尔**（toggle）—— 保持原类型不动，
+  /// 否则 `!!formData["调试模式"]` 会把 "false" 也判成 true。
+  static Map<String, dynamic> loginInfo(RssSource source) {
+    final raw = source.loginInfo.trim();
+    if (raw.isEmpty) return const {};
+    try {
+      final d = jsonDecode(raw);
+      if (d is Map) return Map<String, dynamic>.from(d);
+    } catch (_) {}
+    return const {};
+  }
+
+  /// 保存登录信息：**先落盘**（跨重启），再调源自己的 jsLib 钩子。
+  ///
+  /// 约定名 `upLoginData`（社区订阅源/书源通用写法：它内部会
+  /// `source.setLoginInfoMap(...)` 做二次加工）；没有这个函数时退回直接写 map。
+  static Future<void> saveLogin(
+      RssSource source, Map<String, dynamic> values) async {
+    final json = jsonEncode(values);
+    await RssStore.instance.setLoginInfo(source.id, json);
+    try {
+      final js = '(typeof upLoginData === "function" '
+          '? upLoginData($json) '
+          ': source.setLoginInfoMap($json)), "";';
+      _ruleFor(source, '', source.url).getString('@js:$js');
+    } catch (_) {/* 钩子失败不影响"值已落盘" */}
+  }
+
+  /// `showWebLog` 用的 JS 运行日志（最近若干条）。
+  static List<String> webLogs(RssSource source) {
+    try {
+      final raw = _ruleFor(source, '', source.url)
+          .getString('@js:JSON.stringify(__webLogs||[])');
+      final d = jsonDecode(raw);
+      if (d is List) return d.map((e) => '$e').toList();
+    } catch (_) {}
+    return const [];
+  }
+
+  /// 清空 JS 日志缓冲。
+  static void clearWebLogs(RssSource source) {
+    try {
+      _ruleFor(source, '', source.url).getString('@js:__webLogs.length=0;""');
+    } catch (_) {}
+  }
+
+  // ── 响应体缓存（`cacheFirst` / `preload`）──────────────────────
+
+  /// key = 源 id + 解析后的地址 → 响应体。**有界**（超出按插入顺序丢最旧）。
+  static final Map<String, String> _bodyCache = {};
+
+  /// 取响应体：命中缓存就直接用（仅当 `cacheFirst` 且未强制刷新），否则抓取并回填。
+  static Future<String> _body(
+    RssSource source,
+    String url, {
+    bool ignoreCache = false,
+  }) async {
+    final key = '${source.id}|$url';
+    if (source.cacheFirst && !ignoreCache) {
+      final hit = _bodyCache[key];
+      if (hit != null) return hit;
+    }
+    final body = await _get(url, source);
+    _bodyCache[key] = body;
+    if (_bodyCache.length > 80) _bodyCache.remove(_bodyCache.keys.first);
+    return body;
   }
 
   /// 求"下一页地址"：只在配了 `ruleNextPage` 时有效。
@@ -263,21 +353,26 @@ class RssReader {
   /// （用户给的「影视聚合(资源站)」整页就是个 HLS 播放器模板）。
   static Future<({String text, String image, bool isHtml})> fetchContent(
       RssSource source, RssArticle article) async {
+    // `articleStyle`：官方文档没写清 0/1/2/3 的语义，这里按"1 最像纯文字 /
+    //   ≥2 最像富媒体模板"的常见用法映射，0 = 按产出内容自动判断。
+    //   真机实测发现对不上时，只需改这三行。
+    final forceText = source.articleStyle == 1;
+    final forceHtml = source.articleStyle >= 2;
     try {
       // 列表阶段规则已经产出正文 HTML（`ruleDescription` 当模板用）⇒ 直接用，
       // 不必再抓一次文章页（它的 link 多半只是个接口地址，抓了也没内容）。
-      if (article.contentHtml.trim().isNotEmpty) {
+      if (!forceText && article.contentHtml.trim().isNotEmpty) {
         return (
           text: article.contentHtml,
           image: _firstImage(article.contentHtml, article.link),
           isHtml: true,
         );
       }
-      final body = await _get(article.link, source);
+      final body = await _body(source, article.link);
       if (source.hasRules && (source.ruleContent ?? '').trim().isNotEmpty) {
         final out = _ruleFor(source, body, article.link)
             .getString(source.ruleContent);
-        if (out.contains('<')) {
+        if (out.contains('<') && !forceText) {
           return (
             text: out,
             image: _firstImage(out, article.link),
@@ -287,9 +382,9 @@ class RssReader {
         final text = _stripHtml(out);
         if (text.trim().length > 40) {
           return (
-            text: text,
+            text: forceHtml ? out : text,
             image: _firstImage(out, article.link),
-            isHtml: false,
+            isHtml: forceHtml,
           );
         }
       }

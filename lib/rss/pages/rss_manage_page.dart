@@ -29,6 +29,7 @@ import '../../reading/source/global_proxy.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/common_widgets.dart';
 import '../models/rss_source.dart';
+import '../services/rss_reader.dart';
 import '../services/rss_store.dart';
 
 class RssManagePage extends StatefulWidget {
@@ -887,6 +888,12 @@ class _RssManagePageState extends State<RssManagePage> {
                   ClipboardData(text: encodeRssSources([s])));
               AppToast.message('已复制，可直接分享给别人');
             }),
+            // `showWebLog=true` 的源才给日志入口（排障用）
+            if (s.showWebLog)
+              _sheetItem(Icons.article_outlined, '查看 JS 日志', onTap: () async {
+                Navigator.pop(ctx);
+                await _showWebLogs(s);
+              }),
             _sheetItem(Icons.delete_outline_rounded, '删除', danger: true,
                 onTap: () async {
               Navigator.pop(ctx);
@@ -915,6 +922,78 @@ class _RssManagePageState extends State<RssManagePage> {
           style: TextStyle(
               fontSize: AppTheme.fontSubhead,
               color: enabled ? color : AppTheme.textTertiary)),
+    );
+  }
+
+  /// `showWebLog=true` 源的 JS 运行日志（`source.log` / `console.log`）。
+  Future<void> _showWebLogs(RssSource s) async {
+    final lines = RssReader.webLogs(s);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SheetHandle(),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Text('JS 日志',
+                      style: TextStyle(
+                          fontSize: AppTheme.fontTitle3,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textPrimary)),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () {
+                      RssReader.clearWebLogs(s);
+                      Navigator.pop(ctx);
+                    },
+                    child: const Text('清空'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              if (lines.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 26),
+                  child: Text('还没有日志 —— 跑一次分类/列表后再来看',
+                      style: TextStyle(
+                          fontSize: AppTheme.fontSubhead,
+                          color: AppTheme.textTertiary)),
+                )
+              else
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final l in lines)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: SelectableText(
+                              l,
+                              style: TextStyle(
+                                  fontSize: AppTheme.fontCaption,
+                                  height: 1.5,
+                                  color: AppTheme.textSecondary),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

@@ -202,6 +202,17 @@ class RssStore {
     await _persist();
   }
 
+  /// 写入某源的**登录信息**（`loginUi` 表单值的 JSON 字符串）。
+  ///
+  /// 落盘是为了跨重启保住用户的选择（如「影视聚合(资源站)」的"选影视源站"）；
+  /// JS 侧 `SourceVariableStore` 是内存态，所以求值前由 `RssReader` 回灌。
+  Future<void> setLoginInfo(String id, String json) async {
+    final i = _sources.indexWhere((s) => s.id == id);
+    if (i < 0) return;
+    _sources[i] = _sources[i].copyWith(loginInfo: json);
+    await _persist();
+  }
+
   Future<void> reorder(int oldIndex, int newIndex) async {
     if (oldIndex < 0 || oldIndex >= _sources.length) return;
     if (newIndex > oldIndex) newIndex -= 1;

@@ -51,6 +51,9 @@ function _legadoHostCall(op, args) {
 }
 
 // ── legado 宿主对象 java（纯 JS + 两类宿主协议）────────────────
+// 运行期日志缓冲：`showWebLog` 为 true 的源要能在 App 里看 JS 日志
+// （`source.log(...)` / console.log 都进这里，最多留最近 300 条）。
+var __webLogs = [];
 var java = (function () {
   var _vars = {};
   var _NEED = '__LEGADO_NEED__';   // ① 同步 HTTP 协议（sync_http_bridge.dart）
@@ -58,6 +61,10 @@ var java = (function () {
 
   function _log(msg) {
     try {
+      if (typeof __webLogs !== 'undefined') {
+        __webLogs.push(String(msg));
+        if (__webLogs.length > 300) __webLogs.shift();
+      }
       if (typeof console !== 'undefined' && console && console.log) {
         console.log(String(msg));
       }
@@ -472,6 +479,20 @@ var source = {
       },
       raw: obj
     };
+  },
+  // ── `setLoginInfoMap(obj)`：把整个 Map 写回登录信息 ──────────────
+  //
+  // 订阅源/书源的 `loginUi` 登录表单保存后，**由源自己的 jsLib 调用**它 ——
+  // 例如「影视聚合(资源站)」的 `upLoginData(formData)`：
+  //     source.setLoginInfoMap(saveObj);
+  // 原来缺失 ⇒ 调用即 `TypeError: source.setLoginInfoMap is not a function`
+  // ⇒ 登录保存整条失效、切源站不生效（用户 2026-10-15 实测）。
+  setLoginInfoMap: function (v) {
+    try {
+      return _legadoHostCall('source.putLoginInfo', [JSON.stringify(v || {})]);
+    } catch (e) {
+      return '';
+    }
   },
   getKey: function () { return _legadoHostCall('source.getKey', []); },
   key: function () { return _legadoHostCall('source.getKey', []); },

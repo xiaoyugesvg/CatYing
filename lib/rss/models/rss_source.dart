@@ -54,6 +54,10 @@ class RssSource {
     this.searchUrl = '',
     this.loginUrl = '',
     this.loginUi = '',
+    this.loginInfo = '',
+    this.preload = false,
+    this.cacheFirst = false,
+    this.showWebLog = false,
   });
 
   /// 稳定 id（排序/选中用）。
@@ -116,6 +120,22 @@ class RssSource {
 
   /// 登录界面描述（`loginUi`，JSON 数组：select / toggle / text…）。
   final String loginUi;
+
+  /// 本源的**登录信息**（用户填的 `loginUi` 表单值，JSON 对象字符串）。
+  ///
+  /// Legado 把登录信息存在源自己身上；JS 侧 `SourceVariableStore` 是**内存态**
+  /// （重启即丢），所以这里再落一份盘，规则求值前回灌给 JS
+  /// （`source.putLoginInfo`）—— 用户的"选影视源站"才能跨重启生效。
+  final String loginInfo;
+
+  /// 预加载（`preload`）：列表就绪后预取**第一条正文**进缓存。
+  final bool preload;
+
+  /// 缓存优先（`cacheFirst`）：列表/正文优先读缓存；用户点「刷新」时强制走网络。
+  final bool cacheFirst;
+
+  /// 显示 JS 运行日志（`showWebLog`）—— 排障用。
+  final bool showWebLog;
 
   /// 解析出分类列表；一个都没有 ⇒ 用源主页兜底（`singleUrl` 型）。
   ///
@@ -188,7 +208,12 @@ class RssSource {
   /// 全是这种：能导入 ✓，但抓不出文章（本来就设计成"直开站点"）。
   bool get isSiteOnly => singleUrl && !hasRules;
 
-  RssSource copyWith({String? name, String? group, bool? enabled, String? sortUrl}) =>
+  RssSource copyWith(
+          {String? name,
+          String? group,
+          bool? enabled,
+          String? sortUrl,
+          String? loginInfo}) =>
       RssSource(
         id: id,
         name: name ?? this.name,
@@ -216,6 +241,10 @@ class RssSource {
         searchUrl: searchUrl,
         loginUrl: loginUrl,
         loginUi: loginUi,
+        loginInfo: loginInfo ?? this.loginInfo,
+        preload: preload,
+        cacheFirst: cacheFirst,
+        showWebLog: showWebLog,
       );
 
   Map<String, dynamic> toJson() => {
@@ -245,6 +274,10 @@ class RssSource {
         'searchUrl': searchUrl,
         'loginUrl': loginUrl,
         'loginUi': loginUi,
+        'loginInfo': loginInfo,
+        'preload': preload,
+        'cacheFirst': cacheFirst,
+        'showWebLog': showWebLog,
       };
 
   /// 解析一份「Legado RSS 源」JSON。
@@ -284,6 +317,10 @@ class RssSource {
       searchUrl: _s(j['searchUrl']),
       loginUrl: _s(j['loginUrl']),
       loginUi: _s(j['loginUi']),
+      loginInfo: _s(j['loginInfo']),
+      preload: j['preload'] == true,
+      cacheFirst: j['cacheFirst'] == true,
+      showWebLog: j['showWebLog'] == true,
     );
   }
 
