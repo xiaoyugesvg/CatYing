@@ -46,6 +46,7 @@ import 'package:get/get.dart';
 
 import '../../../services/app_log.dart';
 import '../../pages/webview_page.dart';
+import '../../source/global_proxy.dart';
 import '../../source/webview_image_fetcher.dart';
 
 /// 本机同步 HTTP 代理（进程级单例）。
@@ -77,6 +78,11 @@ class LegadoHttpProxy {
       // 关键：不接受压缩。否则正文是 gzip 字节，而 `sync_http` 不会解压。
       headers: const <String, String>{'accept-encoding': 'identity'},
     ));
+    // ⚠️ 必须套**全局网络代理**：这条链路是 JS 规则里 `java.ajax` 的出口
+    //   （订阅源的 `sortUrl` / 书源的 `@js` 都走它）。漏了它 ⇒ 用户开了
+    //   「设置 → 网络代理」后所有 java.ajax 直连失败，规则表现为"求值为空"
+    //   （用户 2026-10-15 排查订阅源时发现）。
+    applyGlobalProxy(_dio!);
     server.listen(_handle, onError: (_) {});
     return _port;
   }

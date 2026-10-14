@@ -60,6 +60,10 @@ class _RssPageState extends State<RssPage> {
   /// "没有抓到内容"。
   bool _siteLike = false;
 
+  /// 当前源的**分类列表**（`sortUrl` 是 `<js>` / `@js:` 规则时要异步求值，
+  /// 不能直接用 `src.channels` 的静态文本解析）。
+  List<RssChannel> _channels = const [];
+
   WebViewController _webFor(String url) {
     if (_web != null && _webUrl == url) return _web!;
     _webUrl = url;
@@ -99,6 +103,7 @@ class _RssPageState extends State<RssPage> {
         _loadedId = '';
         _nextUrl = '';
         _siteLike = false;
+        _channels = const [];
       });
       return;
     }
@@ -117,9 +122,36 @@ class _RssPageState extends State<RssPage> {
       _web?.reload();
       return;
     }
+    _reloadAsync();
+  }
+
+  Future<void> _reloadAsync() async {
+    // `sortUrl` 可能是**规则**（`<js>` / `@js:`），要先跑规则才知道有哪些分类
+    await _loadChannels();
+    if (!mounted) return;
     _page = 1;
     _nextUrl = '';
     _load(append: false);
+  }
+
+  /// 求分类列表（纯文本直接拆；`<js>` / `@js:` 型走规则引擎求值）。
+  Future<void> _loadChannels() async {
+    final src = store.current;
+    if (src == null) {
+      if (mounted) setState(() => _channels = const []);
+      return;
+    }
+    if (src.isSiteOnly) {
+      if (mounted) setState(() => _channels = const []);
+      return;
+    }
+    final chs = await RssReader.loadChannels(src);
+    if (!mounted) return;
+    setState(() {
+      _channels = chs;
+      // 换源后分类下标可能越界
+      if (_channel >= chs.length) _channel = 0;
+    });
   }
 
   Future<void> _load({required bool append}) async {
@@ -147,7 +179,7 @@ class _RssPageState extends State<RssPage> {
       }
     });
     try {
-      final chs = src.channels;
+      final chs = _channels.isNotEmpty ? _channels : src.channels;
       final ch = chs[_channel.clamp(0, chs.length - 1)];
       // append 时用上一页算出的"下一页地址"接力（ruleNextPage 型源）
       final res = await RssReader.fetchArticles(
@@ -183,7 +215,7 @@ class _RssPageState extends State<RssPage> {
     // 配了 ruleNextPage 却没算出下一页地址 ⇒ 到底了（该规则里没有 {{page}}）
     if ((src.ruleNextPage ?? '').trim().isNotEmpty) return false;
     // 行内模板翻页：地址里必须真有引用 page 的 {{…}} 才算
-    final chs = src.channels;
+    final chs = _channels.isNotEmpty ? _channels : src.channels;
     final ch = chs[_channel.clamp(0, chs.length - 1)];
     return RssReader.isPagedUrl(ch.url);
   }
@@ -281,7 +313,7 @@ class _RssPageState extends State<RssPage> {
   Widget build(BuildContext context) {
     final topInset = MediaQuery.paddingOf(context).top;
     final src = store.current;
-    final channels = src?.channels ?? const <RssChannel>[];
+    final channels = _channels;
     return Scaffold(
       backgroundColor: AppTheme.backgroundPrimary,
       body: Column(
@@ -333,8 +365,11 @@ class _RssPageState extends State<RssPage> {
                   return GestureDetector(
                     onTap: () {
                       if (_channel == i) return;
+                      // 只换分类 ⇒ 不用重算分类表（`sortUrl` 的 JS 可能很贵）
                       setState(() => _channel = i);
-                      _reload();
+                      _page = 1;
+                      _nextUrl = '';
+                      _load(append: false);
                     },
                     child: Container(
                       alignment: Alignment.center,

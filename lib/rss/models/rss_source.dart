@@ -48,6 +48,12 @@ class RssSource {
     this.singleUrl = false,
     this.loadWithBaseUrl = true,
     this.contentBlacklist = '',
+    this.jsLib = '',
+    this.style = '',
+    this.articleStyle = 0,
+    this.searchUrl = '',
+    this.loginUrl = '',
+    this.loginUi = '',
   });
 
   /// 稳定 id（排序/选中用）。
@@ -88,30 +94,81 @@ class RssSource {
   /// 黑名单（正则/URL，命中就跳过该文章）。
   final String contentBlacklist;
 
+  // ── 文档里其余会被真正用到的字段（用户 2026-10-15 指出「没按规范实现」）──
+
+  /// 源级 JS 库（`jsLib`）：规则里调用的工具函数（如 `upLoginData`）写在这里，
+  /// **必须先注入 JS 上下文再跑规则**，否则 ReferenceError 被吞成空串
+  /// （阅读模块 `WebBook._bindJsLib` 就是这么做的）。
+  final String jsLib;
+
+  /// 正文样式（`style`）：规则产出的 HTML 要额外挂的 CSS。
+  final String style;
+
+  /// 阅读样式类型（`articleStyle`）：0=默认文字，其余多为富文本/媒体模板。
+  final int articleStyle;
+
+  /// 搜索地址模板（`searchUrl`，可为 `<js>` / 带 `{{key}}`）—— 目前未接搜索 UI，
+  /// 但字段要留住，免得导入再导出被抹掉。
+  final String searchUrl;
+
+  /// 登录检查 / 登录地址（`loginUrl`）。
+  final String loginUrl;
+
+  /// 登录界面描述（`loginUi`，JSON 数组：select / toggle / text…）。
+  final String loginUi;
+
   /// 解析出分类列表；一个都没有 ⇒ 用源主页兜底（`singleUrl` 型）。
-  List<RssChannel> get channels {
-    final raw = sortUrl.trim();
-    if (raw.isEmpty) return [RssChannel(name, url)];
+  ///
+  /// ⚠️ 只处理**纯文本**形式（`名称::url` 多行 / `&&`）。当 `sortUrl` 是**规则**
+  /// （`<js>` / `@js:` / `$.` …，见 [sortUrlIsRule]）时这里返回的是兜底分类，
+  /// 真正求值要走 `RssReader.loadChannels()`（异步、需要 JS 引擎）。
+  List<RssChannel> get channels =>
+      parseChannelLines(sortUrl, fallbackName: name, fallbackUrl: url);
+
+  /// `sortUrl` 是不是**规则**（而不是"`名称::url`"的纯文本清单）。
+  bool get sortUrlIsRule {
+    final t = sortUrl.trim();
+    if (t.isEmpty) return false;
+    return t.startsWith('<js>') ||
+        t.startsWith('@js:') ||
+        t.startsWith('@css:') ||
+        t.startsWith('@xpath:') ||
+        t.startsWith('@json:') ||
+        t.startsWith('@@') ||
+        t.startsWith(r'$.') ||
+        t.startsWith(r'$[') ||
+        t.startsWith('//');
+  }
+
+  /// 把"分类清单文本"拆成分类（`名称::url`，多行或 `&&` 分隔）。
+  ///
+  /// ⚠️ 只按 **换行** 和 **`&&`** 拆：千万不能按单个 `&` 拆，否则地址里的
+  /// `?a=1&b=2` 会被拦腰截断 ✗。
+  static List<RssChannel> parseChannelLines(
+    String raw, {
+    required String fallbackName,
+    required String fallbackUrl,
+  }) {
+    final t0 = raw.trim();
+    if (t0.isEmpty) return [RssChannel(fallbackName, fallbackUrl)];
     final out = <RssChannel>[];
-    // ⚠️ 只按 **换行** 和 **`&&`** 拆（Legado 的两种分隔符）。
-    // 千万不能按单个 `&` 拆：地址里的 `?a=1&b=2` 会被拦腰截断 ✗
-    for (final line in raw.split(RegExp(r'\n+|&&'))) {
+    for (final line in t0.split(RegExp(r'\n+|&&'))) {
       final t = line.trim();
       if (t.isEmpty) continue;
       final i = t.lastIndexOf('::');
       if (i <= 0) {
         // 没写 `名称::`，整条当 URL
         if (t.startsWith('http') || t.startsWith('/')) {
-          out.add(RssChannel(name, t));
+          out.add(RssChannel(fallbackName, t));
         }
         continue;
       }
       final title = t.substring(0, i).trim();
       final u = t.substring(i + 2).trim();
       if (u.isEmpty) continue;
-      out.add(RssChannel(title.isEmpty ? name : title, u));
+      out.add(RssChannel(title.isEmpty ? fallbackName : title, u));
     }
-    if (out.isEmpty) out.add(RssChannel(name, url));
+    if (out.isEmpty) out.add(RssChannel(fallbackName, fallbackUrl));
     return out;
   }
 
@@ -153,6 +210,12 @@ class RssSource {
         singleUrl: singleUrl,
         loadWithBaseUrl: loadWithBaseUrl,
         contentBlacklist: contentBlacklist,
+        jsLib: jsLib,
+        style: style,
+        articleStyle: articleStyle,
+        searchUrl: searchUrl,
+        loginUrl: loginUrl,
+        loginUi: loginUi,
       );
 
   Map<String, dynamic> toJson() => {
@@ -176,6 +239,12 @@ class RssSource {
         'singleUrl': singleUrl,
         'loadWithBaseUrl': loadWithBaseUrl,
         'contentBlacklist': contentBlacklist,
+        'jsLib': jsLib,
+        'style': style,
+        'articleStyle': articleStyle,
+        'searchUrl': searchUrl,
+        'loginUrl': loginUrl,
+        'loginUi': loginUi,
       };
 
   /// 解析一份「Legado RSS 源」JSON。
@@ -209,6 +278,12 @@ class RssSource {
       singleUrl: j['singleUrl'] == true,
       loadWithBaseUrl: j['loadWithBaseUrl'] != false,
       contentBlacklist: _s(j['contentBlacklist']),
+      jsLib: _s(j['jsLib']),
+      style: _s(j['style']),
+      articleStyle: int.tryParse(_s(j['articleStyle'])) ?? 0,
+      searchUrl: _s(j['searchUrl']),
+      loginUrl: _s(j['loginUrl']),
+      loginUi: _s(j['loginUi']),
     );
   }
 

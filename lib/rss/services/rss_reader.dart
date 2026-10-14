@@ -23,6 +23,7 @@ import 'package:xml/xml.dart';
 
 import '../../reading/novel_source/analyze/analyze_rule.dart';
 import '../../reading/novel_source/analyze/cookie_store.dart';
+import '../../reading/novel_source/analyze/js_engine.dart';
 import '../../reading/source/global_proxy.dart';
 import '../models/rss_article.dart';
 import '../models/rss_source.dart';
@@ -97,17 +98,57 @@ class RssReader {
     }
   }
 
-  /// 建一个绑定当前源的规则求值器（源身份 + cookie jar 按源隔离，Legado 同款）。
+  /// 建一个绑定当前源的规则求值器（源身份 + cookie jar + jsLib，Legado 同款）。
   ///
   /// ⚠️ `enabledCookieJar` 是 Legado 订阅源文档里的字段：控制**本源**的 Cookie
   /// 是否被 `java.ajax` / `cookie.*` 规则读写。跟阅读模块一样，必须在求值前
   /// 按当前源设置（`SourceCookieStore` 是进程级单例，会被下一个源覆盖）。
+  ///
+  /// ⚠️ `jsLib` 同理必须在**跑规则之前**注入 JS 上下文：规则里调用的工具函数
+  /// （`source.getLoginInfoMap()` 之类）都写在 jsLib 里，不注入就是
+  /// `ReferenceError`，而它会被 JS 引擎**吞成空串** ⇒ 表现成"规则不生效"。
   static AnalyzeRule _ruleFor(RssSource source, String body, String pageUrl) {
     SourceCookieStore.instance.enabled = source.enabledCookieJar;
+    try {
+      JsEngine.shared.setActiveSource(
+        source.url.isNotEmpty ? source.url : source.name,
+        source.jsLib,
+      );
+    } catch (_) {
+      // 注入失败不影响规则本身（与阅读模块同一处理）
+    }
     return AnalyzeRule()
       ..setContent(body, pageUrl)
       // 规则里可能用 source.getVariable(...) / java.put，需要源身份做分组
       ..bookSourceUrl = source.url;
+  }
+
+  /// 求**分类列表**（异步；`sortUrl` 是规则时要跑规则引擎）。
+  ///
+  /// 文档里 `sortUrl` 有两种：纯文本 `名称::url` 清单，或**一段规则**
+  /// （用户 2026-10-15 给的「影视聚合(资源站)」就是一整段 `<js>`：它自己
+  /// `java.ajax` 拉站点分类再拼成 `名称::url`）。不求值 ⇒ 一个分类都出不来 ✗。
+  static Future<List<RssChannel>> loadChannels(RssSource source) async {
+    if (!source.sortUrlIsRule) return source.channels;
+    var body = '';
+    // `@css:` / `$.` 这类规则需要页面内容；`<js>` 型自己 ajax，不需要。
+    // ⚠️ 源地址本身可能是 `<js></js>` 这种"空 JS"，不能当 URL 抓。
+    if (source.url.startsWith('http')) {
+      try {
+        body = await _get(source.url, source);
+      } catch (_) {
+        // 取不到就用空内容跑规则（`<js>` 型不受影响）
+      }
+    }
+    try {
+      final text =
+          _ruleFor(source, body, source.url).getString(source.sortUrl).trim();
+      if (text.isEmpty) return source.channels;
+      return RssSource.parseChannelLines(text,
+          fallbackName: source.name, fallbackUrl: source.url);
+    } catch (_) {
+      return source.channels;
+    }
   }
 
   /// 求"下一页地址"：只在配了 `ruleNextPage` 时有效。
@@ -150,7 +191,11 @@ class RssReader {
       var link = _clean(ar.getString(source.ruleLink, isUrl: true));
       final image = _absUrl(_clean(ar.getString(source.ruleImage)), pageUrl);
       var date = _clean(ar.getString(source.rulePubDate));
-      final desc = _clean(ar.getString(source.ruleDescription));
+      // ⚠️ 描述**不能**走 `_clean`（那是去标签的）：文档第 5/6 步里
+      //   `ruleDescription` 常被作者当成**整页正文模板**（用户给的
+      //   「影视聚合(资源站)」就是一整页 HLS 播放器 HTML）。原始 HTML 要留给
+      //   正文页渲染，列表只用它去标签后的纯文本。
+      final rawDesc = ar.getString(source.ruleDescription);
       if (link.isEmpty) continue;
       link = _absUrl(link, pageUrl);
       if (title.isEmpty) title = link;
@@ -159,7 +204,8 @@ class RssReader {
         link: link,
         image: image,
         pubDate: friendlyTime(date),
-        description: _stripHtml(desc),
+        description: _stripHtml(rawDesc),
+        contentHtml: rawDesc.contains('<') ? rawDesc : '',
         sourceId: source.id,
         sourceName: source.name,
       ));
@@ -211,24 +257,49 @@ class RssReader {
     return out;
   }
 
-  /// 取正文。
+  /// 取正文。返回 (内容, 文章里的第一张图, 是不是 HTML)。
   ///
-  /// 返回 (纯文本正文, 文章里的第一张图)。
-  static Future<({String text, String image})> fetchContent(
+  /// [isHtml] 为 true 时 `text` 字段装的是**原始 HTML**，调用方要用网页渲染
+  /// （用户给的「影视聚合(资源站)」整页就是个 HLS 播放器模板）。
+  static Future<({String text, String image, bool isHtml})> fetchContent(
       RssSource source, RssArticle article) async {
     try {
+      // 列表阶段规则已经产出正文 HTML（`ruleDescription` 当模板用）⇒ 直接用，
+      // 不必再抓一次文章页（它的 link 多半只是个接口地址，抓了也没内容）。
+      if (article.contentHtml.trim().isNotEmpty) {
+        return (
+          text: article.contentHtml,
+          image: _firstImage(article.contentHtml, article.link),
+          isHtml: true,
+        );
+      }
       final body = await _get(article.link, source);
       if (source.hasRules && (source.ruleContent ?? '').trim().isNotEmpty) {
-        final ar = _ruleFor(source, body, article.link);
-        final html = ar.getString(source.ruleContent);
-        final text = _stripHtml(html);
+        final out = _ruleFor(source, body, article.link)
+            .getString(source.ruleContent);
+        if (out.contains('<')) {
+          return (
+            text: out,
+            image: _firstImage(out, article.link),
+            isHtml: true,
+          );
+        }
+        final text = _stripHtml(out);
         if (text.trim().length > 40) {
-          return (text: text, image: _firstImage(html, article.link));
+          return (
+            text: text,
+            image: _firstImage(out, article.link),
+            isHtml: false,
+          );
         }
       }
-      return (text: extractArticleText(body), image: _firstImage(body, article.link));
+      return (
+        text: extractArticleText(body),
+        image: _firstImage(body, article.link),
+        isHtml: false,
+      );
     } catch (e) {
-      return (text: '正文抓取失败：${_short(e)}', image: '');
+      return (text: '正文抓取失败：${_short(e)}', image: '', isHtml: false);
     }
   }
 

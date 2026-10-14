@@ -27,6 +27,10 @@ class _RssArticlePageState extends State<RssArticlePage> {
   String _text = '';
   String _cover = '';
 
+  /// 规则产出的正文是**整页 HTML**（Legado 文档里 `ruleDescription` /
+  /// `ruleContent` 常被作者当成正文模板）⇒ 用 WebView 渲染，而不是当纯文本。
+  bool _isHtml = false;
+
   @override
   void initState() {
     super.initState();
@@ -40,8 +44,19 @@ class _RssArticlePageState extends State<RssArticlePage> {
     setState(() {
       _text = r.text;
       _cover = widget.article.hasImage ? widget.article.image : r.image;
+      _isHtml = r.isHtml;
       _loading = false;
     });
+  }
+
+  /// 把源的 `style`（订阅源文档字段）注入规则产出的 HTML。
+  static String _injectStyle(String html, String css) {
+    final c = css.trim();
+    if (c.isEmpty) return html;
+    final tag = '<style>\n$c\n</style>';
+    final i = html.toLowerCase().indexOf('</head>');
+    if (i >= 0) return html.replaceRange(i, i, tag);
+    return '$tag\n$html';
   }
 
   @override
@@ -75,7 +90,13 @@ class _RssArticlePageState extends State<RssArticlePage> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-          : ListView(
+          : _isHtml
+              // HTML 正文：整页渲染（模板内的 `<script>` / HLS 播放器都能跑）
+              ? _RssHtmlView(
+                  html: _injectStyle(_text, widget.source.style),
+                  baseUrl: a.link.isNotEmpty ? a.link : widget.source.url,
+                )
+              : ListView(
               padding: const EdgeInsets.fromLTRB(18, 6, 18, 40),
               children: [
                 Text(
@@ -135,6 +156,60 @@ class _RssArticlePageState extends State<RssArticlePage> {
                 ),
               ],
             ),
+    );
+  }
+}
+
+/// 用 WebView 渲染规则产出的 HTML 正文。
+///
+/// 订阅源文档里 `ruleDescription` / `ruleContent` 经常被作者当成**整页正文
+/// 模板**（视频播放器、图文混排都用它），所以不能再当纯文本显示 ✗。
+class _RssHtmlView extends StatefulWidget {
+  const _RssHtmlView({required this.html, required this.baseUrl});
+
+  final String html;
+  final String baseUrl;
+
+  @override
+  State<_RssHtmlView> createState() => _RssHtmlViewState();
+}
+
+class _RssHtmlViewState extends State<_RssHtmlView> {
+  late final WebViewController _c;
+  int _progress = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(AppTheme.backgroundPrimary)
+      ..setNavigationDelegate(NavigationDelegate(
+        onProgress: (p) {
+          if (mounted) setState(() => _progress = p);
+        },
+      ))
+      ..loadHtmlString(widget.html, baseUrl: widget.baseUrl);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        WebViewWidget(controller: _c),
+        if (_progress > 0 && _progress < 100)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: LinearProgressIndicator(
+              value: _progress / 100.0,
+              minHeight: 2,
+              backgroundColor: AppTheme.borderLight,
+              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accentColor),
+            ),
+          ),
+      ],
     );
   }
 }
