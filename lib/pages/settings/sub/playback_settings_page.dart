@@ -72,7 +72,9 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
             Obx(() => SettingsRow(
                   icon: Icons.video_settings,
                   title: '播放内核',
-                  value: controller.vodPlayerEngine.value.title,
+                  // 直接读 PlayerPrefs 的 Rx：播放器内切核心时设置页会**实时同步**
+                  // （原来读的是 controller 里的副本，只在加载时拷贝一次 ⇒ 不同步）
+                  value: PlayerPrefs.instance.vodEngine.value.title,
                   onTap: _pickEngine,
                 )),
             // 直播内核：与点播**独立持久化**（PlayerPrefs.liveEngine），
@@ -92,23 +94,23 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
                   onTap: _pickFillMode,
                 )),
             // 随内核显隐的专有项
-            Obx(() => controller.vodPlayerEngine.value == PlayerEngine.mpv
+            Obx(() => PlayerPrefs.instance.vodEngine.value == PlayerEngine.mpv
                 ? SettingsRow(
                     icon: Icons.memory,
                     title: '视频解码（MPV）',
-                    value: controller.decodeMode.value.title,
+                    value: PlayerPrefs.instance.decodeMode.value.title,
                     onTap: _pickDecodeMode,
                   )
                 : const SizedBox.shrink()),
-            Obx(() => controller.vodPlayerEngine.value == PlayerEngine.mpv
+            Obx(() => PlayerPrefs.instance.vodEngine.value == PlayerEngine.mpv
                 ? SettingsRow(
                     icon: Icons.sd_card_outlined,
                     title: 'MPV 缓冲',
-                    value: controller.vlcBufferMode.value.title,
+                    value: PlayerPrefs.instance.bufferMode.value.title,
                     onTap: _pickBufferMode,
                   )
                 : const SizedBox.shrink()),
-            Obx(() => controller.vodPlayerEngine.value == PlayerEngine.webview
+            Obx(() => PlayerPrefs.instance.vodEngine.value == PlayerEngine.webview
                 ? unifiedSwitchRow(
                     icon: Icons.javascript,
                     title: '网页 JS',

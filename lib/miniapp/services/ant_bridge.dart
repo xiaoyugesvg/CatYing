@@ -1,17 +1,21 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../common/theme.dart';
+import '../../models/cache_store.dart';
 import '../../models/movie_sort.dart';
 import '../../models/source_bean.dart';
 import '../../models/vod_info.dart';
 import '../../services/api_config.dart';
 import '../../services/app_log.dart';
+import '../../services/play_route.dart';
 import '../../services/parse_service.dart';
 import '../../services/source_service.dart';
 import '../../services/spider_service.dart';
@@ -184,7 +188,8 @@ class AntBridge {
       try { if (window.history.length > 1) window.history.back(); } catch (e) {}
       return Promise.resolve({ moved: true });
     },
-    exitMiniApp: function () { return Promise.resolve(); },
+    // 退出当前网页：走宿主桥（原来只 Promise.resolve()，点了毫无反应）
+    exitMiniApp: function () { return antCall('exitMiniApp', {}); },
 
     // ── 反向服务（宿主暂不提供 loopback，注册 handler 备用）──
     serve: function (handler) { window.__antServe = handler; return Promise.resolve(); },
@@ -214,7 +219,9 @@ class AntBridge {
       category: function (o) { return antCall('source.category', o || {}); },
       search: function (o) { return antCall('source.search', o || {}); },
       detail: function (o) { return antCall('source.detail', o || {}); },
-      play: function (o) { return antCall('source.play', o || {}); }
+      play: function (o) { return antCall('source.play', o || {}); },
+      // 最近观看（含进度）：{list:[{vod_*,sourceKey,flag,episodeIndex,progressSeconds}]}
+      recent: function (o) { return antCall('source.recent', o || {}); }
     }
   };
 
@@ -328,6 +335,10 @@ class AntBridge {
         return _sourceDetail(args);
       case 'source.play':
         return _sourcePlay(args);
+      case 'source.recent':
+        return _sourceRecent(args);
+      case 'exitMiniApp':
+        return _exitMiniApp();
       default:
         throw AntError('UNKNOWN_API', '未知方法 $method');
     }
@@ -335,15 +346,29 @@ class AntBridge {
 
   // ────────────────────────── env ──────────────────────────
 
+  /// App 版本号 / 构建号 —— **必须与 `pubspec.yaml` 的 `version:` 保持一致**。
+  ///
+  /// 为什么写成常量：Dart 运行时读不到 pubspec，本项目也没引入 `package_info_plus`。
+  /// 改版本号时两处一起改（`version: 1.0.0+1` ⇒ `'1.0.0'` / `1`）。
+  static const String kAppVersion = '1.0.0';
+  static const int kAppBuildNumber = 1;
+
+  /// 真实设备与应用信息。
+  ///
+  /// ⚠️ 2026-10-14 补：原来是**硬编码空值**（`osVersion: ''`、`appVersion: ''`、
+  ///   `devMode: false`）⇒ 网页想"按 App 版本 / 系统版本做适配"完全没法做
+  ///   （例如只在某个版本以上才用的能力无法判断）。现在给真实值。
   static Map<String, dynamic> _envInfo() => {
-        'platform': 'ios',
-        'osVersion': '',
-        'isTV': false,
+        'platform': Platform.isIOS
+            ? 'ios'
+            : (Platform.isAndroid ? 'android' : Platform.operatingSystem),
+        'osVersion': Platform.operatingSystemVersion,
+        'isTV': false, // 本项目是手机/平板形态（TV 遥控尚未接入）
         'appId': appId,
-        'appName': 'New TV',
-        'appVersion': '',
-        'appVersionCode': 0,
-        'devMode': false,
+        'appName': '猫影',
+        'appVersion': kAppVersion,
+        'appVersionCode': kAppBuildNumber,
+        'devMode': kDebugMode,
         'permissions': permissions.toList(),
         'sdkVersion': sdkVersion,
       };
@@ -787,6 +812,63 @@ class AntBridge {
     };
   }
 
+  /// 「继续观看」：最近播放记录（带进度）。
+  ///
+  /// ⚠️ 2026-10-14 补：`ant.source.*` 原来只有 list/home/category/search/detail/play，
+  ///   **没有"最近观看"** ⇒ WebHome 类首页做不了"继续观看"这一块。
+  ///
+  /// `args`: `{limit?: int}`（默认 20，上限 100）
+  /// 返回：`{list:[{vod_id, vod_name, vod_pic, vod_remarks, sourceKey, updatedAt,
+  ///        flag?, episodeIndex?, progressSeconds?}]}`
+  ///   —— 后三个字段仅在该记录**存过播放进度**时出现（可直接拿去续播）。
+  static Future<Object?> _sourceRecent(Map<String, dynamic> args) async {
+    final limit = ((args['limit'] as num?)?.toInt() ?? 20).clamp(1, 100);
+    final cs = CacheStore.instance;
+    final out = <Map<String, dynamic>>[];
+    for (final r in cs.records.take(limit)) {
+      final st = cs.getPlaybackState(r.vodId, r.sourceKey);
+      out.add({
+        'vod_id': r.vodId,
+        'vod_name': r.vodName,
+        'vod_pic': r.vodPic,
+        'vod_remarks': r.playNote,
+        'sourceKey': r.sourceKey,
+        'updatedAt': r.updateTime.millisecondsSinceEpoch,
+        if (st != null) ...{
+          'flag': st.flag,
+          'episodeIndex': st.episodeIndex,
+          'progressSeconds': st.progressSeconds,
+        },
+      });
+    }
+    return {'list': out};
+  }
+
+  /// 「退出当前网页」要执行的宿主动作（由宿主页在打开时注入）。
+  ///
+  /// · 小程序页（`MiniAppWebPage`）→ `Navigator.maybePop()`（返回上一页）
+  /// · 「网页首页」模块（`WebHomePage`）→ 切回影视首页 tab（它是底栏 tab，没有"返回"）
+  static void Function()? onExitRequested;
+
+  /// `ant.exitMiniApp()` 的宿主实现。
+  ///
+  /// ⚠️ 2026-10-14 补：原来 JS 侧是**空实现**（只 `Promise.resolve()`）⇒
+  ///   网页里放个"返回 / 退出"按钮，点了毫无反应 ✗。
+  static Object? _exitMiniApp() {
+    final cb = onExitRequested;
+    if (cb != null) {
+      // 延后到微任务：先让本次桥调用把结果回给 JS，再真正退出页面
+      Future<void>.microtask(() {
+        try {
+          cb();
+        } catch (_) {
+          // 退出动作失败不影响桥调用本身
+        }
+      });
+    }
+    return {'ok': true};
+  }
+
   /// VodInfo → TVBox JSON（官方 v4：vod_play_from / vod_play_url 是数组）
   static Map<String, dynamic> _vodToJson(VodInfo info) {
     final flags = info.playFlags;
@@ -819,43 +901,41 @@ class AntBridge {
     final jx = (args['jx'] ?? 0).toString();
     if (url.isEmpty) throw AntError('INVALID_PARAMS', 'player.open: url 必填');
 
-    // parse/jx 为 '1'：url 是网页地址 → 先走宿主解析接口（parses），
-    // 拿到直链直接播；拿到网页交给嗅探页主动嗅探；全部未命中再提示换线路
-    if (parse == '1' || jx == '1') {
-      final headers = args['headers'] is Map
-          ? (args['headers'] as Map)
-              .map((k, v) => MapEntry(k.toString(), v.toString()))
-          : const <String, String>{};
-      final outcome = await ParseService.instance.parseOutcome(url);
-      if (outcome != null && outcome.url.isNotEmpty) {
-        if (outcome.direct) {
-          AppLog.instance.log('[AntBridge] player.open 解析命中直链: ${outcome.url}');
-          Get.to(() =>
-              MiniAppPlayerPage(url: outcome.url, title: title, headers: headers));
-          return {
-            'route': 'player',
-            'url': outcome.url,
-            'sniff': false,
-            'headerKeys': headers.keys.toList(),
-          };
-        }
-        AppLog.instance.log('[AntBridge] player.open 解析返回网页 → 嗅探页: ${outcome.url}');
-        Get.to(() => SniffPlayerPage(url: outcome.url, title: title));
-        return {'route': 'sniff', 'url': outcome.url, 'sniff': true};
-      }
-      AppToast.message('该线路需要宿主解析，当前解析接口未命中，换一条线路试试');
-      return {'route': null, 'url': url, 'sniff': true};
-    }
-
     final headers = args['headers'] is Map
         ? (args['headers'] as Map)
             .map((k, v) => MapEntry(k.toString(), v.toString()))
         : const <String, String>{};
-    AppLog.instance.log('[AntBridge] player.open: $title $url');
-    Get.to(() => MiniAppPlayerPage(url: url, title: title, headers: headers));
+
+    // 与影视端**同一套分流**（规则集中在 services/play_route.dart）：
+    //   ① 主流正版站（优爱腾芒B…），或线路显式标了 parse/jx → 先过解析接口；
+    //   ② 其余站点 → 直接嗅探。
+    // 解析出直链直接播；解析出网页 / 未命中 / 没配接口 → 交给嗅探页兜底。
+    var candidate = url;
+    if (!looksLikeDirectMedia(candidate)) {
+      final mustParse = parse == '1' || jx == '1' || needParseFirst(candidate);
+      if (mustParse && ParseService.instance.enabled) {
+        final outcome = await ParseService.instance.parseOutcome(candidate);
+        if (outcome != null && outcome.url.isNotEmpty) {
+          AppLog.instance.log(
+              '[AntBridge] player.open 解析「${outcome.sourceName}」→ ${outcome.url}'
+              '（${outcome.direct ? "直链" : "仍为网页，转嗅探"}）');
+          candidate = outcome.url;
+        } else {
+          AppLog.instance.log('[AntBridge] player.open 解析未命中，转直接嗅探');
+        }
+      }
+      if (!looksLikeDirectMedia(candidate)) {
+        AppLog.instance.log('[AntBridge] player.open 转嗅探: $candidate');
+        Get.to(() => SniffPlayerPage(url: candidate, title: title));
+        return {'route': 'sniff', 'url': candidate, 'sniff': true};
+      }
+    }
+
+    AppLog.instance.log('[AntBridge] player.open: $title $candidate');
+    Get.to(() => MiniAppPlayerPage(url: candidate, title: title, headers: headers));
     return {
       'route': 'player',
-      'url': url,
+      'url': candidate,
       'sniff': false,
       'headerKeys': headers.keys.toList(),
     };

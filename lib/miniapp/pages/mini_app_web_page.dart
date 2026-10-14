@@ -43,6 +43,10 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
   @override
   void initState() {
     super.initState();
+    // 网页里调 `ant.exitMiniApp()` → 关掉这一页（返回上一页）
+    AntBridge.onExitRequested = () {
+      if (mounted) Navigator.of(context).maybePop();
+    };
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(AppTheme.backgroundPrimary)

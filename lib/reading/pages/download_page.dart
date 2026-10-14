@@ -801,26 +801,8 @@ class _DownloadPageState extends State<DownloadPage>
             right: 12,
             child: Row(
               children: [
-                // 搜索框：**可伸长**（收起 = 圆形图标，点击展开成输入框）。
-                // 原来是常驻 `JellySearchBar` 且写死"屏宽 42%"，占地方又不灵活。
-                // 用 Expanded 让它展开时能吃掉剩余宽度。
-                Expanded(
-                  child: AppExpandableSearch(
-                    controller: _searchController,
-                    hintText: _isComicTab ? '搜索漫画' : '搜索图书',
-                    onSubmitted: (v) => setState(() {
-                      _searchQuery = v;
-                      _comicDisplayCount = ListPagination.pageSize;
-                      _bookDisplayCount = ListPagination.pageSize;
-                    }),
-                    onChanged: (v) => setState(() {
-                      _searchQuery = v;
-                      _comicDisplayCount = ListPagination.pageSize;
-                      _bookDisplayCount = ListPagination.pageSize;
-                    }),
-                  ),
-                ),
-                const SizedBox(width: 8),
+                // 漫画 / 图书 图标框先放（2026-10-14 按用户要求：搜索框要挪到
+                // 它的**右边**，所以这里把图标框提到最左）
                 AnimatedBuilder(
                   animation: _tabController.animation!,
                   builder: (context, _) {
@@ -841,7 +823,26 @@ class _DownloadPageState extends State<DownloadPage>
                     );
                   },
                 ),
-                const Spacer(),
+                const SizedBox(width: 8),
+                // 搜索框：**可伸长**（收起 = 圆形图标，点击展开成输入框）。
+                // 原来是常驻 `JellySearchBar` 且写死"屏宽 42%"，占地方又不灵活。
+                // 用 Expanded 让它展开时能吃掉剩余宽度。
+                Expanded(
+                  child: AppExpandableSearch(
+                    controller: _searchController,
+                    hintText: _isComicTab ? '搜索漫画' : '搜索图书',
+                    onSubmitted: (v) => setState(() {
+                      _searchQuery = v;
+                      _comicDisplayCount = ListPagination.pageSize;
+                      _bookDisplayCount = ListPagination.pageSize;
+                    }),
+                    onChanged: (v) => setState(() {
+                      _searchQuery = v;
+                      _comicDisplayCount = ListPagination.pageSize;
+                      _bookDisplayCount = ListPagination.pageSize;
+                    }),
+                  ),
+                ),
               ],
             ),
           ),

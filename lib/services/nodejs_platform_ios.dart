@@ -114,6 +114,32 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     );
   }
 
+  /// 取文本；失败/非 200 返回 null（md5 只是校验用，拿不到不该影响主流程）。
+  Future<String?> _tryGetText(String url, Map<String, String> headers) async {
+    try {
+      final r = await _dio.get<String>(
+        url,
+        options: _opts(headers, type: ResponseType.plain),
+      );
+      return r.statusCode == 200 ? r.data : null;
+    } on DioException {
+      return null;
+    }
+  }
+
+  /// 取字节；失败/非 200 返回 null（index.config.js 缺失有默认兜底）。
+  Future<List<int>?> _tryGetBytes(String url, Map<String, String> headers) async {
+    try {
+      final r = await _dio.get<List<int>>(
+        url,
+        options: _opts(headers, type: ResponseType.bytes),
+      );
+      return r.statusCode == 200 ? r.data : null;
+    } on DioException {
+      return null;
+    }
+  }
+
   /// 源文件最小有效体积。真实的 catvod 源打包后是几百 KB，
   /// 小于这个值基本可以断定是空文件或 HTML 错误页（401/404 页面）。
   static const int _minValidSourceBytes = 1024;
@@ -420,42 +446,27 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
     try {
       // 凭据订阅源：把 URL 里的 user:pass@ 转成 Basic 头（HttpClient 会丢弃 userinfo）
       final jsAuth = _authSplit(normalizedUrl);
-      final jsResponse = await _dio.get<List<int>>(
+      final configAuth = _authSplit(
+          normalizedUrl.replaceAll('/index.js', '/index.config.js'));
+
+      // 🔴 2026-10-14（用户：「接口配置下载源文件好慢」）：三个请求**并发**。
+      //   主脚本是长杆（几百 KB ~ 几 MB），而 `.md5` 与 `index.config.js`
+      //   都只有几十字节 —— 原来三者**串行**，等于在主脚本下完之后又白等
+      //   两个完整往返（首下源文件时最明显，慢网上每次多等 1~3 秒）。
+      final jsFuture = _dio.get<List<int>>(
         jsAuth.url,
         options: _opts(jsAuth.headers, type: ResponseType.bytes),
       );
+      final md5Future = _tryGetText('${jsAuth.url}.md5', jsAuth.headers);
+      final configFuture = _tryGetBytes(configAuth.url, configAuth.headers);
+
+      final jsResponse = await jsFuture;
+      final md5Data = (await md5Future)?.trim();
+      final configData = await configFuture;
+
       if (jsResponse.statusCode == 200 && jsResponse.data != null) {
         final jsData = jsResponse.data!;
         AppLog.instance.log('[IOSNodeJS] 主源文件已下载，大小: ${jsData.length} 字节');
-
-        String? md5Data;
-        try {
-          final md5Response = await _dio.get<String>(
-            '${jsAuth.url}.md5',
-            options: _opts(jsAuth.headers, type: ResponseType.plain),
-          );
-          if (md5Response.statusCode == 200 && md5Response.data != null) {
-            md5Data = md5Response.data!.trim();
-          }
-        } on DioException catch (e) {
-        AppLog.instance.log('[nodejs_platform_ios] swallowed: $e');
-      }
-
-        List<int>? configData;
-        try {
-          final configAuth = _authSplit(
-              normalizedUrl.replaceAll('/index.js', '/index.config.js'));
-          final configResponse = await _dio.get<List<int>>(
-            configAuth.url,
-            options: _opts(configAuth.headers, type: ResponseType.bytes),
-          );
-          if (configResponse.statusCode == 200 &&
-              configResponse.data != null) {
-            configData = configResponse.data!;
-          }
-        } on DioException catch (e) {
-        AppLog.instance.log('[nodejs_platform_ios] swallowed: $e');
-      }
 
         if (md5Data != null && md5Data.isNotEmpty) {
           final actualMd5 = md5.convert(jsData).toString();
@@ -465,7 +476,7 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
         final sourceDir = Directory(sourcePath);
         if (!await sourceDir.exists()) await sourceDir.create(recursive: true);
         await File(indexJSPath).writeAsBytes(jsData);
-        if (md5Data != null) {
+        if (md5Data != null && md5Data.isNotEmpty) {
           await File(indexMd5Path).writeAsString(md5Data);
         }
         if (configData != null) {
@@ -494,8 +505,17 @@ class IOSNodeJSPlatform implements NodeJSPlatform {
         return false;
       }
     }
-    _spiderPort = 0;
-    onSpiderPortChanged.value = 0;
+    // 🔴 只在 Node **没在跑**时才清零端口（用户 2026-10-14「常驻」审查）：
+    //   iOS 上 NodeMobile 是 embed library，进程**关不掉**，清了文件它照样活着
+    //   （脚本已经 require 进内存，照样能跑）。原来的无条件清零会让上层以为
+    //   "Node 未就绪" ⇒ 下次用到时再调 `startNodeJS()` ⇒ **第二次 node_start**
+    //   ⇒ 卡死在 V8 二次初始化（nodejs_manager.dart 里为此删过 reset 路径）。
+    //   就"清理源文件缓存"这个动作而言：文件删掉即可，运行中的 Node 继续用内存里的
+    //   脚本；真需要重新载入时 `loadSource` 会重新下载。
+    if (!_isRunning) {
+      _spiderPort = 0;
+      onSpiderPortChanged.value = 0;
+    }
     return true;
   }
 

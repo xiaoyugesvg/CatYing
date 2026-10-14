@@ -37,15 +37,30 @@ enum SubscriptionKind {
     js,
   ];
 
-  /// 旧数据兜底：只做**很保守**的推断（.py → PY源、.js → JS源），
-  /// 其余一律 [unknown] —— 猜错的分类比"未分类"更误导人。
+  /// 旧数据兜底：只做**很保守**的推断，其余一律 [unknown]
+  /// —— 猜错的分类比"未分类"更误导人。
+  ///
+  /// ⚠️ 2026-10-14 修（用户：「为啥将 js 以及 js.md5 这个定位成 js 源？这是猫源呀」）：
+  ///   `.js` / `.js.md5` 这种**订阅地址**绝大多数就是 **CatVod 整包订阅**
+  ///   （标准形态 `.../catvod/index.js.md5`，线路由脚本的 /config 下发）。
+  ///   原来推断成 `js` ⇒ 订阅管理里显示"JS源"，与实际不符 ✗。
+  ///   `JS源` 这个分类留给**单脚本站点 js**（drpy2 的站点脚本），
+  ///   而订阅地址的后缀判断不出那种，所以不再自动落到 `js`。
   static SubscriptionKind inferKind(String url) {
     final u = url.trim().toLowerCase();
     if (u.isEmpty) return SubscriptionKind.unknown;
-    final path = Uri.tryParse(u)?.path ?? u;
-    if (path.endsWith('.py')) return SubscriptionKind.py;
-    if (path.endsWith('.js') || path.endsWith('.js.md5')) {
-      return SubscriptionKind.js;
+    // TVBox 的 `;md5;<hash>` 语法：分号后是校验和、不属于地址
+    final raw = u.split(';').first.trim();
+    final path = Uri.tryParse(raw)?.path ?? raw;
+    if (path.endsWith('.py') || path.endsWith('.py.md5')) {
+      return SubscriptionKind.py;
+    }
+    // .js / .js.md5 / .jar / .jar.md5 → CatVod 整包订阅（猫源）
+    if (path.endsWith('.js') ||
+        path.endsWith('.js.md5') ||
+        path.endsWith('.jar') ||
+        path.endsWith('.jar.md5')) {
+      return SubscriptionKind.catvod;
     }
     return SubscriptionKind.unknown;
   }

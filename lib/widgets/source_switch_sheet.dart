@@ -4,6 +4,8 @@ import 'package:get/get.dart';
 import '../common/theme.dart';
 import '../models/source_bean.dart';
 import '../services/api_config.dart';
+import '../services/source_kind.dart';
+import 'source_kind_badge.dart';
 
 /// 源切换面板（2026-10-02 二次重构：**三分之一屏**）
 ///
@@ -235,6 +237,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                             final source = list[index];
                             return _SourceTile(
                               name: source.name,
+                              api: source.api,
                               selected: source.key == selectedKey,
                               onTap: () => _selectSource(source),
                             );
@@ -244,6 +247,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                         for (final source in list)
                           _SourceRow(
                             name: source.name,
+                            api: source.api,
                             selected: source.key == selectedKey,
                             onTap: () => _selectSource(source),
                           ),
@@ -259,14 +263,16 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
   }
 }
 
-/// 单列模式：一行一个源，圆圈 + 名称
+/// 单列模式：一行一个源，圆圈 + 类型字符 + 名称
 class _SourceRow extends StatelessWidget {
   final String name;
+  final String api;
   final bool selected;
   final VoidCallback onTap;
 
   const _SourceRow({
     required this.name,
+    required this.api,
     required this.selected,
     required this.onTap,
   });
@@ -310,6 +316,8 @@ class _SourceRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 10),
+              SourceKindBadge(kind: inferMediaKind(name, api: api)),
+              const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   name,
@@ -416,14 +424,16 @@ class _ExpandableSearchFieldState extends State<_ExpandableSearchField> {
   }
 }
 
-/// 双排模式：网格卡片，圆圈 + 名称
+/// 双排模式：网格卡片，圆圈 + 类型字符 + 名称
 class _SourceTile extends StatelessWidget {
   final String name;
+  final String api;
   final bool selected;
   final VoidCallback onTap;
 
   const _SourceTile({
     required this.name,
+    required this.api,
     required this.selected,
     required this.onTap,
   });
@@ -458,6 +468,8 @@ class _SourceTile extends StatelessWidget {
                   : AppTheme.textTertiary,
             ),
             const SizedBox(width: 8),
+            SourceKindBadge(kind: inferMediaKind(name, api: api)),
+            const SizedBox(width: 5),
             Expanded(
               child: Text(
                 name,
@@ -479,3 +491,4 @@ class _SourceTile extends StatelessWidget {
     );
   }
 }
+

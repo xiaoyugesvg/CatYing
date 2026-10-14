@@ -3391,99 +3391,101 @@ class _ReaderPageState extends State<ReaderPage> {
                   ],
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+                  // ✅ 用户 2026-10-14：「漫画阅读器那个功能面板高度太高了，
+                  //    至少减掉现有的三分之一」⇒ 三处一起收：
+                  //    ① 卡片上下内边距 10/8 → 6/6；
+                  //    ② 页码滑块默认 thumb/overlay 会把整行撑到 ~48，
+                  //       压到 26（滑块本体仍然好拖：手势区=整行）；
+                  //    ③ 原来"上一章/页码/下一章" + "番茄钟/设置/目录"是**两行**
+                  //       TextButton（各 48 高）⇒ 合并成**一行** 36 圆钮
+                  //       （与右侧竖条同款）。
+                  //    整条约 146 → ~80（-45%），功能一个没少。
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       // 页码滑块（拼页模式下不显示）
                       if (_images.isNotEmpty && !_isContinuousMode)
-                        Slider(
-                          value:
-                              (_isDoublePage ? _currentSpread : _currentIndex)
-                                  .toDouble(),
-                          min: 0,
-                          max:
-                              (_isDoublePage
-                                      ? _spreadCount - 1
-                                      : _images.length - 1)
-                                  .toDouble(),
-                          onChanged: (value) {
-                            setState(() {
-                              if (_isDoublePage) {
-                                _currentIndex = _spreadLeftImage(value.toInt());
-                              } else {
-                                _currentIndex = value.toInt();
-                              }
-                            });
-                          },
-                          onChangeEnd: (value) {
-                            // 拖动/点击结束：跳转到目标页（onPageChanged 会同步 _currentIndex 与进度）
-                            if (_pageController.hasClients) {
-                              _pageController.jumpToPage(value.toInt());
-                            }
-                          },
+                        SizedBox(
+                          height: 26,
+                          child: SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              trackHeight: 3,
+                              thumbShape: const RoundSliderThumbShape(
+                                  enabledThumbRadius: 7),
+                              overlayShape: const RoundSliderOverlayShape(
+                                  overlayRadius: 14),
+                            ),
+                            child: Slider(
+                              value:
+                                  (_isDoublePage ? _currentSpread : _currentIndex)
+                                      .toDouble(),
+                              min: 0,
+                              max:
+                                  (_isDoublePage
+                                          ? _spreadCount - 1
+                                          : _images.length - 1)
+                                      .toDouble(),
+                              onChanged: (value) {
+                                setState(() {
+                                  if (_isDoublePage) {
+                                    _currentIndex =
+                                        _spreadLeftImage(value.toInt());
+                                  } else {
+                                    _currentIndex = value.toInt();
+                                  }
+                                });
+                              },
+                              onChangeEnd: (value) {
+                                // 拖动/点击结束：跳转到目标页（onPageChanged 会同步 _currentIndex 与进度）
+                                if (_pageController.hasClients) {
+                                  _pageController.jumpToPage(value.toInt());
+                                }
+                              },
+                            ),
+                          ),
                         ),
-                      const SizedBox(height: 8),
-                      // 页码和按钮（纯图标）
+                      const SizedBox(height: 6),
+                      // 一行装完：上一章 / 页码 / 下一章 / 番茄钟 / 设置 / 目录
+                      // （原来拆两行，白占一整行高度）
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
-                          TextButton(
-                            onPressed: _prevChapter,
-                            child: const Icon(
-                              Icons.chevron_left,
-                              color: Colors.white,
+                          Tooltip(
+                            message: '上一章',
+                            child: _dockCircleButton(
+                              icon: Icons.chevron_left,
+                              onTap: _prevChapter,
                             ),
                           ),
                           _buildPageIndicator(),
-                          TextButton(
-                            onPressed: _nextChapter,
-                            child: const Icon(
-                              Icons.chevron_right,
-                              color: Colors.white,
+                          Tooltip(
+                            message: '下一章',
+                            child: _dockCircleButton(
+                              icon: Icons.chevron_right,
+                              onTap: _nextChapter,
                             ),
                           ),
-                        ],
-                      ),
-                      // 底部按钮行：番茄钟 / 设置 / 目录 三按钮居中等距
-                      // （对齐参考图 IMG_8575：三个图标一行均匀分布）
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          // 番茄钟入口：与书源阅读器右侧竖条同款的圆形 timer 图标，
-                          // 点按开关悬浮倒计时（原先是直接内嵌 🍅 emoji 按钮 ✗ 风格不统一）
                           Tooltip(
                             message: '番茄钟',
-                            child: GestureDetector(
-                              onTap: () =>
-                                  setState(() => _showPomodoro = !_showPomodoro),
-                              child: Container(
-                                width: 36,
-                                height: 36,
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.08),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(
-                                  Icons.timer_outlined,
-                                  size: 20,
-                                  color: Colors.white.withValues(alpha: 0.9),
-                                ),
-                              ),
+                            child: _dockCircleButton(
+                              icon: Icons.timer_outlined,
+                              onTap: () => setState(
+                                  () => _showPomodoro = !_showPomodoro),
                             ),
                           ),
-                          TextButton(
-                            onPressed: _showReaderSettingsSheet,
-                            child: const Icon(
-                              Icons.settings_rounded,
-                              color: Colors.white,
+                          Tooltip(
+                            message: '阅读设置',
+                            child: _dockCircleButton(
+                              icon: Icons.settings_rounded,
+                              onTap: _showReaderSettingsSheet,
                             ),
                           ),
-                          TextButton(
-                            onPressed: _showToc,
-                            child: const Icon(
-                              Icons.menu_book_rounded,
-                              color: Colors.white,
+                          Tooltip(
+                            message: '目录',
+                            child: _dockCircleButton(
+                              icon: Icons.menu_book_rounded,
+                              onTap: _showToc,
                             ),
                           ),
                         ],

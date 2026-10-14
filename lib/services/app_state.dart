@@ -1,14 +1,13 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:get/get.dart';
-import '../models/app_config.dart';
+import '../models/source_bean.dart';
 import 'api_config.dart';
 import 'ad_filter_service.dart';
 import 'app_log.dart';
-import 'network_manager.dart';
 import 'nodejs_manager.dart';
 import 'python_manager.dart';
+import 'python_script_sources.dart';
 import 'python_sources_service.dart';
 import 'scene_recovery.dart';
 import 'spider_service.dart';
@@ -165,6 +164,9 @@ class AppState extends GetxController {
       // Python 引擎（T3 Python spider / 书源）：惰性启动 + 用户源同步，
       // 不阻塞主流程（增量能力，Node 失败不影响 Python 源）
       unawaited(_ensurePythonSource());
+      // 切订阅后的**后台预热**：把本次订阅会用到的脚本提前下好/注册好，
+      // 让"切完就能直接用、不用重启软件"（详见 _prewarmCurrentSubscription 注释）。
+      unawaited(_prewarmCurrentSubscription());
       loadingPhase.value = LoadingPhase.completed;
       applyLoadedConfigState();
     } catch (e) {
@@ -189,29 +191,21 @@ class AppState extends GetxController {
     // 不再弹免责声明（用户要求去掉首次打开的责任弹窗）
   }
 
-  /// 从配置里提取 ads / rules 并交给 AdFilterService。
+  /// 把配置里的 ads / rules 交给 AdFilterService。
   ///
-  /// ⚠️ ApiConfig 未对外暴露已解析的 AppConfigData，且本次改动不允许修改
-  /// api_config.dart，所以这里用其公开静态工具（normalizeConfigUrl /
-  /// stripJsonComments）按同一份 configUrl 重新拉取并解析一次。任何失败都
-  /// 视为「无规则」，绝不影响主流程。
+  /// 🔴 2026-10-14 修（用户：「接口配置下载源文件好慢」）：
+  ///   旧实现是**把整份配置再下一次**（`NetworkManager.getString(configUrl)`）
+  ///   再自己 jsonDecode 一遍 —— 而且它没走 `ApiConfig._fetchConfigText` 的
+  ///   20s 原始文本缓存，等于**每次都实打实重新拉一遍整个配置**。
+  ///   大配置（几 MB）下：白耗一倍流量，还和首页首屏请求抢带宽。
+  ///   ApiConfig 现在把解析好的 ads / rules 直接暴露出来，这里读现成的即可，
+  ///   **不再有任何额外网络请求**。
   Future<void> _reloadAdFilterRules() async {
     try {
-      final rawUrl = ApiConfig.instance.configUrl.value.trim();
-      if (rawUrl.isEmpty) {
-        AdFilterService.instance.load();
-        return;
-      }
-      final normalized = ApiConfig.normalizeConfigUrl(rawUrl);
-      final raw = await NetworkManager.instance.getString(normalized);
-      final cleaned = ApiConfig.stripJsonComments(raw);
-      final decoded = jsonDecode(cleaned);
-      if (decoded is Map<String, dynamic>) {
-        final config = AppConfigData.fromJson(decoded);
-        AdFilterService.instance.load(ads: config.ads, rules: config.rules);
-        return;
-      }
-      AdFilterService.instance.load();
+      AdFilterService.instance.load(
+        ads: ApiConfig.instance.lastAds,
+        rules: ApiConfig.instance.lastRules,
+      );
     } catch (e) {
       AppLog.instance.log('[AdFilter] 规则加载失败: $e');
       try {
@@ -227,9 +221,32 @@ class AppState extends GetxController {
   // ============================================================
 
   /// 确保 Python 引擎已启动并把用户导入的 .py 源同步进引擎
-  /// （视频/书源 Python 源都在此注册，重启后依然可用）
+  /// （视频/书源 Python 源都在此注册，重启后依然可用）。
+  ///
+  /// ── 🔴 2026-10-14 改：**按脚本判，不按订阅**（用户的原话）──────────
+  /// 「其实不同订阅里面都有 py 脚本或者猫源脚本，应该**根据脚本来启动引擎**，
+  ///   不是根据订阅」—— 完全正确，Node 侧本来就是这么判的
+  /// （见 `_ensureNodeJSAndLoadSourceInner` 的 `hasSpiderSource`：扫 sites[] 里
+  ///  有没有 js/jar 脚本源）；**只有 Python 这侧以前是无条件启动**：
+  /// 每次加载配置都 `ensureStarted`，哪怕这个订阅里一个 .py 都没有
+  /// （纯猫源 / 纯 CMS 订阅）⇒ 白白吃掉 CPython 的启动时间与内存，
+  /// 也让"惰性启动"名不副实。
+  ///
+  /// 现在改成同一个口径：**扫 sites[] 里有没有 .py 源**，有才启动。
+  ///   · 纯 js 订阅 → 不碰 Python；
+  ///   · 纯 py 订阅 → 不碰 Node（那条判断在 Node 侧）；
+  ///   · 混合订阅 → 两个都起（各自独立，互不影响）；
+  ///   · **书源**用的 py 模块（Legado + pythonKey）走
+  ///     `PythonSourcesService.ensureInstalled` 按需启动，不受这里影响。
   Future<void> _ensurePythonSource() async {
     if (!PythonManager.instance.isIOS) return;
+    // 按**脚本**判：本次配置里有没有 .py 源
+    final hasPySource =
+        ApiConfig.instance.sourceBeanList.any((s) => s.isPythonScriptSource);
+    if (!hasPySource) {
+      AppLog.instance.log('[AppState] 本次配置没有 .py 源，跳过 Python 引擎启动（按脚本判）');
+      return;
+    }
     try {
       final ok = await PythonManager.instance.ensureStarted();
       if (ok) {
@@ -244,6 +261,93 @@ class AppState extends GetxController {
   /// 公开方法，供 SettingsController 调用
   Future<void> ensureNodeJSAndLoadSource() async {
     await _ensureNodeJSAndLoadSource();
+  }
+
+  // ============================================================
+  // 订阅切换后的「后台预热」——让切完就能直接用
+  // ============================================================
+
+  /// 同时只跑一条预热流程（切订阅很频繁，避免叠加）。
+  static Future<void>? _prewarmInFlight;
+
+  /// 预热上限：一次最多下这么多个 .py 源。
+  /// 不设上限时，一个 50 条 py 线路的订阅会在后台同时开 50 个下载，
+  /// **抢首屏带宽**（本意是让首屏更快，结果反而更慢）。
+  static const int _kPrewarmMaxPySources = 12;
+
+  /// 切订阅后的**后台预热**：把本次订阅要用到的脚本提前下载 / 注册好。
+  ///
+  /// ── 为什么是"预热"，而不是"切换引擎"（用户 2026-10-14 的问题）──────
+  /// iOS 上这两个引擎都是**进程级单例、启动后不可回收**：
+  ///   · Node = NodeMobile 的 V8 单例 —— 第二次 `node_start` 会卡在 V8 init
+  ///     （见 nodejs_manager.dart 里删掉的那段说明）；
+  ///   · Python = 嵌入的 CPython，`Py_Finalize` 在有线程/模块驻留时并不安全。
+  /// ⇒ 所以 **不存在"关掉 A 再开 B"这条路**。正确的模型是：
+  ///   ① 引擎**惰性启动、启动后常驻**（两个可以同时活着，互不干扰）；
+  ///   ② 切订阅只换**数据源**（Node 换 index.js 槽位 / Python 按 key 注册模块），
+  ///      不重启引擎；
+  ///   ③ 真正决定"切完能不能直接用"的是**脚本有没有提前下好** —— 就是这个方法。
+  ///
+  /// Node 侧：单槽位，主源脚本在 [_loadSpiderSource] 里已经（同步）载入；
+  ///          这里只额外预热「主页源」那条 js 脚本（若它不是主源）。
+  /// Python 侧：多源（按 key 注册模块），可以安全地后台逐个预热。
+  Future<void> _prewarmCurrentSubscription() {
+    final inFlight = _prewarmInFlight;
+    if (inFlight != null) return inFlight;
+    final fut = _prewarmCurrentSubscriptionInner();
+    _prewarmInFlight = fut;
+    fut.whenComplete(() => _prewarmInFlight = null);
+    return fut;
+  }
+
+  Future<void> _prewarmCurrentSubscriptionInner() async {
+    // ── ① Node：预热主页源的 js 脚本（与前台点击共享同一次载入，见 prewarmScript）
+    try {
+      final home = ApiConfig.instance.homeSourceBean.value;
+      if (home != null &&
+          home.isSpiderSource &&
+          !home.isPythonScriptSource &&
+          home.scriptUrl.trim().isNotEmpty) {
+        await SpiderService.instance.prewarmScript(home.scriptUrl);
+      }
+    } catch (e) {
+      AppLog.instance.log('[AppState] Node 脚本预热异常: $e');
+    }
+
+    // ── ② Python：把本次订阅里的 .py 源逐个下载 + 注册（主页源排最前）
+    try {
+      if (!PythonManager.instance.isIOS) return;
+      final homeKey = ApiConfig.instance.homeSourceBean.value?.key ?? '';
+      final urls = <String>[];
+      final seen = <String>{};
+      void add(SourceBean? s) {
+        if (s == null || !s.isPythonScriptSource) return;
+        final u = s.scriptUrl.trim();
+        if (u.isEmpty || !seen.add(u)) return;
+        urls.add(u);
+      }
+
+      // 主页源优先（用户最可能立刻点的就是它）
+      add(ApiConfig.instance.homeSourceBean.value);
+      for (final s in ApiConfig.instance.sourceBeanList) {
+        if (s.key == homeKey) continue;
+        add(s);
+      }
+      if (urls.isEmpty) return;
+
+      final take = urls.length > _kPrewarmMaxPySources
+          ? urls.sublist(0, _kPrewarmMaxPySources)
+          : urls;
+      AppLog.instance.log('[AppState] 后台预热 ${take.length}/${urls.length} 个 Python 源…');
+      var ok = 0;
+      for (final u in take) {
+        final key = await PythonScriptSources.instance.ensureInstalled(u);
+        if (key != null) ok++;
+      }
+      AppLog.instance.log('[AppState] Python 源预热完成 $ok/${take.length}');
+    } catch (e) {
+      AppLog.instance.log('[AppState] Python 源预热异常: $e');
+    }
   }
 
   // ============================================================
@@ -296,9 +400,20 @@ class AppState extends GetxController {
   /// 手动加载 Python 引擎。返回一句可直接展示的结果文案。
   ///
   /// 启动 CPython 解释器并把已导入的 .py 源同步进引擎；非 iOS 直接提示不支持。
+  /// 🔴 2026-10-14：如果引擎处于「卡死」态（上次执行没被中断、原生队列堵住），
+  ///    先尝试 [PythonManager.recover] 救回来 —— 这样用户不必重启 App，
+  ///    点一下「加载」就能恢复（根因已在 Python 侧兜住，见 spider_runner）。
   Future<String> manualLoadPythonEngine() async {
     if (!PythonManager.instance.isIOS) return 'Python 引擎仅支持 iOS';
     try {
+      if (PythonManager.instance.isStuck) {
+        final recovered = await PythonManager.instance.recover();
+        if (!recovered) {
+          return 'Python 引擎仍被上次执行占住（原生队列堵塞）。'
+              '自动恢复没成功，请重启 App 后再加载。';
+        }
+        return 'Python 引擎已从「卡死」中恢复';
+      }
       final ok = await PythonManager.instance.ensureStarted();
       if (!ok) {
         return PythonManager.instance.lastError.value ?? 'Python 引擎启动失败';
@@ -350,6 +465,9 @@ class AppState extends GetxController {
     // 现在改回「只要有 **js** 脚本源就启动 Node」，但**排除 .py**
     //（.py 走 CPython，见 isPythonScriptSource；把 .py 当 index.js 交给 Node
     //  会载入失败 → /config 空 → 首页报错，那是上一版修掉的问题）。
+    //
+    // ✅ 口径与 `_ensurePythonSource` 一致：**扫 sites[] 按脚本判，不按订阅** ——
+    //    同一个订阅里既有 py 也有猫源脚本时，两个引擎都会按需起来（互不影响）。
     // 另外「整表替换线路」只对单 spider 配置生效（见 api_config.dart 里
     // `if (isSingleScriptSpider.value)`），所以这里放开**不会**冲掉聚合配置的线路。
     final hasSpiderSource = ApiConfig.instance.sourceBeanList
@@ -432,6 +550,10 @@ class AppState extends GetxController {
     // 登记「主源脚本」：程序脚本源按需载入时会把 Node 的单源槽位顶替掉，
     // 回到主源时 SpiderService 需要靠它把主源脚本重新载入。
     SpiderService.instance.mainScriptUrl = spiderSource.api;
+    // 🔴 还要告诉 SpiderService「槽位里现在驻留的就是它」——否则它记的还是上一轮
+    //    那个脚本，`isScriptLoaded` / `_dispatchScript` 都会误判成"需要重新载入"，
+    //    表现为每次切订阅后的第一次点击白等一次 loadSource（用户 2026-10-14）。
+    SpiderService.instance.markScriptLoaded(spiderSource.api);
     AppLog.instance.log('[AppState] Spider 源加载成功');
     _sourceLoadedThisSession = true;
     _loadedSpiderApi = spiderSource.api;

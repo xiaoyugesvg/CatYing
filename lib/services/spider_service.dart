@@ -44,13 +44,24 @@ class SpiderService {
   // ============================================================
 
   /// 构建 Spider 请求路径
-  /// 当 apiBase 不为空时，路径为 {apiBase}/{action}
-  /// 当 apiBase 为空时，路径为 /{key}/{type}/{action}
+  /// · apiBase 非空（api 自带路径，如 OmniBox 的 `/spider/<key>/<type>`）→ `{apiBase}/{action}`
+  /// · apiBase 为空 → `/spider/{key去掉 nodejs_ 前缀}/{type}/{action}`
   String _buildSpiderPath(String key, int type, String apiBase, String action) {
     if (apiBase.isNotEmpty) {
+      // api 自带路径基址（如 OmniBox 的 `/spider/<key>/<type>`）→ 直接拼 action
       return '$apiBase/$action';
     }
-    return '/$key/$type/$action';
+    // ⚠️ 2026-10-14 修（猫源整包 spider 的线路全 404）：这里原来返回
+    //   `/$key/$type/$action`，两处都不对 ——
+    //   · 引擎的站点路由在 **`/spider`** 下，根路径下没有它；
+    //   · key 带 `nodejs_` 前缀时也不认（那是客户端的显示前缀）。
+    //   实测（用户 2026-10-14 日志）：
+    //     404 → `POST /nodejs_omnibox_Makka聚合/3/init`
+    //     200 → `POST /spider/omnibox_Makka聚合/3/init`
+    final k = key.toLowerCase().startsWith('nodejs_')
+        ? key.substring('nodejs_'.length)
+        : key;
+    return '/spider/$k/$type/$action';
   }
 
   /// 构建完整的 Spider URL
@@ -243,6 +254,39 @@ class SpiderService {
     return u.isNotEmpty && _loadedScriptUrl == u;
   }
 
+  /// 由 `AppState._loadSpiderSource` 在**主源脚本已载入 Node 槽位**之后调用：
+  /// 把"槽位里现在驻留的是谁"如实登记进来。
+  ///
+  /// 🔴 为什么必须有（用户 2026-10-14：「切订阅要能切完就直接用」）：
+  ///   以前只有 `_ensureNodeScript` 会写 `_loadedScriptUrl`，而**主源是走
+  ///   `AppState._loadSpiderSource → NodeJSManager.loadSource` 装的**，绕过了
+  ///   这里 ⇒ 槽位里明明已经是新脚本，`_loadedScriptUrl` 还停在上一轮那个
+  ///   ⇒ 两个后果：
+  ///     ① `isScriptLoaded(新 api)` 恒为 false ⇒ 每次切回这个订阅都会
+  ///        **重新 loadSource 一遍**（白等 0.5~2s）；
+  ///     ② `_dispatchScript` 里 `_loadedScriptUrl != mainScriptUrl` 恒为真
+  ///        ⇒ 切订阅后的**第一次点击**又要先"重新载入主脚本"才发请求。
+  ///   登记之后这两条都变成"已就绪"，切完即可直接用。
+  void markScriptLoaded(String url) {
+    final u = url.trim();
+    if (u.isEmpty) return;
+    _loadedScriptUrl = u;
+    // key 留空：真实的站点 key 交给下一次 `_ensureNodeScript`/`/config` 去补问
+    //（单脚本 spider 配置的 sites 本来就是 /config 下发的真 key，这里不猜）。
+    _loadedScriptKey = '';
+  }
+
+  /// 主脚本是否需要"补一次"：
+  ///   · 槽位里驻留的不是它（被程序脚本源顶替过 / 切了订阅）；**
+  ///     或** · 它的**真实站点 key 还没问到**（[markScriptLoaded] 故意留空的）。
+  ///
+  /// 走这条分支只会做两件**便宜**的事：`_ensureNodeScript` 命中"同 url"时
+  /// **不会重新 loadSource**，只补问一次 `/config` 拿 key ⇒ 不再有
+  /// "切完订阅第一次点击白等一次完整脚本载入"的开销。
+  bool get _needMainScriptRefresh =>
+      mainScriptUrl.isNotEmpty &&
+      (_loadedScriptUrl != mainScriptUrl || _loadedScriptKey.isEmpty);
+
   /// script → Python 模块 key（去 .py 后缀 + py_ 前缀）
   String _pythonModuleKey(String script) {
     var k = script.trim();
@@ -322,11 +366,52 @@ class SpiderService {
     return '';
   }
 
+  /// 同一脚本的载入过程**只跑一次**：并发调用（后台预热 + 用户首次点击）
+  /// 复用同一个 Future。
+  ///
+  /// 为什么必须（用户 2026-10-14：「切订阅要能切完就直接用」）：
+  ///   为了"切完就是热的"，切订阅后会在**后台预热**本次订阅的主脚本；
+  ///   而用户可能在同一时刻点了那个源 ⇒ 两边同时进 `_ensureNodeScript`
+  ///   ⇒ **两次 `loadSource` 往同一个 `index.js` 写** ⇒ 文件被交替写坏、
+  ///   源加载失败（与 `AppState._nodeLoadInFlight` 同一类竞态）。
+  final Map<String, Future<String?>> _scriptLoadInFlight = {};
+
+  /// 确保 [script] 已载入 Node 引擎，返回引擎里的**真实站点 key**（去重入口）。
+  Future<String?> _ensureNodeScript(String script,
+      {required String fallback}) {
+    final playing = _scriptLoadInFlight[script];
+    if (playing != null) {
+      AppLog.instance.log('[SpiderService] 脚本正在载入，复用同一次流程: $script');
+      return playing;
+    }
+    final fut = _ensureNodeScriptInner(script, fallback: fallback);
+    _scriptLoadInFlight[script] = fut;
+    fut.whenComplete(() {
+      if (identical(_scriptLoadInFlight[script], fut)) {
+        _scriptLoadInFlight.remove(script);
+      }
+    });
+    return fut;
+  }
+
+  /// 「预热」某个脚本源（切订阅后台调用）——让用户第一次点它时就是热的。
+  Future<void> prewarmScript(String script) async {
+    final s = script.trim();
+    if (s.isEmpty) return;
+    // Node 没起来就别为预热单独拉一次（真正要用时前台路径会负责启动）
+    if (NodeJSManager.instance.spiderPort <= 0) return;
+    try {
+      await _ensureNodeScript(s, fallback: '');
+    } catch (_) {
+      // 预热失败无所谓：前台用到时还会再走一遍
+    }
+  }
+
   /// 确保 [script] 已载入 Node 引擎，返回引擎里的**真实站点 key**。
   ///
   /// 真实 key 以引擎 `/config` 返回的站点列表为准 —— 聚合配置里写的 key 是 TVBox
   /// 的 key，和 drpy2 模块自报的 key 未必一致；取不到时退回 [fallback]。
-  Future<String?> _ensureNodeScript(String script,
+  Future<String?> _ensureNodeScriptInner(String script,
       {required String fallback}) async {
     if (_loadedScriptUrl == script) {
       if (_loadedScriptKey.isNotEmpty) return _loadedScriptKey;
@@ -442,12 +527,18 @@ class SpiderService {
     // `csp_xxx` 是「由当前已驻留 spider 脚本内置类处理」的占位 api，
     // 不是脚本地址——把它当脚本 loadSource('csp_xxx') 必然失败，
     // 导致 CatVod /config 下发的所有 csp_ 线路全部加载失败。
-    // 同理，非 http 的相对路径（如 OmniBox 私有协议 /spider/<key>/<n>）
-    // 也不是可下载脚本，Node 加载不了，必须直接给明确错误而不是硬塞。
+    // 非 http 的相对路径也不是可下载脚本，Node 加载不了，直接给明确错误而不是硬塞。
+    // ⚠️ 但**必须排除** OmniBox 私有协议 `/spider/<key>/<n>` —— 那是合法形态
+    //   （脚本已驻留，见 `_omniBoxProtocolKey`）。上一轮把它一起拦了，
+    //   导致整包猫源（CatVod/OmniBox 订阅）的**所有线路**全报"暂不支持的源协议"✗。
     final isCspPlaceholder = script.toLowerCase().startsWith('csp_');
+    // OmniBox 私有协议 `/spider/<key>/<type>`：与 csp_ 同类（脚本已驻留，
+    // key 由 sites[] 给出），**必须放行** —— 详见 [_omniBoxProtocolKey] 的说明。
+    final omniKey = _omniBoxProtocolKey(script);
     final isUnsupportedRelative = script.isNotEmpty &&
         !script.startsWith('http') &&
         !_isPythonScript(script) &&
+        omniKey == null &&
         !script.toLowerCase().split('?').first.endsWith('.js') &&
         !script.toLowerCase().split('?').first.endsWith('.js.md5') &&
         !RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(script) &&
@@ -458,7 +549,12 @@ class SpiderService {
       AppLog.instance.w('[SpiderService] $lastError');
       return null;
     }
-    if (script.isNotEmpty && !isCspPlaceholder) {
+    if (omniKey != null) {
+      // OmniBox 私有协议：脚本已在引擎里驻留，直接用它下发的站点 key 调引擎。
+      // ⚠️ **不能**再走 loadSource —— 传进去的是个路径、不是脚本地址，
+      //   而且会把已驻留的整包 spider 顶掉。
+      engineKey = omniKey;
+    } else if (script.isNotEmpty && !isCspPlaceholder) {
       // 聚合配置里的脚本源：按需载入脚本，用引擎自报的真实 key
       final k = await _ensureNodeScript(script, fallback: key);
       if (k == null) {
@@ -466,7 +562,7 @@ class SpiderService {
         return null;
       }
       engineKey = k;
-    } else if (mainScriptUrl.isNotEmpty && _loadedScriptUrl != mainScriptUrl) {
+    } else if (_needMainScriptRefresh) {
       // 主源（单 js spider 配置）：api 由 /config 下发、通常为空或 csp_ 占位。
       // 若期间被程序脚本源顶替过，这里把主源脚本重新载入。
       final k = await _ensureNodeScript(mainScriptUrl, fallback: key);
@@ -528,6 +624,34 @@ class SpiderService {
     }
   }
 
+  /// 识别 OmniBox 私有协议 `/spider/<key>/<type>` 并取出其中的 `<key>`。
+  ///
+  /// ── 为什么这不是"不支持的协议"（2026-10-14 修，用户实测）──────────
+  /// 这类 `api` 出现在**整包 spider（CatVod / OmniBox）订阅**下发的 `sites[]` 里。
+  /// 它不是可下载的脚本地址，而是"**当前已驻留的那份整包 spider 脚本内部某个
+  /// 站点**"的标识 —— 等价于 `csp_` 占位：脚本已经在引擎里，客户端只需拿
+  /// `sites[].key` 去调 `{base}/spider/{key}/{type}/{method}` 即可。
+  ///
+  /// 实测证据（用户 2026-10-14 的 app.log）：
+  ///   · 正确形态：`POST /spider/omnibox_Makka聚合/3/init` → **200** ✓
+  ///   · 错误形态：`POST /nodejs_omnibox_Makka聚合/3/init` → 404（少了 /spider）
+  /// 上一轮把它当"不支持"直接拒绝 ⇒ 整包猫源的**所有线路**全部不可用 ✗。
+  ///
+  /// 返回：提取到的 key（**去掉 `nodejs_` 前缀**，与引擎路由一致）；非该形态返回 null。
+  static String? _omniBoxProtocolKey(String script) {
+    final s = script.trim();
+    if (s.isEmpty) return null;
+    final parts = s.split('/').where((e) => e.isNotEmpty).toList();
+    if (parts.length < 2) return null;
+    if (parts[0].toLowerCase() != 'spider') return null;
+    var k = parts[1].trim();
+    if (k.isEmpty) return null;
+    if (k.toLowerCase().startsWith('nodejs_')) {
+      k = k.substring('nodejs_'.length);
+    }
+    return k.isEmpty ? null : k;
+  }
+
   /// 初始化 Spider - 对应 Swift initSpider
   ///
   /// Python 源没有 init 概念（引擎里注册即就绪）；JS 脚本源把脚本载入引擎即完成 init。
@@ -540,10 +664,16 @@ class SpiderService {
     // 配置 key 和引擎自报 key 不是一回事，这里用配置 key 会 init 404、
     // 而后五个接口却能通（init 失败会被调用方 catch 掉，问题很隐蔽）。
     var engineKey = key;
-    if (script.isNotEmpty) {
+    // OmniBox 私有协议 `/spider/<key>/<type>`：脚本已驻留，key 由 sites[] 下发，
+    // 直接用它；**不要**再 loadSource 一个路径（那会失败并把整包 spider 顶掉）。
+    final omniKey = _omniBoxProtocolKey(script);
+    if (omniKey != null) {
+      engineKey = omniKey;
+    } else if (script.isNotEmpty) {
       final k = await _ensureNodeScript(script, fallback: key);
       if (k != null) engineKey = k;
-    } else if (mainScriptUrl.isNotEmpty && _loadedScriptUrl != mainScriptUrl) {
+    } else if (_needMainScriptRefresh) {
+      // 与 [_dispatchScript] 同一套判断（见 `_needMainScriptRefresh` 说明）
       final k = await _ensureNodeScript(mainScriptUrl, fallback: key);
       if (k != null) engineKey = k;
     }

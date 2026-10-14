@@ -18,11 +18,11 @@ import 'services/api_config.dart';
 import 'services/nav_feature_service.dart';
 import 'services/app_log.dart';
 import 'services/prefs_mirror.dart';
-import 'reading/cores/reader_core_prefs.dart';
 import 'services/app_state.dart';
 import 'services/background_service.dart';
 import 'services/epg_service.dart';
 import 'services/live_service.dart';
+import 'services/parse_store.dart';
 import 'reading/services/book_download_service.dart';
 import 'reading/services/book_font_service.dart';
 import 'reading/services/settings_service.dart';
@@ -48,6 +48,7 @@ import 'reading/services/download_service.dart';
 import 'reading/services/reading_progress_service.dart';
 import 'reading/novel_source/analyze/cookie_store.dart';
 import 'reading/novel_source/web_book/runner_isolate.dart';
+import 'webhome/web_home_prefs.dart';
 import 'reading/services/trim_preset_service.dart';
 import 'reading/services/view_mode.dart';
 import 'reading/services/book_view_mode.dart';
@@ -127,15 +128,18 @@ void main() async {
   //    阅读/弹幕/直播/小程序的设置全没。这里从独立文件镜像把 prefs 救回来。
   await bootRestore('PrefsMirror.restoreIfLost', PrefsMirror.restoreIfLost);
 
-  // 阅读核心（ReaderCore）选择与配置：必须紧跟镜像恢复之后 —— 它读的
-  // `reader_core_id` / `reader_core_source_url` 也可能被镜像修正过。
-  // 未配置时 activeCore 返回 null ⇒ 阅读器一律回落现有链路，**不影响现存功能**。
-  await bootRestore('ReaderCorePrefs.init', ReaderCorePrefs.instance.init);
-
   // 书源 Cookie 落盘恢复（洞 Q）：原来只在内存（`_byHost`），重启即丢 ——
   // 晋江这类"先登录、再带 Cookie 拉正文"的源每次都要重新登录。
   // 必须早于任何书源求值，故在此处（与其它启动期 restore 并列）恢复一次。
   await bootRestore('SourceCookieStore.load', SourceCookieStore.instance.load);
+
+  // 「网页首页」模块的配置（首页地址）：同属启动期读 prefs/文件的恢复类步骤，
+  // 走同一套 5s 超时保护（见 bootRestore 说明）。
+  await bootRestore('WebHomePrefs.load', WebHomePrefs.instance.load);
+
+  // 解析线路（parses）落盘恢复：订阅下发的线路只并入、不再整表清空，
+  // 所以必须早于 ApiConfig 首次加载配置（见 ParseStore 顶部说明）。
+  await bootRestore('ParseStore.load', ParseStore.instance.load);
 
   // 播放内核与选项
   // #10：字号缩放是外观设置，由 AppTheme 负责加载（PlayerPrefs 是兼容壳）
@@ -146,6 +150,9 @@ void main() async {
 
   // 注册 ApiConfig 为 GetxController - 对应 Swift ApiConfig.shared
   Get.put<ApiConfig>(ApiConfig());
+
+  // 把落盘的解析线路灌回 ApiConfig 的列表（启动即显示，不必等订阅加载）
+  ApiConfig.instance.parseBeanList.value = ParseStore.instance.list;
 
   // 注册 AppState 为 GetxController - 对应 Swift @StateObject private var appState = AppState()
   Get.put<AppState>(AppState());

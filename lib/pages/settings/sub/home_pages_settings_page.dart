@@ -19,6 +19,7 @@ class HomePagesSettingsPage extends StatelessWidget {
     NavFeature.music: Icons.library_music_outlined,
     NavFeature.books: Icons.menu_book_outlined,
     NavFeature.apps: Icons.widgets_outlined,
+    NavFeature.webhome: Icons.language_outlined,
     NavFeature.shelf: Icons.video_library_outlined,
     NavFeature.settings: Icons.settings_outlined,
     NavFeature.search: Icons.search,
@@ -93,32 +94,35 @@ class HomePagesSettingsPage extends StatelessWidget {
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('幻灯样式',
-                                style: TextStyle(
-                                    color: AppTheme.textPrimary,
-                                    fontSize: AppTheme.fontSubhead + 0.5,
-                                    fontWeight: FontWeight.w600)),
-                            const SizedBox(height: 2),
-                            Text('切换首页顶部轮播的呈现方式',
-                                style: TextStyle(
-                                    color: AppTheme.textTertiary,
-                                    fontSize: AppTheme.fontCaption)),
-                          ],
-                        ),
+                      Text('幻灯样式',
+                          style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: AppTheme.fontSubhead + 0.5,
+                              fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 2),
+                      Text('切换首页顶部轮播的呈现方式',
+                          style: TextStyle(
+                              color: AppTheme.textTertiary,
+                              fontSize: AppTheme.fontCaption)),
+                      const SizedBox(height: 10),
+                      // ⚠️ 样式从 2 种加到 5 种后，原来"和标题挤在同一行"必然溢出
+                      //    ⇒ 标题/说明单独一行，选项用 Wrap 自动换行。
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final st in HomeBannerStyle.values)
+                            _styleChip(
+                              st,
+                              s.homeBannerStyle == st,
+                              () => s.setHomeBannerStyle(st),
+                            ),
+                        ],
                       ),
-                      for (final st in HomeBannerStyle.values)
-                        _styleChip(
-                          st,
-                          s.homeBannerStyle == st,
-                          () => s.setHomeBannerStyle(st),
-                        ),
                     ],
                   ),
                 ),
@@ -130,12 +134,12 @@ class HomePagesSettingsPage extends StatelessWidget {
     );
   }
 
-  /// 幻灯片样式选项（选中=强调色实底）
+  /// 幻灯片样式选项（选中=强调色实底）。
+  /// 间距由外层 `Wrap` 的 spacing/runSpacing 给，这里不再自带 margin。
   Widget _styleChip(HomeBannerStyle st, bool selected, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.only(left: 8),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: selected ? AppTheme.accentColor : AppTheme.backgroundTertiary,

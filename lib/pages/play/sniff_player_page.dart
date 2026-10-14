@@ -43,6 +43,64 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
   bool _autoSwitched = false;
   String? _sniffedUrl;
 
+  /// 源头劫持脚本：在页面自身脚本运行**之前**注入，包住 XHR / fetch /
+  /// media.src / setAttribute，只要页面去请求媒体地址就立刻回报。
+  ///
+  /// 为什么需要它：原来的嗅探只做 `document.querySelectorAll('video,audio')`
+  /// + 扫 HTML 源码正则，够不到这三类最常见的情况 ——
+  ///   · **iframe 里的播放器**：querySelector 跨不了 frame；
+  ///   · **MSE / HLS.js 播放**：`video.src` 是 `blob:`，源码里也没有真实地址；
+  ///   · **点了播放才加载**：首屏 HTML 里根本没有地址。
+  /// 结果就是嗅探失败 → 只能停在网页里（用户看到的"打开都是 WebView"）。
+  static const String _hookJs = r'''
+(function(){
+  if (window.__sniffHooked) return;
+  window.__sniffHooked = 1;
+  var MEDIA = /\.(m3u8|mp4|flv|mkv|avi|mov|webm|ts|m4s|mpd)(\?|#|$)/i;
+  function report(u){
+    try{
+      if (!u || typeof u !== 'string') return;
+      if (!/^https?:\/\//i.test(u)) return;
+      if (!MEDIA.test(u)) return;
+      if (window.SniffMedia && window.SniffMedia.postMessage){
+        window.SniffMedia.postMessage(u);
+      }
+    }catch(e){}
+  }
+  try{
+    var _open = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(m, u){
+      try{ report(u); }catch(e){}
+      return _open.apply(this, arguments);
+    };
+  }catch(e){}
+  try{
+    var _fetch = window.fetch;
+    if (_fetch){
+      window.fetch = function(input){
+        try{ report(typeof input === 'string' ? input : (input && input.url)); }catch(e){}
+        return _fetch.apply(this, arguments);
+      };
+    }
+  }catch(e){}
+  try{
+    var d = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+    if (d && d.set){
+      Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+        configurable: true, enumerable: true,
+        get: function(){ return d.get.call(this); },
+        set: function(v){ try{ report(v); }catch(e){} return d.set.call(this, v); }
+      });
+    }
+    var _setAttr = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function(n, v){
+      try{ if (String(n).toLowerCase() === 'src') report(v); }catch(e){}
+      return _setAttr.apply(this, arguments);
+    };
+  }catch(e){}
+})();
+''';
+
   static const String _sniffJs = '''
 (function(){
   var found = [], seen = {};
@@ -101,6 +159,16 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
   void _initController(String url) {
     final enableJs = PlayerPrefs.instance.webviewEnableJs.value;
     _controller = WebViewController()
+      // 劫持回报通道：webview_flutter 的 JavaScriptChannel 是随页面加载
+      // 自动注入到 window 的，所以页面自身脚本一定能看到它。
+      // 命中即自动切猫影原生播放器（_onSniffed 内部有 _autoSwitched 去重）。
+      ..addJavaScriptChannel(
+        'SniffMedia',
+        onMessageReceived: (msg) {
+          final u = msg.message;
+          if (u.isNotEmpty) _onSniffed(u);
+        },
+      )
       ..setJavaScriptMode(
           enableJs ? JavaScriptMode.unrestricted : JavaScriptMode.disabled)
       ..setBackgroundColor(const Color(0xFF000000))
@@ -117,6 +185,8 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
           },
           onPageStarted: (url) {
             _stopSniffing();
+            // 抢在页面自身脚本执行前注入劫持脚本（漏掉的由页面完成后的轮询嗅探兜底）
+            _controller.runJavaScript(_hookJs);
             if (mounted) {
               setState(() {
                 _loadingProgress = 0;

@@ -24,7 +24,7 @@
 import 'dart:convert';
 
 import '../../services/python_manager.dart';
-import '../cores/python_core.dart';
+import '../../services/python_sources_service.dart';
 
 class BookSourcePythonEngine {
   BookSourcePythonEngine._();
@@ -110,7 +110,8 @@ class BookSourcePythonEngine {
       //   并写回 raw（下次不用再装，界面也能正确显示成"Python 源"）。
       final u = _sourceUrlOf(body['source']);
       if (u != null && u.toLowerCase().split('?').first.endsWith('.py')) {
-        final k = await PythonCore.instance.ensureInstalled(u, 'book');
+        final k =
+            await PythonSourcesService.instance.ensureInstalled(u, 'book');
         if (k != null) {
           key = k;
           _injectPythonKey(body['source'], k);

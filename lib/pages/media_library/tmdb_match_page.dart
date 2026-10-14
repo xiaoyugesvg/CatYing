@@ -280,7 +280,8 @@ class _TmdbMatchPageState extends State<TmdbMatchPage> {
                       ? CachedNetworkImage(
                           imageUrl:
                               '${TmdbService.instance.effectiveImgBase}/w185$poster',
-                          fit: BoxFit.cover,
+                          // 封面统一拉伸显示、不裁切（与首页/详情页一致）
+                          fit: BoxFit.fill,
                           placeholder: (_, __) => ColoredBox(
                               color: AppTheme.backgroundSecondary),
                           errorWidget: (_, __, ___) => ColoredBox(

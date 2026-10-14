@@ -279,6 +279,12 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
   final TextEditingController _ttsDialogueCtl = TextEditingController();
   /// 番茄钟浮层是否显示
   bool _showPomodoro = false;
+  /// 右侧竖条**亮度滑杆**的当前值（0.1~1.0，直接写系统屏幕亮度）。
+  ///
+  /// 用户 2026-10-14：「右侧的亮度调整能不能直接有个调整条、不是只有一个按钮，
+  /// 而且拖不动」⇒ 竖条里直接放滑杆（与漫画阅读器同款），
+  /// 原来那个"点开→底部弹层里再拖"的实现已删。
+  double _dockBrightnessValue = 1.0;
   /// 听书迷你条已收成光碟（向左快滑收起 ✓，点光碟展开 ✓，朗读不停 ✓）
   bool _ttsDiscCollapsed = false;
   /// 光碟位置（Stack 内左上角坐标，null = 首次收起时按右下角初始化）
@@ -400,6 +406,7 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     _pageCtrl = PageController();
     HardwareKeyboard.instance.addHandler(_onKey);
     _restorePrefs();
+    _syncDockBrightness();
     _loadChapter(_index);
     // C7 护眼休息提醒：墙钟计时（后台恢复后自动补齐），30s 检查一次
     _eyeBreakStart = DateTime.now();
@@ -2657,79 +2664,11 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     });
   }
 
-  /// 顶栏亮度：底部滑杆调系统屏幕亮度（screen_brightness）
-  Future<void> _showBrightnessSheet() async {
-    final fg = _fg;
-    final bgTop = _bgTop;
-    double current = 1.0;
-    try {
-      current = await ScreenBrightness().current;
-    } catch (_) {}
-    if (current < 0.05) current = 1.0; // 系统"自动亮度"返回 0 时按 1 展示
-    final v = current.clamp(0.1, 1.0);
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheet) {
-          var value = v;
-          return Container(
-            decoration: BoxDecoration(
-              color: bgTop,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(18)),
-            ),
-            padding: EdgeInsets.only(
-                top: 14,
-                bottom: MediaQuery.of(context).padding.bottom + 14),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.brightness_6_rounded, size: 18, color: fg),
-                    const SizedBox(width: 8),
-                    Text('亮度',
-                        style: TextStyle(
-                            fontSize: AppTheme.fontSubhead,
-                            fontWeight: FontWeight.w700,
-                            color: fg)),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: Row(
-                    children: [
-                      Icon(Icons.brightness_low_rounded,
-                          size: 18, color: fg.withValues(alpha: 0.5)),
-                      Expanded(
-                        child: Slider(
-                          value: value,
-                          min: 0.1,
-                          max: 1.0,
-                          activeColor: fg,
-                          inactiveColor: fg.withValues(alpha: 0.2),
-                          onChanged: (nv) {
-                            setSheet(() => value = nv);
-                            ScreenBrightness().setScreenBrightness(nv);
-                          },
-                        ),
-                      ),
-                      Icon(Icons.brightness_high_rounded,
-                          size: 18, color: fg.withValues(alpha: 0.5)),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 4),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
+  /// ⚠️ 原来这里有个 `_showBrightnessSheet()`（点右侧「亮度」按钮 → 底部弹层里拖滑杆）。
+  /// 用户 2026-10-14：① 要"直接就有调整条"，不要按钮中转；
+  ///   ② 那个弹层的滑杆**拖不动** —— `var value = v;` 写在 `StatefulBuilder`
+  ///   的 builder 里，每次 rebuild 都被重置回初值 ⇒ 拇指一拖就弹回。
+  /// ⇒ 已删除，改为竖条内联滑杆 [_dockBrightness]（值存在 State 字段，不会被重置）。
 
   Widget _topBar(Color fg) {
     return Positioned(
@@ -2801,6 +2740,54 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
     );
   }
 
+  /// 右侧竖条里的**亮度滑杆**（竖向，直接拖，不走弹层）。
+  ///
+  /// 为什么不再是"一个按钮点开"（用户 2026-10-14）：
+  ///   ① 要"直接有个调整条"；② 原来那个底部弹层的滑杆**拖不动** ——
+  ///   根因是 `var value = v;` 写在了 `StatefulBuilder` 的 builder **里面**，
+  ///   每次 rebuild 都被重置回初始值 ⇒ 拇指一拖就被弹回。这里改成竖条内联滑杆，
+  ///   值存在 State 字段里，天然不会被重置。
+  Widget _dockBrightness(Color fg) {
+    return SizedBox(
+      height: 130,
+      child: RotatedBox(
+        quarterTurns: -1,
+        child: SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            trackHeight: 3,
+            thumbShape:
+                const RoundSliderThumbShape(enabledThumbRadius: 7),
+            overlayShape:
+                const RoundSliderOverlayShape(overlayRadius: 14),
+          ),
+          child: Slider(
+            value: _dockBrightnessValue.clamp(0.1, 1.0),
+            min: 0.1,
+            max: 1.0,
+            activeColor: fg,
+            inactiveColor: fg.withValues(alpha: 0.2),
+            onChanged: (v) {
+              setState(() => _dockBrightnessValue = v);
+              ScreenBrightness().setScreenBrightness(v);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 读一次当前系统亮度做滑杆初值（读不到就按 1.0）。
+  Future<void> _syncDockBrightness() async {
+    try {
+      final v = await ScreenBrightness().current;
+      if (!mounted) return;
+      // 系统"自动亮度"会返回 0 → 按 1.0 展示（与旧实现同一口径）
+      setState(() => _dockBrightnessValue = (v < 0.05 ? 1.0 : v).clamp(0.1, 1.0));
+    } catch (_) {
+      // 读不到就保持 1.0，不影响使用
+    }
+  }
+
   /// 悬浮顶栏/卡片里的紧凑图标按钮：统一 40×40，
   /// 避免 8 个默认 48dp 的 IconButton 把卡片挤到溢出。
   Widget _topIcon(IconData icon, String tooltip, VoidCallback onTap, Color fg) {
@@ -2843,8 +2830,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               _dockButton(Icons.record_voice_over_outlined, '朗读',
                   () => _showTtsSheet(), fg),
               const SizedBox(height: 10),
-              _dockButton(Icons.brightness_6_rounded, '亮度',
-                  _showBrightnessSheet, fg),
+              // 亮度：**直接给滑杆**（不再是"按钮点开→弹层里再拖"，见 _dockBrightness）
+              _dockBrightness(fg),
               const SizedBox(height: 10),
               _dockButton(
                   ink ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
@@ -2862,10 +2849,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   ),
                 );
               }, fg),
-              const SizedBox(height: 10),
-              // 番茄钟从底部宫格挪到这里（宫格让位给「夜间模式」，对齐 Cmbok 截图）
-              _dockButton(Icons.timer_outlined, '番茄钟',
-                  () => setState(() => _showPomodoro = !_showPomodoro), fg),
+              // ⚠️ 番茄钟**不在这里**了：它已经回到底部宫格第一格
+              //    （用户 2026-10-14：宫格那格本来就是番茄钟，右侧竖条不再重复放）。
             ],
           ),
         ),
@@ -3176,11 +3161,14 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
             ],
           ),
           const SizedBox(height: 2),
-          // ── 8 宫格（Cmbok 截图第一行：夜间模式 / 朗读 / AI / 图片模式）──
+          // ── 8 宫格（Cmbok 截图第一行：番茄钟 / 朗读 / AI / 图片模式）──
+          // ✅ 用户 2026-10-14：这一格原来是「夜间模式」，而**右侧竖条已经有**
+          //    白夜切换了（重复）⇒ 换成「番茄钟」（它原来在右侧竖条里，
+          //    挪回这里，右侧竖条不再重复放）。
           Row(
             children: [
-              _navItem(Icons.dark_mode_outlined, '夜间模式',
-                  _toggleDayNight, fg),
+              _navItem(Icons.timer_outlined, '番茄钟',
+                  () => setState(() => _showPomodoro = !_showPomodoro), fg),
               _navItem(Icons.record_voice_over_outlined, '朗读',
                   // ✅ **接上「点朗读进播放页」** ✓（本页 TTS 面板里的那个开关 ✓）：
                   //   · 开启 → 先 `_startTts()` ✓（沉浸式页要在"念着"的状态才有内容 ✓），

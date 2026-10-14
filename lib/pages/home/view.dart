@@ -1013,12 +1013,17 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// 首页顶部推荐横幅（自动轮播）。两种样式，由「设置 → 菜单设置 → 首页幻灯片」切换：
-///   · `wide`  横版大图（原样式）：16:9 大图 + 左下标题 + 右下来源角标
-///   · `cards` 卡片轮播（新增）：竖版海报居中放大，两侧海报缩小 / 倾斜 / 压暗露出
-///            （coverflow 观感，对齐用户 2026-10-13 给的参考图）
+/// 首页顶部推荐横幅（自动轮播）。样式由「设置 → 菜单设置 → 首页幻灯片」切换：
+///   · `wide` 横版大图（原样式）：16:9 大图 + 左下标题 + 右下来源角标
+///   · `cards` 卡片轮播：竖版海报居中放大，两侧缩小 / 倾斜 / 压暗（coverflow / V 形）
+///   · `hero` 沉浸大图（新增）：满宽出血 + 底部重渐变 + 大字标题 + 元信息 + 播放钮，
+///            指示器换成**分段进度条**（参考 Disney+ hero carousel）
+///   · `deck` 叠卡堆（新增）：大卡在前、后面两张向上错位缩小露出，**不侧倾**
+///            （参考 Swiper `effect: 'cards'` —— 与 coverflow 刻意区分）
+///   · `rail` 三格海报轨（新增）：一行 3 张竖版海报，整组横滑，海报下方小字标题
+///            （参考 Swiper「Photo Gallery - Minimal」/ App Store 横滑行）
 ///
-/// ⚠️ 两种样式的 `viewportFraction` 不同，而它**只能在 PageController 构造时**给
+/// ⚠️ 各样式 `viewportFraction` 不同，而它**只能在 PageController 构造时**给
 /// → 切换样式时由调用方换 `key`，让整个 State + PageController 重建
 ///   （见 home/view 的调用点）。
 const double _kBannerWideHeight = 196;
@@ -1035,6 +1040,26 @@ const double _kBannerCardsCardW = 170;
 const double _kBannerCardsCardH = 250;
 const double _kBannerCardsHeight = 282; // 画布：卡 250 + 两侧下沉/缩放的余量
 
+// ── 沉浸大图（hero）──
+//   满宽出血（viewportFraction 1.0）⇒ 画面顶到屏幕两边，文字全部压在渐变上。
+//   高度比 wide 高一档，给"大字标题 + 元信息 + 播放钮"留出呼吸。
+const double _kBannerHeroHeight = 236;
+
+// ── 叠卡堆（deck）──
+//   槽位 0.54 屏宽：中心卡 ≈ 198×232（竖版 0.85，接近参考图里海报的样子），
+//   两侧各露出约 90pt。后卡**向上**错位 + 缩小 ⇒ 像一叠牌，
+//   与 coverflow（向下 + 侧倾）完全不同。
+//   ⚠️ 画布高度要留够"上移量"：卡 232 居中 ⇒ 上下各 (276-232)/2 = 22 的余量，
+//      上移 20 才不会被 PageView 的 viewport 裁掉顶边。
+const double _kBannerDeckViewport = 0.54;
+const double _kBannerDeckCardH = 232;
+const double _kBannerDeckHeight = 276;
+
+// ── 三格海报轨（rail）──
+//   一页 = 3 张竖版海报（3:4），等宽留缝、不缩放；下方小字标题 + 年份。
+const double _kBannerRailHeight = 198;
+const int _kBannerRailPerPage = 3;
+
 class _RecommendBanner extends StatefulWidget {
   final List<Video> videos;
   final HomeBannerStyle style;
@@ -1049,43 +1074,87 @@ class _RecommendBanner extends StatefulWidget {
   State<_RecommendBanner> createState() => _RecommendBannerState();
 }
 
-class _RecommendBannerState extends State<_RecommendBanner> {
+class _RecommendBannerState extends State<_RecommendBanner>
+    with SingleTickerProviderStateMixin {
   /// 循环轮播的起始**绝对**页（取足够大的整数，前后都能滑，实现无限循环）
   static const int _kLoopAnchor = 100000;
 
-  /// 起始绝对页：取 length 的整数倍，保证首屏显示的是第 0 条数据
-  int get _loopStart {
+  /// 页数：`rail` 一页 = 3 条（页数 = 分组数），其余样式一页一条。
+  int get _pageCount {
     final len = widget.videos.length;
     if (len <= 0) return 0;
-    return (_kLoopAnchor ~/ len) * len;
+    return widget.style == HomeBannerStyle.rail
+        ? (len / _kBannerRailPerPage).ceil()
+        : len;
+  }
+
+  /// `rail` 不做无限循环：分组后取模会错位（组数常常不是条数的约数）。
+  bool get _loops => widget.style != HomeBannerStyle.rail;
+
+  /// 起始绝对页：取页数的整数倍，保证首屏显示的是第 0 页
+  int get _loopStart {
+    final n = _pageCount;
+    if (!_loops || n <= 0) return 0;
+    return (_kLoopAnchor ~/ n) * n;
   }
 
   late final PageController _pageCtrl = PageController(
     initialPage: _loopStart,
-    viewportFraction:
-        widget.style == HomeBannerStyle.cards ? _kBannerCardsViewport : 0.92,
+    // 各样式页宽不同；切换样式时调用方会换 key ⇒ 整个 State 重建，这里只读一次
+    viewportFraction: switch (widget.style) {
+      HomeBannerStyle.cards => _kBannerCardsViewport,
+      HomeBannerStyle.deck => _kBannerDeckViewport,
+      HomeBannerStyle.hero => 1.0, // 满宽出血
+      HomeBannerStyle.rail => 1.0, // 一页 = 整行
+      HomeBannerStyle.wide => 0.92,
+    },
   );
 
   /// 当前**绝对**页（无限递增/递减）。数据下标 = `_page % length`。
   int _page = 0;
 
-  /// 当前数据下标（圆点用）
-  int get _index => widget.videos.isEmpty ? 0 : _page % widget.videos.length;
+  /// 当前数据下标（圆点用）；`rail` 下 = 当前分组下标
+  int get _index {
+    final n = _pageCount;
+    if (n <= 0) return 0;
+    return _loops ? _page % n : _page;
+  }
+
+  /// hero 的分段进度条：把"距离下次自动翻页的 5 秒"画成当前段的填充。
+  /// ⚠️ 只在 hero 下 forward（见 [_restartAuto]）—— 其它样式常驻跑动画
+  ///    等于白白让 App 永远不进入空闲帧。
+  bool get _usesProgressBar => widget.style == HomeBannerStyle.hero;
+  late final AnimationController _progress;
 
   Timer? _autoTimer;
+
+  /// （重）启动自动翻页：与进度条同一节拍。
+  /// 手动滑动 / 换源后也调它 —— 否则"刚滑完 1 秒就自动跳走"。
+  void _restartAuto() {
+    _autoTimer?.cancel();
+    _autoTimer = Timer.periodic(const Duration(seconds: 5), (_) => _advance());
+    if (_usesProgressBar) _progress.forward(from: 0);
+  }
+
+  void _advance() {
+    if (!mounted || widget.videos.isEmpty || !_pageCtrl.hasClients) return;
+    _pageCtrl.nextPage(
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeOut,
+    );
+  }
 
   @override
   void initState() {
     super.initState();
+    // 在这里建（而不是 late 懒建）：dispose 里要无条件 dispose 它，
+    // 懒建会在"从未用过进度条"的样式下**在 dispose 里才创建**一个控制器。
+    _progress = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 5),
+    );
     _page = _loopStart;
-    _autoTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (!mounted || widget.videos.isEmpty || !_pageCtrl.hasClients) return;
-      // 无限循环：直接翻下一页（PageView 无边界）
-      _pageCtrl.nextPage(
-        duration: const Duration(milliseconds: 400),
-        curve: Curves.easeOut,
-      );
-    });
+    _restartAuto();
   }
 
   @override
@@ -1104,12 +1173,14 @@ class _RecommendBannerState extends State<_RecommendBanner> {
       if (_pageCtrl.hasClients) {
         _pageCtrl.jumpToPage(_page);
       }
+      _restartAuto(); // 节拍跟着重来（否则进度条与新内容不同步）
     }
   }
 
   @override
   void dispose() {
     _autoTimer?.cancel();
+    _progress.dispose();
     _pageCtrl.dispose();
     super.dispose();
   }
@@ -1117,41 +1188,363 @@ class _RecommendBannerState extends State<_RecommendBanner> {
   @override
   Widget build(BuildContext context) {
     if (widget.videos.isEmpty) return const SizedBox.shrink();
-    final cards = widget.style == HomeBannerStyle.cards;
+    final style = widget.style;
     return Column(
       children: [
         SizedBox(
-          // wide：横版 16:9 观感；cards：竖版海报轮播需要的更高画布
-          height: cards ? _kBannerCardsHeight : _kBannerWideHeight,
+          height: switch (style) {
+            HomeBannerStyle.wide => _kBannerWideHeight,
+            HomeBannerStyle.cards => _kBannerCardsHeight,
+            HomeBannerStyle.hero => _kBannerHeroHeight,
+            HomeBannerStyle.deck => _kBannerDeckHeight,
+            HomeBannerStyle.rail => _kBannerRailHeight,
+          },
           child: PageView.builder(
             controller: _pageCtrl,
-            // 不传 itemCount = 无限，实现**循环轮播**（用户 2026-10-13）
-            onPageChanged: (i) => setState(() => _page = i),
-            itemBuilder: (_, i) {
-              if (cards) return _coverflowItem(context, i);
-              final v = widget.videos[i % widget.videos.length];
-              final badge = VodCard.badgeText(v);
-              return GestureDetector(
-                onTap: () => Get.toNamed('/detail', arguments: v),
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 8),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(18),
-                    color: AppTheme.backgroundSecondary,
-                    border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
+            // rail 有固定页数（分组）；其余不传 itemCount = 无限循环（用户 2026-10-13）
+            itemCount: _loops ? null : _pageCount,
+            onPageChanged: (i) {
+              setState(() => _page = i);
+              _restartAuto(); // 手动滑完重新计时，避免"刚滑 1 秒就被自动跳走"
+            },
+            itemBuilder: (_, i) => switch (style) {
+              HomeBannerStyle.cards => _coverflowItem(context, i),
+              HomeBannerStyle.hero => _heroItem(context, i),
+              HomeBannerStyle.deck => _deckItem(context, i),
+              HomeBannerStyle.rail => _railPage(context, i),
+              HomeBannerStyle.wide => _wideItem(context, i),
+            },
+          ),
+        ),
+        const SizedBox(height: 10),
+        _indicator(),
+      ],
+    );
+  }
+
+  /// 指示器：hero 用**分段进度条**，其余用圆点（rail 按分组数）。
+  Widget _indicator() {
+    final n = _pageCount;
+    if (n <= 1) return const SizedBox.shrink();
+    if (_usesProgressBar) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: AnimatedBuilder(
+          animation: _progress,
+          builder: (_, __) => Row(
+            children: [
+              for (var i = 0; i < n; i++)
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(right: i == n - 1 ? 0 : 4),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(2),
+                      child: SizedBox(
+                        height: 3,
+                        child: Stack(
+                          children: [
+                            ColoredBox(
+                              color: AppTheme.textTertiary
+                                  .withValues(alpha: 0.28),
+                              child: const SizedBox.expand(),
+                            ),
+                            if (i == _index)
+                              FractionallySizedBox(
+                                widthFactor: _progress.value.clamp(0.0, 1.0),
+                                child: ColoredBox(
+                                  color: AppTheme.accentColor,
+                                  child: const SizedBox.expand(),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: List.generate(n, (i) {
+        final active = i == _index;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          margin: const EdgeInsets.symmetric(horizontal: 3),
+          width: active ? 18 : 6,
+          height: 6,
+          decoration: BoxDecoration(
+            color: active
+                ? AppTheme.accentColor
+                : AppTheme.textTertiary.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(3),
+          ),
+        );
+      }),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // 各样式的一项
+  // ══════════════════════════════════════════════════════════
+
+  Video _videoAt(int i) => widget.videos[i % widget.videos.length];
+
+  /// 横版大图（原样式）：16:9 铺满 + 左下标题 + 右下来源角标。
+  Widget _wideItem(BuildContext context, int i) {
+    final v = _videoAt(i);
+    final badge = VodCard.badgeText(v);
+    return GestureDetector(
+      onTap: () => Get.toNamed('/detail', arguments: v),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          color: AppTheme.backgroundSecondary,
+          border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 横版铺满（海报 cover，优先展示画面主体）
+            _BannerImage(url: v.pic),
+            // 底部渐变（只放标题，不重复叠名）
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 72,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.72),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            // 左下标题
+            Positioned(
+              left: 14,
+              bottom: 12,
+              right: 120,
+              child: Text(
+                v.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: AppTheme.fontTitle3,
+                  fontWeight: FontWeight.w600,
+                  shadows: [
+                    Shadow(blurRadius: 8, color: Colors.black54),
+                  ],
+                ),
+              ),
+            ),
+            // 右下半透明黑角标
+            if (badge.isNotEmpty)
+              Positioned(
+                right: 12,
+                bottom: 12,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppBrightness.isLight.value
+                        ? Colors.black.withValues(alpha: 0.62)
+                        : Colors.black.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    badge,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: AppTheme.fontCaption,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 沉浸大图（hero）：满宽出血 + 底部重渐变 + 大字标题 + 元信息 + 圆形播放钮。
+  ///
+  /// 与 `wide` 的区别不只是"更高"：这里**没有圆角/外框**（画面顶到两边）、
+  /// 渐变更厚、标题大一档、并且多了一行"年份 · 类型 · 备注"和一枚播放按钮
+  /// —— 就是 Disney+ 那套 hero 的观感。
+  Widget _heroItem(BuildContext context, int i) {
+    final v = _videoAt(i);
+    // 元信息行：只拼非空项（源里经常缺年份/类型）
+    final badge = VodCard.badgeText(v);
+    final meta = <String>[
+      if (v.year.trim().isNotEmpty) v.year.trim(),
+      if (v.type.trim().isNotEmpty) v.type.trim(),
+      if (badge.isNotEmpty) badge,
+    ].join(' · ');
+
+    return GestureDetector(
+      onTap: () => Get.toNamed('/detail', arguments: v),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          _BannerImage(url: v.pic),
+          // 底部重渐变：给大字标题 + 元信息 + 按钮一个可读的底
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 140,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.55),
+                    Colors.black.withValues(alpha: 0.88),
+                  ],
+                  stops: const [0.0, 0.45, 1.0],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 16,
+            right: 76,
+            bottom: 16,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  v.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    height: 1.2,
+                    fontWeight: FontWeight.w700,
+                    shadows: [Shadow(blurRadius: 10, color: Colors.black54)],
+                  ),
+                ),
+                if (meta.isNotEmpty) ...[
+                  const SizedBox(height: 5),
+                  Text(
+                    meta,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.78),
+                      fontSize: AppTheme.fontCaption + 0.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          // 右下圆形播放钮（整卡也可以点，这枚是"能播"的视觉暗示）
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.92),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.35),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.play_arrow_rounded,
+                size: 26,
+                color: Colors.black87,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 叠卡堆（deck）：大卡在前，后面两张**向上错位 + 缩小**露出，不侧倾。
+  ///
+  /// 与 `cards` 的差别（刻意做开）：coverflow 是"中间凸出、两侧下沉 + 侧倾"的
+  /// 对称 V 形；这里是**同向向上错位**的洗牌堆 —— 侧卡往上冒出来当"底牌"。
+  Widget _deckItem(BuildContext context, int i) {
+    final v = _videoAt(i);
+    final badge = VodCard.badgeText(v);
+
+    double page = _page.toDouble();
+    if (_pageCtrl.hasClients && _pageCtrl.position.haveDimensions) {
+      page = _pageCtrl.page ?? page;
+    }
+    final delta = (i - page).clamp(-1.5, 1.5);
+    final absD = delta.abs().clamp(0.0, 1.0);
+    // 侧卡往上错位（-20，小于画布上下余量 22，顶边不会被裁）并缩小
+    final dy = -20.0 * absD;
+    final scale = 1.0 - 0.10 * absD;
+    final dim = (1 - 0.30 * absD).clamp(0.0, 1.0);
+
+    return Transform.translate(
+      offset: Offset(0, dy),
+      child: Transform.scale(
+        scale: scale,
+        child: Opacity(
+          opacity: dim,
+          child: Center(
+            child: GestureDetector(
+              onTap: () => Get.toNamed('/detail', arguments: v),
+              child: SizedBox(
+                height: _kBannerDeckCardH,
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    color: AppTheme.backgroundSecondary,
+                    border:
+                        Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.38),
+                        blurRadius: 18,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  margin: const EdgeInsets.symmetric(horizontal: 6),
                   clipBehavior: Clip.antiAlias,
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      // 横版铺满（海报 cover，优先展示画面主体）
                       _BannerImage(url: v.pic),
-                      // 底部渐变（只放标题，不重复叠名）
                       Positioned(
                         left: 0,
                         right: 0,
                         bottom: 0,
-                        height: 72,
+                        height: 84,
                         child: DecoratedBox(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
@@ -1159,49 +1552,66 @@ class _RecommendBannerState extends State<_RecommendBanner> {
                               end: Alignment.bottomCenter,
                               colors: [
                                 Colors.transparent,
-                                Colors.black.withValues(alpha: 0.72),
+                                Colors.black.withValues(alpha: 0.80),
                               ],
                             ),
                           ),
                         ),
                       ),
-                      // 左下标题
+                      // 右上角年份小胶囊（对齐用户给的参考图：年份压在右上角）
+                      if (v.year.trim().isNotEmpty)
+                        Positioned(
+                          right: 10,
+                          top: 10,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.55),
+                              borderRadius: BorderRadius.circular(9),
+                            ),
+                            child: Text(
+                              v.year.trim(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: AppTheme.fontCaption,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
                       Positioned(
-                        left: 14,
+                        left: 12,
+                        right: 12,
                         bottom: 12,
-                        right: 120,
                         child: Text(
                           v.name,
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: Colors.white,
-                            fontSize: AppTheme.fontTitle3,
-                            fontWeight: FontWeight.w600,
+                            fontSize: AppTheme.fontBody,
+                            height: 1.25,
+                            fontWeight: FontWeight.w700,
                             shadows: [
-                              Shadow(blurRadius: 8, color: Colors.black54),
+                              Shadow(blurRadius: 8, color: Colors.black54)
                             ],
                           ),
                         ),
                       ),
-                      // 右下半透明黑角标
                       if (badge.isNotEmpty)
                         Positioned(
-                          right: 12,
-                          bottom: 12,
+                          left: 12,
+                          top: 12,
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 4),
+                                horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
-                              color: AppBrightness.isLight.value
-                                  ? Colors.black.withValues(alpha: 0.62)
-                                  : Colors.black.withValues(alpha: 0.55),
-                              borderRadius: BorderRadius.circular(12),
+                              color: Colors.black.withValues(alpha: 0.55),
+                              borderRadius: BorderRadius.circular(9),
                             ),
                             child: Text(
                               badge,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: AppTheme.fontCaption,
@@ -1213,30 +1623,77 @@ class _RecommendBannerState extends State<_RecommendBanner> {
                     ],
                   ),
                 ),
-              );
-            },
+              ),
+            ),
           ),
         ),
-        const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(widget.videos.length, (i) {
-            final active = i == _index;
-            return AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              margin: const EdgeInsets.symmetric(horizontal: 3),
-              width: active ? 18 : 6,
-              height: 6,
-              decoration: BoxDecoration(
-                color: active
-                    ? AppTheme.accentColor
-                    : AppTheme.textTertiary.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(3),
+      ),
+    );
+  }
+
+  /// 三格海报轨（rail）：一页 = 3 张竖版海报（等宽留缝、不缩放），
+  /// 下方小字标题 + 年份（**文字在图外**，不压画面 —— Minimal gallery 的做法）。
+  Widget _railPage(BuildContext context, int i) {
+    final start = i * _kBannerRailPerPage;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var k = 0; k < _kBannerRailPerPage; k++) ...[
+            if (k > 0) const SizedBox(width: 8),
+            // 末组可能不满 3 条：空位留白，不越界取值（RangeError）
+            Expanded(
+              child: start + k < widget.videos.length
+                  ? _railCard(context, widget.videos[start + k])
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _railCard(BuildContext context, Video v) {
+    return GestureDetector(
+      onTap: () => Get.toNamed('/detail', arguments: v),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 海报 3:4
+          AspectRatio(
+            aspectRatio: 3 / 4,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                color: AppTheme.backgroundSecondary,
+                child: _BannerImage(url: v.pic),
               ),
-            );
-          }),
-        ),
-      ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            v.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: AppTheme.fontCaption + 0.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (v.year.trim().isNotEmpty)
+            Text(
+              v.year.trim(),
+              maxLines: 1,
+              style: TextStyle(
+                color: AppTheme.textTertiary,
+                fontSize: AppTheme.fontCaption - 0.5,
+              ),
+            ),
+        ],
+      ),
     );
   }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
@@ -11,6 +12,7 @@ import '../models/source_bean.dart';
 import '../common/constants.dart';
 import 'network_manager.dart';
 import 'live_service.dart';
+import 'parse_store.dart';
 import 'host_resolver.dart';
 
 /// 配置错误枚举
@@ -64,6 +66,16 @@ class ApiConfig extends GetxController {
   final dohList = <(String, String)>[].obs;
   final isLoaded = false.obs;
   final configUrl = ''.obs;
+
+  /// 最近一次成功解析的配置里的**广告黑名单 / 过滤规则**。
+  ///
+  /// 为什么要暴露（用户 2026-10-14：「接口配置下载源文件好慢」）：
+  /// 之前 `AppState._reloadAdFilterRules` 为了拿这两个列表，会把**整份配置
+  /// 再下一次** —— 而且它直接走 NetworkManager，绕开了 20s 的原始文本缓存
+  /// ⇒ 大配置（几 MB）等于白耗一倍流量、还和首页首屏请求抢带宽。
+  /// 现在解析时顺手存下来，广告过滤直接读这份，**不再有第二次下载**。
+  List<String> lastAds = const [];
+  List<RuleConfig> lastRules = const [];
 
   /// 整包是否为「单个 js/jar spider」配置（点播接口地址本身就是 .js/.jar）。
   ///
@@ -651,8 +663,12 @@ class ApiConfig extends GetxController {
       _rawConfigCache[key] =
           _RawConfigCacheEntry(content: content, fetchedAt: now);
       _trimRawConfigCacheIfNeeded();
-      // 拉到就落一份到本地磁盘（用户 2026-10-13：把源下到本地，切换更稳）
-      await _writeDiskCache(normalizedUrl, content);
+      // 拉到就落一份到本地磁盘（用户 2026-10-13：把源下到本地，切换更稳）。
+      // ⚠️ **不 await**（用户 2026-10-14：「接口配置下载好慢」）：
+      //   这份配置常见几 MB，`writeAsString(flush: true)` 会真去 fsync ——
+      //   摆在加载路径上等于让用户白等一次磁盘同步（慢机/大配置下很明显）。
+      //   它只是离线兜底缓存，这次没写完下次再拉即可。
+      unawaited(_writeDiskCache(normalizedUrl, content));
       return content;
     } catch (e) {
       // 网络失败 → 回退本地磁盘缓存，切源/离线时不再「一片空白」
@@ -729,6 +745,10 @@ class ApiConfig extends GetxController {
     required int loadToken,
   }) async {
     if (_activeLoadToken != loadToken) return;
+
+    // 顺手把 ads / rules 存下来（广告过滤直接用，省掉第二次整份下载）
+    lastAds = config.ads ?? const [];
+    lastRules = config.rules ?? const [];
 
     if (includeSources) {
       // 整包线路**是不是由 spider 决定**的（这决定后面对 homeSourceBean 的处置，
@@ -876,14 +896,18 @@ class ApiConfig extends GetxController {
             '${homeSourceBean.value?.key}，/config 返回后再校正');
       }
 
-      // 解析解析器列表
-      if (config.parses != null) {
-        parseBeanList.value = config.parses!
-            .map((p) => ParseBean(name: p.name ?? '', url: p.url ?? '', type: p.type?.value ?? 0))
-            .toList();
-      } else {
-        parseBeanList.value = [];
+      // 解析线路（parses）：**并入本地持久化的 ParseStore**，不再"订阅有就有、
+      // 没就没"。用户 2026-10-14：换一个不带 parses 的订阅，之前拉到的线路
+      // 立刻消失，播放器上的「解析」按钮就没线路可切了。
+      // 现在：订阅下发的只 merge，本地已有的（含手动添加的）一律保留。
+      if (config.parses != null && config.parses!.isNotEmpty) {
+        await ParseStore.instance.absorb(config.parses!.map((p) => ParseBean(
+              name: p.name ?? '',
+              url: p.url ?? '',
+              type: p.type?.value ?? 0,
+            )));
       }
+      parseBeanList.value = ParseStore.instance.list;
 
       // 解析 DoH 列表
       if (config.doh != null) {

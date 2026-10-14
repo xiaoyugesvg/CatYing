@@ -28,6 +28,48 @@ _PYLIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pylib')
 if os.path.isdir(_PYLIB) and _PYLIB not in sys.path:
     sys.path.insert(0, _PYLIB)
 
+
+# ---- 全局网络兜底：给没写 timeout 的请求补一个默认超时 -------------------
+#
+# 🔴 为什么必须（用户 2026-10-14 报「Python 引擎已卡死…请重启 App」的**根因**）：
+#   源脚本大量写 `requests.get(url)`（**不带 timeout**）。此时 requests 会构造
+#   `Timeout(connect=None, read=None)`，urllib3 接着 `socket.create_connection(..., None)`
+#   → `sock.settimeout(None)` ⇒ socket read **永久阻塞**。
+#   而原生 watchdog 的 `PyThreadState_SetAsyncExc` **只在字节码边界生效**：
+#   线程卡在 C 的 socket read 里永远不会回到字节码 ⇒ 中断永远不触发 ⇒
+#   Swift 那条串行 `workQueue` 被**永久占住** ⇒ 之后所有 Python 调用
+#   （连 `ensureStarted` / `dispose` 都排在它后面）全部无响应 ⇒ "卡死"。
+#
+#   ⚠️ `socket.setdefaulttimeout()` **治不了** requests：urllib3 会显式
+#      `settimeout(None)` 把它覆盖掉。所以直接给 `Session.request` 补默认 timeout
+#      —— 这才是真正管用的那一层（`requests.get/post` 内部都走 Session.request）。
+#
+#   默认值 8s 是**刻意**选的：App 侧 watchdog 预算是 10s、Dart 硬超时 13s，
+#   8s 让"没写 timeout 的请求"在 watchdog 之前自己返回 ⇒ 脚本的 try/except
+#   接住报错 → 正常返回 → 原生队列解开，用户**不用重启 App**。
+#   源脚本自己显式传了 timeout 的，一律尊重它（这里只在没写时补）。
+_PY_DEFAULT_TIMEOUT = 8.0
+try:
+    import requests as _requests
+
+    _orig_session_request = _requests.sessions.Session.request
+
+    def _request_with_default_timeout(self, method, url, **kwargs):
+        if kwargs.get('timeout') is None:
+            kwargs['timeout'] = _PY_DEFAULT_TIMEOUT
+        return _orig_session_request(self, method, url, **kwargs)
+
+    _requests.sessions.Session.request = _request_with_default_timeout
+except Exception as _e:  # pragma: no cover - 没有 requests 时静默跳过
+    print('[spider_runner] requests 超时兜底未生效: {}'.format(_e))
+
+# 二级兜底：裸 socket / urllib / 其它库没显式设超时时，用默认值（20s）。
+try:
+    import socket as _socket
+    _socket.setdefaulttimeout(20.0)
+except Exception:  # pragma: no cover
+    pass
+
 # ---- 安全基线 ------------------------------------------------------
 # iOS 无 fork/exec；把危险通道直接禁用，避免源脚本误用
 try:

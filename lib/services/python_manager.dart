@@ -42,12 +42,20 @@ class PythonManager {
   // ⇒ 原生那条串行 `workQueue` 被**永久占用** ⇒ 之后所有 Python 调用都排在
   // 它后面，Dart 侧表现为"点了永远没反应"（MethodChannel 本身没有超时）✗。
   //
-  // Dart 侧能做的兜底：
+  // Dart 侧兜底：
   //   ① 每次调用加**硬超时**（预算 + 3s）——不再无限等待；
-  //   ② 超时即置 [_stuck]，后续调用**立刻失败**并说明原因，
-  //      不再排队堆积（把"静默卡死"变成"明确报错"，用户知道要重启）。
+  //   ② 超时即置 [_stuck]，后续调用**立刻失败**并说明原因，不再排队堆积。
+  //   ③ 🔴 2026-10-14 补：**自动恢复**（见 [_scheduleAutoRecover]）——
+  //      卡死的最常见根因是"脚本里不带 timeout 的网络请求永久阻塞"，已经在
+  //      Python 侧兜住（spider_runner 给 `Session.request` 补了 8s 默认超时）
+  //      ⇒ 卡住的那次调用会在超时内自己返回、原生队列随之解开。所以这里不再
+  //      要求"重启 App"，而是隔几秒探一次队列，通了就自动救回来。
   bool _stuck = false;
   bool get isStuck => _stuck;
+
+  /// 自动恢复：探针轮数 / 每轮间隔（都刻意很小，最多占用十几秒）
+  static const int _kRecoverAttempts = 3;
+  static const Duration _kRecoverInterval = Duration(seconds: 6);
 
   PythonManager._internal() {
     if (!Platform.isIOS) {
@@ -136,11 +144,61 @@ class PythonManager {
   Duration get _hardTimeout => Duration(milliseconds: _timeoutMs + 3000);
 
   static const String _stuckMsg = 'Python 引擎已卡死（上次执行未能被中断，原生队列已堵住）。'
-      '请重启 App 后重试。';
+      '正在自动重试恢复…若一直不好，请到「设置 → 订阅管理 → 引擎管理」点一次「加载」，'
+      '或重启 App。';
 
   void _markStuck(String where) {
     _stuck = true;
     AppLog.instance.w('[Python] $where 超时未返回（预算 ${_timeoutMs}ms）→ 引擎标记为卡死');
+    _scheduleAutoRecover();
+  }
+
+  /// 卡死后**自动尝试救回**，而不是让用户重启 App。
+  ///
+  /// 为什么现在救得回来：卡死的最常见根因是"脚本里不带 timeout 的网络请求永久
+  /// 阻塞"，已在 Python 侧兜住（`spider_runner` 给 `Session.request` 补了 8s 默认
+  /// 超时）⇒ 卡住的那次调用会在超时内自己返回、原生 workQueue 随之解开。
+  /// 这里隔 6/12/18 秒探一次「原生队列是否已通」——探针带 3s 超时，
+  /// **绝不会把 Dart 也挂住**。通了就清标记，后续调用自动恢复正常。
+  void _scheduleAutoRecover() {
+    for (var i = 0; i < _kRecoverAttempts; i++) {
+      Future.delayed(_kRecoverInterval * (i + 1), () async {
+        if (!_stuck) return; // 已被手动/上一轮探针救回
+        if (await recover()) {
+          AppLog.instance.log('[Python] 已自动恢复（第 ${i + 1} 轮探针）');
+        } else if (i == _kRecoverAttempts - 1) {
+          AppLog.instance.w('[Python] 自动恢复失败：原生队列仍被占住（需重启 App）');
+        }
+      });
+    }
+  }
+
+  /// 从「卡死」中恢复；返回原生队列是否已通。
+  ///
+  /// 探针用 `ensureStarted`：原生侧它**幂等且不碰解释器**
+  /// （`started` 已 true 就直接返回 true）⇒ 它只需等队列空出来，
+  /// 正好就是"队列通不通"的判据。
+  /// 「引擎管理 → 加载」按钮也会调它 —— 手动救命入口。
+  Future<bool> recover() async {
+    if (!_stuck) return true;
+    if (!isIOS) return false;
+    try {
+      final ok = await _channelImpl
+          .invokeMethod<bool>('ensureStarted')
+          .timeout(const Duration(seconds: 3));
+      if (ok != true) return false;
+      _stuck = false;
+      ready.value = true;
+      lastError.value = null;
+      AppLog.instance.log('[Python] 引擎已恢复（原生队列已通）');
+      return true;
+    } on TimeoutException {
+      AppLog.instance.w('[Python] 恢复探针超时：原生队列仍被占住');
+      return false;
+    } catch (e) {
+      AppLog.instance.w('[Python] 恢复探针异常: $e');
+      return false;
+    }
   }
 
   /// 调用适配层方法：module=spider_runner 下的逻辑模块，

@@ -12,11 +12,14 @@
 //   删文件 → call('runner','remove_source')
 //   启动时 → syncToEngine() 全量注册一遍（保证重启后仍可用）
 
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'app_log.dart';
+import 'network_manager.dart';
 import 'python_manager.dart';
 
 class PythonSourcesService {
@@ -99,6 +102,44 @@ class PythonSourcesService {
       AppLog.instance.w('[Python] 读源失败 $kind/$key: $e');
       return null;
     }
+  }
+
+  /// 按源地址计算 key：`psrc_<md5(url) 前 12 位>`（同一 URL 恒同 key）。
+  static String keyForUrl(String url) {
+    final h = md5.convert(utf8.encode(url.trim())).toString();
+    return 'psrc_${h.substring(0, 12)}';
+  }
+
+  /// 确保某个 .py 源（由 [url] 指定）已落盘并注册进引擎，返回模块 key；
+  /// 失败返回 null。已有本地缓存直接用，没有才去 [url] 下载 ——
+  /// 书源侧的 `pythonKey` 缺省时靠它把「带 .py 地址的书源」接进 CPython。
+  Future<String?> ensureInstalled(String url, String kind) async {
+    final u = url.trim();
+    if (u.isEmpty) return null;
+    final key = keyForUrl(u);
+    if (isRegisteredInSession(kind, key)) return key;
+    if (!PythonManager.instance.isIOS) return null;
+    if (!await PythonManager.instance.ensureStarted()) {
+      AppLog.instance.w('[Python] 引擎未就绪，无法注册 $u');
+      return null;
+    }
+    var code = await readSource(kind, key);
+    if (code == null || code.trim().isEmpty) {
+      try {
+        code = await NetworkManager.instance.getString(u);
+      } catch (e) {
+        AppLog.instance.w('[Python] 脚本下载失败 $u: $e');
+        return null;
+      }
+      if (code.trim().isEmpty) return null;
+    }
+    final r = await installSource(kind, key, code);
+    if (!r.ok) {
+      AppLog.instance.w('[Python] 注册失败 $u: ${r.message}');
+      return null;
+    }
+    AppLog.instance.log('[Python] 已就绪 $kind/$key ← $u');
+    return key;
   }
 
   /// 写入并注册一个 Python 源（新建或更新）

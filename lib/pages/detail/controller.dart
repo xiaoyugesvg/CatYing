@@ -16,10 +16,15 @@ import '../../services/source_service.dart';
 import '../../services/spider_service.dart';
 import '../../services/app_log.dart';
 import '../../services/network_manager.dart';
+import '../../services/play_route.dart';
 import '../../services/player_prefs.dart';
 import '../../services/ad_filter_service.dart';
 import '../../services/parse_service.dart';
+import '../../services/parse_store.dart';
+import '../../widgets/app_toast.dart';
 import '../play/sniff_player_page.dart';
+import 'simple_image_reader_page.dart';
+import 'simple_text_reader_page.dart';
 
 class PlaybackQualityOption {
   static const String autoIdentifier = 'auto';
@@ -65,6 +70,15 @@ class PlaybackQualityOption {
   int get hashCode => id.hashCode;
 }
 
+/// 当前集解析出来的**内容形态**。
+///
+/// - [video]    普通视频（走播放器）
+/// - [pictures] 图片列表（漫画 / 图源，`pics://`）→ 看图阅读器
+/// - [text]     正文（小说源，`novel://`）→ 书籍阅读器
+///
+/// 非 [video] 时详情页**不占**那块 4:3 播放区（用户 2026-10-14）。
+enum PlayContentMode { video, pictures, text }
+
 class DetailController extends GetxController with WidgetsBindingObserver {
   final vodInfo = Rx<VodInfo?>(null);
   final isLoading = false.obs;
@@ -107,6 +121,49 @@ class DetailController extends GetxController with WidgetsBindingObserver {
 
   /// 详情页 tab 索引: 0=简介, 1=推荐, 2=快搜
   final detailTabIndex = 0.obs;
+
+  // ============================================================
+  // 内容形态（视频 / 图片 / 正文）
+  // ============================================================
+
+  /// 当前集解析出来的内容形态 —— 由 `playerContent` 返回的协议决定：
+  /// `novel://` → 正文；`pics://` / `mange://` → 图片；其余 → 视频。
+  final contentMode = PlayContentMode.video.obs;
+
+  /// 已知为「非视频内容源」的 sourceKey（小说 / 漫画源），落 prefs。
+  ///
+  /// 为什么需要它：内容形态只能在 `playerContent` 返回后才知道，但用户
+  /// **再次**进入这类源的详情页时，不该再先黑底转圈 15 秒（然后报"播放地址
+  /// 获取超时"）—— 记住它，一开始就不占那块 4:3 播放区（用户 2026-10-14）。
+  static const String _kNonVideoKeys = 'non_video_source_keys';
+  final nonVideoSourceKeys = <String>{}.obs;
+
+  /// 详情页是否**不占**那块 4:3 播放区（非视频内容）。
+  bool get isNonVideoContent =>
+      contentMode.value != PlayContentMode.video ||
+      nonVideoSourceKeys.contains(vodInfo.value?.sourceKey ?? '');
+
+  Future<void> _loadNonVideoSources() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs.getStringList(_kNonVideoKeys) ?? const <String>[];
+      if (keys.isNotEmpty) nonVideoSourceKeys.addAll(keys);
+    } catch (e) {
+      AppLog.instance.w('[Detail] 读非视频源记录失败: $e');
+    }
+  }
+
+  Future<void> _rememberNonVideoSource() async {
+    final key = vodInfo.value?.sourceKey ?? '';
+    if (key.isEmpty || nonVideoSourceKeys.contains(key)) return;
+    nonVideoSourceKeys.add(key);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_kNonVideoKeys, nonVideoSourceKeys.toList());
+    } catch (e) {
+      AppLog.instance.w('[Detail] 写非视频源记录失败: $e');
+    }
+  }
 
   /// 加载推荐（固定「同类型」+ 多源并发 + 每源超时）。
   ///
@@ -227,6 +284,8 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   void onInit() {
     super.onInit();
     loadSkipDurations();
+    // 非视频源记录（小说 / 漫画源）：读出来后再次进入这些源就不占 4:3 播放区
+    _loadNonVideoSources();
     // 监听 lifecycle：应用从后台/锁屏切回前台时强制重置 isLoading
     // 并重新加载详情（避免旧 dio in-flight 请求卡住 isLoading）
     WidgetsBinding.instance.addObserver(this);
@@ -533,6 +592,34 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     }
   }
 
+  // ============================================================
+  // 底栏「嗅探 / 解析」按钮
+  // ============================================================
+
+  /// 当前集从 Spider 拿到的**原始**播放地址（未经解析 / 嗅探）。
+  /// 「嗅探」按钮用它 —— 已经解析成直链后再嗅探没有意义。
+  String _rawPlayUrl = '';
+  String get rawPlayUrl => _rawPlayUrl;
+
+  /// 底栏「嗅探」：用 WebView 打开当前网页，手动抓里面的媒体地址。
+  void openSniff() {
+    final url = _rawPlayUrl.isNotEmpty ? _rawPlayUrl : (playUrl.value ?? '');
+    if (!url.startsWith('http')) {
+      AppToast.message('当前地址不是网页，无法嗅探');
+      return;
+    }
+    Get.to(() => SniffPlayerPage(url: url, title: vodInfo.value?.name));
+  }
+
+  /// 底栏「解析」选中某条线路后：记住选择，并用新线路**重解当前集**。
+  /// 传空串 = 自动（按列表顺序依次尝试）。
+  Future<void> selectParseLine(String url) async {
+    await ParseStore.instance.setActive(url);
+    ApiConfig.instance.parseBeanList.value = ParseStore.instance.list;
+    AppLog.instance.log('[Parse] 切换解析线路 → ${url.isEmpty ? '自动' : url}');
+    retryCurrentEpisode();
+  }
+
   bool playNext() {
     final info = vodInfo.value;
     if (info == null) return false;
@@ -555,6 +642,11 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   void _resolveSpiderPlayUrl({required String flag, required String id}) {
     final token = _newUuid();
     _spiderResolveToken = token;
+
+    // 每次重解都先按"视频"假设 —— 真正形态等 playerContent 返回后按协议定：
+    //   novel:// → 正文；pics:// / mange:// → 图片；其余 → 视频。
+    // （内容形态决定详情页要不要占那块 4:3 播放区）
+    contentMode.value = PlayContentMode.video;
 
     // 获取当前 Spider 的 key/type/api/ext
     final spiderInfo = SpiderService.instance.getCurrentSpiderInfo();
@@ -622,19 +714,72 @@ class DetailController extends GetxController with WidgetsBindingObserver {
         if (_spiderResolveToken != token) return;
 
         if (resolvedUrl != null && resolvedUrl.isNotEmpty) {
-          // 2026-10-14：Spider 返回 http(s) 网页地址时，旧逻辑把非媒体后缀的
-          // 地址一律当"网页播放页"丢给 WebView —— 用户点播放就直接弹出原网页。
-          // 现在先过一遍配置里的解析接口尝试提取真实直链：拿到直链走原生播放；
-          // 解析接口不可用 / 未命中 / 只解出网页时保持原地址，由播放区 WebView 兜底。
+          // 记下 Spider 给的**原始**地址（底栏「嗅探」按钮要用）
+          _rawPlayUrl = resolvedUrl;
+          // **按内容分流①：正文协议**（小说源，`novel://{title,content}`）
+          // —— 这类源给出的"播放地址"其实是整章正文，交给播放器只会黑屏，
+          // 所以直接进简易书籍阅读器。
+          final novel = parseNovelUrl(resolvedUrl);
+          if (novel != null && novel.content.trim().isNotEmpty) {
+            contentMode.value = PlayContentMode.text;
+            unawaited(_rememberNonVideoSource());
+            playUrl.value = resolvedUrl;
+            playHeaders.value = headers;
+            playbackSessionId.value = _newUuid();
+            isPlaying.value = true;
+            AppLog.instance.log(
+                '[Play] 正文协议 → 书籍阅读器（${novel.content.length} 字）');
+            SimpleTextReaderPage.open(
+              content: novel.content,
+              bookName: vodInfo.value?.name ?? '',
+              chapterName: novel.title.isNotEmpty
+                  ? novel.title
+                  : (vodInfo.value?.currentEpisode?.name ?? ''),
+            );
+            return;
+          }
+          // **按内容分流②：图片列表协议**（漫画 / 图源，`pics://` / `mange://…`）
+          // —— 这类源给出的"播放地址"其实是整章图片，交给播放器只会黑屏，
+          // 所以直接进简易看图阅读器（用户 2026-10-14）。
+          // playUrl 仍记下这个地址（`contentMode` 已置为非视频 → 详情页那块
+          // 4:3 播放区直接不占面积）。
+          final pictures = parseImageListUrl(resolvedUrl);
+          if (pictures != null && pictures.isNotEmpty) {
+            contentMode.value = PlayContentMode.pictures;
+            unawaited(_rememberNonVideoSource());
+            playUrl.value = resolvedUrl;
+            playHeaders.value = headers;
+            playbackSessionId.value = _newUuid();
+            isPlaying.value = true;
+            AppLog.instance.log(
+                '[Play] 图片列表协议 → 看图阅读器（${pictures.length} 张）');
+            SimpleImageReaderPage.open(
+              title: vodInfo.value?.name ?? '',
+              images: pictures,
+              chapterName: vodInfo.value?.currentEpisode?.name ?? '',
+              headers: headers,
+            );
+            return;
+          }
+          // 播放地址分流（按站点性质决定要不要先解析）：
+          //   ① **优爱腾芒B 等主流正版站** —— 有防盗链/加密，直接嗅探拿到的
+          //      地址通常播不了 ⇒ **先用解析接口解一遍**；解析结果无论
+          //      "直链"还是"新的网页地址"都采用（新的网页再交给嗅探兜底）；
+          //   ② **其它站点** —— 不做解析，**直接交给 WebView 嗅探**从页面上
+          //      抓媒体地址（省一次请求，也避免被解析接口解歪）。
           var playCandidate = resolvedUrl;
           if (!_looksLikeDirectMedia(playCandidate) &&
+              needParseFirst(playCandidate) &&
               ParseService.instance.enabled) {
             final outcome =
                 await ParseService.instance.parseOutcome(playCandidate);
-            if (outcome != null && outcome.url.isNotEmpty && outcome.direct) {
+            if (outcome != null && outcome.url.isNotEmpty) {
               AppLog.instance.log(
-                  '[Play] 解析接口「${outcome.sourceName}」提取直链成功 → ${outcome.url}');
+                  '[Play] 「${outcome.sourceName}」解析 → ${outcome.url}'
+                  '（${outcome.direct ? "直链" : "仍为网页，转嗅探"}）');
               playCandidate = outcome.url;
+            } else {
+              AppLog.instance.log('[Play] 解析接口未命中，转直接嗅探');
             }
           }
           if (_spiderResolveToken != token) return;
@@ -689,6 +834,8 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   ///
   /// 无 ads/rules 且无 parses 时，方法内不产生 await，行为与原来的同步赋值一致。
   Future<void> _startPlayback(String fallback) async {
+    // 走这里的都是普通视频链路（CMS 源 / 直链），形态复位成"视频"
+    contentMode.value = PlayContentMode.video;
     var candidate = _selectedPlayableURL(fallback: fallback);
 
     if (AdFilterService.instance.isBlocked(candidate) &&

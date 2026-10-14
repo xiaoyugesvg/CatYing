@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -12,6 +13,7 @@ import '../../services/api_config.dart';
 import '../../services/app_log.dart';
 import '../../services/live_service.dart';
 import '../../services/network_manager.dart';
+import '../../services/parse_store.dart';
 import '../models/mini_app.dart';
 
 /// 「程序」模块服务：管理导入的 TVBox 生态小程序配置。
@@ -514,6 +516,7 @@ class MiniAppService extends GetxService {
       final parses = decoded is Map ? decoded['parses'] : null;
       if (parses is! List) return;
       final list = ApiConfig.instance.parseBeanList;
+      final added = <ParseBean>[];
       for (final p in parses) {
         if (p is! Map) continue;
         final url = (p['url'] ?? '').toString().trim();
@@ -535,7 +538,11 @@ class MiniAppService extends GetxService {
         } else {
           list.add(bean);
         }
+        added.add(bean);
       }
+      // 同时**落盘**（ParseStore）：否则下一次"按 ParseStore 重灌解析列表"
+      // （切换解析线路 / 打开解析线路管理 / 加载订阅）会把程序带进来的线路冲掉。
+      if (added.isNotEmpty) unawaited(ParseStore.instance.absorb(added));
       if (parses.isNotEmpty) {
         AppLog.instance.log('[MiniApp] 已注册 ${parses.length} 条解析接口');
       }
@@ -639,6 +646,10 @@ class MiniAppService extends GetxService {
           .toSet();
       if (urls.isEmpty) return;
       ApiConfig.instance.parseBeanList.removeWhere((b) => urls.contains(b.url));
+      // 落盘的那份也一并删掉，否则下次重灌解析列表又回来了
+      for (final u in urls) {
+        unawaited(ParseStore.instance.remove(u));
+      }
     } catch (e) {
       AppLog.instance.log('[MiniApp] 移除解析接口失败: $e');
     }

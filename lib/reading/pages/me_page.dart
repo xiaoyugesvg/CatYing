@@ -1,6 +1,5 @@
 
 import 'package:flutter/material.dart';
-import 'reader_core_page.dart';
 import 'package:flutter/services.dart';
 import '../services/settings_service.dart';
 import '../services/theme_switch.dart';
@@ -241,28 +240,6 @@ class _MePageState extends State<MePage> {
                             context,
                             MaterialPageRoute(
                               builder: (_) => const ReadingSettingsPage(),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    // 4.5 阅读核心（ReaderCore）—— 与影视「播放器核心」同构：
-                    //     核心选择独立成页，**不跟排版设置混在一起**
-                    StaggeredEntrance(
-                      key: ValueKey('${_session}_reader_core'),
-                      index: 4,
-                      child: SizedBox(
-                        width: itemWidth,
-                        child: _buildMenuItem(
-                          isDark,
-                          icon: Icons.memory_rounded,
-                          iconBg: JellyTheme.primary,
-                          title: '阅读核心',
-                          subtitle: '取正文 / 图片的引擎：现有链路 · Python 源',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ReaderCorePage(),
                             ),
                           ),
                         ),

@@ -6,6 +6,7 @@ import '../common/constants.dart';
 import '../models/app_config.dart';
 import 'api_config.dart';
 import 'app_log.dart';
+import 'parse_store.dart';
 
 /// 解析结果：url 为解析得到的地址；direct 表示是否已是可直链播放的媒体。
 class ParseOutcome {
@@ -53,6 +54,9 @@ class ParseService {
 
   /// 解析 [url]：遍历可用接口（或仅 [only] 指定的接口），
   /// 成功返回 [ParseOutcome]（含直链判定），全部失败返回 null。
+  ///
+  /// 播放器底栏的「解析」按钮切换线路后，用户选中的那条由 [ParseStore] 记录，
+  /// 这里会**优先**用它，失败再自动回退其余线路（选错也不至于播不了）。
   Future<ParseOutcome?> parseOutcome(
     String url, {
     ParseBean? only,
@@ -61,7 +65,16 @@ class ParseService {
     final target = url.trim();
     if (target.isEmpty) return null;
 
-    final beans = only != null ? [only] : _parsers();
+    final all = _parsers();
+    List<ParseBean> beans;
+    if (only != null) {
+      beans = [only];
+    } else {
+      final active = ParseStore.instance.activeBean;
+      beans = active == null
+          ? all
+          : [active, ...all.where((b) => b.url != active.url)];
+    }
     for (final bean in beans) {
       try {
         final endpoint = _buildEndpoint(bean.url.trim(), target);

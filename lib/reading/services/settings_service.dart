@@ -46,17 +46,37 @@ enum DefaultHomePage { manga, book, bookshelf, favorites, me }
 enum PageDefaultContent { manga, book }
 
 /// 首页顶部幻灯片（轮播）样式 —— 用户可在「设置 → 菜单设置」切换。
+///
+/// ⚠️ 持久化存的是 **index**，所以新样式只能**往后加**，
+/// 中间插值会让老用户的已选样式漂移。
 enum HomeBannerStyle {
   /// 横版大图（原样式）：16:9 大图铺满，左下标题 + 右下来源角标
   wide,
 
-  /// 卡片轮播（新增）：中间竖版海报放大居中，两侧海报缩小 / 倾斜 / 压暗露出
+  /// 卡片轮播：中间竖版海报放大居中，两侧海报缩小 / 倾斜 / 压暗露出
   /// （coverflow 观感，对齐用户 2026-10-13 给的参考图）
-  cards;
+  cards,
+
+  /// 沉浸大图（新增）：**满宽出血**画面 + 底部多层渐变 + 大字标题 + 元信息行
+  /// + 右下圆形播放钮；指示器是**细长分段进度条**（不是圆点）。
+  /// 参考 Disney+ 新版 hero carousel：让画面主体"顶到边"，文字压在渐变上。
+  hero,
+
+  /// 叠卡堆（新增）：大卡在前，后面两张**向上错位 + 缩小**露出（洗牌堆观感），
+  /// 不做侧倾 —— 与 coverflow 的"左右对称 V 形"刻意区分开。
+  /// 参考 Swiper `effect: 'cards'`。
+  deck,
+
+  /// 三格海报轨（新增）：一行 **3 张竖版海报**（等宽留缝、不缩放），整组横滑，
+  /// 海报下方小字标题 + 年份。参考 Swiper「Photo Gallery - Minimal」/ App Store 横滑行。
+  rail;
 
   String get label => switch (this) {
         HomeBannerStyle.wide => '横版大图',
         HomeBannerStyle.cards => '卡片轮播',
+        HomeBannerStyle.hero => '沉浸大图',
+        HomeBannerStyle.deck => '叠卡堆',
+        HomeBannerStyle.rail => '三格海报轨',
       };
 }
 

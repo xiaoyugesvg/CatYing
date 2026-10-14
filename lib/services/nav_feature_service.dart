@@ -22,6 +22,8 @@ enum NavFeature {
   music('music', '音乐', false, tabIndex: 5),
   books('books', '阅读', false, tabIndex: 6),
   apps('apps', '程序', false, tabIndex: 7),
+  // 「网页首页」模块（独立于小程序体系：加载用户自配的 HTML 首页）
+  webhome('webhome', '网页', false, tabIndex: 8),
   shelf('shelf', '史藏', false, tabIndex: 1),
   settings('settings', '设置', true, tabIndex: 3),
   search('search', '搜索', false, tabIndex: 0);
@@ -48,6 +50,7 @@ enum NavFeature {
         NavFeature.music => Icons.library_music_outlined,
         NavFeature.books => Icons.menu_book_outlined,
         NavFeature.apps => Icons.widgets_outlined,
+        NavFeature.webhome => Icons.language_outlined,
         NavFeature.shelf => Icons.schedule_outlined,
         NavFeature.settings => Icons.settings_outlined,
         NavFeature.search => Icons.search,
@@ -60,6 +63,7 @@ enum NavFeature {
         NavFeature.music => Icons.library_music,
         NavFeature.books => Icons.menu_book,
         NavFeature.apps => Icons.widgets,
+        NavFeature.webhome => Icons.language,
         NavFeature.shelf => Icons.schedule,
         NavFeature.settings => Icons.settings,
         NavFeature.search => Icons.search,
@@ -132,7 +136,12 @@ class NavFeatureService extends GetxService {
     final on = <NavFeature>[];
     final off = <NavFeature>[];
     for (final f in order) {
-      final isOn = enabledSet == null ? true : enabledSet.contains(f);
+      // ⚠️ 2026-10-14：「网页首页」是新增的可选模块，**无记录时也默认关闭** ——
+      //   否则全新安装（或老用户升级）后底栏会凭空多出一项，而用户从没开过它。
+      //   其余项保持原有语义（无记录 = 启用），不动既有行为。
+      final isOn = enabledSet == null
+          ? f != NavFeature.webhome
+          : enabledSet.contains(f);
       // 必需页面强制启用
       if (f.required) {
         on.add(f);

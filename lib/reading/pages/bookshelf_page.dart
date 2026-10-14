@@ -3230,11 +3230,27 @@ class _BookshelfPageState extends State<BookshelfPage>
               // ✅ 用户 2026-10-12「管理/排序图标太丑、占位太长」：
               //    原来是两枚 20px 裸图标（各占 32 宽，合计 68）✗ —— 松散廉价。
               //    改成**一个浅底圆角胶囊分段控件**：两枚 16px 图标 + 中间
-              //    细分隔线，总宽约 56 —— 更紧凑也更精致（与书架 chips 同语言）。
+              //    细分隔线，更紧凑也更精致（与书架 chips 同语言）。
+              // ✅ 用户 2026-10-14：①「管理书架」的图标换成不再像流水账的
+              //    `dashboard_customize`；② 这枚胶囊的高度必须和「全部」标签
+              //    那道背景框**一样高**（原来固定 28，跟标签框对不齐）；
+              //    ③ 宽度再收窄一点，视觉上与标签更接近。
               final iconColor = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+              // 标签背景框高度 = 文字行高 + 上下内边距 6*2
+              //（与 `_buildAllShelfChip` / `_buildShelfChip` 的 padding 一致，
+              //  改了那边这里自动跟着走，不会再有"差 2px"的对不齐）。
+              final chipBoxHeight = (TextPainter(
+                        text: const TextSpan(text: '全部', style: textStyle),
+                        textDirection: TextDirection.ltr,
+                        // 必须带上 textScaler：系统字号放大时标签文字会变高，
+                        // 不带就会算出一个偏矮的胶囊（又对不齐了）。
+                        textScaler: MediaQuery.textScalerOf(context),
+                      )..layout())
+                      .height +
+                  12;
               final fixedButtons = Container(
-                height: 28,
-                padding: const EdgeInsets.symmetric(horizontal: 2),
+                height: chipBoxHeight,
+                padding: const EdgeInsets.symmetric(horizontal: 1),
                 decoration: BoxDecoration(
                   color: isDark
                       ? Colors.white.withValues(alpha: 0.08)
@@ -3246,11 +3262,11 @@ class _BookshelfPageState extends State<BookshelfPage>
                   children: [
                     IconButton(
                       tooltip: '管理书架',
-                      icon: Icon(Icons.view_list_rounded,
+                      icon: Icon(Icons.dashboard_customize_rounded,
                           size: 16, color: iconColor),
                       padding: EdgeInsets.zero,
                       constraints:
-                          const BoxConstraints(minWidth: 26, minHeight: 26),
+                          const BoxConstraints(minWidth: 23, minHeight: 23),
                       onPressed: _showManageShelves,
                     ),
                     Container(
@@ -3264,7 +3280,7 @@ class _BookshelfPageState extends State<BookshelfPage>
                           size: 16, color: iconColor),
                       padding: EdgeInsets.zero,
                       constraints:
-                          const BoxConstraints(minWidth: 26, minHeight: 26),
+                          const BoxConstraints(minWidth: 23, minHeight: 23),
                       onPressed: _showSortSheet,
                     ),
                   ],
@@ -3273,8 +3289,8 @@ class _BookshelfPageState extends State<BookshelfPage>
 
               // 固定按钮在**左侧**（用户多次点名"管理/排序移到左边"），
               // 标签行占满剩余宽度；内容不足时居中，超出则横向滚动
-              //（固定按钮胶囊 56 = 2+26+1+26+2，加 4 间距）
-              const fixedWidth = 60.0;
+              //（固定按钮胶囊 49 = 1+23+1+23+1，加 4 间距）
+              const fixedWidth = 53.0;
               return Row(
                 children: [
                   fixedButtons,

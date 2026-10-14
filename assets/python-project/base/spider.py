@@ -34,6 +34,116 @@ def _remember_error(url, exc):
         pass
 
 
+# ── 网络会话（缓解 RemoteDisconnected） ──────────────────────────
+# 很多站点会直接掐断"不像浏览器"的连接：请求头 UA 为 `python-requests/x.y`
+# 时，服务端**不返回任何响应就 close**，于是 requests 抛：
+#   ConnectionError: ('Connection aborted.', RemoteDisconnected('Remote end
+#   closed connection without response'))
+# 这里统一补上浏览器风格的默认头，并对**连接类**错误自动重试。
+_DEFAULT_UA = (
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+    'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
+    'Mobile/15E148 Safari/604.1'
+)
+
+_DEFAULT_HEADERS = {
+    'User-Agent': _DEFAULT_UA,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+}
+
+_SESSION = None
+
+
+def _default_timeout():
+    """默认请求超时（秒）。
+
+    为什么必须有（用户 2026-10-14：「Python 引擎已卡死…请重启 App」）：
+      源脚本经常写 `requests.get(url)`（不带 timeout）⇒ urllib3 会
+      `sock.settimeout(None)` ⇒ socket read **永久阻塞**；而原生 watchdog 的
+      `PyThreadState_SetAsyncExc` **只在字节码边界生效**，线程卡在 C 里就永远
+      不返回 ⇒ 原生那条串行 workQueue 被永久占住 ⇒ 整个 Python 引擎"卡死"。
+    这里给基类自己的请求补一个默认超时（8s < App 侧 10s watchdog 预算），
+    让"没写 timeout"的请求到点自己返回、脚本的 try/except 接住即可。
+    """
+    return 8.0
+
+
+class _TimeoutSession(object):
+    """Session 包装：**每次请求**都补默认 timeout。
+
+    ⚠️ 不能只靠 `socket.setdefaulttimeout()`：requests/urllib3 内部会显式
+       `settimeout(None)` 把全局默认值覆盖掉，所以必须在 `Session.request`
+       这一层补。
+    """
+
+    def __init__(self):
+        import requests
+        self._s = requests.Session()
+
+    def request(self, method, url, **kwargs):
+        if kwargs.get('timeout') is None:
+            kwargs['timeout'] = _default_timeout()
+        return self._s.request(method, url, **kwargs)
+
+    def get(self, url, **kwargs):
+        return self.request('GET', url, **kwargs)
+
+    def post(self, url, **kwargs):
+        return self.request('POST', url, **kwargs)
+
+    def headers(self):  # pragma: no cover - 兼容旧源读取会话头
+        return self._s.headers
+
+    def mount(self, *a, **kw):
+        return self._s.mount(*a, **kw)
+
+
+def _session():
+    """带重试的全局 Session（懒加载，连接复用）。
+
+    重试只针对**连接/读取类**错误（RemoteDisconnected、连接被重置等），
+    外加 429/5xx；不重试普通 4xx —— 源脚本拿到 404 属正常业务结果，
+    重试只会拖慢。
+    """
+    global _SESSION
+    if _SESSION is not None:
+        return _SESSION
+    s = _TimeoutSession()
+    try:
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+
+        retry = Retry(
+            total=3,
+            connect=3,
+            read=3,
+            backoff_factor=0.4,
+            status_forcelist=(429, 500, 502, 503, 504),
+            allowed_methods=frozenset(['GET', 'POST', 'HEAD']),
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        s.mount('http://', adapter)
+        s.mount('https://', adapter)
+    except Exception:
+        # 环境里没有 urllib3/HTTPAdapter 时退化为普通 Session（不装重试）
+        pass
+    _SESSION = s
+    return s
+
+
+def _merge_headers(user_headers):
+    """默认头 + 源脚本自己的头；**源脚本显式给的值优先**
+    （它们通常自己带 Referer / Cookie，不能被覆盖）。"""
+    h = dict(_DEFAULT_HEADERS)
+    if user_headers:
+        for k, v in user_headers.items():
+            if v is not None and v != '':
+                h[k] = v
+    return h
+
+
 class Response(object):
     """极简响应对象：只暴露源脚本常用的 .text / .content / .status_code / .headers / .url。"""
 
@@ -72,11 +182,11 @@ class Spider(object):
     # ── 网络 ────────────────────────────────────────────────
     def fetch(self, url, headers=None, timeout=15, **kwargs):
         try:
-            import requests
-            h = dict(getattr(self, 'headers', None) or {})
+            # 走带重试的 Session + 浏览器默认头（见文件上方说明）
+            h = _merge_headers(dict(getattr(self, 'headers', None) or {}))
             if headers:
-                h.update(headers)
-            r = requests.get(url, headers=h, timeout=timeout, **kwargs)
+                h.update({k: v for k, v in headers.items() if v})
+            r = _session().get(url, headers=h, timeout=timeout, **kwargs)
             return Response(r.text, r.status_code, dict(r.headers), r.url)
         except Exception as e:
             # 仍然返回 None（大量源脚本靠"判空"做兜底），但**原因不再丢**
@@ -85,11 +195,11 @@ class Spider(object):
 
     def post(self, url, data=None, headers=None, timeout=15, **kwargs):
         try:
-            import requests
-            h = dict(getattr(self, 'headers', None) or {})
+            # 同 fetch：带重试的 Session + 浏览器默认头
+            h = _merge_headers(dict(getattr(self, 'headers', None) or {}))
             if headers:
-                h.update(headers)
-            r = requests.post(url, data=data, headers=h, timeout=timeout, **kwargs)
+                h.update({k: v for k, v in headers.items() if v})
+            r = _session().post(url, data=data, headers=h, timeout=timeout, **kwargs)
             return Response(r.text, r.status_code, dict(r.headers), r.url)
         except Exception as e:
             _remember_error(url, e)

@@ -167,12 +167,16 @@ class _JellyExpandableSearchState extends State<JellyExpandableSearch> {
       width: _expanded ? widget.maxWidth : h,
       height: h,
       decoration: BoxDecoration(
-        // 展开态用卡片底色聚焦输入；收起态透明（页面背景上只有一个描边圆钮）
-        color: _expanded
-            ? (isDark ? JellyTheme.cardDark : JellyTheme.cardLight)
-            : Colors.transparent,
+        // ⚠️ 2026-10-14 与影视/小程序的 `HomeSearchBar` **完全对齐**：
+        //   展开态也是**透明底 + 无边框**（整条融入页面背景，不出现色块），
+        //   收起态只有一根 0.5 的发丝描边。
+        //   原来这里是"展开时换卡片底色 + width:1 的粗边" ⇒ 观感比影视那边重，
+        //   用户反馈「阅读的搜索框改不好，小程序的好看」。
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(h / 2),
-        border: Border.all(color: borderColor, width: 1),
+        border: _expanded
+            ? Border.all(color: Colors.transparent, width: 0)
+            : Border.all(color: borderColor, width: 0.5),
       ),
       child: _expanded
           ? Row(
@@ -196,13 +200,9 @@ class _JellyExpandableSearchState extends State<JellyExpandableSearch> {
                   const SizedBox(width: 4),
                   widget.trailing!,
                 ],
-                const SizedBox(width: 6),
-                // 右侧确认按钮（与影视版同位）：点它 = 提交
-                GestureDetector(
-                  onTap: () => _submit(_ctrl.text),
-                  child: Icon(Icons.arrow_forward_rounded,
-                      color: JellyTheme.primary, size: 18),
-                ),
+                // ⚠️ 2026-10-14：删掉了原来那个「→ 确认按钮」—— 影视/小程序的搜索框
+                //   **没有**它，多一个图标正是两边不一致、阅读这边显得"重"的原因之一。
+                //   提交仍由键盘搜索键完成（`textInputAction: search` 已绑 onSubmitted ✓）。
                 const SizedBox(width: 10),
               ],
             )

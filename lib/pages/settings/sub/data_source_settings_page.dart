@@ -9,10 +9,13 @@ import '../../../models/source_bean.dart';
 import '../../../models/subscription.dart';
 import '../../../services/api_config.dart';
 import '../../../services/python_sources_service.dart';
+import '../../../services/source_kind.dart';
 import '../../subscription/view.dart';
 import '../../../widgets/common_widgets.dart';
+import '../../../widgets/source_kind_badge.dart';
 import '../controller.dart';
 import 'engine_settings_page.dart';
+import 'parse_settings_page.dart';
 import 'settings_shared.dart';
 import '../../../widgets/app_toast.dart';
 
@@ -82,6 +85,16 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                 title: '主页数据源',
                 value: ApiConfig.instance.homeSourceBean.value?.name ?? '未选择',
                 onTap: _showSourcePicker,
+              ),
+            ),
+            // 解析线路管理（用户 2026-10-14）：从订阅拉到的解析线路会**落盘**，
+            // 换订阅不再清空；播放器底栏「解析」按钮切的线路也是这里选的。
+            Obx(
+              () => SettingsRow(
+                icon: Icons.link_rounded,
+                title: '解析线路管理',
+                value: '${ApiConfig.instance.parseBeanList.length} 条',
+                onTap: () => Get.to(() => const ParseSettingsPage()),
               ),
             ),
             SettingsRow(
@@ -203,7 +216,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
       if (svc.activeId.value != exist.id) await svc.setActive(exist.id);
       return;
     }
-    // 分类按地址保守推断（.py → PY源、.js → JS源，其余未分类）
+    // 分类按地址保守推断（.py → PY源；.js/.js.md5/.jar → CatVod 猫源；其余未分类）
     final s = await svc.add(url: url, kind: SubscriptionKind.inferKind(url));
     await svc.setActive(s.id);
   }
@@ -484,16 +497,28 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                   color: Colors.transparent,
                   child: ListTile(
                     dense: true,
-                    title: Text(
-                      source.name,
-                      style: TextStyle(
-                        color: isHome
-                            ? AppTheme.accentColor
-                            : AppTheme.textPrimary,
-                        fontWeight: isHome
-                            ? FontWeight.w600
-                            : FontWeight.normal,
-                      ),
+                    title: Row(
+                      children: [
+                        SourceKindBadge(
+                          kind: inferMediaKind(source.name, api: source.api),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            source.name,
+                            style: TextStyle(
+                              color: isHome
+                                  ? AppTheme.accentColor
+                                  : AppTheme.textPrimary,
+                              fontWeight: isHome
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
                     trailing: isHome
                         ? Icon(

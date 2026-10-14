@@ -19,6 +19,7 @@ import 'live/view.dart';
 import '../reading/pages/home_page.dart' as reading_app;
 import '../music/pages/root_view.dart';
 import '../miniapp/pages/mini_app_list_page.dart';
+import '../webhome/web_home_page.dart';
 import 'settings/view.dart';
 import 'search/view.dart';
 import 'search/controller.dart';
@@ -624,7 +625,7 @@ class _ContentViewState extends State<ContentView>
       if (svc.activeId.value != exist.id) await svc.setActive(exist.id);
       return;
     }
-    // 分类按地址保守推断（.py → PY源、.js → JS源，其余未分类）
+    // 分类按地址保守推断（.py → PY源；.js/.js.md5/.jar → CatVod 猫源；其余未分类）
     final s = await svc.add(url: u, kind: SubscriptionKind.inferKind(u));
     await svc.setActive(s.id);
   }
@@ -691,6 +692,10 @@ class _ContentViewState extends State<ContentView>
         reading_app.HomePage(),
         // 程序（索引 7）—— 独立「小程序」模块（TVBox 配置：影视 + 直播）
         const MiniAppListPage(),
+        // 网页（索引 8）—— 「网页首页」独立模块：加载用户自配的 HTML 首页，
+        // 注入 window.ant 后可直接搜片 / 播放 / 存取（默认不进底栏，
+        // 用户在「设置 → 主页页面」里自行开启；见 lib/webhome/）
+        const WebHomePage(),
       ];
     }
     return _tabPagesCache!;

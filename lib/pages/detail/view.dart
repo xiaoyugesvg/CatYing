@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import '../../reading/cores/core_reader_page.dart';
-import '../../reading/cores/reader_core_prefs.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import '../../services/live_service.dart';
@@ -23,6 +21,7 @@ import '../settings/sub/metadata_settings_page.dart';
 import '../../services/detail_page_controller.dart';
 import '../../services/player_fullscreen_controller.dart';
 import '../../services/player_prefs.dart';
+import '../../services/parse_store.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/app_player.dart';
 import '../../widgets/ios_av_player.dart';
@@ -763,21 +762,26 @@ class _DetailPageState extends State<DetailPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 0. 状态栏高度黑边（与直播播放器上方一致）——高度减半：
-            //   仍覆盖状态栏区域发浅色图标，但不再厚厚一条，
-            //   顶栏与状态栏之间更紧凑（播放器顶栏自带下推间距，不重叠）
+            // 0. 状态栏区域
+            //    · 视频：黑边（与上方播放画面连成一体，状态栏发浅色图标）
+            //    · 非视频（书 / 漫）：**不留黑边** —— 播放区已经整块不占了，
+            //      再压一条黑带会像"凭空多出来一条黑条"；这里只占高度、
+            //      按明暗发深/浅色图标，让内容直接顶上去（用户 2026-10-14）。
             if (topBar > 0)
-              // 这一条正好覆盖状态栏区域 → 发浅色图标。
-              // 本页刻意不放 AppBar（见 Scaffold 上方注释），没有 AppBar
-              // 就没人发布 overlay style，浅色模式下会沿用上一条路由的
-              // 深色图标，压在黑边上直接看不见。
-              AnnotatedRegion<SystemUiOverlayStyle>(
-                value: SystemUiOverlayStyle.light,
-                child: SizedBox(
-                  height: topBar / 2,
-                  child: const ColoredBox(color: Colors.black),
-                ),
-              ),
+              _controller.isNonVideoContent
+                  ? AnnotatedRegion<SystemUiOverlayStyle>(
+                      value: AppBrightness.isLight.value
+                          ? SystemUiOverlayStyle.dark
+                          : SystemUiOverlayStyle.light,
+                      child: SizedBox(height: topBar),
+                    )
+                  : AnnotatedRegion<SystemUiOverlayStyle>(
+                      value: SystemUiOverlayStyle.light,
+                      child: SizedBox(
+                        height: topBar / 2,
+                        child: const ColoredBox(color: Colors.black),
+                      ),
+                    ),
 
             // 1. 播放器 - 对应 Swift PlayerView
             // **进详情即显示播放界面**：不依赖 isPlaying，只要 vodInfo 就绪
@@ -815,6 +819,14 @@ class _DetailPageState extends State<DetailPage> {
       final _ = _controller.selectedEpisodeIndex.value;
       final __ = _controller.playbackSessionId.value;
       final ___ = _controller.selectedFlag.value;
+      // 非视频内容（小说 `novel://` / 漫画 `pics://`）：**整块 4:3 播放区不占面积**
+      // —— 页面直接显示 封面 / 简介 / 作者 / 更新时间 / 播放列表（用户 2026-10-14）。
+      // 已知非视频的源在**再次进入详情页时**也走这里（一开始就不占位）。
+      if (_controller.isNonVideoContent) {
+        _playerErrorTimer?.cancel();
+        _playerErrorTimer = null;
+        return const SizedBox.shrink();
+      }
       if (url != null && url.isNotEmpty) {
         _playerErrorTimer?.cancel();
         _playerErrorTimer = null;
@@ -981,6 +993,11 @@ class _DetailPageState extends State<DetailPage> {
       },
       onSetSkipIntro: (s) => _controller.setSkipIntroSeconds(s),
       onSetSkipOutro: (s) => _controller.setSkipOutroSeconds(s),
+      // 底栏「嗅探 / 解析」——用户 2026-10-14 要求加在播放器下面的工具栏：
+      //   嗅探 = 打开 WebView 手动抓页面里的媒体地址；
+      //   解析 = 弹层切换解析线路（选中后用新线路重解当前集）。
+      onSniff: _controller.openSniff,
+      onSwitchParse: _openParseLineSheet,
       // 播放器错误（原生 onError / 加载失败）以前无处可去，只表现为白转圈；
       // 这里接进控制器的错误态，详情页即可显示文案 + 重试。
       onError: () => _controller.setPlaybackError('播放失败，请点重试或切换其他线路'),
@@ -995,6 +1012,140 @@ class _DetailPageState extends State<DetailPage> {
     return AspectRatio(
       aspectRatio: 4 / 3,
       child: widget,
+    );
+  }
+
+  /// 底栏「解析」：弹出解析线路列表；选中后用新线路重解当前集。
+  ///
+  /// 线路来自 [ApiConfig.parseBeanList]（= ParseStore 的持久化列表，订阅下发的
+  /// 只并入不清空）。第一项是「自动」= 按顺序依次尝试。
+  Future<void> _openParseLineSheet() async {
+    final lines = ApiConfig.instance.parseBeanList;
+    final active = ParseStore.instance.activeUrl;
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 顶部把手
+              Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.textTertiary.withValues(alpha: 0.35),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+                child: Row(
+                  children: [
+                    Text(
+                      '解析线路',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${lines.length} 条',
+                      style: TextStyle(
+                        color: AppTheme.textTertiary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (lines.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 10, 24, 26),
+                  child: Text(
+                    '还没有解析线路。\n可在 设置 → 订阅管理 → 解析线路管理 里添加。',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppTheme.textTertiary,
+                      fontSize: 12,
+                      height: 1.6,
+                    ),
+                  ),
+                )
+              else
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(ctx).size.height * 0.5,
+                  ),
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      _parseLineRow(
+                        ctx,
+                        label: '自动（按顺序尝试）',
+                        sub: '',
+                        selected: active.isEmpty,
+                        value: '',
+                      ),
+                      ...lines.map((b) => _parseLineRow(
+                            ctx,
+                            label: b.name.isEmpty ? b.url : b.name,
+                            sub: b.url,
+                            selected: active == b.url,
+                            value: b.url,
+                          )),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
+    );
+    if (picked == null) return; // null = 用户取消；'' = 选了「自动」
+    await _controller.selectParseLine(picked);
+  }
+
+  Widget _parseLineRow(
+    BuildContext ctx, {
+    required String label,
+    required String sub,
+    required bool selected,
+    required String value,
+  }) {
+    return ListTile(
+      dense: true,
+      title: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: selected ? AppTheme.accentColor : AppTheme.textPrimary,
+          fontSize: 14,
+          fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+        ),
+      ),
+      subtitle: sub.isEmpty
+          ? null
+          : Text(
+              sub,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: AppTheme.textTertiary, fontSize: 11),
+            ),
+      trailing: selected
+          ? Icon(Icons.check_circle, color: AppTheme.accentColor, size: 18)
+          : null,
+      onTap: () => Navigator.of(ctx).pop(value),
     );
   }
 
@@ -1186,7 +1337,9 @@ class _DetailPageState extends State<DetailPage> {
               child: info.pic.isNotEmpty
                   ? CachedNetworkImage(
                       imageUrl: info.pic,
-                      fit: BoxFit.cover,
+                      // fill = 拉伸填满、**整张图都显示**（与首页/搜索页封面一致；
+                      // cover 会把海报两侧裁掉 → 用户反馈"图片显示不全"）
+                      fit: BoxFit.fill,
                       placeholder: (_, __) => Container(
                         color: AppTheme.backgroundTertiary,
                         alignment: Alignment.center,
@@ -1289,7 +1442,6 @@ class _DetailPageState extends State<DetailPage> {
                         ),
                       ),
                     ),
-                    _buildReadCoreIconButton(),
                     const SizedBox(width: AppTheme.spacingSM),
                     _buildCollectIconButton(),
                   ],
@@ -1907,70 +2059,6 @@ class _DetailPageState extends State<DetailPage> {
     await _quickSearch.search();
   }
 
-  /// 阅读核心入口（方案 A，用户 2026-10-14）——
-  /// **只在配置了「阅读核心」时出现**，点了用核心取图 / 取正文，进独立的阅读页。
-  ///
-  /// 为什么不自动判断：订阅里的源没有"图/文/视频"标记（type 都是 3，区别只在
-  /// 脚本内容里），猜错就是点漫画起播放器 —— 所以做成**显式入口**。
-  /// 没配核心 → 返回空；取不到内容 → 提示一句，**绝不影响现有播放**。
-  Widget _buildReadCoreIconButton() {
-    final core = ReaderCorePrefs.instance.activeCore;
-    final src = ReaderCorePrefs.instance.sourceUrl;
-    if (core == null || src.isEmpty) return const SizedBox.shrink();
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () async {
-        final info = _controller.vodInfo.value;
-        if (info == null) return;
-        final id = '$src|${info.id}';
-        try {
-          final imgs = await core.images(id, 0);
-          if (!mounted) return;
-          if (imgs.isNotEmpty) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) =>
-                    CoreReaderPage(title: info.name, images: imgs),
-              ),
-            );
-            return;
-          }
-          final txt = await core.content(id, 0);
-          if (!mounted) return;
-          if (txt.trim().isNotEmpty) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => CoreReaderPage(title: info.name, text: txt),
-              ),
-            );
-            return;
-          }
-        } catch (_) {
-          /* 核心失败：不影响播放 */
-        }
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('该源没取到内容（可换源 / 检查阅读核心设置）')),
-        );
-      },
-      child: Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: AppTheme.backgroundTertiary,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Icon(
-          Icons.menu_book_rounded,
-          size: 18,
-          color: AppTheme.accentColor,
-        ),
-      ),
-    );
-  }
-
   /// 收藏按钮（小图标版）- 前置在视频名称前
   /// 点击切换收藏状态，图标随状态变化（实心=已收藏 / 空心=未收藏）
   Widget _buildCollectIconButton() {
@@ -2095,6 +2183,11 @@ class _DetailPageState extends State<DetailPage> {
             if (info.year.isNotEmpty) MetadataPill(text: info.year),
             if (info.typeName.isNotEmpty) MetadataPill(text: info.typeName),
             if (info.area.isNotEmpty) MetadataPill(text: info.area),
+            // 非视频内容（小说 / 漫画）额外显示 vod_remarks —— 来源常把
+            // 「作者 / 更新时间」塞在这里，而影视链路没有对应展示位
+            // （用户 2026-10-14：书/漫详情要直接看到作者与更新时间）。
+            if (_controller.isNonVideoContent && info.note.isNotEmpty)
+              MetadataPill(text: info.note),
           ],
         ),
         const SizedBox(height: AppTheme.spacingSM),
@@ -2552,7 +2645,8 @@ class _SimilarCard extends StatelessWidget {
                         ? ColoredBox(color: AppTheme.backgroundTertiary)
                         : CachedNetworkImage(
                             imageUrl: poster,
-                            fit: BoxFit.cover,
+                            // 同上：封面统一拉伸显示，不裁切
+                            fit: BoxFit.fill,
                             memCacheWidth: 224,
                             placeholder: (_, __) =>
                                 ColoredBox(color: AppTheme.backgroundTertiary),

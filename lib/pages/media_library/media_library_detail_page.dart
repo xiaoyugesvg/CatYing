@@ -1887,7 +1887,8 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                         imageUrl: still,
                         width: double.infinity,
                         height: 168,
-                        fit: BoxFit.cover,
+                        // 封面/剧照统一拉伸显示、不裁切（与首页一致）
+                        fit: BoxFit.fill,
                         placeholder: (_, __) =>
                             ColoredBox(color: Colors.black26),
                         errorWidget: (_, __, ___) =>
@@ -2045,7 +2046,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                     if (still.isNotEmpty)
                       CachedNetworkImage(
                         imageUrl: still,
-                        fit: BoxFit.cover,
+                        fit: BoxFit.fill, // 同上：不裁切
                         placeholder: (_, __) =>
                             ColoredBox(color: Colors.black26),
                         errorWidget: (_, __, ___) =>
@@ -2503,7 +2504,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                 child: poster.isNotEmpty
                     ? CachedNetworkImage(
                         imageUrl: poster,
-                        fit: BoxFit.cover,
+                        fit: BoxFit.fill, // 同上：封面不裁切
                         placeholder: (_, __) =>
                             ColoredBox(color: _libCard),
                         errorWidget: (_, __, ___) =>
@@ -2596,7 +2597,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                 child: item.posterUrl.isNotEmpty
                     ? CachedNetworkImage(
                         imageUrl: item.posterUrl,
-                        fit: BoxFit.cover,
+                        fit: BoxFit.fill, // 同上：封面不裁切
                         placeholder: (_, __) => ColoredBox(color: Colors.black26),
                         errorWidget: (_, __, ___) =>
                             ColoredBox(color: Colors.black26),
