@@ -291,12 +291,26 @@ class _WebHomePageState extends State<WebHomePage> {
       body: Column(
         children: [
           Container(height: topInset, color: pageColor),
-          // ── 顶栏：左「网页」+ 右「源切换 / 设置」──
+          // ── 顶栏：左「← 网页」+ 右「源切换 / 设置」──
+          //
+          // ⚠️ 进入「网页」时影视悬浮底栏会隐藏（见 MainTabController
+          //   .inEmbeddedModule），所以这里必须留一个**回影视**的出口，
+          //   否则用户会被困在网页里出不去。
           SizedBox(
             height: 46,
             child: Row(
               children: [
-                const SizedBox(width: 16),
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: '返回影视',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                  iconSize: 20,
+                  onPressed: () => MainTabController.instance.backToVideo(),
+                  icon: Icon(Icons.arrow_back_ios_new_rounded,
+                      color: AppTheme.textPrimary),
+                ),
+                const SizedBox(width: 2),
                 Text('网页',
                     style: TextStyle(
                         color: AppTheme.textPrimary,

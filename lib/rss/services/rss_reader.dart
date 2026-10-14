@@ -16,17 +16,19 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:fast_gbk/fast_gbk.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 import 'package:xml/xml.dart';
 
 import '../../reading/novel_source/analyze/analyze_rule.dart';
 import '../../reading/novel_source/analyze/cookie_store.dart';
+import '../../reading/source/global_proxy.dart';
 import '../models/rss_article.dart';
 import '../models/rss_source.dart';
 
-/// 抓一页的结果：文章列表 + 下一页地址（空 = 到底了）。
-typedef RssFetchResult = ({List<RssArticle> articles, String nextUrl});
+/// 抓一页的结果：文章列表 + 下一页地址（空 = 到底了）+ 是否"其实是个网页"。
+typedef RssFetchResult = ({List<RssArticle> articles, String nextUrl, bool siteLike});
 
 class RssReader {
   RssReader._();
@@ -49,11 +51,27 @@ class RssReader {
         ? pageUrl.trim()
         : resolveUrl(ch.url, source.url, page);
     final body = await _get(url, source);
+    final arts = _blacklist(source, parseArticles(source, body, url));
 
     return (
-      articles: _blacklist(source, parseArticles(source, body, url)),
+      articles: arts,
       nextUrl: _nextPageUrl(source, body, url),
+      // 兜底判定"这个地址其实是个网页"：**没有列表规则** + 一条文章都没解析出来
+      // + 返回体不像 feed（没有 <rss>/<feed>/<channel>/<item> 标签）。
+      // ⇒ 用户那份 txt 里 5 条站点型源（源仓库 / Yiove / 使用文档…）即使丢了
+      //   `singleUrl` 标记也能被认出来，交给上层**内嵌网页直开**，
+      //   而不是甩一句"没有抓到内容"（用户 2026-10-15 反复报的那句）。
+      siteLike: !source.hasRules && arts.isEmpty && !_looksLikeFeed(body),
     );
+  }
+
+  /// 返回体像不像订阅源（RSS 2.0 / Atom）。
+  static bool _looksLikeFeed(String body) {
+    if (body.isEmpty) return false;
+    final head = body.length > 4096 ? body.substring(0, 4096) : body;
+    return RegExp(r'<\s*(rss|feed|channel|item|entry)[\s>]',
+            caseSensitive: false)
+        .hasMatch(head);
   }
 
   /// 把**已抓到的页面内容**按源解析成文章列表（不联网，便于测试与复用）。
@@ -218,20 +236,62 @@ class RssReader {
 
   static Future<String> _get(String url, RssSource source) async {
     final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 12),
-      receiveTimeout: const Duration(seconds: 20),
-      responseType: ResponseType.plain,
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 30),
+      // ⚠️ 取**字节**自己解编码：中文站/RSS 常见 GBK，Dio 默认按 utf8 解会整篇乱码
+      responseType: ResponseType.bytes,
       followRedirects: true,
       headers: _headers(source),
     ));
+    // ⚠️ **必须**套全局代理（「设置 → 网络代理」）—— 全项目 27 处请求都这么做
+    //   （书源 / 漫画源 / z-library / 豆瓣…）。RSS 原来漏了这一句 ⇒ 用户开了
+    //   代理后 RSS **每个源都失败**，报的就是 `DioException [unknown]: null`
+    //   （用户 2026-10-15 实测）。
+    applyGlobalProxy(dio);
     try {
-      final resp = await dio.get<String>(url);
-      final data = resp.data ?? '';
-      // Legado 同款：JSON 接口有时返回被包了一层，这里不做加工，交给规则
-      return data;
+      final resp = await dio.get<List<int>>(url);
+      return _decode(resp.data ?? const <int>[],
+          resp.headers.value('content-type') ?? '');
     } finally {
       dio.close(force: true);
     }
+  }
+
+  /// 按 charset 解码（content-type → 页面内 `charset=` → 兜底 utf8 / gbk）。
+  ///
+  /// 与阅读模块 `XiaoshuoHttp` 同一套思路：GBK 的 RSS/站点还不少，
+  /// 直接 `utf8.decode` 会乱码，规则自然也就匹配不上了。
+  static String _decode(List<int> bytes, String contentType) {
+    if (bytes.isEmpty) return '';
+    String? cs;
+    final m = RegExp(r'charset=([^\s;]+)', caseSensitive: false)
+        .firstMatch(contentType);
+    if (m != null) cs = m.group(1);
+    if (cs == null) {
+      final head = bytes.length > 4096 ? bytes.sublist(0, 4096) : bytes;
+      final ascii = String.fromCharCodes(head.map((b) => b < 128 ? b : 0x20));
+      final i = ascii.toLowerCase().indexOf('charset=');
+      if (i != -1) {
+        cs = RegExp(r'^([a-zA-Z0-9_-]+)')
+            .firstMatch(ascii.substring(i + 8).trimLeft())
+            ?.group(1);
+      }
+    }
+    final lower = (cs ?? '').toLowerCase();
+    if (lower.contains('gb') || lower.contains('big5')) {
+      try {
+        return gbk.decode(bytes, allowMalformed: true);
+      } catch (_) {/* 解不了就走下面的 utf8 兜底 */}
+    }
+    final utf8Str = utf8.decode(bytes, allowMalformed: true);
+    // 出现替换字符 ⇒ 多半不是 utf8（GBK 的典型表现），再试一次 gbk
+    if (utf8Str.contains('\uFFFD')) {
+      try {
+        final g = gbk.decode(bytes, allowMalformed: true);
+        if (!g.contains('\uFFFD')) return g;
+      } catch (_) {}
+    }
+    return utf8Str;
   }
 
   static Map<String, String> _headers(RssSource source) {

@@ -38,6 +38,9 @@ class MainTabController extends GetxController {
   /// 阅读模块
   static const int booksTabIndex = 6;
 
+  /// 「网页」模块（内嵌 WebView 加载用户自配的网页）
+  static const int webHomeTabIndex = 8;
+
   /// 当前选中的主 tab 索引：0 首页 / 1 历史 / 2 收藏 / 3 设置 / 5 音乐 / 6 阅读
   final RxInt selectedTab = 0.obs;
 
@@ -46,9 +49,15 @@ class MainTabController extends GetxController {
     selectedTab.value = index;
   }
 
-  /// 当前是否在音乐/阅读模块里（这两个模块自带悬浮栏，影视底栏要让位）
+  /// 当前是否在"自带悬浮栏 / 需要全屏"的模块里 —— 影视底栏必须让位：
+  ///   · 音乐 / 阅读：**自带悬浮栏**，两条栏会叠在一起
+  ///   · 网页：内嵌网页要**全屏**（用户 2026-10-15：「网页里面隐藏这个悬浮
+  ///     菜单导航栏」），网页自己的底栏 + 影视悬浮栏叠着很难看
+  /// 网页页顶栏留了「←」返回影视，所以隐藏底栏不会变成死胡同。
   bool get inEmbeddedModule =>
-      selectedTab.value == musicTabIndex || selectedTab.value == booksTabIndex;
+      selectedTab.value == musicTabIndex ||
+      selectedTab.value == booksTabIndex ||
+      selectedTab.value == webHomeTabIndex;
 
   /// 回到影视首页
   void backToVideo() => select(videoTabIndex);

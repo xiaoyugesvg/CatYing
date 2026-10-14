@@ -10,6 +10,7 @@
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../common/theme.dart';
 import '../../widgets/common_widgets.dart';
@@ -45,6 +46,30 @@ class _RssPageState extends State<RssPage> {
   /// 本次请求的序号：防止"快速换源 / 连续刷新"时旧结果覆盖新结果。
   int _seq = 0;
 
+  /// ── 站点型源（Legado `singleUrl`）的**内嵌网页** ──────────────────
+  ///
+  /// 用户 2026-10-15：「我其实就想用这种订阅源」—— 这类源（源仓库 / Yiove /
+  /// 使用文档 / 一键导入…）在 Legado 里就是**直接打开这个站**，本来没有文章
+  /// 列表。所以这里不再去抓列表、也不再报"没抓到内容"，而是把网页**内嵌**
+  /// 在 RSS 页里显示（顶栏的切换源 / 刷新照样可用，刷新 = 重载网页）。
+  WebViewController? _web;
+  String _webUrl = '';
+
+  /// 抓完之后才发现"这个地址其实是个网页"（无列表规则 + 0 条文章 + 返回体不像
+  /// feed）。用于 `singleUrl` 标记缺失时的兜底 —— 一样走内嵌网页，不再报
+  /// "没有抓到内容"。
+  bool _siteLike = false;
+
+  WebViewController _webFor(String url) {
+    if (_web != null && _webUrl == url) return _web!;
+    _webUrl = url;
+    _web = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(AppTheme.backgroundPrimary)
+      ..loadRequest(Uri.parse(url));
+    return _web!;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -73,6 +98,7 @@ class _RssPageState extends State<RssPage> {
         _error = '';
         _loadedId = '';
         _nextUrl = '';
+        _siteLike = false;
       });
       return;
     }
@@ -85,6 +111,12 @@ class _RssPageState extends State<RssPage> {
   }
 
   void _reload() {
+    final src = store.current;
+    // 站点型源：刷新 = 重载内嵌网页
+    if (src != null && (src.isSiteOnly || _siteLike)) {
+      _web?.reload();
+      return;
+    }
     _page = 1;
     _nextUrl = '';
     _load(append: false);
@@ -93,12 +125,25 @@ class _RssPageState extends State<RssPage> {
   Future<void> _load({required bool append}) async {
     final src = store.current;
     if (src == null) return;
+    // 站点型源不抓文章列表 —— 直接内嵌网页（见 [_webFor]）
+    if (src.isSiteOnly) {
+      setState(() {
+        _articles = [];
+        _error = '';
+        _nextUrl = '';
+        _siteLike = false;
+        _loadedId = src.id;
+        _loading = false;
+      });
+      return;
+    }
     final my = ++_seq;
     setState(() {
       _loading = true;
       if (!append) {
         _error = '';
         _articles = [];
+        _siteLike = false;
       }
     });
     try {
@@ -116,6 +161,7 @@ class _RssPageState extends State<RssPage> {
       setState(() {
         _articles = append ? [..._articles, ...list] : list;
         _nextUrl = res.nextUrl;
+        _siteLike = res.siteLike;
         _loadedId = src.id;
         _error = list.isEmpty ? '没有抓到文章（源可能失效了，可到「RSS 管理」里换一个）' : '';
       });
@@ -333,26 +379,19 @@ class _RssPageState extends State<RssPage> {
         onBtn: _openManage,
       );
     }
+    // 站点型源：**直接内嵌网页**。两条判定：
+    //   · `src.isSiteOnly` —— Legado 的 `singleUrl` 标记（源仓库 / Yiove /
+    //     使用文档 / 一键导入 都是这种）；
+    //   · `_siteLike` —— 抓完发现"没规则 + 0 条 + 不像 feed"的兜底（标记缺失
+    //     时也能认出来）。
+    // 抓列表只会得到"没有抓到内容"，那才是真正的不兼容 ✗。
+    if (src.isSiteOnly || _siteLike) {
+      return WebViewWidget(controller: _webFor(src.url));
+    }
     if (_loading && _articles.isEmpty) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
     if (_articles.isEmpty) {
-      // 站点型源（Legado `singleUrl`）：它本来就没有文章列表 ⇒ 别报"没抓到内容"，
-      // 直接告诉用户这是站点型、给「用网页打开」出口（用户 2026-10-15 导入的
-      // 源仓库 / Yiove / 使用文档 这批都属于这种）。
-      if (_error.isEmpty && src.isSiteOnly) {
-        return _emptyView(
-          icon: Icons.public_rounded,
-          title: '「${src.name}」是站点型订阅源',
-          hint: '它本身是一个网站、没有文章列表，所以抓不到文章。\n可以用网页直接打开看。',
-          btnText: '用网页打开',
-          onBtn: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => RssWebViewPage(url: src.url, title: src.name),
-            ),
-          ),
-        );
-      }
       return RefreshIndicator(
         onRefresh: () async => _reload(),
         color: AppTheme.accentColor,

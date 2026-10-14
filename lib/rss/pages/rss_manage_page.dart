@@ -25,6 +25,7 @@ import 'package:flutter/services.dart';
 
 import '../../common/theme.dart';
 import '../../reading/pages/book_source_qr_scan_page.dart';
+import '../../reading/source/global_proxy.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/common_widgets.dart';
 import '../models/rss_source.dart';
@@ -983,11 +984,13 @@ class _RssManagePageState extends State<RssManagePage> {
     Dio? dio;
     try {
       dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 12),
-        receiveTimeout: const Duration(seconds: 20),
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 30),
         responseType: ResponseType.plain,
         headers: {'User-Agent': 'Mozilla/5.0'},
       ));
+      // ⚠️ 导入地址也要套全局代理（同 RssReader：漏了它开了代理就必然失败）
+      applyGlobalProxy(dio);
       final resp = await dio.get<String>(url);
       await _absorb(resp.data ?? '');
     } catch (e) {
