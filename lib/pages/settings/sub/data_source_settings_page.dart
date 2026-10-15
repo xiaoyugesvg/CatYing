@@ -1,13 +1,9 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:file_picker/file_picker.dart';
 
 import '../../../common/theme.dart';
 import '../../../models/subscription.dart';
 import '../../../services/api_config.dart';
-import '../../../services/python_sources_service.dart';
 import '../../../services/source_kind.dart';
 import '../../../rss/pages/rss_manage_page.dart';
 import '../../../rss/services/rss_store.dart';
@@ -20,7 +16,6 @@ import '../controller.dart';
 import 'engine_settings_page.dart';
 import 'parse_settings_page.dart';
 import 'settings_shared.dart';
-import '../../../widgets/app_toast.dart';
 
 /// 设置 → 订阅管理
 ///
@@ -100,12 +95,6 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                 onTap: () => Get.to(() => const ParseSettingsPage()),
               ),
             ),
-            SettingsRow(
-              icon: Icons.code_rounded,
-              title: '导入 Python 视频源',
-              value: '.py 文件 → 注册为线路',
-              onTap: _importPythonVideoSource,
-            ),
             // 网页管理（用户 2026-10-14）：内置/订阅/本地导入的网页源，
             // 可切换、可拖动排序 —— 与「网页」页顶栏右边的设置按钮是同一页。
             //
@@ -154,68 +143,6 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         ),
       ],
     );
-  }
-
-  // ============================================================
-  // 导入 Python 视频源
-  // ============================================================
-
-  /// 选 .py 文件 → 注册进 CPython 引擎（video kind）→ 生成一条线路。
-  ///
-  /// 生成的 SourceBean：`api = py_<key>.py`（SpiderService 识别 .py 结尾即走
-  /// Python 引擎），type=3（脚本源），可直接搜/播。
-  Future<void> _importPythonVideoSource() async {
-    try {
-      final result = await FilePicker.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['py'],
-      );
-      if (result.isEmpty) return;
-      final f = result.first;
-      String code;
-      final path = f.path;
-      if (path == null) {
-        AppToast.message('读不出这个文件（没有本地路径）');
-        return;
-      }
-      try {
-        code = await File(path).readAsString();
-      } catch (_) {
-        AppToast.message('文件读取失败');
-        return;
-      }
-      if (code.trim().isEmpty) {
-        AppToast.message('文件是空的');
-        return;
-      }
-      final fileName = f.name.endsWith('.py')
-          ? f.name.substring(0, f.name.length - 3)
-          : f.name;
-      final key = fileName.replaceAll(RegExp(r'[^A-Za-z0-9_\-]'), '_');
-      if (key.isEmpty) {
-        AppToast.message('文件名不合法');
-        return;
-      }
-      final installed =
-          await PythonSourcesService.instance.installSource('video', key, code);
-      if (!installed.ok) {
-        AppToast.message('注册失败：${installed.message ?? '未知错误'}');
-        return;
-      }
-      // 用户 2026-10-15：**不再**把导入的 py 源注册成一条影视「线路」。
-      //
-      // 原因：py 源的 api 是 `py_xxx.py` —— 那是**本地已注册的 Python 模块名**，
-      // 不是一个可下载的线路地址。把它塞进 sourceBeanList 会污染
-      // 「/config 整表替换」的判据（allPlaceholder 原来只认 空/`csp_`，被它打破
-      // ⇒ 猫源 / tvbox 的线路表不再被 /config 更新 ⇒ 全部没有内容）。
-      // 详见 api_config.updateSourceBeansFromSpiderConfig 里那段说明。
-      //
-      // 现在只做「注册到 Python 引擎」这一步；.py 文件仍在
-      // `<Documents>/python-project/src/spider/video/`，由 Python 引擎按 key 载入。
-      AppToast.message('已导入 Python 源「$key」（已注册到 Python 引擎）');
-    } catch (e) {
-      AppToast.message('导入失败：${e.toString().split('\n').first}');
-    }
   }
 
   // ============================================================
