@@ -34,6 +34,10 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
   late final WebViewController _controller;
   int _loadingProgress = 0;
 
+  /// 主文档加载失败（见 onWebResourceError）：给明确提示 + 重试，而不是纯黑
+  bool _failed = false;
+  String _failDesc = '';
+
   @override
   void initState() {
     super.initState();
@@ -75,13 +79,22 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
             if (mounted) {
               setState(() {
                 _loadingProgress = 0;
+                _failed = false; // 重试/跳转后先复位失败态
               });
             }
           },
           onWebResourceError: (error) {
-            // 仅打印错误，不弹 dialog（避免遮挡；用户在加载条上能看到失败）
+            // 只有**主文档**失败才提示（子资源失败很常见，不打扰用户）
+            // ⚠️ 原来这里只打日志 ⇒ 解析返回的网页打不开时，4:3 播放区是
+            //    一块纯黑：不转圈、不报错、没有重试入口（用户以为"卡死了"）。
             AppLog.instance.log(
                 '[WebviewPlayer] 资源错误: ${error.errorCode} ${error.description} url=${error.url}');
+            if (error.isForMainFrame == true && mounted) {
+              setState(() {
+                _failed = true;
+                _failDesc = '${error.errorCode} ${error.description}'.trim();
+              });
+            }
           },
         ),
       )
@@ -93,7 +106,10 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
     super.didUpdateWidget(oldWidget);
     // 换集 / 换清晰度 / 换线路时 URL 变化 → 重新加载
     if (oldWidget.url != widget.url) {
-      _loadingProgress = 0;
+      setState(() {
+        _loadingProgress = 0;
+        _failed = false; // 换集/换线路：复位失败态
+      });
       _controller.loadRequest(Uri.parse(widget.url));
     }
   }
@@ -126,7 +142,56 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
             valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
           ),
         Expanded(
-          child: WebViewWidget(controller: _controller),
+          child: Stack(
+            children: [
+              Positioned.fill(child: WebViewWidget(controller: _controller)),
+              // 主文档加载失败 → 明确提示 + 重试（而不是纯黑什么都不说）
+              if (_failed)
+                Positioned.fill(
+                  child: ColoredBox(
+                    color: Colors.black,
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.public_off_rounded,
+                                size: 34, color: Colors.white54),
+                            const SizedBox(height: 10),
+                            const Text('这个网页打不开',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold)),
+                            if (_failDesc.isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Text(_failDesc,
+                                  maxLines: 2,
+                                  textAlign: TextAlign.center,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      color: Colors.white38, fontSize: 11.5)),
+                            ],
+                            const SizedBox(height: 14),
+                            TextButton(
+                              onPressed: () {
+                                setState(() {
+                                  _failed = false;
+                                  _loadingProgress = 0;
+                                });
+                                _controller.loadRequest(Uri.parse(widget.url));
+                              },
+                              child: const Text('重试'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ],
     );

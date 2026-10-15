@@ -1020,14 +1020,20 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
   @override
   Widget build(BuildContext context) {
     final bg = AppTheme.backgroundPrimary;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Obx(() {
       final info = _info;
       // 加载中（无详情且无错误提示）
       if (_controller.isLoading.value && info == null) {
         return Scaffold(
           backgroundColor: bg,
-          body: const Center(
-            child: CircularProgressIndicator(color: Colors.white70),
+          // ⚠️ 底色是**主题色**（浅色模式下是米白），转圈不能再写死白色 ——
+          //    白圈压在米白底上几乎看不见（用户 2026-10-15 反馈"一直是黑色"时
+          //    顺带发现的同页缺陷）。
+          body: Center(
+            child: CircularProgressIndicator(
+              color: isDark ? Colors.white70 : AppTheme.accentColor,
+            ),
           ),
         );
       }

@@ -343,10 +343,17 @@ class ApiConfig extends GetxController {
   /// （同 key 以接口下发的为准，避免和接口线路打架）。
   static const String _kUserVideoSources = 'user_video_sources';
 
-  /// 导入一条用户视频线路：入列表 + 落盘
-  Future<void> addUserVideoSource(SourceBean bean) async {
+  /// 导入/更新一条用户注入的站点：入列表 + 落盘
+  ///
+  /// [enabled] 关闭的站点**只落盘不入列表**（改回开启后下次整表替换会带回来）；
+  /// [homePage]/[searchable] 等一并落盘，UI 用 [userInjectedSites] 读。
+  Future<void> addUserVideoSource(
+    SourceBean bean, {
+    bool enabled = true,
+    String homePage = '',
+  }) async {
     sourceBeanList.removeWhere((s) => s.key == bean.key || s.api == bean.api);
-    sourceBeanList.add(bean);
+    if (enabled) sourceBeanList.add(bean);
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getStringList(_kUserVideoSources) ?? <String>[];
@@ -362,6 +369,14 @@ class ApiConfig extends GetxController {
         'name': bean.name,
         'api': bean.api,
         'type': bean.type,
+        'ext': bean.ext,
+        // ── 站点注入（Webhtv）扩展字段 ──────────────────────────
+        'enabled': enabled,
+        'indexs': bean.indexs, // -1 = 插到最前；0 = 末尾（默认）
+        'searchable': bean.searchable,
+        'quickSearch': bean.quickSearch,
+        'filterable': bean.filterable,
+        'homePage': homePage,
       }));
       await prefs.setStringList(_kUserVideoSources, raw);
       // 🔴 2026-10-14 修（洞 G）：导入自定义线路同样要立刻落盘 + 刷镜像，
@@ -373,31 +388,87 @@ class ApiConfig extends GetxController {
     }
   }
 
+  /// 用户注入的站点列表（原始 JSON，供「Webhtv → 站点注入」管理页读写）
+  Future<List<Map<String, dynamic>>> userInjectedSites() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getStringList(_kUserVideoSources) ?? const <String>[];
+      return raw
+          .map((e) {
+            try {
+              final m = jsonDecode(e);
+              return m is Map ? Map<String, dynamic>.from(m) : null;
+            } catch (_) {
+              return null;
+            }
+          })
+          .whereType<Map<String, dynamic>>()
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// 删除一条用户注入的站点
+  Future<void> removeUserVideoSource(String key) async {
+    sourceBeanList.removeWhere((s) => s.key == key);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getStringList(_kUserVideoSources) ?? <String>[];
+      raw.removeWhere((e) {
+        try {
+          return ((jsonDecode(e) as Map)['key'] ?? '').toString() == key;
+        } catch (_) {
+          return false;
+        }
+      });
+      await prefs.setStringList(_kUserVideoSources, raw);
+      PrefsMirror.snapshotSoon();
+      AppLog.instance.log('[ApiConfig] 已删除用户视频线路 $key');
+    } catch (e) {
+      AppLog.instance.log('[ApiConfig] 删除用户视频线路失败: $e');
+    }
+  }
+
   /// 把落盘的用户线路合并进 [target]（按 key 去重；接口已下发的同 key 不覆盖）
+  ///
+  /// 「站点注入」扩展（Webhtv）：
+  ///   · `enabled == false` 的**跳过**（只是不显示，配置仍留在盘上，随时改回来）；
+  ///   · `indexs == -1` 的插到**最前**，其余按落盘顺序追加在末尾；
+  ///   · `searchable / quickSearch / filterable` 决定它参与搜索 / 快速搜索 / 筛选。
   Future<void> _mergeUserVideoSources(List<SourceBean> target) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getStringList(_kUserVideoSources) ?? const <String>[];
       if (raw.isEmpty) return;
+      final head = <SourceBean>[];
       var added = 0;
       for (final e in raw) {
         final m = jsonDecode(e) as Map;
+        if (m['enabled'] == false) continue;
         final key = (m['key'] ?? '').toString().trim();
         if (key.isEmpty || target.any((s) => s.key == key)) continue;
-        target.add(SourceBean(
+        final indexs = (m['indexs'] as num?)?.toInt() ?? 0;
+        final bean = SourceBean(
           key: key,
           name: (m['name'] ?? key).toString(),
           api: (m['api'] ?? '').toString(),
-          searchable: 1,
-          filterable: 0,
-          quickSearch: 0,
+          searchable: (m['searchable'] as num?)?.toInt() ?? 1,
+          filterable: (m['filterable'] as num?)?.toInt() ?? 0,
+          quickSearch: (m['quickSearch'] as num?)?.toInt() ?? 0,
           playerType: 0,
           type: (m['type'] as num?)?.toInt() ?? 3,
-          ext: null,
-          indexs: 0,
-        ));
+          ext: m['ext']?.toString(),
+          indexs: indexs,
+        );
+        if (indexs == -1) {
+          head.add(bean);
+        } else {
+          target.add(bean);
+        }
         added++;
       }
+      if (head.isNotEmpty) target.insertAll(0, head);
       if (added > 0) {
         AppLog.instance.log('[ApiConfig] 已合并用户视频线路 $added 条');
       }

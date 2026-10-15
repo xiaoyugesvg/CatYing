@@ -174,6 +174,9 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
         CacheModule.music => Icons.music_note_outlined,
         CacheModule.reading => Icons.menu_book_outlined,
         CacheModule.tmdb => Icons.movie_filter_outlined,
+        CacheModule.hiker => Icons.rocket_launch_outlined,
+        CacheModule.webhome => Icons.language_outlined,
+        CacheModule.rss => Icons.rss_feed_outlined,
         CacheModule.app => Icons.phone_iphone_rounded,
       };
 
@@ -397,7 +400,9 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
           '· 视频切片与临时文件\n'
           '· 应用缓存目录\n'
           '· 页面缓存（首页列表 / 详情 / 刮削结果）\n\n'
-          '都不会清除：观看历史、收藏、源文件 JS、播放设置\n'
+          '都不会清除：观看历史、收藏、源文件 JS、海阔文件区（含导入的规则包）、'
+          '播放设置\n'
+          '（源文件 JS 与海阔文件区可在本页**单独**清除）\n'
           '清除后相关页面下次会重新联网获取',
           style: TextStyle(
             color: AppTheme.textSecondary,

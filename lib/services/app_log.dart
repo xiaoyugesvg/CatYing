@@ -200,7 +200,6 @@ class AppLog {
     // 总开关 - 关闭时所有 entry 静默丢弃
     if (!kLogEnabled) return;
     final human = e.formatHuman();
-    final json = e.formatJson();
     // 同步 print（**不要**再调 AppLog.log()，那会 entry→log→entry 无限递归）
     // ⚠️ 2026-10-14：加 `kDebugMode` 守卫 —— release 下不再往 stdout 打
     //    （iOS 的 stdout 走系统日志，高频日志同样有锁与格式化开销）；
@@ -210,7 +209,7 @@ class AppLog {
       print(human);
     }
     if (!_initialized) return;
-    _writeBoth(human, json);
+    _writeBoth(human, e);
   }
 
   /// 兼容旧 API: 直接写消息 (LEGACY category, 给旧 log() 调用用)
@@ -602,13 +601,25 @@ class AppLog {
   // ============================================================
 
   /// 串行化双写 (human 格式 + JSON 格式)
-  void _writeBoth(String humanLine, String jsonLine) {
-  _writeChain = _writeChain.then((_) async {
-  try {
-  // 跨天 → 换成当天的文件（每天一个，方便清理 / 归档 ✓）
-  final dir = _runtimeDir;
-  if (dir != null) await _ensureToday(dir);
-  await _maybeRotate(_logFile);
+  ///
+  /// ⚠️ **背压**（2026-10-15）：`_writeChain = _writeChain.then(...)` 每调一次
+  ///   就往链上挂一个新闭包（各捕获两行字符串）。而 `main.dart` 把全局
+  ///   `debugPrint` 重定向进了 AppLog，于是播放器轮询 / 书源 HTTP 报错循环 /
+  ///   弹幕这类**高频日志**会让"产生速度 > 落盘速度"，链上排队对象**无上限增长**
+  ///   → 内存持续上涨。这里给队列设上限，超了直接丢弃（日志是诊断用的，
+  ///   宁可丢也不能拖垮内存）。
+  int _pendingWrites = 0;
+  static const int _maxPendingWrites = 2000;
+
+  void _writeBoth(String humanLine, LogEntry e) {
+    if (_pendingWrites >= _maxPendingWrites) return;
+    _pendingWrites++;
+    _writeChain = _writeChain.then((_) async {
+      try {
+        // 跨天 → 换成当天的文件（每天一个，方便清理 / 归档 ✓）
+        final dir = _runtimeDir;
+        if (dir != null) await _ensureToday(dir);
+        await _maybeRotate(_logFile);
         // ⚠️ 2026-10-14 改 `flush: true` → `false`：原来每条日志都是一次
         //    **fsync**，而全项目的 `debugPrint` 已被重定向进 AppLog（见
         //    main.dart）⇒ 播放器每秒轮询、书源 HTTP、弹幕这类**高频日志**
@@ -618,11 +629,16 @@ class AppLog {
         //    对"事后排查"完全够用。
         await _logFile?.writeAsString('$humanLine\n',
             mode: FileMode.append, flush: false);
+        // JSON 行**延迟到这里**才格式化：既省掉被背压丢弃时的无用 jsonEncode，
+        // 也把这段开销挪出调用点（调用点常在密集循环里）。
+        final jsonLine = e.formatJson();
         await _maybeRotate(_jsonlFile);
         await _jsonlFile?.writeAsString('$jsonLine\n',
             mode: FileMode.append, flush: false);
       } catch (_) {
         // 写文件失败不能 crash app
+      } finally {
+        _pendingWrites--;
       }
     });
   }
@@ -664,15 +680,21 @@ class AppLog {
 
   /// 删掉超过 [_keepDays] 天的 `app_*`（含 `.log` / `.jsonl` / 滚动出来的 `.1`）。
   /// ⚠️ 只碰 `app_` 前缀：Node.js 端写的 `node.log` 不归这里管 ✗。
+  ///
+  /// ⚠️ 2026-10-15：原来用 `listSync()/statSync()/deleteSync()` **同步** IO。
+  ///   它是在 `_writeChain` 的回调里跑的，也就是 **UI isolate 的事件循环**上；
+  ///   跨天后的第一条日志会同步遍历 + stat + 删除目录内所有 `app_*` 文件，
+  ///   期间整个 UI 被阻塞（跨天那一下会卡顿）。改为异步 API。
   Future<void> _pruneOldLogs(Directory dir) async {
     try {
       final cutoff = DateTime.now().subtract(const Duration(days: _keepDays));
-      for (final e in dir.listSync()) {
+      await for (final e in dir.list()) {
         if (e is! File) continue;
         final name = e.uri.pathSegments.last;
         if (!name.startsWith('app_')) continue;
         try {
-        if (e.statSync().modified.isBefore(cutoff)) e.deleteSync();
+          final st = await e.stat();
+          if (st.modified.isBefore(cutoff)) await e.delete();
         } catch (_) {}
       }
     } catch (_) {}

@@ -70,8 +70,17 @@ class GbkTxtParser {
       return _fallback(bytes, title);
     }
     try {
-      return await c.future;
+      // ⚠️ 必须带超时：常驻 worker isolate 若异常退出（OOM / 未捕获致命错误），
+      //   `_respPort` 收不到任何回包，`await c.future` 会**永久挂起** ⇒
+      //   TXT 导入界面卡死不动（不同于 runner_isolate 有超时兜底）。
+      //   超时后退回一次性 isolate，并把 `_startup` 置空让下次重建 worker。
+      return await c.future.timeout(const Duration(seconds: 90));
+    } on TimeoutException {
+      _pending.remove(id);
+      _startup = null; // worker 可能已死：下次 spawn 一个新的
+      return _fallback(bytes, title);
     } catch (_) {
+      _pending.remove(id);
       return _fallback(bytes, title);
     }
   }

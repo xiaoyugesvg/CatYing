@@ -224,6 +224,11 @@ class RssReader {
   /// key = 源 id + 解析后的地址 → 响应体。**有界**（超出按插入顺序丢最旧）。
   static final Map<String, String> _bodyCache = {};
 
+  /// 清掉响应体缓存（「设置 → 缓存管理 → RSS」用）。
+  ///
+  /// 纯内存（随进程消失），清掉只影响"下次要重新抓一次"，不动任何订阅数据。
+  static void clearBodyCache() => _bodyCache.clear();
+
   /// 取响应体：命中缓存就直接用（仅当 `cacheFirst` 且未强制刷新），否则抓取并回填。
   static Future<String> _body(
     RssSource source,
@@ -334,12 +339,39 @@ class RssReader {
           : (_txt(n, 'published').isNotEmpty
               ? _txt(n, 'published')
               : _txt(n, 'updated'));
+      // ── feed 自带全文（用户 2026-10-15：「不再白抓、也不会因为反爬变成空」）──
+      //   ① `<content:encoded>`：RSS 扩展里**就是全文**，有就优先用；
+      //   ② `<description>`：只有当它**带 HTML 标签且够长**时才当全文
+      //     （很多源只给一小段摘要，那种仍走"抓原文页"那条老路）。
+      //   命中就预置进 contentHtml ⇒ fetchContent 直接用它、不再抓 link。
+      //   （源设了 `articleStyle == 1`（纯文字）时不走这条，见 fetchContent。）
+      //
+      //   ⚠️ 两种写法都要认：CDATA（`<![CDATA[<p>…]]>`，innerXml 原样）
+      //   与被转义的 HTML（`&lt;p&gt;`，innerXml 是实体、innerText 才是真标签）。
+      String pickHtml(String raw, String text) {
+        final re = RegExp(r'<[a-zA-Z][^>]*>');
+        if (re.hasMatch(raw)) return raw;
+        if (re.hasMatch(text)) return text;
+        return '';
+      }
+
+      final encHtml = pickHtml(_rawOf(n, const ['encoded']), _txt(n, 'encoded'));
+      final descRaw = _rawOf(n, const ['description', 'summary', 'content']);
+      final descHtml = pickHtml(descRaw, _txt(n, 'description').isNotEmpty
+          ? _txt(n, 'description')
+          : (_txt(n, 'summary').isNotEmpty
+              ? _txt(n, 'summary')
+              : _txt(n, 'content')));
+      final feedFullHtml = encHtml.isNotEmpty
+          ? encHtml
+          : (_stripHtml(descHtml).length > 200 ? descHtml : '');
       out.add(RssArticle(
         title: title.isEmpty ? link : title,
         link: link,
         image: _imageOf(n, pageUrl),
         pubDate: friendlyTime(date),
         description: _stripHtml(desc),
+        contentHtml: feedFullHtml,
         sourceId: source.id,
         sourceName: source.name,
       ));
@@ -662,6 +694,22 @@ class RssReader {
     for (final e in n.children.whereType<XmlElement>()) {
       if (e.name.local.toLowerCase() == tag.toLowerCase()) {
         return (e.innerText).trim();
+      }
+    }
+    return '';
+  }
+
+  /// 取子元素的**原始内部 XML**（保留 HTML 标签）。
+  ///
+  /// [tags] 按优先级依次尝试；`content:encoded` 这样的带前缀标签按**本地名**
+  /// （`encoded`）匹配即可命中。
+  static String _rawOf(XmlElement n, List<String> tags) {
+    for (final tag in tags) {
+      for (final e in n.children.whereType<XmlElement>()) {
+        if (e.name.local.toLowerCase() == tag.toLowerCase()) {
+          final s = e.innerXml.trim();
+          if (s.isNotEmpty) return s;
+        }
       }
     }
     return '';

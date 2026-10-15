@@ -10,9 +10,11 @@
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../common/theme.dart';
+import '../../services/nav_feature_service.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/common_widgets.dart';
 import '../models/rss_article.dart';
@@ -76,16 +78,42 @@ class _RssPageState extends State<RssPage> {
     return _web!;
   }
 
+  /// ── 懒启动（用户 2026-10-15：「RSS、网页以及海阔默认关闭」）──────────
+  ///
+  /// 本页是 `IndexedStack` 的第 9 个 child ⇒ **模块没开进底栏也会被 build**，
+  /// `initState` 照跑。原来这里无条件 `_boot()`（读源仓库 + 立刻拉当前订阅的
+  /// 文章列表）⇒ "关着"的模块也在启动时发网络请求。
+  /// 现在只在**开关打开**时才开工，关着时只挂一个监听等它被打开。
+  bool _started = false;
+  Worker? _navWorker;
+  bool get _tabEnabled =>
+      NavFeatureService.instance.enabled.contains(NavFeature.rss);
+
   @override
   void initState() {
     super.initState();
     store.tick.addListener(_onStoreChanged);
+    if (_tabEnabled) {
+      _start();
+    } else {
+      _navWorker = ever(NavFeatureService.instance.enabled, (_) {
+        if (!_tabEnabled || _started) return;
+        _start();
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
+  void _start() {
+    if (_started) return;
+    _started = true;
     _boot();
   }
 
   @override
   void dispose() {
     store.tick.removeListener(_onStoreChanged);
+    _navWorker?.dispose();
     super.dispose();
   }
 
@@ -96,7 +124,8 @@ class _RssPageState extends State<RssPage> {
   }
 
   void _onStoreChanged() {
-    if (!mounted) return;
+    // 模块没开 ⇒ 不干活（否则"关着"的模块也会因为仓库变更去发请求）
+    if (!mounted || !_started) return;
     final cur = store.current;
     if (cur == null) {
       setState(() {
@@ -129,8 +158,9 @@ class _RssPageState extends State<RssPage> {
 
   Future<void> _reloadAsync() async {
     // `sortUrl` 可能是**规则**（`<js>` / `@js:`），要先跑规则才知道有哪些分类
-    await _loadChannels();
-    if (!mounted) return;
+    final seq = ++_seq; // 与 _load 共用同一序号：分类与列表必须成对是最新那次
+    await _loadChannels(seq: seq);
+    if (!mounted || seq != _seq) return;
     _page = 1;
     _nextUrl = '';
     // 用户主动刷新 ⇒ 绕过 `cacheFirst` 的缓存
@@ -138,7 +168,11 @@ class _RssPageState extends State<RssPage> {
   }
 
   /// 求分类列表（纯文本直接拆；`<js>` / `@js:` 型走规则引擎求值）。
-  Future<void> _loadChannels() async {
+  ///
+  /// ⚠️ 求值是异步的（跑 JS 规则）⇒ 快速换源时旧分类可能**后到**并盖住新源的分类。
+  /// 这里的"是否已过期"由调用方在 await 之后用 `_seq` 再判一次（见 [_reloadAsync]
+  /// 与 [_onStoreChanged]）。
+  Future<void> _loadChannels({int? seq}) async {
     final src = store.current;
     if (src == null) {
       if (mounted) setState(() => _channels = const []);
@@ -149,7 +183,8 @@ class _RssPageState extends State<RssPage> {
       return;
     }
     final chs = await RssReader.loadChannels(src);
-    if (!mounted) return;
+    // 求值是异步的：期间又换源/刷新过 ⇒ 这次结果作废（否则旧源的分类会盖住新的）
+    if (!mounted || (seq != null && seq != _seq)) return;
     setState(() {
       _channels = chs;
       // 换源后分类下标可能越界
@@ -162,6 +197,9 @@ class _RssPageState extends State<RssPage> {
     if (src == null) return;
     // 站点型源不抓文章列表 —— 直接内嵌网页（见 [_webFor]）
     if (src.isSiteOnly) {
+      // ⚠️ 也要占一个序号：否则"在飞的旧请求"回来时仍能通过 my == _seq 校验，
+      //    把上一个源的列表写进这个站点型源里
+      _seq++;
       setState(() {
         _articles = [];
         _error = '';
@@ -303,6 +341,8 @@ class _RssPageState extends State<RssPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 模块没开进底栏 ⇒ 一行都不渲染（也保证上面那套懒启动不被绕过）
+    if (!_started) return const SizedBox.shrink();
     final topInset = MediaQuery.paddingOf(context).top;
     final src = store.current;
     final channels = _channels;

@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:get/get.dart';
 import '../../models/movie.dart';
 import '../../models/cache_store.dart';
 import '../../router/app_pages.dart';
+import '../../webhome/webhtv_playback_sync_service.dart';
 
 /// 历史记录控制器
 class HistoryController extends GetxController {
@@ -28,9 +31,18 @@ class HistoryController extends GetxController {
 
   void deleteItem(VodRecord item) {
     CacheStore.instance.removeRecord(item.vodId, item.sourceKey);
+    // ── Webhtv 观影记录同步：删除事件上报 + 落本地墓碑（阻止旧进度复活）
+    unawaited(WebhtvPlaybackSyncService.instance.reportDeleted(
+      siteKey: item.sourceKey,
+      vodId: item.vodId,
+      scope: 'item',
+    ));
   }
 
   Future<void> clearAll() async {
     await CacheStore.instance.clearHistory();
+    // 清空 = 当前接口范围内的全量删除
+    unawaited(
+        WebhtvPlaybackSyncService.instance.reportDeleted(siteKey: '', vodId: '', scope: 'all'));
   }
 }

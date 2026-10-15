@@ -197,10 +197,17 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
         fit: StackFit.expand,
         children: [
           const RepaintBoundary(child: ThemeBackgroundAnimation()),
-          Column(
-            children: [
-              _header(),
-              Expanded(child: _tocArea()),
+          // ⚠️ 用户 2026-10-15：「简介点『展开全部』后整体滑不动、滑不到下面，
+          //   也够不着『收起』」——
+          //   原来是 `Column(头部, Expanded(目录))`：**头部不参与滚动**，
+          //   简介一展开就把头部撑得比屏幕还高 ⇒ Column 溢出、目录区被挤成
+          //   0 高，下半页根本滚不到 ✗。
+          //   ⇒ 改成**整页一个滚动视图**：头部与目录都进 slivers，
+          //     谁长都能滚，`收起` 自然也够得着 ✓。
+          CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(child: _header()),
+              ..._tocSlivers(),
             ],
           ),
         ],
@@ -536,9 +543,15 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
     );
   }
 
-  /// 简介区块：区块标题 + 圆角卡片（更新时间 / 内容简介 / 展开收起）
+  /// 简介区块：区块标题 + 圆角卡片（内容简介 / 展开收起）
+  ///
+  /// ⚠️ 用户 2026-10-15：「更新时间放在内容简介前面」——
+  ///   原来卡片里第一块就是「🕐 更新时间」，视觉上成了**简介内容的一部分** ✗；
+  ///   而页头信息列里本来就有一行「更新时间：」（见 [_header]，
+  ///   取的是 `updateTime/updatedAt/lastUpdate` + 拉取时间兜底，覆盖面更大）。
+  ///   ⇒ 卡片里这份**删掉**（它本来就是重复的），"更新时间"从此只出现在
+  ///     简介**前面**的那一行 ✓。
   Widget _introSection(String intro) {
-    final updated = _infoFirst(['updatedAt', 'lastUpdate']);
     final long = intro.length > 90 || intro.contains('\n');
     final subtitleStyle = TextStyle(
         fontSize: AppTheme.fontSubhead,
@@ -574,12 +587,6 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (updated.isNotEmpty) ...[
-                Text('🕐 更新时间：', style: subtitleStyle),
-                const SizedBox(height: 4),
-                Text(updated, style: valueStyle),
-                const SizedBox(height: 10),
-              ],
               Text('▤ 内容简介：', style: subtitleStyle),
               const SizedBox(height: 4),
               Text(
@@ -900,58 +907,73 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
   String _safeFileName(String s) =>
       s.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
 
-  Widget _tocArea() {
+  /// 目录区（slivers 形态，见 build 里的说明）。
+  List<Widget> _tocSlivers() {
     if (_loadingToc) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(color: JellyTheme.primary),
-            const SizedBox(height: 14),
-            Text('正在获取目录...',
-                style: TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
-          ],
-        ),
-      );
-    }
-    if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline_rounded,
-                  size: 48, color: Colors.orangeAccent),
-              const SizedBox(height: 14),
-              Text(_error!,
-                  textAlign: TextAlign.center,
-                  style:
-                      TextStyle(fontSize: AppTheme.fontSubhead, color: JellyTheme.textSecondary)),
-              const SizedBox(height: 16),
-              TextButton.icon(
-                onPressed: _load,
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('重试'),
-              ),
-              TextButton.icon(
-                onPressed: _changeSource,
-                icon: const Icon(Icons.swap_horiz_rounded),
-                label: const Text('换个书源'),
-              ),
-            ],
+      return [
+        SliverFillRemaining(
+          hasScrollBody: false,
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: JellyTheme.primary),
+                const SizedBox(height: 14),
+                Text('正在获取目录...',
+                    style: TextStyle(
+                        fontSize: AppTheme.fontSubhead,
+                        color: JellyTheme.textSecondary)),
+              ],
+            ),
           ),
         ),
-      );
+      ];
+    }
+    if (_error != null) {
+      return [
+        SliverFillRemaining(
+          hasScrollBody: false,
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline_rounded,
+                      size: 48, color: Colors.orangeAccent),
+                  const SizedBox(height: 14),
+                  Text(_error!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          fontSize: AppTheme.fontSubhead,
+                          color: JellyTheme.textSecondary)),
+                  const SizedBox(height: 16),
+                  TextButton.icon(
+                    onPressed: _load,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('重试'),
+                  ),
+                  TextButton.icon(
+                    onPressed: _changeSource,
+                    icon: const Icon(Icons.swap_horiz_rounded),
+                    label: const Text('换个书源'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ];
     }
     final visibleCount = _showAllChapters
         ? _chapters.length
         : _chapters.length.clamp(0, 8);
     final hasMore = _chapters.length > 8;
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-      children: [
-        Container(
+    return [
+      SliverPadding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+        sliver: SliverToBoxAdapter(
+          child: Container(
           decoration: BoxDecoration(
             color: _cardColor,
             borderRadius: BorderRadius.circular(14),
@@ -1039,9 +1061,10 @@ class _BookSourceDetailPageState extends State<BookSourceDetailPage> {
                 ),
             ],
           ),
+          ),
         ),
-      ],
-    );
+      ),
+    ];
   }
 
   void _openReader(int index) {

@@ -399,7 +399,10 @@ class SettingsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = iconColor ?? AppTheme.accentColor;
+    // ⚠️ 兜底色用 accentOnSurface 而不是 accentColor：后者取调色板 primary，
+    // 默认「水墨书香」是 #3A3A3A 墨灰 —— 暗色下"图标 + 它的淡底"整块看不见
+    //（用户 2026-10-15：「晚上完全看不清」）。浅色下两者相同，观感不变。
+    final accent = iconColor ?? AppTheme.accentOnSurface;
     // 行高最终 = 图标 36 + 纵向内边距 2×13 = 62，接近 iOS 设置页的呼吸感。
     // （之前是 32 + 2×8 = 48，一屏塞太多行，显得很挤。）
     final child = Padding(

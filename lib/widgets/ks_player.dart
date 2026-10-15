@@ -35,8 +35,9 @@ class KSPlayer extends AppPlayer {
 
   KSPlayer({super.config}) {
     _ensureHandlerInstalled();
-    // 抢占「活跃」身份：最近一次 open() 的实例才是共享播放器的当前主人
-    _activeInstance = this;
+    // ⚠️ 不在构造时抢占「活跃」身份：只有真正 `open()` 的实例才是共享 KSEngine
+    //   的当前主人（见 open()）。否则"构造了但没 open / open 失败"的实例会
+    //   把正在播放的实例的事件路由夺走 → 进度条停住、转圈不消失。
     _startSizePolling();
     platformViewBuilder = ({BoxFit fit = BoxFit.contain, double? aspectRatio}) {
       return KSPlayerView(fit: fit, aspectRatio: aspectRatio);
@@ -199,12 +200,14 @@ class KSPlayer extends AppPlayer {
   Future<void> dispose() async {
     _sizePoller?.cancel();
     _sizePoller = null;
-    try {
-      // close：销毁原生 KSPlayerLayer（含 PiP 清理）；仅 pause 会常驻占内存
-      await _channel.invokeMethod('close');
-    } catch (_) {}
-    // 只有自己还是活跃实例时才让位，避免把别人的身份清掉
+    // ⚠️ 原生 KSEngine 是**全局唯一**播放层：只有当前活跃实例才有权 close。
+    //   非活跃实例（例如直播页正在播、详情页另建实例后又销毁）若也发 close，
+    //   会把别人正在用的原生层一并销毁 → 其它页面黑屏 / 点了没反应。
     if (identical(_activeInstance, this)) {
+      try {
+        // close：销毁原生 KSPlayerLayer（含 PiP 清理）；仅 pause 会常驻占内存
+        await _channel.invokeMethod('close');
+      } catch (_) {}
       _activeInstance = null;
     }
     await super.dispose();

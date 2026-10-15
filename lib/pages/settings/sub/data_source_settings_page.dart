@@ -116,7 +116,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
             //   并把下面所有行一起吃掉 ✗。改成「返回本页后 setState 刷新」。
             SettingsRow(
               icon: Icons.language_outlined,
-              title: '网页管理',
+              title: 'Webhtv 管理',
               value: '${WebHomePrefs.instance.sources.length} 个网页',
               onTap: () async {
                 await Get.to(() => const WebHomeManagePage());

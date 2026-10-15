@@ -34,8 +34,8 @@ class IosAvPlayer extends AppPlayer {
 
   IosAvPlayer({super.config}) {
     _ensureHandlerInstalled();
-    // 抢占"活跃"身份：最近一次 open() 的实例才是共享播放器的当前主人
-    _activeInstance = this;
+    // ⚠️ 同 KSPlayer：不在构造时抢占「活跃」身份，只有真正 `open()` 的实例
+    //   才是共享 AvEngine 的当前主人（见 open()）。
     _startSizePolling();
     platformViewBuilder = ({BoxFit fit = BoxFit.contain, double? aspectRatio}) {
       return IosAvPlayerView(
@@ -187,11 +187,13 @@ class IosAvPlayer extends AppPlayer {
   Future<void> dispose() async {
     _sizePoller?.cancel();
     _sizePoller = null;
-    try {
-      await _channel.invokeMethod('pause');
-    } catch (_) {}
-    // 只有自己还是活跃实例时才让位，避免把别人的身份清掉
+    // ⚠️ 原生 AvEngine 是**全局唯一** AVPlayer：只有当前活跃实例才有权 pause。
+    //   非活跃实例（例如直播页正在播、详情页另建实例后又销毁）若也发 pause，
+    //   会把别人正在播的全局播放器一起暂停。
     if (identical(_activeInstance, this)) {
+      try {
+        await _channel.invokeMethod('pause');
+      } catch (_) {}
       _activeInstance = null;
     }
     await super.dispose();

@@ -37,6 +37,7 @@ import '../search/controller.dart' show TvSearchController;
 import 'controller.dart';
 import 'episode_list.dart';
 import '../../widgets/app_toast.dart';
+import '../../webhome/webhtv_playback_sync_service.dart';
 
 /// 详情页 - 对应 Swift DetailView
 class DetailPage extends StatefulWidget {
@@ -1015,6 +1016,10 @@ class _DetailPageState extends State<DetailPage> {
       onPositionChanged: (pos) =>
           _handlePlaybackProgress(pos.inSeconds.toDouble()),
       onEnded: () {
+        // ── Webhtv 观影记录同步：自然完播上报 ──────────────────────
+        // 放在自动下一集判定**之前**：无论是否开启自动下一集，
+        // 本集确实播完了都要上报 `playback.ended`。
+        _reportPlaybackEnded();
         // AVPlayer 内核可关「自动下一集」；手动点下一集不受限
         if (PlayerPrefs.instance.vodEngine.value == PlayerEngine.avplayer &&
             !PlayerPrefs.instance.avAutoNext.value) {
@@ -2440,6 +2445,42 @@ class _DetailPageState extends State<DetailPage> {
       playNote,
       playbackState: playbackState,
     );
+
+    // ── Webhtv 观影记录同步：上报进度 ─────────────────────────────
+    // 这里是**唯一的进度落盘点**（周期进度 / 暂停退出 / 切集切线路前都汇聚于此），
+    // 已覆盖文档要求的三个进度时机；自然完播另走 [onEnded] → `ended: true`。
+    // ⚠️ 总时长字段暂未接（`durationMs: 0`），完播以 `completed: true` 表达。
+    unawaited(WebhtvPlaybackSyncService.instance.reportProgress(
+      siteKey: info.sourceKey,
+      vodId: info.id,
+      vodName: info.name,
+      vodPic: info.pic,
+      flag: _controller.selectedFlag.value,
+      episodeName: episodeLabel,
+      episodeUrl: info.currentEpisode?.url ?? '',
+      episodeIndex: _controller.selectedEpisodeIndex.value,
+      positionMs: (progress * 1000).round(),
+    ));
+  }
+
+  /// 自然完播上报（`playback.ended`）——与自动下一集开关无关。
+  void _reportPlaybackEnded() {
+    final info = _controller.vodInfo.value;
+    if (info == null) return;
+    final episodeName = info.currentEpisode?.name.trim() ?? '';
+    unawaited(WebhtvPlaybackSyncService.instance.reportProgress(
+      siteKey: info.sourceKey,
+      vodId: info.id,
+      vodName: info.name,
+      vodPic: info.pic,
+      flag: _controller.selectedFlag.value,
+      episodeName:
+          episodeName.isEmpty ? '第${_controller.selectedEpisodeIndex.value + 1}集' : episodeName,
+      episodeUrl: info.currentEpisode?.url ?? '',
+      episodeIndex: _controller.selectedEpisodeIndex.value,
+      positionMs: (_controller.currentPlaybackSeconds() * 1000).round(),
+      ended: true,
+    ));
   }
 
   /// 对应 Swift handlePlaybackProgress

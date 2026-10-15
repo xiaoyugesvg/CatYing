@@ -144,11 +144,11 @@ class PeerTransferService extends ChangeNotifier {
       );
     }
 
-    _cleanupTimer?.cancel(); // 保险：即便守卫被绕过也只保留一个定时器
-    _cleanupTimer = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) => _cleanupOffers(),
-    );
+    // 清理定时器**不在这里建**（原来是 `Timer.periodic(30s)` 无条件常驻）：
+    // 它是应用级单例上的一个空转 tick，而"有过期邀约要清"只发生在
+    // 接收 / 发送模式里。改为随模式起停 —— 见 [_ensureCleanupTimer] /
+    // [_stopCleanupTimerIfIdle]。这里顺手停掉可能残留的旧定时器。
+    _stopCleanupTimerIfIdle();
     _log('初始化完成: $_peerName ($_peerId)，${_peers.length} 个已配对设备');
   }
 
@@ -176,6 +176,15 @@ class PeerTransferService extends ChangeNotifier {
 
   // ===================== mDNS：广播（接收方） =====================
 
+  /// mDNS 事件流订阅。
+  ///
+  /// ⚠️ 2026-10-15：`listen(...)` 原来**丢弃了返回值**，`_stopBroadcast` /
+  ///   `stopDiscovery` 只 `stop()` + 置 null，从不 `cancel()` ⇒ 反复进出
+  ///   收发模式（每次进 peer_transfer_page 都会 start）会累积旧订阅，
+  ///   并且旧 Bonsoir 对象被订阅闭包强引用、无法回收。
+  StreamSubscription<dynamic>? _broadcastSub;
+  StreamSubscription<dynamic>? _discoverySub;
+
   Future<void> _startBroadcast() async {
     if (_broadcast != null) return;
     final svc = BonsoirService(
@@ -192,7 +201,8 @@ class PeerTransferService extends ChangeNotifier {
     );
     final b = BonsoirBroadcast(service: svc);
     await b.initialize();
-    b.eventStream?.listen((e) {
+    _broadcastSub?.cancel();
+    _broadcastSub = b.eventStream?.listen((e) {
       if (e is BonsoirBroadcastStartedEvent) {
         _log('已广播 $_peerName @ :$_port');
       }
@@ -202,6 +212,8 @@ class PeerTransferService extends ChangeNotifier {
   }
 
   Future<void> _stopBroadcast() async {
+    await _broadcastSub?.cancel();
+    _broadcastSub = null;
     await _broadcast?.stop();
     _broadcast = null;
   }
@@ -212,13 +224,16 @@ class PeerTransferService extends ChangeNotifier {
     if (_discovery != null) return;
     final d = BonsoirDiscovery(type: _kServiceType);
     await d.initialize();
-    d.eventStream?.listen(_onDiscoveryEvent, onError: (e) => _log('发现错误: $e'));
+    await _discoverySub?.cancel();
+    _discoverySub = d.eventStream?.listen(_onDiscoveryEvent, onError: (e) => _log('发现错误: $e'));
     await d.start();
     _discovery = d;
     notifyListeners();
   }
 
   Future<void> stopDiscovery() async {
+    await _discoverySub?.cancel();
+    _discoverySub = null;
     await _discovery?.stop();
     _discovery = null;
     for (final p in _peers.values) {
@@ -586,6 +601,7 @@ class PeerTransferService extends ChangeNotifier {
     if (!ok) return false;
     await _startBroadcast();
     await _startForeground();
+    _ensureCleanupTimer();
     _resetIdleTimer();
     notifyListeners();
     return true;
@@ -598,6 +614,7 @@ class PeerTransferService extends ChangeNotifier {
     await _stopBroadcast();
     await _stopServer();
     _offers.clear();
+    _stopCleanupTimerIfIdle();
     notifyListeners();
   }
 
@@ -605,6 +622,22 @@ class PeerTransferService extends ChangeNotifier {
   void _resetIdleTimer() {
     _idleTimer?.cancel();
     _idleTimer = Timer(_idleTimeout, _onIdleTimeout);
+  }
+
+  /// 起一个「清理过期邀约」的周期定时器（进入接收 / 发送模式时调用）。
+  /// 幂等：已在跑就直接返回。
+  void _ensureCleanupTimer() {
+    if (_cleanupTimer != null) return;
+    _cleanupTimer =
+        Timer.periodic(const Duration(seconds: 30), (_) => _cleanupOffers());
+  }
+
+  /// 两种模式都不活跃时停掉清理定时器（避免应用级单例上的常驻空转）。
+  void _stopCleanupTimerIfIdle() {
+    if (isReceiving) return; // 接收中
+    if (_discovery != null) return; // 发送模式（正在发现对端）
+    _cleanupTimer?.cancel();
+    _cleanupTimer = null;
   }
 
   /// 接收空闲超时：长时间无设备连接进来，自动退出接收模式。
@@ -621,9 +654,14 @@ class PeerTransferService extends ChangeNotifier {
     // 幂等 init：发送模式要按已配对表列设备，`_peers` 只有 init 会加载
     //（见 init 的说明）。不调这里就会出现"之前配对过的设备列表是空的"。
     await init();
+    _ensureCleanupTimer();
     await startDiscovery();
   }
-  Future<void> exitSendMode() => stopDiscovery();
+
+  Future<void> exitSendMode() async {
+    await stopDiscovery();
+    _stopCleanupTimerIfIdle();
+  }
 
   /// 快速探活对端：TCP 连其 HTTP 端口（2s 超时）。失败则标记离线并通知。
   /// 发送前拦截 mDNS 缓存残留的已下线设备，避免点了才失败。

@@ -213,7 +213,7 @@ class _ParseSettingsPageState extends State<ParseSettingsPage> {
               icon: Icons.auto_awesome,
               title: '自动（按顺序尝试）',
               value: active.isEmpty ? '使用中' : '',
-              titleColor: active.isEmpty ? AppTheme.accentColor : null,
+              titleColor: active.isEmpty ? AppTheme.accentOnSurface : null,
               onTap: _selectAuto,
             ),
           ],
@@ -230,13 +230,13 @@ class _ParseSettingsPageState extends State<ParseSettingsPage> {
               SettingsRow(
                 icon: Icons.link_rounded,
                 iconColor: active == b.url
-                    ? AppTheme.accentColor
+                    ? AppTheme.accentOnSurface
                     : AppTheme.textTertiary,
                 title: b.name.trim().isEmpty ? b.url : b.name,
                 subtitle:
                     '${b.type == 1 ? '解析' : '嗅探'}'
                     '${_headersOf(b).isNotEmpty ? ' · 带请求头' : ''} · ${b.url}',
-                titleColor: active == b.url ? AppTheme.accentColor : null,
+                titleColor: active == b.url ? AppTheme.accentOnSurface : null,
                 onTap: () => _select(b),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,

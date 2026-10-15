@@ -167,14 +167,38 @@ class AppPlayer {
     }
   }
 
+  /// `open()` 的代次号：用于**并发 / 重入**保护。
+  ///
+  /// 详情页快速连续换集 / 换线路 / 重试时，两次 `open()` 会交叠：第二次会把
+  /// 第一次仍在 `initialize()`（最长 30s）里用着的 controller `dispose` 掉，
+  /// 第一次恢复后再 `_attach` + `stream.addPosition`，就作用在**已 dispose 的
+  /// controller / 已关闭的 StreamController** 上（`StateError: Cannot add event
+  /// after closing`；而且该异常还可能落进 catch 里再 `addError` 一次 →
+  /// 未捕获异步异常）。代次号让过期的那一次直接放弃。
+  int _openGen = 0;
+
   Future<void> open(AppMedia media, {bool play = true}) async {
+    final gen = ++_openGen;
     _completedNotified = false;
     final old = _vc;
-    if (old != null && _ownsController) {
-      try {
-        await old.dispose();
-      } catch (_) {}
+    if (old != null) {
+      // 先把引用摘掉：即便下面 `dispose()` 的 await 期间有**并发** open 插进来，
+      // 它看到的 `_vc` 已是 null，不会再 dispose 同一个 controller（双重 dispose
+      // 在 debug 下会触发 ChangeNotifier 的断言）。
+      _vc = null;
+      if (_ownsController) {
+        try {
+          await old.dispose();
+        } catch (_) {}
+      } else {
+        try {
+          old.removeListener(_pullState);
+        } catch (_) {}
+      }
     }
+    // 过期（有更新的 open 接管）或播放器已销毁 → 放弃本次
+    if (_disposed || gen != _openGen) return;
+
     final vc = VideoPlayerController.networkUrl(
       Uri.parse(media.url),
       httpHeaders: media.httpHeaders ?? const {},
@@ -192,25 +216,28 @@ class AppPlayer {
       //   `initialize()` 的 Future **永久 pending**，其后所有逻辑（seek / 续播
       //   兜底）永不执行，用户点重试还会不断叠加挂起的原生调用。
       await vc.initialize().timeout(const Duration(seconds: 30));
-      if (_disposed) {
-        await vc.dispose();
-        return;
-      }
+      // 过期/已销毁 → 放弃：此时 vc 或已被更新的 open 覆盖（它会负责 dispose），
+      //   或已被 dispose() 释放；这里**不要**再动 stream / listener。
+      if (_disposed || gen != _openGen) return;
       _attach(vc);
       _pullState();
       stream.addDuration(vc.value.duration);
       stream.addPosition(vc.value.position);
       if (media.start != null && media.start! > Duration.zero) {
         await vc.seekTo(media.start!);
+        if (_disposed || gen != _openGen) return;
         _s.position = media.start!;
         stream.addPosition(_s.position);
       }
       if (play) {
         await vc.play();
+        if (_disposed || gen != _openGen) return;
         _s.playing = true;
         stream.addPlaying(true);
       }
     } catch (e) {
+      // 已销毁/已过期时绝不能再往已关闭的 stream 上 add
+      if (_disposed || gen != _openGen) return;
       stream.addError(e.toString());
       stream.addPlaying(false);
     }

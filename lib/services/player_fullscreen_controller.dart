@@ -17,13 +17,23 @@ class PlayerFullscreenController extends GetxController {
   /// true = 有视频处于全屏 (app.dart 用它隐藏底栏)
   final isFullscreen = false.obs;
 
-  /// 上一个全屏的 ID, 用于"在 detail A 全屏 → 切到 detail B 全屏"时
-  /// 避免 setState 顺序问题. 当前实现下只用 bool 就够.
+  /// 当前处于全屏的**来源集合**（引用计数）。
+  ///
+  /// ⚠️ 2026-10-15：原来只有一个 bool，`enter/exit` 完全忽略传入的 `sourceId`。
+  ///   而详情页全屏 + 直播页全屏**可以同时存在**（例如详情页全屏时又推入
+  ///   直播页全屏）—— 任一方 `exit` 就把 bool 置 false，会让另一个仍在全屏的
+  ///   页面底栏**提前恢复显示**。同仓的 `DetailPageController` 已用计数解决
+  ///   同类问题，这里对齐。
+  final Set<String> _fullscreenSources = <String>{};
+
   void enter(String sourceId) {
-    isFullscreen.value = true;
+    _fullscreenSources.add(sourceId);
+    isFullscreen.value = _fullscreenSources.isNotEmpty;
   }
 
   void exit(String sourceId) {
-    isFullscreen.value = false;
+    // 移除不存在的 id 是无害的（例如直播页 dispose 时补一次 exit）
+    _fullscreenSources.remove(sourceId);
+    isFullscreen.value = _fullscreenSources.isNotEmpty;
   }
 }

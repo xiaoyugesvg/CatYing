@@ -46,6 +46,13 @@ class SniffPlayerPage extends StatefulWidget {
   /// 返回要连按多次 —— 用户 2026-10-15「嗅探容易影响播放」。
   static final ValueNotifier<String?> pendingUrl = ValueNotifier<String?>(null);
 
+  /// 每次本页 **dispose** 自增一次（详情页据此收尾"嗅探中"标记）。
+  ///
+  /// 为什么需要：嗅探页被**复用重载**时，是"已存在的那一页"在跑，详情页那次
+  /// `_autoSniff` 的 await 早就返回了 ⇒ 没人清 `sniffingUrl`，详情页会永久停在
+  /// "正在嗅探视频地址…"占位上。用这个 tick 把"关闭"这个事实广播给上游。
+  static final ValueNotifier<int> closedTick = ValueNotifier<int>(0);
+
   @override
   State<SniffPlayerPage> createState() => _SniffPlayerPageState();
 }
@@ -546,6 +553,11 @@ class _SniffPlayerPageState extends State<SniffPlayerPage> {
     SniffPlayerPage.pendingUrl.removeListener(_onPendingUrl);
     // 本页已关闭：清掉可能残留的重载请求，避免干扰下一次打开
     SniffPlayerPage.pendingUrl.value = null;
+    // 通知上游（详情页）"嗅探页已关闭"：详情页据此收尾 `sniffingUrl`。
+    // ⚠️ 必须有这个信号：嗅探页**被复用重载**时（pendingUrl），详情页那次
+    //    `_autoSniff` 的 await 早已返回，没人再把 sniffingUrl 清掉 ⇒
+    //    详情页会永久停在"正在嗅探视频地址…"的黑底占位上。
+    SniffPlayerPage.closedTick.value++;
     _stopSniffing();
     try {
       _controller.runJavaScript(

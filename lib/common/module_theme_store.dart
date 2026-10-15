@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../reading/theme/jelly_palette.dart';
+import '../services/prefs_mirror.dart';
 
 /// 每个模块用哪套配色方案。
 ///
@@ -99,6 +100,8 @@ class ModuleThemeStore {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('$_kPrefix$module', presetId);
+      // 与其它设置项一致：改完立刻落盘 + 写镜像快照（见 PrefsMirror 顶部说明）。
+      PrefsMirror.snapshotSoon();
     } catch (e) {
       debugPrint('[ModuleTheme] 保存失败: $e');
     }
@@ -115,6 +118,7 @@ class ModuleThemeStore {
       for (final k in _presets.keys) {
         await prefs.remove('$_kPrefix$k');
       }
+      PrefsMirror.snapshotSoon();
     } catch (_) {}
   }
 }

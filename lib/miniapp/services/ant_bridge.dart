@@ -13,6 +13,7 @@ import '../../models/cache_store.dart';
 import '../../models/movie_sort.dart';
 import '../../models/source_bean.dart';
 import '../../models/vod_info.dart';
+import '../../reading/source/global_proxy.dart';
 import '../../services/api_config.dart';
 import '../../services/app_log.dart';
 import '../../services/parse_service.dart';
@@ -422,6 +423,11 @@ class AntBridge {
             : ResponseType.plain,
         headers: {'User-Agent': 'okhttp/4.12.0', ...headers},
       ));
+      // 网页 / 小程序里的 `ant.request` 必须跟着**全局代理**走
+      //（用户 2026-10-15：「网页里面内容老是加载不出来」）。
+      // 这里的 Dio 原来是裸的 ⇒ 开了代理也直连 ⇒ 网页里的接口全超时、
+      // 页面只剩空壳；与当初 RSS `java.ajax` 是同一个坑 ✓。
+      applyGlobalProxy(dio);
       final resp = await dio.request<dynamic>(
         url,
         data: body is Map ? jsonEncode(body) : body,

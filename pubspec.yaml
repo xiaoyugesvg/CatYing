@@ -121,6 +121,18 @@ flutter:
     #   继续随包只会白占体积，故连同 pubspec 声明一并删除。
     # 网页首页模块的内置默认页（未配置自定义地址时加载；见 lib/webhome/）
     - assets/webhome/
+    # 「海阔」模块的**内置源**（随包分发；见 lib/hiker/services/hiker_builtin.dart）
+    #   ⚠️ 这份清单是**实跑筛出来的**：拿一份 115 个源的导出文件逐个真跑 `home`，
+    #      只有真出内容的才写进来（其余依赖海阔内置页 hiker://page/Apollo、
+    #      密文模块引用、pdfa 等，见「海阔设置 → 说明」）。
+    - assets/hiker/
+    # 「海阔」的 **App 自带资源**（摘自海阔官方源码 hikerView 的
+    #   app/src/main/assets：home.js / inject.js / theme.js / css.js …）
+    #   规则里的 `hiker://assets/xxx` 读的就是这些 —— 进模块时由
+    #   HikerBuiltin.installAssets() 释放到 Documents/hiker/builtin，
+    #   Node 侧按 options.assetsDir 读文件。
+    #   ⚠️ 目录式声明**不递归**，所以这个子目录必须单独声明 ✓
+    - assets/hiker/files/
     # 猫爪（猫咪）Logo：用于接口配置引导页主视觉
     - assets/images/
     # 阅读模块用到的图标（logo / 文件夹 / 魔棒）：
@@ -128,6 +140,9 @@ flutter:
     #     加载失败（about_page / download_page / source_repo_page / search_page ✓）
     #   2026-10-09：从 cmbok 安装目录把文件补回来 + 这里补声明 ✓
     - assets/icons/
+    # 用户头像素材（40 款内置，来自 DiceBear `fun-emoji`，CC BY 4.0）——
+    # 「我的」页「选择头像」面板用；生成命令见 lib/reading/pages/me_page.dart 注释。
+    - assets/avatars/
     # 内置阅读背景壁纸（14 张，来自 cmbok ✓）
     #   ⚠️ 目录式声明**不递归**，所以要单独声明这个子目录 ✓
     - assets/images/reader_bg/

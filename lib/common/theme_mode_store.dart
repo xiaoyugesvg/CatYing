@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/background_service.dart';
+import '../services/prefs_mirror.dart';
 import 'theme.dart';
 
 /// 全局主题模式：dark / light / system（设置页可改）
@@ -95,6 +96,9 @@ class ThemeModeStore {
           _ => 'dark',
         },
       );
+      // 与其它设置项一致：改完立刻落盘 + 写镜像快照。原来漏挂这个钩子 ⇒
+      // 「改完明暗马上划掉 App」时改动不在镜像里，重启可能被旧值回退。
+      PrefsMirror.snapshotSoon();
     } catch (e) {
       /* ignore */
     }

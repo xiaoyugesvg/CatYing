@@ -23,9 +23,15 @@ enum NavFeature {
   books('books', '阅读', false, tabIndex: 6),
   apps('apps', '程序', false, tabIndex: 7),
   // 「网页首页」模块（独立于小程序体系：加载用户自配的 HTML 首页）
-  webhome('webhome', '网页', false, tabIndex: 8),
+  // 名称用「Webhtv」——用户 2026-10-15：「将网页分类名称改成 Webhtv，
+  //  设置里面也是」。这一个 label 同时驱动**悬浮导航栏**和
+  //  「设置 → 菜单设置」里的分类名（那边读的就是 `f.label`）。
+  webhome('webhome', 'Webhtv', false, tabIndex: 8),
   // 「RSS」模块（订阅源阅读：Legado RSS 源 / 标准 RSS / OPML）
   rss('rss', 'RSS', false, tabIndex: 9),
+  // 「海阔」模块（海阔视界 hiker/hipy 小程序规则；**独立于** TVBox 小程序体系，
+  //  见 lib/hiker/）。同样默认不进底栏，用户在「设置 → 主页页面」里自行开启。
+  hiker('hiker', '海阔', false, tabIndex: 10),
   shelf('shelf', '史藏', false, tabIndex: 1),
   settings('settings', '设置', true, tabIndex: 3),
   search('search', '搜索', false, tabIndex: 0);
@@ -54,6 +60,7 @@ enum NavFeature {
         NavFeature.apps => Icons.widgets_outlined,
         NavFeature.webhome => Icons.language_outlined,
         NavFeature.rss => Icons.rss_feed_outlined,
+        NavFeature.hiker => Icons.rocket_launch_outlined,
         NavFeature.shelf => Icons.schedule_outlined,
         NavFeature.settings => Icons.settings_outlined,
         NavFeature.search => Icons.search,
@@ -68,6 +75,7 @@ enum NavFeature {
         NavFeature.apps => Icons.widgets,
         NavFeature.webhome => Icons.language,
         NavFeature.rss => Icons.rss_feed,
+        NavFeature.hiker => Icons.rocket_launch,
         NavFeature.shelf => Icons.schedule,
         NavFeature.settings => Icons.settings,
         NavFeature.search => Icons.search,
@@ -88,6 +96,20 @@ class NavFeatureService extends GetxService {
 
   static const String _enabledKey = 'nav_enabled_features_v1';
   static const String _orderKey = 'nav_feature_order_v1';
+
+  /// 一次性迁移标记：见 [load] 里「把这三个请出底栏」那一段
+  static const String _kDefaultOffOnce = 'nav_default_off_once_v1';
+
+  /// **默认不进悬浮底栏**的三个新增模块（用户 2026-10-15 明确要求）：
+  /// 「网页(Webhtv)」「RSS」「海阔」。
+  ///
+  /// ⚠️ 注意语义：**只是不出现在底栏**，功能本身完全照常 ——
+  ///    在「设置 → 菜单设置」里把开关打开，它们立刻回到悬浮底栏并正常工作。
+  static const List<NavFeature> kDefaultOffFeatures = [
+    NavFeature.webhome,
+    NavFeature.rss,
+    NavFeature.hiker,
+  ];
 
   /// 启用中的功能（**顺序即底栏顺序**，不含 search —— 搜索是按钮不是 tab）
   final enabled = <NavFeature>[
@@ -137,16 +159,24 @@ class NavFeatureService extends GetxService {
     order.remove(NavFeature.search);
 
     final enabledSet = enabledRaw?.map(_byId).whereType<NavFeature>().toSet();
+    // ── 一次性迁移（2026-10-15）：把「网页 / RSS / 海阔」请出底栏 ────────
+    // 「RSS」「网页」当初是**新增分类**直接加上的、「海阔」是今天新加的模块，
+    // 一旦被"新增项 = 默认启用"写进过持久化记录，后面把默认值改成关闭
+    // **对老用户就无效了** —— 记录里写着开，底栏里就一直挂着。
+    // 这里在首次跑到这段代码时，把这三个**挪回未启用段一次**；
+    // 之后就完全尊重用户在「菜单设置」里的选择（想开随时能开，不会再被重置）。
+    final defaultOffMigrated = prefs.getBool(_kDefaultOffOnce) ?? false;
     final on = <NavFeature>[];
     final off = <NavFeature>[];
     for (final f in order) {
-      // ⚠️ 2026-10-14：「网页首页」是新增的可选模块，**无记录时也默认关闭** ——
+      // ⚠️ 2026-10-14：新增的可选模块**无记录时也默认关闭** ——
       //   否则全新安装（或老用户升级）后底栏会凭空多出一项，而用户从没开过它。
-      // ⚠️ 2026-10-15：「RSS」同理（用户明确要求 RSS 与网页**都默认关闭**）。
       //   其余项保持原有语义（无记录 = 启用），不动既有行为。
-      final isOn = enabledSet == null
-          ? (f != NavFeature.webhome && f != NavFeature.rss)
+      var isOn = enabledSet == null
+          ? !kDefaultOffFeatures.contains(f)
           : enabledSet.contains(f);
+      // 迁移没跑过 ⇒ 这三个一律先按关闭算，并在下面写回磁盘
+      if (!defaultOffMigrated && kDefaultOffFeatures.contains(f)) isOn = false;
       // 必需页面强制启用
       if (f.required) {
         on.add(f);
@@ -170,8 +200,16 @@ class NavFeatureService extends GetxService {
     //   写回磁盘 —— 用户的配置就从"暂时丢了"变成"永久没了"。
     //   现在只有确实读到了持久化记录才回写，缺记录时保持不动：
     //   界面照常按默认值渲染，但不会覆盖掉任何可能存在的数据。
+    if (!defaultOffMigrated) {
+      // 迁移标记必须**本次就落下**：否则全新安装（enabledRaw == null、不回写）
+      // 之后用户自己把 RSS 打开 → 下次启动又被"迁移"关掉一次。
+      await prefs.setBool(_kDefaultOffOnce, true);
+    }
     if (enabledRaw != null) {
       await _persist();
+    } else if (!defaultOffMigrated) {
+      // 没回写也要让镜像把迁移标记存下来（周期快照 15s 一次，这里提前一次）
+      PrefsMirror.snapshotSoon();
     }
   }
 
@@ -195,8 +233,7 @@ class NavFeatureService extends GetxService {
     PrefsMirror.snapshotSoon();
   }
 
-  Future<void> setEnabled(NavFeature f, bool v) async {
-    if (f.required) return;
+  Future<void> setEnabled(NavFeature f, bool v) async {    if (f.required) return;
     if (v) {
       if (enabled.contains(f)) return;
       disabled.remove(f);

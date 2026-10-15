@@ -21,7 +21,19 @@ import '../services/settings_service.dart';
 bool applyGlobalProxy(Dio dio, {HttpClient Function()? createHttpClient}) {
   final s = SettingsService();
   if (!s.globalProxyEnabled) return false;
-  return applyProxy(dio, s.globalProxy, createHttpClient: createHttpClient);
+  // 「APP 代理」域名规则（Webhtv → APP 代理）：
+  //   开了「只对规则里的域名走代理」且规则非空 ⇒ 只有命中的域名走代理，其余直连。
+  //   没开（默认）= 全部走代理 = 与改动前完全一致 ✓
+  final rules = s.proxyDomainRules;
+  final limitToDomains = s.proxyDomainOnly && rules.isNotEmpty;
+  return applyProxy(
+    dio,
+    s.globalProxy,
+    createHttpClient: createHttpClient,
+    shouldProxy: limitToDomains
+        ? (host) => SettingsService.hostMatchesProxyRules(host, rules)
+        : null,
+  );
 }
 
 /// 把 "host:port" 代理应用到 [dio]；格式非法返回 false。
@@ -42,6 +54,8 @@ bool applyProxy(
   Dio dio,
   String proxy, {
   HttpClient Function()? createHttpClient,
+  /// 该域名的请求是否走代理。null = 全部走（原行为）
+  bool Function(String host)? shouldProxy,
 }) {
   final p = proxy.trim();
   if (p.isEmpty) return false;
@@ -56,7 +70,11 @@ bool applyProxy(
       // ⚠️ 不能写 `(createHttpClient ?? HttpClient)()` ✗ —— `HttpClient` 是**工厂构造** ✓，
       //   它不是函数值 ✓ → 会报 "expression doesn't evaluate to a function" ✗（本轮闸门当场抓到 ✓✓）。
       final client = createHttpClient != null ? createHttpClient() : HttpClient();
-      client.findProxy = (uri) => 'PROXY $host:$port';
+      client.findProxy = (uri) {
+        // 域名规则：不命中的直连（不设代理 = 走系统直连）
+        if (shouldProxy != null && !shouldProxy(uri.host)) return 'DIRECT';
+        return 'PROXY $host:$port';
+      };
       return client;
     },
   );

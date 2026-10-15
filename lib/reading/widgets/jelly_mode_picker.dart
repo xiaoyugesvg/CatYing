@@ -16,8 +16,10 @@ class JellyModeItem {
   /// 2 字简称（左右 / 上下 / 仿真 / 覆盖 / 无动画 ……）
   final String label;
 
-  /// 文字符号（↔ / ↕ / 📖 / ⬚ / ⚡ ……）—— 用户 2026-10-15：
-  /// 「这种文字就行，不用图标」，所以是**文本字符**，不是 IconData。
+  /// 「符号 + 名称」里的**文字符号**（↔ / ↕ / ▤ / ▣ / ⇥ ……）。
+  ///
+  /// 用户 2026-10-15：「这种文字就行，不用图标」⇒ 是**文本字符**，
+  /// 不是 `IconData`，也**不能用 emoji**（彩色 emoji 看着还是图标）。
   final String symbol;
 
   final bool selected;
@@ -25,30 +27,34 @@ class JellyModeItem {
 }
 
 /// 阅读模式符号（书源阅读器的 [PageMode]）。
+///
+/// ⚠️ 只用**单色文字符号**，不许用 emoji：
+///   `📖` `⚡` 这类会渲染成彩色 emoji，看起来仍是"图标" ✗
+///   （用户 2026-10-15：「我他么说了阅读模式不要图标呀」）。
 String pageModeSymbol(PageMode m) => switch (m) {
       PageMode.slide => '↔',
       PageMode.scroll => '↕',
-      PageMode.curl => '📖',
-      PageMode.cover => '⬚',
-      PageMode.none => '⚡',
+      PageMode.curl => '▤',
+      PageMode.cover => '▣',
+      PageMode.none => '⇥',
     };
 
 /// 阅读模式符号（图书阅读器的 [BookReadingMode]，语义同 [PageMode]）。
 String bookModeSymbol(BookReadingMode m) => switch (m) {
       BookReadingMode.pageTurn => '↔',
       BookReadingMode.vertical => '↕',
-      BookReadingMode.simulation => '📖',
-      BookReadingMode.cover => '⬚',
-      BookReadingMode.none => '⚡',
+      BookReadingMode.simulation => '▤',
+      BookReadingMode.cover => '▣',
+      BookReadingMode.none => '⇥',
     };
 
 /// 阅读模式符号（漫画阅读器的 [ReadingMode]）。
 String mangaModeSymbol(ReadingMode m) => switch (m) {
       ReadingMode.pageTurn => '⇄',
       ReadingMode.leftToRight => '⇆',
-      ReadingMode.dissolve => '✧',
-      ReadingMode.continuous => '☰',
-      ReadingMode.none => '⚡',
+      ReadingMode.dissolve => '◌',
+      ReadingMode.continuous => '≡',
+      ReadingMode.none => '⇥',
     };
 
 /// 阅读模式选择器（图书 / 书源 / 漫画阅读器共用）。

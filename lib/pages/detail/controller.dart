@@ -23,6 +23,7 @@ import '../../services/ad_filter_service.dart';
 import '../../services/parse_service.dart';
 import '../../services/parse_store.dart';
 import '../../widgets/app_toast.dart';
+import '../../webhome/webhtv_site_health_page.dart';
 import '../play/sniff_player_page.dart';
 import 'simple_image_reader_page.dart';
 import 'simple_text_reader_page.dart';
@@ -311,7 +312,38 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     // 详情页销毁：清掉嗅探会话残留，避免下次打开详情页被误判为"正在嗅探"
     sniffingUrl.value = null;
     SniffPlayerPage.pendingUrl.value = null;
+    if (_sniffCloseHooked) {
+      SniffPlayerPage.closedTick.removeListener(_onSniffPageClosed);
+    }
     super.onClose();
+  }
+
+  /// 是否已挂上"嗅探页关闭"监听（只挂一次）
+  bool _sniffCloseHooked = false;
+
+  void _hookSniffPageClosed() {
+    if (_sniffCloseHooked) return;
+    _sniffCloseHooked = true;
+    SniffPlayerPage.closedTick.addListener(_onSniffPageClosed);
+  }
+
+  /// 嗅探页**关闭**了（无论是不是本页 push 的）⇒ 结束"嗅探中"态。
+  ///
+  /// ⚠️ 为什么不能只靠 `_autoSniff` 里那次 `await Get.to(...)`：
+  ///   嗅探页被**复用重载**时（`pendingUrl`），await 对应的那次早已返回，
+  ///   没人再清 `sniffingUrl` ⇒ 详情页播放区会**永久**停在
+  ///   "正在嗅探视频地址…"的黑底占位上（不报错、不超时，只能退出重进）。
+  void _onSniffPageClosed() {
+    if (isClosed) return;
+    final u = sniffingUrl.value;
+    if (u == null) return; // 已经收尾过（首次 push 那条路径也会清）
+    sniffingUrl.value = null;
+    // 从嗅探页返回：改用网页本身兜底（原行为：能直接看网页）
+    if ((playUrl.value ?? '').isEmpty) {
+      playUrl.value = u;
+      playbackSessionId.value = _newUuid();
+      isPlaying.value = true;
+    }
   }
 
   @override
@@ -368,6 +400,8 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       final info = await SourceService.instance.getDetail(source, video.id);
       if (token != _detailLoadToken || isClosed) return;
       if (info != null) {
+        // ── Webhtv 站点健康：详情加载成功（Webhtv → 站点健康排序）
+        SiteHealthStore.instance.record(source.key, 'detail', true);
         vodInfo.value = info;
         // 恢复上次选择的播放源（线路）：用户要求每次重进详情页都用
         // 上次选的源，而不是每次都回到第一个。源更新链接后旧 flag
@@ -389,6 +423,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
         }
       }
     } catch (e) {
+      SiteHealthStore.instance.record(source.key, 'detail', false);
       if (token == _detailLoadToken) {
         errorMessage.value = e.toString();
       }
@@ -579,6 +614,12 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   /// （多清晰度 / 多线路，见 [updateQualityOptions]），全部试完才把错误
   /// 抛给界面 —— 原来一失败就要用户手动切线路。
   void setPlaybackError(String message) {
+    // ── Webhtv 站点健康：播放失败记一笔（只有"失败"这一半，见站点健康页说明）
+    SiteHealthStore.instance.record(
+      SpiderService.instance.getCurrentSpiderInfo().key,
+      'play',
+      false,
+    );
     if ((playUrl.value ?? '').isNotEmpty && _advanceToNextCandidate()) return;
     errorMessage.value = message;
     isPlaying.value = false;
@@ -739,6 +780,10 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     }
 
     () async {
+      // 取址期间就挂上"解析中"标记：详情页据此**不启动** 15 秒"地址获取超时"
+      //  ——Spider 的 getPlayUrl 最坏可达 60 秒，原来这期间 isResolving 还是 false，
+      //  首帧就会建出 15 秒计时器 ⇒ 正常解析中被误报"播放地址获取超时"。
+      isResolving.value = true;
       try {
         final result =
             await SpiderService.instance.getPlayUrl(
@@ -882,6 +927,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       } catch (e) {
         if (_spiderResolveToken != token) return;
         errorMessage.value = 'Spider播放解析错误: $e';
+      } finally {
+        // 只有"仍是本次取址"时才清标记（期间又切了集 ⇒ 由新一次接管）
+        if (_spiderResolveToken == token) isResolving.value = false;
       }
     }();
   }
@@ -904,6 +952,14 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   /// 或被弹去嗅探页，等于白白打断一次播放。
   bool _looksLikeDirectMedia(String url) => SniffFilter.isDirectMedia(url);
 
+  /// `_startPlayback` 的代次号。
+  ///
+  /// 普通链路（CMS / 直链）也要防"旧结果顶掉新集"：解析接口是 await 的，
+  /// 快速连点两集时，先发起那次回来后会**无条件**写 `playUrl` —— 表现就是
+  /// "点了下一集，画面又跳回上一集"。Spider 链路早有 `_spiderResolveToken`，
+  /// 这里补上同一套。
+  String _playbackStartToken = '';
+
   /// 取流/播放入口统一入口：在 [_selectedPlayableURL] 基础上接入广告过滤与解析接口。
   ///
   /// - 命中广告黑名单 → 回退到 fallback（沿用既有回退语义，不抛弃原地址）；
@@ -911,6 +967,8 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   ///
   /// 无 ads/rules 且无 parses 时，方法内不产生 await，行为与原来的同步赋值一致。
   Future<void> _startPlayback(String fallback) async {
+    final token = _newUuid();
+    _playbackStartToken = token;
     // 走这里的都是普通视频链路（CMS 源 / 直链），形态复位成"视频"
     contentMode.value = PlayContentMode.video;
     var candidate = _selectedPlayableURL(fallback: fallback);
@@ -931,6 +989,8 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       isResolving.value = true;
       try {
         final outcome = await ParseService.instance.parseOutcome(candidate);
+        // 期间又切了集 / 换了线路 ⇒ 这次结果作废（别把新集顶回去）
+        if (_playbackStartToken != token) return;
         if (outcome != null && outcome.url.isNotEmpty) {
           // 直链直接播；解析出的是另一个网页播放页 → 换它继续走自动嗅探
           candidate = outcome.url;
@@ -941,9 +1001,13 @@ class DetailController extends GetxController with WidgetsBindingObserver {
           }
         }
       } finally {
-        isResolving.value = false;
+        // 只有"仍是本次"才清（期间又切集 ⇒ 标记归新一次管，别提前清掉）
+        if (_playbackStartToken == token) isResolving.value = false;
       }
     }
+
+    // 期间又切了集/换了线路 ⇒ 这次作废（否则会把新集的地址覆盖掉）
+    if (_playbackStartToken != token) return;
 
     // 仍是网页地址且嗅探开关开着 → 交给嗅探页抓媒体直链。
     // ⚠️ 详情页播放区**不再**同时挂内嵌 WebView：否则会和嗅探页各加载一份
@@ -966,6 +1030,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   /// 地址交给已打开那页重载 —— 否则「自动下一集」每集都会叠一层嗅探页，
   /// 返回要连按多次才能回详情页。
   Future<void> _autoSniff(String url) async {
+    _hookSniffPageClosed();
     if (sniffingUrl.value != null) {
       AppLog.instance.log('[Play] 已有嗅探页在栈中 → 复用重载: $url');
       SniffPlayerPage.pendingUrl.value = url;

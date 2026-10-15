@@ -5,13 +5,16 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../hiker/services/hiker_builtin.dart';
+import '../../hiker/services/hiker_files.dart';
 import '../../reading/services/book_content_cache_service.dart';
 import '../../reading/services/book_page_cache_service.dart';
 import '../../music/services/music_api.dart';
+import '../../rss/services/rss_reader.dart';
 import '../models/cache_store.dart';
 import 'nodejs_manager.dart';
 
-/// 缓存分类：模块（影视/直播/音乐/阅读/TMDB）在前，
+/// 缓存分类：模块（影视/直播/音乐/阅读/TMDB/海阔/网页/RSS）在前，
 /// 「软件本身」收纳图片/数据/JS/临时文件等跨模块分类。
 enum CacheModule {
   video('影视'),
@@ -19,6 +22,10 @@ enum CacheModule {
   music('音乐'),
   reading('阅读'),
   tmdb('TMDB 缓存'),
+  // ── 后加的模块（用户 2026-10-15 要求"把新模块也纳入缓存管理"）──────
+  hiker('海阔'),
+  webhome('网页'),
+  rss('RSS'),
   app('软件本身');
 
   const CacheModule(this.label);
@@ -34,6 +41,7 @@ class CacheEntryInfo {
     required this.module,
     required this.size,
     required this.clear,
+    this.skipOnClearAll = false,
   });
 
   final String id;
@@ -44,6 +52,15 @@ class CacheEntryInfo {
   final CacheModule module;
   final int size;
   final Future<void> Function() clear;
+
+  /// 「全部清除」时**跳过**这一项。
+  ///
+  /// 有些入口虽然挂在缓存管理里（方便单独查看/单独清），但内容其实是**用户数据**
+  /// 或**清不掉就会坏功能**的东西：
+  ///   · `js_source`  —— 已下载的 Spider 源脚本（清了要重新下载；且弹窗承诺不清）
+  ///   · `hiker_files` —— 海阔文件区，可能含用户导入的规则包（如 Apollo）
+  /// 批量"全部清除"不该顺手删掉它们。
+  final bool skipOnClearAll;
 }
 
 /// **全 App 缓存管理**（统一入口）。
@@ -236,6 +253,127 @@ class CacheManagerService {
     );
     onSize?.call();
 
+    // ── 海阔（hiker）：文件区 / 远端依赖 / 自带资源 ────────────────
+    //   ⚠️ 文件区里可能有**用户自己导入的规则包**（如 Apollo）—— 它不是缓存，
+    //      所以单独一项、提示写清"清了那批源会失效"，而不是混在"缓存"里悄悄删掉。
+    var hikerFilesBytes = 0;
+    try {
+      // ⚠️ 排除 `libs/`：那是 `rc()` 远端依赖的缓存，下面单独一项 ——
+      //    不排除会把同一份字节算两遍（总量虚高）
+      final all = await HikerFiles.list();
+      for (final e in all) {
+        if (e.path == 'libs' || e.path.startsWith('libs/')) continue;
+        hikerFilesBytes += e.size;
+      }
+    } catch (_) {}
+    out.add(
+      CacheEntryInfo(
+        id: 'hiker_files',
+        label: '文件区（hiker://files）',
+        hint: '规则读的数据文件；⚠️ 可能含你导入的规则包（如 Apollo），'
+            '清了依赖它的源会失效',
+        module: CacheModule.hiker,
+        size: hikerFilesBytes,
+        // 可能含用户导入的规则包 ⇒ 不参与「全部清除」（可在本页单独清）
+        skipOnClearAll: true,
+        clear: () async {
+          try {
+            await HikerFiles.clearAll();
+          } catch (_) {}
+        },
+      ),
+    );
+    onSize?.call();
+
+    var hikerLibsBytes = 0;
+    try {
+      final d = await HikerFiles.dir();
+      if (d != null) hikerLibsBytes = await _dirSize(Directory('${d.path}/libs'));
+    } catch (_) {}
+    out.add(
+      CacheEntryInfo(
+        id: 'hiker_libs',
+        label: '远端依赖缓存（rc）',
+        hint: '规则用 rc()/requireCache() 下载的 JS，清了下次用到时重新下载',
+        module: CacheModule.hiker,
+        size: hikerLibsBytes,
+        clear: () async {
+          try {
+            final d = await HikerFiles.dir();
+            if (d != null) {
+              await _deleteDirContents(Directory('${d.path}/libs'));
+            }
+          } catch (_) {}
+        },
+      ),
+    );
+    onSize?.call();
+
+    var hikerBuiltinBytes = 0;
+    try {
+      final p = await HikerBuiltin.assetsDir();
+      if (p.isNotEmpty) hikerBuiltinBytes = await _dirSize(Directory(p));
+    } catch (_) {}
+    out.add(
+      CacheEntryInfo(
+        id: 'hiker_builtin',
+        label: 'App 自带资源',
+        hint: '随包资源（home.js / theme.js…）释放出来的副本，'
+            '清了下次进海阔会自动重新铺',
+        module: CacheModule.hiker,
+        size: hikerBuiltinBytes,
+        clear: () async {
+          try {
+            final p = await HikerBuiltin.assetsDir();
+            if (p.isNotEmpty) await _deleteDirContents(Directory(p));
+          } catch (_) {}
+        },
+      ),
+    );
+    onSize?.call();
+
+    // ── 网页（Webhtv）：观影记录同步的**游标** ────────────────────
+    //   游标是纯缓存（清了下次全量拉一次）；**墓碑不清** —— 它挡的是"远端已删除
+    //   的记录又被拉回来"，清掉会让已删记录复活。
+    var cursorBytes = 0;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      cursorBytes = prefs.getString('webhtv_playback_cursors')?.length ?? 0;
+    } catch (_) {}
+    out.add(
+      CacheEntryInfo(
+        id: 'webhome_sync_cursor',
+        label: '观影记录同步游标',
+        hint: '增量同步的进度；清了下次会重新全量拉一次（不会丢记录）',
+        module: CacheModule.webhome,
+        size: cursorBytes,
+        clear: () async {
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.remove('webhtv_playback_cursors');
+          } catch (_) {}
+        },
+      ),
+    );
+    onSize?.call();
+
+    // ── RSS：响应体缓存（纯内存、上限 80 条）────────────────────
+    out.add(
+      CacheEntryInfo(
+        id: 'rss_body',
+        label: '响应体缓存',
+        hint: 'cacheFirst 源的响应体（纯内存，上限 80 条），清了下次重新抓',
+        module: CacheModule.rss,
+        size: -1, // 内存态，UI 显示"内存"
+        clear: () async {
+          try {
+            RssReader.clearBodyCache();
+          } catch (_) {}
+        },
+      ),
+    );
+    onSize?.call();
+
     // ── 图片（内存 + 磁盘）────────────────────────────────────
     var imageBytes = 0;
     try {
@@ -307,9 +445,11 @@ class CacheManagerService {
       CacheEntryInfo(
         id: 'js_source',
         label: '源 JS 缓存',
-        hint: '已下载的 Spider 源脚本文件',
+        hint: '已下载的 Spider 源脚本文件（弹窗承诺「全部清除」不动它，'
+            '只在本页可单独清）',
         module: CacheModule.app,
         size: -1,
+        skipOnClearAll: true,
         clear: () async {
           try {
             await NodeJSManager.instance.deleteSource();
@@ -368,8 +508,11 @@ class CacheManagerService {
   }
 
   /// 清空全部
+  ///
+  /// ⚠️ 跳过 [CacheEntryInfo.skipOnClearAll] 的项（用户数据 / 清了会坏功能的）——
+  /// 弹窗里也向用户承诺了"不会清除源文件 JS"，这里必须一致。
   static Future<void> clearAll(List<CacheEntryInfo> all) async {
-    for (final e in all) {
+    for (final e in all.where((x) => !x.skipOnClearAll)) {
       await e.clear();
     }
   }

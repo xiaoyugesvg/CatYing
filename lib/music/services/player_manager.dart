@@ -194,6 +194,7 @@ class MusicPlayerManager extends ChangeNotifier {
   StreamSubscription? _playSub;
   StreamSubscription? _bufSub;
   StreamSubscription? _compSub;
+  StreamSubscription? _errSub;
 
   /// 歌曲自然播完（用于自动下一首）
   VoidCallback? onCompleted;
@@ -264,9 +265,8 @@ class MusicPlayerManager extends ChangeNotifier {
     //   · 日志里也查不到
     // 所以这条是"错误可见性"的地基。
     //
-    // 这里刻意**不保存订阅引用**（`dispose()` 全仓无调用者、Player 与 App
-    // 同生命周期），以保持最小改动；将来若要真正 dispose，记得在这里存引用。
-    _player.stream.error.listen((e) {
+    // 这里保存订阅引用，`dispose()` 里一并 cancel（原来没存 ⇒ dispose 漏取消）。
+    _errSub = _player.stream.error.listen((e) {
       final msg = '$e';
       AppLog.instance.log('[Music] 播放流错误: $msg');
       // 走既有的错误出口（会弹"播放失败"全文弹窗）
@@ -1081,6 +1081,7 @@ class MusicPlayerManager extends ChangeNotifier {
     _playSub?.cancel();
     _bufSub?.cancel();
     _compSub?.cancel();
+    _errSub?.cancel();
     _player.dispose();
     super.dispose();
   }

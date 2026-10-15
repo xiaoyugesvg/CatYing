@@ -6,6 +6,7 @@ import '../../models/movie.dart';
 import '../../models/movie_sort.dart';
 import '../../services/api_config.dart';
 import '../../services/source_service.dart';
+import '../../webhome/webhtv_site_health_page.dart';
 
 class HomeController extends GetxController {
   final sorts = <SortData>[].obs;
@@ -72,6 +73,8 @@ class HomeController extends GetxController {
     try {
       final result = await SourceService.instance.getSort(source);
       sorts.value = result.$1;
+      // ── Webhtv 站点健康：本次「首页/分类」加载成功（Webhtv → 站点健康排序）
+      SiteHealthStore.instance.record(source.key, 'home', true);
       // ⚠️ 只在**非空**时才覆盖：py/js 脚本源的 home() 只返回分类、没有推荐列表，
       // 直接赋值会把上面刚读出来的「幻灯片缓存」清成空 → 顶部闪一下空白，
       // 然后再被 _fillBannerFromCategory 兜底填回来（用户会看到抖动）。
@@ -95,6 +98,8 @@ class HomeController extends GetxController {
         _fillBannerFromCategory(source.key);
       }
     } catch (e) {
+      // ── Webhtv 站点健康：本次「首页/分类」加载失败
+      SiteHealthStore.instance.record(source.key, 'home', false);
       errorMessage.value = _friendlyErrorMessage(e);
     }
 

@@ -200,8 +200,9 @@ class SceneRecovery {
     if (recovered) {
       setCompleted();
     } else {
-      setFailed('Node.js 重启失败, 请关闭应用后重新打开');
-      setFailed('服务已断开，请关闭应用后重新打开');
+      // 只报一条：`setFailed` 写的是同一个 configLoadError，连续两次调用
+      // 会让第一条（更具体的"Node.js 重启失败"）被后一条覆盖 ⇒ 用户永远看不到
+      setFailed('Node.js 重启失败，服务已断开，请关闭应用后重新打开');
     }
     AppLog.instance.sceneEnd(
       cid,

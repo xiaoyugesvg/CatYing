@@ -1531,9 +1531,18 @@ JellyIconDeck(
               const SizedBox(height: 10),
               Flexible(
                 child: SingleChildScrollView(
-                  child: Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
+                  // ✅ 与漫画页 / 图书页的筛选弹窗同款：**固定 3 列等宽网格**。
+                  // 原来这里是 `Wrap` —— 而 `JellyFilterChip` 自身带 `alignment`，
+                  // 放进 Wrap 会被撑满整行 ⇒ 变成"一行一个"
+                  //（用户 2026-10-15：「书源页的筛选为啥还是一个一行」；
+                  //   漫画页/图书页当时也是这么修的，见 search_page.dart / book_search_page.dart）。
+                  child: GridView.count(
+                    crossAxisCount: 3,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: 6,
+                    crossAxisSpacing: 6,
+                    childAspectRatio: 3.0,
                     children: _cats.map((c) {
                       final active = _activeCat?.url == c.url;
                       return JellyFilterChip(

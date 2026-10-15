@@ -115,6 +115,7 @@ class SpiderService {
             return null;
           }
         } else {
+          lastHttpStatus = statusCode;
           AppLog.instance.log('[SpiderService] HTTP错误 $statusCode: $url, body=${responseBody.length > 500 ? responseBody.substring(0, 500) : responseBody}');
           return null;
         }
@@ -137,6 +138,7 @@ class SpiderService {
           continue;
         }
         final code = e.response?.statusCode ?? 0;
+        lastHttpStatus = code;
         final respBody = e.response?.data?.toString() ?? '';
         AppLog.instance.log('[SpiderService] POST $url 失败: code=$code, type=${e.type}, message=${e.message}, body=${respBody.length > 500 ? respBody.substring(0, 500) : respBody}');
         return null;
@@ -243,6 +245,22 @@ class SpiderService {
   String _loadedScriptUrl = '';
   String _loadedScriptKey = '';
 
+  /// 本次载入的脚本对应的**候选 key 列表**（按可信度排序，见
+  /// [_queryEngineScriptCandidates]）。
+  ///
+  /// 为什么需要（用户 2026-10-15：TVBox 源"切过去不直接出内容、要刷新几次、
+  /// 还播不了"）：引擎是**多模块常驻**的（订阅下发的 `catvod/index.js` 一个包
+  /// 里塞了 280 个模块，全是 `type:3`），`/config` 的 sites[] 会同时列出
+  /// 新旧脚本的站点；原来"取第一个有 key 的站点"经常拿到**旧脚本的 key**，
+  /// 再配上新 type ⇒ `/spider/<旧key>/<新type>/init` ⇒ 404。
+  /// ⇒ 现在不再赌一个 key：把候选全列出来，**用响应验证**（404 = key 不对就换
+  /// 下一个），全失败才报错并作废缓存。
+  List<String> _loadedScriptCandidates = [];
+
+  /// 最近一次 `_postJSON` 的 HTTP 状态码（0 = 连接层错误）。
+  /// 用来判定"404 = 路由不存在 = key 不对"，从而触发换 key 重试。
+  int? lastHttpStatus;
+
   /// Node 槽位里当前驻留的脚本是不是 [url]。
   ///
   /// 为什么需要（洞 E）：Node 是**单源架构**，程序脚本源载入后会顶掉主源。
@@ -346,24 +364,149 @@ class SpiderService {
     return null;
   }
 
-  /// 向引擎 `/config` 问"当前驻留脚本的真实站点 key"。
+  /// 向引擎 `/config` 问"当前驻留脚本的真实站点 key"（取候选列表里的第一个）。
   ///
   /// 抽成独立方法是为了两处复用（洞 D）：初次载入脚本后问一次；如果当时没问到
   /// （`_loadedScriptKey` 仍为空），**下次再进 `_ensureNodeScript` 时还能再问一次**，
   /// 而不是永远退回 fallback。
-  /// 模块的 `start()` 是异步的，载入后首次 /config 可能还没注册完 → 小退避重试。
-  Future<String> _queryEngineScriptKey() async {
-    for (var attempt = 0; attempt < 4; attempt++) {
+  Future<String> _queryEngineScriptKey({int? type, String preferKey = ''}) async {
+    final cands = await _queryEngineScriptCandidates(type: type, preferKey: preferKey);
+    _loadedScriptCandidates = cands;
+    return cands.isEmpty ? '' : cands.first;
+  }
+
+  /// 取"本次载入的脚本"对应的**候选 key 列表**（按可信度排序）。
+  ///
+  /// 用户 2026-10-15（TVBox 源切换后不出内容 / 要刷新几次 / 播不了）：
+  ///   —— 引擎是多模块常驻的，`/config` 的 sites[] 同时列出**新旧脚本**的站点；
+  ///      原来"取第一个有 key 的站点"经常拿到旧脚本的 key，配新 type 去请求
+  ///      就是 `/spider/<旧key>/<新type>/…` ⇒ 404（日志里 `/4/init not found`）。
+  ///   ⇒ 这里不再赌一个 key，而是给出**有序候选**，由调用方"用响应验证"
+  ///      （404 = 路由不存在 = key 不对 ⇒ 换下一个），全失败才作废重问。
+  ///
+  /// 排序依据（从强到弱）：
+  ///   ① `preferKey`：聚合配置里该源的 key（不少 host 直接拿源 id 当模块 key）
+  ///      —— 但只在其**确实出现在 sites[] 里**时才排第一，免得白打一次 404；
+  ///   ② `type` 匹配：站点声明的 type == 本次要用的 type（最像"我们要的那条线路"）；
+  ///   ③ 其余站点；
+  ///   ④ 兜底：`preferKey`（sites 里没有时仍试一次，保住"单脚本配置"的旧行为）。
+  ///
+  /// 就绪等待：新脚本刚载入时，`/config` 可能还没把它注册进来 —— 只在
+  /// **"判定依据还没出现"**（既没有 preferKey、也没有 type 匹配）时小退避重试，
+  /// 最多 5 次 × 400ms；一旦依据出现就立刻返回，正常源零额外等待。
+  Future<List<String>> _queryEngineScriptCandidates(
+      {int? type, String preferKey = ''}) async {
+    final ordered = <String>[];
+    final seen = <String>{};
+    void push(Object? raw) {
+      final v = (raw ?? '').toString().trim();
+      if (v.isEmpty || !seen.add(v)) return;
+      ordered.add(v);
+    }
+
+    final prefer = preferKey.trim();
+    List<Map<String, dynamic>> lastSites = const [];
+    for (var attempt = 0; attempt < 5; attempt++) {
       if (attempt > 0) {
         await Future<void>.delayed(const Duration(milliseconds: 400));
       }
       final cfg = await getCatConfig();
-      for (final s in _extractSites(cfg)) {
+      final sites = _extractSites(cfg);
+      if (sites.isEmpty) continue;
+
+      final keys = <String>[];
+      var typedCount = 0;
+      for (final s in sites) {
         final k = (s['key'] ?? '').toString().trim();
-        if (k.isNotEmpty) return k;
+        if (k.isEmpty) continue;
+        keys.add(k);
+        if (type != null && _siteType(s) == type) typedCount++;
       }
+      if (keys.isEmpty) continue;
+      lastSites = sites;
+      // 判定依据出现了（preferKey 命中 / 有 type 匹配的站点）⇒ 不用再等
+      if ((prefer.isNotEmpty && keys.contains(prefer)) || typedCount > 0) break;
     }
-    return '';
+
+    // 组装：① preferKey（确实在 sites 里才排第一，免得白打一次 404）
+    //      ② type 匹配 ③ 其余站点 ④ preferKey 兜底（保住"单脚本配置"的旧行为）
+    final srcKeys = <String>[];
+    final typedKeys = <String>[];
+    for (final s in lastSites) {
+      final k = (s['key'] ?? '').toString().trim();
+      if (k.isEmpty) continue;
+      srcKeys.add(k);
+      if (type != null && _siteType(s) == type) typedKeys.add(k);
+    }
+    if (prefer.isNotEmpty && srcKeys.contains(prefer)) push(prefer);
+    for (final k in typedKeys) push(k);
+    for (final k in srcKeys) push(k);
+    if (prefer.isNotEmpty) push(prefer);
+    // ⚠️ 必须**封顶**：聚合包一次能列出 280 个站点，若全当候选，
+    //    key 猜错时会连打 280 次请求。取前 6 个足够覆盖
+    //    （preferKey / type 匹配 / 前几个站点），剩下的靠"作废后重问"兜。
+    if (ordered.length > 6) {
+      ordered.removeRange(6, ordered.length);
+    }
+    return ordered;
+  }
+
+  /// 站点声明的 type（/config 的 sites[] 里可能是 int 也可能是字符串）
+  static int? _siteType(Map<String, dynamic> s) {
+    final t = s['type'];
+    if (t is int) return t;
+    if (t is String) return int.tryParse(t.trim());
+    return null;
+  }
+
+  /// 按候选 key 依次请求同一个 action；**404（路由不存在）判定为 key 不对 ⇒ 换
+  /// 下一个候选**，命中即把该 key 记回缓存（自愈）；全候选 404 才失败并作废缓存。
+  ///
+  /// 非 404 的失败（超时 / 500 / 连接错误）**不换 key** —— 那是真的故障，
+  /// 换 key 只会把问题掩盖成"多打几次请求"。
+  Future<Map<String, dynamic>?> _postSpiderWithKeyFallback({
+    required List<String> candidates,
+    required String primaryKey,
+    required int type,
+    required String api,
+    required String action,
+    required Map<String, dynamic> body,
+  }) async {
+    final cands = candidates.isEmpty ? <String>[primaryKey] : candidates;
+    // ⚠️ 单候选 = 没在"猜"（猫源 / 私有协议 / 主源刷新 / 缓存命中）⇒
+    //    行为与改动前**完全一致**：只试一次，不记 key、不作废缓存、不改错误文案。
+    //    多候选才启用"换 key + 自愈"。
+    final maySwitchKey = cands.length > 1;
+    for (final k in cands) {
+      if (!isSpiderReady) {
+        lastError ??= 'Node 引擎未就绪（spider 服务没起来）';
+        return null;
+      }
+      lastHttpStatus = null;
+      final url = _buildSpiderUrl(k, type, _nodeBase(api), action);
+      AppLog.instance.log('[SpiderService] $action: $url');
+      final r = await _postJSON(url, body);
+      if (r != null) {
+        if (maySwitchKey && k != _loadedScriptKey) {
+          _loadedScriptKey = k;
+          AppLog.instance
+              .log('[SpiderService] 换 key 命中并记住: $k（$action）');
+        }
+        return r;
+      }
+      if (maySwitchKey && lastHttpStatus == 404) {
+        AppLog.instance.log(
+            '[SpiderService] $action: key=$k 路由不存在(404)，换下一个候选 key');
+        continue;
+      }
+      return null;
+    }
+    // 全部候选都 404 ⇒ 缓存的 key 不可信，作废，下次重新问
+    _loadedScriptKey = '';
+    _loadedScriptCandidates = [];
+    lastError = '脚本源路由未就绪（已尝试 ${cands.length} 个候选 key）';
+    AppLog.instance.w('[SpiderService] $action: ${lastError}');
+    return null;
   }
 
   /// 同一脚本的载入过程**只跑一次**：并发调用（后台预热 + 用户首次点击）
@@ -377,14 +520,17 @@ class SpiderService {
   final Map<String, Future<String?>> _scriptLoadInFlight = {};
 
   /// 确保 [script] 已载入 Node 引擎，返回引擎里的**真实站点 key**（去重入口）。
+  ///
+  /// [type] 只用于"挑候选 key"（站点声明的 type 与本次请求的 type 一致者优先），
+  /// 不影响载入行为；不传（如后台预热）时退化为旧行为。
   Future<String?> _ensureNodeScript(String script,
-      {required String fallback}) {
+      {required String fallback, int? type}) {
     final playing = _scriptLoadInFlight[script];
     if (playing != null) {
       AppLog.instance.log('[SpiderService] 脚本正在载入，复用同一次流程: $script');
       return playing;
     }
-    final fut = _ensureNodeScriptInner(script, fallback: fallback);
+    final fut = _ensureNodeScriptInner(script, fallback: fallback, type: type);
     _scriptLoadInFlight[script] = fut;
     fut.whenComplete(() {
       if (identical(_scriptLoadInFlight[script], fut)) {
@@ -412,16 +558,21 @@ class SpiderService {
   /// 真实 key 以引擎 `/config` 返回的站点列表为准 —— 聚合配置里写的 key 是 TVBox
   /// 的 key，和 drpy2 模块自报的 key 未必一致；取不到时退回 [fallback]。
   Future<String?> _ensureNodeScriptInner(String script,
-      {required String fallback}) async {
+      {required String fallback, int? type}) async {
     if (_loadedScriptUrl == script) {
-      if (_loadedScriptKey.isNotEmpty) return _loadedScriptKey;
+      if (_loadedScriptKey.isNotEmpty) {
+        // 缓存命中：候选就按"上次命中的那个 key"起步（404 时会自动作废重问）
+        _loadedScriptCandidates = [_loadedScriptKey];
+        return _loadedScriptKey;
+      }
       // 🔴 2026-10-14 修（洞 D：key 缓存降级）：
       //   脚本上次载入过、但当时没能从 /config 问到引擎真实 key
       //   （模块 start() 还没注册完等）。以前这里**直接返回 fallback**，
       //   而 `_loadedScriptUrl` 已经置位 ⇒ 之后永远走这个分支、**再也不会重试**，
       //   那条线路就一直拿错的 key 去请求（404 / 空），永远恢复不了。
       //   现在补一次"重新问 key"，仍拿不到才退回 fallback。
-      final retried = await _queryEngineScriptKey();
+      final retried =
+          await _queryEngineScriptKey(type: type, preferKey: fallback);
       if (retried.isNotEmpty) {
         _loadedScriptKey = retried;
         AppLog.instance
@@ -449,9 +600,11 @@ class SpiderService {
         return null;
       }
       _loadedScriptUrl = script;
-      _loadedScriptKey = await _queryEngineScriptKey();
+      _loadedScriptKey =
+          await _queryEngineScriptKey(type: type, preferKey: fallback);
       AppLog.instance.log('[SpiderService] 脚本已载入 $script，'
-          '引擎 key=${_loadedScriptKey.isEmpty ? fallback : _loadedScriptKey}');
+          '引擎 key=${_loadedScriptKey.isEmpty ? fallback : _loadedScriptKey}'
+          '（候选 ${_loadedScriptCandidates.length} 个）');
       return _loadedScriptKey.isNotEmpty ? _loadedScriptKey : fallback;
     } catch (e) {
       AppLog.instance.w('[SpiderService] 脚本载入异常 $script: $e');
@@ -549,6 +702,11 @@ class SpiderService {
       AppLog.instance.w('[SpiderService] $lastError');
       return null;
     }
+    // 本次请求可用的 key 候选。
+    // ⚠️ 只有"按需载入脚本"的两条分支才填多候选（它们刚 query 过 /config）；
+    //    猫源（OmniBox 私有协议）等路径**保持单候选**，行为与改动前完全一致，
+    //    不会因为这次改动多打任何请求。
+    var candidates = <String>[];
     if (omniKey != null) {
       // OmniBox 私有协议：脚本已在引擎里驻留，直接用它下发的站点 key 调引擎。
       // ⚠️ **不能**再走 loadSource —— 传进去的是个路径、不是脚本地址，
@@ -556,26 +714,31 @@ class SpiderService {
       engineKey = omniKey;
     } else if (script.isNotEmpty && !isCspPlaceholder) {
       // 聚合配置里的脚本源：按需载入脚本，用引擎自报的真实 key
-      final k = await _ensureNodeScript(script, fallback: key);
+      final k = await _ensureNodeScript(script, fallback: key, type: type);
       if (k == null) {
         lastError ??= '脚本源加载失败: $script';
         return null;
       }
       engineKey = k;
+      candidates = List<String>.of(_loadedScriptCandidates);
     } else if (_needMainScriptRefresh) {
       // 主源（单 js spider 配置）：api 由 /config 下发、通常为空或 csp_ 占位。
       // 若期间被程序脚本源顶替过，这里把主源脚本重新载入。
-      final k = await _ensureNodeScript(mainScriptUrl, fallback: key);
+      final k =
+          await _ensureNodeScript(mainScriptUrl, fallback: key, type: type);
       if (k != null) engineKey = k;
+      candidates = List<String>.of(_loadedScriptCandidates);
     }
 
-    if (!isSpiderReady) {
-      lastError ??= 'Node 引擎未就绪（spider 服务没起来）';
-      return null;
-    }
-    final url = _buildSpiderUrl(engineKey, type, _nodeBase(api), action);
-    AppLog.instance.log('[SpiderService] $action: $url');
-    return _postJSON(url, nodeArgs);
+    // ✅ 候选 + 响应验证：404（路由不存在）⇒ 换下一个候选 key 重试（自愈）。
+    return _postSpiderWithKeyFallback(
+      candidates: candidates,
+      primaryKey: engineKey,
+      type: type,
+      api: api,
+      action: action,
+      body: nodeArgs,
+    );
   }
 
   // ============================================================
@@ -664,25 +827,34 @@ class SpiderService {
     // 配置 key 和引擎自报 key 不是一回事，这里用配置 key 会 init 404、
     // 而后五个接口却能通（init 失败会被调用方 catch 掉，问题很隐蔽）。
     var engineKey = key;
+    var candidates = <String>[];
     // OmniBox 私有协议 `/spider/<key>/<type>`：脚本已驻留，key 由 sites[] 下发，
     // 直接用它；**不要**再 loadSource 一个路径（那会失败并把整包 spider 顶掉）。
     final omniKey = _omniBoxProtocolKey(script);
     if (omniKey != null) {
       engineKey = omniKey;
     } else if (script.isNotEmpty) {
-      final k = await _ensureNodeScript(script, fallback: key);
+      final k = await _ensureNodeScript(script, fallback: key, type: type);
       if (k != null) engineKey = k;
+      candidates = List<String>.of(_loadedScriptCandidates);
     } else if (_needMainScriptRefresh) {
       // 与 [_dispatchScript] 同一套判断（见 `_needMainScriptRefresh` 说明）
-      final k = await _ensureNodeScript(mainScriptUrl, fallback: key);
+      final k =
+          await _ensureNodeScript(mainScriptUrl, fallback: key, type: type);
       if (k != null) engineKey = k;
+      candidates = List<String>.of(_loadedScriptCandidates);
     }
-    if (!isSpiderReady) return null;
 
-    final url = _buildSpiderUrl(engineKey, type, _nodeBase(api), 'init');
-    AppLog.instance.log('[SpiderService] initSpider: $url');
-
-    return _postJSON(url, <String, dynamic>{});
+    // 与内容接口同一套"候选 + 404 换 key"：init 也是 /spider/<key>/<type>/init，
+    // key 不对一样是 404（日志里的 `/4/init not found` 就是它）。
+    return _postSpiderWithKeyFallback(
+      candidates: candidates,
+      primaryKey: engineKey,
+      type: type,
+      api: api,
+      action: 'init',
+      body: <String, dynamic>{},
+    );
   }
 
   /// 获取首页内容 - 对应 Swift getHomeContent
@@ -840,6 +1012,7 @@ class SpiderService {
     // 引擎侧已载入的脚本状态也一并作废（Node 可能已被系统回收）
     _loadedScriptUrl = '';
     _loadedScriptKey = '';
+    _loadedScriptCandidates = [];
     try {
       _dio.close(force: true);
     } catch (e) { /* ignore */ }

@@ -1,6 +1,10 @@
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import '../services/settings_service.dart';
 import '../services/theme_switch.dart';
 import '../services/zlibrary_service.dart';
@@ -425,6 +429,421 @@ class _MePageState extends State<MePage> {
     );
   }
 
+  // ============================================================
+  // 头像（用户 2026-10-15：「选头像面板用什么素材，你去网上找相似的图标
+  // 下载本地内置进去」）
+  // ============================================================
+
+  /// 内置头像张数（assets/avatars/a01.png … a40.png）
+  ///
+  /// 素材：DiceBear `fun-emoji`（CC BY 4.0，原作者 Davis Uche / DiceBear）。
+  /// 生成命令（40 个不同 seed，192px PNG）：
+  ///   https://api.dicebear.com/9.x/fun-emoji/png?seed=<seed>&size=192&backgroundType=gradientLinear
+  static const int _kAvatarCount = 40;
+
+  /// 头像图（按 id）：'' = 默认图标；'aNN' = 内置素材；'custom' = 相册上传
+  Widget _avatarImageFor(String id, double size, {bool logged = true}) {
+    if (id == 'custom') {
+      final p = SettingsService().readerAvatarPath;
+      if (p.isNotEmpty) {
+        final f = File(p);
+        if (f.existsSync()) {
+          return Image.file(f, width: size, height: size, fit: BoxFit.cover);
+        }
+      }
+    } else if (id.startsWith('a')) {
+      return Image.asset(
+        'assets/avatars/$id.png',
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => _defaultAvatarIcon(size, logged),
+      );
+    }
+    return _defaultAvatarIcon(size, logged);
+  }
+
+  /// 当前用户选择的头像
+  Widget _avatarImage(double size, {bool logged = true}) =>
+      _avatarImageFor(SettingsService().readerAvatar, size, logged: logged);
+
+  Widget _defaultAvatarIcon(double size, bool logged) => logged
+      ? Image.asset(
+          'assets/icons/user.png',
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) =>
+              Icon(Icons.person_rounded, color: Colors.white, size: size * 0.44),
+        )
+      : Icon(Icons.person_rounded,
+          color: JellyTheme.textSecondary, size: size * 0.5);
+
+  /// 选择头像面板：拖拽条 → 「选择头像」+ 说明 → **4 列圆形网格**
+  /// （首格 = 上传自定义头像，与用户给的目标样式一致）。
+  Future<void> _showAvatarSheet() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fg = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    final sub = isDark
+        ? Colors.white.withValues(alpha: 0.55)
+        : JellyTheme.textSecondary;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        height: MediaQuery.of(ctx).size.height * 0.72,
+        decoration: BoxDecoration(
+          color: isDark ? JellyTheme.cardDark : JellyTheme.cardLight,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            children: [
+              const SizedBox(height: 10),
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('选择头像',
+                        style: TextStyle(
+                            fontSize: AppTheme.fontTitle3,
+                            fontWeight: FontWeight.w600,
+                            color: fg)),
+                    const SizedBox(height: 4),
+                    Text('共 $_kAvatarCount 款内置，可点首张上传自定义头像',
+                        style: TextStyle(
+                            fontSize: AppTheme.fontCaption, color: sub)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              Expanded(
+                child: ListenableBuilder(
+                  listenable: SettingsService(),
+                  builder: (_, _) {
+                    final cur = SettingsService().readerAvatar;
+                    return GridView.builder(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 4,
+                        mainAxisSpacing: 14,
+                        crossAxisSpacing: 14,
+                      ),
+                      itemCount: _kAvatarCount + 1,
+                      itemBuilder: (c, i) {
+                        if (i == 0) {
+                          return _avatarCell(
+                            ctx: ctx,
+                            isDark: isDark,
+                            isUpload: true,
+                            selected: false,
+                          );
+                        }
+                        final id = 'a${i.toString().padLeft(2, '0')}';
+                        return _avatarCell(
+                          ctx: ctx,
+                          isDark: isDark,
+                          id: id,
+                          selected: cur == id,
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _avatarCell({
+    required BuildContext ctx,
+    required bool isDark,
+    required bool selected,
+    String id = '',
+    bool isUpload = false,
+  }) {
+    return GestureDetector(
+      onTap: () async {
+        if (isUpload) {
+          await _pickCustomAvatar(ctx);
+        } else {
+          await SettingsService().setReaderAvatar(id);
+          if (ctx.mounted) Navigator.pop(ctx);
+        }
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.06)
+              : const Color(0xFFF2F3F5),
+          border: Border.all(
+            color: selected ? AppTheme.accentOnSurface : Colors.transparent,
+            width: 2.5,
+          ),
+        ),
+        padding: const EdgeInsets.all(2),
+        child: ClipOval(
+          child: isUpload
+              ? Icon(Icons.add_photo_alternate_outlined,
+                  size: 26, color: JellyTheme.textSecondary)
+              : _avatarImageFor(id, 64),
+        ),
+      ),
+    );
+  }
+
+  /// 上传自定义头像：相册选图 → 复制进 App 目录 → 记路径
+  Future<void> _pickCustomAvatar(BuildContext sheetCtx) async {
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        maxHeight: 512,
+      );
+      if (picked == null) return;
+      final dir = await getApplicationSupportDirectory();
+      final dst = File('${dir.path}/reader_avatar.png');
+      await dst.writeAsBytes(await picked.readAsBytes());
+      await SettingsService().setReaderAvatar('custom', path: dst.path);
+      if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+    } catch (_) {
+      // 用户取消 / 无相册权限：静默返回，不改动原头像
+      if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+    }
+  }
+
+  /// 「我的账号」面板（用户 2026-10-15 给的目标样式）：
+  ///   头像 / 用户名 / 邮箱 → 「今日下载 N/M 本」胶囊 → 「我的账号」（单选 + 删除）
+  ///   → 「添加账号」→ 说明文案 → 取消 / 退出登录。
+  ///
+  /// ⚠️ 只在**已登录**时弹出；未登录点账号卡仍直接进登录页。
+  Future<void> _showAccountSheet() async {
+    final z = ZlibraryService();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fg = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    final sub = isDark
+        ? Colors.white.withValues(alpha: 0.55)
+        : JellyTheme.textSecondary;
+    final sheetBg = isDark ? JellyTheme.cardDark : JellyTheme.cardLight;
+    final softBg = isDark
+        ? Colors.white.withValues(alpha: 0.06)
+        : const Color(0xFFF2F3F5);
+    final limit = z.serverDownloadsLimit ?? ZlibraryService.loggedDailyLimit;
+    final used = z.loggedCountToday;
+    final email = z.email;
+    final name = z.username.isNotEmpty
+        ? z.username
+        : (email.isNotEmpty ? email : '已登录');
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: sheetBg,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 头像
+              Container(
+                width: 84,
+                height: 84,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: JellyTheme.primary,
+                ),
+                child: ClipOval(child: _avatarImage(80)),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.w700, color: fg),
+              ),
+              if (email.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(email,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 13, color: sub)),
+              ],
+              const SizedBox(height: 16),
+              // 今日下载额度
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: softBg,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.file_download_outlined, size: 16, color: fg),
+                    const SizedBox(width: 6),
+                    Text('今日下载 $used / $limit 本',
+                        style: TextStyle(
+                            fontSize: AppTheme.fontSubhead,
+                            fontWeight: FontWeight.w600,
+                            color: fg)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('我的账号',
+                    style: TextStyle(fontSize: AppTheme.fontCaption, color: sub)),
+              ),
+              const SizedBox(height: 6),
+              // 当前账号（当前只支持单账号 ⇒ 常驻选中）
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {},
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      Icon(Icons.radio_button_checked_rounded,
+                          size: 20, color: fg),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(email.isEmpty ? name : email,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: AppTheme.fontBody, color: fg)),
+                      ),
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () async {
+                          Navigator.pop(ctx);
+                          await ZlibraryService().logout();
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Icon(Icons.delete_outline_rounded,
+                              size: 20, color: sub),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 2),
+              // 添加账号 → 登录页
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _push(const ZlibraryAuthPage());
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Row(
+                    children: [
+                      Icon(Icons.add_circle_outline_rounded,
+                          size: 20, color: fg),
+                      const SizedBox(width: 10),
+                      Text('添加账号',
+                          style: TextStyle(
+                              fontSize: AppTheme.fontBody, color: fg)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline_rounded, size: 14, color: sub),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '退出后将回退内置账号（${ZlibraryService.builtinDailyLimit} 本/天）',
+                        style: TextStyle(
+                            fontSize: AppTheme.fontCaption, color: sub),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => Navigator.pop(ctx),
+                      child: Container(
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        child: Text('取消',
+                            style: TextStyle(
+                                fontSize: AppTheme.fontBody, color: fg)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () async {
+                        Navigator.pop(ctx);
+                        await ZlibraryService().logout();
+                      },
+                      child: Container(
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(
+                          color: isDark ? Colors.white : const Color(0xFF16181D),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Text('退出登录',
+                            style: TextStyle(
+                                fontSize: AppTheme.fontBody,
+                                fontWeight: FontWeight.w600,
+                                color: isDark
+                                    ? const Color(0xFF16181D)
+                                    : Colors.white)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 顶部账号卡（参考目标设计）：
   ///   左侧：圆形头像（描边 + 右下角相机角标）
   ///   中间：用户名（加粗）+ 小号灰字「z-library」；下一行邮箱灰字
@@ -442,7 +861,8 @@ class _MePageState extends State<MePage> {
   ///    状态，**取不到的字段就隐藏或退回状态文案**，绝不编造。
   Widget _buildAccountCard(bool isDark) {
     return ListenableBuilder(
-      listenable: ZlibraryService(),
+      // 同时监听头像设置：在「选择头像」面板里换头像后，这张卡要立刻跟着变
+      listenable: Listenable.merge([ZlibraryService(), SettingsService()]),
       builder: (context, _) {
         final z = ZlibraryService();
         final logged = z.isLoggedIn;
@@ -499,12 +919,20 @@ class _MePageState extends State<MePage> {
               ),
               // ── 账号信息区：点击整块进入登录（快捷条在其外部，不误触）──
               InkWell(
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const ZlibraryAuthPage(),
-                  ),
-                ),
+                // 已登录 → 弹「我的账号」面板（用户 2026-10-15 给的目标样式）；
+                // 未登录 → 直接进登录页。
+                onTap: () {
+                  if (ZlibraryService().isLoggedIn) {
+                    _showAccountSheet();
+                  } else {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const ZlibraryAuthPage(),
+                      ),
+                    );
+                  }
+                },
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
                   child: Column(
@@ -529,41 +957,29 @@ class _MePageState extends State<MePage> {
                                   border:
                                       Border.all(color: avatarRing, width: 2),
                                 ),
-                                child: logged
-                                    ? Image.asset(
-                                        'assets/icons/user.png',
-                                        width: 52,
-                                        height: 52,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, _, _) => const Icon(
-                                          Icons.person_rounded,
-                                          color: Colors.white,
-                                          size: 28,
-                                        ),
-                                      )
-                                    : Icon(
-                                        Icons.person_rounded,
-                                        color: sub,
-                                        size: 32,
-                                      ),
+                                child: _avatarImage(60, logged: logged),
                               ),
-                              // 相机角标（编辑头像入口）
+                              // 相机角标（编辑头像入口）—— 点它开「选择头像」面板
                               Positioned(
                                 right: 0,
                                 bottom: 0,
-                                child: Container(
-                                  width: 22,
-                                  height: 22,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: JellyTheme.primary,
-                                    border: Border.all(
-                                        color: cardColor, width: 2),
-                                  ),
-                                  child: const Icon(
-                                    Icons.photo_camera_rounded,
-                                    size: 12,
-                                    color: Colors.white,
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: _showAvatarSheet,
+                                  child: Container(
+                                    width: 22,
+                                    height: 22,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: JellyTheme.primary,
+                                      border:
+                                          Border.all(color: cardColor, width: 2),
+                                    ),
+                                    child: const Icon(
+                                      Icons.photo_camera_rounded,
+                                      size: 12,
+                                      color: Colors.white,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -882,6 +1298,9 @@ class _MePageState extends State<MePage> {
                               ),
                             ),
                           ),
+                          // 标题行：左「主题风格」，右「省电」开关
+                          //（用户 2026-10-15 给的目标样式：面板顶部只有 省电 一个开关，
+                          //  下面两行分别是「跟随系统明暗」「系统动效」）
                           Row(
                             children: [
                               Text(
@@ -914,29 +1333,31 @@ class _MePageState extends State<MePage> {
                                             .setFrameRateReduced(v),
                                 ),
                               ),
-                              const SizedBox(width: 6),
-                              Text(
-                                '动画',
-                                style: TextStyle(
-                                  fontSize: AppTheme.fontSubhead,
-                                  color: isDark
-                                      ? Colors.white70
-                                      : Colors.black54,
-                                ),
-                              ),
-                              Transform.scale(
-                                scale: 0.75,
-                                child: Switch(
-                                  value: SettingsService().backgroundAnimation,
-                                  onChanged: switching
-                                      ? null
-                                      : (v) => SettingsService()
-                                            .setBackgroundAnimation(v),
-                                ),
-                              ),
                             ],
                           ),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 4),
+                          _themeSwitchRow(
+                            isDark: isDark,
+                            icon: Icons.brightness_6_rounded,
+                            title: '跟随系统明暗',
+                            value: SettingsService().themeFollowSystem,
+                            onChanged: switching
+                                ? null
+                                : (v) => SettingsService()
+                                    .setThemeFollowSystem(v),
+                          ),
+                          _themeSwitchRow(
+                            isDark: isDark,
+                            icon: Icons.auto_awesome_rounded,
+                            title: '系统动效',
+                            subtitle: '页面转场等全局动效',
+                            value: SettingsService().backgroundAnimation,
+                            onChanged: switching
+                                ? null
+                                : (v) => SettingsService()
+                                    .setBackgroundAnimation(v),
+                          ),
+                          const SizedBox(height: 8),
                           ConstrainedBox(
                             constraints: BoxConstraints(
                               maxHeight:
@@ -947,13 +1368,13 @@ class _MePageState extends State<MePage> {
                                 mainAxisSize: MainAxisSize.min,
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  // 预设：圆点网格（每主题一颗大圆点 + 名称）
-                                  Wrap(
-                                    spacing: 10,
-                                    runSpacing: 14,
+                                  // 预设：**全宽圆角行**（色点 + 名称 + 右侧单选圆）
+                                  //（用户 2026-10-15 给的目标样式；
+                                  //  原来是「一颗大圆点 + 名称」的 Wrap 网格）
+                                  Column(
                                     children: [
                                       for (final p in themePresets)
-                                        _buildPresetDot(
+                                        _buildPresetRow(
                                           p,
                                           p.id == current,
                                           isDark,
@@ -1011,13 +1432,11 @@ class _MePageState extends State<MePage> {
                                         ),
                                       ),
                                     ),
-                                    Wrap(
-                                      spacing: 10,
-                                      runSpacing: 14,
+                                    Column(
                                       children: [
                                         for (final t
                                             in SettingsService().customThemes)
-                                          _buildPresetDot(
+                                          _buildPresetRow(
                                             t,
                                             t.id == current,
                                             isDark,
@@ -1113,19 +1532,14 @@ class _MePageState extends State<MePage> {
     );
   }
 
-  /// 一个主题「圆点」（照用户截图的样式 + 复用统一主题页的画法）。
+  /// 一行主题（用户 2026-10-15 给的目标样式）：
+  ///   **左 = 三个色点（主色 / 强调色 / 浅底），中 = 名称，右 = 单选圆**。
   ///
-  /// ── 为什么改成"一个大圆点" ────────────────────────────────────
-  /// 原来是**每个主题三个小圆点**（主色/强调色/浅色底）排一行、占满整宽。
-  /// 用户对比后指出："这个圆点样式没有（统一主题页）这一排好看"。
+  /// 原来这里是"一颗 SweepGradient 四色环大圆点 + 名称"的 64 宽网格卡；
+  /// 用户给了新的参考样式 ⇒ 换成全宽圆角行，7 套配色一眼扫下来更好选。
   ///
-  /// 统一主题页 `_presetDot` 的做法是 **一个 SweepGradient 四色环大圆点**：
-  /// 颜色沿圆周扫过，像一颗小球 —— 比三个并排的小点更有"一颗主题"的整体感，
-  /// 也更容易一眼分辨 7 套配色。这里照抄那个画法并把尺寸放大到 52。
-  ///
-  /// 自定义主题的「编辑 / 删除」放**长按菜单**（点按 = 应用主题）——
-  /// 圆点式布局里没有合适的位置常驻两个图标，长按是 iOS 的常规交互。
-  Widget _buildPresetDot(
+  /// 自定义主题的「编辑 / 删除」仍放在**长按菜单**（点按 = 应用主题）。
+  Widget _buildPresetRow(
     ThemePresetInfo preset,
     bool selected,
     bool isDark,
@@ -1195,58 +1609,115 @@ class _MePageState extends State<MePage> {
       if (v != null) return;
     }
 
+    // 三个色点：主色 / 强调色 / 浅底（一眼分辨 7 套配色）
+    final dots = <Color>[
+      preset.palette.primary,
+      preset.palette.accent,
+      preset.palette.backgroundLight,
+    ];
+    final rowBg = selected
+        ? (isDark
+            ? Colors.white.withValues(alpha: 0.10)
+            : const Color(0xFFEDEEF0))
+        : (isDark
+            ? Colors.white.withValues(alpha: 0.04)
+            : const Color(0xFFF7F8FA));
+
     return GestureDetector(
       onTap: onTap,
       onLongPress: canEdit ? showActions : null,
       behavior: HitTestBehavior.opaque,
-      child: SizedBox(
-        width: 64,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: rowBg,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
           children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                // 四色扫描渐变 —— 与统一主题页 _presetDot 同一画法
-                gradient: SweepGradient(colors: [
-                  preset.palette.backgroundLight,
-                  preset.palette.primary,
-                  preset.palette.backgroundDark,
-                  preset.palette.accent,
-                  preset.palette.backgroundLight,
-                ]),
-                shape: BoxShape.circle,
-                // 选中：加粗描边 + 打勾；未选中：细描边
-                border: Border.all(
-                  color: selected ? labelColor : hintColor.withValues(alpha: 0.4),
-                  width: selected ? 2.5 : 1,
+            for (final c in dots)
+              Container(
+                width: 18,
+                height: 18,
+                margin: const EdgeInsets.only(right: 6),
+                decoration: BoxDecoration(
+                  color: c,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.18)
+                        : Colors.black.withValues(alpha: 0.08),
+                  ),
                 ),
               ),
-              child: selected
-                  ? Icon(Icons.check,
-                      size: 20,
-                      color: preset.palette.backgroundLight.computeLuminance() >
-                              0.5
-                          ? Colors.black87
-                          : Colors.white)
-                  : null,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              preset.name,
-              maxLines: 2,
-              textAlign: TextAlign.center,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: AppTheme.fontCaption,
-                height: 1.15,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-                color: selected ? labelColor : hintColor,
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                preset.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: AppTheme.fontBody,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  color: labelColor,
+                ),
               ),
+            ),
+            Icon(
+              selected
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              size: 20,
+              color: selected ? labelColor : hintColor.withValues(alpha: 0.6),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 主题面板里的一行「图标 + 标题(+副标题) + 开关」
+  ///（用户 2026-10-15 给的目标样式：跟随系统明暗 / 系统动效）。
+  Widget _themeSwitchRow({
+    required bool isDark,
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    required bool value,
+    ValueChanged<bool>? onChanged,
+  }) {
+    final fg = isDark ? Colors.white : JellyTheme.textPrimaryLight;
+    final sub = isDark
+        ? Colors.white.withValues(alpha: 0.55)
+        : JellyTheme.textSecondary;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: sub),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: TextStyle(
+                        fontSize: AppTheme.fontBody, color: fg)),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: TextStyle(
+                          fontSize: AppTheme.fontCaption, color: sub)),
+                ],
+              ],
+            ),
+          ),
+          Transform.scale(
+            scale: 0.75,
+            child: Switch(value: value, onChanged: onChanged),
+          ),
+        ],
       ),
     );
   }

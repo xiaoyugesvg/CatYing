@@ -377,11 +377,14 @@ class _DataCleanupPageState extends State<DataCleanupPage> {
       // 现在"什么算缓存、怎么清"只在 `CacheManagerService` 一处定义，
       // 这里只是按用户勾选的项去挑对应的那几条。
       case CleanTarget.imageCache:
-        await _clearCacheById(['app_image_memory', 'app_image_disk']);
+        // ⚠️ 这里的 id 必须与 CacheManagerService.list() 的真实 id 一致
+        //    （原先是 'app_image_memory' / 'app_image_disk' —— 不存在 ⇒ 空操作）
+        await _clearCacheById(['image_memory', 'image_disk']);
         break;
 
       case CleanTarget.tempFiles:
-        await _clearCacheById(['app_temp']);
+        // 同上：真实 id 是 temp_files（'app_temp' 不存在 ⇒ 空操作）
+        await _clearCacheById(['temp_files']);
         break;
 
       case CleanTarget.syncCache:

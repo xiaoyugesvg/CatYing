@@ -72,6 +72,16 @@ class NodeJSManager {
   }();
   int get nativeServerPort => _nativeServerPort;
 
+  /// Node → Dart 的「**WebView 抓页**」钩子（由「海阔」模块注册）。
+  ///
+  /// 入参：`(url, 完整请求体)`；出参：`{'ok': true, 'html': '...'}` 或
+  /// `{'ok': false, 'error': '...'}`。
+  /// 未注册（模块没装/没启用）时 `/hiker/webview` 回 501，**不报错、不影响别处**。
+  static Future<Map<String, dynamic>> Function(
+    String url,
+    Map<String, dynamic> req,
+  )? webViewFetcher;
+
   // HTTP server 层 → 平台实现的桥接
   final ValueNotifier<bool> _nodeReadyBridge = ValueNotifier(false);
   final ValueNotifier<int> _managementPortBridge = ValueNotifier(0);
@@ -560,6 +570,67 @@ class NodeJSManager {
           ..write('OK')
           ..close();
       }
+    } else if (path == '/hiker/webview' && request.method == 'POST') {
+      // 「海阔」模块的 **WebView 抓页桥**（Phase 2）：
+      // Node 侧规则要开一个**真 WebView** 打开页面、等 JS 跑完再回传 DOM
+      // （对应 assets/nodejs-project/src/hiker_engine.js 的
+      //   fetchCodeByWebView → NeedWebView → 回环调用）。
+      //
+      // 为什么要做成**可空回调**而不是直接 import 海阔模块：这个回环服务器是
+      // **基础设施**，海阔是可插拔模块 —— 两者只通过这一个钩子耦合；
+      // 模块没启用时这里直接回 501，不新增任何硬依赖。
+      final fetcher = webViewFetcher;
+      // 体积上限：与 /onMessage 同样防"超大 body 把内存顶爆"
+      // （正常请求体只有 url/checkJs/headers，几 KB 而已）
+      if (request.contentLength > 1024 * 1024) {
+        request.response
+          ..statusCode = HttpStatus.badRequest
+          ..close();
+        return;
+      }
+      final builder = BytesBuilder();
+      request.listen(
+        (data) => builder.add(data),
+        onDone: () async {
+          Future<void> reply(Map<String, dynamic> body,
+              {int code = HttpStatus.ok}) async {
+            request.response
+              ..statusCode = code
+              ..headers.contentType =
+                  ContentType('application', 'json', charset: 'utf-8')
+              ..write(jsonEncode(body))
+              ..close();
+          }
+
+          if (fetcher == null) {
+            await reply({'ok': false, 'error': '海阔模块未就绪（WebView 桥未注册）'},
+                code: HttpStatus.notImplemented);
+            return;
+          }
+          try {
+            final raw = utf8.decode(builder.toBytes());
+            final req = raw.trim().isEmpty
+                ? <String, dynamic>{}
+                : Map<String, dynamic>.from(jsonDecode(raw) as Map);
+            final url = (req['url'] ?? '').toString();
+            if (url.isEmpty) {
+              await reply({'ok': false, 'error': '缺少 url'},
+                  code: HttpStatus.badRequest);
+              return;
+            }
+            final r = await fetcher(url, req);
+            await reply(r);
+          } catch (e) {
+            await reply({'ok': false, 'error': e.toString()},
+                code: HttpStatus.internalServerError);
+          }
+        },
+        onError: (e) {
+          request.response
+            ..statusCode = HttpStatus.badRequest
+            ..close();
+        },
+      );
     } else {
       AppLog.instance.ports('http_request_unknown', fields: {
         'method': request.method,

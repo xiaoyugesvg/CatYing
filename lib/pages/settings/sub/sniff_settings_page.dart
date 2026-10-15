@@ -304,16 +304,15 @@ class _SniffSettingsPageState extends State<SniffSettingsPage> {
                               style: TextStyle(
                                   fontSize: AppTheme.fontFootnote,
                                   color: draft.contains(ext)
-                                      ? AppTheme.accentColor
+                                      ? AppTheme.accentOnSurface
                                       : AppTheme.textSecondary)),
                           selected: draft.contains(ext),
                           showCheckmark: false,
-                          selectedColor:
-                              AppTheme.accentColor.withValues(alpha: 0.18),
+                          selectedColor: AppTheme.accentSurface,
                           backgroundColor: AppTheme.backgroundPrimary,
                           side: BorderSide(
                             color: draft.contains(ext)
-                                ? AppTheme.accentColor
+                                ? AppTheme.accentOnSurface
                                 : AppTheme.textTertiary.withValues(alpha: 0.35),
                           ),
                           onSelected: (v) => setLocal(() {
@@ -338,7 +337,8 @@ class _SniffSettingsPageState extends State<SniffSettingsPage> {
             ),
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(true),
-              child: Text('确定', style: TextStyle(color: AppTheme.accentColor)),
+              child: Text('确定',
+                  style: TextStyle(color: AppTheme.accentOnSurface)),
             ),
           ],
         ),
@@ -373,12 +373,14 @@ class _SniffSettingsPageState extends State<SniffSettingsPage> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color: AppTheme.accentColor.withValues(alpha: 0.12),
+                      // 暗色下不能再用"墨色淡底 + 墨色字"（用户 2026-10-15：
+                      // 晚上完全看不清）⇒ 统一走 accentSurface / accentOnSurface
+                      color: AppTheme.accentSurface,
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(h,
                         style: TextStyle(
-                            color: AppTheme.accentColor,
+                            color: AppTheme.accentOnSurface,
                             fontSize: AppTheme.fontFootnote)),
                   ),
               ],
@@ -388,7 +390,8 @@ class _SniffSettingsPageState extends State<SniffSettingsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('知道了', style: TextStyle(color: AppTheme.accentColor)),
+            child: Text('知道了',
+                style: TextStyle(color: AppTheme.accentOnSurface)),
           ),
         ],
       ),
@@ -406,7 +409,7 @@ class _SniffSettingsPageState extends State<SniffSettingsPage> {
       message: '黑名单恢复为出厂广告规则；白名单、自定义解析域名、'
           '媒体格式筛选全部清空（格式清空 = 不限）。',
       confirmText: '恢复',
-      confirmColor: AppTheme.accentColor,
+      confirmColor: AppTheme.accentOnSurface,
     );
     if (!ok) return;
     await prefs.resetSniffRules();

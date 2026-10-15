@@ -13,6 +13,7 @@ import 'miniapp/services/mini_app_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'common/constants.dart';
 import 'models/cache_store.dart';
+import 'pages/settings/controller.dart' show SettingsController;
 import 'models/subscription.dart';
 import 'services/api_config.dart';
 import 'services/nav_feature_service.dart';
@@ -61,6 +62,7 @@ import 'pages/search/controller.dart';
 import 'music/services/library_store.dart';
 import 'widgets/app_toast.dart';
 import 'widgets/video_player_pip.dart';
+import 'webhome/webhtv_playback_sync_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -410,6 +412,17 @@ void main() async {
   // **故意不 await** —— 同步要走网络（可能好几秒），绝不能卡住启动画面。
   // 内部自带节流（6 小时）与内容指纹比对，重复启动不会反复拉。
   unawaited(subSvc.autoSyncOnLaunch());
+
+  // 「Webhtv 观影记录同步」：启动拉取（勾了 syncOnStartup 的源）+ 周期拉取
+  // （intervalMinutes）。内部自带节流与并发保护，**不 await**（走网络，别卡启动）。
+  unawaited(WebhtvPlaybackSyncService.instance.beginAutoSync());
+
+  // 「设置 → 缓存清理 → 自动清理缓存」：按用户设的周期（天/周/月）清图片与临时文件。
+  //
+  // ⚠️ 这个方法以前**从来没有被调用过**（全项目只有定义），而且内部按两个
+  //    **不存在**的 entry id 去匹配 ⇒ 那个设置项一直是"设了没用"。
+  //    这里补上启动调用（内部自带节流：未到周期直接 return），**不 await**。
+  unawaited(SettingsController.runAutoCacheCleanIfNeeded());
 
   // 🔴 注入 AppToast 的 navigatorKey —— 这一步以前**从来没有被调用过**！
   //

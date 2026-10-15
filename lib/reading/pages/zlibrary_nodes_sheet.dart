@@ -171,63 +171,112 @@ class _ZlibraryNodesSheetState extends State<ZlibraryNodesSheet> {
                       fontSize: AppTheme.fontCaption, color: JellyTheme.warning)),
             ),
           // 节点列表 ✓（点「一键测试」后出现 ✓；未测试时提示一下 ✓）
+          // ✅ 用户 2026-10-15：「节点测试改成一行 2 个那种卡片」
+          //   ⇒ 原来的 ListTile 单列列表换成**两列卡片网格**（可用性 + 延迟 + 切换/删除）。
           if (_tested && _rows.isNotEmpty)
             Flexible(
-              child: ListView.separated(
+              child: GridView.builder(
                 shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                gridDelegate:
+                    const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 1.5,
+                ),
                 itemCount: _rows.length,
-                separatorBuilder: (_, __) => Divider(
-                    height: 1, color: isDark ? Colors.white12 : Colors.black12),
                 itemBuilder: (_, i) {
                   final r = _rows[i];
                   final isCurrent = r.domain == _svc.domain;
                   final ms = r.latency == null
                       ? '—'
                       : '${(r.latency! * 1000).round()} ms';
-                  return ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(
-                      r.ok
-                          ? Icons.check_circle_rounded
-                          : Icons.cancel_rounded,
-                      size: 18,
-                      color: r.ok ? JellyTheme.success : sub,
+                  return Container(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.06)
+                          : const Color(0xFFF4F5F7),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: isCurrent
+                            ? AppTheme.accentOnSurface.withValues(alpha: 0.6)
+                            : (isDark ? Colors.white12 : Colors.black12),
+                        width: isCurrent ? 1.2 : 0.6,
+                      ),
                     ),
-                    title: Text(r.domain,
-                        style: TextStyle(
-                            fontSize: AppTheme.fontBody,
-                            fontWeight:
-                                isCurrent ? FontWeight.w700 : FontWeight.w400,
-                            color: label)),
-                    subtitle: Text(
-                      r.ok ? '可用 · 延迟 $ms' : '不可达',
-                      style: TextStyle(
-                          fontSize: AppTheme.fontCaption, color: sub),
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (isCurrent)
-                          Text('当前',
-                              style: TextStyle(
-                                  fontSize: AppTheme.fontCaption,
-                                  color: JellyTheme.primary))
-                        else
-                          TextButton(
-                            onPressed: () => _switchTo(r.domain),
-                            child: const Text('切换'),
-                          ),
-                        // ✅ 删除（用户 2026-10-11：「节点我要能删除」）——
-                        //    内置节点也能删；删当前节点会自动切到下一个候选，
-                        //    全删光后下次启动回播内置兜底节点，不会变砖。
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline_rounded,
-                              size: 18),
-                          color: sub,
-                          tooltip: '删除节点',
-                          visualDensity: VisualDensity.compact,
-                          onPressed: () => _removeNode(r.domain),
+                        Row(
+                          children: [
+                            Icon(
+                              r.ok
+                                  ? Icons.check_circle_rounded
+                                  : Icons.cancel_rounded,
+                              size: 14,
+                              color: r.ok ? JellyTheme.success : sub,
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                r.domain,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: AppTheme.fontBody,
+                                    fontWeight: isCurrent
+                                        ? FontWeight.w700
+                                        : FontWeight.w400,
+                                    color: label),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          r.ok ? '可用 · $ms' : '不可达',
+                          style: TextStyle(
+                              fontSize: AppTheme.fontCaption, color: sub),
+                        ),
+                        const Spacer(),
+                        Row(
+                          children: [
+                            if (isCurrent)
+                              Text('当前',
+                                  style: TextStyle(
+                                      fontSize: AppTheme.fontCaption,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.accentOnSurface))
+                            else
+                              GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => _switchTo(r.domain),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 2, horizontal: 2),
+                                  child: Text('切换',
+                                      style: TextStyle(
+                                          fontSize: AppTheme.fontCaption,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppTheme.accentOnSurface)),
+                                ),
+                              ),
+                            const Spacer(),
+                            // ✅ 删除（用户 2026-10-11：「节点我要能删除」）——
+                            //    内置节点也能删；删当前节点会自动切到下一个候选，
+                            //    全删光后下次启动回播内置兜底节点，不会变砖。
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () => _removeNode(r.domain),
+                              child: Padding(
+                                padding: const EdgeInsets.all(3),
+                                child: Icon(Icons.delete_outline_rounded,
+                                    size: 16, color: sub),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),

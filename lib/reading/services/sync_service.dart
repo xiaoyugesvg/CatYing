@@ -167,8 +167,9 @@ class SyncService {
     if (!config.webdavReady) {
       return (ok: false, error: '请先在设置里填写 WebDAV 服务器与账号');
     }
+    final dio = _dio();
     try {
-      final resp = await _dio().put(
+      final resp = await dio.put(
         _webdavFullUrl,
         data: json,
         options: Options(headers: {'Content-Type': 'application/json'}),
@@ -179,6 +180,10 @@ class SyncService {
       return (ok: false, error: 'HTTP ${resp.statusCode}');
     } catch (e) {
       return (ok: false, error: _short(e));
+    } finally {
+      // `_dio()` 每次新建实例（其中含独立的 HttpClient 连接池），
+      // 用完必须关闭，否则反复「备份/恢复」会持续泄漏连接池。
+      dio.close(force: true);
     }
   }
 
@@ -187,8 +192,9 @@ class SyncService {
     if (!config.webdavReady) {
       return (ok: false, error: '请先在设置里填写 WebDAV 服务器与账号', json: null);
     }
+    final dio = _dio();
     try {
-      final resp = await _dio().get(_webdavFullUrl);
+      final resp = await dio.get(_webdavFullUrl);
       if (resp.statusCode == 200) {
         return (ok: true, error: null, json: resp.data?.toString());
       }
@@ -199,6 +205,8 @@ class SyncService {
       );
     } catch (e) {
       return (ok: false, error: _short(e), json: null);
+    } finally {
+      dio.close(force: true);
     }
   }
 
@@ -271,6 +279,15 @@ class SyncService {
 
   /// SMTP 会话：读欢迎 → EHLO → STARTTLS(如需要) → AUTH LOGIN →
   /// MAIL/RCPT/DATA → 发送 MIME multipart → QUIT。
+  ///
+  /// ⚠️ 2026-10-15 重写：原实现对**同一个 socket** `listen` 两次
+  ///   （本方法里一次、`_smtpAuthAndSend` 里又一次），并且对**单订阅**的
+  ///   `ctrl.stream` 在每一次 `expectCode` 里 `await for` 一次 —— 单订阅流
+  ///   第二次监听必抛 `Bad state: Stream has already been listened to`，
+  ///   于是 Kindle 推送**必然失败**（异常被 `pushToKindle` 的 catch 吞成
+  ///   `(ok:false)`，界面上只显示"推送失败"，看不出原因）。
+  ///   现在改为一个**单订阅的读行器** [_SmtpReader]：全程只监听一次，
+  ///   可被反复 `readReply` 消费（并且能正确识别 `250-xxx` 多行响应）。
   Future<({bool ok, String? error})> _smtpSend(
     Socket socket, {
     required String from,
@@ -279,128 +296,105 @@ class SyncService {
     required String fileName,
     required List<int> fileBytes,
   }) async {
-    final ctrl = StreamController<String>();
-    socket.listen(
-      (data) => ctrl.add(utf8.decode(data, allowMalformed: true)),
-      onError: (_) {},
-    );
+    var active = socket;
+    var reader = _SmtpReader(socket);
+    void send(String line) => active.write('$line\r\n');
 
-    String? lastLine;
-    Future<bool> expectCode(List<int> codes, String what) async {
-      final buffer = StringBuffer();
-      await for (final chunk in ctrl.stream) {
-        buffer.write(chunk);
-        final text = buffer.toString();
-        if (text.contains('\n')) {
-          lastLine = text.trim();
-          final code = int.tryParse(text.trim().substring(0, 3)) ?? -1;
-          if (codes.contains(code)) return true;
-          if (code >= 500 || text.trim().length > 4) return false;
+    Future<bool> expect(List<int> codes) async {
+      final line = await reader.readReply();
+      return codes.contains(reader.codeOf(line));
+    }
+
+    try {
+      // 1) 欢迎
+      if (!await expect([220])) {
+        return (ok: false, error: 'SMTP 欢迎失败: ${reader.lastLine}');
+      }
+      // 2) EHLO
+      send('EHLO newtv');
+      if (!await expect([250])) {
+        return (ok: false, error: 'EHLO 失败: ${reader.lastLine}');
+      }
+      // 3) STARTTLS（587 模式；升级后要重新 EHLO）
+      if (config.useStartTls) {
+        send('STARTTLS');
+        if (!await expect([220])) {
+          return (ok: false, error: 'STARTTLS 失败: ${reader.lastLine}');
+        }
+        await active.flush();
+        // 升级前必须先退订旧 socket：否则老订阅还挂在同一个 fd 上
+        await reader.dispose();
+        active = await SecureSocket.secure(socket,
+            host: config.smtpHost.trim(), onBadCertificate: (_) => false);
+        reader = _SmtpReader(active);
+        active.write('EHLO newtv\r\n');
+        await active.flush();
+        if (!await expect([250])) {
+          return (ok: false, error: 'TLS 后 EHLO 失败: ${reader.lastLine}');
         }
       }
-      return false;
-    }
-
-    void send(String line) => socket.write('$line\r\n');
-
-    // 1) 欢迎
-    if (!await expectCode([220], '欢迎')) {
-      return (ok: false, error: 'SMTP 欢迎失败: $lastLine');
-    }
-    // 2) EHLO
-    send('EHLO doubao');
-    if (!await expectCode([250], 'EHLO')) {
-      return (ok: false, error: 'EHLO 失败: $lastLine');
-    }
-    // 3) STARTTLS（587 模式；需在 TLS 前把 EHLO 再发一遍）
-    if (config.useStartTls) {
-      send('STARTTLS');
-      if (!await expectCode([220], 'STARTTLS')) {
-        return (ok: false, error: 'STARTTLS 失败: $lastLine');
-      }
-      await socket.flush();
-      final upgraded = await SecureSocket.secure(socket,
-          host: config.smtpHost.trim(), onBadCertificate: (_) => false);
-      // 升级后重新监听 + 重发 EHLO
-      final ctrl2 = StreamController<String>();
-      upgraded.listen(
-        (data) => ctrl2.add(utf8.decode(data, allowMalformed: true)),
-        onError: (_) {},
+      return await _smtpAuthAndSend(
+        reader,
+        active,
+        from: from,
+        to: to,
+        subject: subject,
+        fileName: fileName,
+        fileBytes: fileBytes,
       );
-      upgraded.write('EHLO doubao\r\n');
-      await upgraded.flush();
-      final buf = StringBuffer();
-      var ehloOk = false;
-      await for (final chunk in ctrl2.stream) {
-        buf.write(chunk);
-        if (buf.toString().contains('\n')) {
-          final code = int.tryParse(buf.toString().trim().substring(0, 3)) ?? -1;
-          if (code == 250) {
-            ehloOk = true;
-            break;
-          }
-          if (code >= 500) break;
-        }
-      }
-      if (!ehloOk) return (ok: false, error: 'TLS 后 EHLO 失败');
-      return _smtpAuthAndSend(upgraded, from, to, subject, fileName, fileBytes);
+    } catch (e) {
+      return (ok: false, error: e.toString());
+    } finally {
+      await reader.dispose();
+      try {
+        active.destroy();
+      } catch (_) {}
     }
-    return _smtpAuthAndSend(socket, from, to, subject, fileName, fileBytes);
   }
 
   Future<({bool ok, String? error})> _smtpAuthAndSend(
-    Socket socket,
-    String from,
-    String to,
-    String subject,
-    String fileName,
-    List<int> fileBytes,
-  ) async {
-    final ctrl = StreamController<String>();
-    socket.listen(
-      (data) => ctrl.add(utf8.decode(data, allowMalformed: true)),
-      onError: (_) {},
-    );
-
-    String? lastLine;
-    Future<bool> expectCode(List<int> codes) async {
-      final buffer = StringBuffer();
-      await for (final chunk in ctrl.stream) {
-        buffer.write(chunk);
-        final text = buffer.toString();
-        if (text.contains('\n')) {
-          lastLine = text.trim();
-          final code = int.tryParse(text.trim().substring(0, 3)) ?? -1;
-          if (codes.contains(code)) return true;
-          if (code >= 500) return false;
-        }
-      }
-      return false;
-    }
-
+    _SmtpReader reader,
+    Socket socket, {
+    required String from,
+    required String to,
+    required String subject,
+    required String fileName,
+    required List<int> fileBytes,
+  }) async {
     void send(String line) => socket.write('$line\r\n');
+
+    Future<bool> expect(List<int> codes) async {
+      final line = await reader.readReply();
+      return codes.contains(reader.codeOf(line));
+    }
 
     // AUTH LOGIN
     send('AUTH LOGIN');
-    if (!await expectCode([334])) return (ok: false, error: 'AUTH 失败: $lastLine');
+    if (!await expect([334])) {
+      return (ok: false, error: 'AUTH 失败: ${reader.lastLine}');
+    }
     send(base64Encode(utf8.encode(config.smtpUser)));
-    if (!await expectCode([334])) return (ok: false, error: '账号被拒: $lastLine');
+    if (!await expect([334])) {
+      return (ok: false, error: '账号被拒: ${reader.lastLine}');
+    }
     send(base64Encode(utf8.encode(config.smtpPass)));
-    if (!await expectCode([235])) {
-      return (ok: false, error: '密码被拒: $lastLine');
+    if (!await expect([235])) {
+      return (ok: false, error: '密码被拒: ${reader.lastLine}');
     }
     // MAIL / RCPT
-    send('MAIL FROM:<${config.smtpUser}>');
-    if (!await expectCode([250])) return (ok: false, error: 'MAIL FROM 失败: $lastLine');
-    send('RCPT TO:<${config.kindleEmail}>');
-    if (!await expectCode([250, 251])) {
-      return (ok: false, error: 'RCPT TO 失败: $lastLine');
+    send('MAIL FROM:<$from>');
+    if (!await expect([250])) {
+      return (ok: false, error: 'MAIL FROM 失败: ${reader.lastLine}');
+    }
+    send('RCPT TO:<$to>');
+    if (!await expect([250, 251])) {
+      return (ok: false, error: 'RCPT TO 失败: ${reader.lastLine}');
     }
     // DATA（MIME multipart，附件 base64）
-    final boundary = '----dbtv${DateTime.now().millisecondsSinceEpoch}';
+    final boundary = '----newtv${DateTime.now().millisecondsSinceEpoch}';
     final header = StringBuffer()
-      ..writeln('From: ${config.smtpUser}')
-      ..writeln('To: ${config.kindleEmail}')
+      ..writeln('From: $from')
+      ..writeln('To: $to')
       ..writeln('Subject: =?UTF-8?B?${base64Encode(utf8.encode(subject))}?=')
       ..writeln('MIME-Version: 1.0')
       ..writeln('Content-Type: multipart/mixed; boundary="$boundary"')
@@ -410,7 +404,7 @@ class SyncService {
       ..writeln('Content-Type: text/plain; charset=UTF-8')
       ..writeln('Content-Transfer-Encoding: 8bit')
       ..writeln('')
-      ..writeln('从 Doubao 阅读推送的图书：$subject')
+      ..writeln('从阅读模块推送的图书：$subject')
       ..writeln('')
       ..writeln('--$boundary')
       ..writeln('Content-Type: application/octet-stream; name="$fileName"')
@@ -419,21 +413,114 @@ class SyncService {
       ..writeln('')
       ..write(base64Encode(fileBytes))
       ..writeln('')
-      ..writeln('--$boundary--')
-      ..writeln('.');
+      ..writeln('--$boundary--');
 
     send('DATA');
-    if (!await expectCode([354])) return (ok: false, error: 'DATA 失败: $lastLine');
+    if (!await expect([354])) {
+      return (ok: false, error: 'DATA 失败: ${reader.lastLine}');
+    }
     socket.write(header.toString());
     socket.write(body.toString());
+    // 结束符必须**独占一行**（base64 字母表不含 '.'，无需 dot-stuffing）
+    socket.write('.\r\n');
     await socket.flush();
-    if (!await expectCode([250])) {
-      return (ok: false, error: '发送失败: $lastLine');
+    if (!await expect([250])) {
+      return (ok: false, error: '发送失败: ${reader.lastLine}');
     }
     send('QUIT');
-    try {
-      socket.destroy();
-    } catch (_) {}
     return (ok: true, error: null);
+  }
+}
+
+/// SMTP 响应的**单订阅读行器**。
+///
+/// 只对 socket `listen` 一次，把字节流按 `\n` 切成完整行放进队列；
+/// 调用方可以反复 [readReply] 逐条消费，并支持 `250-xxx` 多行响应。
+///
+/// ⚠️ 存在的意义：`Socket` / `SecureSocket` 都是**单订阅流**，
+///   原来"每次 `expectCode` 都 `await for (ctrl.stream)`"的写法在第二次
+///   调用时必抛 StateError —— 这是 Kindle 推送长期 100% 失败的根因。
+class _SmtpReader {
+  _SmtpReader(this._socket) {
+    _sub = _socket.listen(_onData, onError: (Object _) {}, cancelOnError: false);
+  }
+
+  final Socket _socket;
+  late final StreamSubscription<List<int>> _sub;
+
+  final List<String> _lines = [];
+  final List<Completer<String?>> _waiters = [];
+  final StringBuffer _buffer = StringBuffer();
+
+  /// 最近一条完整响应行（拼错误文案用）
+  String? lastLine;
+
+  bool _disposed = false;
+
+  void _onData(List<int> data) {
+    _buffer.write(utf8.decode(data, allowMalformed: true));
+    var text = _buffer.toString();
+    var idx = text.indexOf('\n');
+    while (idx >= 0) {
+      var line = text.substring(0, idx);
+      if (line.endsWith('\r')) line = line.substring(0, line.length - 1);
+      text = text.substring(idx + 1);
+      if (_waiters.isNotEmpty) {
+        final c = _waiters.removeAt(0);
+        if (!c.isCompleted) c.complete(line);
+      } else {
+        _lines.add(line);
+      }
+      idx = text.indexOf('\n');
+    }
+    _buffer
+      ..clear()
+      ..write(text);
+  }
+
+  Future<String?> _nextLine(Duration timeout) {
+    if (_lines.isNotEmpty) return Future.value(_lines.removeAt(0));
+    if (_disposed) return Future.value(null);
+    final c = Completer<String?>();
+    _waiters.add(c);
+    return c.future.timeout(timeout, onTimeout: () {
+      _waiters.remove(c);
+      return null;
+    });
+  }
+
+  /// 读一条完整 SMTP 响应（`250-xxx` 多行会读到 `250 xxx` 为止）；
+  /// 超时或连接断开返回 null。
+  Future<String?> readReply(
+      {Duration timeout = const Duration(seconds: 20)}) async {
+    final deadline = DateTime.now().add(timeout);
+    while (true) {
+      final remain = deadline.difference(DateTime.now());
+      if (remain.isNegative) return null;
+      final line = await _nextLine(remain);
+      if (line == null) return null;
+      lastLine = line;
+      // 第 4 个字符是 '-' → 这条响应还有后续行
+      if (line.length >= 4 && line[3] == '-') continue;
+      return line;
+    }
+  }
+
+  /// 取响应码；解析不出返回 -1
+  int codeOf(String? line) {
+    if (line == null || line.length < 3) return -1;
+    return int.tryParse(line.substring(0, 3)) ?? -1;
+  }
+
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    for (final c in _waiters) {
+      if (!c.isCompleted) c.complete(null);
+    }
+    _waiters.clear();
+    try {
+      await _sub.cancel();
+    } catch (_) {}
   }
 }

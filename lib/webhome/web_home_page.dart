@@ -2,18 +2,21 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemUiOverlayStyle;
+import 'package:get/get.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../common/theme.dart';
 import '../miniapp/services/ant_bridge.dart';
 import '../services/app_log.dart';
 import '../services/main_tab_controller.dart';
+import '../services/nav_feature_service.dart';
 import '../services/webview_page_color.dart';
 import '../widgets/common_widgets.dart';
 import 'web_home_fm_shim.dart';
 import 'web_home_manage_page.dart';
 import 'web_home_prefs.dart';
 import 'web_home_source.dart';
+import 'webhtv_extension_page.dart';
 
 /// 「网页首页」模块 —— **独立于小程序体系**的一个 WebView 宿主。
 ///
@@ -62,16 +65,56 @@ class _WebHomePageState extends State<WebHomePage> {
   /// null = 没取到 ⇒ 那条保持透明、透出壁纸（与改造前一致）。
   Color? _pageColor;
 
+  /// ── 懒启动（用户 2026-10-15：「RSS、网页以及海阔默认关闭」）──────────
+  ///
+  /// 本页是 `IndexedStack` 的第 8 个 child ⇒ **模块没开进底栏也会被 build**，
+  /// `initState` 照跑。原来这里无条件建 WebView 并立刻 `loadRequest` ⇒
+  /// "关着"的模块在启动时就占一个 WebView、发一次网页请求。
+  /// 现在只在**开关打开**时才真正起 WebView，关着时只挂一个监听等它被打开。
+  bool _started = false;
+  Worker? _navWorker;
+  Worker? _tabWorker;
+  bool get _tabEnabled =>
+      NavFeatureService.instance.enabled.contains(NavFeature.webhome);
+
   @override
   void initState() {
     super.initState();
-    AntBridge.configure(appId: _appId, permissions: _permissions);
-    // 网页里调 `ant.exitMiniApp()` → 切回影视首页 tab
-    //（本模块是底栏 tab，没有"返回上一页"这回事）
+    // 网页源列表/选中项变化（管理页增删改排序 / 切换）→ 跟着刷新
+    webHomeSourcesTick.addListener(_onSourcesChanged);
+    if (_tabEnabled) {
+      _start();
+    } else {
+      _navWorker = ever(NavFeatureService.instance.enabled, (_) {
+        if (!_tabEnabled || _started) return;
+        _start();
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
+  /// 认领 `ant.exitMiniApp()` 的处理权（见 [AntBridge.onExitRequested] 的单槽问题）
+  void _bindExitHandler() {
     AntBridge.onExitRequested = () {
       if (!mounted) return;
       MainTabController.instance.select(MainTabController.videoTabIndex);
     };
+  }
+
+  /// 真正开建 WebView 并加载当前源（只会跑一次）
+  void _start() {
+    if (_started) return;
+    _started = true;
+    AntBridge.configure(appId: _appId, permissions: _permissions);
+    _bindExitHandler();
+    // ⚠️ `AntBridge.onExitRequested` 是**单槽静态**：小程序网页页
+    //（mini_app_web_page）一打开就会把它改成"关掉那一页"，而本页只在
+    //  模块开启时设一次 ⇒ 之后回到网页，`ant.exitMiniApp()` 会落到那个
+    //  **已销毁**页面的回调上（mounted=false → 什么都不做）＝点了没反应。
+    //   所以只要"网页"这个 tab 被选中，就重新认领一次。
+    _tabWorker = ever(MainTabController.instance.selectedTab, (v) {
+      if (v == NavFeature.webhome.tabIndex) _bindExitHandler();
+    });
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(AppTheme.backgroundPrimary)
@@ -97,6 +140,8 @@ class _WebHomePageState extends State<WebHomePage> {
             _controller
               ..runJavaScript(AntBridge.injectScript)
               ..runJavaScript(kWebHomeFmShim);
+            // 用户自配的「WebHome 扩展」（Webhtv → WebHome 扩展）按匹配规则注入
+            _injectExtensions(url);
             // 顶栏跟随网页配色：立刻探一次；不少页面的颜色是脚本随后才设的
             //（或主题异步就绪），再补探一次兜住。
             _probePageColor();
@@ -114,20 +159,21 @@ class _WebHomePageState extends State<WebHomePage> {
           },
         ),
       );
-    // 网页源列表/选中项变化（管理页增删改排序 / 切换）→ 跟着刷新
-    webHomeSourcesTick.addListener(_onSourcesChanged);
     _loadEntry();
   }
 
   @override
   void dispose() {
     webHomeSourcesTick.removeListener(_onSourcesChanged);
+    _navWorker?.dispose();
+    _tabWorker?.dispose();
     super.dispose();
   }
 
   /// 源列表变了：换了源就重新加载，只是顺序/名字变了就只重建界面。
   void _onSourcesChanged() {
-    if (!mounted) return;
+    // 模块没开 ⇒ 不干活（此时 WebView 还没建，碰 _controller 会 LateInitializationError）
+    if (!mounted || !_started) return;
     final cur = WebHomePrefs.instance.current.id;
     if (cur != _loadedSourceId) {
       setState(() {
@@ -145,6 +191,25 @@ class _WebHomePageState extends State<WebHomePage> {
     final c = await probeWebViewPageColor(_controller);
     if (!mounted || c == null || c == _pageColor) return;
     setState(() => _pageColor = c);
+  }
+
+  /// 注入命中的「WebHome 扩展」（用户自配脚本，见 Webhtv → WebHome 扩展）。
+  ///
+  /// 与 `window.ant` / `window.fm` **同一时机**（页面加载完成后）；
+  /// 命中的扩展由 [WebhtvExtensionStore.resolveFor] 合成一段带 try/catch 的 IIFE，
+  /// 单个扩展报错不会影响其它扩展。
+  Future<void> _injectExtensions(String url) async {
+    try {
+      final js = await WebhtvExtensionStore.instance.resolveFor(
+        url: url,
+        sourceKey: WebHomePrefs.instance.current.id,
+      );
+      if (js.isEmpty) return;
+      await _controller.runJavaScript(js);
+      AppLog.instance.log('[WebHome] 已注入扩展脚本（${js.length} 字符）');
+    } catch (e) {
+      AppLog.instance.log('[WebHome] 注入扩展失败: $e');
+    }
   }
 
   /// 加载**当前选中的网页源**。
@@ -207,82 +272,67 @@ class _WebHomePageState extends State<WebHomePage> {
     );
   }
 
-  /// 切换网页：**卡片网格**（一行 2 个）—— 用户 2026-10-15：
-  /// 「弹窗也太丑了，要卡片式的，一行 2-3 个这种」。
-  Future<void> _pickSource() async {
-    final prefs = WebHomePrefs.instance;
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppTheme.backgroundSecondary,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SheetHandle(),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Text('切换网页',
-                      style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: AppTheme.fontTitle3,
-                          fontWeight: FontWeight.w600)),
-                  const Spacer(),
-                  Text('长按拖动排序在「网页管理」',
-                      style: TextStyle(
-                          color: AppTheme.textTertiary,
-                          fontSize: AppTheme.fontCaption)),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Flexible(
-                child: SingleChildScrollView(
-                  child: CardGrid(
-                    columns: 2,
-                    children: [
-                      for (final s in prefs.sources)
-                        CardGridItem(
-                          title: s.name,
-                          subtitle: s.kind == WebHomeSourceKind.url
-                              ? s.value
-                              : '${s.kind.label} · ${s.value.split('/').last}',
-                          selected: s.id == prefs.selectedId,
-                          leading: CardGridAvatar(s.name,
-                              selected: s.id == prefs.selectedId),
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            if (s.id != prefs.selectedId) prefs.select(s.id);
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              CardGridItem(
-                icon: Icons.settings_outlined,
-                title: '网页管理',
-                subtitle: '导入订阅链接 / 本地文件、排序、改名、删除',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _openManage();
-                },
-              ),
-            ],
+  /// 顶栏动作按钮：**圆形浅底**（与 RSS / 影视首页右上角同款）。
+  Widget _topIcon(IconData icon, String tooltip, VoidCallback? onTap) =>
+      Tooltip(
+        message: tooltip,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: AppTheme.backgroundTertiary,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              size: 15,
+              color: onTap == null
+                  ? AppTheme.textTertiary
+                  : AppTheme.textSecondary,
+            ),
           ),
         ),
+      );
+
+  /// 重新加载当前网页（顶栏「刷新」）。
+  void _reload() {
+    setState(() {
+      _failed = false;
+      _progress = 0;
+    });
+    _controller.reload();
+  }
+
+  /// 切换网页 —— 版式**对齐 RSS / 影视的切换面板**
+  ///（用户 2026-10-15：「网页的顶栏也参考 RSS 那种」）：
+  /// 约 0.4 屏高、标题 + 定位 + 网格/列表切换、搜索胶囊、2 列卡片、
+  /// 底部「网页管理」入口。
+  Future<void> _pickSource() async {
+    final prefs = WebHomePrefs.instance;
+    if (!prefs.loaded) await prefs.load();
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _WebSourceSwitchSheet(
+        sources: prefs.sources,
+        selectedId: prefs.selectedId,
+        onPick: (id) {
+          if (id != prefs.selectedId) prefs.select(id);
+        },
+        onManage: _openManage,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    // 模块没开进底栏 ⇒ 一行都不渲染（也保证上面那套懒启动不被绕过）
+    if (!_started) return const SizedBox.shrink();
     // 状态栏那一条：刷成**当前网页的主色**（取不到就透明 ⇒ 透出壁纸，与改造前一致）。
     final topInset = MediaQuery.paddingOf(context).top;
     final pageColor = _pageColor;
@@ -291,49 +341,51 @@ class _WebHomePageState extends State<WebHomePage> {
       body: Column(
         children: [
           Container(height: topInset, color: pageColor),
-          // ── 顶栏：左「← 网页」+ 右「源切换 / 设置」──
+          // ── 顶栏：与 RSS / 影视首页**同款**——左「Logo + 加粗网页名（点击换源）」，
+          //    右「圆形动作按钮」。（用户 2026-10-15：「网页的顶栏也参考 RSS 那种」）
           //
           // ⚠️ 进入「网页」时影视悬浮底栏会隐藏（见 MainTabController
-          //   .inEmbeddedModule），所以这里必须留一个**回影视**的出口，
+          //   .inEmbeddedModule），所以最左边必须留一个**回影视**的出口，
           //   否则用户会被困在网页里出不去。
           SizedBox(
             height: 46,
-            child: Row(
-              children: [
-                const SizedBox(width: 4),
-                IconButton(
-                  tooltip: '返回影视',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                  iconSize: 20,
-                  onPressed: () => MainTabController.instance.backToVideo(),
-                  icon: Icon(Icons.arrow_back_ios_new_rounded,
-                      color: AppTheme.textPrimary),
-                ),
-                const SizedBox(width: 2),
-                Text('网页',
-                    style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontTitle3,
-                        fontWeight: FontWeight.w600)),
-                const Spacer(),
-                // 顺带显示"当前是哪个网页"，一眼知道在看哪个
-                const _CurrentSourceLabel(),
-                IconButton(
-                  tooltip: '切换网页',
-                  iconSize: 20,
-                  onPressed: _pickSource,
-                  icon: Icon(Icons.swap_horiz_rounded,
-                      color: AppTheme.textPrimary),
-                ),
-                IconButton(
-                  tooltip: '网页管理',
-                  iconSize: 20,
-                  onPressed: _openManage,
-                  icon: Icon(Icons.tune_rounded, color: AppTheme.textPrimary),
-                ),
-                const SizedBox(width: 4),
-              ],
+            child: Padding(
+              // 左 6：让返回钮贴近屏幕边；右 6：圆形按钮贴边（同 RSS）
+              padding: const EdgeInsets.fromLTRB(6, 0, 6, 0),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: '返回影视',
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints(minWidth: 34, minHeight: 34),
+                    iconSize: 20,
+                    onPressed: () => MainTabController.instance.backToVideo(),
+                    icon: Icon(Icons.arrow_back_ios_new_rounded,
+                        color: AppTheme.textPrimary),
+                  ),
+                  // 左：Logo + 网页名（**点它换源**）—— 与 RSS / 影视首屏同款
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _pickSource,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const _WebLogo(),
+                        const SizedBox(width: 8),
+                        const _CurrentSourceLabel(),
+                        const SizedBox(width: 4),
+                        Icon(Icons.expand_more_rounded,
+                            size: 16, color: AppTheme.textTertiary),
+                      ],
+                    ),
+                  ),
+                  const Spacer(),
+                  _topIcon(Icons.refresh_rounded, '刷新', _reload),
+                  const SizedBox(width: 8),
+                  _topIcon(Icons.tune_rounded, 'Webhtv 管理', _openManage),
+                ],
+              ),
             ),
           ),
           Expanded(
@@ -437,6 +489,41 @@ class _WebHomePageState extends State<WebHomePage> {
   }
 }
 
+/// 「网页」顶栏 Logo —— 与 RSS / 影视首页的 Logo **同款造型**
+///（34×34 圆角渐变方块 + 同色柔光），只是图标换成地球。
+///
+/// 用户 2026-10-15：「网页的顶栏也参考 RSS 那种」⇒ 顶栏左侧统一成
+/// “Logo + 加粗网页名（点击换源）”，与 RSS / 影视首屏的视觉语言一致。
+class _WebLogo extends StatelessWidget {
+  const _WebLogo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppTheme.accentColor.withValues(alpha: 0.65),
+            AppTheme.accentColor,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.accentColor.withValues(alpha: 0.35),
+            blurRadius: 10,
+          ),
+        ],
+      ),
+      child: const Icon(Icons.public_rounded, color: Colors.white, size: 20),
+    );
+  }
+}
+
 /// 顶栏里显示"当前网页名"的小组件（跟随 [webHomeSourcesTick] 重建）。
 ///
 /// 单独抽出来是为了让**只有它**跟着源列表刷新，不把整个 WebView 重建。
@@ -451,16 +538,344 @@ class _CurrentSourceLabel extends StatelessWidget {
         final sources = WebHomePrefs.instance.sources;
         if (sources.isEmpty) return const SizedBox.shrink();
         return ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 120),
+          constraints: const BoxConstraints(maxWidth: 150),
           child: Text(
             WebHomePrefs.instance.current.name,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-                color: AppTheme.textSecondary, fontSize: AppTheme.fontCaption),
+              color: AppTheme.textPrimary,
+              fontSize: AppTheme.fontHeadline,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         );
       },
+    );
+  }
+}
+
+/// 网页切换面板 —— **照 RSS / 影视模块的 `SourceSwitchSheet` 版式做**：
+///   拖拽条 → 「标题 + 定位 + 网格/列表切换」→ 搜索胶囊 →
+///   2 列卡片（3.4 纵横比）/ 单列行 → 底部「网页管理」入口
+///
+/// 用户 2026-10-15：「网页的顶栏也参考 RSS 那种」。
+class _WebSourceSwitchSheet extends StatefulWidget {
+  const _WebSourceSwitchSheet({
+    required this.sources,
+    required this.selectedId,
+    required this.onPick,
+    required this.onManage,
+  });
+
+  final List<WebHomeSource> sources;
+  final String selectedId;
+  final ValueChanged<String> onPick;
+  final VoidCallback onManage;
+
+  @override
+  State<_WebSourceSwitchSheet> createState() => _WebSourceSwitchSheetState();
+}
+
+class _WebSourceSwitchSheetState extends State<_WebSourceSwitchSheet> {
+  final TextEditingController _search = TextEditingController();
+  final ScrollController _scroll = ScrollController();
+  String _kw = '';
+
+  /// false=单列列表 / true=双排网格（默认双排，与 RSS / 影视面板一致）
+  bool _grid = true;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  List<WebHomeSource> get _list {
+    if (_kw.isEmpty) return widget.sources;
+    final k = _kw.toLowerCase();
+    return widget.sources
+        .where((s) => s.name.toLowerCase().contains(k))
+        .toList();
+  }
+
+  /// 定位到当前选中的网页（与 RSS / 影视面板同款）。
+  ///
+  /// 用**算术**算行偏移，不用 `ensureVisible` —— 选中的源常在很下面、
+  /// 还没被 build，那时拿不到 context。
+  void _locate() {
+    final list = _list;
+    final i = list.indexWhere((s) => s.id == widget.selectedId);
+    if (i < 0 || !_scroll.hasClients) return;
+    final w = MediaQuery.of(context).size.width;
+    // 与下面网格参数保持一致：2 列 / 间距 10 / 纵横比 3.4 / 行距 8
+    final rowH = _grid ? ((w - 32 - 10) / 2) / 3.4 + 8 : 52.0;
+    final offset = _grid ? (i ~/ 2) * rowH : i * rowH;
+    final pos = _scroll.position;
+    _scroll.animateTo(
+      offset.clamp(0.0, pos.maxScrollExtent),
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOut,
+    );
+  }
+
+  Widget _circleBtn(IconData icon, VoidCallback onTap) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: AppTheme.backgroundTertiary,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, size: 15, color: AppTheme.textSecondary),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final h = MediaQuery.of(context).size.height;
+    final list = _list;
+    return Container(
+      height: (h * 0.4).clamp(h * 0.34, h * 0.48),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundSecondary,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border.all(color: AppTheme.borderLight, width: 0.5),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(top: 10, bottom: 4),
+              child: SheetHandle(),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Row(
+                children: [
+                  Text('切换网页',
+                      style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  _circleBtn(Icons.my_location_rounded, _locate),
+                  const SizedBox(width: 8),
+                  _circleBtn(
+                    _grid ? Icons.view_list_outlined : Icons.grid_view_outlined,
+                    () => setState(() => _grid = !_grid),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Container(
+                height: 36,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.backgroundTertiary,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.search, size: 16, color: AppTheme.textTertiary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: _search,
+                        onChanged: (v) => setState(() => _kw = v.trim()),
+                        style: TextStyle(
+                            fontSize: AppTheme.fontSubhead,
+                            color: AppTheme.textPrimary),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          border: InputBorder.none,
+                          hintText: '搜索网页',
+                          hintStyle: TextStyle(
+                              fontSize: AppTheme.fontSubhead,
+                              color: AppTheme.textTertiary),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: list.isEmpty
+                  ? Center(
+                      child: Text('未找到匹配的网页',
+                          style: TextStyle(
+                              fontSize: AppTheme.fontSubhead,
+                              color: AppTheme.textTertiary)),
+                    )
+                  : ListView(
+                      controller: _scroll,
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      children: [
+                        if (_grid)
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              mainAxisSpacing: 8,
+                              crossAxisSpacing: 10,
+                              childAspectRatio: 3.4,
+                            ),
+                            itemCount: list.length,
+                            itemBuilder: (c, i) => _tile(list[i]),
+                          )
+                        else
+                          for (final s in list)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: _row(s),
+                            ),
+                      ],
+                    ),
+            ),
+            // 底部入口：去管理页导入 / 排序 / 删除
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                Navigator.pop(context);
+                widget.onManage();
+              },
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                padding: const EdgeInsets.symmetric(vertical: 11),
+                decoration: BoxDecoration(
+                  color: AppTheme.backgroundTertiary,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.borderLight, width: 0.5),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.tune_rounded,
+                        size: 16, color: AppTheme.textSecondary),
+                    const SizedBox(width: 6),
+                    Text('Webhtv 管理',
+                        style: TextStyle(
+                            fontSize: AppTheme.fontSubhead,
+                            color: AppTheme.textPrimary)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _pick(WebHomeSource s) {
+    Navigator.pop(context);
+    widget.onPick(s.id);
+  }
+
+  /// 副标题：远端源显示完整地址；内置 / 本地显示「形态 · 文件名」
+  String _sub(WebHomeSource s) => s.kind == WebHomeSourceKind.url
+      ? s.value
+      : '${s.kind.label} · ${s.value.split('/').last}';
+
+  /// 网格卡片：首字头像 + 名称 + 地址
+  Widget _tile(WebHomeSource s) {
+    final on = s.id == widget.selectedId;
+    return GestureDetector(
+      onTap: () => _pick(s),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: on
+              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              : AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: on
+                ? AppTheme.accentColor.withValues(alpha: 0.5)
+                : AppTheme.borderLight,
+            width: on ? 1 : 0.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            CardGridAvatar(s.name, selected: on),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(s.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: AppTheme.fontSubhead,
+                          fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+                          color: AppTheme.textPrimary)),
+                  const SizedBox(height: 2),
+                  Text(_sub(s),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: AppTheme.fontCaption,
+                          color: AppTheme.textTertiary)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 单列行
+  Widget _row(WebHomeSource s) {
+    final on = s.id == widget.selectedId;
+    return GestureDetector(
+      onTap: () => _pick(s),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: on
+              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              : AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: on
+                ? AppTheme.accentColor.withValues(alpha: 0.5)
+                : AppTheme.borderLight,
+            width: on ? 1 : 0.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            CardGridAvatar(s.name, selected: on),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(s.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+                      color: AppTheme.textPrimary)),
+            ),
+            if (on)
+              Icon(Icons.check_circle_rounded,
+                  size: 16, color: AppTheme.accentColor),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -142,10 +142,18 @@ class SettingsService extends ChangeNotifier {
   static const _kBuiltinAccountKey = 'use_builtin_account';
   static const _kGlobalProxyEnabledKey = 'global_proxy_enabled';
   static const _kGlobalProxyKey = 'global_proxy'; // "host:port"（空串=直连）
+  // 「APP 代理」域名规则（Webhtv）：proxy_domain_only=false 时全部走代理（现状）；
+  // =true 时**只有命中的域名**走代理，其余直连（见 global_proxy.dart）
+  static const _kProxyDomainOnlyKey = 'proxy_domain_only';
+  static const _kProxyDomainRulesKey = 'proxy_domain_rules';
   static const _kAutoSyncKey = 'auto_sync_backup'; // 同步与备份：自动同步开关
   static const _kDarkModeKey = 'dark_mode';
   static const _kThemeFollowSystemKey = 'theme_follow_system';
   static const _kThemePresetKey = 'theme_preset'; // 主题预设：jelly/pink/green
+  // 「我的」页头像：'' = 默认图标；'a01'~'a40' = assets/avatars 内置；
+  // 'custom' = 用户从相册上传（文件路径另存 _kReaderAvatarPathKey）
+  static const _kReaderAvatarKey = 'reader_avatar';
+  static const _kReaderAvatarPathKey = 'reader_avatar_path';
   static const _kBgAnimationKey = 'background_animation'; // 主题背景动画开关
   static const _kFrameRateReducedKey = 'frame_rate_reduced'; // 主题动画降帧省电
   static const _kCustomThemesKey = 'custom_themes'; // 自定义主题（JSON 数组）
@@ -290,10 +298,14 @@ class SettingsService extends ChangeNotifier {
   bool _useBuiltinAccount = true; // 图书下载未登录时是否回退内置账号（搜索一律回退内置账号）
   bool _globalProxyEnabled = false; // 全局网络代理开关（参考图 IMG_8465 网络代理）
   String _globalProxy = ''; // 全局代理 "host:port"
+  bool _proxyDomainOnly = false; // 只对规则里的域名走代理（默认关 = 全部走）
+  List<String> _proxyDomainRules = const []; // 域名规则（* 通配 / 也容忍粘贴整条 URL）
   bool _autoSyncBackup = false; // 同步与备份：自动同步开关
   bool _isDarkMode = false; // 暗色模式（首次跟随系统，之后保留用户选择）
   bool _themeFollowSystem = true; // 主题跟随系统明暗；关闭后用上面的手动选择
   String _themePreset = 'ink'; // 主题预设：ink(水墨书香,默认)/jelly/pink/green/... 或 custom_*
+  String _readerAvatar = ''; // 头像：'' 默认 / 'aNN' 内置 / 'custom' 上传
+  String _readerAvatarPath = ''; // 上传头像的本地绝对路径（'custom' 时用）
   bool _backgroundAnimation = true; // 主题背景动画开关
   bool _frameRateReduced = true; // 主题动画降帧省电（默认开启，减半重绘）
   List<ThemePresetInfo> _customThemes =
@@ -473,6 +485,12 @@ class SettingsService extends ChangeNotifier {
   DefaultHomePage get defaultHomePage => _defaultHomePage;
   bool get useBuiltinAccount => _useBuiltinAccount;
   bool get globalProxyEnabled => _globalProxyEnabled;
+
+  /// 只对规则里的域名走代理（Webhtv → APP 代理）。false = 全部走代理（原行为）
+  bool get proxyDomainOnly => _proxyDomainOnly;
+
+  /// 代理域名规则（`*.example.com` / `example.com`，也容忍粘贴整条 URL）
+  List<String> get proxyDomainRules => List.unmodifiable(_proxyDomainRules);
   String get globalProxy => _globalProxy;
   bool get autoSyncBackup => _autoSyncBackup;
   bool get isDarkMode => _themeFollowSystem
@@ -480,6 +498,12 @@ class SettingsService extends ChangeNotifier {
       : _isDarkMode;
   bool get themeFollowSystem => _themeFollowSystem;
   String get themePreset => _themePreset;
+
+  /// 「我的」页头像：'' = 默认图标；'aNN' = 内置素材；'custom' = 相册上传
+  String get readerAvatar => _readerAvatar;
+
+  /// 上传头像的本地绝对路径（[readerAvatar] == 'custom' 时才有效）
+  String get readerAvatarPath => _readerAvatarPath;
   bool get backgroundAnimation => _backgroundAnimation;
   bool get frameRateReduced => _frameRateReduced;
   List<ThemePresetInfo> get customThemes => List.unmodifiable(_customThemes);
@@ -693,6 +717,9 @@ class SettingsService extends ChangeNotifier {
       _globalProxyEnabled =
           prefs.getBool(_kGlobalProxyEnabledKey) ?? false;
       _globalProxy = prefs.getString(_kGlobalProxyKey) ?? '';
+      _proxyDomainOnly = prefs.getBool(_kProxyDomainOnlyKey) ?? false;
+      _proxyDomainRules =
+          prefs.getStringList(_kProxyDomainRulesKey) ?? const <String>[];
       _autoSyncBackup = prefs.getBool(_kAutoSyncKey) ?? false;
       // 暗色模式：有记录用记录，否则首次跟随系统
       _isDarkMode =
@@ -707,6 +734,9 @@ class SettingsService extends ChangeNotifier {
       // 若存的主题已被删除，回退 jelly
       if (!_isKnownPreset(_themePreset)) _themePreset = 'ink';
       JellyTheme.apply(_resolvePalette(_themePreset));
+      // 头像：'' 默认 / 'aNN' 内置 / 'custom' 上传（路径另存）
+      _readerAvatar = prefs.getString(_kReaderAvatarKey) ?? '';
+      _readerAvatarPath = prefs.getString(_kReaderAvatarPathKey) ?? '';
       _backgroundAnimation = prefs.getBool(_kBgAnimationKey) ?? true;
       _frameRateReduced = prefs.getBool(_kFrameRateReducedKey) ?? true;
       _preloadImageCount = _clamp(
@@ -1197,7 +1227,48 @@ class SettingsService extends ChangeNotifier {
     }
   }
 
-  /// 设置：全局网络代理地址 "host:port"（空串=直连）
+  /// 「APP 代理」：是否只对规则里的域名走代理（默认关 = 全部走）
+  Future<void> setProxyDomainOnly(bool value) async {
+    if (_proxyDomainOnly == value) return;
+    _proxyDomainOnly = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kProxyDomainOnlyKey, value);
+    } catch (e) {
+      _log('保存代理域名开关失败: $e');
+    }
+  }
+
+  /// 「APP 代理」：整表替换域名规则
+  Future<void> setProxyDomainRules(List<String> rules) async {
+    _proxyDomainRules =
+        rules.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_kProxyDomainRulesKey, _proxyDomainRules);
+    } catch (e) {
+      _log('保存代理域名规则失败: $e');
+    }
+  }
+
+  /// 域名是否命中代理规则（`*.x.com` / `x.com`；也容忍粘贴整条 URL）
+  static bool hostMatchesProxyRules(String host, List<String> rules) {
+    final h = host.toLowerCase().trim();
+    if (h.isEmpty) return false;
+    for (final raw in rules) {
+      var p = raw.trim().toLowerCase();
+      if (p.isEmpty) continue;
+      if (p.contains('://')) p = p.split('://').last;
+      if (p.contains('/')) p = p.split('/').first;
+      if (p.startsWith('*.')) p = p.substring(2);
+      if (p.isEmpty) continue;
+      if (h == p || h.endsWith('.$p')) return true;
+    }
+    return false;
+  }
+
   Future<void> setGlobalProxy(String value) async {
     final v = value.trim();
     if (_globalProxy == v) return;
@@ -1276,6 +1347,22 @@ class SettingsService extends ChangeNotifier {
       await prefs.setBool(_kBgAnimationKey, value);
     } catch (e) {
       _log('保存背景动画开关失败: $e');
+    }
+  }
+
+  /// 设置：「我的」页头像（'' 默认 / 'aNN' 内置 / 'custom' 上传）。
+  ///
+  /// [path] 只在 id=='custom' 时传：相册上传后复制到 App 目录的绝对路径。
+  Future<void> setReaderAvatar(String id, {String path = ''}) async {
+    _readerAvatar = id;
+    _readerAvatarPath = path;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kReaderAvatarKey, id);
+      await prefs.setString(_kReaderAvatarPathKey, path);
+    } catch (e) {
+      _log('保存头像失败: $e');
     }
   }
 

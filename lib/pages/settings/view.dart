@@ -4,6 +4,8 @@ import '../../common/theme.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/glass.dart';
 import '../../miniapp/pages/mini_app_list_page.dart';
+import '../../webhome/webhtv_settings_page.dart';
+import '../../hiker/pages/hiker_settings_page.dart';
 import 'controller.dart';
 import 'sub/about_settings_page.dart';
 import 'sub/unified_theme_settings_page.dart';
@@ -138,6 +140,27 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: Icons.movie_filter_outlined,
                 title: 'TMDB管理',
                 onTap: () => Get.to(() => const MetadataSettingsPage()),
+              ),
+              const SizedBox(height: AppTheme.spacingMD),
+
+              // Webhtv（独立模块，用户 2026-10-15）：
+              // 站点注入 / WebHome 扩展 / 网盘检测 / 站点健康排序 /
+              // 观影记录同步 / APP 代理 / 一键同步 / 局域网管理页 / 远程托管
+              // —— 全部集中在这一个独立设置页里分项管理。
+              _categoryTile(
+                icon: Icons.public_rounded,
+                title: 'Webhtv',
+                onTap: () => Get.to(() => const WebhtvSettingsPage()),
+              ),
+              const SizedBox(height: AppTheme.spacingMD),
+
+              // 海阔（独立模块，用户 2026-10-15）：海阔视界(hiker/hipy)小程序。
+              // 总设置页（源管理 / 显示 / 引擎 / 排序 / 数据 / 调试）。
+              // ⚠️ 与「程序」里的 TVBox 小程序是**两套体系**，互不影响。
+              _categoryTile(
+                icon: Icons.rocket_launch_outlined,
+                title: '海阔设置',
+                onTap: () => Get.to(() => const HikerSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingMD),
 

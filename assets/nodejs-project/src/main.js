@@ -13,6 +13,30 @@
 // (swift --node-log-path 参数还会传过来, 但 src 不接, 等于无操作)
 const NODE_LOG_ENABLED = false;
 
+// ── 全局未捕获异常处理：必须**在任何顶层 require / 求值之前**装好 ──────
+//
+// iOS 的 Node 与 App 是**同一个进程**：未捕获异常会让 Node 退出 = 整个 App 闪退。
+// 原来这两个处理器写在文件后段（原第 532 行附近），而前面第 87~95 行已经在顶层
+// 执行了 `require('axios')` 与「逐个 require 全部内建模块」——属于"保护装得太晚"：
+// 一旦那些顶层语句抛错，处理器根本来不及生效，进程直接死。
+//
+// ⚠️ 刻意用 `typeof` 守卫 `writeLine`：它是下面 NODE_LOG_ENABLED 块内的局部
+//    常量，此处不可见；`typeof` 对不可见标识符返回 'undefined'，不会抛错。
+process.on('uncaughtException', function (err) {
+    const msg = err && err.stack ? err.stack : (err && err.message ? err.message : String(err));
+    console.error('Caught uncaughtException:', msg);
+    if (typeof writeLine === 'function') {
+        try { writeLine('FATAL_UNCAUGHT', [msg]); } catch (_) {}
+    }
+});
+process.on('unhandledRejection', function (reason) {
+    const r = reason && reason.stack ? reason.stack : (reason && reason.message ? reason.message : String(reason));
+    console.error('Caught unhandledRejection:', r);
+    if (typeof writeLine === 'function') {
+        try { writeLine('FATAL_UNHANDLED_REJECTION', [r]); } catch (_) {}
+    }
+});
+
 // ── 可选功能的模块一律**延迟加载** ────────────────────────────
 //
 // 教训（踩过两次）：
@@ -49,6 +73,16 @@ async function getBookSource() {
     if (bookSourceCache) return bookSourceCache;
     bookSourceCache = await import('./book_source.js');
     return bookSourceCache;
+}
+
+// ── 「海阔」小程序规则引擎（hiker 兼容层）─────────────────────────
+// 同样**延迟加载**（见上：顶层求值一旦抛错 = 整个 App 闪退）。
+let hikerEngineCache = null;
+
+async function getHikerEngine() {
+    if (hikerEngineCache) return hikerEngineCache;
+    hikerEngineCache = await import('./hiker_engine.js');
+    return hikerEngineCache;
 }
 
 let nodeLogFile = null;
@@ -90,7 +124,13 @@ const { builtinModules } = require('module');
 
 builtinModules.forEach(mod => {
     if (!['trace_events'].includes(mod)) {
-        globalThis[mod] = require(mod);
+        // 逐个 try：裁剪版 NodeMobile 可能缺个别内建（或它的 native 部分），
+        // 顶层抛错会直接杀死同进程的 App，故缺一个就跳过一个、绝不上抛。
+        try {
+            globalThis[mod] = require(mod);
+        } catch (e) {
+            // 跳过缺失内建
+        }
     }
 });
 console.log('=== main.js after builtinModules.forEach, nativeServerPort=0 (will be set later) ===');
@@ -413,6 +453,51 @@ const mgmtServer = createServer((req, res) => {
         return;
     }
 
+    if (req.method === 'POST' && url.pathname === '/hiker/run') {
+        // 「海阔」小程序规则执行（见 hiker_engine.js 顶部说明：同步 HTTP 走「重放桥」）
+        //   body: { action:'home'|'search'|'detail', source:{...}, params:{...}, vars:{...} }
+        //   ⚠️ 与 /onMessage、/hiker/webview 一样要有**请求体上限**：
+        //      不带上限时，一个字段超大的源（pages/规则巨长）会被无限累加再 JSON.parse，
+        //      把 Node 内存顶爆（其它模块的在线请求一起挂）。
+        const MAX_HIKER_BODY = 2 * 1024 * 1024;
+        let body = '';
+        let tooLarge = false;
+        req.on('error', () => { /* 客户端中断：忽略，避免未处理的 error 事件把进程带崩 */ });
+        req.on('data', chunk => {
+            if (tooLarge) return;
+            body += chunk;
+            if (body.length > MAX_HIKER_BODY) {
+                tooLarge = true;
+                console.error('ERROR in /hiker/run: body 超过上限', MAX_HIKER_BODY);
+                try {
+                    res.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8' });
+                    res.end(JSON.stringify({ ok: false, error: '海阔请求体过大（上限 2MB）' }));
+                } catch (_) { /* 响应可能已开始写出 */ }
+                req.destroy();
+            }
+        });
+        req.on('end', async () => {
+            if (tooLarge) return;
+            try {
+                const data = JSON.parse(body || '{}');
+                const eng = await getHikerEngine();
+                const r = await eng.handleHikerApi(data);
+                res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify(r));
+            } catch (e) {
+                console.error('ERROR in /hiker/run:', (e && e.stack) || e);
+                try {
+                    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+                    res.end(JSON.stringify({
+                        ok: false,
+                        error: '海阔接口异常：' + ((e && e.message) || String(e)),
+                    }));
+                } catch (_) { /* 响应已开始写出，忽略二次写入错误 */ }
+            }
+        });
+        return;
+    }
+
     if (req.method === 'POST' && url.pathname === '/command') {
         let body = '';
         req.on('data', chunk => { body += chunk; });
@@ -527,19 +612,5 @@ mgmtServer.listen(0, '127.0.0.1', () => {
     console.log('=== after sendMessageToNative(ready) ===');
 });
 
-// 全局未捕获异常处理：不退出进程（iOS embed library 进程死 = host 闪退）
-// 日志模式启用时额外写入文件，否则仅 console.error
-process.on('uncaughtException', function (err) {
-    const msg = err && err.stack ? err.stack : (err && err.message ? err.message : String(err));
-    console.error('Caught uncaughtException:', msg);
-    if (typeof writeLine === 'function') {
-        try { writeLine('FATAL_UNCAUGHT', [msg]); } catch (_) {}
-    }
-});
-process.on('unhandledRejection', function (reason) {
-    const r = reason && reason.stack ? reason.stack : (reason && reason.message ? reason.message : String(reason));
-    console.error('Caught unhandledRejection:', r);
-    if (typeof writeLine === 'function') {
-        try { writeLine('FATAL_UNHANDLED_REJECTION', [r]); } catch (_) {}
-    }
-});
+// 全局未捕获异常处理已**上移到文件顶部**（必须早于任何顶层 require 才有效），
+// 见 `process.on('uncaughtException' / 'unhandledRejection')` 处的说明。

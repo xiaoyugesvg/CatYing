@@ -1419,6 +1419,18 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   if (_showBar && !_showSettingsPanel) _sideDock(bg[1]),
                   // 阅读设置面板拆成**独立开关**（只有功能栏里的「设置」打开它 ✓）——
                   // 否则点中间会连面板一起弹出、把刚出现的功能栏整个盖住 ✗。
+                  //
+                  // ✅ 用户 2026-10-15：「子面板打开时，点外面空白不能收起吗？」
+                  //   ⇒ 面板**下面垫一层全屏透明屏障**（不改变观感）：
+                  //     点空白 = 收起面板；点面板本身不受影响（屏障在它下面 ✓）。
+                  if (_showSettingsPanel)
+                    Positioned.fill(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () =>
+                            setState(() => _showSettingsPanel = false),
+                      ),
+                    ),
                   if (_showSettingsPanel) _settingsPanel(bg[1]),
                   // 番茄钟浮层：bottom 动态计算，避免悬浮功能栏改后错位
                   if (_showPomodoro)

@@ -16,8 +16,8 @@ import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
-
 import '../common/theme.dart';
+import '../reading/source/global_proxy.dart';
 import '../widgets/app_toast.dart';
 import 'web_home_prefs.dart';
 import 'web_home_source.dart';
@@ -54,27 +54,32 @@ class _WebHomeManagePageState extends State<WebHomeManagePage> {
     final list = prefs.sources;
     return Scaffold(
       backgroundColor: AppTheme.backgroundPrimary,
+      // 用户 2026-10-15：「按这个方案改网页管理页的顶栏」——
+      // 对齐网页模块 / RSS / 影视：**标题左对齐加粗**，动作用 **30×30 圆形浅底**
+      // 并贴屏幕边；「导入订阅链接 / 导入本地文件 / 恢复内置」三个入口都收进顶栏
+      //（原来导入是页面底部两个大按钮，已撤掉）。
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        scrolledUnderElevation: 0,
+        centerTitle: false,
+        titleSpacing: 16,
         iconTheme: IconThemeData(color: AppTheme.textPrimary),
-        title: Text('网页管理',
+        title: Text('Webhtv 管理',
             style: TextStyle(
-                color: AppTheme.textPrimary, fontSize: AppTheme.fontTitle3)),
+                color: AppTheme.textPrimary,
+                fontSize: AppTheme.fontTitle3,
+                fontWeight: FontWeight.w600)),
         actions: [
-          IconButton(
-            tooltip: '恢复内置',
-            icon: Icon(Icons.restore_rounded,
-                size: 20, color: AppTheme.textSecondary),
-            onPressed: _busy
-                ? null
-                : () async {
-                    final n = await prefs.restoreBuiltins();
-                    if (mounted) {
-                      AppToast.message(n == 0 ? '内置网页都在' : '已补回 $n 个内置网页');
-                    }
-                  },
-          ),
+          _topIcon(Icons.link_rounded, '导入订阅链接',
+              _busy ? null : _importByUrl),
+          const SizedBox(width: 8),
+          _topIcon(Icons.folder_open_rounded, '导入本地文件',
+              _busy ? null : _importByFile),
+          const SizedBox(width: 8),
+          _topIcon(Icons.restore_rounded, '恢复内置',
+              _busy ? null : _restoreBuiltins),
+          const SizedBox(width: 6),
         ],
       ),
       body: Column(
@@ -84,7 +89,7 @@ class _WebHomeManagePageState extends State<WebHomeManagePage> {
             child: Row(
               children: [
                 Expanded(
-                  child: Text('点一条即切换；拖右侧把手可排序',
+                  child: Text('点一条即切换；拖右侧把手可排序；右上角可导入 / 恢复内置',
                       style: TextStyle(
                           color: AppTheme.textTertiary,
                           fontSize: AppTheme.fontCaption)),
@@ -101,7 +106,7 @@ class _WebHomeManagePageState extends State<WebHomeManagePage> {
           Expanded(
             child: list.isEmpty
                 ? Center(
-                    child: Text('还没有网页，用下面的按钮导入',
+                    child: Text('还没有网页，点右上角导入',
                         style: TextStyle(
                             color: AppTheme.textTertiary,
                             fontSize: AppTheme.fontSubhead)),
@@ -284,42 +289,46 @@ class _WebHomeManagePageState extends State<WebHomeManagePage> {
           ),
           SafeArea(
             top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.backgroundTertiary,
-                        foregroundColor: AppTheme.textPrimary,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      onPressed: _busy ? null : _importByUrl,
-                      icon: const Icon(Icons.link_rounded, size: 18),
-                      label: const Text('导入订阅链接'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.backgroundTertiary,
-                        foregroundColor: AppTheme.textPrimary,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      onPressed: _busy ? null : _importByFile,
-                      icon: const Icon(Icons.folder_open_rounded, size: 18),
-                      label: const Text('导入本地文件'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            // 底部那两个「导入…」大按钮已收进顶栏圆形按钮（用户 2026-10-15），
+            // 这里只留一点底部安全边距。
+            child: const SizedBox(height: 8),
           ),
         ],
       ),
     );
+  }
+
+  /// 顶栏动作按钮：**30×30 圆形浅底**（与网页模块 / RSS / 影视首页同款）
+  Widget _topIcon(IconData icon, String tooltip, VoidCallback? onTap) =>
+      Tooltip(
+        message: tooltip,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: AppTheme.backgroundTertiary,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              size: 15,
+              color: onTap == null
+                  ? AppTheme.textTertiary
+                  : AppTheme.textSecondary,
+            ),
+          ),
+        ),
+      );
+
+  /// 恢复内置网页（原来内联在 AppBar 的 actions 里，挪进顶栏圆形按钮后抽出来）
+  Future<void> _restoreBuiltins() async {
+    final n = await WebHomePrefs.instance.restoreBuiltins();
+    if (mounted) {
+      AppToast.message(n == 0 ? '内置网页都在' : '已补回 $n 个内置网页');
+    }
   }
 
   // ── 导入：订阅链接 ──────────────────────────────────────────────
@@ -336,6 +345,7 @@ class _WebHomeManagePageState extends State<WebHomeManagePage> {
       initial: '',
     );
     if (url == null || url.trim().isEmpty) return;
+    if (!mounted) return; // 等输入框期间页面可能已被销毁
     final link = url.trim();
     setState(() => _busy = true);
     Dio? dio;
@@ -346,6 +356,9 @@ class _WebHomeManagePageState extends State<WebHomeManagePage> {
         responseType: ResponseType.plain,
         headers: {'User-Agent': 'Mozilla/5.0'},
       ));
+      // ⚠️ 必须套全局代理：开了「设置 → 网络代理」时，直连必然 DioException，
+      //    表现为"导入订阅链接"永远失败（而 RSS / 网盘检测 / 海阔导入都正常）
+      applyGlobalProxy(dio);
       final resp = await dio.get<String>(link);
       final body = resp.data ?? '';
       if (body.trim().isEmpty) {
@@ -460,6 +473,11 @@ class _WebHomeManagePageState extends State<WebHomeManagePage> {
   // 复制进 App 自己的目录（`<Documents>/webhome/`）再登记 —— 直接引用
   // 沙箱外的临时路径，重启/系统清理后就打不开了。
   Future<void> _importByFile() async {
+    // 与「按链接导入」一致：置 `_busy` ⇒ 顶栏按钮禁用 + 显示进度圈。
+    // 原来这条路径**完全没置**：导入大文件（读盘+复制+写盘+逐个入列）期间
+    // 用户还能重复点，导致同一份文件被导入多次。
+    if (_busy) return;
+    setState(() => _busy = true);
     try {
       final result = await FilePicker.pickFiles(
         type: FileType.custom,
@@ -524,6 +542,8 @@ class _WebHomeManagePageState extends State<WebHomeManagePage> {
       AppToast.message(ok ? '已导入「$name」' : '同一个文件已经在列表里了');
     } catch (e) {
       AppToast.error('导入失败：${e.toString().split('\n').first}');
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 

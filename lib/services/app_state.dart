@@ -114,6 +114,15 @@ class AppState extends GetxController {
   /// 第二次及以后的调用直接跳过, 不浪费 CPU 也不互相覆盖 loadingPhase
   bool _isHandleSceneActiveRunning = false;
 
+  /// 重入期间又来了一次 resumed → 标记「跑完再补一次」。
+  ///
+  /// ⚠️ 2026-10-15：原来直接 `return` 丢弃。而 `_handleSceneActiveImpl` 里的
+  ///   `SceneRecovery.recover()` 最坏要跑 10s + 6×10s（60s+）；用户在这段时间内
+  ///   再切后台回前台时，那一次恢复机会就被**永久丢弃**（要么等这一轮自己跑完、
+  ///   要么一直卡着）。改为记一个待补跑标记：期间无论来几次，跑完只补一次
+  ///   （合并抖动，不会堆积成多次长流程）。
+  bool _sceneActiveRerunPending = false;
+
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
 
   @override
@@ -681,12 +690,14 @@ class AppState extends GetxController {
     // cid_1 卡在 reload 125.8 秒时, 第二次 handleSceneActive 进来 (cid_2)
     // 浪费 CPU 跑完整 4 次重试, 并可能覆盖 loadingPhase.
     if (_isHandleSceneActiveRunning) {
+      // 不丢弃：记一个待补跑标记，本轮结束后补跑一次（见下面的 finally）
+      _sceneActiveRerunPending = true;
       AppLog.instance.entry(LogEntry(
         category: 'GUARD',
         action: 'handleSceneActive_skip',
         level: LogLevel.warn,
-        message: 'handleSceneActive already running, skip duplicate call',
-        fields: {'reason': 'already running'},
+        message: 'handleSceneActive already running, 已记为待补跑',
+        fields: {'reason': 'already running', 'rerunPending': true},
       ));
       return;
     }
@@ -696,6 +707,12 @@ class AppState extends GetxController {
       await _handleSceneActiveImpl();
     } finally {
       _isHandleSceneActiveRunning = false;
+      if (_sceneActiveRerunPending) {
+        _sceneActiveRerunPending = false;
+        // 补跑一次：期间可能又回到过前台，那次恢复机会不能被吞掉。
+        // 不 await —— 本轮已完成，让调用方（lifecycle 回调）立刻返回。
+        unawaited(handleSceneActive());
+      }
     }
   }
 

@@ -333,8 +333,11 @@ class SettingsController extends GetxController {
   /// 实际意义 = imageCache 内存估算 + temp 目录 + app cache 目录
   /// （cached_network_image_ce 的磁盘缓存在 app cache 下面的
   /// `libCachedImageData/` 子目录，递归算 app cache 时已包含）
-  /// 按设置周期自动清缓存（启动设置页时调用）
-  Future<void> runAutoCacheCleanIfNeeded() async {
+  /// 按设置周期自动清缓存（App 启动时调用一次，见 `main.dart`）
+  ///
+  /// 设成 **static**：它只读 prefs + 走 [CacheManagerService]，不需要 controller
+  /// 实例；启动期也不该为了清缓存去构造一个 SettingsController。
+  static Future<void> runAutoCacheCleanIfNeeded() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final mode =
@@ -359,7 +362,12 @@ class SettingsController extends GetxController {
       // `DataCleanupPage` 的清单各写一份。现在统一按 entry id 清。
       final entries = await CacheManagerService.instance.list();
       for (final e in entries) {
-        if (e.id == 'app_image_memory' || e.id == 'app_temp') {
+        // ⚠️ id 必须与 CacheManagerService.list() 里的**真实 id** 一致：
+        //   原先是 'app_image_memory' / 'app_temp' —— 这两个 id **不存在**，
+        //   于是"自动清理缓存"设了等于没设（一个都不清）。
+        if (e.id == 'image_memory' ||
+            e.id == 'image_disk' ||
+            e.id == 'temp_files') {
           try {
             await e.clear();
           } catch (_) {

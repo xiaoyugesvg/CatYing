@@ -112,6 +112,21 @@ class AppTheme {
   /// 换配色时整页一起变。
   static Color get accentColor => _palette.primary;
 
+  /// 「在当前明暗下都看得清」的强调色 —— **当文字 / 图标 / 细描边用时请用它**，
+  /// 不要直接用 [accentColor]。
+  ///
+  /// ⚠️ 用户 2026-10-15：「新加的功能白天看着可以，**晚上完全看不清字**」：
+  ///   [accentColor] 取调色板 `primary`，而默认「水墨书香」的 primary 是
+  ///   **#3A3A3A 墨灰** ⇒ 压在暗底（#1C1C1E / 卡片 #2A2A2C）上几乎不可见。
+  ///   ⇒ 暗色模式改用 `textPrimaryDark`（浅色），浅色模式保持调色板 primary。
+  static Color get accentOnSurface =>
+      _light ? _palette.primary : _palette.textPrimaryDark;
+
+  /// 「在当前明暗下都看得清」的强调色**淡底**（chip / 徽标 / 选中块底用）
+  static Color get accentSurface => _light
+      ? _palette.primary.withValues(alpha: 0.10)
+      : Colors.white.withValues(alpha: 0.08);
+
   /// 强调色的浅一档（用于次要高亮、hover 态）
   static Color get accentLightColor => _palette.primaryLight;
 
@@ -123,10 +138,17 @@ class AppTheme {
   static Color get backgroundSecondary =>
       _light ? _palette.cardLight : _palette.cardDark;
 
-  static Color get backgroundTertiary =>
-      _palette.primary.withValues(alpha: _light ? 0.06 : 0.10);
-  static Color get backgroundElevated =>
-      _palette.primary.withValues(alpha: _light ? 0.08 : 0.12);
+  /// 淡底（圆形按钮底 / 未选中卡片底等）。
+  ///
+  /// ⚠️ 暗色下**不能再用调色板 primary**（默认「水墨书香」是 #3A3A3A 墨灰）——
+  ///   墨灰淡底压在暗底（#1C1C1E）上等于没有（用户 2026-10-15：
+  ///   「晚上完全看不清」）⇒ 暗色改成**白色淡底**；浅色保持原样，白天观感不变。
+  static Color get backgroundTertiary => _light
+      ? _palette.primary.withValues(alpha: 0.06)
+      : Colors.white.withValues(alpha: 0.08);
+  static Color get backgroundElevated => _light
+      ? _palette.primary.withValues(alpha: 0.08)
+      : Colors.white.withValues(alpha: 0.12);
 
   // ===== 半透明卡片色 =====
   // 用调色板的卡片色 + 不同 alpha，保持"同一套色、多层透明"的观感
