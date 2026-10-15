@@ -709,12 +709,25 @@ jobs:
         # 崩在 KSPlayer 的 FFmpeg 核心时，.ips 里只有「函数名 + 函数内偏移」
         # （如 FFmpegAssetTrack.init(codecpar:) +1256）。有 dSYM 才能用 atos 把它
         # 精确映射回源码行，避免下一刀靠猜。拿不到也不算构建失败，不影响出包。
+        #
+        # ⚠️ 为什么路径要用 glob 兜住，而不是写 build/ios/iphoneos/：
+        #   `flutter build ios` 会给 xcodebuild 传 `BUILD_DIR=<项目>/build/ios`
+        #   （见 flutter_tools/lib/src/ios/mac.dart，非 archive 动作才传；
+        #    源码注释原话 "dSYM files aren't copied to the archive if BUILD_DIR is set"）
+        #   ⇒ Xcode 的产物目录 = $(BUILD_DIR)/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)
+        #     = **build/ios/Release-iphoneos/**，Runner.app 与 Runner.app.dSYM 同目录。
+        #   之后 Flutter 只把 **Runner.app 这一个目录** rsync 到 build/ios/iphoneos/
+        #   （mac.dart：outputDir = targetBuildDir.replaceFirst('/$configuration-', '/')，
+        #    所以日志里那句 "Built build/ios/iphoneos/Runner.app" 就是这么来的），
+        #   **.dSYM 不在那次 rsync 里** ⇒ build/ios/iphoneos/ 下永远不会有 dSYM。
+        #   之前写死 `build/ios/iphoneos/*.dSYM`，因此长期是「步骤 success 但零产物」。
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: runner-dsym
-          path: build/ios/iphoneos/*.dSYM
+          path: |
+            build/ios/**/*.dSYM
           retention-days: 30
           if-no-files-found: warn
 
@@ -725,8 +738,13 @@ jobs:
         if: always()
         continue-on-error: true
         run: |
-          DWARF=build/ios/iphoneos/Runner.app.dSYM/Contents/Resources/DWARF/Runner
-          if [ ! -f "$DWARF" ]; then echo "⚠️ 没有 dSYM，跳过"; exit 0; fi
+          # dSYM 的真实位置随 Flutter 版本会变（原因见上面「Upload dSYM」的注释），
+          # 所以这里用 find 动态定位，不要再写死 build/ios/iphoneos/。
+          echo "=== build/ios 下的 dSYM ==="
+          find build/ios -maxdepth 3 -name '*.dSYM' -type d 2>/dev/null || true
+          DWARF=$(find build/ios -type f -path '*/Contents/Resources/DWARF/Runner' 2>/dev/null | head -1)
+          if [ -z "$DWARF" ]; then echo "⚠️ 没有 dSYM，跳过"; exit 0; fi
+          echo "DWARF=$DWARF"
           echo "=== dSYM uuid (应与 .ips 的 slice_uuid 一致) ==="
           xcrun dwarfdump --uuid "$DWARF" || true
           # 崩点换算（链址 = 0x100000000 + imageOffset）：
