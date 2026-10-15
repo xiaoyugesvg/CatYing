@@ -384,6 +384,28 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     return ApiConfig.instance.getSource(sourceKey)?.isSpiderSource ?? false;
   }
 
+  /// 本页能不能「换源」（在当前源内重新搜索、挑正确结果）。
+  ///
+  /// ⚠️ 与 [isSpiderSource]（= `type == 3`，**播放入口分流**在用）**分开**：
+  ///   那个判据决定"播放地址走 Spider 取址还是 CMS 直取"，不能动。
+  ///   这个只决定"详情页那个 🔁 按钮显不显示"。
+  ///
+  /// 为什么不能继续用 `type == 3`（用户 2026-10-15：
+  /// 「默认详情页里面那个换源按钮是不是没了？」）：
+  ///   · 换源弹窗（`_showSpiderPickDialog`）自己的前置条件只有一条 ——
+  ///     **当前有可用的 Spider 上下文 key**（key 为空才提示"当前源不是 Spider 源"）；
+  ///   · 而 `type == 4` 的 TVBox / 远程接口线路**同样是脚本引擎在跑**
+  ///     （日志实证：`setCurrentSpider: key=…, type=4` + `/spider/<key>/4/…`），
+  ///     换源对它一样有用，却因为 type≠3 被整块隐藏了；
+  ///   · 另外从历史/收藏进来时 `sourceKey` 可能已不在当前订阅的线路表里
+  ///     （`getSource` 返回 null）⇒ `isSpiderSource` 也被动变 false，按钮消失。
+  /// 所以这里改成与弹窗**同一个口径**：脚本引擎驱动的源（3/4）且当前 key 非空。
+  bool get canSwitchSourceInPage {
+    final t = ApiConfig.instance.getSource(vodInfo.value?.sourceKey ?? '')?.type;
+    if (t != null && t != 3 && t != 4) return false; // CMS(0/1) 等：本页换源不适用
+    return SpiderService.instance.getCurrentSpiderInfo().key.trim().isNotEmpty;
+  }
+
   /// 详情加载代次：切页/切片时递增，过期响应直接丢弃
   int _detailLoadToken = 0;
 

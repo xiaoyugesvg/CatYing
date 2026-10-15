@@ -1432,9 +1432,11 @@ class _DetailPageState extends State<DetailPage> {
                       ),
                     ),
                     const SizedBox(width: AppTheme.spacingSM),
-                    // Spider 源：手动换源/选择正确结果（同名剧匹配错时）
+                    // Spider / 远程接口源：手动换源、选正确结果（同名剧匹配错时）
+                    // ⚠️ 判据用 canSwitchSourceInPage（与换源弹窗同一口径），
+                    //    不是 isSpiderSource（那个只管 type==3，是播放入口分流在用的）
                     Obx(() {
-                      if (!_controller.isSpiderSource) {
+                      if (!_controller.canSwitchSourceInPage) {
                         return const SizedBox.shrink();
                       }
                       return GestureDetector(
