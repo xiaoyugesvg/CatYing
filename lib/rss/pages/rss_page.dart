@@ -230,15 +230,32 @@ class _RssPageState extends State<RssPage> {
     );
   }
 
-  /// 顶栏动作图标：内边距清零 + 固定 36 热区 ⇒ 视觉上**紧贴右边**。
+  /// 顶栏动作按钮：**圆形浅底**（与影视首页右上角 / 搜索源面板右上角同款）。
+  ///
+  /// 之前是无底色的裸图标（视觉上"飘"在顶栏里，用户 2026-10-15：「顶栏太丑了」）；
+  /// 现在统一成 30×30 圆底 + 15 号图标，和影视模块完全一致。
   Widget _topIcon(IconData icon, String tooltip, VoidCallback? onTap) =>
-      IconButton(
-        tooltip: tooltip,
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-        iconSize: 20,
-        onPressed: onTap,
-        icon: Icon(icon, color: AppTheme.textPrimary),
+      Tooltip(
+        message: tooltip,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: AppTheme.backgroundTertiary,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              size: 15,
+              color: onTap == null
+                  ? AppTheme.textTertiary
+                  : AppTheme.textSecondary,
+            ),
+          ),
+        ),
       );
 
   /// 登录 / 源站设置 —— 按源的 `loginUi` 动态生成表单，
@@ -264,74 +281,22 @@ class _RssPageState extends State<RssPage> {
     _reload();
   }
 
-  /// 切换订阅源：**卡片网格**（一行 2 个）—— 用户 2026-10-15：
-  /// 「弹窗也太丑了，要卡片式的，一行 2-3 个这种」。
+  /// 切换订阅源 —— 版式**对齐影视模块的 `SourceSwitchSheet`**
+  ///（用户 2026-10-15：「RSS 这个顶栏切换参考影视撒」）：
+  /// 约 0.4 屏高、标题 + 定位 + 网格/列表切换、搜索胶囊、2 列卡片。
   Future<void> _pickSource() async {
     final list = store.sources.where((e) => e.enabled).toList();
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: AppTheme.backgroundSecondary,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SheetHandle(),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Text('切换订阅源',
-                      style: TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: AppTheme.fontTitle3,
-                          fontWeight: FontWeight.w600)),
-                  const Spacer(),
-                  Text('停用的源不显示',
-                      style: TextStyle(
-                          color: AppTheme.textTertiary,
-                          fontSize: AppTheme.fontCaption)),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Flexible(
-                child: SingleChildScrollView(
-                  child: CardGrid(
-                    columns: 2,
-                    children: [
-                      for (final s in list)
-                        CardGridItem(
-                          title: s.name,
-                          subtitle: s.url,
-                          selected: s.id == store.selectedId,
-                          leading: CardGridAvatar(s.name,
-                              selected: s.id == store.selectedId),
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            if (s.id != store.selectedId) store.select(s.id);
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              CardGridItem(
-                icon: Icons.settings_outlined,
-                title: 'RSS 管理',
-                subtitle: '导入订阅链接 / OPML / 本地文件',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _openManage();
-                },
-              ),
-            ],
-          ),
-        ),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _RssSourceSwitchSheet(
+        sources: list,
+        selectedId: store.selectedId,
+        onPick: (id) {
+          if (id != store.selectedId) store.select(id);
+        },
+        onManage: _openManage,
       ),
     );
   }
@@ -348,39 +313,53 @@ class _RssPageState extends State<RssPage> {
           SizedBox(height: topInset),
           SizedBox(
             height: 46,
-            child: Row(
-              children: [
-                const SizedBox(width: 16),
-                Text('RSS',
-                    style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontTitle3,
-                        fontWeight: FontWeight.w600)),
-                const SizedBox(width: 8),
-                if (src != null)
-                  Flexible(
-                    child: Text(
-                      src.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: AppTheme.textTertiary,
-                          fontSize: AppTheme.fontCaption),
+            child: Padding(
+              // 左 16 与页面内容对齐；右侧只留 6 ⇒ 圆形按钮贴近屏幕边
+              //（保留用户 2026-10-15「图标要到边」的要求）
+              padding: const EdgeInsets.fromLTRB(16, 0, 6, 0),
+              child: Row(
+                children: [
+                  // 左：Logo + 源名（**点它换源**）—— 与影视首页顶栏同款
+                  //（用户 2026-10-15：「RSS 这个顶栏切换参考影视」）
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _pickSource,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const _RssLogo(),
+                        const SizedBox(width: 8),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 150),
+                          child: Text(
+                            src?.name ?? 'RSS',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: AppTheme.fontHeadline,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.expand_more_rounded,
+                            size: 16, color: AppTheme.textTertiary),
+                      ],
                     ),
                   ),
-                const Spacer(),
-                // ⚠️ 三个图标必须**贴到右边**（用户 2026-10-15：「图标没有到边」）：
-                //   IconButton 自带 8px 内边距 + 末尾 4px 留白 ⇒ 视觉上离屏幕边
-                //   还有一段。这里把内边距清零、只留 36 的点击热区 + 末尾 2px。
-                _topIcon(Icons.swap_horiz_rounded, '切换订阅源', _pickSource),
-                // 源配了 `loginUi` 才出「登录 / 源站设置」（如「影视聚合(资源站)」
-                // 靠它切 27 个影视源站）
-                if ((src?.loginUi ?? '').trim().isNotEmpty)
-                  _topIcon(Icons.key_rounded, '登录 / 源站设置', _openLogin),
-                _topIcon(Icons.refresh_rounded, '刷新', _loading ? null : _reload),
-                _topIcon(Icons.tune_rounded, 'RSS 管理', _openManage),
-                const SizedBox(width: 2),
-              ],
+                  const Spacer(),
+                  // 源配了 `loginUi` 才出「登录 / 源站设置」（如「影视聚合(资源站)」
+                  // 靠它切 27 个影视源站）
+                  if ((src?.loginUi ?? '').trim().isNotEmpty) ...[
+                    _topIcon(Icons.key_rounded, '登录 / 源站设置', _openLogin),
+                    const SizedBox(width: 8),
+                  ],
+                  _topIcon(Icons.refresh_rounded, '刷新', _loading ? null : _reload),
+                  const SizedBox(width: 8),
+                  _topIcon(Icons.tune_rounded, 'RSS 管理', _openManage),
+                ],
+              ),
             ),
           ),
           if (channels.length > 1)
@@ -654,6 +633,360 @@ class _RssPageState extends State<RssPage> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// RSS 顶栏 Logo —— 与影视首页的 `_CatPawLogo` **同款造型**
+///（34×34 圆角渐变方块 + 同色柔光），只是图标换成 RSS。
+///
+/// 用户 2026-10-15：「RSS 这个顶栏切换参考影视撒，顶栏太丑了」⇒ 顶栏左侧
+/// 统一成"Logo + 加粗源名（点击换源）"，和影视首屏的视觉语言一致。
+class _RssLogo extends StatelessWidget {
+  const _RssLogo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppTheme.accentColor.withValues(alpha: 0.65),
+            AppTheme.accentColor,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.accentColor.withValues(alpha: 0.35),
+            blurRadius: 10,
+          ),
+        ],
+      ),
+      child: const Icon(Icons.rss_feed, color: Colors.white, size: 20),
+    );
+  }
+}
+
+/// 订阅源切换面板 —— **照影视模块 `SourceSwitchSheet` 的版式做**：
+///   拖拽条 → 「标题 + 定位 + 网格/列表切换」→ 搜索胶囊 →
+///   2 列卡片（3.4 纵横比）/ 单列行 → 底部「RSS 管理」入口
+///
+/// 用户 2026-10-15：「RSS 这个顶栏切换参考影视撒，顶栏太丑了」。
+class _RssSourceSwitchSheet extends StatefulWidget {
+  const _RssSourceSwitchSheet({
+    required this.sources,
+    required this.selectedId,
+    required this.onPick,
+    required this.onManage,
+  });
+
+  final List<RssSource> sources;
+  final String selectedId;
+  final ValueChanged<String> onPick;
+  final VoidCallback onManage;
+
+  @override
+  State<_RssSourceSwitchSheet> createState() => _RssSourceSwitchSheetState();
+}
+
+class _RssSourceSwitchSheetState extends State<_RssSourceSwitchSheet> {
+  final TextEditingController _search = TextEditingController();
+  final ScrollController _scroll = ScrollController();
+  String _kw = '';
+
+  /// false=单列列表 / true=双排网格（默认双排，与影视面板一致）
+  bool _grid = true;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  List<RssSource> get _list {
+    if (_kw.isEmpty) return widget.sources;
+    final k = _kw.toLowerCase();
+    return widget.sources.where((s) => s.name.toLowerCase().contains(k)).toList();
+  }
+
+  /// 定位到当前选中的源（与影视面板同款功能）。
+  ///
+  /// 用**算术**算行偏移，不用 `ensureVisible` —— 选中的源常在很下面、
+  /// 还没被 build，那时拿不到 context。
+  void _locate() {
+    final list = _list;
+    final i = list.indexWhere((s) => s.id == widget.selectedId);
+    if (i < 0 || !_scroll.hasClients) return;
+    final w = MediaQuery.of(context).size.width;
+    // 与下面网格参数保持一致：2 列 / 间距 10 / 纵横比 3.4 / 行距 8
+    final rowH = _grid ? ((w - 32 - 10) / 2) / 3.4 + 8 : 52.0;
+    final offset = _grid ? (i ~/ 2) * rowH : i * rowH;
+    final pos = _scroll.position;
+    _scroll.animateTo(
+      offset.clamp(0.0, pos.maxScrollExtent),
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOut,
+    );
+  }
+
+  Widget _circleBtn(IconData icon, VoidCallback onTap) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: AppTheme.backgroundTertiary,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, size: 15, color: AppTheme.textSecondary),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final h = MediaQuery.of(context).size.height;
+    final list = _list;
+    return Container(
+      height: (h * 0.4).clamp(h * 0.34, h * 0.48),
+      decoration: BoxDecoration(
+        color: AppTheme.backgroundSecondary,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border.all(color: AppTheme.borderLight, width: 0.5),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(top: 10, bottom: 4),
+              child: SheetHandle(),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Row(
+                children: [
+                  Text('切换订阅源',
+                      style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontHeadline,
+                          fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  _circleBtn(Icons.my_location_rounded, _locate),
+                  const SizedBox(width: 8),
+                  _circleBtn(
+                    _grid ? Icons.view_list_outlined : Icons.grid_view_outlined,
+                    () => setState(() => _grid = !_grid),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Container(
+                height: 36,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.backgroundTertiary,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.search,
+                        size: 16, color: AppTheme.textTertiary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: _search,
+                        onChanged: (v) => setState(() => _kw = v.trim()),
+                        style: TextStyle(
+                            fontSize: AppTheme.fontSubhead,
+                            color: AppTheme.textPrimary),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          border: InputBorder.none,
+                          hintText: '搜索订阅源',
+                          hintStyle: TextStyle(
+                              fontSize: AppTheme.fontSubhead,
+                              color: AppTheme.textTertiary),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: list.isEmpty
+                  ? Center(
+                      child: Text('未找到匹配的订阅源',
+                          style: TextStyle(
+                              fontSize: AppTheme.fontSubhead,
+                              color: AppTheme.textTertiary)),
+                    )
+                  : ListView(
+                      controller: _scroll,
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      children: [
+                        if (_grid)
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              mainAxisSpacing: 8,
+                              crossAxisSpacing: 10,
+                              childAspectRatio: 3.4,
+                            ),
+                            itemCount: list.length,
+                            itemBuilder: (c, i) => _tile(list[i]),
+                          )
+                        else
+                          for (final s in list)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: _row(s),
+                            ),
+                      ],
+                    ),
+            ),
+            // 底部入口：去管理页导入 / 排序 / 删除
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                Navigator.pop(context);
+                widget.onManage();
+              },
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                padding: const EdgeInsets.symmetric(vertical: 11),
+                decoration: BoxDecoration(
+                  color: AppTheme.backgroundTertiary,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.borderLight, width: 0.5),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.tune_rounded,
+                        size: 16, color: AppTheme.textSecondary),
+                    const SizedBox(width: 6),
+                    Text('RSS 管理',
+                        style: TextStyle(
+                            fontSize: AppTheme.fontSubhead,
+                            color: AppTheme.textPrimary)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _pick(RssSource s) {
+    Navigator.pop(context);
+    widget.onPick(s.id);
+  }
+
+  /// 网格卡片：首字头像 + 源名 + 地址
+  Widget _tile(RssSource s) {
+    final on = s.id == widget.selectedId;
+    return GestureDetector(
+      onTap: () => _pick(s),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: on
+              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              : AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: on
+                ? AppTheme.accentColor.withValues(alpha: 0.5)
+                : AppTheme.borderLight,
+            width: on ? 1 : 0.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            CardGridAvatar(s.name, selected: on),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(s.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: AppTheme.fontSubhead,
+                          fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+                          color: AppTheme.textPrimary)),
+                  const SizedBox(height: 2),
+                  Text(s.url,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: AppTheme.fontCaption,
+                          color: AppTheme.textTertiary)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 单列行
+  Widget _row(RssSource s) {
+    final on = s.id == widget.selectedId;
+    return GestureDetector(
+      onTap: () => _pick(s),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: on
+              ? AppTheme.accentColor.withValues(alpha: 0.12)
+              : AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: on
+                ? AppTheme.accentColor.withValues(alpha: 0.5)
+                : AppTheme.borderLight,
+            width: on ? 1 : 0.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            CardGridAvatar(s.name, selected: on),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(s.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: AppTheme.fontSubhead,
+                      fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+                      color: AppTheme.textPrimary)),
+            ),
+            if (on)
+              Icon(Icons.check_circle_rounded,
+                  size: 16, color: AppTheme.accentColor),
+          ],
         ),
       ),
     );
