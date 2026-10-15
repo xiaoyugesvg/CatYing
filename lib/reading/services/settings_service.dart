@@ -309,6 +309,77 @@ class SettingsService extends ChangeNotifier {
   bool _navFloating = true; // 导航栏是否悬浮（胶囊型毛玻璃样式），默认开启
   bool _navIconOnly = false; // 导航栏只显示图标（隐藏文字标签），默认关
   bool _pageTabsFollowNav = true; // 收藏/书架/下载页 tab 是否跟随导航栏 manga/book 可见性
+
+  // ── 书架 / 收藏 卡片外观（用户 2026-10-15：显示设置新增 3 项）────────
+  static const _kListDensityKey = 'reading_list_density'; // 0紧凑 1标准 2宽松
+  static const _kCoverRadiusKey = 'reading_cover_radius'; // 0小 1中 2大
+  static const _kCardInfoKey = 'reading_card_info'; // 卡片信息（进度/来源/更新角标）
+
+  int _listDensity = 1; // 0=紧凑 1=标准 2=宽松
+  int _coverRadius = 1; // 0=小 1=中 2=大
+  bool _cardInfo = true; // 是否显示卡片上的信息徽标
+
+  /// 书架 / 收藏 卡片密度：0=紧凑 1=标准 2=宽松
+  int get listDensity => _listDensity;
+
+  /// 封面圆角档位：0=小 1=中 2=大
+  int get coverRadius => _coverRadius;
+
+  /// 卡片信息（进度 / 来源 / 更新角标）是否显示
+  bool get cardInfo => _cardInfo;
+
+  /// 封面圆角像素（档位 → px）
+  double get coverRadiusPx => switch (_coverRadius) {
+        0 => 6.0,
+        2 => 16.0,
+        _ => 10.0,
+      };
+
+  /// 卡片留白 / 间距的密度系数
+  double get densityScale => switch (_listDensity) {
+        0 => 0.8,
+        2 => 1.3,
+        _ => 1.0,
+      };
+
+  Future<void> setListDensity(int value) async {
+    if (_listDensity == value) return;
+    _listDensity = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_kListDensityKey, value);
+      PrefsMirror.snapshotSoon();
+    } catch (e) {
+      _log('保存列表密度失败: $e');
+    }
+  }
+
+  Future<void> setCoverRadius(int value) async {
+    if (_coverRadius == value) return;
+    _coverRadius = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_kCoverRadiusKey, value);
+      PrefsMirror.snapshotSoon();
+    } catch (e) {
+      _log('保存封面圆角失败: $e');
+    }
+  }
+
+  Future<void> setCardInfo(bool value) async {
+    if (_cardInfo == value) return;
+    _cardInfo = value;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kCardInfoKey, value);
+      PrefsMirror.snapshotSoon();
+    } catch (e) {
+      _log('保存卡片信息开关失败: $e');
+    }
+  }
   HomeBannerStyle _homeBannerStyle =
       HomeBannerStyle.wide; // 首页幻灯片样式（默认保持原样：横版大图）
   PageDefaultContent _pageDefaultContent =
@@ -682,6 +753,10 @@ class SettingsService extends ChangeNotifier {
       // 导航栏悬浮开关
       _navFloating = prefs.getBool(_kNavFloatingKey) ?? true;
       _navIconOnly = prefs.getBool(_kNavIconOnlyKey) ?? false;
+      // 书架/收藏 卡片外观（显示设置，2026-10-15）
+      _listDensity = (prefs.getInt(_kListDensityKey) ?? 1).clamp(0, 2);
+      _coverRadius = (prefs.getInt(_kCoverRadiusKey) ?? 1).clamp(0, 2);
+      _cardInfo = prefs.getBool(_kCardInfoKey) ?? true;
       // 当前漫画源
       // 🔴 历史版本这里默认值硬编码成 'copymanga'：拷贝漫画在内置源列表里只排第
       // 14 个，从没主动选过源的用户打开漫画也被钉在拷贝，而不是列表第一个源。

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
+import '../widgets/jelly_mode_picker.dart';
 import '../../common/theme.dart';
 
 /// 漫画阅读模式分段选项顺序（对齐参考图 IMG_8567 的 5 段 chips：
@@ -312,43 +313,17 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
             ),
           ),
           const SizedBox(height: 12),
-          // 5 段 chips（参考图 IMG_8567：右左/左右/消散/无动画/拼页）
-          Row(
-            children: [
-              for (var i = 0; i < _mangaModes.length; i++) ...[
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => s.setReadingMode(_mangaModes[i]),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 9),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: s.readingMode == _mangaModes[i]
-                            ? JellyTheme.primary
-                            : (isDark
-                                ? Colors.white.withValues(alpha: 0.08)
-                                : Colors.black.withValues(alpha: 0.05)),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        _mangaModeLabels[_mangaModes[i]]!,
-                        style: TextStyle(
-                          fontSize: AppTheme.fontBody,
-                          fontWeight: s.readingMode == _mangaModes[i]
-                              ? FontWeight.w600
-                              : FontWeight.normal,
-                          color: s.readingMode == _mangaModes[i]
-                              ? Colors.white
-                              : (isDark
-                                  ? Colors.white
-                                  : JellyTheme.textPrimaryLight),
-                        ),
-                      ),
-                    ),
-                  ),
+          // 5 个模式块（图标 + 名称；用户 2026-10-15：纯文字 chip 不够好）
+          JellyModePicker(
+            fg: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+            items: [
+              for (final m in _mangaModes)
+                JellyModeItem(
+                  label: _mangaModeLabels[m]!,
+                  symbol: mangaModeSymbol(m),
+                  selected: s.readingMode == m,
+                  onTap: () => s.setReadingMode(m),
                 ),
-                if (i < _mangaModes.length - 1) const SizedBox(width: 6),
-              ],
             ],
           ),
         ],
@@ -386,43 +361,17 @@ class _ReadingSettingsPageState extends State<ReadingSettingsPage> {
             ),
           ),
           const SizedBox(height: 12),
-          // 5 段 chips（同漫画阅读模式）
-          Row(
-            children: [
-              for (var i = 0; i < _bookModes.length; i++) ...[
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => s.setBookReadingMode(_bookModes[i]),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 9),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: s.bookReadingMode == _bookModes[i]
-                            ? JellyTheme.primary
-                            : (isDark
-                                ? Colors.white.withValues(alpha: 0.08)
-                                : Colors.black.withValues(alpha: 0.05)),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        _bookModeLabels[_bookModes[i]]!,
-                        style: TextStyle(
-                          fontSize: AppTheme.fontBody,
-                          fontWeight: s.bookReadingMode == _bookModes[i]
-                              ? FontWeight.w600
-                              : FontWeight.normal,
-                          color: s.bookReadingMode == _bookModes[i]
-                              ? Colors.white
-                              : (isDark
-                                  ? Colors.white
-                                  : JellyTheme.textPrimaryLight),
-                        ),
-                      ),
-                    ),
-                  ),
+          // 5 个模式块（图标 + 名称；与上方漫画阅读模式同款）
+          JellyModePicker(
+            fg: isDark ? Colors.white : JellyTheme.textPrimaryLight,
+            items: [
+              for (final m in _bookModes)
+                JellyModeItem(
+                  label: _bookModeLabels[m]!,
+                  symbol: bookModeSymbol(m),
+                  selected: s.bookReadingMode == m,
+                  onTap: () => s.setBookReadingMode(m),
                 ),
-                if (i < _bookModes.length - 1) const SizedBox(width: 6),
-              ],
             ],
           ),
         ],

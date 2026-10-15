@@ -223,9 +223,27 @@ class ParseBean {
   static Map<String, String>? _parseExtMap(dynamic value) {
     if (value == null) return null;
     if (value is Map) {
-      return value.map((k, v) => MapEntry(k.toString(), v.toString()));
+      return value.map((k, v) => MapEntry(k.toString(), _extValue(v)));
     }
     return null;
+  }
+
+  /// ext 的值统一成字符串。
+  ///
+  /// ⚠️ 嵌套 Map/List 必须用 **jsonEncode**：TVBox 的 `ext.header` 有两种写法 ——
+  /// JSON 字符串（`"header": "{\"User-Agent\":\"…\"}"`）与**对象**
+  /// （`"header": {"User-Agent":"…"}`）。对象若走 `toString()` 会得到 Dart 的
+  /// `{User-Agent: …}` 格式，下游 `jsonDecode` 解不出，请求头被静默丢弃、
+  /// 表现为"解析站要求 UA 却一直解析失败"（2026-10-15 深挖发现）。
+  static String _extValue(dynamic v) {
+    if (v == null) return '';
+    if (v is String) return v;
+    if (v is Map || v is List) {
+      try {
+        return jsonEncode(v);
+      } catch (_) {}
+    }
+    return v.toString();
   }
 }
 

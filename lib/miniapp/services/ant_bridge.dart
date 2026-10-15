@@ -15,12 +15,14 @@ import '../../models/source_bean.dart';
 import '../../models/vod_info.dart';
 import '../../services/api_config.dart';
 import '../../services/app_log.dart';
-import '../../services/play_route.dart';
 import '../../services/parse_service.dart';
+import '../../services/player_prefs.dart';
+import '../../services/sniff_filter.dart';
 import '../../services/source_service.dart';
 import '../../services/spider_service.dart';
 import '../../widgets/app_toast.dart';
 import '../../pages/play/sniff_player_page.dart';
+import '../../pages/play/webview_player_page.dart';
 import '../pages/mini_app_player_page.dart';
 
 /// 官方 ant JSAPI SDK v4 桥（Dart 侧实现）。
@@ -901,18 +903,20 @@ class AntBridge {
     final jx = (args['jx'] ?? 0).toString();
     if (url.isEmpty) throw AntError('INVALID_PARAMS', 'player.open: url 必填');
 
-    final headers = args['headers'] is Map
+    var headers = args['headers'] is Map
         ? (args['headers'] as Map)
             .map((k, v) => MapEntry(k.toString(), v.toString()))
         : const <String, String>{};
 
-    // 与影视端**同一套分流**（规则集中在 services/play_route.dart）：
+    // 与影视端**同一套分流**（规则集中在 services/sniff_filter.dart +
+    // play_route.dart 的后缀清单，且用户自定义的后缀清单在这里也生效）：
     //   ① 主流正版站（优爱腾芒B…），或线路显式标了 parse/jx → 先过解析接口；
     //   ② 其余站点 → 直接嗅探。
     // 解析出直链直接播；解析出网页 / 未命中 / 没配接口 → 交给嗅探页兜底。
     var candidate = url;
-    if (!looksLikeDirectMedia(candidate)) {
-      final mustParse = parse == '1' || jx == '1' || needParseFirst(candidate);
+    if (!SniffFilter.isDirectMedia(candidate)) {
+      final mustParse =
+          parse == '1' || jx == '1' || SniffFilter.shouldParse(candidate);
       if (mustParse && ParseService.instance.enabled) {
         final outcome = await ParseService.instance.parseOutcome(candidate);
         if (outcome != null && outcome.url.isNotEmpty) {
@@ -920,14 +924,32 @@ class AntBridge {
               '[AntBridge] player.open 解析「${outcome.sourceName}」→ ${outcome.url}'
               '（${outcome.direct ? "直链" : "仍为网页，转嗅探"}）');
           candidate = outcome.url;
+          // 解析接口自带的请求头（防盗链）随地址带上；小程序传入的优先
+          final h = outcome.headers;
+          if (h != null && h.isNotEmpty) {
+            headers = {...h, ...headers};
+          }
         } else {
           AppLog.instance.log('[AntBridge] player.open 解析未命中，转直接嗅探');
         }
       }
-      if (!looksLikeDirectMedia(candidate)) {
+      if (!SniffFilter.isDirectMedia(candidate) &&
+          PlayerPrefs.instance.sniffEnabled.value) {
         AppLog.instance.log('[AntBridge] player.open 转嗅探: $candidate');
-        Get.to(() => SniffPlayerPage(url: candidate, title: title));
+        // 把小程序传入的请求头带给嗅探页（嗅探到直链后播放要用）
+        Get.to(() => SniffPlayerPage(
+            url: candidate,
+            title: title,
+            headers: headers.isEmpty ? null : headers));
         return {'route': 'sniff', 'url': candidate, 'sniff': true};
+      }
+      if (!SniffFilter.isDirectMedia(candidate)) {
+        // 嗅探总开关关闭（默认）：网页地址不再进嗅探页，改用内嵌网页
+        // 播放器打开——直接丢给原生播放器会黑屏（2026-10-15）。
+        AppLog.instance.log(
+            '[AntBridge] player.open 嗅探已关闭，网页地址转内嵌网页播放器: $candidate');
+        Get.to(() => WebviewPlayerPage(url: candidate, title: title));
+        return {'route': 'webview', 'url': candidate, 'sniff': false};
       }
     }
 

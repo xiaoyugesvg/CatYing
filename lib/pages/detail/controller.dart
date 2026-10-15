@@ -17,6 +17,7 @@ import '../../services/spider_service.dart';
 import '../../services/app_log.dart';
 import '../../services/network_manager.dart';
 import '../../services/play_route.dart';
+import '../../services/sniff_filter.dart';
 import '../../services/player_prefs.dart';
 import '../../services/ad_filter_service.dart';
 import '../../services/parse_service.dart';
@@ -87,6 +88,19 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   final selectedEpisodeIndex = 0.obs;
   final isPlaying = false.obs;
   final playUrl = Rx<String?>(null);
+
+  /// **正在自动嗅探的网页地址**（非空 = 已弹起嗅探页）。
+  ///
+  /// 为什么需要它（用户 2026-10-15「嗅探容易影响播放」）：
+  ///   · 详情页播放区**不再**同时挂内嵌 WebView —— 否则和嗅探页各加载一份
+  ///     同一网页，双份解码/双份声音，返回后底层还在跑（这是最主要的影响）；
+  ///   · 也用它做**去重**：已有嗅探页在栈中就不再 push 新页，避免"自动下一集"
+  ///     每集都叠一层嗅探页、返回要连按多次。
+  final sniffingUrl = Rx<String?>(null);
+
+  /// 正在走解析接口取地址（详情页据此显示"解析中"，且**不**启动 15 秒
+  /// "地址获取超时"计时 —— 解析慢时误报错误会打断用户观看）。
+  final isResolving = false.obs;
   final playHeaders = <String, String>{}.obs;
   final playbackSessionId = ''.obs;
   final resumeSeconds = 0.0.obs;
@@ -294,6 +308,9 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   @override
   void onClose() {
     WidgetsBinding.instance.removeObserver(this);
+    // 详情页销毁：清掉嗅探会话残留，避免下次打开详情页被误判为"正在嗅探"
+    sniffingUrl.value = null;
+    SniffPlayerPage.pendingUrl.value = null;
     super.onClose();
   }
 
@@ -419,6 +436,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     isPlaying.value = false;
     playUrl.value = null;
     playHeaders.clear();
+    _failedPlayUrls.clear(); // 换源线路：失败记录清零
 
     selectedFlag.value = flag;
     vodInfo.value?.playFlag = flag;
@@ -466,6 +484,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     playHeaders.clear();
     resumeSeconds.value = 0;
     _realtimeProgressSeconds = 0;
+    _failedPlayUrls.clear(); // 换集：失败记录清零，新集重新给机会
 
     selectedEpisodeIndex.value = index;
     vodInfo.value?.playIndex = index;
@@ -502,6 +521,7 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     final targetIndex = state.episodeIndex.clamp(0, episodes.length - 1);
     selectedEpisodeIndex.value = targetIndex;
     info.playIndex = targetIndex;
+    _failedPlayUrls.clear(); // 恢复播放（换集/换线路）：失败记录清零
 
     final progress = state.progressSeconds > 0 ? state.progressSeconds : 0.0;
     resumeSeconds.value = progress;
@@ -554,9 +574,35 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   ///
   /// 播放器错误以前只走到 DetailView 的空回调，用户看到的是白转圈。
   /// 这里统一落进 errorMessage，由详情页错误态渲染。
+  ///
+  /// 2026-10-15：直链 403/404/超时**先自动顺延**同集的其它候选地址
+  /// （多清晰度 / 多线路，见 [updateQualityOptions]），全部试完才把错误
+  /// 抛给界面 —— 原来一失败就要用户手动切线路。
   void setPlaybackError(String message) {
+    if ((playUrl.value ?? '').isNotEmpty && _advanceToNextCandidate()) return;
     errorMessage.value = message;
     isPlaying.value = false;
+  }
+
+  /// 本集内已被判定失败的地址（按 URL 去重，防止在多个同址候选间打转）
+  final Set<String> _failedPlayUrls = <String>{};
+
+  /// 顺延到下一条未试过的候选地址；没有则返回 false。
+  bool _advanceToNextCandidate() {
+    final current = playUrl.value ?? '';
+    if (current.isNotEmpty) _failedPlayUrls.add(current);
+
+    final next = qualityOptions.firstWhereOrNull(
+        (o) => o.url.isNotEmpty && !_failedPlayUrls.contains(o.url));
+    if (next == null) return false;
+
+    AppLog.instance.log(
+        '[Play] 播放失败 → 自动换线路「${next.name}」: ${next.url}');
+    selectedQualityId.value = next.id;
+    playUrl.value = next.url;
+    playbackSessionId.value = _newUuid();
+    isPlaying.value = true;
+    return true;
   }
 
   /// 播放/解析失败后用户点「重试」：重新解析当前集的播放地址。
@@ -572,6 +618,10 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     errorMessage.value = null;
     playUrl.value = null;
     isPlaying.value = false;
+    // 复位"解析中"标记：避免上一次解析异常退出后标志悬挂，
+    // 导致详情页永不报"地址获取超时"而卡在转圈。
+    isResolving.value = false;
+    _failedPlayUrls.clear(); // 用户手动重试：允许重新尝试所有候选
 
     final flag = selectedFlag.value;
     final episodes = info.playUrlMap[flag] ?? [];
@@ -585,6 +635,11 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       errorMessage.value = '当前剧集地址为空，请切换其他线路';
       return;
     }
+    // 用户点「重试」= 要重新解析：先让这个地址的解析缓存失效。
+    // 解析出的 m3u8 常带时效签名，若还命中 10 分钟内的旧缓存，会陷入
+    // "点重试 → 同一个坏地址 → 再失败" 的死循环（2026-10-15 深挖发现）。
+    ParseService.instance.invalidate(episode.url);
+
     if (episode.url.startsWith('/')) {
       _resolveSpiderPlayUrl(flag: flag, id: episode.url);
     } else {
@@ -608,7 +663,20 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       AppToast.message('当前地址不是网页，无法嗅探');
       return;
     }
-    Get.to(() => SniffPlayerPage(url: url, title: vodInfo.value?.name));
+    // 底层正在放的若是**网页**（内嵌 WebView），走统一入口让播放区让位 ——
+    // 否则详情页那个 WebView 会和嗅探页各加载一份同一网页（双份解码/双份
+    // 声音）。底层是直链播放器时不打断，直接打开嗅探页（2026-10-15 深挖）。
+    final current = playUrl.value ?? '';
+    if (current.isNotEmpty && !_looksLikeDirectMedia(current)) {
+      _autoSniff(url);
+      return;
+    }
+    Get.to(() => SniffPlayerPage(
+          url: url,
+          title: vodInfo.value?.name,
+          headers:
+              playHeaders.isEmpty ? null : Map<String, String>.from(playHeaders),
+        ));
   }
 
   /// 底栏「解析」选中某条线路后：记住选择，并用新线路**重解当前集**。
@@ -768,23 +836,44 @@ class DetailController extends GetxController with WidgetsBindingObserver {
           //   ② **其它站点** —— 不做解析，**直接交给 WebView 嗅探**从页面上
           //      抓媒体地址（省一次请求，也避免被解析接口解歪）。
           var playCandidate = resolvedUrl;
+          // 2026-10-15：是否解析改由 SniffFilter 统一判定（内置主流站点 +
+          // 用户在「播放设置 → 嗅探设置」里追加的域名，减去屏蔽域名）。
           if (!_looksLikeDirectMedia(playCandidate) &&
-              needParseFirst(playCandidate) &&
+              SniffFilter.shouldParse(playCandidate) &&
               ParseService.instance.enabled) {
-            final outcome =
-                await ParseService.instance.parseOutcome(playCandidate);
-            if (outcome != null && outcome.url.isNotEmpty) {
-              AppLog.instance.log(
-                  '[Play] 「${outcome.sourceName}」解析 → ${outcome.url}'
-                  '（${outcome.direct ? "直链" : "仍为网页，转嗅探"}）');
-              playCandidate = outcome.url;
-            } else {
-              AppLog.instance.log('[Play] 解析接口未命中，转直接嗅探');
+            isResolving.value = true;
+            try {
+              final outcome =
+                  await ParseService.instance.parseOutcome(playCandidate);
+              if (outcome != null && outcome.url.isNotEmpty) {
+                AppLog.instance.log(
+                    '[Play] 「${outcome.sourceName}」解析 → ${outcome.url}'
+                    '（${outcome.direct ? "直链" : "仍为网页，转嗅探"}）');
+                playCandidate = outcome.url;
+                // 解析接口自带的请求头（防盗链）随地址一起带上；
+                // 源自己给的 header 更具体，不覆盖（2026-10-15）。
+                final h = outcome.headers;
+                if (h != null && h.isNotEmpty) {
+                  headers = {...h, ...headers};
+                }
+              } else {
+                AppLog.instance.log('[Play] 解析接口未命中，转直接嗅探');
+              }
+            } finally {
+              isResolving.value = false;
             }
           }
           if (_spiderResolveToken != token) return;
-          playUrl.value = playCandidate;
           playHeaders.value = headers;
+          // 解析完（或跳过解析）后**仍是网页地址**：嗅探开关开着就交给嗅探页
+          // 抓页面里的 m3u8/mp4。详情页**不**同时挂内嵌 WebView，避免和嗅探页
+          // 双重加载同一网页（双份解码 + 双份声音）——用户 2026-10-15。
+          if (!_looksLikeDirectMedia(playCandidate) &&
+              PlayerPrefs.instance.sniffEnabled.value) {
+            _autoSniff(playCandidate);
+            return;
+          }
+          playUrl.value = playCandidate;
           playbackSessionId.value = _newUuid();
           isPlaying.value = true;
         } else {
@@ -807,25 +896,13 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     return fallback;
   }
 
-  static const List<String> _directMediaExtensions = [
-    '.m3u8',
-    '.mp4',
-    '.flv',
-    '.ts',
-    '.mkv',
-    '.m3u',
-  ];
-
   /// 是否已是已知直链媒体（后缀命中）——是则无需再过解析接口。
-  bool _looksLikeDirectMedia(String url) {
-    if (url.isEmpty) return false;
-    final path = Uri.tryParse(url)?.path ?? url;
-    final lower = path.toLowerCase();
-    for (final ext in _directMediaExtensions) {
-      if (lower.endsWith(ext)) return true;
-    }
-    return false;
-  }
+  ///
+  /// 2026-10-15：统一委托 [SniffFilter.isDirectMedia]，它按**用户可自定义**的
+  /// 「影视直链后缀」清单判定（空则用出厂 13 种）。原来这里只认 6 种，
+  /// `.webm/.mov/.m4s/.mpd/.avi` 等能直接播的地址会被误判成"网页"→ 送去解析
+  /// 或被弹去嗅探页，等于白白打断一次播放。
+  bool _looksLikeDirectMedia(String url) => SniffFilter.isDirectMedia(url);
 
   /// 取流/播放入口统一入口：在 [_selectedPlayableURL] 基础上接入广告过滤与解析接口。
   ///
@@ -843,22 +920,78 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       candidate = fallback;
     }
 
-    if (!_looksLikeDirectMedia(candidate) && ParseService.instance.enabled) {
-      final outcome = await ParseService.instance.parseOutcome(candidate);
-      if (outcome != null && outcome.url.isNotEmpty) {
-        if (outcome.direct) {
+    // 2026-10-15：是否解析统一由 SniffFilter 判定（内置主流站点 +
+    // 用户追加域名 - 屏蔽域名），且解析总开关开启。不在解析范围内的
+    // 网页不请求解析接口，直接交给下面的自动嗅探。
+    if (!_looksLikeDirectMedia(candidate) &&
+        SniffFilter.shouldParse(candidate) &&
+        ParseService.instance.enabled) {
+      // 解析期间挂"解析中"标记：详情页据此显示文案，且不启动 15 秒
+      // "地址获取超时"计时（解析慢时误报错误会打断观看）。
+      isResolving.value = true;
+      try {
+        final outcome = await ParseService.instance.parseOutcome(candidate);
+        if (outcome != null && outcome.url.isNotEmpty) {
+          // 直链直接播；解析出的是另一个网页播放页 → 换它继续走自动嗅探
           candidate = outcome.url;
-        } else {
-          // 解析接口返回的是网页播放页 → 交给嗅探播放页，避免直接播黑屏
-          Get.to(() => SniffPlayerPage(url: outcome.url));
-          return;
+          // 解析接口的请求头（防盗链）随地址带上；已有的（源给的）优先
+          final h = outcome.headers;
+          if (h != null && h.isNotEmpty) {
+            playHeaders.value = {...h, ...playHeaders};
+          }
         }
+      } finally {
+        isResolving.value = false;
       }
+    }
+
+    // 仍是网页地址且嗅探开关开着 → 交给嗅探页抓媒体直链。
+    // ⚠️ 详情页播放区**不再**同时挂内嵌 WebView：否则会和嗅探页各加载一份
+    // 同一个网页（双份解码 + 双份声音，返回后底层还在跑）——用户 2026-10-15
+    // 「嗅探容易影响播放」的主因。
+    if (!_looksLikeDirectMedia(candidate) &&
+        PlayerPrefs.instance.sniffEnabled.value) {
+      _autoSniff(candidate);
+      return;
     }
 
     playUrl.value = candidate;
     playbackSessionId.value = _newUuid();
     isPlaying.value = true;
+  }
+
+  /// 把网页地址交给嗅探页（详情页播放区让位，避免双重加载）。
+  ///
+  /// 去重（用户 2026-10-15）：已有嗅探页在栈中时**不 push 新页**，改为把新
+  /// 地址交给已打开那页重载 —— 否则「自动下一集」每集都会叠一层嗅探页，
+  /// 返回要连按多次才能回详情页。
+  Future<void> _autoSniff(String url) async {
+    if (sniffingUrl.value != null) {
+      AppLog.instance.log('[Play] 已有嗅探页在栈中 → 复用重载: $url');
+      SniffPlayerPage.pendingUrl.value = url;
+      sniffingUrl.value = url;
+      return;
+    }
+    sniffingUrl.value = url;
+    AppLog.instance.log('[Play] 网页地址 → 自动嗅探: $url');
+    await Get.to(() => SniffPlayerPage(
+          url: url,
+          title: vodInfo.value?.name,
+          // 把上游（Spider 源 / 解析接口）的请求头带给嗅探页：嗅探到直链后
+          // 播放时要用，否则有防盗链的 CDN 会 403（2026-10-15）。
+          headers:
+              playHeaders.isEmpty ? null : Map<String, String>.from(playHeaders),
+        ));
+    // 期间详情页可能已被关闭（用户一路返回并退出），此时不可再写 Rx
+    if (isClosed) return;
+    // 从嗅探页返回详情页：结束嗅探态，改用网页本身兜底（原行为：能直接看网页）
+    if (sniffingUrl.value != url) return; // 期间已切到别的地址，交给那一次收尾
+    sniffingUrl.value = null;
+    if ((playUrl.value ?? '').isEmpty) {
+      playUrl.value = url;
+      playbackSessionId.value = _newUuid();
+      isPlaying.value = true;
+    }
   }
 
   void resetQualityState() {

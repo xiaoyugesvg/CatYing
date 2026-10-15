@@ -146,6 +146,9 @@ class ParseStore {
 
   /// 把订阅下发的线路**并入**本地：同 url 覆盖 name/type，不删本地已有的。
   /// 返回是否有变化（上层据此决定要不要刷新列表）。
+  ///
+  /// ⚠️ 订阅下发的线路常常**不带 ext**（header）；此时保留本地已填的 ext，
+  /// 否则用户手填的请求头会被订阅一次次清掉（2026-10-15）。
   Future<bool> absorb(Iterable<ParseBean> incoming) async {
     if (!_loaded) await load();
     var changed = false;
@@ -156,18 +159,57 @@ class ParseStore {
       if (i < 0) {
         _list.add(ParseBean(name: b.name, url: url, type: b.type, ext: b.ext));
         changed = true;
-      } else if (_list[i].name != b.name || _list[i].type != b.type) {
-        _list[i] = ParseBean(name: b.name, url: url, type: b.type, ext: b.ext);
-        changed = true;
+      } else {
+        final local = _list[i];
+        final mergedExt = b.ext ?? local.ext;
+        if (local.name != b.name ||
+            local.type != b.type ||
+            !_sameExt(local.ext, mergedExt)) {
+          _list[i] = ParseBean(
+              name: b.name, url: url, type: b.type, ext: mergedExt);
+          changed = true;
+        }
       }
     }
     if (changed) await _save();
     return changed;
   }
 
-  /// 手动新增 / 更新一条线路。
-  Future<void> addOrUpdate(ParseBean bean) async {
-    await absorb([bean]);
+  /// 手动新增 / 编辑一条线路（**整体替换**语义）。
+  ///
+  /// 与 [absorb]（订阅合并、会保留本地 ext）不同：这里用户清空请求头就要真的
+  /// 清掉。[originalUrl] 用于"改了地址"的场景 —— 先把旧 url 那条摘掉。
+  Future<void> addOrUpdate(ParseBean bean, {String? originalUrl}) async {
+    if (!_loaded) await load();
+    final url = bean.url.trim();
+    if (url.isEmpty) return;
+
+    final oldUrl = (originalUrl ?? '').trim();
+    if (oldUrl.isNotEmpty && oldUrl != url) {
+      _list.removeWhere((x) => x.url == oldUrl);
+      if (_activeUrl == oldUrl) _activeUrl = url; // 选中项跟着地址走
+    }
+
+    final fresh =
+        ParseBean(name: bean.name, url: url, type: bean.type, ext: bean.ext);
+    final i = _list.indexWhere((x) => x.url == url);
+    if (i < 0) {
+      _list.add(fresh);
+    } else {
+      _list[i] = fresh;
+    }
+    await _save();
+  }
+
+  /// 两个 ext（请求头）Map 是否等价
+  static bool _sameExt(Map<String, String>? a, Map<String, String>? b) {
+    if (identical(a, b)) return true;
+    if (a == null || b == null) return false;
+    if (a.length != b.length) return false;
+    for (final e in a.entries) {
+      if (b[e.key] != e.value) return false;
+    }
+    return true;
   }
 
   /// 删除一条线路；若删的正是选中项，选中态回到"自动"。

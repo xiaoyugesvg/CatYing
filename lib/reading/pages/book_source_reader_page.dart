@@ -26,6 +26,7 @@ import '../services/bsr_independent_layout.dart';
 import '../widgets/book_page_cover.dart';
 import '../widgets/book_page_curl.dart';
 import '../widgets/jelly_filter_sheet.dart';
+import '../widgets/jelly_mode_picker.dart';
 import '../widgets/color_picker_dialog.dart';
 import '../widgets/pomodoro_button.dart';
 import 'tts_engine_page.dart';
@@ -1702,8 +1703,8 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
               PageView.builder(
                 controller: _pageCtrl,
                 physics: _rs.pageMode == PageMode.none
-                    // 无动画：直接切换（拖动仍然可用，只是没有滑动惯性）
-                    ? const ClampingScrollPhysics()
+                    // 无动画：**不滑动**，点点击区/翻页按钮瞬切（Duration.zero）
+                    ? const NeverScrollableScrollPhysics()
                     : const PageScrollPhysics(),
                 itemCount: _pages.length,
                 onPageChanged: (i) {
@@ -6754,20 +6755,26 @@ class _BookSourceReaderPageState extends State<BookSourceReaderPage> {
                   padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
                   children: [
                     // ── 阅读模式（5 种）────────────────────────
-                    // 阅读模式：标签在左、5 个按钮在右（同一行，截图如此）
+                    // 阅读模式：标签在左、5 个模式块在右（同一行，截图如此）。
+                    // 用户 2026-10-15：纯文字 chip 辨识度差 ⇒ 换成
+                    // 「图标 + 名称」的等宽小块（JellyModePicker）。
                     _setRowRight(
                       '阅读模式',
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
+                      JellyModePicker(
+                        fg: _fg,
+                        items: [
                           for (final m in PageMode.values)
-                            _chip(m.label, _rs.pageMode == m, () {
-                              setState(() => _rs = _rs.copyWith(pageMode: m));
-                              _scheduleSavePrefs();
-                              // 模式变了要重新分页（上下模式不分页）
-                              _paginate();
-                            }, compact: true),
+                            JellyModeItem(
+                              label: m.label,
+                              symbol: pageModeSymbol(m),
+                              selected: _rs.pageMode == m,
+                              onTap: () {
+                                setState(() => _rs = _rs.copyWith(pageMode: m));
+                                _scheduleSavePrefs();
+                                // 模式变了要重新分页（上下模式不分页）
+                                _paginate();
+                              },
+                            ),
                         ],
                       ),
                     ),

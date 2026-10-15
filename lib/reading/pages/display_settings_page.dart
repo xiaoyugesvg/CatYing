@@ -66,6 +66,50 @@ class _DisplaySettingsPageState extends State<DisplaySettingsPage> {
             builder: (context, _) => _buildDefaultContentCard(isDark),
           ),
           const SizedBox(height: 12),
+          // ── 书架 / 收藏 卡片外观（用户 2026-10-15：显示设置新增 3 项）──
+          ListenableBuilder(
+            listenable: SettingsService(),
+            builder: (context, _) => _buildCard(
+              isDark,
+              title: '列表密度',
+              subtitle: '书架 / 收藏页卡片之间的松紧',
+              trailing: _buildChoiceTrailing(
+                isDark,
+                labels: const ['紧凑', '标准', '宽松'],
+                index: SettingsService().listDensity,
+                onPick: (i) => SettingsService().setListDensity(i),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          ListenableBuilder(
+            listenable: SettingsService(),
+            builder: (context, _) => _buildCard(
+              isDark,
+              title: '封面圆角',
+              subtitle: '书架 / 收藏页封面的圆角大小',
+              trailing: _buildChoiceTrailing(
+                isDark,
+                labels: const ['小', '中', '大'],
+                index: SettingsService().coverRadius,
+                onPick: (i) => SettingsService().setCoverRadius(i),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          ListenableBuilder(
+            listenable: SettingsService(),
+            builder: (context, _) => _buildCard(
+              isDark,
+              title: '卡片信息',
+              subtitle: '封面上的进度 / 来源 / 更新角标',
+              trailing: Switch.adaptive(
+                value: SettingsService().cardInfo,
+                onChanged: (v) => SettingsService().setCardInfo(v),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
           _buildViewCard(
             isDark,
             title: '漫画搜索页视图',
@@ -95,6 +139,50 @@ class _DisplaySettingsPageState extends State<DisplaySettingsPage> {
           ),
         ],
       ),
+    );
+  }
+
+  /// 三档分段选择（「列表密度 / 封面圆角」用）：
+  /// 选中的一段用主色实底 + 白字，未选中是极浅灰底，与页面卡片风格一致。
+  Widget _buildChoiceTrailing(
+    bool isDark, {
+    required List<String> labels,
+    required int index,
+    required ValueChanged<int> onPick,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < labels.length; i++) ...[
+          if (i > 0) const SizedBox(width: 6),
+          GestureDetector(
+            onTap: () => onPick(i),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOut,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: i == index
+                    ? JellyTheme.primary
+                    : (isDark
+                        ? Colors.white.withValues(alpha: 0.06)
+                        : Colors.black.withValues(alpha: 0.05)),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                labels[i],
+                style: TextStyle(
+                  fontSize: AppTheme.fontFootnote,
+                  fontWeight: i == index ? FontWeight.w700 : FontWeight.w500,
+                  color: i == index
+                      ? Colors.white
+                      : (isDark ? Colors.white70 : JellyTheme.textPrimaryLight),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 

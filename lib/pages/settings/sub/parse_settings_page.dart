@@ -12,12 +12,14 @@
 //     「自动」= 按列表顺序依次尝试，命中即用）；
 //   · 可删除、可手动添加。
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 
 import '../../../common/theme.dart';
 import '../../../models/app_config.dart';
 import '../../../services/api_config.dart';
+import '../../../services/parse_service.dart';
 import '../../../services/parse_store.dart';
 import '../../../widgets/common_widgets.dart';
 import 'settings_shared.dart';
@@ -34,6 +36,9 @@ class _ParseSettingsPageState extends State<ParseSettingsPage> {
   /// 订阅管理页的条数、播放器弹层才会同步。
   Future<void> _sync() async {
     ApiConfig.instance.parseBeanList.value = ParseStore.instance.list;
+    // 线路被增删改（含改请求头/类型）→ 清解析缓存，保证"改完立即生效"；
+    // 否则 10 分钟缓存内仍然用旧接口/旧 header 的结果（2026-10-15 深挖）。
+    ParseService.instance.clearCache();
     if (mounted) setState(() {});
   }
 
@@ -76,13 +81,117 @@ class _ParseSettingsPageState extends State<ParseSettingsPage> {
       helper: '支持 {url} 占位符 / url= 参数 / 直接拼接（与 TVBox 一致）',
     );
     if (url == null || url.trim().isEmpty) return;
+    if (!mounted) return;
+    final type = await _pickType(1);
+    if (type == null) return;
+    if (!mounted) return;
+    final headerText = await _editHeaderText(const <String, String>{});
+    if (headerText == null) return;
+
     await ParseStore.instance.addOrUpdate(ParseBean(
       name: name.trim(),
       url: url.trim(),
-      type: 1,
+      type: type,
+      ext: _extOf(_parseHeaders(headerText)),
     ));
     await _sync();
   }
+
+  /// 编辑已有线路（名称 / 地址 / 类型 / 请求头）——订阅下发的线路也能改。
+  Future<void> _edit(ParseBean b) async {
+    final name = await SettingsDialogs.editText(
+      context: context,
+      title: '线路名称',
+      initial: b.name,
+      hint: '如：量子解析',
+    );
+    if (name == null) return;
+    if (!mounted) return;
+    final url = await SettingsDialogs.editText(
+      context: context,
+      title: '线路地址',
+      initial: b.url,
+      hint: 'https://…/jx?url=',
+      helper: '支持 {url} 占位符 / url= 参数 / 直接拼接（与 TVBox 一致）',
+    );
+    if (url == null || url.trim().isEmpty) return;
+    if (!mounted) return;
+    final type = await _pickType(b.type);
+    if (type == null) return;
+    if (!mounted) return;
+    final headerText = await _editHeaderText(_headersOf(b));
+    if (headerText == null) return;
+
+    await ParseStore.instance.addOrUpdate(
+      ParseBean(
+        name: name.trim(),
+        url: url.trim(),
+        type: type,
+        ext: _extOf(_parseHeaders(headerText)),
+      ),
+      originalUrl: b.url, // 改了地址时把旧那条摘掉
+    );
+    await _sync();
+  }
+
+  /// 选接口类型：1=解析（直接返回地址），0=嗅探（返回网页播放页）
+  Future<int?> _pickType(int current) {
+    return SettingsDialogs.pick<int>(
+      context: context,
+      title: '接口类型',
+      options: const [1, 0],
+      selected: current,
+      labelBuilder: (t) =>
+          t == 1 ? '解析（直接返回地址）' : '嗅探（返回网页播放页）',
+    );
+  }
+
+  /// 请求头编辑弹层（每行一条 `名称: 值`）
+  Future<String?> _editHeaderText(Map<String, String> headers) {
+    final initial =
+        headers.entries.map((e) => '${e.key}: ${e.value}').join('\n');
+    return SettingsDialogs.editText(
+      context: context,
+      title: '请求头（可选）',
+      initial: initial,
+      hint: 'User-Agent: Mozilla/5.0',
+      maxLines: 6,
+      helper: '每行一条 `名称: 值`，例如 Referer / User-Agent。\n'
+          '有些解析站要求特定 UA / Referer 才返回结果。留空表示不带。',
+    );
+  }
+
+  /// 文本 → 请求头 Map（每行 `Key: Value`）
+  Map<String, String> _parseHeaders(String text) {
+    final map = <String, String>{};
+    for (final line in text.split(RegExp(r'[\r\n]+'))) {
+      final t = line.trim();
+      if (t.isEmpty) continue;
+      final i = t.indexOf(':');
+      if (i <= 0) continue;
+      final k = t.substring(0, i).trim();
+      final v = t.substring(i + 1).trim();
+      if (k.isNotEmpty) map[k] = v;
+    }
+    return map;
+  }
+
+  /// 线路已配置的请求头（与 ParseService._headerOf 的存储格式一致）
+  Map<String, String> _headersOf(ParseBean b) {
+    final raw = b.ext?['header'];
+    if (raw == null || raw.isEmpty) return const <String, String>{};
+    try {
+      final d = jsonDecode(raw);
+      if (d is Map) {
+        return d.map((k, v) => MapEntry(k.toString(), v.toString()));
+      }
+    } catch (_) {}
+    return const <String, String>{};
+  }
+
+  /// 请求头 Map → ParseBean.ext（空则不写 ext）
+  Map<String, String>? _extOf(Map<String, String> headers) =>
+      headers.isEmpty ? null : {'header': jsonEncode(headers)};
 
   @override
   Widget build(BuildContext context) {
@@ -124,17 +233,34 @@ class _ParseSettingsPageState extends State<ParseSettingsPage> {
                     ? AppTheme.accentColor
                     : AppTheme.textTertiary,
                 title: b.name.trim().isEmpty ? b.url : b.name,
-                subtitle: '${b.type == 1 ? '解析' : '嗅探'} · ${b.url}',
+                subtitle:
+                    '${b.type == 1 ? '解析' : '嗅探'}'
+                    '${_headersOf(b).isNotEmpty ? ' · 带请求头' : ''} · ${b.url}',
                 titleColor: active == b.url ? AppTheme.accentColor : null,
                 onTap: () => _select(b),
-                trailing: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => _remove(b),
-                  child: const Padding(
-                    padding: EdgeInsets.all(8),
-                    child: Icon(Icons.delete_outline,
-                        size: 18, color: Colors.redAccent),
-                  ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 编辑（名称/地址/类型/请求头）——订阅下发的线路也能改
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _edit(b),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Icon(Icons.edit_outlined,
+                            size: 18, color: AppTheme.textTertiary),
+                      ),
+                    ),
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _remove(b),
+                      child: const Padding(
+                        padding: EdgeInsets.all(8),
+                        child: Icon(Icons.delete_outline,
+                            size: 18, color: Colors.redAccent),
+                      ),
+                    ),
+                  ],
                 ),
               ),
           ],

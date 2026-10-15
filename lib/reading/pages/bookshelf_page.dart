@@ -3248,14 +3248,20 @@ class _BookshelfPageState extends State<BookshelfPage>
                       )..layout())
                       .height +
                   12;
+              // 管理 / 排序：一枚浅底圆角胶囊里的两枚图标。
+              //
+              // ✅ 用户 2026-10-15：①「中间那个 | 去掉」—— 原来两枚图标之间
+              //    横着一根 1×14 的分隔线，显得碎；②「尺寸高度加大一点，和旁边
+              //    不协调」—— 图标 16→18、每段点击区 23→30，胶囊更饱满，
+              //    视觉重量与右侧书架 chips 拉齐（高度仍与 chips 一致，基线不乱）。
               final fixedButtons = Container(
                 height: chipBoxHeight,
-                padding: const EdgeInsets.symmetric(horizontal: 1),
+                padding: const EdgeInsets.symmetric(horizontal: 2),
                 decoration: BoxDecoration(
                   color: isDark
                       ? Colors.white.withValues(alpha: 0.08)
                       : Colors.black.withValues(alpha: 0.045),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(16),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -3263,24 +3269,19 @@ class _BookshelfPageState extends State<BookshelfPage>
                     IconButton(
                       tooltip: '管理书架',
                       icon: Icon(Icons.dashboard_customize_rounded,
-                          size: 16, color: iconColor),
+                          size: 18, color: iconColor),
                       padding: EdgeInsets.zero,
                       constraints:
-                          const BoxConstraints(minWidth: 23, minHeight: 23),
+                          const BoxConstraints(minWidth: 30, minHeight: 30),
                       onPressed: _showManageShelves,
-                    ),
-                    Container(
-                      width: 1,
-                      height: 14,
-                      color: iconColor.withValues(alpha: 0.18),
                     ),
                     IconButton(
                       tooltip: '排序方式',
                       icon: Icon(Icons.swap_vert_rounded,
-                          size: 16, color: iconColor),
+                          size: 18, color: iconColor),
                       padding: EdgeInsets.zero,
                       constraints:
-                          const BoxConstraints(minWidth: 23, minHeight: 23),
+                          const BoxConstraints(minWidth: 30, minHeight: 30),
                       onPressed: _showSortSheet,
                     ),
                   ],
@@ -3289,8 +3290,8 @@ class _BookshelfPageState extends State<BookshelfPage>
 
               // 固定按钮在**左侧**（用户多次点名"管理/排序移到左边"），
               // 标签行占满剩余宽度；内容不足时居中，超出则横向滚动
-              //（固定按钮胶囊 49 = 1+23+1+23+1，加 4 间距）
-              const fixedWidth = 53.0;
+              //（胶囊 2+30+30+2 = 64，加 4 间距）
+              const fixedWidth = 68.0;
               return Row(
                 children: [
                   fixedButtons,
@@ -4260,7 +4261,8 @@ class _BookshelfRow extends StatelessWidget {
         // 🔴 2026-10-14：架板下的「书名 / 作者」**整行去掉** ✓ —— 用户要求
         //    书架里不再显示漫画名 / 书籍名 ✓（名称在**长按条目菜单**顶部仍有 ✓，
         //    不会因为这里不显示就查不到是哪本书 ✓）
-        const SizedBox(height: 20),
+        // 行间距随「显示设置 → 列表密度」缩放（用户 2026-10-15）
+        SizedBox(height: 20 * SettingsService().densityScale),
       ],
     );
   }
@@ -4425,7 +4427,9 @@ class _ShelfCoverState extends State<_ShelfCover> {
             children: [
               Container(
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
+                  // 圆角跟随「显示设置 → 封面圆角」（用户 2026-10-15）
+                  borderRadius:
+                      BorderRadius.circular(SettingsService().coverRadiusPx),
                   color: isDark
                       ? Colors.white.withValues(alpha: 0.05)
                       : JellyTheme.cardLight,
@@ -4440,7 +4444,8 @@ class _ShelfCoverState extends State<_ShelfCover> {
                   ],
                 ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius:
+                      BorderRadius.circular(SettingsService().coverRadiusPx),
                   child: _buildCoverImage(isDark),
                 ),
               ),
@@ -4450,7 +4455,9 @@ class _ShelfCoverState extends State<_ShelfCover> {
                   left: 4,
                   child: JellySelectBadge(selected: widget.selected),
                 ),
-              if (!widget.isSelecting &&
+              // 徽标类信息跟随「显示设置 → 卡片信息」开关（用户 2026-10-15）
+              if (SettingsService().cardInfo &&
+                  !widget.isSelecting &&
                   (widget.formatLabel != null || widget.sourceLabel != null))
                 Positioned(
                   top: 4,
@@ -4476,7 +4483,9 @@ class _ShelfCoverState extends State<_ShelfCover> {
                   ),
                 ),
               // 右上角：更新角标（红底白字 +N，与左上格式/源徽标错开）
-              if ((widget.updateCount ?? 0) > 0 && !widget.isSelecting)
+              if (SettingsService().cardInfo &&
+                  (widget.updateCount ?? 0) > 0 &&
+                  !widget.isSelecting)
                 Positioned(
                   top: 4,
                   right: 4,
@@ -4499,7 +4508,7 @@ class _ShelfCoverState extends State<_ShelfCover> {
                     ),
                   ),
                 ),
-              if (widget.progress != null)
+              if (SettingsService().cardInfo && widget.progress != null)
                 badge(
                   Text(
                     '${(widget.progress! * 100).round()}%',
@@ -4510,7 +4519,8 @@ class _ShelfCoverState extends State<_ShelfCover> {
                     ),
                   ),
                 )
-              else if (widget.progressLabel != null)
+              else if (SettingsService().cardInfo &&
+                  widget.progressLabel != null)
                 badge(
                   Text(
                     widget.progressLabel!,
@@ -4585,7 +4595,8 @@ Widget _buildShelfContent({
       LayoutBuilder(
         builder: (context, constraints) {
           final cols = _adaptiveCols(constraints.maxWidth);
-          const spacing = 12.0;
+          // 卡片间距随「显示设置 → 列表密度」缩放（用户 2026-10-15）
+          final spacing = 12.0 * SettingsService().densityScale;
           final cellWidth =
               (constraints.maxWidth - 24 - (cols - 1) * spacing) / cols;
           final isDark = Theme.of(context).brightness == Brightness.dark;

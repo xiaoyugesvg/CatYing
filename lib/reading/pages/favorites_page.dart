@@ -337,25 +337,25 @@ class _FavoritesPageState extends State<FavoritesPage>
                                               .toList(),
                                         ),
                                   ),
-                                // 搜索：与首页右上角同款小胶囊（收起=圆钮，
+                                // 搜索：与书架页同款小胶囊（收起=圆钮，
                                 // 点击展开、图标在左、提示「搜索收藏」），
-                                // 提交直接进搜索浮层出结果；
-                                // 用户 2026-10-07：改**靠左**（原来右对齐 ✗）
-                                Expanded(
-                                  child: Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: FractionallySizedBox(
-                                      widthFactor: 0.6,
-                                      alignment: Alignment.centerLeft,
-                                      child: JellyExpandableSearch(
-                                        controller: _favSearchController,
-                                        hintText: '搜索收藏',
-                                        onSubmitted: (v) => _openSearch(v),
-                                        onChanged: (v) => setState(() {}),
-                                      ),
-                                    ),
-                                  ),
+                                // 提交直接进搜索浮层出结果；仍**靠左**（用户 2026-10-07）。
+                                //
+                                // ⚠️ 用户 2026-10-15「这个搜索框太丑了」：
+                                //   原来包在 `Expanded + FractionallySizedBox(0.6)` 里
+                                //   —— 组件被**拉伸**成剩余宽度的 60%，而收起态本是
+                                //   一枚圆钮，拉宽后就成了一根又长又空的灰胶囊 ✗
+                                //   现在只占内容宽（`maxWidth`）+ 后面补 `Spacer`
+                                //   吃掉剩余空白，与书架页的搜索完全一致 ✓
+                                const SizedBox(width: 10),
+                                JellyExpandableSearch(
+                                  controller: _favSearchController,
+                                  hintText: '搜索收藏',
+                                  maxWidth: 133,
+                                  onSubmitted: (v) => _openSearch(v),
+                                  onChanged: (v) => setState(() {}),
                                 ),
+                                const Spacer(),
                               ],
                             ),
                           ),

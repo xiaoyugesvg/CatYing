@@ -33,8 +33,11 @@ const Set<String> kParseFirstHosts = {
   'migu.cn', // 咪咕视频
 };
 
-/// 可直接交给播放器的媒体后缀。
-const List<String> _kMediaExts = [
+/// **默认**可直接交给播放器的媒体后缀。
+///
+/// 用户可在「播放设置 → 嗅探设置 → 影视直链后缀」里增删（例如加 `.m4a`、
+/// 去掉 `.wmv`）；自定义清单存在 [PlayerPrefs.mediaExtensions]，为空则用这份默认。
+const List<String> kDefaultMediaExtensions = [
   '.m3u8',
   '.mp4',
   '.flv',
@@ -50,8 +53,43 @@ const List<String> _kMediaExts = [
   '.wmv',
 ];
 
+/// **音频直链**后缀：影视后缀清单（[kDefaultMediaExtensions]，用户可自定义）
+/// 之外的补充白名单。
+///
+/// 解析接口 / 源偶尔给出纯音频地址（音乐源直链），这几类也交给原生播放器。
+/// 集中一处，避免 parse_service 与 detail/view 各写一份、顺序还不一致
+/// （2026-10-15 核对一致性时发现）。
+const List<String> kAudioExtensions = [
+  '.mp3',
+  '.aac',
+  '.wav',
+  '.ogg',
+  '.flac',
+  '.m4a',
+];
+
+/// 取 URL 的媒体后缀（小写、带点，如 `.m3u8`）；**不在清单内则返回空串**。
+///
+/// [exts] 不传则用 [kDefaultMediaExtensions]；调用方一般应传用户当前生效的
+/// 清单（见 `SniffFilter.mediaExtensions`）。
+/// 只看 path 的最后一段（忽略查询串/锚点），与 [looksLikeDirectMedia] 同一口径。
+String mediaExtOf(String url, {List<String>? exts}) {
+  final list = exts ?? kDefaultMediaExtensions;
+  final path = Uri.tryParse(url.trim())?.path.toLowerCase() ?? '';
+  final slash = path.lastIndexOf('/');
+  final name = slash >= 0 ? path.substring(slash + 1) : path;
+  final dot = name.lastIndexOf('.');
+  if (dot <= 0) return '';
+  final ext = name.substring(dot);
+  return list.contains(ext) ? ext : '';
+}
+
 /// URL 看起来是不是**可直接播放**的媒体地址。
-bool looksLikeDirectMedia(String url) {
+///
+/// [exts] 不传则用 [kDefaultMediaExtensions]（保持纯函数、方便单测）；
+/// 业务侧应传用户当前生效的清单，见 `SniffFilter.isDirectMedia`。
+bool looksLikeDirectMedia(String url, {List<String>? exts}) {
+  final list = exts ?? kDefaultMediaExtensions;
   final raw = url.trim().toLowerCase();
   if (raw.isEmpty) return false;
   if (!raw.startsWith('http://') &&
@@ -61,7 +99,7 @@ bool looksLikeDirectMedia(String url) {
     return false;
   }
   final path = Uri.tryParse(raw)?.path.toLowerCase() ?? raw;
-  for (final ext in _kMediaExts) {
+  for (final ext in list) {
     if (path.endsWith(ext)) return true;
   }
   return false;

@@ -1060,22 +1060,11 @@ class _RssManagePageState extends State<RssManagePage> {
       url = input.trim();
     }
     setState(() => _busy = true);
-    Dio? dio;
     try {
-      dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 30),
-        responseType: ResponseType.plain,
-        headers: {'User-Agent': 'Mozilla/5.0'},
-      ));
-      // ⚠️ 导入地址也要套全局代理（同 RssReader：漏了它开了代理就必然失败）
-      applyGlobalProxy(dio);
-      final resp = await dio.get<String>(url);
-      await _absorb(resp.data ?? '');
+      await _absorb(await _fetchText(url));
     } catch (e) {
       AppToast.error('导入失败：${_short(e)}');
     } finally {
-      dio?.close(force: true);
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -1090,9 +1079,50 @@ class _RssManagePageState extends State<RssManagePage> {
     if (!mounted) return;
     setState(() => _busy = true);
     try {
-      await _absorb(text);
+      final raw = text.trim();
+      // 扫到的是**单个网址**（常见：二维码里放订阅列表的下载地址）：
+      // 先把网址内容下载下来按 JSON/OPML 源列表解析；下载失败、或内容
+      // 根本不是源列表（网址本身就是一个 RSS 订阅页）时，回退为直接
+      // 订阅这个网址，避免「只导入了网址本身」的问题（2026-10-15）。
+      if (_isBareHttpUrl(raw)) {
+        String? body;
+        try {
+          body = await _fetchText(raw);
+        } catch (_) {}
+        if (body != null &&
+            body.trim().isNotEmpty &&
+            parseRssSources(body).isNotEmpty) {
+          await _absorb(body);
+          return;
+        }
+      }
+      await _absorb(raw);
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// 是否是**单行** http(s) 网址（JSON / OPML 内容不会命中）。
+  bool _isBareHttpUrl(String s) {
+    if (s.isEmpty || s.contains('\n') || s.contains('\r')) return false;
+    return s.startsWith('http://') || s.startsWith('https://');
+  }
+
+  /// 下载文本（套全局代理）——网络导入 / 二维码导入共用。
+  Future<String> _fetchText(String url) async {
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 30),
+      responseType: ResponseType.plain,
+      headers: {'User-Agent': 'Mozilla/5.0'},
+    ));
+    try {
+      // ⚠️ 必须套全局代理（漏了它开了代理就必然 DioException unknown）
+      applyGlobalProxy(dio);
+      final resp = await dio.get<String>(url);
+      return resp.data ?? '';
+    } finally {
+      dio.close(force: true);
     }
   }
 

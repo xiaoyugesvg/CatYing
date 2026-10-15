@@ -34,6 +34,10 @@ class _MiniAppPlayerPageState extends State<MiniAppPlayerPage> {
         url: widget.url,
         videoTitle: widget.title.isEmpty ? '播放' : widget.title,
         headers: widget.headers,
+        // 顶栏返回键由播放器自带、且**无条件显示**；不传 onBack 时点了
+        // 什么都不会发生（只能靠系统手势退出）—— 2026-10-15 修复。
+        // 从嗅探页进来时回到嗅探页，从小程序进来时回到小程序页。
+        onBack: () => Navigator.of(context).maybePop(),
       ),
     );
   }

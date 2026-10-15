@@ -20,6 +20,7 @@ import '../services/manga_bookmark_service.dart';
 import '../services/reader_override_service.dart';
 import '../services/settings_service.dart';
 import '../theme/jelly_theme.dart';
+import '../widgets/jelly_mode_picker.dart';
 import '../widgets/pomodoro_button.dart';
 import '../../common/theme.dart';
 import '../../common/system_ui.dart';
@@ -758,45 +759,50 @@ class _ReaderPageState extends State<ReaderPage> {
                           ),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: Row(
-                              children: [
-                                _modeChip(
-                                  '右左',
-                                  draftMode == ReadingMode.pageTurn,
-                                  () => setSheet(
+                            // 用户 2026-10-15：「阅读模式这些不够好」⇒
+                            // 纯文字 chip 换成「图标 + 名称」小块（三处阅读器统一）
+                            child: JellyModePicker(
+                              fg: Colors.white,
+                              items: [
+                                JellyModeItem(
+                                  label: '右左',
+                                  symbol: mangaModeSymbol(ReadingMode.pageTurn),
+                                  selected: draftMode == ReadingMode.pageTurn,
+                                  onTap: () => setSheet(
                                     () => draftMode = ReadingMode.pageTurn,
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                _modeChip(
-                                  '左右',
-                                  draftMode == ReadingMode.leftToRight,
-                                  () => setSheet(
-                                    () =>
-                                        draftMode = ReadingMode.leftToRight,
+                                JellyModeItem(
+                                  label: '左右',
+                                  symbol: mangaModeSymbol(ReadingMode.leftToRight),
+                                  selected:
+                                      draftMode == ReadingMode.leftToRight,
+                                  onTap: () => setSheet(
+                                    () => draftMode = ReadingMode.leftToRight,
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                _modeChip(
-                                  '消散',
-                                  draftMode == ReadingMode.dissolve,
-                                  () => setSheet(
+                                JellyModeItem(
+                                  label: '消散',
+                                  symbol: mangaModeSymbol(ReadingMode.dissolve),
+                                  selected: draftMode == ReadingMode.dissolve,
+                                  onTap: () => setSheet(
                                     () => draftMode = ReadingMode.dissolve,
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                _modeChip(
-                                  '无动画',
-                                  draftMode == ReadingMode.none,
-                                  () => setSheet(
+                                JellyModeItem(
+                                  label: '无动画',
+                                  symbol: mangaModeSymbol(ReadingMode.none),
+                                  selected: draftMode == ReadingMode.none,
+                                  onTap: () => setSheet(
                                     () => draftMode = ReadingMode.none,
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                _modeChip(
-                                  '拼页',
-                                  draftMode == ReadingMode.continuous,
-                                  () => setSheet(
+                                JellyModeItem(
+                                  label: '拼页',
+                                  symbol: mangaModeSymbol(ReadingMode.continuous),
+                                  selected:
+                                      draftMode == ReadingMode.continuous,
+                                  onTap: () => setSheet(
                                     () => draftMode = ReadingMode.continuous,
                                   ),
                                 ),
@@ -1114,32 +1120,6 @@ class _ReaderPageState extends State<ReaderPage> {
           );
         },
       )),
-    );
-  }
-
-  Widget _modeChip(String label, bool selected, VoidCallback onTap) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: selected
-                ? JellyTheme.primary
-                : Colors.white.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: AppTheme.fontSubhead,
-              color: selected ? Colors.white : Colors.white70,
-              fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-            ),
-          ),
-        ),
-      ),
     );
   }
 

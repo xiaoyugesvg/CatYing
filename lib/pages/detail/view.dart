@@ -22,6 +22,8 @@ import '../../services/detail_page_controller.dart';
 import '../../services/player_fullscreen_controller.dart';
 import '../../services/player_prefs.dart';
 import '../../services/parse_store.dart';
+import '../../services/play_route.dart';
+import '../../services/sniff_filter.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/app_player.dart';
 import '../../widgets/ios_av_player.dart';
@@ -827,6 +829,30 @@ class _DetailPageState extends State<DetailPage> {
         _playerErrorTimer = null;
         return const SizedBox.shrink();
       }
+      // 自动嗅探中：播放区让位（**不**挂内嵌 WebView），避免与嗅探页各加载
+      // 一份同一个网页 —— 双份解码 + 双份声音、返回后底层还在跑。
+      // 用户 2026-10-15「嗅探容易影响播放」的主因。
+      if (_controller.sniffingUrl.value != null) {
+        _playerErrorTimer?.cancel();
+        _playerErrorTimer = null;
+        return AspectRatio(
+          aspectRatio: 4 / 3,
+          child: Container(
+            color: Colors.black,
+            child: const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(color: Colors.white),
+                  SizedBox(height: 12),
+                  Text('正在嗅探视频地址…',
+                      style: TextStyle(color: Colors.white70, fontSize: 13)),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
       if (url != null && url.isNotEmpty) {
         _playerErrorTimer?.cancel();
         _playerErrorTimer = null;
@@ -847,21 +873,36 @@ class _DetailPageState extends State<DetailPage> {
           ),
         );
       } else {
-        // 正在播放但 URL 尚未就绪：超时后置错误，避免永久转圈
-        _playerErrorTimer ??= Timer(const Duration(seconds: 15), () {
-          _playerErrorTimer = null;
-          if (!mounted) return;
-          if ((_controller.playUrl.value ?? '').isEmpty) {
-            _controller.setPlaybackError('播放地址获取超时，请点重试或切换其他线路');
-          }
-        });
+        // 正在播但 URL 尚未就绪：超时后置错误，避免永久转圈。
+        // ⚠️ 正在走解析接口取址时不启动这个计时 —— 解析本身可能要好几秒，
+        // 误报"播放地址获取超时"会把用户从观看里打断（用户 2026-10-15）。
+        if (!_controller.isResolving.value) {
+          _playerErrorTimer ??= Timer(const Duration(seconds: 15), () {
+            _playerErrorTimer = null;
+            if (!mounted) return;
+            if ((_controller.playUrl.value ?? '').isEmpty) {
+              _controller
+                  .setPlaybackError('播放地址获取超时，请点重试或切换其他线路');
+            }
+          });
+        }
         // 4:3 容器: 比 16:9 更高, 上下控制条间距拉开, 视频画面不再被压成细缝
         return AspectRatio(
           aspectRatio: 4 / 3,
           child: Container(
             color: Colors.black,
-            child: const Center(
-              child: CircularProgressIndicator(color: Colors.white),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(color: Colors.white),
+                  if (_controller.isResolving.value) ...[
+                    const SizedBox(height: 12),
+                    const Text('正在解析视频地址…',
+                        style: TextStyle(color: Colors.white70, fontSize: 13)),
+                  ],
+                ],
+              ),
             ),
           ),
         );
@@ -996,8 +1037,14 @@ class _DetailPageState extends State<DetailPage> {
       // 底栏「嗅探 / 解析」——用户 2026-10-14 要求加在播放器下面的工具栏：
       //   嗅探 = 打开 WebView 手动抓页面里的媒体地址；
       //   解析 = 弹层切换解析线路（选中后用新线路重解当前集）。
-      onSniff: _controller.openSniff,
-      onSwitchParse: _openParseLineSheet,
+      // 2026-10-15：两个总开关关闭时传 null，VideoPlayerWidget 内部会
+      // 自动隐藏对应按钮（本方法在 Obx 内被调用，开关切换实时显隐）。
+      onSniff: PlayerPrefs.instance.sniffEnabled.value
+          ? _controller.openSniff
+          : null,
+      onSwitchParse: PlayerPrefs.instance.parseEnabled.value
+          ? _openParseLineSheet
+          : null,
       // 播放器错误（原生 onError / 加载失败）以前无处可去，只表现为白转圈；
       // 这里接进控制器的错误态，详情页即可显示文案 + 重试。
       onError: () => _controller.setPlaybackError('播放失败，请点重试或切换其他线路'),
@@ -1153,33 +1200,19 @@ class _DetailPageState extends State<DetailPage> {
   ///
   /// 规则：
   /// - 非 http/https（如 rtmp/rtsp）→ 不是网页，走原生播放器
-  /// - 含常见媒体扩展名（m3u8/mp4/flv/ts 等）→ 直链，走原生播放器
+  /// - 是媒体直链 → 走原生播放器。判定统一走 [SniffFilter.isDirectMedia]，
+  ///   **跟随用户在「嗅探设置 → 影视直链后缀」里的自定义清单**（2026-10-15：
+  ///   这里原来还有第 4 份写死的后缀表，用户改后缀时它不跟着变，会把直链
+  ///   误判成网页丢给 WebView，或把网页当直链丢给播放器）
   /// - 其余 http(s) URL → 视为网页播放页（解析页 / player 页 / 网页端地址）
-  static const List<String> _directMediaExtensions = [
-    '.m3u8',
-    '.m3u',
-    '.mp4',
-    '.flv',
-    '.ts',
-    '.mkv',
-    '.avi',
-    '.mov',
-    '.webm',
-    '.rmvb',
-    '.rm',
-    '.wmv',
-    '.mp3',
-    '.aac',
-    '.ogg',
-    '.flac',
-  ];
-
   bool _isWebPageUrl(String url) {
     final lower = url.trim().toLowerCase();
     if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
       return false;
     }
-    for (final ext in _directMediaExtensions) {
+    if (SniffFilter.isDirectMedia(url)) return false;
+    // 音频直链也交给原生播放器（与 parse_service 的音频白名单同源）
+    for (final ext in kAudioExtensions) {
       if (lower.contains(ext)) {
         return false;
       }

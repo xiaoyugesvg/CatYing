@@ -33,6 +33,7 @@ import '../services/reading_time_service.dart';
 import '../theme/jelly_theme.dart';
 import '../widgets/book_page_cover.dart';
 import '../widgets/book_page_curl.dart';
+import '../widgets/jelly_mode_picker.dart';
 import '../widgets/pomodoro_button.dart';
 import 'book_prefetch_page.dart';
 import 'notes_and_journey_page.dart';
@@ -1183,7 +1184,11 @@ class _BookReaderPageState extends State<BookReaderPage> {
         scrollDirection: mode == BookReadingMode.vertical
             ? Axis.vertical
             : Axis.horizontal,
-        physics: const ClampingScrollPhysics(),
+        // 「无动画」按设定就该**不滑动**（见阅读设置里的说明文案），
+        // 由点击区瞬切；其余模式可拖动翻页。
+        physics: mode == BookReadingMode.none
+            ? const NeverScrollableScrollPhysics()
+            : const ClampingScrollPhysics(),
         itemCount: _isDoublePage ? _spreadCount : _pages.length,
         onPageChanged: (i) {
           final page = _isDoublePage ? _spreadLeftPage(i) : i;
@@ -3391,49 +3396,48 @@ class _BookReaderPageState extends State<BookReaderPage> {
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: Row(
-                            children: [
-                              _bookModeChip(
-                                '左右',
-                                draftMode == BookReadingMode.pageTurn,
-                                isDark,
-                                () => setSheet(
+                          // 用户 2026-10-15：纯文字 chip 辨识度差 ⇒
+                          // 「图标 + 名称」的等宽小块（与书源/漫画阅读器统一）
+                          child: JellyModePicker(
+                            fg: textColor,
+                            items: [
+                              JellyModeItem(
+                                label: '左右',
+                                symbol: bookModeSymbol(BookReadingMode.pageTurn),
+                                selected: draftMode == BookReadingMode.pageTurn,
+                                onTap: () => setSheet(
                                   () => draftMode = BookReadingMode.pageTurn,
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              _bookModeChip(
-                                '上下',
-                                draftMode == BookReadingMode.vertical,
-                                isDark,
-                                () => setSheet(
+                              JellyModeItem(
+                                label: '上下',
+                                symbol: bookModeSymbol(BookReadingMode.vertical),
+                                selected: draftMode == BookReadingMode.vertical,
+                                onTap: () => setSheet(
                                   () => draftMode = BookReadingMode.vertical,
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              _bookModeChip(
-                                '仿真',
-                                draftMode == BookReadingMode.simulation,
-                                isDark,
-                                () => setSheet(
+                              JellyModeItem(
+                                label: '仿真',
+                                symbol: bookModeSymbol(BookReadingMode.simulation),
+                                selected: draftMode == BookReadingMode.simulation,
+                                onTap: () => setSheet(
                                   () => draftMode = BookReadingMode.simulation,
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              _bookModeChip(
-                                '覆盖',
-                                draftMode == BookReadingMode.cover,
-                                isDark,
-                                () => setSheet(
+                              JellyModeItem(
+                                label: '覆盖',
+                                symbol: bookModeSymbol(BookReadingMode.cover),
+                                selected: draftMode == BookReadingMode.cover,
+                                onTap: () => setSheet(
                                   () => draftMode = BookReadingMode.cover,
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              _bookModeChip(
-                                '无动画',
-                                draftMode == BookReadingMode.none,
-                                isDark,
-                                () => setSheet(
+                              JellyModeItem(
+                                label: '无动画',
+                                symbol: bookModeSymbol(BookReadingMode.none),
+                                selected: draftMode == BookReadingMode.none,
+                                onTap: () => setSheet(
                                   () => draftMode = BookReadingMode.none,
                                 ),
                               ),
@@ -3575,41 +3579,6 @@ class _BookReaderPageState extends State<BookReaderPage> {
           );
         },
       )),
-    );
-  }
-
-  Widget _bookModeChip(
-    String label,
-    bool selected,
-    bool isDark,
-    VoidCallback onTap,
-  ) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: selected
-                ? JellyTheme.primary
-                : (isDark
-                      ? Colors.white.withValues(alpha: 0.12)
-                      : Colors.black.withValues(alpha: 0.05)),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: AppTheme.fontSubhead,
-              color: selected
-                  ? Colors.white
-                  : (isDark ? Colors.white70 : JellyTheme.textPrimaryLight),
-              fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-            ),
-          ),
-        ),
-      ),
     );
   }
 
