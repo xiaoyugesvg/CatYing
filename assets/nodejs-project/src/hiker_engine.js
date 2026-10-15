@@ -55,6 +55,24 @@ const TOTAL_BUDGET_MS = 45000;
 /** 单条列表最多返回多少项 */
 const MAX_ITEMS = 300;
 
+/**
+ * 限制值兜底：不是正数就用 [dft]。
+ *
+ * ── 为什么需要（用户 2026-10-15「一个都用不了」）────────────────────
+ * 实测机型上出现过**模块级常量的绑定丢失**：`MAX_REPLAY` 在运行时是 `undefined`
+ * ⇒ 重放循环的守卫 `attempt < maxReplay` 恒为 false ⇒ **循环一次都不跑**
+ * ⇒ `pending` 恒空 ⇒ 函数直接落到末尾那句 throw ⇒ **每一条规则都秒失败**，
+ *   报错还长这样：「规则重放次数超过上限（undefined 轮，共 0 次请求…）」
+ * （本地把产物里那个常量改成 `undefined` 可 1:1 复现这条报错。）
+ *
+ * ⇒ 所有"限制值"在函数入口都过一遍这里：绑定异常时最坏只是退回出厂默认值，
+ *   绝不会把整个引擎打死。
+ */
+function _limit(v, dft) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : dft;
+}
+
 /** 单次读文件上限：规则读到一个大文件（比如 VIDEO/大 SQLite）时不许整块进内存 */
 const MAX_READ_BYTES = 8 * 1024 * 1024;
 
@@ -1643,8 +1661,11 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
   const rule = stripJsPrefix(rawRule);
   if (!rule) return { list: [], playUrl: '', nextPage: '', pageTitle: '', vars: kv || {} };
 
-  const budgetMs = opts.timeoutMs || TOTAL_BUDGET_MS;
-  const maxItems = opts.maxItems || MAX_ITEMS;
+  // ⚠️ 限制值一律**局部化 + 兜底**（见 [_limit]）：模块级常量一旦在产物里绑定
+  //    丢失，`attempt < undefined` 会让重放循环一次都不跑 ⇒ 全部规则秒失败。
+  const budgetMs = _limit(opts.timeoutMs || TOTAL_BUDGET_MS, 45000);
+  const maxItems = _limit(opts.maxItems || MAX_ITEMS, 300);
+  const maxReplay = _limit(MAX_REPLAY, 40);
 
   const rt = newRuntime(ctx, kv);
 
@@ -1674,7 +1695,7 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
   const isJsRule = /^js:/i.test(rawRule.trim());
   if (!isJsRule && rule.includes(';')) {
     let list = [];
-    for (let attempt = 0; attempt < MAX_REPLAY; attempt++) {
+    for (let attempt = 0; attempt < maxReplay; attempt++) {
       try {
         const html = httpSync(rt, ctx.url, { ua: ctx.ua });
         list = runSecondaryRule(html, rule, source && source.col_type, maxItems);
@@ -1706,7 +1727,7 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
   // 内联页面模块：`$.require('miss')` / `$.require('hiker://page/miss')` / 裸 `require(...)`
   // （索引已在上面建好，并挂在 rt.modules 上给 httpSync 用）
 
-  for (let attempt = 0; attempt < MAX_REPLAY; attempt++) {
+  for (let attempt = 0; attempt < maxReplay; attempt++) {
     if (Date.now() > deadline) {
       throw new Error(
         `规则执行超时（${Math.round(budgetMs / 1000)}s，已发起 ${pending.length} 次请求）`
@@ -1912,7 +1933,7 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
   const uniqUrls = new Set(pending).size;
   const tail = pending.slice(-3).map((u) => String(u).slice(0, 120)).join(' | ');
   throw new Error(
-    `规则重放次数超过上限（${MAX_REPLAY} 轮，共 ${pending.length} 次请求，`
+    `规则重放次数超过上限（${maxReplay} 轮，共 ${pending.length} 次请求，`
     + `其中不同地址 ${uniqUrls} 个）—— 该脚本的请求地址依赖响应内容，Phase 1 暂不支持。`
     + (uniqUrls === pending.length
       ? '原因：每轮请求的地址都不同（脚本可能用了随机数/时间戳，或沿链接链式翻页）。'
