@@ -421,6 +421,9 @@ function httpSync(rt, url, opts) {
   }
   const key = cacheKeyOf(u, opts);
   if (rt.cache.has(key)) return rt.cache.get(key);
+  // 记下"这一轮想要抓这个页面"：万一规则内部 `try { fetch() } catch(e) {}`
+  // 把 NeedFetch 吞了，引擎仍能据此补抓一轮（见 runHikerRule 每轮之后的补抓闸门）。
+  rt.wantFetch = { url: u, key, opts, webview: false };
   throw new NeedFetch(u, opts, key);
 }
 
@@ -434,6 +437,8 @@ function webViewSync(rt, input, opts) {
   }
   const key = `wv:${u}|${JSON.stringify(opts || {})}`;
   if (rt.cache.has(key)) return rt.cache.get(key);
+  // 同 httpSync：被规则吞掉时也要能补抓（走宿主的 WebView 桥）
+  rt.wantFetch = { url: u, key, opts: opts || {}, webview: true };
   throw new NeedWebView(u, opts || {}, key);
 }
 
@@ -1734,6 +1739,8 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
         + ' —— 该规则可能要抓太多网页，或地址依赖响应内容（Phase 1 不支持）',
       );
     }
+    // 每轮复位"被吞掉的抓页意图"（由 httpSync / webViewSync 记录，见下面那道闸门）
+    rt.wantFetch = null;
     const state = {
       result: undefined,
       homeResult: undefined,
@@ -1893,6 +1900,36 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
       //  预加载会引入额外请求把一个原本可用的源拖坏：47 → 46）。既然没有收益，
       //  就不留这套机制 —— 这类源需要的是它自己的 Apollo/规则包（属内容缺失）。
       throw e;
+    }
+
+    // ── 被规则吞掉的抓页信号（用户 2026-10-15 实测）──────────────────────
+    // 规则里常写成 `try { var html = fetch(url) } catch (e) { html = '' }`：
+    // NeedFetch 会被**规则自己的 try/catch 吞掉** ⇒ 引擎以为"这轮正常跑完了"，
+    // 于是拿着一个**空结果**就返回 —— 实测 `ok:true / list:[] / requests:0 / 3ms`，
+    // 用户看到的现象就是"脚本不显示内容"（不报错、也不重试）。
+    //
+    // 这里补一道闸门：本轮记下的"想要的页面"若还没抓到，就先抓、再重放一轮
+    //（这一轮的（空）结果作废）。抓完即进缓存 ⇒ 下一轮 httpSync 直接命中、
+    // 不会再记新的 want ⇒ 与既有重放桥一样收敛，不会空转。
+    if (rt.wantFetch) {
+      const w = rt.wantFetch;
+      rt.wantFetch = null;
+      if (w.webview) {
+        if (typeof opts.fetchWebView !== 'function') {
+          throw new Error(
+            '规则需要 WebView 抓页（fetchCodeByWebView），但当前没有 WebView 桥'
+            + '（宿主未就绪）',
+          );
+        }
+        const html = await opts.fetchWebView(w.url, w.opts);
+        rt.cache.set(w.key, html == null ? '' : String(html));
+        pending.push(`webview:${w.url}`);
+      } else {
+        const body = await doHttp(rt, w.url, w.opts);
+        rt.cache.set(w.key, body);
+        pending.push(w.url);
+      }
+      continue; // 重放：让规则拿到真页面
     }
 
     if (state.error) throw new Error(String(state.error));
