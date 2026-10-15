@@ -1650,6 +1650,25 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
                   _collected ? Icons.favorite : Icons.favorite_border,
                   onTap: _toggleCollect,
                 ),
+              // 切到默认详情页（用户 2026-10-15：「媒体库模式页面右上角加个
+              // 切换默认详情页的按钮」）。
+              //
+              // 为什么需要：媒体库模式是**顶替**默认详情页的（app_pages.dart 里
+              // 按 `TmdbService.libraryMode` 二选一渲染），一旦开启就没有别的口子
+              // 回普通详情页。这里复用 [_fallbackToDefault] —— 它用
+              // `Get.off(() => DetailPage(), …)` **直接构造**页面对象，
+              // 绕开按 libraryMode 分流的那条路由，否则会又渲染回本页。
+              //
+              // ⚠️ 与「收藏」同样只在主路径（有 Video）显示：类似作品/相关推荐
+              //    那条链路没有 Video，默认详情页没有数据可渲染，那里这一下等价于
+              //    "返回上一页"（与返回键重复），没必要给。
+              if (_video != null) ...[
+                const SizedBox(width: 10),
+                _circleIconButton(
+                  Icons.article_outlined,
+                  onTap: () => _fallbackToDefault(_video),
+                ),
+              ],
             ],
           ),
         ),
