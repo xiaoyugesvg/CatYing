@@ -827,7 +827,10 @@ class DetailController extends GetxController with WidgetsBindingObserver {
         if (_spiderResolveToken != token) return;
 
         if (resolvedUrl != null && resolvedUrl.isNotEmpty) {
-          // 记下 Spider 给的**原始**地址（底栏「嗅探」按钮要用）
+          // 相对播放地址 → 用源 api 的 host 补成绝对（方案 B，见 [_absolutizePlayUrl]）
+          resolvedUrl = _absolutizePlayUrl(resolvedUrl);
+          // 记下 Spider 给的地址（底栏「嗅探」按钮要用）—— 记**补全后**的形态，
+          // 否则嗅探页/播放器拿到相对路径同样加载不了
           _rawPlayUrl = resolvedUrl;
           // **按内容分流①：正文协议**（小说源，`novel://{title,content}`）
           // —— 这类源给出的"播放地址"其实是整章正文，交给播放器只会黑屏，
@@ -918,6 +921,17 @@ class DetailController extends GetxController with WidgetsBindingObserver {
             _autoSniff(playCandidate);
             return;
           }
+          // ── 地址形态兜底（用户 2026-10-15）────────────────────────────
+          // 既不是绝对 URL、又补不出 base ⇒ 交给播放器只会白卡 15 秒再弹
+          // "加载超时"（实测 `vodplay/223052-1-1.html`）。走 setPlaybackError
+          // 的既有机制：先自动顺延同集其它候选，全试完才把原因写给用户。
+          if (!_isPlayableShape(playCandidate)) {
+            AppLog.instance
+                .w('[Play] Spider 播放地址不是完整链接，已拦截: $playCandidate');
+            setPlaybackError('该源返回的播放地址不是完整链接：$playCandidate'
+                '（源没给域名，也无法用站点地址补全，请切换线路）');
+            return;
+          }
           playUrl.value = playCandidate;
           playbackSessionId.value = _newUuid();
           isPlaying.value = true;
@@ -952,6 +966,76 @@ class DetailController extends GetxController with WidgetsBindingObserver {
   /// 或被弹去嗅探页，等于白白打断一次播放。
   bool _looksLikeDirectMedia(String url) => SniffFilter.isDirectMedia(url);
 
+  /// 能直接交给播放器/阅读器的**地址形态白名单前缀**。
+  ///
+  /// ⚠️ 不能只看 `Uri.tryParse(url).hasScheme`：源给的"地址"里常含非法 URI 字符
+  /// （`novel://{"title":…}` 这种正文内联、路径带空格、中文未编码…），
+  /// `tryParse` 会直接返回 null ⇒ 被误判成"相对路径"→ 要么被拦下、要么被
+  /// 拼进站点域名里**拼坏**（实测 `novel://{...}` 就踩这个）。
+  /// 所以先按前缀白名单放行，再用 hasScheme 兜住自定义 scheme。
+  static const List<String> _kPlayablePrefixes = [
+    'http://', 'https://', 'rtmp://', 'rtsp://', 'mms://',
+    'x5://', 'novel://', 'pics://', 'mange://', 'manga://',
+    'magnet:', 'ed2k://', 'thunder://', 'ftp://', 'file://',
+  ];
+
+  /// 是不是"能交给播放器"的地址形态（有 scheme）。
+  ///
+  /// 裸相对路径（实测 `vodplay/223052-1-1.html`，连 http 都没有）**绝不能**交给
+  /// 播放器：原生播放器解析不了 ⇒ `stream error: Operation Stopped` ⇒ 又因为
+  /// 既不报 `onError` 也不推进位置，用户只会看到"加载超时 / 点这里重试"卡满
+  /// 15 秒（用户 2026-10-15，日志实证）。
+  static bool _isPlayableShape(String url) {
+    final raw = url.trim();
+    if (raw.isEmpty) return false;
+    final lower = raw.toLowerCase();
+    for (final p in _kPlayablePrefixes) {
+      if (lower.startsWith(p)) return true;
+    }
+    // 兜住白名单之外的合法 scheme（如 `xiaohongshu://…`）
+    final u = Uri.tryParse(raw);
+    return u != null && u.hasScheme;
+  }
+
+  /// 把**相对播放地址**补成绝对 URL（用户 2026-10-15，方案 B）。
+  ///
+  /// ── 为什么要补 ───────────────────────────────────────────────────
+  /// 部分源（实测整包 TVBox / MacCMS 采集站那条线路）的 `play` 返回的是
+  /// **相对路径**，如 `vodplay/223052-1-1.html` —— 连 scheme 都没有；
+  /// 而 [DetailView._isWebPageUrl] 对无 scheme 的地址返回 false
+  /// ⇒ 连"交给 WebView 兜底"都轮不到，直接被丢进原生播放器白卡。
+  ///
+  /// ── base 为什么取"源 api 的 origin" ───────────────────────────────
+  /// 这是 TVBox 的既有约定：相对播放地址按**站点 host** 解析。MacCMS 的
+  /// 前台播放页与采集接口**同域**（`https://<host>/vodplay/<id>-<s>-<n>.html`），
+  /// 实测该线路的 api 正是 `https://box.miuu.site/api/...`，与 `vodplay/...` 同域。
+  ///
+  /// ⚠️ 必须取 **origin**、不能是 api 的目录：实测按目录解析会得到
+  /// `/api/tvbox/source/vodplay/223052-1-1.html`（错），
+  /// 按 origin 才是 `/vodplay/223052-1-1.html`（对）—— 已用 Dart 实跑核对过。
+  ///
+  /// 补不出来（api 自己都不是绝对地址）时**原样返回**，交给调用方的形态兜底
+  /// 给明确提示，而不是让播放器白卡 15 秒。
+  String _absolutizePlayUrl(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty || _isPlayableShape(s)) return s;
+    final base = SpiderService.instance.getCurrentSpiderInfo().api.trim();
+    if (base.isEmpty) return s;
+    final bu = Uri.tryParse(base);
+    if (bu == null || !bu.hasScheme) return s; // base 也不绝对：补不了，别硬猜
+    try {
+      final origin = '${bu.scheme}://${bu.authority}/';
+      // 协议相对（`//host/x`）也会被 resolve 正确补上 scheme
+      final fixed = Uri.parse(origin).resolve(s).toString();
+      if (fixed != s) {
+        AppLog.instance.log('[Play] 相对播放地址补全: $s → $fixed（站点 $origin）');
+      }
+      return fixed;
+    } catch (_) {
+      return s;
+    }
+  }
+
   /// `_startPlayback` 的代次号。
   ///
   /// 普通链路（CMS / 直链）也要防"旧结果顶掉新集"：解析接口是 await 的，
@@ -972,6 +1056,8 @@ class DetailController extends GetxController with WidgetsBindingObserver {
     // 走这里的都是普通视频链路（CMS 源 / 直链），形态复位成"视频"
     contentMode.value = PlayContentMode.video;
     var candidate = _selectedPlayableURL(fallback: fallback);
+    // 相对播放地址 → 用源 api 的 host 补成绝对（方案 B，见 [_absolutizePlayUrl]）
+    candidate = _absolutizePlayUrl(candidate);
 
     if (AdFilterService.instance.isBlocked(candidate) &&
         candidate != fallback) {
@@ -1019,6 +1105,16 @@ class DetailController extends GetxController with WidgetsBindingObserver {
       return;
     }
 
+    // ── 地址形态兜底（用户 2026-10-15）────────────────────────────────
+    // 既不是绝对 URL、又补不出 base ⇒ 交给播放器只会白卡 15 秒再弹"加载超时"。
+    // 走 setPlaybackError 的既有机制：先自动顺延同集其它候选，全试完才报原因。
+    if (!_isPlayableShape(candidate)) {
+      AppLog.instance
+          .w('[Play] 播放地址不是完整链接，已拦截（不丢给播放器）: $candidate');
+      setPlaybackError('该源返回的播放地址不是完整链接：$candidate'
+          '（源没给域名，也无法用站点地址补全，请切换线路）');
+      return;
+    }
     playUrl.value = candidate;
     playbackSessionId.value = _newUuid();
     isPlaying.value = true;
