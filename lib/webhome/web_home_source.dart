@@ -95,12 +95,12 @@ class WebHomeSource {
 
 /// 内置网页源（首次启动播种 / 「恢复内置」用）。
 ///
-/// 🔴 默认网页 = `https://tmd.920410.xyz/`（用户 2026-10-14 指定）。
-/// 另外 4 个是用户给的 HTML 应用，**名称就是中文名**（用户要求）。
+/// 🔴 **只保留「默认网页」** = `https://tmd.920410.xyz/`（用户 2026-10-14 指定）。
 ///
-/// ⚠️ 资源文件名故意用 ASCII（`kulao_music.html`），显示名才是中文 ——
-/// 非 ASCII 的资源路径在打包/读取环节更容易踩坑，而显示名来自这个模型，
-/// 两者不需要一致。
+/// 用户 2026-10-15：**去掉另外 4 个随包 HTML**（裤佬音乐 / 歪比巴卜 / 漫蛙动漫 /
+/// 追更助手）—— 它们要靠外部接口 + `window.fm` 垫片才有内容，实测点进去是空白，
+/// 留着只会让人以为"网页模块坏了"。对应的 `assets/webhome/*.html` 也一并删掉。
+/// 老用户 prefs 里已经播种过的，由 [kRetiredWebHomeSourceIds] 一次性清理。
 const List<WebHomeSource> kBuiltinWebHomeSources = [
   WebHomeSource(
     id: 'builtin_default',
@@ -109,34 +109,17 @@ const List<WebHomeSource> kBuiltinWebHomeSources = [
     value: 'https://tmd.920410.xyz/',
     builtin: true,
   ),
-  WebHomeSource(
-    id: 'builtin_kulao_music',
-    name: '裤佬音乐',
-    kind: WebHomeSourceKind.asset,
-    value: 'assets/webhome/kulao_music.html',
-    builtin: true,
-  ),
-  WebHomeSource(
-    id: 'builtin_waibibabu',
-    name: '歪比巴卜',
-    kind: WebHomeSourceKind.asset,
-    value: 'assets/webhome/waibibabu.html',
-    builtin: true,
-  ),
-  WebHomeSource(
-    id: 'builtin_manwa_anime',
-    name: '漫蛙动漫',
-    kind: WebHomeSourceKind.asset,
-    value: 'assets/webhome/manwa_anime.html',
-    builtin: true,
-  ),
-  WebHomeSource(
-    id: 'builtin_zhuigeng',
-    name: '追更助手',
-    kind: WebHomeSourceKind.asset,
-    value: 'assets/webhome/zhuigeng.html',
-    builtin: true,
-  ),
+];
+
+/// **已下线**的内置源 id（不再播种、不再恢复）。
+///
+/// 用途只有一处：老用户的 prefs 里可能已经播种过这些条目，
+/// 升级后要在 [WebHomePrefs.load] 里把它们摘掉 —— 否则"删了还留着"。
+const List<String> kRetiredWebHomeSourceIds = [
+  'builtin_kulao_music',
+  'builtin_waibibabu',
+  'builtin_manwa_anime',
+  'builtin_zhuigeng',
 ];
 
 /// 网页源列表的**变更通知**（页面/管理页监听它重建）。

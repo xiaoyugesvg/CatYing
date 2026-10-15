@@ -81,6 +81,22 @@ class WebHomePrefs {
       // 读失败按"没有配置"起步，不影响启动
     }
 
+    // ── 一次性清理：已下线的内置源（用户 2026-10-15）──────────────────
+    // 那 4 个随包 HTML（裤佬音乐 / 歪比巴卜 / 漫蛙动漫 / 追更助手）已从
+    // [kBuiltinWebHomeSources] 移除（依赖外部接口，点进去是空白）。
+    // 老用户 prefs 里已经**播种过**它们 ⇒ 这里主动摘掉，否则"删了还留着"。
+    // ⚠️ 只删 `builtin == true` 且 id 命中的：用户自己导入的同名/同址源不动。
+    final beforeDrop = _sources.length;
+    _sources.removeWhere(
+        (s) => s.builtin && kRetiredWebHomeSourceIds.contains(s.id));
+    if (_sources.length != beforeDrop) {
+      // 选中项若正好是被摘掉的那条，切到剩下的第一条（不能让选中悬空）
+      if (!_sources.any((s) => s.id == _selectedId)) {
+        _selectedId = _sources.isEmpty ? '' : _sources.first.id;
+      }
+      await _persist();
+    }
+
     // ── 首次升级 / 全新安装：播种内置 + 迁移旧的单个地址 ──
     // ⚠️ 只在**没播种过**时做：用户把源全删了（列表为空）时不该又冒出来。
     if (_sources.isEmpty && !seeded) {
