@@ -491,12 +491,40 @@ class ApiConfig extends GetxController {
     // 聚合配置（sites 里是真实 http/.py 线路，如 huahua.json）**不能**被
     // /config 冲掉——之前这里没有守卫，Node 一旦启动（聚合里含 js 源就会
     // 启动），/config 一返回就把聚合自己的线路整表替换，表现为「切换不顺」。
-    final wholePackIsSpider = _isSpiderSourceUrl(configUrl.value);
+    // ⚠️ 判据必须与 `isSingleScriptSpider`（loadConfigs 里
+    //    `_isSpiderSourceUrl(apiUrl) || config.spider 非空`）**对齐**：
+    //    这里原来只看**配置 URL 的后缀**（`_isSpiderSourceUrl(configUrl)`），
+    //    于是一份"以 .json/.txt 下发、但声明了 `spider` 字段"的 CatVod / TVBox
+    //    订阅会被判成"聚合配置（线路自持）"⇒ **跳过 /config 整表替换**
+    //    ⇒ 线路表永远停在 sites[] 里的 `csp_` / 数字 key 占位
+    //    ⇒ 表现就是"猫源 / tvbox 全部没有内容"。
+    //
+    //    用户日志实证（app_2026-10-15.log，同一个源上自相矛盾）：
+    //      [ApiConfig] 单个 Spider 配置：先给兜底主页源 index，/config 返回后再校正
+    //      [AppState]  Spider 源加载成功
+    //      [ApiConfig] 聚合配置（线路自持），跳过 /config 整表替换   ← 该替换的没替换
+    //    这条守卫在当天日志里**命中 9 次**。
+    //    （用户三次同样的抱怨 2026-10-13 / 10-14 / 10-15：
+    //      「没加 py 源前，猫源和 tvbox 随时切换随时能播放」）
+    final wholePackIsSpider =
+        isSingleScriptSpider.value || _isSpiderSourceUrl(configUrl.value);
+    // 「全是占位」的判定要**排除本地自持的线路**：py 模块的 api 是 `py_xxx.py`
+    // （本地已注册模块，不是可下载线路），既不为空也不是 `csp_` —— 只要用户导入过
+    // **任何一个 py 源**，这个判定就被打破，上面那条守卫随即误命中。
+    // 这正是"加了 py 源之后猫源 / tvbox 就没内容了"的直接原因。
     final allPlaceholder = sourceBeanList.isNotEmpty &&
         sourceBeanList.every((s) =>
-            s.api.isEmpty || s.api.toLowerCase().startsWith('csp_'));
+            s.api.isEmpty ||
+            s.api.toLowerCase().startsWith('csp_') ||
+            s.isPythonScriptSource);
     if (!wholePackIsSpider && !allPlaceholder) {
-      AppLog.instance.log('[ApiConfig] 聚合配置（线路自持），跳过 /config 整表替换');
+      // 把三个判据都打出来：下一次再出现"线路没内容"，一眼就能看出是哪个判据
+      // 决定的，不用再靠猜（上面那段注释里的矛盾正是这么发现的）
+      AppLog.instance.log('[ApiConfig] 聚合配置（线路自持），跳过 /config 整表替换'
+          '（isSingleScriptSpider=${isSingleScriptSpider.value}, '
+          'urlIsSpider=${_isSpiderSourceUrl(configUrl.value)}, '
+          'allPlaceholder=$allPlaceholder, '
+          'lines=${sourceBeanList.length}）');
       return;
     }
 
