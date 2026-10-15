@@ -448,6 +448,14 @@ class ApiConfig extends GetxController {
         if (m['enabled'] == false) continue;
         final key = (m['key'] ?? '').toString().trim();
         if (key.isEmpty || target.any((s) => s.key == key)) continue;
+        // ── 用户 2026-10-15：py 源不再当影视「线路」──────────────────────
+        // 历史版本把导入的 py 源也落盘成一条线路（api = `py_xxx.py`）。
+        // 现在「导入 py 源」不再注册线路，这些历史条目也要**不再合并回来** ——
+        // 否则它们仍然出现在线路列表里，并继续污染 /config 整表替换的判据
+        //（allPlaceholder，见 updateSourceBeansFromSpiderConfig）。
+        // ⚠️ 只**跳过**、不删盘：万一以后要恢复，数据还在。
+        final userApi = (m['api'] ?? '').toString();
+        if (userApi.toLowerCase().split('?').first.endsWith('.py')) continue;
         final indexs = (m['indexs'] as num?)?.toInt() ?? 0;
         final bean = SourceBean(
           key: key,

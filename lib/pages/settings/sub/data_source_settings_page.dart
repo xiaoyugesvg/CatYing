@@ -5,7 +5,6 @@ import 'package:get/get.dart';
 import 'package:file_picker/file_picker.dart';
 
 import '../../../common/theme.dart';
-import '../../../models/source_bean.dart';
 import '../../../models/subscription.dart';
 import '../../../services/api_config.dart';
 import '../../../services/python_sources_service.dart';
@@ -203,24 +202,17 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         AppToast.message('注册失败：${installed.message ?? '未知错误'}');
         return;
       }
-      // 加一条线路（重名则先移除旧线路，避免重复），并**落盘**：
-      // 接口配置每次都整表替换 sourceBeanList，不落盘这条线路下次加载就被冲掉了
-      // （用户 2026-10-13：「py 源线路…切换显示不了」）
-      final api = 'py_$key.py';
-      await ApiConfig.instance.addUserVideoSource(SourceBean(
-        key: key,
-        name: key,
-        api: api,
-        searchable: 1,
-        filterable: 0,
-        quickSearch: 0,
-        playerType: 0,
-        type: 3,
-        ext: null,
-        indexs: 0,
-      ));
-      AppToast.message(
-          '已导入 Python 视频源「$key」（线路 ${ApiConfig.instance.sourceBeanList.length} 条）');
+      // 用户 2026-10-15：**不再**把导入的 py 源注册成一条影视「线路」。
+      //
+      // 原因：py 源的 api 是 `py_xxx.py` —— 那是**本地已注册的 Python 模块名**，
+      // 不是一个可下载的线路地址。把它塞进 sourceBeanList 会污染
+      // 「/config 整表替换」的判据（allPlaceholder 原来只认 空/`csp_`，被它打破
+      // ⇒ 猫源 / tvbox 的线路表不再被 /config 更新 ⇒ 全部没有内容）。
+      // 详见 api_config.updateSourceBeansFromSpiderConfig 里那段说明。
+      //
+      // 现在只做「注册到 Python 引擎」这一步；.py 文件仍在
+      // `<Documents>/python-project/src/spider/video/`，由 Python 引擎按 key 载入。
+      AppToast.message('已导入 Python 源「$key」（已注册到 Python 引擎）');
     } catch (e) {
       AppToast.message('导入失败：${e.toString().split('\n').first}');
     }
