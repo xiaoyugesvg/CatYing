@@ -257,6 +257,19 @@ class SpiderService {
   /// 下一个），全失败才报错并作废缓存。
   List<String> _loadedScriptCandidates = [];
 
+  /// 引擎 `/config` 里各站点**自己声明**的 type（`key → type`）。
+  ///
+  /// ── 为什么需要（用户 2026-10-15「TVBox 源内容加载不出来 / 播放不了」）───
+  /// `/spider/<key>/<type>/<action>` 里的 **type 必须与引擎实际注册的一致**
+  /// —— 引擎是按各模块 `meta.type` 挂路由的（见 assets/nodejs-project/src/spider/
+  /// 下每个源导出的 `meta`）。而调用方的 type 来自订阅配置的 `sites[].type`，
+  /// **两者未必相等**：
+  ///   · 实测整包 TVBox 源那条线路声明 `type=4`，引擎按模块 meta 注册的是 `3`
+  ///     ⇒ `POST /spider/omnibox_Makka聚合/4/init` 404 `Route ... not found`；
+  ///   · key 又是对的、候选只有一个 ⇒ 连"换 key"重试都没有，整条线路直接废掉。
+  /// 引擎自己 `/config` 的 sites[] 就是它的注册表 ⇒ 404 时拿它校正 type。
+  final Map<String, int> _engineSiteTypes = {};
+
   /// 最近一次 `_postJSON` 的 HTTP 状态码（0 = 连接层错误）。
   /// 用来判定"404 = 路由不存在 = key 不对"，从而触发换 key 重试。
   int? lastHttpStatus;
@@ -420,7 +433,10 @@ class SpiderService {
         final k = (s['key'] ?? '').toString().trim();
         if (k.isEmpty) continue;
         keys.add(k);
-        if (type != null && _siteType(s) == type) typedCount++;
+        final st = _siteType(s);
+        // 顺手记下"这个 key 自己声明的 type"——404 时用它校正（见 [_engineSiteTypes]）
+        if (st != null) _engineSiteTypes[k] = st;
+        if (type != null && st == type) typedCount++;
       }
       if (keys.isEmpty) continue;
       lastSites = sites;
@@ -459,11 +475,17 @@ class SpiderService {
     return null;
   }
 
-  /// 按候选 key 依次请求同一个 action；**404（路由不存在）判定为 key 不对 ⇒ 换
-  /// 下一个候选**，命中即把该 key 记回缓存（自愈）；全候选 404 才失败并作废缓存。
+  /// 按**候选 (key, type) 组合**依次请求同一个 action；**404（路由不存在）判定为
+  /// "这条路由没注册" ⇒ 换下一个组合**，命中即把该 key 记回缓存（自愈）；
+  /// 全组合都 404 才失败并作废缓存。
   ///
-  /// 非 404 的失败（超时 / 500 / 连接错误）**不换 key** —— 那是真的故障，
-  /// 换 key 只会把问题掩盖成"多打几次请求"。
+  /// 组合怎么来：每个候选 key **先用调用方给的 type**（保证现在能用的路径行为
+  /// 完全不变），404 时再补一次**引擎 `/config` 里该 key 自己声明的 type**
+  /// （见 [_engineSiteTypes]）—— 路由由 key **和** type 一起决定，原来只换 key，
+  /// 遇到"key 对、type 不对"就必然 404 且无从自愈。
+  ///
+  /// 非 404 的失败（超时 / 500 / 连接错误）**不换** —— 那是真的故障，
+  /// 换只会把问题掩盖成"多打几次请求"。
   Future<Map<String, dynamic>?> _postSpiderWithKeyFallback({
     required List<String> candidates,
     required String primaryKey,
@@ -473,38 +495,64 @@ class SpiderService {
     required Map<String, dynamic> body,
   }) async {
     final cands = candidates.isEmpty ? <String>[primaryKey] : candidates;
-    // ⚠️ 单候选 = 没在"猜"（猫源 / 私有协议 / 主源刷新 / 缓存命中）⇒
-    //    行为与改动前**完全一致**：只试一次，不记 key、不作废缓存、不改错误文案。
-    //    多候选才启用"换 key + 自愈"。
+    // ⚠️ 单候选 = 没在"猜 key"（猫源 / 私有协议 / 主源刷新 / 缓存命中）。
     final maySwitchKey = cands.length > 1;
+
+    // 组装实际要试的 (key, type) 序列：
+    //   ① 调用方给的 type（排第一 ⇒ 所有现在能用的路径行为不变）
+    //   ② 该 key 在引擎 /config 里自己声明的 type（≠① 时）
+    // 实测背景见 [_engineSiteTypes]：整包 TVBox 源那条线路声明 type=4，
+    // 引擎按模块 meta 注册的是 3 ⇒ `/spider/omnibox_Makka聚合/4/init` 404；
+    // key 又恰好是对的、候选只有一个 ⇒ 连原来那套"换 key"都轮不到，
+    // 整条线路直接废掉（用户 2026-10-15「内容加载不出来 / 播放不了」）。
+    final attempts = <({String key, int type})>[];
+    final seenAttempt = <String>{};
     for (final k in cands) {
+      final declared = _engineSiteTypes[k];
+      for (final t in <int>[type, if (declared != null) declared]) {
+        if (seenAttempt.add('$k\u0001$t')) attempts.add((key: k, type: t));
+      }
+    }
+    // 真"换过"才作废缓存 / 换错误文案（单候选且只有一次尝试 ⇒ 维持原行为）
+    final mayVary = maySwitchKey || attempts.length > cands.length;
+
+    for (var i = 0; i < attempts.length; i++) {
+      final k = attempts[i].key;
+      final t = attempts[i].type;
       if (!isSpiderReady) {
         lastError ??= 'Node 引擎未就绪（spider 服务没起来）';
         return null;
       }
       lastHttpStatus = null;
-      final url = _buildSpiderUrl(k, type, _nodeBase(api), action);
+      final url = _buildSpiderUrl(k, t, _nodeBase(api), action);
       AppLog.instance.log('[SpiderService] $action: $url');
       final r = await _postJSON(url, body);
       if (r != null) {
-        if (maySwitchKey && k != _loadedScriptKey) {
+        if (mayVary && k != _loadedScriptKey) {
           _loadedScriptKey = k;
           AppLog.instance
               .log('[SpiderService] 换 key 命中并记住: $k（$action）');
         }
         return r;
       }
-      if (maySwitchKey && lastHttpStatus == 404) {
-        AppLog.instance.log(
-            '[SpiderService] $action: key=$k 路由不存在(404)，换下一个候选 key');
-        continue;
-      }
-      return null;
+      // 非 404（超时 / 500 / 连接错误）= 真故障：不换 key/type，避免掩盖
+      if (lastHttpStatus != 404) return null;
+      final next = i + 1 < attempts.length ? attempts[i + 1] : null;
+      if (next == null) break;
+      AppLog.instance.log(next.key == k
+          ? '[SpiderService] $action: key=$k type=$t 路由不存在(404)，'
+              '改用引擎声明的 type=${next.type} 再试一次'
+          : '[SpiderService] $action: key=$k 路由不存在(404)，'
+              '换下一个候选 key=${next.key}');
     }
-    // 全部候选都 404 ⇒ 缓存的 key 不可信，作废，下次重新问
+    // 单候选且只试过一次（没换过）⇒ 维持原行为：错误文案由 _postJSON 给，
+    // 不动缓存（下次进来还能复用，避免把一次偶发 404 放大成"整源作废"）
+    if (!mayVary) return null;
+    // 换过 key / 校正过 type 仍全 404 ⇒ 缓存不可信，作废，下次重新问
     _loadedScriptKey = '';
     _loadedScriptCandidates = [];
-    lastError = '脚本源路由未就绪（已尝试 ${cands.length} 个候选 key）';
+    lastError = '脚本源路由未就绪（已尝试 ${attempts.length} 次；'
+        '${cands.length} 个候选 key）';
     AppLog.instance.w('[SpiderService] $action: ${lastError}');
     return null;
   }
