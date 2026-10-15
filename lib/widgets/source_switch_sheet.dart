@@ -5,6 +5,7 @@ import '../common/theme.dart';
 import '../models/source_bean.dart';
 import '../services/api_config.dart';
 import '../services/source_kind.dart';
+import 'app_toast.dart';
 import 'source_kind_badge.dart';
 
 /// 源切换面板（2026-10-02 二次重构：**三分之一屏**）
@@ -45,6 +46,118 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
 
   /// false=单列列表 / true=双排网格（默认双排，与参考截图一致）
   bool _gridMode = true;
+
+  /// 是否正在看「失效线路」分类（顶部「失效 N」切换）
+  bool _showInvalid = false;
+
+  /// 长按一条线路 → 移入「失效」（用户 2026-10-15：
+  /// 「删除后不再加载」「或者是移入失效分类，不加载不显示呢」）。
+  ///
+  /// 为什么不做"直接删除"：线路表是**以接口下发的 sites 为准整表替换**的，
+  /// 删掉下次加载又被灌回来；而且删了就找不回。所以改成"移出列表 + 落盘 + 可移回"。
+  Future<void> _markInvalid(SourceBean source) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.backgroundSecondary,
+        title: Text('移入失效线路？',
+            style: TextStyle(
+                fontSize: AppTheme.fontHeadline, color: AppTheme.textPrimary)),
+        content: Text(
+            '「${source.name}」将不再加载、也不显示在列表里；\n'
+            '随时可以在顶部「失效」里移回。',
+            style: TextStyle(
+                fontSize: AppTheme.fontSubhead, color: AppTheme.textSecondary)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('移入失效')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await ApiConfig.instance.markVideoSourceInvalid(source);
+    if (!mounted) return;
+    AppToast.message('「${source.name}」已移入失效线路');
+  }
+
+  /// 「失效」分类的列表：已移出的线路，可逐条 / 全部移回
+  Widget _buildInvalidList() {
+    final api = ApiConfig.instance;
+    // 读一下这个 Rx：让外面的 Obx 跟着条数变化刷新
+    api.invalidVideoSourceCount.value;
+    final items = api.invalidVideoSourcesForCurrentSub;
+    if (items.isEmpty) {
+      return Center(
+        child: Text('没有失效线路',
+            style: TextStyle(color: AppTheme.textTertiary)),
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text('已移出 ${items.length} 条（不加载、不显示）',
+                  style: TextStyle(
+                      fontSize: AppTheme.fontCaption,
+                      color: AppTheme.textTertiary)),
+            ),
+            TextButton(
+              onPressed: () async {
+                final n = await api.restoreAllInvalidVideoSources();
+                if (!mounted) return;
+                setState(() => _showInvalid = false);
+                AppToast.message('已移回 $n 条线路');
+              },
+              child: const Text('全部移回'),
+            ),
+          ],
+        ),
+        for (final m in items)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppTheme.backgroundTertiary,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppTheme.borderLight, width: 0.5),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.block, size: 15, color: Colors.grey),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      (m['name'] ?? m['key'] ?? '').toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: AppTheme.fontBody,
+                          color: AppTheme.textSecondary),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      final ok = await api.restoreInvalidVideoSource(
+                          (m['id'] ?? '').toString());
+                      if (!mounted || !ok) return;
+                      AppToast.message('已移回');
+                    },
+                    child: const Text('移回'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 
   @override
   void dispose() {
@@ -143,6 +256,45 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                       ),
                     ),
                     const Spacer(),
+                    // 「失效」入口（用户 2026-10-15）：只在存在失效线路时出现，
+                    // 点一下在"正常线路 / 失效线路"之间切换。
+                    Obx(() {
+                      final n =
+                          ApiConfig.instance.invalidVideoSourceCount.value;
+                      if (n <= 0) return const SizedBox.shrink();
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          GestureDetector(
+                            onTap: () =>
+                                setState(() => _showInvalid = !_showInvalid),
+                            child: Container(
+                              height: 30,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 10),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: _showInvalid
+                                    ? AppTheme.accentColor
+                                        .withValues(alpha: 0.15)
+                                    : AppTheme.backgroundTertiary,
+                                borderRadius: BorderRadius.circular(15),
+                              ),
+                              child: Text(
+                                '失效 $n',
+                                style: TextStyle(
+                                  fontSize: AppTheme.fontFootnote,
+                                  color: _showInvalid
+                                      ? AppTheme.accentColor
+                                      : AppTheme.textSecondary,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                      );
+                    }),
                     // 定位：滚到当前选中的源（用户 2026-10-13 要求）
                     GestureDetector(
                       onTap: () {
@@ -199,6 +351,8 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
               // 源列表：占满剩余空间，随时可滚动（搜索中/键盘弹起时也一样）
               Expanded(
                 child: Obx(() {
+                  // 「失效」分类：列出已移出的线路（可逐条 / 全部移回）
+                  if (_showInvalid) return _buildInvalidList();
                   // ignore: invalid_use_of_protected_member
                   final all = ApiConfig.instance.sourceBeanList.value;
                   final selectedKey = _selectedKey;
@@ -240,6 +394,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                               api: source.api,
                               selected: source.key == selectedKey,
                               onTap: () => _selectSource(source),
+                              onLongPress: () => _markInvalid(source),
                             );
                           },
                         )
@@ -250,6 +405,7 @@ class _SourceSwitchSheetState extends State<SourceSwitchSheet> {
                             api: source.api,
                             selected: source.key == selectedKey,
                             onTap: () => _selectSource(source),
+                            onLongPress: () => _markInvalid(source),
                           ),
                     ],
                   );
@@ -269,12 +425,15 @@ class _SourceRow extends StatelessWidget {
   final String api;
   final bool selected;
   final VoidCallback onTap;
+  /// 长按 = 移入「失效线路」（可移回，见 [_SourceSwitchSheetState._markInvalid]）
+  final VoidCallback? onLongPress;
 
   const _SourceRow({
     required this.name,
     required this.api,
     required this.selected,
     required this.onTap,
+    this.onLongPress,
   });
 
   @override
@@ -283,6 +442,7 @@ class _SourceRow extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 6),
       child: GestureDetector(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
           decoration: BoxDecoration(
@@ -430,18 +590,22 @@ class _SourceTile extends StatelessWidget {
   final String api;
   final bool selected;
   final VoidCallback onTap;
+  /// 长按 = 移入「失效线路」（可移回，见 [_SourceSwitchSheetState._markInvalid]）
+  final VoidCallback? onLongPress;
 
   const _SourceTile({
     required this.name,
     required this.api,
     required this.selected,
     required this.onTap,
+    this.onLongPress,
   });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(

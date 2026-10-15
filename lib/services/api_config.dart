@@ -343,6 +343,31 @@ class ApiConfig extends GetxController {
   /// （同 key 以接口下发的为准，避免和接口线路打架）。
   static const String _kUserVideoSources = 'user_video_sources';
 
+  /// 「失效线路」落盘键。
+  ///
+  /// ── 为什么需要（用户 2026-10-15）────────────────────────────────────
+  /// 「已经订阅的线路里面的源我能删除吗？删除后不再加载呢」
+  /// 「或者是移入失效分类，不加载不显示呢」
+  ///
+  /// 线路表是**以接口下发的 sites 为准整表替换**的 ⇒ 在界面上直接删掉一条，
+  /// 下次加载（切源 / 重启 / 回前台重载）又被灌回来。
+  /// ⇒ 做法：把这条线路**移出** sourceBeanList，连原字段一起落盘到「失效线路」，
+  ///    并在每次重建线路表之后统一过滤 —— 于是它"不加载、不显示"，
+  ///    但随时能在源面板的「失效」里移回（不丢数据）。
+  ///
+  /// 条目形如：`{"id":"<订阅配置地址>\u0001<key>", "key":…, "name":…, "api":…,
+  ///           "type":…, "ext":…}`。
+  /// id 里带订阅地址是为了**按订阅隔离** —— 不同订阅里的同名 key 不该互相影响。
+  static const String _kInvalidVideoSources = 'invalid_video_sources';
+
+  /// id → 原字段（"移回"时直接用它补回列表，不必重拉 /config）
+  final Map<String, Map<String, dynamic>> _invalidVideoSources = {};
+
+  bool _invalidLoaded = false;
+
+  /// 当前订阅的失效线路条数（UI 用它做响应式刷新）
+  final invalidVideoSourceCount = 0.obs;
+
   /// 导入/更新一条用户注入的站点：入列表 + 落盘
   ///
   /// [enabled] 关闭的站点**只落盘不入列表**（改回开启后下次整表替换会带回来）；
@@ -412,6 +437,12 @@ class ApiConfig extends GetxController {
   /// 删除一条用户注入的站点
   Future<void> removeUserVideoSource(String key) async {
     sourceBeanList.removeWhere((s) => s.key == key);
+    await _removeFromUserStore(key);
+    AppLog.instance.log('[ApiConfig] 已删除用户视频线路 $key');
+  }
+
+  /// 从「用户线路」落盘里摘掉同 key 条目（否则下次整表替换又合并回来）
+  Future<void> _removeFromUserStore(String key) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getStringList(_kUserVideoSources) ?? <String>[];
@@ -424,10 +455,144 @@ class ApiConfig extends GetxController {
       });
       await prefs.setStringList(_kUserVideoSources, raw);
       PrefsMirror.snapshotSoon();
-      AppLog.instance.log('[ApiConfig] 已删除用户视频线路 $key');
     } catch (e) {
-      AppLog.instance.log('[ApiConfig] 删除用户视频线路失败: $e');
+      AppLog.instance.log('[ApiConfig] 写入用户视频线路失败: $e');
     }
+  }
+
+  // ============================================================
+  // 失效线路（用户 2026-10-15：「移入失效分类，不加载不显示」）
+  // ============================================================
+
+  /// 当前订阅维度的 id 前缀（空订阅地址时退化为"只按 key"，全局生效）
+  String get _invalidIdPrefix {
+    final url = configUrl.value.trim();
+    return url.isEmpty ? '' : '$url\u0001';
+  }
+
+  String _invalidIdOf(String key) => '$_invalidIdPrefix${key.trim()}';
+
+  Future<void> _ensureInvalidLoaded() async {
+    if (_invalidLoaded) return;
+    try {
+      final p = await SharedPreferences.getInstance();
+      for (final e
+          in p.getStringList(_kInvalidVideoSources) ?? const <String>[]) {
+        try {
+          final m = jsonDecode(e);
+          if (m is! Map) continue;
+          final map = Map<String, dynamic>.from(m);
+          final id = (map['id'] ?? '').toString();
+          if (id.isEmpty) continue;
+          _invalidVideoSources[id] = map;
+        } catch (_) {
+          // 坏条目跳过，不影响其它
+        }
+      }
+    } catch (_) {
+      // 读失败按"没有失效线路"起步
+    }
+    _invalidLoaded = true;
+    _syncInvalidCount();
+  }
+
+  Future<void> _persistInvalid() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setStringList(_kInvalidVideoSources,
+          _invalidVideoSources.values.map((v) => jsonEncode(v)).toList());
+      PrefsMirror.snapshotSoon();
+    } catch (e) {
+      AppLog.instance.log('[ApiConfig] 保存失效线路失败: $e');
+    }
+    _syncInvalidCount();
+  }
+
+  void _syncInvalidCount() {
+    invalidVideoSourceCount.value = invalidVideoSourcesForCurrentSub.length;
+  }
+
+  /// 当前订阅的失效线路（供「失效」面板展示 + 移回）
+  List<Map<String, dynamic>> get invalidVideoSourcesForCurrentSub {
+    final prefix = _invalidIdPrefix;
+    return _invalidVideoSources.entries
+        .where((e) =>
+            prefix.isEmpty ? !e.key.contains('\u0001') : e.key.startsWith(prefix))
+        .map((e) => Map<String, dynamic>.from(e.value))
+        .toList();
+  }
+
+  /// 这条线路是不是"已移入失效"（当前订阅维度）
+  bool isVideoSourceInvalid(String key) =>
+      _invalidVideoSources.containsKey(_invalidIdOf(key));
+
+  /// 重建线路表之后统一过滤掉失效线路 ——
+  /// 两处 `sourceBeanList.value = …`（/config 整表替换、配置解析）之前都要调。
+  void _dropInvalidSources(List<SourceBean> list) {
+    if (_invalidVideoSources.isEmpty || list.isEmpty) return;
+    final before = list.length;
+    list.removeWhere((s) => isVideoSourceInvalid(s.key));
+    final dropped = before - list.length;
+    if (dropped > 0) {
+      AppLog.instance.log(
+          '[ApiConfig] 已过滤 $dropped 条失效线路（不加载 / 不显示）');
+    }
+  }
+
+  /// 把一条线路**移入失效**：出列表 + 落盘（不加载、不显示，但随时能移回）
+  Future<void> markVideoSourceInvalid(SourceBean bean) async {
+    final key = bean.key.trim();
+    if (key.isEmpty) return;
+    await _ensureInvalidLoaded();
+    final id = _invalidIdOf(key);
+    _invalidVideoSources[id] = {
+      'id': id,
+      'key': key,
+      'name': bean.name,
+      'api': bean.api,
+      'type': bean.type,
+      'ext': bean.ext,
+    };
+    sourceBeanList.removeWhere((s) => s.key == key);
+    await _removeFromUserStore(key);
+    // 移的正好是当前主页源 ⇒ 换到剩下的第一条，别让首页挂着一个失效源
+    if (homeSourceBean.value?.key == key) {
+      final first = sourceBeanList.firstOrNull;
+      if (first != null) setHomeSource(first);
+    }
+    await _persistInvalid();
+    AppLog.instance.log('[ApiConfig] 线路 $key 已移入失效'
+        '（当前订阅共 ${invalidVideoSourceCount.value} 条）');
+  }
+
+  /// 把一条失效线路**移回**列表（按 id）
+  Future<bool> restoreInvalidVideoSource(String id) async {
+    await _ensureInvalidLoaded();
+    final m = _invalidVideoSources.remove(id);
+    if (m == null) return false;
+    final key = (m['key'] ?? '').toString().trim();
+    if (key.isNotEmpty && !sourceBeanList.any((s) => s.key == key)) {
+      sourceBeanList.add(SourceBean(
+        key: key,
+        name: (m['name'] ?? key).toString(),
+        api: (m['api'] ?? '').toString(),
+        type: (m['type'] as num?)?.toInt() ?? 3,
+        ext: m['ext']?.toString(),
+      ));
+    }
+    await _persistInvalid();
+    AppLog.instance.log('[ApiConfig] 失效线路已移回: $key');
+    return true;
+  }
+
+  /// 把当前订阅的失效线路**全部移回**
+  Future<int> restoreAllInvalidVideoSources() async {
+    final items = invalidVideoSourcesForCurrentSub;
+    var n = 0;
+    for (final m in items) {
+      if (await restoreInvalidVideoSource((m['id'] ?? '').toString())) n++;
+    }
+    return n;
   }
 
   /// 把落盘的用户线路合并进 [target]（按 key 去重；接口已下发的同 key 不覆盖）
@@ -613,6 +778,14 @@ class ApiConfig extends GetxController {
     if (keptApp > 0) {
       AppLog.instance.log('[ApiConfig] /config 整表替换：保留 $keptApp 条程序源(app_)');
     }
+
+    // 失效线路（用户 2026-10-15：「移入失效分类，不加载不显示」）：
+    // 必须放在**所有来源都补完之后、赋值之前**（含上面合并的用户线路与
+    // 补回的 app_ 程序源），否则漏掉的那些又会被灌回来。
+    await _ensureInvalidLoaded();
+    _dropInvalidSources(newSources);
+    // 订阅刚换过 ⇒ 失效条数是"当前订阅维度"的，要跟着一起刷新（顶部「失效 N」）
+    _syncInvalidCount();
 
     sourceBeanList.value = newSources;
 
@@ -939,6 +1112,10 @@ class ApiConfig extends GetxController {
       }
       // 同上：把用户导入的线路（py 源等）并回列表
       await _mergeUserVideoSources(sources);
+      // 失效线路：移出的那些不再灌回来（与 /config 整表替换同一套过滤）
+      await _ensureInvalidLoaded();
+      _dropInvalidSources(sources);
+      _syncInvalidCount();
       sourceBeanList.value = sources;
 
       // 直播 lives：交给 LiveService 解析（内嵌 channels 或 m3u URL）
