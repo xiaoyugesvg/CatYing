@@ -85,6 +85,27 @@ class HikerEngine {
     ));
   }
 
+  /// 从 `/hiker/run` 的响应体里抠出 Node 侧给的错误文本。
+  ///
+  /// Node（`main.js`）在 `handleHikerApi` 抛错时回 **500 + `{ok:false,error:'海阔接口异常：…'}`**，
+  /// 请求体过大时回 **413 + 同形状 JSON**。这个 `error` 才是真正的原因 ——
+  /// Dio 的 `DioException.toString()` 完全看不到它。
+  static String? _errorFromResponseBody(Object? data) {
+    if (data == null) return null;
+    final text = data.toString().trim();
+    if (text.isEmpty) return null;
+    try {
+      final m = jsonDecode(text);
+      if (m is Map) {
+        final err = (m['error'] ?? '').toString().trim();
+        if (err.isNotEmpty) return err;
+      }
+    } catch (_) {
+      // 不是 JSON（例如网关插入的 HTML 错误页）→ 直接把原文当消息，别把信息丢了
+    }
+    return text.length > 400 ? '${text.substring(0, 400)}…' : text;
+  }
+
   Future<HikerResult> _post(Map<String, dynamic> payload) async {
     // 注册 Node → Dart 的 WebView 钩子（幂等）：规则里用到
     // fetchCodeByWebView / lazyRule 时，Node 会回调 `/hiker/webview`。
@@ -177,6 +198,26 @@ class HikerEngine {
         listeners: listeners,
         needRefresh: map['needRefresh'] == true,
       );
+    } on DioException catch (e) {
+      // ── 🔴 为什么要单独接一个 DioException ──────────────────────────────
+      // Node 侧 `handleHikerApi` 抛错时，main.js 回的是 **HTTP 500 + JSON 体**
+      // `{ok:false, error:'海阔接口异常：<真正的原因>'}`；而 Dio 默认把非 2xx 直接抛
+      // DioException ⇒ 那句真正有用的原因（「规则重放次数超过上限」/「$.require 找不到
+      // 模块」/「规则执行超时」…）**被整段丢掉**，界面上只剩
+      // 「This exception was thrown because the response has a status code of 500 …」
+      // 这种几百字的废话（用户 2026-10-15 反馈）。所以这里把响应体解回来。
+      final real = _errorFromResponseBody(e.response?.data);
+      if (real != null) {
+        AppLog.instance.log(
+            '[Hiker] /hiker/run 失败 HTTP ${e.response?.statusCode}: $real');
+        return HikerResult.fail(real);
+      }
+      final code = e.response?.statusCode;
+      final brief = code == null
+          ? '海阔引擎请求失败（${e.type.name}）${e.message ?? ''}'
+          : '海阔引擎返回 HTTP $code，且响应体为空';
+      AppLog.instance.log('[Hiker] /hiker/run 失败: $brief');
+      return HikerResult.fail(brief);
     } catch (e) {
       AppLog.instance.log('[Hiker] /hiker/run 失败: $e');
       return HikerResult.fail('$e');

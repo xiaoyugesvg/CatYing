@@ -1903,7 +1903,22 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
       needRefresh: state.needRefresh === true,
     };
   }
-  throw new Error(`规则重放次数超过上限（${MAX_REPLAY}）—— 该脚本的请求地址依赖响应内容，Phase 1 暂不支持`);
+  // 走到这里 = MAX_REPLAY 轮都没收敛。把**能直接定位**的信息带上：
+  // 原来只有一句「该脚本的请求地址依赖响应内容」，既看不出是脚本的问题还是引擎的问题，
+  // 也看不到它到底在请求什么（用户 2026-10-15 反馈的不明报错）。
+  //   去重地址数 == 请求次数 ⇒ 每轮都在请求**新地址**：脚本用了随机数/时间戳，
+  //                            或在沿「下一页」链式爬，40 层不够；
+  //   去重地址数 <  请求次数 ⇒ 同一地址反复未命中缓存：是引擎侧的问题，要反馈。
+  const uniqUrls = new Set(pending).size;
+  const tail = pending.slice(-3).map((u) => String(u).slice(0, 120)).join(' | ');
+  throw new Error(
+    `规则重放次数超过上限（${MAX_REPLAY} 轮，共 ${pending.length} 次请求，`
+    + `其中不同地址 ${uniqUrls} 个）—— 该脚本的请求地址依赖响应内容，Phase 1 暂不支持。`
+    + (uniqUrls === pending.length
+      ? '原因：每轮请求的地址都不同（脚本可能用了随机数/时间戳，或沿链接链式翻页）。'
+      : '原因：有地址被重复请求且始终未命中缓存（疑似引擎问题，请反馈）。')
+    + (tail ? ` 最近的请求：${tail}` : ''),
+  );
 }
 
 /**
