@@ -2404,30 +2404,62 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
 
   Widget _buildTmdbMiss(VodInfo info) {
     final accent = _libAccent;
+    // 没刮到 ⇒ 头图/剧集卡会**自动回落到视频自己的封面**（`info.pic`，
+    // 见 [_buildWallpaper] 与剧集卡的 still 回退链），这里把这件事明说，
+    // 免得用户以为"封面丢了"；源自己也没给封面时如实讲清
+    //（用户 2026-10-15：「没刮到的话就用视频封面做为媒体库页面里的封面」）。
+    final hasOwnCover = info.pic.isNotEmpty || info.backdrop.isNotEmpty;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.info_outline, size: 15, color: Colors.white54),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'TMDB 未匹配到「${info.name}」的详情数据，导演 / 演员 / 简介暂缺',
-              style: const TextStyle(color: Colors.white54, fontSize: 12),
-            ),
-          ),
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => _enrichFromTmdb(force: true),
-            child: Text(
-              '重新刮削',
-              style: TextStyle(
-                color: accent,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.info_outline, size: 15, color: Colors.white54),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'TMDB 未匹配到「${info.name}」的详情数据，导演 / 演员 / 简介暂缺；'
+                  '${hasOwnCover ? "封面已改用视频自己的封面" : "该源也没提供封面，暂时无图可用"}',
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                ),
               ),
-            ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // 两个出口：
+          //   ① 重新刮削 —— 留在本页（「手动匹配 TMDB」的入口只在本页，见 _buildTopBar）
+          //   ② 去默认详情页 —— 本页没有 TMDB 数据时比较空，给用户一条退路
+          Row(
+            children: [
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _enrichFromTmdb(force: true),
+                child: Text(
+                  '重新刮削',
+                  style: TextStyle(
+                    color: accent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 18),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _fallbackToDefault(_video),
+                child: const Text(
+                  '去默认详情页',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
