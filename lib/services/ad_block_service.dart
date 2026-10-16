@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../reading/source/global_proxy.dart';
 import 'app_log.dart';
 
 /// 网页**去广告**（元素隐藏）—— 规则、持久化、注入脚本、选元素。
@@ -39,6 +41,20 @@ class AdBlockService extends ChangeNotifier {
   static const String _kBubble = 'adblock_bubble_v1';
   static const String _kBuiltin = 'adblock_builtin_v1';
   static const String _kBuiltinOff = 'adblock_builtin_off_v1';
+  static const String _kFilterOn = 'adblock_filter_on_v1';
+  static const String _kFilterSrc = 'adblock_filter_src_v1';
+  static const String _kFilterAt = 'adblock_filter_at_v1';
+
+  /// 毒奶去广告（Adblock4limbo）**真正管用的那一半**：纯 CSS 过滤器。
+  ///
+  /// 它仓库里的 `Adblock4limbo.conf` 是 Quantumult X 的 rewrite 规则
+  /// （`正则 url reject` / `url script-response-body`）—— **网络层**，
+  /// webview 拿不到请求层，我们一条都用不了；
+  /// 但那份 JS 只是"往页面里注入 5 个外链脚本"的加载器，真正的去广告内容在这个
+  /// CSS 里（约 1.8 万条选择器 + `display:none!important`）。**整份 CSS 能直接注入**，
+  /// 这就是本模块支持的「CSS 过滤器」。
+  static const String kLimboCssUrl =
+      'https://limbopro.com/CSS/Adblock4limbo.user.css';
 
   bool _enabled = true;
   bool _bubble = true;
@@ -49,6 +65,12 @@ class AdBlockService extends ChangeNotifier {
 
   /// 被用户**单条关掉**的内置通用选择器（prefs 里存 StringList）
   final Set<String> _builtinOff = {};
+
+  /// 导入的 **CSS 过滤器**（整份注入，例如毒奶的 Adblock4limbo.user.css）
+  String _filterCss = '';
+  String _filterSrc = '';
+  bool _filterOn = true;
+  int _filterAt = 0;
 
   /// 网页里刚选中的元素（悬浮按钮据此弹确认框）；发布-订阅式，谁在当前页谁处理
   final ValueNotifier<AdBlockPick?> lastPick = ValueNotifier(null);
@@ -108,9 +130,11 @@ class AdBlockService extends ChangeNotifier {
     await ensureLoaded();
     if (!_enabled) return;
     final selectors = selectorsFor(pageUrl);
-    if (selectors.isEmpty) return;
+    final extra = filterEnabled ? _filterCss : '';
+    if (selectors.isEmpty && extra.isEmpty) return;
     try {
-      await controller.runJavaScript(buildInjectJs(selectors));
+      await controller.runJavaScript(
+          buildInjectJs(selectors, extraCss: extra));
     } catch (e) {
       AppLog.instance.log('[AdBlock] 注入失败: $e');
     }
@@ -186,6 +210,75 @@ class AdBlockService extends ChangeNotifier {
     } else {
       _builtinOff.add(selector);
     }
+    await _saveFlags();
+    notifyListeners();
+  }
+
+  // ============================================================
+  // CSS 过滤器（整份 CSS 直接注入）
+  // ============================================================
+
+  bool get hasFilter => _filterCss.isNotEmpty;
+
+  /// 过滤器当前生效吗（开关开着 **且** 真有内容）
+  bool get filterEnabled => _filterOn && _filterCss.isNotEmpty;
+
+  bool get filterSwitch => _filterOn;
+
+  String get filterSource => _filterSrc;
+
+  int get filterBytes => _filterCss.length;
+
+  int get filterUpdatedAt => _filterAt;
+
+  /// 从网址导入（覆盖旧的）。用带**全局代理**的 Dio 下载 —— 与全项目 27 处请求
+  /// 一致，否则开了代理的用户这里必然失败。
+  ///
+  /// 返回 (成功?, 提示语)。
+  Future<(bool, String)> importFilterFromUrl(String url) async {
+    final u = url.trim();
+    if (u.isEmpty) return (false, '网址是空的');
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 60),
+      headers: const {'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)'},
+    ));
+    applyGlobalProxy(dio);
+    try {
+      final resp = await dio.get<List<int>>(u);
+      final bytes = resp.data ?? const <int>[];
+      if (bytes.isEmpty) return (false, '下载到 0 字节');
+      final css = utf8.decode(bytes, allowMalformed: true);
+      // 只认 CSS：HTML 错误页/JSON 之类直接拒掉，免得注入一堆垃圾
+      if (!css.contains('{') || !css.contains('}')) {
+        return (false, '内容不像 CSS（是不是下到了错误页？）');
+      }
+      _filterCss = css;
+      _filterSrc = u;
+      _filterOn = true;
+      _filterAt = DateTime.now().millisecondsSinceEpoch;
+      await _persistFilter();
+      await _saveFlags();
+      notifyListeners();
+      return (true, '已导入 ${(css.length / 1024).round()} KB');
+    } catch (e) {
+      return (false, '下载失败：$e');
+    } finally {
+      dio.close(force: true);
+    }
+  }
+
+  Future<void> clearFilter() async {
+    _filterCss = '';
+    _filterSrc = '';
+    _filterAt = 0;
+    await _persistFilter();
+    await _saveFlags();
+    notifyListeners();
+  }
+
+  Future<void> setFilterEnabled(bool v) async {
+    _filterOn = v;
     await _saveFlags();
     notifyListeners();
   }
@@ -300,6 +393,11 @@ class AdBlockService extends ChangeNotifier {
       _builtinOff
         ..clear()
         ..addAll(prefs.getStringList(_kBuiltinOff) ?? const []);
+      // CSS 过滤器：内容在文件里（可能几百 KB，别塞 prefs），开关与来源在 prefs
+      _filterOn = prefs.getBool(_kFilterOn) ?? true;
+      _filterSrc = prefs.getString(_kFilterSrc) ?? '';
+      _filterAt = prefs.getInt(_kFilterAt) ?? 0;
+      _filterCss = await _readFilter();
       final list = await _readRules();
       _rules
         ..clear()
@@ -337,6 +435,9 @@ class AdBlockService extends ChangeNotifier {
       await prefs.setBool(_kBubble, _bubble);
       await prefs.setBool(_kBuiltin, _builtin);
       await prefs.setStringList(_kBuiltinOff, _builtinOff.toList());
+      await prefs.setBool(_kFilterOn, _filterOn);
+      await prefs.setString(_kFilterSrc, _filterSrc);
+      await prefs.setInt(_kFilterAt, _filterAt);
     } catch (e) {
       AppLog.instance.log('[AdBlock] 保存开关失败: $e');
     }
@@ -349,6 +450,36 @@ class AdBlockService extends ChangeNotifier {
     } catch (e) {
       AppLog.instance.log('[AdBlock] 取目录失败: $e');
       return null;
+    }
+  }
+
+  /// CSS 过滤器落盘位置：`<Documents>/ad_block_filter.css`
+  Future<File> _filterFile() async {
+    final d = await getApplicationDocumentsDirectory();
+    return File('${d.path}/ad_block_filter.css');
+  }
+
+  Future<String> _readFilter() async {
+    try {
+      final f = await _filterFile();
+      if (!await f.exists()) return '';
+      return await f.readAsString();
+    } catch (e) {
+      AppLog.instance.log('[AdBlock] 读 CSS 过滤器失败: $e');
+      return '';
+    }
+  }
+
+  Future<void> _persistFilter() async {
+    try {
+      final f = await _filterFile();
+      if (_filterCss.isEmpty) {
+        if (await f.exists()) await f.delete();
+        return;
+      }
+      await f.writeAsString(_filterCss, flush: true);
+    } catch (e) {
+      AppLog.instance.log('[AdBlock] 写 CSS 过滤器失败: $e');
     }
   }
 
@@ -443,14 +574,19 @@ class AdBlockService extends ChangeNotifier {
   ///   · 动态插入的广告（弹窗/浮层）也要盖住 ⇒ MutationObserver；
   ///   · 有些站点会删掉/覆盖注入的 `<style>` ⇒ 前 10 秒每 500ms 兜底刷一遍；
   ///   · 只有一条 style 标签，重复注入是**替换内容**而不是越堆越多。
-  static String buildInjectJs(List<String> selectors) {
+  static String buildInjectJs(List<String> selectors, {String extraCss = ''}) {
     final json = jsonEncode(selectors);
+    // 整份 CSS 过滤器（例如毒奶那 1.8 万条选择器）按 JSON 字符串安全嵌入：
+    // 里面全是 `}` 与换行，直接拼进 JS 会炸语法
+    final extra = jsonEncode(extraCss.trim());
     return '''
 (function(){
   try {
     var SEL = $json;
-    if (!SEL || !SEL.length) return 'ok';
+    var EXTRA = $extra;
     var css = SEL.map(function(s){ return s + '{display:none !important;}'; }).join('\\n');
+    if (EXTRA) css = css + '\\n' + EXTRA;
+    if (!css) return 'ok';
     var apply = function(){
       var st = document.getElementById('__tbAdBlockStyle');
       if (!st) {

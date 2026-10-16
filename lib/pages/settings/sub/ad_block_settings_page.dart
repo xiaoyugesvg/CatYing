@@ -308,6 +308,45 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
     if (mounted) AppToast.message('已清空');
   }
 
+  // ── CSS 过滤器（整份注入）──────────────────────────────────
+
+  Future<void> _importLimbo() => _importFilterUrl(AdBlockService.kLimboCssUrl);
+
+  Future<void> _importAnyFilter() async {
+    final u = await SettingsDialogs.editText(
+      context: context,
+      title: '从网址导入 CSS 过滤器',
+      initial: '',
+      hint: 'https://…/xxx.css',
+      helper: '只要是一份 CSS（元素隐藏规则）就行；'
+          'Quantumult X / Surge 那种 rewrite 规则不吃',
+    );
+    if (u == null || u.trim().isEmpty) return;
+    await _importFilterUrl(u.trim());
+  }
+
+  Future<void> _importFilterUrl(String url) async {
+    AppToast.message('正在下载…');
+    final (ok, msg) = await _svc.importFilterFromUrl(url);
+    if (!mounted) return;
+    if (ok) {
+      AppToast.message(msg);
+    } else {
+      AppToast.error(msg);
+    }
+  }
+
+  Future<void> _clearFilter() async {
+    final ok = await SettingsDialogs.confirm(
+      context: context,
+      title: '删除 CSS 过滤器？',
+      message: '删掉后这一层不再注入（内置选择器与「我的规则」不受影响）',
+    );
+    if (ok != true) return;
+    await _svc.clearFilter();
+    if (mounted) AppToast.message('已删除');
+  }
+
   String _short(String s) => s.length <= 40 ? s : '${s.substring(0, 38)}…';
 
   /// 一行两个的卡片网格（用外层宽度算，避免 GridView 的滚动嵌套）
@@ -471,6 +510,42 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
               _grid(context, [
                 for (final s in AdBlockService.kBuiltinSelectors) _builtinCard(s),
               ]),
+            ],
+          ),
+
+          SettingsGroup(
+            title: 'CSS 过滤器（整份注入）',
+            hint: '毒奶去广告那套 .conf 是 Quantumult X 的 rewrite（拦请求 / 改响应体，'
+                '需要 MITM），webview 吃不下；但它背后那份 Adblock4limbo.user.css 是'
+                '纯选择器（约 1.8 万条），能整份注入 —— 就是这里。',
+            children: [
+              SettingsRow(
+                icon: Icons.download_rounded,
+                title: _svc.hasFilter ? '重新导入毒奶 CSS' : '一键导入毒奶 CSS',
+                subtitle: 'limbopro.com/CSS/Adblock4limbo.user.css（约 320 KB）',
+                onTap: _importLimbo,
+              ),
+              SettingsRow(
+                icon: Icons.link_rounded,
+                title: '从其它网址导入',
+                subtitle: '任何一份 CSS 过滤器都行',
+                onTap: _importAnyFilter,
+              ),
+              if (_svc.hasFilter) ...[
+                SettingsRow(
+                  icon: Icons.code_rounded,
+                  title: 'CSS 过滤器',
+                  subtitle: '${(_svc.filterBytes / 1024).round()} KB · ${_svc.filterSource}',
+                  trailingSwitch: true,
+                  switchValue: _svc.filterSwitch,
+                  onSwitchChanged: (v) => _svc.setFilterEnabled(v),
+                ),
+                SettingsRow(
+                  icon: Icons.delete_forever_rounded,
+                  title: '删除 CSS 过滤器',
+                  onTap: _clearFilter,
+                ),
+              ],
             ],
           ),
 
