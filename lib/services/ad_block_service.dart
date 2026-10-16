@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -44,6 +45,17 @@ class AdBlockService extends ChangeNotifier {
   static const String _kFilterOn = 'adblock_filter_on_v1';
   static const String _kFilterSrc = 'adblock_filter_src_v1';
   static const String _kFilterAt = 'adblock_filter_at_v1';
+  static const String _kFilterOrigin = 'adblock_filter_origin_v1'; // custom | builtin
+
+  /// **内置**的 CSS 过滤器（**默认就用它，不用联网**）：
+  /// 从 Adblock4limbo 的 `.user.css` 里抽出「元素隐藏」那一块
+  /// （18008 条通用广告选择器 + `display:none!important`，约 321 KB），
+  /// 丢掉它的工具箱 UI 样式（那些跟去广告无关）。MIT 许可，
+  /// 版权与许可见 `assets/adblock/LICENSE-Adblock4limbo.txt`。
+  static const String kBuiltinFilterAsset = 'assets/adblock/limbopro_ads.css';
+
+  /// 内置过滤器的来源（联网"更新"用的地址）
+  static const String kLimboHome = 'https://github.com/limbopro/Adblock4limbo';
 
   /// 毒奶去广告（Adblock4limbo）**真正管用的那一半**：纯 CSS 过滤器。
   ///
@@ -71,6 +83,9 @@ class AdBlockService extends ChangeNotifier {
   String _filterSrc = '';
   bool _filterOn = true;
   int _filterAt = 0;
+
+  /// 当前过滤器哪来的：`'custom'` = 用户导入的；其它 = **内置 asset**
+  String _filterOrigin = '';
 
   /// 网页里刚选中的元素（悬浮按钮据此弹确认框）；发布-订阅式，谁在当前页谁处理
   final ValueNotifier<AdBlockPick?> lastPick = ValueNotifier(null);
@@ -220,6 +235,12 @@ class AdBlockService extends ChangeNotifier {
 
   bool get hasFilter => _filterCss.isNotEmpty;
 
+  /// 现在这份过滤器是**用户自己导入的**吗（否则就是内置版）
+  bool get filterIsCustom => _filterOrigin == 'custom';
+
+  /// 来源说明（内置 / 自定义网址）
+  String get filterOriginLabel => filterIsCustom ? '自定义' : '内置';
+
   /// 过滤器当前生效吗（开关开着 **且** 真有内容）
   bool get filterEnabled => _filterOn && _filterCss.isNotEmpty;
 
@@ -255,12 +276,13 @@ class AdBlockService extends ChangeNotifier {
       }
       _filterCss = css;
       _filterSrc = u;
+      _filterOrigin = 'custom';
       _filterOn = true;
       _filterAt = DateTime.now().millisecondsSinceEpoch;
       await _persistFilter();
       await _saveFlags();
       notifyListeners();
-      return (true, '已导入 ${(css.length / 1024).round()} KB');
+      return (true, '已导入 ${(css.length / 1024).round()} KB（已替换内置版）');
     } catch (e) {
       return (false, '下载失败：$e');
     } finally {
@@ -268,11 +290,16 @@ class AdBlockService extends ChangeNotifier {
     }
   }
 
-  Future<void> clearFilter() async {
-    _filterCss = '';
+  /// 回到**内置版**过滤器（删掉用户导入的那份）
+  Future<void> revertToBuiltinFilter() async {
+    _filterOrigin = 'builtin';
     _filterSrc = '';
     _filterAt = 0;
-    await _persistFilter();
+    try {
+      final f = await _filterFile();
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
+    _filterCss = await _readBuiltinFilter();
     await _saveFlags();
     notifyListeners();
   }
@@ -393,11 +420,20 @@ class AdBlockService extends ChangeNotifier {
       _builtinOff
         ..clear()
         ..addAll(prefs.getStringList(_kBuiltinOff) ?? const []);
-      // CSS 过滤器：内容在文件里（可能几百 KB，别塞 prefs），开关与来源在 prefs
+      // CSS 过滤器：内容可能几百 KB（别塞 prefs）——
+      // 自定义的读文件；没导入过的用**内置 asset**（默认就生效，不用联网）
       _filterOn = prefs.getBool(_kFilterOn) ?? true;
       _filterSrc = prefs.getString(_kFilterSrc) ?? '';
       _filterAt = prefs.getInt(_kFilterAt) ?? 0;
-      _filterCss = await _readFilter();
+      _filterOrigin = prefs.getString(_kFilterOrigin) ?? '';
+      _filterCss = _filterOrigin == 'custom'
+          ? await _readFilterFile()
+          : await _readBuiltinFilter();
+      if (_filterOrigin == 'custom' && _filterCss.isEmpty) {
+        // 自定义文件丢了（换机/清理）→ 回退内置，别让过滤器凭空消失
+        _filterOrigin = 'builtin';
+        _filterCss = await _readBuiltinFilter();
+      }
       final list = await _readRules();
       _rules
         ..clear()
@@ -438,6 +474,7 @@ class AdBlockService extends ChangeNotifier {
       await prefs.setBool(_kFilterOn, _filterOn);
       await prefs.setString(_kFilterSrc, _filterSrc);
       await prefs.setInt(_kFilterAt, _filterAt);
+      await prefs.setString(_kFilterOrigin, _filterOrigin);
     } catch (e) {
       AppLog.instance.log('[AdBlock] 保存开关失败: $e');
     }
@@ -459,13 +496,24 @@ class AdBlockService extends ChangeNotifier {
     return File('${d.path}/ad_block_filter.css');
   }
 
-  Future<String> _readFilter() async {
+  Future<String> _readFilterFile() async {
     try {
       final f = await _filterFile();
       if (!await f.exists()) return '';
       return await f.readAsString();
     } catch (e) {
       AppLog.instance.log('[AdBlock] 读 CSS 过滤器失败: $e');
+      return '';
+    }
+  }
+
+  /// 读**内置**过滤器（随包 asset，不联网）
+  Future<String> _readBuiltinFilter() async {
+    try {
+      final s = await rootBundle.loadString(kBuiltinFilterAsset);
+      return s.trim();
+    } catch (e) {
+      AppLog.instance.log('[AdBlock] 读内置 CSS 过滤器失败: $e');
       return '';
     }
   }

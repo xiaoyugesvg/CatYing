@@ -1,0 +1,8 @@
+Adblock4limbo
+Copyright (c) limbopro
+https://github.com/limbopro/Adblock4limbo
+License: MIT（https://github.com/limbopro/Adblock4limbo/blob/main/LICENSE）
+
+本目录下的 limbopro_ads.css 取自上述项目的
+https://limbopro.com/CSS/Adblock4limbo.user.css ，
+仅保留其中的「通用广告元素选择器」（元素隐藏规则），版权与许可归原作者所有。

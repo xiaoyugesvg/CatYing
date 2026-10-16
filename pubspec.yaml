@@ -133,6 +133,12 @@ flutter:
     #   Node 侧按 options.assetsDir 读文件。
     #   ⚠️ 目录式声明**不递归**，所以这个子目录必须单独声明 ✓
     - assets/hiker/files/
+    # 网页去广告的**内置 CSS 过滤器**（默认启用；见 lib/services/ad_block_service.dart）
+    #   ⚠️ 来源是 Adblock4limbo（MIT）：只抽了它那份 .user.css 里**元素隐藏**那块
+    #      （18008 条通用广告选择器 + display:none!important，约 321 KB），
+    #      丢掉了它的工具箱 UI 样式；版权与许可见同目录 LICENSE-Adblock4limbo.txt。
+    #   用户可在「设置 → 广告管理 → CSS 过滤器」联网更新或换成自己的 CSS。
+    - assets/adblock/
     # 猫爪（猫咪）Logo：用于接口配置引导页主视觉
     - assets/images/
     # 阅读模块用到的图标（logo / 文件夹 / 魔棒）：

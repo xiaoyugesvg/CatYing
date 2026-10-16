@@ -336,15 +336,20 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
     }
   }
 
-  Future<void> _clearFilter() async {
+  Future<void> _revertFilter() async {
     final ok = await SettingsDialogs.confirm(
       context: context,
-      title: '删除 CSS 过滤器？',
-      message: '删掉后这一层不再注入（内置选择器与「我的规则」不受影响）',
+      title: '恢复内置版？',
+      message: '导入的那份会被删除，回到随包的 18008 条通用选择器',
     );
     if (ok != true) return;
-    await _svc.clearFilter();
-    if (mounted) AppToast.message('已删除');
+    await _svc.revertToBuiltinFilter();
+    if (mounted) AppToast.message('已恢复内置版');
+  }
+
+  Future<void> _copyLimboHome() async {
+    await Clipboard.setData(const ClipboardData(text: AdBlockService.kLimboHome));
+    if (mounted) AppToast.message('来源已复制');
   }
 
   String _short(String s) => s.length <= 40 ? s : '${s.substring(0, 38)}…';
@@ -514,38 +519,40 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
           ),
 
           SettingsGroup(
-            title: 'CSS 过滤器（整份注入）',
-            hint: '毒奶去广告那套 .conf 是 Quantumult X 的 rewrite（拦请求 / 改响应体，'
-                '需要 MITM），webview 吃不下；但它背后那份 Adblock4limbo.user.css 是'
-                '纯选择器（约 1.8 万条），能整份注入 —— 就是这里。',
+            title: 'CSS 过滤器（整份注入 · 已内置）',
+            hint: '默认用**内置版**：来自 Adblock4limbo（MIT）的 18008 条通用广告选择器，'
+                '不用联网就生效。毒奶那套 .conf 是 Quantumult X 的 rewrite（拦请求 / '
+                '改响应体，需要 MITM），webview 吃不下；能吃的是它背后这份 CSS。',
             children: [
               SettingsRow(
+                icon: Icons.code_rounded,
+                title: 'CSS 过滤器',
+                subtitle: _svc.hasFilter
+                    ? '${(_svc.filterBytes / 1024).round()} KB · ${_svc.filterOriginLabel}'
+                        '${_svc.filterIsCustom ? ' · ${_svc.filterSource}' : ''}'
+                    : '读不到内置过滤器（asset 缺失？）',
+                trailingSwitch: true,
+                switchValue: _svc.filterSwitch,
+                onSwitchChanged: (v) => _svc.setFilterEnabled(v),
+              ),
+              SettingsRow(
                 icon: Icons.download_rounded,
-                title: _svc.hasFilter ? '重新导入毒奶 CSS' : '一键导入毒奶 CSS',
-                subtitle: 'limbopro.com/CSS/Adblock4limbo.user.css（约 320 KB）',
+                title: _svc.filterIsCustom ? '联网更新（覆盖自定义）' : '联网更新内置版',
+                subtitle: '约 320 KB；更新后会变成"自定义"',
                 onTap: _importLimbo,
               ),
               SettingsRow(
                 icon: Icons.link_rounded,
-                title: '从其它网址导入',
-                subtitle: '任何一份 CSS 过滤器都行',
+                title: '换成其它网址的 CSS',
                 onTap: _importAnyFilter,
               ),
-              if (_svc.hasFilter) ...[
+              if (_svc.filterIsCustom)
                 SettingsRow(
-                  icon: Icons.code_rounded,
-                  title: 'CSS 过滤器',
-                  subtitle: '${(_svc.filterBytes / 1024).round()} KB · ${_svc.filterSource}',
-                  trailingSwitch: true,
-                  switchValue: _svc.filterSwitch,
-                  onSwitchChanged: (v) => _svc.setFilterEnabled(v),
+                  icon: Icons.settings_backup_restore_rounded,
+                  title: '恢复内置版',
+                  subtitle: '删掉导入的那份，回到随包的 18008 条',
+                  onTap: _revertFilter,
                 ),
-                SettingsRow(
-                  icon: Icons.delete_forever_rounded,
-                  title: '删除 CSS 过滤器',
-                  onTap: _clearFilter,
-                ),
-              ],
             ],
           ),
 
@@ -592,18 +599,25 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
 
           SettingsGroup(
             title: '说明',
-            children: const [
-              SettingsRow(
+            children: [
+              const SettingsRow(
                 icon: Icons.help_outline_rounded,
                 title: '为什么有些规则导入不了',
                 subtitle: '本模块靠"给网页注入 CSS"隐藏元素，所以只支持选择器写法；'
                     'uBlock 的 ||域名^ / /ads/* 属于拦请求，webview 拿不到请求层，做不到',
               ),
-              SettingsRow(
+              const SettingsRow(
                 icon: Icons.warning_amber_rounded,
                 title: '选择器别写太宽',
                 subtitle: '像 [class*="ad"] 会误伤 adaptive / load / header 这类正常元素，'
                     '尽量带上连字符或明确单词（.ad-banner、#ads）',
+              ),
+              SettingsRow(
+                icon: Icons.copyright_rounded,
+                title: '内置过滤器的来源',
+                subtitle: 'Adblock4limbo · MIT License · github.com/limbopro/Adblock4limbo'
+                    '（点一下复制地址）',
+                onTap: _copyLimboHome,
               ),
             ],
           ),
