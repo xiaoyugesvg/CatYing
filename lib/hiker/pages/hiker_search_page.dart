@@ -9,6 +9,7 @@ import '../models/hiker_source.dart';
 import '../services/hiker_engine.dart';
 import '../services/hiker_prefs.dart';
 import '../services/hiker_store.dart';
+import '../widgets/hiker_richtext.dart';
 import '../widgets/hiker_widgets.dart';
 import 'hiker_detail_page.dart';
 
@@ -307,7 +308,7 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
           children: [
             const SizedBox(height: 10),
             ListTile(
-              title: Text(it.title,
+              title: Text(hikerPlainText(it.title),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTheme.fontBody)),

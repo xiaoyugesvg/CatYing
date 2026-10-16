@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../common/theme.dart';
 import '../models/hiker_source.dart';
 import '../services/hiker_prefs.dart';
+import 'hiker_richtext.dart';
 
 /// 海阔条目的网格卡片（主页 / 搜索页 / 收藏共用一套，避免三处各写一遍）
 class HikerCard extends StatelessWidget {
@@ -54,7 +55,7 @@ class HikerCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            item.title.isEmpty ? '(无标题)' : item.title,
+            item.title.isEmpty ? '(无标题)' : hikerPlainText(item.title),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -64,7 +65,7 @@ class HikerCard extends StatelessWidget {
           ),
           if (showDesc && item.desc.isNotEmpty)
             Text(
-              item.desc,
+              hikerPlainText(item.desc),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(

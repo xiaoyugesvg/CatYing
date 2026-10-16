@@ -571,7 +571,7 @@ class _HikerHomePageState extends State<HikerHomePage> {
           children: [
             const SizedBox(height: 10),
             ListTile(
-              title: Text(it.title.isEmpty ? '(无标题)' : it.title,
+              title: Text(it.title.isEmpty ? '(无标题)' : hikerPlainText(it.title),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(

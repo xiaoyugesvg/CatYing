@@ -17,7 +17,7 @@ import '../services/hiker_engine.dart';
 import '../services/hiker_prefs.dart';
 import '../services/hiker_route.dart';
 import '../services/hiker_store.dart';
-import '../widgets/hiker_blocks.dart' show hikerRichSpans;
+import '../widgets/hiker_blocks.dart' show hikerPlainText, hikerRichSpans;
 
 /// 海阔条目详情 + 打开。
 ///
@@ -486,7 +486,9 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         foregroundColor: AppTheme.textPrimary,
         elevation: 0,
         title: Text(
-          it.title.isEmpty ? '(无标题)' : it.title,
+          widget.item.title.isEmpty
+              ? '(无标题)'
+              : hikerPlainText(widget.item.title),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -663,7 +665,8 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(it.title.isEmpty ? '(无标题)' : it.title,
+              Text(
+                  it.title.isEmpty ? '(无标题)' : hikerPlainText(it.title),
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -783,7 +786,7 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              c.note.isEmpty ? '(无标题)' : c.note,
+              c.note.isEmpty ? '(无标题)' : hikerPlainText(c.note),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
