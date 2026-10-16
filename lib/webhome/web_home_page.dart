@@ -7,10 +7,12 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../common/theme.dart';
 import '../miniapp/services/ant_bridge.dart';
+import '../services/ad_block_service.dart';
 import '../services/app_log.dart';
 import '../services/main_tab_controller.dart';
 import '../services/nav_feature_service.dart';
 import '../services/webview_page_color.dart';
+import '../widgets/ad_block_bubble.dart';
 import '../widgets/common_widgets.dart';
 import 'web_home_fm_shim.dart';
 import 'web_home_manage_page.dart';
@@ -134,12 +136,16 @@ class _WebHomePageState extends State<WebHomePage> {
                 _failed = false;
               });
             }
+            // 去广告：网页首页（站点直接开首页，广告最多的一类）
+            AdBlockService.instance.injectInto(_controller, url);
           },
           onPageFinished: (url) {
             // 每次加载完都注入：站内跳转产生的新页面同样需要 window.ant / window.fm
             _controller
               ..runJavaScript(AntBridge.injectScript)
               ..runJavaScript(kWebHomeFmShim);
+            // 去广告：DOM 就绪后补一次（抢注入常常拿不到时机）
+            AdBlockService.instance.injectInto(_controller, url);
             // 用户自配的「WebHome 扩展」（Webhtv → WebHome 扩展）按匹配规则注入
             _injectExtensions(url);
             // 顶栏跟随网页配色：立刻探一次；不少页面的颜色是脚本随后才设的
@@ -159,6 +165,9 @@ class _WebHomePageState extends State<WebHomePage> {
           },
         ),
       );
+    // 去广告：挂 JS 消息通道（必须在加载之前）
+    AdBlockService.attach(_controller);
+    AdBlockService.instance.ensureLoaded();
     _loadEntry();
   }
 
@@ -413,6 +422,20 @@ class _WebHomePageState extends State<WebHomePage> {
                             AppTheme.accentColor),
                       ),
                     ),
+
+                  // 去广告悬浮球：点它 → 点页面上的广告 → 存规则（重启后仍生效）
+                  ListenableBuilder(
+                    listenable: AdBlockService.instance,
+                    builder: (_, __) => AdBlockService.instance.showBubble
+                        ? AdBlockBubble(
+                            controller: _controller,
+                            // `value` 就是源的 url / asset 路径（本地页面时取不到 host，
+                            // 全局规则仍然生效；站点专属规则按真实地址在确认时再取）
+                            pageUrl: WebHomePrefs.instance.current.value,
+                            margin: const EdgeInsets.only(right: 12, bottom: 96),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
 
                   // 主文档加载失败：给明确原因 + 重试/换源入口（而不是白屏）
                   if (_failed)

@@ -102,7 +102,7 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
               SettingsRow(
                 icon: Icons.block_rounded,
                 title: '网页去广告',
-                subtitle: 'RSS 正文 / 站点型源 / 网页播放页 / 小程序 / 在线阅读',
+                subtitle: 'RSS · 站点型源 · 网页播放页 · 小程序 · 在线阅读 · 网页首页',
                 trailingSwitch: true,
                 switchValue: _svc.enabled,
                 onSwitchChanged: (v) => _svc.setEnabled(v),
