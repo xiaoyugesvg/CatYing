@@ -169,7 +169,16 @@ class _HikerHomePageState extends State<HikerHomePage> {
       });
       return;
     }
-    if (!src.usable) {
+    // 只拦"**确实没规则**"的源（没有任何东西可跑）。
+    //
+    // ⚠️ 不要再按 [HikerSource.usable] 直接拦下 —— 那是**静态**判定
+    //（扫规则文本里有没有引用自己 pages 之外的 `hiker://page|assets/*`），
+    // 实测有假阴性：45 个内置源全量真跑 home 时，𝟕𝐌𝐌𝐓𝐕 / 星集Media /
+    // 𝐉𝐌𝐂𝐨𝐦𝐢𝐜𝟐本地 等被判"依赖内置模块"，实际首页都能出内容。
+    // 能不能跑交给引擎（它按 basename 归一化找模块，找不到会抛明确报错），
+    // 这样界面上看到的是**真实原因**，而不是一句笼统的"该源不可用"。
+    // 「不可用」标签仍保留在源列表 / 管理页里，供参考。
+    if (src.findRule.isEmpty) {
       setState(() {
         _items = const [];
         _hasMore = false;
@@ -530,7 +539,9 @@ class _HikerHomePageState extends State<HikerHomePage> {
         children: [
           SizedBox(height: topInset),
           _header(src),
-          if (cats.isNotEmpty && src != null && src.usable)
+          // 分类条只看"源自己声明了分类"，不再看静态的 usable 判定 ——
+          // 否则被判"依赖内置模块"但实际能跑的源（见 _load 的注释）连分类都没了
+          if (cats.isNotEmpty && src != null)
             _categoryBar(cats),
           if (_needConfigHint(src)) _configHint(src!),
           if (_items.isNotEmpty) _statsLine(),
