@@ -8,6 +8,9 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../../common/theme.dart';
+import '../../services/ad_block_service.dart';
+import '../../widgets/ad_block_bubble.dart';
 import '../services/zlibrary_service.dart';
 
 class OnlineReaderPage extends StatefulWidget {
@@ -48,11 +51,15 @@ class _OnlineReaderPageState extends State<OnlineReaderPage> {
           onProgress: (p) {
             if (mounted) setState(() => _progress = p);
           },
-          onPageStarted: (_) {
+          onPageStarted: (url) {
             if (mounted) setState(() => _loading = true);
+            // 去广告：在线阅读页里的广告层
+            AdBlockService.instance.injectInto(_controller, url);
           },
-          onPageFinished: (_) {
+          onPageFinished: (url) {
             if (mounted) setState(() => _loading = false);
+            // DOM 就绪后补注一次（抢注入常常拿不到时机）
+            AdBlockService.instance.injectInto(_controller, url);
           },
           onWebResourceError: (e) {
             if (mounted) setState(() => _loading = false);
@@ -60,6 +67,9 @@ class _OnlineReaderPageState extends State<OnlineReaderPage> {
           },
         ),
       );
+    // 去广告：挂 JS 消息通道（必须在 loadRequest 之前）
+    AdBlockService.attach(_controller);
+    AdBlockService.instance.ensureLoaded();
     _injectCookieAndLoad();
   }
 
@@ -141,6 +151,17 @@ class _OnlineReaderPageState extends State<OnlineReaderPage> {
                 minHeight: 2,
               ),
             ),
+          // 去广告悬浮球：点它 → 点页面上的广告 → 存规则（重启后仍生效）
+          ListenableBuilder(
+            listenable: AdBlockService.instance,
+            builder: (_, __) => AdBlockService.instance.showBubble
+                ? AdBlockBubble(
+                    controller: _controller,
+                    pageUrl: widget.url,
+                    margin: const EdgeInsets.only(right: 12, bottom: 96),
+                  )
+                : const SizedBox.shrink(),
+          ),
           // 全屏后没有顶栏了 ⇒ 必须留一个能返回的入口 ✓
           Positioned(
             top: 0,

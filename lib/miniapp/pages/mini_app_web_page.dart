@@ -7,8 +7,10 @@ import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../common/theme.dart';
+import '../../services/ad_block_service.dart';
 import '../../services/app_log.dart';
 import '../../services/webview_page_color.dart';
+import '../../widgets/ad_block_bubble.dart';
 import '../services/ant_bridge.dart';
 
 /// 小程序 WebView 页：加载远端/本地小程序页面 + 官方 ant SDK v4 桥注入。
@@ -73,10 +75,14 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
           },
           onPageStarted: (url) {
             if (mounted) setState(() => _loadingProgress = 0);
+            // 去广告：小程序内嵌网页里的广告层（站点型小程序最常见）
+            AdBlockService.instance.injectInto(_controller, url);
           },
           onPageFinished: (url) {
             // 每次页面加载完都注入 ant 桥，保证内部页面也有
             _controller.runJavaScript(AntBridge.injectScript);
+            // 去广告：DOM 就绪后补一次（抢注入常常拿不到时机）
+            AdBlockService.instance.injectInto(_controller, url);
             // 顶栏跟随网页配色：立刻探一次 + 稍后补探一次（颜色常是异步设的）
             _probePageColor();
             Future<void>.delayed(const Duration(milliseconds: 600), () {
@@ -89,6 +95,9 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
           },
         ),
       );
+    // 去广告：挂 JS 消息通道（必须在加载之前）
+    AdBlockService.attach(_controller);
+    AdBlockService.instance.ensureLoaded();
     // 先读 manifest（拿到 appId/permissions/entry），再按来源加载入口页
     _loadManifestThenEntry();
   }
@@ -220,6 +229,17 @@ class _MiniAppWebPageState extends State<MiniAppWebPage> {
                             AppTheme.accentColor),
                       ),
                     ),
+                  // 去广告悬浮球：点它 → 点页面上的广告 → 存规则（重启后仍生效）
+                  ListenableBuilder(
+                    listenable: AdBlockService.instance,
+                    builder: (_, __) => AdBlockService.instance.showBubble
+                        ? AdBlockBubble(
+                            controller: _controller,
+                            pageUrl: widget.remoteUrl ?? '',
+                            margin: const EdgeInsets.only(right: 12, bottom: 96),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
                 ],
               ),
             ),
