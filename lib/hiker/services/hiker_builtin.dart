@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/services.dart' show AssetManifest, rootBundle;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/app_log.dart';
 import '../models/hiker_source.dart';
@@ -27,6 +28,9 @@ class HikerBuiltin {
   HikerBuiltin._();
 
   static const String kAsset = 'assets/hiker/builtin.json';
+
+  /// 上次安装过的**内置清单指纹**（见 [installIfNeeded]）
+  static const String _kStamp = 'hiker_builtin_stamp_v1';
 
   /// 随包分发的「海阔 App 自带资源」目录（源文件取自 [hikerView] 的
   /// `app/src/main/assets/`：home.js / inject.js / theme.js / css.js …）。
@@ -79,7 +83,52 @@ class HikerBuiltin {
     return HikerStore.instance.importSources(list);
   }
 
-  /// 首次进入模块、仓库为空时自动装一份（让海阔"开箱可用"）
+  /// 首次进入模块、仓库为空时自动装一份（让海阔"开箱可用"）。
+  ///
+  /// ⚠️ 只有"仓库为空"是不够的 —— 老用户升级后仓库**不空**（已有旧的 25 个），
+  /// 于是新增的内置源永远不进来（用户 2026-10-16 就是踩了这个：文件里明明 45 个，
+  /// 界面上还是 25 个）。所以改成按**清单指纹**判断：指纹变了就补装一次。
+  ///
+  /// 指纹存 prefs；[install] 是 upsert 语义（补缺 + 更新，不动用户自己导入的源）。
+  static Future<void> installIfNeeded() async {
+    final list = await load();
+    if (list.isEmpty) return;
+    final stamp = _fingerprint(list);
+    String last = '';
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      last = prefs.getString(_kStamp) ?? '';
+      // 指纹一致 ⇒ 清单没变：只在"从来没装过且仓库为空"时补一次
+      if (last == stamp && HikerStore.instance.sources.isNotEmpty) return;
+      if (last == stamp) {
+        // 指纹一致 + 仓库为空 —— 用户是**主动清空**的，尊重它，不要自动复活
+        AppLog.instance.log('[Hiker] 内置源已被清空且清单未变，跳过自动安装');
+        return;
+      }
+      final (added, updated, total) = await install();
+      await prefs.setString(_kStamp, stamp);
+      if (added > 0 || updated > 0) {
+        AppLog.instance.log(
+            '[Hiker] 内置清单变化 → 补装 $added 个、更新 $updated 个（共 $total 个源）');
+      }
+    } catch (e) {
+      AppLog.instance.log('[Hiker] 内置源自动补装失败: $e');
+    }
+  }
+
+  /// 内置清单指纹：条数 + 全部 id（标题+作者）的有序 hash。
+  /// 用确定性折叠而不是 `String.hashCode`（后者不保证跨进程稳定）。
+  static String _fingerprint(List<HikerSource> list) {
+    final ids = list.map((s) => s.id).toList()..sort();
+    var h = 17;
+    for (final c in ids.join('\u0001').codeUnits) {
+      h = (h * 31 + c) & 0x7fffffff;
+    }
+    return '${list.length}-$h';
+  }
+
+  /// 兼容旧调用点（等价于"只在空仓库时装一次"）
+  @Deprecated('用 installIfNeeded：老用户升级后也需要补装新增的内置源')
   static Future<void> installIfEmpty() async {
     if (HikerStore.instance.sources.isNotEmpty) return;
     final (added, _, total) = await install();

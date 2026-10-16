@@ -38,6 +38,7 @@ class AdBlockService extends ChangeNotifier {
   static const String _kEnabled = 'adblock_enabled_v1';
   static const String _kBubble = 'adblock_bubble_v1';
   static const String _kBuiltin = 'adblock_builtin_v1';
+  static const String _kBuiltinOff = 'adblock_builtin_off_v1';
 
   bool _enabled = true;
   bool _bubble = true;
@@ -45,6 +46,9 @@ class AdBlockService extends ChangeNotifier {
   bool _loaded = false;
 
   final List<AdBlockRule> _rules = [];
+
+  /// 被用户**单条关掉**的内置通用选择器（prefs 里存 StringList）
+  final Set<String> _builtinOff = {};
 
   /// 网页里刚选中的元素（悬浮按钮据此弹确认框）；发布-订阅式，谁在当前页谁处理
   final ValueNotifier<AdBlockPick?> lastPick = ValueNotifier(null);
@@ -158,7 +162,11 @@ class AdBlockService extends ChangeNotifier {
   List<String> selectorsFor(String pageUrl) {
     final host = hostOf(pageUrl);
     final out = <String>[];
-    if (_builtin) out.addAll(kBuiltinSelectors);
+    if (_builtin) {
+      for (final s in kBuiltinSelectors) {
+        if (!_builtinOff.contains(s)) out.add(s);
+      }
+    }
     for (final r in _rules) {
       if (!r.enabled) continue;
       if (r.host.isEmpty || hostMatches(host, r.host)) {
@@ -166,6 +174,20 @@ class AdBlockService extends ChangeNotifier {
       }
     }
     return out;
+  }
+
+  /// 单条内置选择器是否生效（总开关关掉时全都不生效）
+  bool builtinItemEnabled(String selector) =>
+      _builtin && !_builtinOff.contains(selector);
+
+  Future<void> setBuiltinItemEnabled(String selector, bool v) async {
+    if (v) {
+      _builtinOff.remove(selector);
+    } else {
+      _builtinOff.add(selector);
+    }
+    await _saveFlags();
+    notifyListeners();
   }
 
   Future<void> addRule({required String host, required String selector}) async {
@@ -275,6 +297,9 @@ class AdBlockService extends ChangeNotifier {
       _enabled = prefs.getBool(_kEnabled) ?? true;
       _bubble = prefs.getBool(_kBubble) ?? true;
       _builtin = prefs.getBool(_kBuiltin) ?? true;
+      _builtinOff
+        ..clear()
+        ..addAll(prefs.getStringList(_kBuiltinOff) ?? const []);
       final list = await _readRules();
       _rules
         ..clear()
@@ -311,6 +336,7 @@ class AdBlockService extends ChangeNotifier {
       await prefs.setBool(_kEnabled, _enabled);
       await prefs.setBool(_kBubble, _bubble);
       await prefs.setBool(_kBuiltin, _builtin);
+      await prefs.setStringList(_kBuiltinOff, _builtinOff.toList());
     } catch (e) {
       AppLog.instance.log('[AdBlock] 保存开关失败: $e');
     }

@@ -10,11 +10,15 @@ import 'settings_shared.dart';
 /// 「广告管理」——网页去广告的**统一设置入口**。
 ///
 /// 这里管的是**页面层**的广告（把广告元素的 CSS 选择器注入网页隐藏掉）：
-///   · RSS 正文 / 站点型源内嵌网页 / 网页播放页 都会自动套用这里的规则；
+///   · RSS 正文 / 站点型源 / 网页播放页 / 小程序 / 在线阅读 / 网页首页 都会套用；
 ///   · 网页里那个悬浮球点选的广告，也会变成一条规则出现在下面。
 ///
 /// 注意与**播放地址层**的过滤（`AdFilterService`，数据来自订阅配置的
 /// `ads` / `rules`）不是一回事：那个拦的是播放地址，配置在订阅里，不在这一页。
+///
+/// UI 约定（用户 2026-10-16）：「弹窗要卡片/网格，不要列表」⇒
+///   · 内置规则、我的规则都用**卡片网格**（一行两个）呈现，点卡片即开关；
+///   · 新增规则的弹窗也是**卡片**（选作用范围 + 选域名的卡片），不是表单列表。
 class AdBlockSettingsPage extends StatefulWidget {
   const AdBlockSettingsPage({super.key});
 
@@ -25,28 +29,244 @@ class AdBlockSettingsPage extends StatefulWidget {
 class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
   final _svc = AdBlockService.instance;
 
+  /// 每条内置选择器的**中文说明** —— 让用户一眼看懂"填的是什么内容"
+  static const Map<String, String> _notes = {
+    '.adsbygoogle': 'Google 广告位',
+    'ins.adsbygoogle': 'Google 广告位（ins）',
+    'iframe[src*="doubleclick"]': 'DoubleClick 广告框',
+    'iframe[src*="googlesyndication"]': 'Google 广告联盟框',
+    'iframe[src*="googleadservices"]': 'Google 广告服务框',
+    '[id^="ad_"]': 'id 以 ad_ 开头',
+    '[class^="ad_"]': 'class 以 ad_ 开头',
+    '[class*="advert"]': '名字含 advert',
+    '[id*="advert"]': 'id 含 advert',
+    '[class*="ad-banner"]': '横幅广告位',
+    '[class*="banner-ad"]': '横幅广告位（倒写）',
+    '[class*="popup-ad"]': '弹窗广告',
+    '[class*="pop-under"]': 'pop-under 弹窗',
+    '[class*="float-ad"]': '漂浮广告',
+    '[class*="ad-overlay"]': '广告蒙层',
+    '[class*="ad-mask"]': '广告遮罩',
+  };
+
   @override
   void initState() {
     super.initState();
     _svc.ensureLoaded();
   }
 
-  /// 新增 = 支持一次粘贴多条（与「从剪贴板导入」共用同一套解析）
-  Future<void> _addRules() async {
-    final text = await SettingsDialogs.editText(
+  // ============================================================
+  // 新增规则：**卡片式弹窗**（不是表单列表）
+  // ============================================================
+  Future<void> _addRuleSheet() async {
+    var scopeAll = true;
+    var host = '';
+    final selCtrl = TextEditingController();
+    final hostCtrl = TextEditingController();
+
+    await showModalBottomSheet<void>(
       context: context,
-      title: '新增 / 粘贴规则',
-      initial: '##',
-      hint: '域名##选择器，一行一条',
-      helper: '例：\nexample.com##.ad-box\n.adsbygoogle        （不写域名 = 所有网站）',
-      maxLines: 6,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 16,
+              bottom: 16 + MediaQuery.of(ctx).viewInsets.bottom,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('加到哪些网站',
+                    style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 10),
+                // 两块卡片二选一（不用 RadioListTile 那种列表样式）
+                Row(
+                  children: [
+                    Expanded(
+                      child: _pickCard(
+                        title: '所有网站',
+                        subtitle: '任何网页都隐藏',
+                        selected: scopeAll,
+                        onTap: () => setSheet(() => scopeAll = true),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _pickCard(
+                        title: '指定网站',
+                        subtitle: '只在某个域名下',
+                        selected: !scopeAll,
+                        onTap: () => setSheet(() => scopeAll = false),
+                      ),
+                    ),
+                  ],
+                ),
+                if (!scopeAll) ...[
+                  const SizedBox(height: 10),
+                  _field(
+                    controller: hostCtrl,
+                    hint: 'example.com（含子域）',
+                    label: '域名',
+                    onChanged: (v) => host = v,
+                  ),
+                ],
+                const SizedBox(height: 16),
+                Text('选择器',
+                    style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: AppTheme.fontHeadline,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                Text('例：.ad-banner　#ads　div[class*="gg"]　（一行一条，可一次粘多条）',
+                    style: TextStyle(
+                        color: AppTheme.textTertiary,
+                        fontSize: AppTheme.fontCaption)),
+                const SizedBox(height: 8),
+                _field(
+                  controller: selCtrl,
+                  hint: '.ad-banner',
+                  label: 'CSS 选择器',
+                  mono: true,
+                  maxLines: 4,
+                  autofocus: true,
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('取消'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () async {
+                          final raw = selCtrl.text.trim();
+                          if (raw.isEmpty) {
+                            AppToast.message('先填一个选择器');
+                            return;
+                          }
+                          // 多行时按"每行一条"处理；域名只对"指定网站"那张卡生效
+                          final text = scopeAll
+                              ? raw.split('\n').map((l) => l.trim()).join('\n')
+                              : raw
+                                  .split('\n')
+                                  .map((l) => l.trim())
+                                  .where((l) => l.isNotEmpty)
+                                  .map((l) => '${host.trim()}##$l')
+                                  .join('\n');
+                          final (ok, skip) = await _svc.importText(text);
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          AppToast.message(ok > 0
+                              ? '已添加 $ok 条${skip > 0 ? '，跳过 $skip 条' : ''}'
+                              : '没识别出规则，检查一下写法');
+                        },
+                        child: const Text('添加'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
-    if (text == null || text.trim().isEmpty) return;
-    final (ok, skip) = await _svc.importText(text);
-    if (!mounted) return;
-    AppToast.message(ok > 0
-        ? '新增 $ok 条${skip > 0 ? '，跳过 $skip 条' : ''}'
-        : '没识别出规则（只支持「元素隐藏」选择器）');
+  }
+
+  /// 弹窗里的"选项卡片"（选中 = 强调色描边）
+  Widget _pickCard({
+    required String title,
+    required String subtitle,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? AppTheme.accentColor : AppTheme.borderLight,
+            width: selected ? 1.4 : 0.6,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(selected ? Icons.check_circle_rounded : Icons.circle_outlined,
+                    size: 15,
+                    color: selected ? AppTheme.accentColor : AppTheme.textTertiary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: AppTheme.fontFootnote,
+                          fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _field({
+    required TextEditingController controller,
+    required String hint,
+    required String label,
+    bool mono = false,
+    int maxLines = 1,
+    bool autofocus = false,
+    ValueChanged<String>? onChanged,
+  }) {
+    return TextField(
+      controller: controller,
+      maxLines: maxLines,
+      autofocus: autofocus,
+      onChanged: onChanged,
+      style: TextStyle(
+        color: AppTheme.textPrimary,
+        fontSize: mono ? AppTheme.fontFootnote : AppTheme.fontSubhead,
+        fontFamily: mono ? 'monospace' : null,
+      ),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        labelStyle: TextStyle(color: AppTheme.textTertiary),
+        hintStyle: TextStyle(color: AppTheme.textTertiary),
+        border: const OutlineInputBorder(),
+      ),
+    );
   }
 
   Future<void> _importFromClipboard() async {
@@ -60,7 +280,7 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
     if (!mounted) return;
     AppToast.message(ok > 0
         ? '导入 $ok 条${skip > 0 ? '，跳过 $skip 条（网络过滤语法不支持）' : ''}'
-        : '没识别出规则（uBlock 的 ||域名^ 这类要拦截请求，本模块做不到）');
+        : '没识别出规则（uBlock 的 ||域名^ 这类要拦请求，本模块做不到）');
   }
 
   Future<void> _editRule(AdBlockRule r) async {
@@ -88,7 +308,132 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
     if (mounted) AppToast.message('已清空');
   }
 
-  String _short(String s) => s.length <= 46 ? s : '${s.substring(0, 44)}…';
+  String _short(String s) => s.length <= 40 ? s : '${s.substring(0, 38)}…';
+
+  /// 一行两个的卡片网格（用外层宽度算，避免 GridView 的滚动嵌套）
+  Widget _grid(BuildContext context, List<Widget> cards) {
+    return LayoutBuilder(
+      builder: (_, c) {
+        final w = (c.maxWidth - 10) / 2;
+        return Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (final x in cards) SizedBox(width: w, child: x),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 内置通用选择器卡片：点一下开关这一条
+  Widget _builtinCard(String sel) {
+    final on = _svc.builtinItemEnabled(sel);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _svc.setBuiltinItemEnabled(sel, !on),
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: on ? AppTheme.accentColor : AppTheme.borderLight,
+            width: on ? 1.2 : 0.6,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(on ? Icons.check_circle_rounded : Icons.circle_outlined,
+                    size: 14,
+                    color: on ? AppTheme.accentColor : AppTheme.textTertiary),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(_notes[sel] ?? '通用广告位',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: AppTheme.fontCaption)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 5),
+            Text(sel,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontCaption,
+                    fontFamily: 'monospace',
+                    height: 1.25)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 我的规则卡片：点卡片开关；右上角 ✕ 删除；长按改
+  Widget _ruleCard(AdBlockRule r) {
+    final on = r.enabled && _svc.enabled;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _svc.setRuleEnabled(r, !r.enabled),
+      onLongPress: () => _editRule(r),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 8, 6, 10),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: on ? AppTheme.accentColor : AppTheme.borderLight,
+            width: on ? 1.2 : 0.6,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(on ? Icons.check_circle_rounded : Icons.circle_outlined,
+                    size: 14,
+                    color: on ? AppTheme.accentColor : AppTheme.textTertiary),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(r.host.isEmpty ? '所有网站' : r.host,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: AppTheme.fontCaption)),
+                ),
+                InkWell(
+                  onTap: () => _svc.removeRule(r),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(Icons.close_rounded,
+                        size: 14, color: AppTheme.textTertiary),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 5),
+            Text(_short(r.selector),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontCaption,
+                    fontFamily: 'monospace',
+                    height: 1.25)),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -115,23 +460,45 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
                 switchValue: _svc.showBubble,
                 onSwitchChanged: (v) => _svc.setShowBubble(v),
               ),
-              SettingsRow(
-                icon: Icons.auto_awesome_rounded,
-                title: '内置通用选择器',
-                subtitle: '${AdBlockService.kBuiltinSelectors.length} 条通用广告位规则',
-                trailingSwitch: true,
-                switchValue: _svc.builtinEnabled,
-                onSwitchChanged: (v) => _svc.setBuiltinEnabled(v),
-              ),
             ],
           ),
+
+          SettingsGroup(
+            title: '内置通用选择器（点卡片开关）',
+            hint: '这些是"名字里明确就是广告"的通用位；站点自己的广告靠悬浮球点选，'
+                '点出来的规则会出现在下面「我的规则」里。',
+            children: [
+              _grid(context, [
+                for (final s in AdBlockService.kBuiltinSelectors) _builtinCard(s),
+              ]),
+            ],
+          ),
+
+          SettingsGroup(
+            title: '我的规则（${_svc.rules.length}）',
+            hint: _svc.rules.isEmpty
+                ? '还没有：打开任意网页/RSS 正文，点右下角圆钮再点广告即可添加。'
+                : '点卡片 = 开关这条；右上角 ✕ = 删除；长按 = 改域名/选择器。',
+            children: [
+              if (_svc.rules.isEmpty)
+                SettingsRow(
+                  icon: Icons.info_outline_rounded,
+                  title: '还没有手选规则',
+                  subtitle: '网页里点悬浮球 → 点广告 → 保存，就会出现在这里',
+                  onTap: _addRuleSheet,
+                )
+              else
+                _grid(context, [for (final r in _svc.rules) _ruleCard(r)]),
+            ],
+          ),
+
           SettingsGroup(
             children: [
               SettingsRow(
                 icon: Icons.add_rounded,
-                title: '新增规则',
-                value: '可粘贴多条',
-                onTap: _addRules,
+                title: '手动加一条规则',
+                value: '卡片式',
+                onTap: _addRuleSheet,
               ),
               SettingsRow(
                 icon: Icons.content_paste_rounded,
@@ -141,52 +508,27 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
               ),
               SettingsRow(
                 icon: Icons.delete_sweep_rounded,
-                title: '清空全部规则',
+                title: '清空我的规则',
                 value: '${_svc.rules.length} 条',
                 onTap: _svc.rules.isEmpty ? null : _clearAll,
               ),
             ],
           ),
-          if (_svc.rules.isNotEmpty)
-            SettingsGroup(
-              children: [
-                for (final r in _svc.rules)
-                  SettingsRow(
-                    icon: Icons.visibility_off_rounded,
-                    title: _short(r.selector),
-                    subtitle: r.host.isEmpty ? '所有网站' : r.host,
-                    switchEnabled: _svc.enabled,
-                    trailingSwitch: true,
-                    switchValue: r.enabled,
-                    onSwitchChanged: (v) => _svc.setRuleEnabled(r, v),
-                    onTap: () => _editRule(r),
-                    trailing: IconButton(
-                      tooltip: '删除',
-                      icon: Icon(Icons.close_rounded,
-                          size: 16, color: AppTheme.textTertiary),
-                      onPressed: () => _svc.removeRule(r),
-                    ),
-                  ),
-              ],
-            )
-          else
-            SettingsGroup(
-              children: const [
-                SettingsRow(
-                  icon: Icons.info_outline_rounded,
-                  title: '还没有手选规则',
-                  subtitle: '打开任意网页/RSS 正文，点右下角圆钮再点广告即可添加',
-                ),
-              ],
-            ),
+
           SettingsGroup(
+            title: '说明',
             children: const [
               SettingsRow(
                 icon: Icons.help_outline_rounded,
                 title: '为什么有些规则导入不了',
-                subtitle:
-                    '本模块靠"给网页注入 CSS"隐藏元素，所以只支持选择器写法；'
+                subtitle: '本模块靠"给网页注入 CSS"隐藏元素，所以只支持选择器写法；'
                     'uBlock 的 ||域名^ / /ads/* 属于拦请求，webview 拿不到请求层，做不到',
+              ),
+              SettingsRow(
+                icon: Icons.warning_amber_rounded,
+                title: '选择器别写太宽',
+                subtitle: '像 [class*="ad"] 会误伤 adaptive / load / header 这类正常元素，'
+                    '尽量带上连字符或明确单词（.ad-banner、#ads）',
               ),
             ],
           ),

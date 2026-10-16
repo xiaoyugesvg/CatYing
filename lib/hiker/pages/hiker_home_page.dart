@@ -108,8 +108,8 @@ class _HikerHomePageState extends State<HikerHomePage> {
   Future<void> _bootstrap() async {
     await _prefs.load();
     await _store.load();
-    // 首次进入且仓库为空 → 自动装一份**内置源**（实测可用的那批），开箱可用
-    await HikerBuiltin.installIfEmpty();
+    // 内置源：仓库为空时装一份（开箱可用）；**清单变了也补装**（升级带了新源）
+    await HikerBuiltin.installIfNeeded();
     // 释放随包的**App 自带资源**（assets/hiker/files/* → Documents/hiker/builtin）
     // 规则里的 `hiker://assets/xxx` 靠它才能读到内容；幂等，只补缺失的
     await HikerBuiltin.installAssets();
