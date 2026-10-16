@@ -17,6 +17,7 @@ import '../services/hiker_engine.dart';
 import '../services/hiker_prefs.dart';
 import '../services/hiker_route.dart';
 import '../services/hiker_store.dart';
+import '../widgets/hiker_blocks.dart' show hikerRichSpans;
 
 /// 海阔条目详情 + 打开。
 ///
@@ -331,6 +332,25 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         await _pushPlayer(url, c.headers);
         return;
 
+      case HikerLinkKind.playJson:
+        // 海阔的播放地址 JSON（`{"urls":["…m3u8"]}`）：**直链进播放器、否则进网页**
+        // —— 用户 2026-10-16 要求的口径，也是官方 `parse` 字段的语义。
+        final pj = hikerPlayJson(url);
+        if (pj == null) {
+          AppToast.error('这个播放地址解析不了：${_short(url)}');
+          return;
+        }
+        // 源给的 header 作补充；调用方（详情规则 / 解析接口）给的**优先**
+        final pjHeaders = <String, String>{...pj.headers, ...c.headers};
+        final direct = pj.urls.firstWhere(SniffFilter.isDirectMedia,
+            orElse: () => pj.urls.first);
+        if (SniffFilter.isDirectMedia(direct)) {
+          await _pushPlayer(direct, pjHeaders);
+        } else {
+          await _pushWeb(direct);
+        }
+        return;
+
       case HikerLinkKind.x5Play:
         // 官方语义：强制用播放器播这个地址 → 剥掉外壳再判一次
         final real = hikerStripScheme(url);
@@ -572,7 +592,7 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
                     fontSize: AppTheme.fontSubhead,
                     fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            ..._candidates.map(_candidateTile),
+            _candidateArea(),
           ],
 
           if (it.desc.isNotEmpty) ...[
@@ -681,100 +701,139 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         ),
       );
 
-  Widget _candidateTile(_Candidate c) {
-    // lazy 候选（"选集"/"立即播放"这类）点了会再解一层，按钮文案给"打开"
-    final kind = c.lazy ? null : hikerLinkKind(c.url);
-    final actionLabel = c.lazy
-        ? '打开'
-        : switch (kind!) {
-            HikerLinkKind.media || HikerLinkKind.x5Play => '播放',
-            HikerLinkKind.pics || HikerLinkKind.image => '看图',
-            HikerLinkKind.novel => '阅读',
-            HikerLinkKind.toast ||
-            HikerLinkKind.copyLink ||
-            HikerLinkKind.external ||
-            HikerLinkKind.download ||
-            HikerLinkKind.apk ||
-            HikerLinkKind.hikerPage ||
-            HikerLinkKind.unknown =>
-              '提示',
-            _ => '网页',
-          };
-    final actionIcon = c.lazy
-        ? Icons.touch_app_rounded
-        : switch (kind!) {
-            HikerLinkKind.media || HikerLinkKind.x5Play => Icons.play_arrow_rounded,
-            HikerLinkKind.pics || HikerLinkKind.image => Icons.photo_library_rounded,
-            HikerLinkKind.novel => Icons.menu_book_rounded,
-            HikerLinkKind.toast ||
-            HikerLinkKind.copyLink ||
-            HikerLinkKind.external ||
-            HikerLinkKind.download ||
-            HikerLinkKind.apk ||
-            HikerLinkKind.hikerPage ||
-            HikerLinkKind.unknown =>
-              Icons.info_outline_rounded,
-            _ => Icons.language_rounded,
-          };
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-      decoration: BoxDecoration(
-        color: AppTheme.backgroundCard,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.borderLight),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 30,
-            height: 30,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: AppTheme.accentSurface,
-              borderRadius: BorderRadius.circular(9),
-            ),
-            child: Icon(
-              actionIcon,
-              size: 17,
-              color: AppTheme.accentOnSurface,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(c.note,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: AppTheme.fontFootnote,
-                        fontWeight: FontWeight.w600)),
-                const SizedBox(height: 2),
-                Text(_short(c.url),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption)),
+  /// 候选区：**一行三个卡片**（用户 2026-10-16：卡片上是名称、点击直接播/开）。
+  ///
+  /// 源经常在候选中间插"分节标题"（`—— 选集（3 集）——`、`连播已就绪`）——
+  /// 那些条目的地址是 `hiker://empty`，本身不可点。以前它们也被画成一行卡片
+  /// 并带个「提示」按钮（点了只弹一句"不支持"），既误导又占地方；
+  /// 现在这类**整行当纯文本标题**，其余可操作的排成三列卡片。
+  Widget _candidateArea() {
+    final rows = <Widget>[];
+    final pending = <_Candidate>[];
+    void flush() {
+      while (pending.isNotEmpty) {
+        final n = pending.length >= 3 ? 3 : pending.length;
+        final slice = pending.sublist(0, n);
+        pending.removeRange(0, n);
+        rows.add(Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var i = 0; i < 3; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                Expanded(
+                  child: i < slice.length
+                      ? _candidateCard(slice[i])
+                      : const SizedBox.shrink(),
+                ),
               ],
-            ),
+            ],
           ),
-          IconButton(
-            tooltip: '复制',
-            onPressed: () => _copy(c.url),
-            icon: Icon(Icons.copy_rounded, size: 16, color: AppTheme.textTertiary),
-          ),
-          TextButton(
-            onPressed: () => _play(c),
-            child: Text(actionLabel,
-                style: TextStyle(
-                    color: AppTheme.accentOnSurface, fontSize: AppTheme.fontFootnote)),
-          ),
-        ],
+        ));
+      }
+    }
+
+    for (final c in _candidates) {
+      if (_isLabel(c)) {
+        flush();
+        rows.add(_labelRow(c));
+      } else {
+        pending.add(c);
+      }
+    }
+    flush();
+    return Column(mainAxisSize: MainAxisSize.min, children: rows);
+  }
+
+  /// 不可点的"分节标题/说明"条目
+  static bool _isLabel(_Candidate c) =>
+      c.url.isEmpty || c.url == 'hiker://empty';
+
+  Widget _labelRow(_Candidate c) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+      child: Text.rich(
+        TextSpan(
+            children: hikerRichSpans(
+                c.note,
+                TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: AppTheme.fontSubhead,
+                    fontWeight: FontWeight.w600))),
+        textAlign: TextAlign.center,
       ),
     );
+  }
+
+  Widget _candidateCard(_Candidate c) {
+    final (label, icon) = _actionOf(c);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _play(c),
+      onLongPress: () => _copy(c.url),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.borderLight),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              c.note.isEmpty ? '(无标题)' : c.note,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: AppTheme.fontFootnote,
+                  fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 13, color: AppTheme.accentOnSurface),
+                const SizedBox(width: 3),
+                Flexible(
+                  child: Text(label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: AppTheme.accentOnSurface,
+                          fontSize: AppTheme.fontCaption)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 卡片底部的动作文案 + 图标（lazy 候选点了会再解一层，所以是"打开"）
+  static (String, IconData) _actionOf(_Candidate c) {
+    if (c.lazy) return ('打开', Icons.touch_app_rounded);
+    return switch (hikerLinkKind(c.url)) {
+      HikerLinkKind.media ||
+      HikerLinkKind.playJson ||
+      HikerLinkKind.x5Play =>
+        ('播放', Icons.play_arrow_rounded),
+      HikerLinkKind.pics || HikerLinkKind.image => ('看图', Icons.photo_library_rounded),
+      HikerLinkKind.novel => ('阅读', Icons.menu_book_rounded),
+      HikerLinkKind.toast ||
+      HikerLinkKind.copyLink ||
+      HikerLinkKind.external ||
+      HikerLinkKind.download ||
+      HikerLinkKind.apk ||
+      HikerLinkKind.hikerPage ||
+      HikerLinkKind.unknown =>
+        ('提示', Icons.info_outline_rounded),
+      _ => ('网页', Icons.language_rounded),
+    };
   }
 
   Widget _kv(String k, String v) {

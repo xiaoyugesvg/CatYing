@@ -22,6 +22,8 @@
 /// 避免两边漂移。
 library;
 
+import 'dart:convert';
+
 import '../../services/play_route.dart' as play_route;
 import '../../services/sniff_filter.dart';
 
@@ -44,6 +46,10 @@ enum HikerLinkKind {
 
   /// 影视直链（当前生效清单，见 [SniffFilter.isDirectMedia]）→ 原生播放器
   media,
+
+  /// 海阔的**播放地址 JSON**（`{"urls":[…],"headers":{…}}`）—— 见 [hikerPlayJson]。
+  /// 里面可能是直链（→ 播放器）也可能是网页（→ 内嵌 WebView）。
+  playJson,
 
   /// `x5://` / `x5WebView://` —— X5 全屏网页
   x5,
@@ -123,6 +129,45 @@ List<String>? hikerPicList(String url) => play_route.parseImageListUrl(url);
 ({String title, String content})? hikerNovelContent(String url) =>
     play_route.parseNovelUrl(url);
 
+/// 海阔的**播放地址 JSON** —— 官方的播放约定，长这样：
+///   `{"urls":["https://hls…/index.m3u8","备用"],"names":["HLS"],
+///     "headers":{"Referer":"…"},"parse":0}`
+///
+/// ⚠️ 以前只在**整条规则的返回值**里解析它（引擎侧），**列表条目**里的这坨 JSON
+/// 会原样透到详情页 ⇒ 既不是 http 也不是任何已知协议 ⇒ 被判成"未知链接"，
+/// 详情页上一排「提示」按钮点了没反应（用户 2026-10-16 的截图：
+/// 选集 1/2/3 的地址就是 `{"urls":["https://hls.tpbbwcc.cn/…m3u8"]}`）。
+///
+/// 返回 (urls, headers)；不是播放 JSON 则 null。
+({List<String> urls, Map<String, String> headers})? hikerPlayJson(String raw) {
+  final s = raw.trim();
+  if (!s.startsWith('{') || !s.contains('"urls"')) return null;
+  try {
+    final j = jsonDecode(s);
+    if (j is! Map) return null;
+    final urls = <String>[];
+    final rawUrls = j['urls'];
+    if (rawUrls is List) {
+      for (final u in rawUrls) {
+        final t = u.toString().trim();
+        if (t.isNotEmpty) urls.add(t);
+      }
+    } else if (j['url'] != null) {
+      final t = j['url'].toString().trim();
+      if (t.isNotEmpty) urls.add(t);
+    }
+    if (urls.isEmpty) return null;
+    final headers = <String, String>{};
+    final h = j['headers'];
+    if (h is Map) {
+      h.forEach((k, v) => headers[k.toString()] = v.toString());
+    }
+    return (urls: urls, headers: headers);
+  } catch (_) {
+    return null;
+  }
+}
+
 /// 按官方 `dealWithUrl()` 的**判定顺序**给链接分类。
 ///
 /// 顺序不能乱 —— 官方就是按这个顺序短路返回的：
@@ -156,6 +201,10 @@ HikerLinkKind hikerLinkKind(String raw) {
   if (novel != null && novel.content.trim().isNotEmpty) {
     return HikerLinkKind.novel;
   }
+
+  // ⑥' 播放地址 JSON —— 必须排在"图片"之前：里面那个 url 可能是 `…/1.jpg`，
+  //     先判图片就会把一坨播放 JSON 当成单张大图。
+  if (hikerPlayJson(s) != null) return HikerLinkKind.playJson;
 
   // ⑦ 提示 / 复制 / 下载 / 选择框这类"无页面"协议
   if (lower.startsWith('toast://')) return HikerLinkKind.toast;
