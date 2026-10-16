@@ -35,6 +35,16 @@ class HikerBlocks extends StatelessWidget {
   final VoidCallback? onTapSearch;
   final double bottomPadding;
 
+  /// 把整行的 `text_1` 设置项排成**一行两个卡片**。
+  ///
+  /// 只给「工具入口弹窗」用：源里的设置项（接口域名 / 每页数量 / 列表样式…）
+  /// 一行一个会拖很长，弹窗里两列更紧凑（用户 2026-10-16 要求）。
+  /// 首页正常内容里保持原样（`text_1` 官方就是整行）。
+  final bool twoUpText;
+
+  /// 由外层滚动容器接管滚动（弹窗里用：内容少时弹窗就贴内容高度，不硬撑满）
+  final bool shrinkWrap;
+
   const HikerBlocks({
     super.key,
     required this.items,
@@ -43,13 +53,17 @@ class HikerBlocks extends StatelessWidget {
     this.onLongPress,
     this.onTapSearch,
     this.bottomPadding = 96,
+    this.twoUpText = false,
+    this.shrinkWrap = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final runs = _runsOf(items);
+    final runs = _runsOf(items, twoUpText: twoUpText);
     return ListView.builder(
       padding: EdgeInsets.fromLTRB(0, 2, 0, bottomPadding),
+      shrinkWrap: shrinkWrap,
+      physics: shrinkWrap ? const NeverScrollableScrollPhysics() : null,
       itemCount: runs.length,
       itemBuilder: (_, i) => _buildRun(runs[i]),
     );
@@ -73,6 +87,12 @@ class HikerBlocks extends StatelessWidget {
         return _cards(run.items, 3);
       case _Kind.text:
         return _textRow(run.items.first);
+      case _Kind.text2:
+        return _textCells(run.items, 2);
+      case _Kind.text3:
+        return _textCells(run.items, 3);
+      case _Kind.text4:
+        return _textCells(run.items, 4);
       case _Kind.paragraph:
         return _paragraph(run.items);
       case _Kind.gap:
@@ -284,6 +304,72 @@ class HikerBlocks extends StatelessWidget {
     );
   }
 
+  // ── 多列文本按钮（text_2 / text_3 / text_4）────────────────
+  //
+  // 官方语义：一行摆 2/3/4 个等宽格子。源里典型就是
+  //   `text_3` → 「收藏 / 历史 / 设置」三个工具入口（点一下就地切页）
+  // 可点（有 url）的给成"按钮卡片"外观，纯文本的居中显示。
+  Widget _textCells(List<HikerItem> list, int perRow) {
+    final rows = <Widget>[];
+    for (var i = 0; i < list.length; i += perRow) {
+      final end = (i + perRow) > list.length ? list.length : (i + perRow);
+      final slice = list.sublist(i, end);
+      rows.add(Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+        // ⚠️ 不能用 `CrossAxisAlignment.stretch`：这块挂在 unbounded 高度的
+        //    列表项里，stretch 会要求无限高（"BoxConstraints forces an infinite
+        //    height"）。等宽由 Expanded 保证，高度交给各自内容。
+        child: Row(
+          children: [
+            for (var j = 0; j < perRow; j++) ...[
+              if (j > 0) const SizedBox(width: 8),
+              Expanded(
+                child: j < slice.length
+                    ? _textCell(slice[j])
+                    : const SizedBox.shrink(),
+              ),
+            ],
+          ],
+        ),
+      ));
+    }
+    return Column(mainAxisSize: MainAxisSize.min, children: rows);
+  }
+
+  Widget _textCell(HikerItem it) {
+    final tappable = it.url.isNotEmpty && it.url != 'hiker://empty';
+    final style = TextStyle(
+        color: AppTheme.textPrimary,
+        fontSize: AppTheme.fontFootnote,
+        fontWeight: FontWeight.w600);
+    final body = Text.rich(
+      TextSpan(children: hikerRichSpans(it.title, style)),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.center,
+    );
+    if (!tappable) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: body,
+      );
+    }
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _tap(it, action: true),
+      child: Container(
+        height: 42,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: body,
+      ),
+    );
+  }
+
   // ── 段落（long_text / rich_text）─────────────────────────
   Widget _paragraph(List<HikerItem> list) {
     return Padding(
@@ -339,7 +425,21 @@ class HikerBlocks extends StatelessWidget {
 // 分块：把连续同类条目合成一块（等价官方 12 栅格里的行）
 // ============================================================
 
-enum _Kind { search, chips, icons4, icons3, cards1, cards2, cards3, text, paragraph, gap }
+enum _Kind {
+  search,
+  chips,
+  icons4,
+  icons3,
+  cards1,
+  cards2,
+  cards3,
+  text,
+  text2,
+  text3,
+  text4,
+  paragraph,
+  gap,
+}
 
 class _Run {
   final _Kind kind;
@@ -381,12 +481,20 @@ _Kind _kindOf(String colType) {
     case 'pic_3_square':
     case 'card_pic_3':
       return _Kind.cards3;
+    // 官方 12 栅格（`ArticleColTypeEnum`）：
+    //   text_1 / text_center_1 → spanCount 12 ⇒ 整行
+    //   text_2 → 6 ⇒ 一行 2 个；text_3 → 4 ⇒ 一行 3 个；text_4 → 3 ⇒ 一行 4 个
+    // 源里这些多列文本基本都是「收藏 / 历史 / 设置」这类**工具按钮**，
+    // 官方摆成一行；之前一律按整行渲染 ⇒ 被拆成三行占满屏。
     case 'text_1':
-    case 'text_2':
-    case 'text_3':
-    case 'text_4':
     case 'text_center_1':
       return _Kind.text;
+    case 'text_2':
+      return _Kind.text2;
+    case 'text_3':
+      return _Kind.text3;
+    case 'text_4':
+      return _Kind.text4;
     case 'long_text':
     case 'rich_text':
       return _Kind.paragraph;
@@ -404,7 +512,11 @@ _Kind _kindOf(String colType) {
   }
 }
 
-List<_Run> _runsOf(List<HikerItem> items) {
+/// 分块：连续同类条目合成一块。
+///
+/// [twoUpText] = true 时（工具入口弹窗），把相邻的整行 `text_1` 归并成
+/// `text2`（一行两个卡片）—— 这样设置项就不用一行一个拖很长。
+List<_Run> _runsOf(List<HikerItem> items, {bool twoUpText = false}) {
   final runs = <_Run>[];
   for (final it in items) {
     final kind = _kindOf(it.colType);
@@ -422,7 +534,21 @@ List<_Run> _runsOf(List<HikerItem> items) {
     }
     merged.add(r);
   }
-  return merged;
+  if (!twoUpText) return merged;
+  // 工具弹窗：相邻的整行 `text_1` 归并成 `text2` ⇒ 渲染成一行两个卡片
+  final out = <_Run>[];
+  for (final r in merged) {
+    if (r.kind == _Kind.text) {
+      if (out.isNotEmpty && out.last.kind == _Kind.text2) {
+        out.last.items.addAll(r.items);
+      } else {
+        out.add(_Run(_Kind.text2, [...r.items]));
+      }
+      continue;
+    }
+    out.add(r);
+  }
+  return out;
 }
 
 /// 哪些块可以"连续同类合并"（卡片/按钮/图标是一行行排；文本与间距各占一块）
@@ -433,6 +559,10 @@ bool _mergable(_Kind k) =>
     k == _Kind.cards1 ||
     k == _Kind.cards2 ||
     k == _Kind.cards3 ||
+    // 多列文本要合并成一行（2/3/4 个一组），整行的 text_1 仍各占一块
+    k == _Kind.text2 ||
+    k == _Kind.text3 ||
+    k == _Kind.text4 ||
     k == _Kind.paragraph;
 
 // ============================================================
@@ -594,6 +724,32 @@ class HikerNavStrip extends StatelessWidget {
   }
 }
 
+/// 掐掉列表开头的"页面外壳"，只留内容 —— 给「工具入口弹窗」用。
+///
+/// 源被重跑后产出的列表**总是又把整页的头带一遍**：源自带的搜索框（`input`）+
+/// 分类 chips + 「收藏 / 历史 / 设置」这一行（`text_2/3/4`）。弹窗里再显示这些
+/// 没意义（实测「麻豆传媒AI」第二轮 n=24 里有 10 条都是壳，真正的设置项从
+/// `text_center_1 程序设置` 才开始）。
+List<HikerItem> stripLeadingShell(List<HikerItem> items) {
+  var i = 0;
+  while (i < items.length) {
+    final k = _kindOf(items[i].colType);
+    if (k == _Kind.search ||
+        k == _Kind.chips ||
+        k == _Kind.icons3 ||
+        k == _Kind.icons4 ||
+        k == _Kind.text2 ||
+        k == _Kind.text3 ||
+        k == _Kind.text4 ||
+        k == _Kind.gap) {
+      i++;
+      continue;
+    }
+    break;
+  }
+  return items.sublist(i);
+}
+
 /// 把"顶部的分类区"从列表里摘出来（返回 pinned = 固定的那块，rest = 其余按序渲染）。
 ///
 /// 判定：从前往后找**第一个** 分类/图标行；它之前不能出现内容卡片
@@ -632,11 +788,12 @@ class HikerNavStrip extends StatelessWidget {
 /// 富文本标记（两个左单引号 + 两个右单引号）
 const String kHikerRichMark = '‘‘’’';
 
-/// 是否是"高亮/选中"样式（`‘‘’’` 前缀，或带 `<b>` / `<font`）
+/// 是否是"高亮/选中"样式（`‘‘’’` 前缀，或带 `<b>` / `<strong>` / `<font`）
 bool hikerRichIsActive(String raw) {
   final s = raw.trimLeft();
   return s.startsWith(kHikerRichMark) ||
       s.contains('<b>') ||
+      s.contains('<strong>') ||
       s.contains('<font');
 }
 
@@ -649,12 +806,20 @@ String hikerPlainText(String raw) {
   return s.trim();
 }
 
-/// 富文本 → TextSpan（只认 `<b> <i> <font color> <br>`，其余标签剥掉）
+/// 富文本 → TextSpan（认 `<b>/<strong> <i>/<em> <font|span color> <br>`，其余标签剥掉）
 List<TextSpan> hikerRichSpans(String raw, TextStyle base) {
   var s = raw.trimLeft();
   if (s.startsWith(kHikerRichMark)) s = s.substring(kHikerRichMark.length);
   final spans = <TextSpan>[];
-  final re = RegExp(r'</?(b|i|font)([^>]*)>|<br\s*/?>', caseSensitive: false);
+  // 任何标签都吃掉：`<b>`/`<strong>` 加粗、`<i>`/`<em>` 斜体、
+  // `<font>`/`<span>` 取颜色、`<br>` 当一个空格，其余（`<p>` `<div>` `<a>`
+  // `<center>` …）只剥标签、保留文字。
+  //
+  // ⚠️ 必须"吃掉**所有**标签"：原来只认 b/i/font，源里极常见的 `<strong>`
+  // 会**原样显示在界面上**。用户 2026-10-16 截到的就是这个 ——
+  // 源里 `strong: function(txt, color){ return '‘‘’’<strong><font color=#' + color + '>' + txt + '</font></strong>' }`，
+  // 「程序设置」那行就渲染成了 `<strong>程序设置</strong>` 一坨原文。
+  final re = RegExp(r'<\s*(/?)\s*([a-zA-Z][a-zA-Z0-9]*)([^>]*)>');
   final colorRe = RegExp(r'''color\s*=\s*["']?\s*(#[0-9a-fA-F]{3,8})''');
   var bold = false;
   var italic = false;
@@ -675,24 +840,24 @@ List<TextSpan> hikerRichSpans(String raw, TextStyle base) {
   for (final m in re.allMatches(s)) {
     push(s.substring(idx, m.start));
     idx = m.end;
-    final tag = (m.group(1) ?? '').toLowerCase();
-    final closing = m.group(0)!.startsWith('</');
-    if (tag.isEmpty) {
-      push(' '); // <br>
-      continue;
-    }
-    if (tag == 'b') {
+    final closing = (m.group(1) ?? '') == '/';
+    final tag = (m.group(2) ?? '').toLowerCase();
+    if (tag == 'br') {
+      push(' ');
+    } else if (tag == 'b' || tag == 'strong') {
       bold = !closing;
-    } else if (tag == 'i') {
+    } else if (tag == 'i' || tag == 'em') {
       italic = !closing;
-    } else if (tag == 'font') {
+    } else if (tag == 'font' || tag == 'span') {
       if (closing) {
         color = null;
       } else {
-        final c = colorRe.firstMatch(m.group(2) ?? '');
-        color = c != null ? _hexColor(c.group(1)!) : null;
+        final c = colorRe.firstMatch(m.group(3) ?? '');
+        // 认不出颜色就沿用外层：`<font>` 不带 color 时不该把颜色清掉
+        if (c != null) color = _hexColor(c.group(1)!);
       }
     }
+    // 其余标签：只剥标签，文字保留
   }
   push(s.substring(idx));
   if (spans.isEmpty) push(hikerPlainText(raw));

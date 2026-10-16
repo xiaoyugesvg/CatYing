@@ -291,18 +291,51 @@ class _HikerHomePageState extends State<HikerHomePage> {
   }
 
   /// 延迟规则执行入口：重跑**当前这次查询**并把父链带上（见 hiker_engine.js）
-  Future<HikerResult> Function(List<String>) _replayLazyFor(HikerSource src) {
+  ///
+  /// [persistVars] = false 用于「工具入口弹窗」：那次重跑多半是把源的 `mode`
+  /// 变量改成 `settings` / `favorites` 这类**粘性**状态，落盘之后用户就再也
+  /// 回不到视频列表了（下次 `_load` 跑出来还是设置页）。弹窗只是"看一眼"，
+  /// 所以丢弃它产生的变量；弹窗里真正要存的设置项走源的 `setItem`（自己落盘）。
+  ///
+  /// [vars] 用来**续用上一轮的变量**（源切页 = 改 mode 变量 + `refreshPage()`，
+  /// 真正的内容要带上刚改过的变量再跑一轮，见 [_runToolEntry]）。
+  Future<HikerResult> Function(List<String>) _replayLazyFor(
+    HikerSource src, {
+    bool persistVars = true,
+    Map<String, dynamic>? vars,
+  }) {
     final cate = _cate;
     final cateName = _cateName;
     return (ids) async {
-      final vars = _store.varsOf(src.id);
+      final v = vars ?? _store.varsOf(src.id);
       final r = cate.isEmpty
-          ? await HikerEngine.instance.home(src, vars: vars, lazyIds: ids)
+          ? await HikerEngine.instance.home(src, vars: v, lazyIds: ids)
           : await HikerEngine.instance.category(src, cate,
-              cateName: cateName, vars: vars, lazyIds: ids);
-      await _store.saveVarsIfChanged(src.id, vars, r.vars);
+              cateName: cateName, vars: v, lazyIds: ids);
+      if (persistVars) {
+        await _store.saveVarsIfChanged(src.id, v, r.vars);
+      }
       return r;
     };
+  }
+
+  /// 跑一次「工具入口」，并自动补上 `refreshPage()` 的第二轮；**全程不落盘**。
+  ///
+  /// 海阔的「收藏 / 历史 / 设置」按钮典型写法是：
+  ///   `putMyVar('mode','settings'); refreshPage(false); return 'hiker://empty'`
+  /// 也就是**第一轮只改状态、返回空**，真正的设置内容要带上改过的变量再跑一轮。
+  /// 少这一轮的话弹窗里永远是空的。
+  Future<HikerResult> _runToolEntry(
+    HikerSource src,
+    List<String> chain, {
+    Map<String, dynamic>? vars,
+  }) async {
+    var r = await _replayLazyFor(src, persistVars: false, vars: vars)(chain);
+    if (r.needRefresh) {
+      final r2 = await _replayLazyFor(src, persistVars: false, vars: r.vars)(const []);
+      if (r2.list.isNotEmpty || r2.playUrl.isNotEmpty) r = r2;
+    }
+    return r;
   }
 
   /// 分类 / 按钮 / 图标 / 文本类条目的点击 —— 海阔语义是**就地切换**（不是进详情页）。
@@ -322,6 +355,16 @@ class _HikerHomePageState extends State<HikerHomePage> {
       return;
     }
     final chain = [..._lazyChain, u.substring('hiker://lazy#'.length)];
+
+    // **工具入口**（`text_2/3/4` 多列文本按钮，典型是「收藏 / 历史 / 设置」）：
+    // 官方语义是把整页换成它产出的内容，而源多半靠一个**粘性**的 mode 变量切页
+    // —— 换掉之后用户就回不到视频列表了（下次刷新跑出来还是设置页）。
+    // 所以这里改成**弹窗**：主列表原样保留，关掉弹窗就回去（用户 2026-10-16 要求）。
+    if (_isToolButton(it)) {
+      await _openToolSheet(src, it, chain);
+      return;
+    }
+
     setState(() {
       _loading = true;
       _error = null;
@@ -356,6 +399,163 @@ class _HikerHomePageState extends State<HikerHomePage> {
     if (r.list.isEmpty && r.ok) {
       AppToast.message('这个分类没有内容');
     }
+  }
+
+  /// 是不是"工具入口"按钮：官方 12 栅格里的**多列文本**（`text_2/3/4`）。
+  ///
+  /// 源里这些条目基本只有一种用途 —— 「收藏 / 历史 / 设置 / ××开关」这类
+  /// **就地切页的工具按钮**（`text_1` 是整行内容行，不当工具）。
+  static bool _isToolButton(HikerItem it) =>
+      it.colType == 'text_2' || it.colType == 'text_3' || it.colType == 'text_4';
+
+  /// 「工具入口」弹窗：把按钮产出的内容（收藏列表 / 设置项 …）放进底部弹窗。
+  ///
+  /// 两条硬约束：
+  ///   · **不动主列表** —— 关掉弹窗就回到原来的视频列表；
+  ///   · **不落盘变量** —— 源切页靠改自己的 mode 变量，落了盘就回不去了
+  ///     （见 [_replayLazyFor] 的 `persistVars`）。
+  /// 弹窗里的设置项按**一行两个卡片**排（[HikerBlocks.twoUpText]）。
+  Future<void> _openToolSheet(
+      HikerSource src, HikerItem entry, List<String> chain) async {
+    HikerResult r;
+    try {
+      r = await _runToolEntry(src, chain);
+    } catch (e) {
+      AppToast.error('这个入口打不开：$e');
+      return;
+    }
+    if (!mounted) return;
+    if (r.playUrl.isNotEmpty) {
+      // 少数源的按钮直接给播放地址：交给详情页那套播放逻辑
+      _open(entry);
+      return;
+    }
+    // 源重跑后总是把整页的头（搜索框 / 分类 / 这行按钮）又带一遍 —— 弹窗里掐掉
+    final toolItems = stripLeadingShell(r.list);
+    if (toolItems.isEmpty) {
+      if (r.ok) {
+        AppToast.message('这个入口没有内容');
+      } else {
+        AppToast.error(r.error ?? '规则执行失败');
+      }
+      return;
+    }
+    final rawTitle = hikerPlainText(entry.title);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.backgroundCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        var items = toolItems;
+        final sheetVars = r.vars;
+        return StatefulBuilder(
+          builder: (ctx, setSheet) => SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.76),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _sheetHeader(ctx, rawTitle.isEmpty ? '设置' : rawTitle),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: HikerBlocks(
+                        items: items,
+                        twoUpText: true,
+                        shrinkWrap: true,
+                        bottomPadding: 20,
+                        onTapItem: (it) {
+                          Navigator.of(ctx).pop();
+                          _open(it);
+                        },
+                        onTapAction: (it) => _sheetAction(
+                          src: src,
+                          ctx: ctx,
+                          chain: chain,
+                          vars: sheetVars,
+                          item: it,
+                          replace: (list) => setSheet(() => items = list),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 弹窗内再点一次（例如设置页里的「恢复默认设置」）：重跑一层并**替换弹窗内容**
+  Future<void> _sheetAction({
+    required HikerSource src,
+    required BuildContext ctx,
+    required List<String> chain,
+    required Map<String, dynamic> vars,
+    required HikerItem item,
+    required void Function(List<HikerItem>) replace,
+  }) async {
+    final u = item.url;
+    if (u.isEmpty || u == 'hiker://empty') return;
+    if (!u.startsWith('hiker://lazy#')) {
+      // 老式写法（直接给分类地址）：交给主页那套（会换主列表）
+      Navigator.of(ctx).pop();
+      await _triggerAction(item);
+      return;
+    }
+    final c2 = [...chain, u.substring('hiker://lazy#'.length)];
+    try {
+      final r2 = await _runToolEntry(src, c2, vars: vars);
+      if (!mounted) return;
+      if (r2.playUrl.isNotEmpty) {
+        Navigator.of(ctx).pop();
+        _open(item);
+        return;
+      }
+      if (r2.list.isEmpty) {
+        AppToast.error(r2.ok ? '这一步没有内容' : (r2.error ?? '规则执行失败'));
+        return;
+      }
+      // 同一口径：弹窗内容一律掐掉页面外壳
+      final next = stripLeadingShell(r2.list);
+      if (next.isEmpty) {
+        AppToast.message('这一步没有内容');
+        return;
+      }
+      replace(next);
+    } catch (e) {
+      AppToast.error('$e');
+    }
+  }
+
+  Widget _sheetHeader(BuildContext ctx, String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 8, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontTitle3,
+                    fontWeight: FontWeight.bold)),
+          ),
+          IconButton(
+            tooltip: '关闭',
+            onPressed: () => Navigator.of(ctx).pop(),
+            icon: Icon(Icons.close_rounded,
+                size: 20, color: AppTheme.textSecondary),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showItemMenu(HikerItem it) {
