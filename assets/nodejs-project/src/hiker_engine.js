@@ -173,7 +173,49 @@ function newRuntime(ctx, kv) {
     touchedVars: false,
     lazyIds: new Set(), // 本趟遇到过的 lazyRule id（回报给宿主）
     listeners: {}, // addListener 注册的回调（我们不做事件循环，仅记录）
+    /// 「重放期间的时间/随机数冻结」（见 [makeFrozenDate] / [pseudoRandom]）：
+    /// 一条规则要重放好几轮，每轮都从头跑；若每轮 `Date.now()` / `Math.random()`
+    /// 都不同，带时间戳/随机机器码的请求**每轮都是新缓存键** ⇒ 永远不命中、
+    /// 40 轮耗尽（实测内置源「网页吃瓜」就是这个：请求头 `timestamp` + 随机 machine_code）。
+    frozenNow: Date.now(),
+    randSeed: ((Date.now() ^ (Math.random() * 0xffffffff)) >>> 0) || 1,
+    randSeq: 0,
   };
+}
+
+/**
+ * 冻结的 `Date`：`Date.now()` 返回**本次运行**固定的时间，`new Date()` 同理。
+ *
+ * 为什么必须冻结：重放桥是「每轮重跑整条规则」，而真实时间每轮都在走
+ * ⇒ 只要规则把时间戳放进请求（签名/timestamp 头），缓存键每轮都变，
+ * 规则永远收敛不了（用户看到的报错就是"重放次数超过上限"）。
+ * 冻结在"运行开始时刻"不影响正常语义（一次页面加载本来也就几秒）。
+ */
+function makeFrozenDate(rt) {
+  const base = Number(rt.frozenNow) || Date.now();
+  function FrozenDate(...args) {
+    if (!(this instanceof FrozenDate)) return new Date(base).toString();
+    return args.length ? new Date(...args) : new Date(base);
+  }
+  FrozenDate.now = () => base;
+  FrozenDate.parse = (...a) => Date.parse(...a);
+  FrozenDate.UTC = (...a) => Date.UTC(...a);
+  FrozenDate.prototype = Date.prototype;
+  return FrozenDate;
+}
+
+/**
+ * 冻结的 `Math.random()`：同一轮里第 n 次调用永远给同一个值
+ * （`randSeq` 每轮重放前归零 ⇒ 各轮随机序列完全一致 ⇒ 缓存键稳定）。
+ */
+function pseudoRandom(rt) {
+  const seq = Number(rt.randSeq) || 0;
+  let x = ((Number(rt.randSeed) || 1) ^ Math.imul(seq + 1, 0x9e3779b9)) >>> 0;
+  x ^= x << 13; x >>>= 0;
+  x ^= x >>> 17;
+  x ^= x << 5; x >>>= 0;
+  rt.randSeq = seq + 1;
+  return (x % 1000000) / 1000000;
 }
 
 function cookieHeaderFor(rt, url) {
@@ -212,8 +254,9 @@ function absorbSetCookie(rt, url, headers) {
   } catch (_) { /* cookie 解析失败不影响主流程 */ }
 }
 
-/** 真正发出请求（异步）—— 只在重放循环里被调用 */
-async function doHttp(rt, url, opts) {
+/** 真正发出请求（异步）—— 只在重放循环里被调用
+ *  [asBuffer] = true 时**不解码字符集**，直接把原始字节返回（`$.image` 用）。 */
+async function doHttp(rt, url, opts, asBuffer = false) {
   const o = opts || {};
   const method = String(o.method || 'get').toLowerCase();
   const headers = { ...(o.headers || {}) };
@@ -249,6 +292,7 @@ async function doHttp(rt, url, opts) {
   ]);
   absorbSetCookie(rt, url, resp.headers);
   const buf = Buffer.from(resp.data);
+  if (asBuffer) return buf; // 二进制通道（图片）：不做字符集解码
   const charset = String(o.charset || '').trim() || sniffCharset(resp.headers, buf) || 'utf-8';
   return decodeBuffer(buf, charset);
 }
@@ -767,8 +811,16 @@ function decodeWithCharset(v, charset) {
 function sleepSync(ms) {
   const n = Math.min(Math.max(0, Number(ms) || 0), 5000);
   if (n <= 0) return;
-  // Node 主线程允许 Atomics.wait（浏览器不允许），用法与阻塞睡眠一致
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, n);
+  // Node（含 iOS 的 nodejs-mobile）主线程允许 Atomics.wait，用法与阻塞睡眠一致。
+  // 实测 Node 18.20.4（= iOS 端同一个版本）可用；万一某个运行时禁掉了
+  // SharedArrayBuffer/Atomics，也不能让规则直接炸 —— 退化成忙等（规则里
+  // sleep 一般都是几十~几百毫秒的节流）。
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, n);
+    return;
+  } catch (_) { /* 下面走忙等 */ }
+  const end = Date.now() + n;
+  while (Date.now() < end) { /* 忙等兜底 */ }
 }
 
 /** 把"整块字节"模拟成 Java InputStream 的最小面（read/available/skip/close） */
@@ -800,6 +852,328 @@ function makeInputStream(buf) {
     __remaining: () => buf.subarray(pos),
   };
   return api;
+}
+
+/**
+ * `javax.crypto.Cipher` 的最小实现（**真加解密**）。
+ *
+ * ⚠️ 刻意用**纯 JS 的 CryptoJS**（引擎本来就自带，`buildCryptoGlobals` 也用它），
+ *   而不是 `node:crypto` —— iOS 的 nodejs-mobile 是裁剪过的运行时，
+ *   `main.js` 里那句 `builtinModules.forEach` 是**逐模块 try/catch 跳过缺失内建**的
+ *   （即 crypto 是否可用没人保证过）。走 CryptoJS 就没有这个风险，跨平台行为一致。
+ *
+ * 实测用到它的内置源：野果短剧 / 91短剧（封面与首页数据都是 `AES/CBC/PKCS5Padding` 密文）。
+ * 语义按 Java：`getInstance("AES/CBC/PKCS5Padding")` → `init(mode, keySpec, ivSpec)`
+ * → `doFinal(bytes)`，返回**有符号 byte[]**（Rhino 里 byte[] 就是有符号数字数组）。
+ */
+function makeCipher(transformation) {
+  const parts = String(transformation == null ? 'AES/ECB/PKCS5Padding' : transformation).split('/');
+  const alg = String(parts[0] || 'AES').trim().toUpperCase();
+  const mode = String(parts[1] || 'ECB').trim().toUpperCase();
+  const pad = String(parts[2] || 'PKCS5Padding').trim().toUpperCase();
+  let keyBuf = null;
+  let ivBuf = null;
+  let opMode = 0;
+
+  const hexOf = (b) => CryptoJS.enc.Hex.parse(Buffer.from(b).toString('hex'));
+  const modeOf = () => {
+    const m = {
+      ECB: CryptoJS.mode.ECB, CBC: CryptoJS.mode.CBC, CTR: CryptoJS.mode.CTR,
+      CFB: CryptoJS.mode.CFB, OFB: CryptoJS.mode.OFB,
+    }[mode];
+    if (!m) throw new Error(`AES 模式不支持：${mode}`);
+    return m;
+  };
+  const padOf = () => {
+    if (pad === 'NOPADDING') return CryptoJS.pad.NoPadding;
+    if (pad === 'PKCS5PADDING' || pad === 'PKCS7PADDING') return CryptoJS.pad.Pkcs7;
+    if (pad === 'ISO10126PADDING') return CryptoJS.pad.Iso10126;
+    if (pad === 'ZEROPADDING') return CryptoJS.pad.ZeroPadding;
+    // 流模式（CTR/CFB/OFB）按 Java 语义本来是 NoPadding
+    return (mode === 'CTR' || mode === 'CFB' || mode === 'OFB')
+      ? CryptoJS.pad.NoPadding
+      : CryptoJS.pad.Pkcs7;
+  };
+
+  const run = (data) => {
+    if (alg !== 'AES') throw new Error(`javax.crypto.Cipher 只实现了 AES（收到 ${alg}）`);
+    if (!keyBuf || !keyBuf.length) throw new Error('javax.crypto.Cipher 还没 init（没有密钥）');
+    const bits = keyBuf.length * 8;
+    if (![128, 192, 256].includes(bits)) throw new Error(`AES 密钥长度不合法：${bits} bit`);
+    const needIv = mode !== 'ECB';
+    if (needIv && (!ivBuf || ivBuf.length !== 16)) throw new Error(`${alg}/${mode} 需要一个 16 字节 IV`);
+    const cfg = { mode: modeOf(), padding: padOf() };
+    if (needIv) cfg.iv = hexOf(ivBuf);
+    const key = hexOf(keyBuf);
+    const msg = hexOf(bufOf(data));
+    // Java 的 ENCRYPT_MODE=1 / DECRYPT_MODE=2
+    if (opMode === 2) {
+      const dec = CryptoJS.AES.decrypt({ ciphertext: msg }, key, cfg);
+      return signedBytes(Buffer.from(dec.toString(CryptoJS.enc.Hex), 'hex'));
+    }
+    const enc = CryptoJS.AES.encrypt(msg, key, cfg);
+    return signedBytes(Buffer.from(enc.ciphertext.toString(CryptoJS.enc.Hex), 'hex'));
+  };
+
+  return {
+    init: (m, keySpec, ivSpec) => {
+      opMode = Number(m) || 0;
+      keyBuf = bufOf(keySpec && (keySpec.__key || keySpec.secret || keySpec));
+      const iv = ivSpec && (ivSpec.__iv || ivSpec.iv || ivSpec);
+      if (iv != null) ivBuf = bufOf(iv);
+      return undefined;
+    },
+    doFinal: run,
+    update: run,
+    getIV: () => (ivBuf ? signedBytes(ivBuf) : []),
+    getAlgorithm: () => `${alg}/${mode}/${pad}`,
+    toString: () => `Cipher(${alg}/${mode}/${pad})`,
+  };
+}
+
+/** `android.util.Base64` 的 flags（照 Android 常量表） */
+const ANDROID_B64 = { DEFAULT: 0, NO_PADDING: 1, NO_WRAP: 2, CRLF: 4, URL_SAFE: 8, NO_CLOSE: 16 };
+
+function androidB64Decode(str, flags) {
+  const f = Number(flags) || 0;
+  let s = String(str == null ? '' : str).replace(/\s+/g, '');
+  if (f & ANDROID_B64.URL_SAFE) s = s.replace(/-/g, '+').replace(/_/g, '/');
+  s = s.replace(/=+$/, '');
+  const pad = s.length % 4;
+  if (pad) s += '='.repeat(4 - pad);
+  return Buffer.from(s, 'base64');
+}
+
+function androidB64Encode(v, flags) {
+  const f = Number(flags) || 0;
+  let s = bufOf(v).toString('base64');
+  if (f & ANDROID_B64.URL_SAFE) s = s.replace(/\+/g, '-').replace(/\//g, '_');
+  if (f & ANDROID_B64.NO_PADDING) s = s.replace(/=+$/, '');
+  return s;
+}
+
+// ============================================================
+// `$.image(fn, …)` —— 封面/图片解密（**懒执行**）
+// ============================================================
+//
+// 海阔里 `$(url, headers).image(fn)` 的语义是**生成一个"图片解密链接"**
+// （官方 help_js.json 原话就是"生成链接"）：fn 里能拿到 Java InputStream 形态的
+// 图片字节（全局 `input`，`input.read(buf)` 循环读），返回处理后的图。
+// 典型用途就是**封面是密文** —— 真人短剧站几乎都这么干
+// （实测 91短剧 / 野果短剧 / 麻豆传媒AI / 新吾爱吃瓜网）。
+//
+// 我们按同样的语义做：
+//   · 规则里只**登记**一个任务（url + headers + fn 源码），返回本机地址
+//     `http://127.0.0.1:<mgmt>/hiker/image/<token>`；
+//   · 宿主渲染到那张图时才来取 → 这时才真去抓原图、跑 fn 解密、把字节吐回去。
+//
+// 为什么不"规则里就把图抓回来"（第一版就是那样，实测不行）：
+//   · 一屏 50 张封面 = 50 次抓图 + 50 次解密**全压在列表加载上**
+//     （实测 野果短剧：25 次请求 / 13 秒才出列表），而宿主根本没用到那么多张；
+//   · 官方就是这样懒执行的（点开/滚动到才解），列表才能秒出。
+//
+// 顺带的好处：需要 Referer/UA 的图也能显示（是 Node 带着源给的 headers 去抓的），
+// 而且不用把几百 KB 的 base64 塞进列表 JSON。
+
+/** 单张图上限（超过就退回原图地址，别把内存撑爆） */
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+/** 已解好的图：条数 + 总字节双上限（LRU 淘汰最旧的） */
+const MAX_IMAGE_CACHE_ITEMS = 48;
+const MAX_IMAGE_CACHE_BYTES = 12 * 1024 * 1024;
+/** 待解任务上限 / 存活时间（页面重跑会不断产生新 token） */
+const MAX_IMAGE_TASKS = 400;
+const IMAGE_TASK_TTL_MS = 30 * 60 * 1000;
+
+/** token → { url, headers, src, args, at }（规则里登记，取图时执行） */
+const IMAGE_TASKS = new Map();
+/** token → { bytes, mime }（解好的图，重复取直接命中） */
+const IMAGE_CACHE = new Map();
+let IMAGE_CACHE_BYTES = 0;
+let IMAGE_PORT = 0;
+let IMAGE_SEQ = 0;
+
+/** 抓原图用的"假运行时"（doHttp 只用到 ctx.ua 与 cookies） */
+const IMAGE_FETCH_RT = { ctx: { ua: UA_MOBILE }, cookies: new Map() };
+
+/** main.js 在 mgmtServer 监听成功后把端口同步进来（拼图片地址要用） */
+export function setHikerImagePort(port) {
+  const n = Number(port) || 0;
+  if (n > 0) IMAGE_PORT = n;
+}
+
+/** 规则里登记一张"待解密的图"，返回宿主可直接渲染的地址 */
+function registerImageTask(url, headers, fn, extra, modulesPlain) {
+  const token = `${++IMAGE_SEQ}t${Date.now().toString(36)}`;
+  IMAGE_TASKS.set(token, {
+    url: String(url),
+    headers: headers || {},
+    src: typeof fn === 'function' ? fn.toString() : '',
+    args: Array.isArray(extra) ? extra : [],
+    /// 源自己的页面模块源码（`$.require('xxx')` 要用，见 [runImageFn]）：
+    /// 多个 task 共享**同一个对象**（一次运行只建一份），不额外占内存
+    modules: modulesPlain || null,
+    at: Date.now(),
+  });
+  while (IMAGE_TASKS.size > MAX_IMAGE_TASKS) {
+    IMAGE_TASKS.delete(IMAGE_TASKS.keys().next().value);
+  }
+  return token;
+}
+
+/**
+ * main.js 的 `/hiker/image/<token>` 用它取图：
+ * 抓原图 → 跑 fn 解密 → 返回 { bytes, mime }；解密/抓取失败返回
+ * `{ redirect: 原始地址 }`（让宿主去试原图，总比空白好）；token 不认识返回 null。
+ */
+export async function resolveHikerImage(token) {
+  const key = String(token || '');
+  const cached = IMAGE_CACHE.get(key);
+  if (cached) return { bytes: cached.bytes, mime: cached.mime };
+  const task = IMAGE_TASKS.get(key);
+  if (!task) return null;
+  if (Date.now() - task.at > IMAGE_TASK_TTL_MS) {
+    IMAGE_TASKS.delete(key);
+    return null;
+  }
+  let raw;
+  try {
+    raw = await doHttp(IMAGE_FETCH_RT, task.url, { headers: task.headers }, true);
+  } catch (e) {
+    warnOnce(`$.image 抓图失败（${describeError(e)}），已回退原图`);
+    return { redirect: task.url };
+  }
+  if (!raw || !raw.length || raw.length > MAX_IMAGE_BYTES) return { redirect: task.url };
+  let bytes = raw;
+  if (task.src) {
+    const decrypted = runImageFn(task.src, raw, task.args, task.modules);
+    if (decrypted && decrypted.length) bytes = decrypted;
+  }
+  const mime = imageMimeOf(bytes);
+  // 认不出图片格式 ⇒ 多半是解密没成：让宿主去试原图地址
+  if (!mime) return { redirect: task.url };
+  IMAGE_CACHE.set(key, { bytes, mime });
+  IMAGE_CACHE_BYTES += bytes.length;
+  while (IMAGE_CACHE.size > MAX_IMAGE_CACHE_ITEMS
+      || (IMAGE_CACHE_BYTES > MAX_IMAGE_CACHE_BYTES && IMAGE_CACHE.size > 1)) {
+    const oldest = IMAGE_CACHE.keys().next().value;
+    const gone = IMAGE_CACHE.get(oldest);
+    IMAGE_CACHE.delete(oldest);
+    IMAGE_CACHE_BYTES -= gone ? gone.bytes.length : 0;
+  }
+  return { bytes, mime };
+}
+
+/**
+ * 在**最小沙箱**里跑图片解密函数。
+ *
+ * 给的是：`java.* / javax.* / android.* + input + 基础 JS 全局 + $.require(...)`。
+ * `$.require('common')` 这种很常见（实测 新吾爱吃瓜网：解密器写在源自己的
+ * 「公共模块」里，`.image(fn, 'common')` 把模块名当额外参数传进来）——
+ * 所以这里把源的页面模块源码也带过来，按需就地求值（不联网、不重跑整条规则）。
+ * 用到更重的东西（`fetch` / `getResCode` / 规则上下文变量）就会抛错 ⇒
+ * 上层退回原图地址，不会把整个列表搞挂。
+ */
+function runImageFn(src, buf, args, modulesPlain) {
+  try {
+    const javaNs = buildJavaNs();
+    const inputStream = makeInputStream(buf);
+    const canNot = () => { throw new Error('图片解密函数里用不了 $.xxx（只支持 $.require）'); };
+    const box = {
+      input: inputStream,
+      java: javaNs,
+      javax: javaNs.javax,
+      android: buildAndroidNs(),
+      console,
+      JSON, Math, Date, String, Number, Boolean, Array, Object, RegExp, Error,
+      parseInt, parseFloat, isNaN, encodeURIComponent, decodeURIComponent,
+      atob: (s) => Buffer.from(String(s), 'base64').toString('binary'),
+      btoa: (s) => Buffer.from(String(s), 'binary').toString('base64'),
+      $: canNot,
+    };
+
+    /** `$.require('xxx')`：在同一个最小沙箱里就地求值源自己的页面模块 */
+    const modCache = new Map();
+    function imageRequire(name) {
+      const key = String(name == null ? '' : name)
+        .replace(/^hiker:\/\/page\//i, '')
+        .replace(/\.js$/i, '')
+        .trim()
+        .toLowerCase();
+      if (!key) throw new Error('$.require() 拿到了空名字');
+      if (modCache.has(key)) return modCache.get(key);
+      let code = '';
+      if (modulesPlain) {
+        for (const n of Object.keys(modulesPlain)) {
+          if (n.toLowerCase() === key || n.replace(/\.js$/i, '').toLowerCase() === key) {
+            code = modulesPlain[n];
+            break;
+          }
+        }
+      }
+      if (!code) throw new Error(`图片解密函数要的模块「${key}」不在源的 pages 里`);
+      // 海阔的模块导出约定是 `$.exports = xxx;`（见 [runInModuleScope]），
+      // 所以这里必须**跑完再读 `$.exports`**；读不到就退回"沙箱顶层绑定"（var/function）。
+      const exportsBox = {};
+      const dollar = Object.assign(canNot, { require: imageRequire });
+      const sub = { ...box, $: dollar, exports: exportsBox };
+      dollar.exports = undefined;
+      vm.runInContext(code, vm.createContext(sub), { timeout: SCRIPT_TIMEOUT_MS });
+      const value = dollar.exports !== undefined
+        ? dollar.exports
+        : (Object.keys(exportsBox).length ? exportsBox : sub);
+      modCache.set(key, value);
+      return value;
+    }
+    box.$ = Object.assign(canNot, { require: imageRequire });
+
+    const ctx = vm.createContext(box);
+    const fn = vm.runInContext(`(${src})`, ctx, { timeout: SCRIPT_TIMEOUT_MS });
+    if (typeof fn !== 'function') return null;
+    const out = fn(inputStream, ...(args || []));
+    if (typeof out === 'string') {
+      const s = out.trim();
+      if (!s) return null;
+      if (/^(https?:|data:|hiker:)/i.test(s)) return null; // 源自己换了地址 → 走兜底
+      return tryImageBase64(s);
+    }
+    return bytesOfImageResult(out);
+  } catch (e) {
+    warnOnce(`图片解密函数执行失败（${describeError(e)}），已回退原图`);
+    return null;
+  }
+}
+
+/** 从魔数认图片类型（认不出来返回 ''，调用方据此判断"解密是不是失败了"） */
+function imageMimeOf(buf) {
+  if (!buf || buf.length < 4) return '';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38) return 'image/gif';
+  if (buf[0] === 0x42 && buf[1] === 0x4d) return 'image/bmp';
+  if (buf.length >= 12 && buf.slice(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+  return '';
+}
+
+/** fn 的返回值 → Buffer（InputStream / byte[] / Buffer 三种形态） */
+function bytesOfImageResult(v) {
+  if (v == null) return null;
+  if (Buffer.isBuffer(v)) return v;
+  if (Buffer.isBuffer(v.__bytes)) return v.__bytes; // makeInputStream
+  if (Array.isArray(v)) return bufOf(v);
+  if (v instanceof Uint8Array) return Buffer.from(v);
+  return null;
+}
+
+/** 源直接返回 base64 的情况（认得出来才算图） */
+function tryImageBase64(s) {
+  const t = String(s).replace(/\s+/g, '');
+  if (t.length < 32 || !/^[A-Za-z0-9+/_-]+={0,2}$/.test(t)) return null;
+  try {
+    const buf = androidB64Decode(t, /[-_]/.test(t) ? ANDROID_B64.URL_SAFE : 0);
+    return imageMimeOf(buf) ? buf : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 /** `String.format` 的最小实现（%s/%d/%f/%x/%n，够用即可） */
@@ -1102,6 +1476,32 @@ function buildJavaNs() {
         },
       },
     },
+    // `javax.crypto.*`（AES 加解密；见 [makeCipher]）
+    javax: {
+      crypto: {
+        Cipher: Object.assign(
+          function () { throw new Error('javax.crypto.Cipher 请用 Cipher.getInstance(...)'); },
+          {
+            ENCRYPT_MODE: 1,
+            DECRYPT_MODE: 2,
+            WRAP_MODE: 3,
+            UNWRAP_MODE: 4,
+            getInstance: (t) => makeCipher(t),
+          },
+        ),
+        spec: {
+          SecretKeySpec: function (bytes, algorithm) {
+            return { __key: bufOf(bytes), algorithm: String(algorithm == null ? '' : algorithm) };
+          },
+          IvParameterSpec: function (bytes) {
+            return { __iv: bufOf(bytes) };
+          },
+          GCMParameterSpec: function (tagLen, iv) {
+            return { __iv: bufOf(iv), __tagLen: Number(tagLen) || 0 };
+          },
+        },
+      },
+    },
     // 海阔自定义的繁简转换（实测只有 2 处用到；没有对照表 ⇒ 原样返回 + 提示一次，
     // 比抛错好：抛错会让整条规则在加载期就炸掉）
     t2s: (s) => {
@@ -1112,6 +1512,26 @@ function buildJavaNs() {
       warnOnce('java.s2t（简转繁）未实现，已原样返回');
       return s == null ? '' : String(s);
     },
+  });
+}
+
+/**
+ * `android.*` 的 shim（海阔规则里常见的 Android 专属 API）。
+ *
+ * 实测用到：野果短剧 —— `android.util.Base64.decode(text, android.util.Base64.DEFAULT)`
+ * 解出 AES 密文（它的首页/正文数据都是密文）。缺了它整条规则会
+ * `android is not defined` 直接炸。
+ */
+function buildAndroidNs() {
+  const Base64 = {
+    ...ANDROID_B64,
+    decode: (s, flags) => signedBytes(androidB64Decode(s, flags)),
+    encode: (b, flags) => Buffer.from(androidB64Encode(b, flags), 'utf8'),
+    encodeToString: (b, flags) => androidB64Encode(b, flags),
+  };
+  return lazyJavaNs({
+    util: { Base64 },
+    text: { TextUtils: { isEmpty: (s) => s == null || String(s).length === 0 } },
   });
 }
 
@@ -1404,9 +1824,28 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
   const post = (url, body, opts) => httpSync(rt, url, { ...(opts || {}), method: 'post', body });
   const cryptoGlobals = buildCryptoGlobals();
 
+  /**
+   * `$(url, headers).image(fn, …)` —— **只登记任务**，这里不抓任何东西
+   * （见模块顶部 `$.image` 那节：抓图+解密发生在宿主真的来取这张图的时候）。
+   */
+  function imageRuleImpl(url, headers, fn, extra) {
+    const u = String(url == null ? '' : url);
+    if (!/^https?:\/\//i.test(u)) return u; // data:/hiker:///空 → 原样
+    if (IMAGE_PORT <= 0) return u;          // 还没拿到 mgmt 端口 → 退回原图
+    // 源的页面模块源码：一次运行只建一份，多个图片任务共享（供 fn 里的 $.require 用）
+    if (!rt.modulesPlain && rt.modules) {
+      const plain = {};
+      rt.modules.forEach((m, k) => { plain[k] = String((m && m.rule) || ''); });
+      rt.modulesPlain = plain;
+    }
+    const token = registerImageTask(u, headers, fn, extra, rt.modulesPlain);
+    return `http://127.0.0.1:${IMAGE_PORT}/hiker/image/${token}`;
+  }
+
   /** jQuery 风格薄包装（覆盖海阔脚本最常用的那几个） */
-  function jq(input) {
+  function jq(input, headers) {
     const $ = typeof input === 'string' ? cheerio.load(input) : input;
+    const asUrl = typeof input === 'string' ? input : '';
     return {
       raw: $,
       find: (sel) => jq($.find ? $.find(sel) : $(sel)),
@@ -1425,16 +1864,19 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
       //   `$(url).select(fn)`           生成**选择器弹窗**链接
       //   `$(url,headers).image(fn,s1…)` 生成**图片解密**链接（多带若干参数）
       //   `$(url).x5Rule(fn)`           生成 `javascript:` 链接
-      // 四者与 lazyRule 完全同构（都是"先给个标记地址、用户点开时再执行"），
-      // 所以共用同一套两趟机制 —— 缺了它们源会直接报 "xxx is not a function"。
+      // input/select/x5Rule 与 lazyRule 完全同构（"先给标记地址、点开时再执行"），
+      // 共用两趟机制 —— 缺了它们源会直接报 "xxx is not a function"。
+      // ⚠️ 只有 `image` 不一样：它**必须当场出结果**（返回图片地址）。
+      //   做成延迟规则会让封面变成 `hiker://lazy#…` ⇒ 列表里封面全空
+      //   （见上方 `$.image` 那节说明）。
       input: (fn) => lazyRuleImpl(rt, ctx, fn),
       select: (fn) => lazyRuleImpl(rt, ctx, fn),
-      image: (fn, ...args) => lazyRuleImpl(rt, ctx, fn, args),
+      image: (fn, ...args) => imageRuleImpl(asUrl, headers, fn, args),
       x5Rule: (fn) => lazyRuleImpl(rt, ctx, fn),
     };
   }
 
-  const jQueryLike = (input) => jq(typeof input === 'string' ? input : input);
+  const jQueryLike = (input, headers) => jq(input, headers);
 
   const javaNs = buildJavaNs();
   const sandbox = {
@@ -1443,12 +1885,23 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
     //   写死对象会让 `x instanceof java.util.List` 抛
     //   "Right-hand side of 'instanceof' is not an object"（用户 2026-10-15「小霸王」）。
     java: javaNs,
+    // `javax.*` 在 Rhino 里是**与 java.\* 平级**的顶层包（源里直接写
+    // `javax.crypto.Cipher.getInstance(...)`）—— 少了它这些源会
+    // `javax is not defined` 直接炸（实测 野果短剧 / 91短剧）。
+    javax: javaNs.javax,
+    // `android.*`（Android 专属 API，见 [buildAndroidNs]）
+    android: buildAndroidNs(),
     Packages: lazyJavaNs({ java: javaNs }),
     // ── 环境 ─────────────────────────────────────────────
     console,
     JSON,
-    Math,
-    Date,
+    // ⚠️ `Math` / `Date` 必须是**冻结版**：重放桥每轮重跑整条规则，
+    //   若时间/随机数每轮都变，带 timestamp/随机机器码的请求永远不命中缓存
+    //   （实测内置源「网页吃瓜」重放 40 轮耗尽）。见 [makeFrozenDate] / [pseudoRandom]。
+    //   注意不能写 `{...Math}` —— Math 的属性**不可枚举**，展开是空对象，
+    //   那样 `Math.floor` 直接变 undefined（整批源全挂）。
+    Math: Object.assign(Object.create(Math), { random: () => pseudoRandom(rt) }),
+    Date: makeFrozenDate(rt),
     String,
     Number,
     Boolean,
@@ -1857,8 +2310,10 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
         + ' —— 该规则可能要抓太多网页，或地址依赖响应内容（Phase 1 不支持）',
       );
     }
-    // 每轮复位"被吞掉的抓页意图"（由 httpSync / webViewSync 记录，见下面那道闸门）
+    // 每轮复位"被吞掉的抓页意图"（由 httpSync / webViewSync 记录，见下面那道闸门），
+    // 随机数序列也归零 —— 这样各轮走到同一行代码时拿到的随机值一致（见 [pseudoRandom]）
     rt.wantFetch = null;
+    rt.randSeq = 0;
     const state = {
       result: undefined,
       homeResult: undefined,

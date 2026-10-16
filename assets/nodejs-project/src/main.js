@@ -82,6 +82,12 @@ let hikerEngineCache = null;
 async function getHikerEngine() {
     if (hikerEngineCache) return hikerEngineCache;
     hikerEngineCache = await import('./hiker_engine.js');
+    // 封面是密文的源（91短剧 / 野果短剧…）由规则在 Node 里解密，字节存在内存里，
+    // 地址指向本进程的 `/hiker/image/<id>`（见下面那条 GET 路由）——
+    // 引擎需要知道 mgmt 端口才能把地址拼全（见 hiker_engine.js 的 $.image 说明）。
+    if (typeof hikerEngineCache.setHikerImagePort === 'function') {
+        hikerEngineCache.setHikerImagePort(managementPort);
+    }
     return hikerEngineCache;
 }
 
@@ -318,6 +324,46 @@ const mgmtServer = createServer((req, res) => {
     if (req.method === 'GET' && url.pathname === '/check') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ run: true, ready: isReady }));
+        return;
+    }
+
+    // 海阔源的**解密后图片**出口（见 hiker_engine.js 的 `$.image` 那节）：
+    // 规则只在列表里登记"这张图要用哪段 JS 解"，地址指向这里；
+    // 宿主真的渲染到那张图时才来取 —— 这时才抓原图 + 跑解密。
+    // 好处：列表加载不为几十张封面买单（实测野果短剧从 13 秒回到 1 秒级），
+    // 需要 Referer 的图也能显示，列表 JSON 里也不会塞 base64。
+    if (req.method === 'GET' && url.pathname.startsWith('/hiker/image/')) {
+        const token = decodeURIComponent(url.pathname.slice('/hiker/image/'.length));
+        (async () => {
+            const eng = hikerEngineCache;
+            const r = eng && typeof eng.resolveHikerImage === 'function'
+                ? await eng.resolveHikerImage(token)
+                : null;
+            if (!r) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'image not found' }));
+                return;
+            }
+            if (r.redirect) {
+                // 解密没成 / 抓不到：让宿主自己去原始地址碰运气（302 而不是 404）
+                res.writeHead(302, { Location: r.redirect });
+                res.end();
+                return;
+            }
+            res.writeHead(200, {
+                'Content-Type': r.mime || 'image/jpeg',
+                'Content-Length': r.bytes.length,
+                // 同一张图前端会反复取（列表滚动/复用）⇒ 让它在客户端也缓存一会儿
+                'Cache-Control': 'public, max-age=600',
+            });
+            res.end(r.bytes);
+        })().catch((e) => {
+            console.error('ERROR in /hiker/image:', (e && e.stack) || e);
+            try {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'image error' }));
+            } catch (_) { /* 响应可能已开始写出 */ }
+        });
         return;
     }
 
