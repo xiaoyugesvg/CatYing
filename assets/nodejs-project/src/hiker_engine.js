@@ -922,7 +922,8 @@ function buildJavaNs() {
     };
   };
 
-  return {
+  // 照 Rhino 语义包成"动态命名空间"（未知类名 → 占位类），见 [lazyJavaNs]
+  return lazyJavaNs({
     lang: {
       String: JavaString,
       StringBuilder: JavaStringBuilder,
@@ -1111,7 +1112,84 @@ function buildJavaNs() {
       warnOnce('java.s2t（简转繁）未实现，已原样返回');
       return s == null ? '' : String(s);
     },
-  };
+  });
+}
+
+/** 占位类：只为让未知的 Java 类名不至于让规则当场炸（`instanceof` / `new` / `.class`） */
+function makeMissingJavaClass(name) {
+  const f = function () {};
+  try {
+    Object.defineProperty(f, 'name', { value: String(name || 'JavaClass'), configurable: true });
+  } catch (_) { /* 忽略 */ }
+  f.class = f;
+  f.getName = () => String(name || '');
+  f.toString = () => `[JavaClass ${name || ''}]`;
+  // 包名也可能是"命名空间"（`java.nio.ByteBuffer`）⇒ 继续给占位，别让属性访问变 undefined
+  return new Proxy(f, {
+    get(t, p) {
+      if (typeof p !== 'string') return t[p];
+      if (LAZY_NS_DENY.has(p)) return t[p];
+      if (t[p] !== undefined) return t[p];
+      const child = makeMissingJavaClass(`${name}.${p}`);
+      try {
+        Object.defineProperty(t, p, { value: child, writable: true, configurable: true });
+      } catch (_) { /* 忽略 */ }
+      return child;
+    },
+    has: () => true,
+  });
+}
+
+/// 这些属性名**绝不能被"动态解析"**，否则会引起连锁反应
+/// （`then` 会把 `await java` 变成 thenable；`toJSON`/`$$typeof` 等同理）
+const LAZY_NS_DENY = new Set([
+  'then', 'catch', 'finally', 'toJSON', '$$typeof', 'constructor', 'prototype',
+  'inspect', 'nodeType', 'valueOf',
+]);
+
+/// 已包装过的命名空间（target → proxy）：保证 `java.util === java.util` 恒真
+const LAZY_NS_CACHE = new WeakMap();
+
+/**
+ * 动态命名空间（照 Rhino 语义）：已知名字给真实现，**未知名字给占位类**。
+ *
+ * 为什么需要（用户 2026-10-15 实测「小霸王」报
+ * `Right-hand side of 'instanceof' is not an object`）：
+ * 真海阔跑在 Rhino 上，`java.*` / `Packages.*` 是**动态解析**的 —— 任意类名都能
+ * 拿到一个"类对象"，只有真正用它才可能失败；我这边原本是写死的对象 ⇒ 缺一个
+ * 名字就是 undefined ⇒ 规则里 `x instanceof java.util.List` 直接抛原生 TypeError
+ *（`instanceof` 的右值不是对象就是这个错）。
+ *
+ * ⚠️ 必须**递归**包装真实的子命名空间（`util` / `zip` …）：只包外层时
+ *    `java.util.List` 依然取到 undefined（实测踩过）。
+ */
+function lazyJavaNs(target) {
+  const cached = LAZY_NS_CACHE.get(target);
+  if (cached) return cached;
+  const proxy = new Proxy(target, {
+    get(t, p) {
+      if (typeof p !== 'string') return t[p];
+      const hit = t[p];
+      if (hit !== undefined) {
+        // `prototype` / `constructor` 必须原样给：`instanceof` 与 `new` 靠它做
+        // 身份比较，包一层会让真实类的 `x instanceof java.lang.String` 静默变 false
+        if (p === 'prototype' || p === 'constructor') return hit;
+        if (hit !== null && typeof hit === 'object' && !Array.isArray(hit)) {
+          return lazyJavaNs(hit);
+        }
+        return hit;
+      }
+      if (LAZY_NS_DENY.has(p)) return undefined;
+      const ph = makeMissingJavaClass(p);
+      try {
+        Object.defineProperty(t, p, { value: ph, writable: true, configurable: true });
+      } catch (_) { /* 忽略 */ }
+      return ph;
+    },
+    has: () => true,
+  });
+  LAZY_NS_CACHE.set(target, proxy);
+  return proxy;
 }
 
 // ============================================================
@@ -1131,7 +1209,39 @@ function buildJavaNs() {
  *     `MY_CLASS_URL` / `rc` 这类名字，所以执行完要把顶层名字**回填沙箱**。
  *
  * 返回值 = `wantName` 对应的绑定；模块用 `return xxx` 直接给值时，那个值就是结果。
+ *   （这段注释属于 [runInModuleScope] —— 它就写在下面隔一个函数的位置）
  */
+/**
+ * `$.require(...)` / 裸 `require(...)` 的出口统一处理：
+ *   ① 返回值补一个 `.default`（**非枚举**、指向自身）—— 一批海阔模块/规则是按
+ *      CommonJS 编译的，消费方写的是 `$.require('x').default`；
+ *   ② 真没取到值就**明确报错**，而不是返回 undefined。
+ *
+ * ② 是用户 2026-10-15 实测「AVbebe」报
+ * `Cannot read properties of undefined (reading 'default')` 的根因：
+ * 模块没取到值 → 返回 undefined → 规则一取 `.default` 就抛原生 TypeError，
+ * 用户只能看到一句没有任何线索的英文错误。现在直接说清"哪个模块、为什么"。
+ */
+function normalizeModuleValue(v, name) {
+  if (v === undefined || v === null) {
+    const e = new Error(
+      `require('${String(name == null ? '' : name)}') 没取到值 —— `
+      + '这个模块可能不在该源的 pages 里，或它没写 `$.exports = ...`'
+      + '（若它依赖源配置，去「海阔源管理 → 源配置」补上）',
+    );
+    e.__hikerModuleError = true;
+    throw e;
+  }
+  if ((typeof v === 'object' || typeof v === 'function') && v.default === undefined) {
+    try {
+      Object.defineProperty(v, 'default', {
+        value: v, enumerable: false, configurable: true, writable: true,
+      });
+    } catch (_) { /* 冻结/不可扩展的对象：忽略 */ }
+  }
+  return v;
+}
+
 function runInModuleScope(sandbox, code, wantName) {
   const body = stripJsPrefix(code);
   const names = new Set();
@@ -1326,9 +1436,14 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
 
   const jQueryLike = (input) => jq(typeof input === 'string' ? input : input);
 
+  const javaNs = buildJavaNs();
   const sandbox = {
-    // `java.*`：Rhino 的 Java 互操作（有限 shim，见 buildJavaNs）
-    java: buildJavaNs(),
+    // `java.*` / `Packages.*`：Rhino 的 Java 互操作（有限 shim，见 buildJavaNs）。
+    //   ⚠️ 两者都必须是**动态命名空间** —— Rhino 里任意类名都解析得出来，
+    //   写死对象会让 `x instanceof java.util.List` 抛
+    //   "Right-hand side of 'instanceof' is not an object"（用户 2026-10-15「小霸王」）。
+    java: javaNs,
+    Packages: lazyJavaNs({ java: javaNs }),
     // ── 环境 ─────────────────────────────────────────────
     console,
     JSON,
@@ -1588,7 +1703,10 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
     getItem: (k, def) => (rt.kv[k] != null ? rt.kv[k] : (def != null ? def : '')),
 
     // ── 上级页面 / 模块 ─────────────────────────────────
-    require: (name) => requireModule(name),
+    // 出口统一过 [normalizeModuleValue]：补 `.default`、取不到值就明确报错
+    // （见其注释：`$.require('x').default` 是常见写法，返回 undefined 会变成
+    //  一句没有线索的 "Cannot read properties of undefined (reading 'default')"）
+    require: (name) => normalizeModuleValue(requireModule(name), name),
     // 海阔的「执行私有 JS」：多数源里它就等价于 require（同名页面模块），
     // 找不到时再退回源自己的 `private_js` 字段。
     evalPrivateJS: (name) => evalPrivateJS(name),
@@ -1626,7 +1744,7 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
       // `fetch(base64Decode(MY_PARAMS.u))`）——实测 MissAV / 道长仓库Pro 用到
       base64Encode: (s) => Buffer.from(String(s == null ? '' : s), 'utf8').toString('base64'),
       base64Decode: (s) => Buffer.from(String(s == null ? '' : s), 'base64').toString('utf8'),
-      require: (name) => requireModule(name),
+      require: (name) => normalizeModuleValue(requireModule(name), name),
       /// 模块导出约定：`$.exports = xxx;`（CommonJS 风格）
       /// —— 海阔的源页面模块就是这么把值交出去的（`main` / `xiu` 等模块名
       ///    与内部变量名常常不一致，只能靠 exports 取），见 [runInModuleScope]
