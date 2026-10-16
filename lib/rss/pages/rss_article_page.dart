@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../common/theme.dart';
+import '../../services/ad_block_service.dart';
+import '../../widgets/ad_block_bubble.dart';
 import '../models/rss_article.dart';
 import '../models/rss_source.dart';
 import '../services/rss_reader.dart';
@@ -188,8 +190,14 @@ class _RssHtmlViewState extends State<_RssHtmlView> {
         onProgress: (p) {
           if (mounted) setState(() => _progress = p);
         },
-      ))
-      ..loadHtmlString(widget.html, baseUrl: widget.baseUrl);
+        // 去广告：正文里常带第三方脚本塞的广告层，DOM 就绪后再注入一次
+        onPageFinished: (url) =>
+            AdBlockService.instance.injectInto(_c, url.isEmpty ? widget.baseUrl : url),
+      ));
+    // 挂 JS 通道必须在加载之前
+    AdBlockService.attach(_c);
+    AdBlockService.instance.ensureLoaded();
+    _c.loadHtmlString(widget.html, baseUrl: widget.baseUrl);
   }
 
   @override
@@ -197,6 +205,17 @@ class _RssHtmlViewState extends State<_RssHtmlView> {
     return Stack(
       children: [
         WebViewWidget(controller: _c),
+        // 去广告悬浮球：点它 → 点正文里的广告 → 存规则
+        ListenableBuilder(
+          listenable: AdBlockService.instance,
+          builder: (_, __) => AdBlockService.instance.showBubble
+              ? AdBlockBubble(
+                  controller: _c,
+                  pageUrl: widget.baseUrl,
+                  margin: const EdgeInsets.only(right: 12, bottom: 96),
+                )
+              : const SizedBox.shrink(),
+        ),
         if (_progress > 0 && _progress < 100)
           Positioned(
             top: 0,
@@ -239,8 +258,13 @@ class _RssWebViewPageState extends State<RssWebViewPage> {
         onProgress: (p) {
           if (mounted) setState(() => _progress = p);
         },
-      ))
-      ..loadRequest(Uri.parse(widget.url));
+        // 去广告：网页源（站点型 RSS / 原文链接）里的广告层
+        onPageStarted: (url) => AdBlockService.instance.injectInto(_c, url),
+        onPageFinished: (url) => AdBlockService.instance.injectInto(_c, url),
+      ));
+    AdBlockService.attach(_c);
+    AdBlockService.instance.ensureLoaded();
+    _c.loadRequest(Uri.parse(widget.url));
   }
 
   @override
@@ -268,7 +292,24 @@ class _RssWebViewPageState extends State<RssWebViewPage> {
               backgroundColor: AppTheme.borderLight,
               valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accentColor),
             ),
-          Expanded(child: WebViewWidget(controller: _c)),
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(child: WebViewWidget(controller: _c)),
+                // 去广告悬浮球
+                ListenableBuilder(
+                  listenable: AdBlockService.instance,
+                  builder: (_, __) => AdBlockService.instance.showBubble
+                      ? AdBlockBubble(
+                          controller: _c,
+                          pageUrl: widget.url,
+                          margin: const EdgeInsets.only(right: 12, bottom: 96),
+                        )
+                      : const SizedBox.shrink(),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );

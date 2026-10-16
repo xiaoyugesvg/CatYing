@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../services/app_log.dart';
+import '../../services/ad_block_service.dart';
 import '../../services/player_prefs.dart';
 import 'package:flutter/services.dart';
 import '../../common/system_ui.dart';
+import '../../widgets/ad_block_bubble.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 /// 网页播放器页 - 全屏 WebView 加载网页播放页
@@ -82,6 +84,13 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
                 _failed = false; // 重试/跳转后先复位失败态
               });
             }
+            // 去广告：抢在页面脚本之前注入（有些站点一加载就弹广告层），
+            // 拿不到时机也没关系 —— onPageFinished 还会再补一次
+            AdBlockService.instance.injectInto(_controller, url);
+          },
+          onPageFinished: (url) {
+            // 补注：这时 DOM 已经在了，隐藏才真正生效
+            AdBlockService.instance.injectInto(_controller, url);
           },
           onWebResourceError: (error) {
             // 只有**主文档**失败才提示（子资源失败很常见，不打扰用户）
@@ -97,8 +106,11 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
             }
           },
         ),
-      )
-      ..loadRequest(Uri.parse(url));
+      );
+    // 去广告：挂 JS 消息通道（必须在 loadRequest **之前** —— 页面一开始跑就可能回传）
+    AdBlockService.attach(_controller);
+    AdBlockService.instance.ensureLoaded();
+    _controller.loadRequest(Uri.parse(url));
   }
 
   @override
@@ -145,6 +157,20 @@ class _WebviewPlayerPageState extends State<WebviewPlayerPage> {
           child: Stack(
             children: [
               Positioned.fill(child: WebViewWidget(controller: _controller)),
+              // 去广告悬浮球：点它 → 点页面上的广告 → 存规则（下次打开自动隐藏）
+              ListenableBuilder(
+                listenable: AdBlockService.instance,
+                builder: (_, __) => AdBlockService.instance.showBubble
+                    ? AdBlockBubble(
+                        controller: _controller,
+                        pageUrl: widget.url,
+                        // 内嵌（详情页 4:3 小窗）贴着右上角，别压住播放控件
+                        margin: widget.embedded
+                            ? const EdgeInsets.only(right: 8, top: 8)
+                            : const EdgeInsets.only(right: 12, bottom: 96),
+                      )
+                    : const SizedBox.shrink(),
+              ),
               // 主文档加载失败 → 明确提示 + 重试（而不是纯黑什么都不说）
               if (_failed)
                 Positioned.fill(

@@ -8,6 +8,7 @@ import '../../webhome/webhtv_settings_page.dart';
 import '../../hiker/pages/hiker_settings_page.dart';
 import 'controller.dart';
 import 'sub/about_settings_page.dart';
+import 'sub/ad_block_settings_page.dart';
 import 'sub/unified_theme_settings_page.dart';
 import 'sub/danmu_settings_page.dart';
 import 'sub/data_source_settings_page.dart';
@@ -140,6 +141,16 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: Icons.movie_filter_outlined,
                 title: 'TMDB管理',
                 onTap: () => Get.to(() => const MetadataSettingsPage()),
+              ),
+              const SizedBox(height: AppTheme.spacingMD),
+
+              // 广告管理（用户 2026-10-16）：网页去广告的统一入口 ——
+              // 总开关 / 悬浮按钮 / 规则增删改 / 导入。
+              // 作用于 RSS 正文、站点型 RSS 源、网页播放页等**页面层**广告。
+              _categoryTile(
+                icon: Icons.block_rounded,
+                title: '广告管理',
+                onTap: () => Get.to(() => const AdBlockSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingMD),
 

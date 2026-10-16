@@ -14,7 +14,9 @@ import 'package:get/get.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../common/theme.dart';
+import '../../services/ad_block_service.dart';
 import '../../services/nav_feature_service.dart';
+import '../../widgets/ad_block_bubble.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/common_widgets.dart';
 import '../models/rss_article.dart';
@@ -74,7 +76,14 @@ class _RssPageState extends State<RssPage> {
     _web = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(AppTheme.backgroundPrimary)
-      ..loadRequest(Uri.parse(url));
+      ..setNavigationDelegate(NavigationDelegate(
+        // 去广告：站点型 RSS 源就是直接开网站，广告最多的一类
+        onPageStarted: (u) => AdBlockService.instance.injectInto(_web!, u),
+        onPageFinished: (u) => AdBlockService.instance.injectInto(_web!, u),
+      ));
+    AdBlockService.attach(_web!);
+    AdBlockService.instance.ensureLoaded();
+    _web!.loadRequest(Uri.parse(url));
     return _web!;
   }
 
@@ -487,7 +496,22 @@ class _RssPageState extends State<RssPage> {
     //     时也能认出来）。
     // 抓列表只会得到"没有抓到内容"，那才是真正的不兼容 ✗。
     if (src.isSiteOnly || _siteLike) {
-      return WebViewWidget(controller: _webFor(src.url));
+      return Stack(
+        children: [
+          Positioned.fill(child: WebViewWidget(controller: _webFor(src.url))),
+          // 去广告悬浮球：点它 → 点页面上的广告 → 存规则（重启后仍生效）
+          ListenableBuilder(
+            listenable: AdBlockService.instance,
+            builder: (_, __) => AdBlockService.instance.showBubble
+                ? AdBlockBubble(
+                    controller: _webFor(src.url),
+                    pageUrl: src.url,
+                    margin: const EdgeInsets.only(right: 12, bottom: 96),
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ],
+      );
     }
     if (_loading && _articles.isEmpty) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
