@@ -309,44 +309,50 @@ class HomePagesSettingsPage extends StatelessWidget {
               ],
             );
 
-          // 双排海报：2 行 × 3 列 = 6 张竖版海报
-          case HomeBannerStyle.grid:
-            return Stack(
-              children: [
-                for (var r = 0; r < 2; r++)
-                  for (var c = 0; c < 3; c++)
-                    Positioned(
-                      left: w * (0.06 + c * 0.32),
-                      top: h * (0.08 + r * 0.48),
-                      child: rect(0.26, 0.40, block),
-                    ),
-              ],
-            );
-
-          // 左右双卡（新增）：2 张竖版大海报并排
-          case HomeBannerStyle.duo:
+          // 编辑推荐（新增）：左边竖版封面 + 右边文字条 + 播放胶囊
+          case HomeBannerStyle.spotlight:
             return Stack(
               children: [
                 Positioned(
-                    left: w * 0.06, top: h * 0.08, child: rect(0.40, 0.84, block)),
+                    left: w * 0.06, top: h * 0.08, child: rect(0.30, 0.84, block)),
+                Positioned(left: w * 0.42, top: h * 0.20, child: bar(0.50)),
+                Positioned(left: w * 0.42, top: h * 0.34, child: bar(0.44)),
+                Positioned(left: w * 0.42, top: h * 0.50, child: bar(0.40)),
+                Positioned(left: w * 0.42, top: h * 0.62, child: bar(0.34)),
                 Positioned(
-                    right: w * 0.06,
-                    top: h * 0.08,
-                    child: rect(0.40, 0.84, block)),
+                  left: w * 0.42,
+                  top: h * 0.76,
+                  child: Container(
+                    width: w * 0.34,
+                    height: h * 0.16,
+                    decoration: BoxDecoration(
+                        color: accent, borderRadius: BorderRadius.circular(6)),
+                  ),
+                ),
               ],
             );
 
-          // 九宫格（新增）：3 行 × 3 列 = 9 张小海报
-          case HomeBannerStyle.nine:
+          // 高低错落（新增）：3 张竖版海报，中间抬高 / 左右下沉
+          case HomeBannerStyle.stair:
             return Stack(
               children: [
-                for (var r = 0; r < 3; r++)
-                  for (var c = 0; c < 3; c++)
-                    Positioned(
-                      left: w * (0.07 + c * 0.30),
-                      top: h * (0.07 + r * 0.31),
-                      child: rect(0.25, 0.24, block, r: 2),
-                    ),
+                Positioned(
+                    left: w * 0.05, top: h * 0.28, child: rect(0.27, 0.64, blockSoft)),
+                Positioned(
+                    left: w * 0.365, top: h * 0.08, child: rect(0.27, 0.84, block)),
+                Positioned(
+                    left: w * 0.68, top: h * 0.28, child: rect(0.27, 0.64, blockSoft)),
+              ],
+            );
+
+          // 上下双联（新增）：2 张横版通栏大图上下堆叠
+          case HomeBannerStyle.twin:
+            return Stack(
+              children: [
+                Positioned(
+                    left: w * 0.06, top: h * 0.06, child: rect(0.88, 0.40, block)),
+                Positioned(
+                    left: w * 0.06, top: h * 0.54, child: rect(0.88, 0.40, block)),
               ],
             );
 

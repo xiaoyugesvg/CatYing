@@ -47,8 +47,10 @@ enum PageDefaultContent { manga, book }
 
 /// 首页顶部幻灯片（轮播）样式 —— 用户可在「设置 → 菜单设置」切换。
 ///
-/// ⚠️ 持久化存的是 **index**，所以新样式只能**往后加**，
-/// 中间插值会让老用户的已选样式漂移。
+/// ⚠️ 持久化**存 name**（老数据存的是 index，读取时按
+/// [kLegacyHomeBannerOrder] 迁移一次）。原来存 index，于是一旦在中间
+/// 删/加样式，老用户已选的样式就会**悄悄漂到另一种** ——
+/// 2026-10-16 换掉 3 种样式时正是这个坑。
 enum HomeBannerStyle {
   /// 横版大图（原样式）：16:9 大图铺满，左下标题 + 右下来源角标
   wide,
@@ -67,22 +69,23 @@ enum HomeBannerStyle {
   /// 用户原话：「叠卡堆和三格海报太他妈丑了，这两个换其他样式」。
   feature,
 
-  /// 双排海报（2026-10-14 **换掉**原「三格海报轨」）：一页 **2 行 × 3 列 = 6 张**
-  /// 竖版海报（名称压在图上）。原来一页只有 3 张、还被压在一行里、整块又矮
-  /// ⇒ 像缩略图列表 ✗。
-  grid,
-
-  /// 左右双卡（2026-10-15 新增）：一页 **2 张竖版大海报并排**，整屏高度。
-  /// 张数最少、单张最大 ⇒ 适合"就想看两张大的"。
-  duo,
-
-  /// 九宫格（2026-10-15 新增）：一页 **3 行 × 3 列 = 9 张**小海报。
-  /// 一眼看得最多，和「双排海报」（2×3）拉开密度差。
-  nine,
-
   /// 交错瀑布（2026-10-15 新增）：2 列错位 —— 左边 1 张**满高**大卡，
   /// 右边上下 2 张短卡。比"规整网格"更有节奏感。
-  masonry;
+  masonry,
+
+  /// 编辑推荐（2026-10-16 换掉「双排海报」）：一页 1 张 —— 左边**竖版封面**
+  /// + 右边**文字栏**（年份·地区·分类 / 大标题 / 简介 / 「立即播放」胶囊）。
+  /// 唯一"以文为主"的样式：适合认真看一条推荐，而不是扫一墙海报。
+  spotlight,
+
+  /// 高低错落（2026-10-16 换掉「左右双卡」）：一页 3 张竖版海报，**中间那张
+  /// 抬高、左右两张下沉**（并略窄）⇒ 三张不等高的错落节奏。
+  /// 与「交错瀑布」的区别：那边是 2 列 / 1 大 2 小，这边是 3 列等宽不等高。
+  stair,
+
+  /// 上下双联（2026-10-16 换掉「九宫格」）：一页 2 张**横版通栏大图**上下堆叠
+  /// （各自左下标题 + 右下方角标）—— 与「横版大图」的区别是"同屏两张"。
+  twin;
 
   String get label => switch (this) {
         // 名称统一**最多 4 个字**（用户 2026-10-14：多了去掉，卡片宽度才一致）
@@ -90,11 +93,41 @@ enum HomeBannerStyle {
         HomeBannerStyle.cards => '卡片轮播',
         HomeBannerStyle.hero => '沉浸大图',
         HomeBannerStyle.feature => '主次三栏',
-        HomeBannerStyle.grid => '双排海报',
-        HomeBannerStyle.duo => '左右双卡',
-        HomeBannerStyle.nine => '九宫格',
         HomeBannerStyle.masonry => '交错瀑布',
+        HomeBannerStyle.spotlight => '编辑推荐',
+        HomeBannerStyle.stair => '高低错落',
+        HomeBannerStyle.twin => '上下双联',
       };
+}
+
+/// **旧版** `HomeBannerStyle` 的取值顺序（存 index 时代的枚举顺序）。
+///
+/// 2026-10-16 把「双排海报 / 左右双卡 / 九宫格」换成「编辑推荐 / 高低错落 /
+/// 上下双联」，同时把持久化从 **index 改成 name**。老用户 prefs 里还留着
+/// index，读的时候用这张表换回名字，才不会让"我明明选的是交错瀑布"变成别的。
+///
+/// ⚠️ 这张表是**历史快照，只增不改**（改了就迁移错）。
+const List<String> kLegacyHomeBannerOrder = [
+  'wide',
+  'cards',
+  'hero',
+  'feature',
+  'grid', // 已删除 → 迁移时回落到 wide
+  'duo', // 已删除 → 迁移时回落到 wide
+  'nine', // 已删除 → 迁移时回落到 wide
+  'masonry',
+];
+
+/// 把老数据（index）转成样式；越界 / 已删除的样式 → `wide`。
+HomeBannerStyle homeBannerStyleFromLegacyIndex(int idx) {
+  if (idx < 0 || idx >= kLegacyHomeBannerOrder.length) {
+    return HomeBannerStyle.wide;
+  }
+  final name = kLegacyHomeBannerOrder[idx];
+  for (final st in HomeBannerStyle.values) {
+    if (st.name == name) return st;
+  }
+  return HomeBannerStyle.wide;
 }
 
 /// 首页幻灯片最多取几个视频（兜底抓取 / 缓存按这个上限来，显示时再按样式裁）。
@@ -103,28 +136,25 @@ const int kHomeBannerMaxItems = 9;
 /// **每种幻灯片样式取几个视频**（用户 2026-10-16：「根据幻灯片的样式调整到 6~9 个」）。
 ///
 /// 之前是**写死 6 个**（view.dart 里 `sublist(0, 6)`），于是
-/// 「九宫格」一页要 9 张只有 6 张、「主次三栏」一页 4 张第 2 页只剩 2 张、
-/// 「双排海报」一页 6 张刚好 —— 密度差被这个固定值抹平了。
+/// 一页 9 张的样式只有 6 张、「主次三栏」一页 4 张第 2 页只剩 2 张，
+/// 密度差被这个固定值抹平了。
 ///
 /// 取值规则：**落在 6~9 之间，且尽量是"每页张数"的整数倍**（末页不留半屏空位）。
 /// ⚠️ 各样式"每页张数"的定义在 `pages/home/view.dart` 的 `_kBanner*PerPage`，
 /// 改那边记得同步这里。
 int homeBannerItemCount(HomeBannerStyle style) => switch (style) {
-      // 一页 1 张（大图 / 卡片轮播 / 沉浸大图）→ 9 张，轮播久一点
+      // 一页 1 张（大图 / 卡片轮播 / 沉浸大图 / 编辑推荐）→ 9 张，轮播久一点
       HomeBannerStyle.wide ||
       HomeBannerStyle.cards ||
-      HomeBannerStyle.hero =>
+      HomeBannerStyle.hero ||
+      HomeBannerStyle.spotlight =>
         9,
-      // 一页 2 张（左右双卡）→ 8
-      HomeBannerStyle.duo => 8,
-      // 一页 3 张（交错瀑布）→ 9
-      HomeBannerStyle.masonry => 9,
+      // 一页 2 张（上下双联）→ 8
+      HomeBannerStyle.twin => 8,
+      // 一页 3 张（交错瀑布 / 高低错落）→ 9
+      HomeBannerStyle.masonry || HomeBannerStyle.stair => 9,
       // 一页 4 张（主次三栏：1 大 + 3 小）→ 8
       HomeBannerStyle.feature => 8,
-      // 一页 6 张（双排海报 2×3）→ 6（正好一页；12 就超上限了）
-      HomeBannerStyle.grid => 6,
-      // 一页 9 张（九宫格 3×3）→ 9
-      HomeBannerStyle.nine => 9,
     };
 
 /// NavTab 与 DefaultHomePage 的双向转换辅助（两者值一一对应）
@@ -846,10 +876,22 @@ class SettingsService extends ChangeNotifier {
       }
       // 收藏/书架/下载页 tab 跟随导航栏
       _pageTabsFollowNav = prefs.getBool(_kPageTabsFollowNavKey) ?? true;
-      // 首页幻灯片样式（存 index，越界/缺失都回落默认 wide）
-      final hbsIdx = prefs.getInt(_kHomeBannerStyleKey) ?? 0;
-      if (hbsIdx >= 0 && hbsIdx < HomeBannerStyle.values.length) {
-        _homeBannerStyle = HomeBannerStyle.values[hbsIdx];
+      // 首页幻灯片样式：新数据存 **name**（字符串）。
+      // 老数据存的是 index（int）→ 走 kLegacyHomeBannerOrder 迁移一次，
+      // 否则在中间删/加样式时老用户选中的样式会悄悄漂到另一种。
+      final hbsName = prefs.getString(_kHomeBannerStyleKey);
+      if (hbsName != null) {
+        for (final st in HomeBannerStyle.values) {
+          if (st.name == hbsName) {
+            _homeBannerStyle = st;
+            break;
+          }
+        }
+      } else {
+        final hbsIdx = prefs.getInt(_kHomeBannerStyleKey);
+        if (hbsIdx != null) {
+          _homeBannerStyle = homeBannerStyleFromLegacyIndex(hbsIdx);
+        }
       }
       final pdcIdx = prefs.getInt(_kPageDefaultContentKey);
       if (pdcIdx != null &&
@@ -1910,7 +1952,8 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_kHomeBannerStyleKey, value.index);
+      // 存 name（不是 index）：样式增删时老用户的选择不会漂到别的样式
+      await prefs.setString(_kHomeBannerStyleKey, value.name);
       // 立刻落进文件镜像：这个值在「设置 → 菜单设置」里改，用户改完常直接
       // 杀 App，等 15s 周期快照就来不及了（见 prefs_mirror.snapshotSoon 说明）
       PrefsMirror.snapshotSoon();

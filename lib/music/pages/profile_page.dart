@@ -16,6 +16,7 @@ import '../../common/theme_mode_store.dart';
 import '../../reading/theme/jelly_palette.dart';
 import '../../common/theme.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/theme_preset_row.dart';
 
 /// 「我的」页 —— 移植自 Beans 的 `ProfileView.swift`（3350 行，取其主干）。
 ///
@@ -565,6 +566,11 @@ class _ModeTile extends StatelessWidget {
 ///
 /// 直接操作 ModuleThemeStore（音乐模块的配色存在那里），
 /// 和统一主题设置页的音乐区块是同一个数据源。
+///
+/// 用户 2026-10-16：「其余模块的主题样式的 UI 能不能也参考弄成阅读那样的」——
+/// 原来这里是「34×34 三色环格点 + 名称在下」的 Wrap，与阅读那套
+/// **全宽圆角行**不是一回事。现改为与阅读「主题风格」同款：
+/// 一行入口 → 底部面板里是「三色点 + 名称 + 右侧单选圈」。
 class _AccentPicker extends StatelessWidget {
   const _AccentPicker();
 
@@ -575,7 +581,6 @@ class _AccentPicker extends StatelessWidget {
       valueListenable: store.revision,
       builder: (context, _, __) {
         final current = store.rawPreset(ModuleThemeStore.music);
-        final presets = themePresets;
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
           child: Column(
@@ -587,56 +592,26 @@ class _AccentPicker extends StatelessWidget {
                       style:
                           TextStyle(color: MusicTheme.label, fontSize: AppTheme.fontHeadline)),
                   const Spacer(),
-                  if (current == ModuleThemeStore.followReading)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: MusicTheme.tint.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text('跟随阅读',
-                          style: TextStyle(
-                              fontSize: AppTheme.fontCaption,
-                              fontWeight: FontWeight.w600,
-                              color: MusicTheme.tint)),
-                    ),
+                  Text(
+                    current == ModuleThemeStore.followReading
+                        ? '跟随阅读'
+                        : _presetName(current),
+                    style: TextStyle(
+                        fontSize: AppTheme.fontFootnote,
+                        color: MusicTheme.secondary),
+                  ),
                 ],
               ),
               const SizedBox(height: 10),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  // 跟随阅读
-                  _buildDot(
-                    palette: null,
-                    label: '跟随',
-                    selected: current == ModuleThemeStore.followReading,
-                    onTap: () async {
-                      await store.setPreset(
-                          ModuleThemeStore.music, ModuleThemeStore.followReading);
-                      // ⚠️ 必须落地：`setPreset` 只改 store 的数据。
-                      // 不调 `applyModuleThemes()` 的话，注入给音乐的强调色
-                      // （`MusicTheme._customAccent`）不会更新，也不会通知
-                      // 音乐 UI 重建 —— 表现是"只有圆点的勾移动了，
-                      // 底色/强调色不同步或不刷新"。
-                      await applyModuleThemes();
-                    },
-                  ),
-                  // 7 套预设
-                  for (final p in presets)
-                    _buildDot(
-                      palette: p.palette,
-                      label: p.name,
-                      selected: current == p.id,
-                      onTap: () async {
-                        await store.setPreset(ModuleThemeStore.music, p.id);
-                        // 同上：换配色后要把新调色板落地并通知重建
-                        await applyModuleThemes();
-                      },
-                    ),
-                ],
+              // 与阅读「主题风格」面板同款的行（点开底部面板再选）
+              ThemePresetRow(
+                name: '选择主题',
+                subtitle: '与阅读「主题风格」同一套样式',
+                dots: _dotsOf(current, store),
+                selected: false,
+                trailing: Icon(Icons.chevron_right_rounded,
+                    size: 20, color: MusicTheme.secondary),
+                onTap: () => _openSheet(context, current),
               ),
             ],
           ),
@@ -645,69 +620,60 @@ class _AccentPicker extends StatelessWidget {
     );
   }
 
-  Widget _buildDot({
-    required JellyPalette? palette,
-    required String label,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Tooltip(
-        message: label,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: palette != null
-                    ? SweepGradient(colors: [
-                        palette.backgroundLight,
-                        palette.primary,
-                        palette.backgroundDark,
-                        palette.accent,
-                        palette.backgroundLight,
-                      ])
-                    : null,
-                color: palette == null ? MusicTheme.fill : null,
-                border: Border.all(
-                  color: selected ? MusicTheme.tint : MusicTheme.divider,
-                  width: selected ? 2.5 : 1,
-                ),
-              ),
-              child: selected
-                  ? Icon(Icons.check,
-                      size: 16,
-                      color: palette != null
-                          ? palette.backgroundLight.computeLuminance() > 0.5
-                              ? Colors.black
-                              : Colors.white
-                          : MusicTheme.tint)
-                  : (palette == null
-                      ? Icon(Icons.auto_awesome,
-                          size: 14, color: MusicTheme.tint)
-                      : null),
-            ),
-            const SizedBox(height: 4),
-            SizedBox(
-              width: 52,
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: AppTheme.fontCaption,
-                  color: selected ? MusicTheme.tint : MusicTheme.secondary,
-                ),
-              ),
-            ),
-          ],
+  String _presetName(String id) {
+    for (final p in themePresets) {
+      if (p.id == id) return p.name;
+    }
+    return '跟随阅读';
+  }
+
+  /// 三色点：主色 / 强调色 / 浅底（与阅读面板上的色点同一取法）。
+  /// 「跟随阅读」时直接显示阅读当前那套，用户一眼能看出跟随的是什么。
+  List<Color> _dotsOf(String id, ModuleThemeStore store) {
+    final palette = JellyPalette.fromPreset(
+        id == ModuleThemeStore.followReading ? store.readingPreset : id);
+    return [palette.primary, palette.accent, palette.backgroundLight];
+  }
+
+  Future<void> _openSheet(BuildContext context, String current) async {
+    final store = ModuleThemeStore.instance;
+
+    Future<void> pick(String id) async {
+      await store.setPreset(ModuleThemeStore.music, id);
+      // ⚠️ 必须落地：`setPreset` 只改 store 的数据。
+      // 不调 `applyModuleThemes()` 的话，注入给音乐的强调色
+      // （`MusicTheme._customAccent`）不会更新，也不会通知
+      // 音乐 UI 重建 —— 表现是"只有圆点的勾移动了，
+      // 底色/强调色不同步或不刷新"。
+      await applyModuleThemes();
+    }
+
+    await showThemePresetSheet(
+      context: context,
+      title: '主题风格',
+      subtitle: '音乐',
+      rowsBuilder: (sheetCtx) => [
+        ThemePresetRow(
+          name: '跟随阅读',
+          subtitle: '与阅读模块当前配色一致',
+          dots: _dotsOf(ModuleThemeStore.followReading, store),
+          selected: current == ModuleThemeStore.followReading,
+          onTap: () {
+            Navigator.of(sheetCtx).pop();
+            pick(ModuleThemeStore.followReading);
+          },
         ),
-      ),
+        for (final p in themePresets)
+          ThemePresetRow(
+            name: p.name,
+            dots: _dotsOf(p.id, store),
+            selected: current == p.id,
+            onTap: () {
+              Navigator.of(sheetCtx).pop();
+              pick(p.id);
+            },
+          ),
+      ],
     );
   }
 }

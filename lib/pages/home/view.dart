@@ -941,10 +941,11 @@ class _HomePageState extends State<HomePage> {
                             builder: (context, _) {
                               final st = SettingsService().homeBannerStyle;
                               // 取几个**由样式决定**（6~9，见 homeBannerItemCount）：
-                              // 一页 1 张的取 9、双卡取 8、九宫格取 9、双排海报取 6 …
+                              // 一页 1 张的取 9、上下双联取 8、高低错落取 9 …
                               final n = homeBannerItemCount(st);
                               return _RecommendBanner(
-                                key: ValueKey('banner-${st.index}'),
+                                // key 用 **name**（不是 index）：index 会随枚举增删漂移
+                                key: ValueKey('banner-${st.name}'),
                                 style: st,
                                 videos: homeVideos.length > n
                                     ? homeVideos.sublist(0, n)
@@ -1074,7 +1075,12 @@ class _HomePageState extends State<HomePage> {
 ///   · `hero` 沉浸大图：满宽出血 + 底部重渐变 + 大字标题 + 元信息 + 播放钮，
 ///            指示器换成**分段进度条**（参考 Disney+ hero carousel）
 ///   · `feature` 主次三栏：左边一张大竖版海报 + 右侧竖排 3 条小卡（杂志排版）
-///   · `grid` 双排海报：**2 行 × 3 列 = 6 张**竖版海报（发现墙）
+///   · `masonry` 交错瀑布：左 1 张满高大卡 + 右侧上下 2 张短卡
+///   · `spotlight` 编辑推荐：左竖版封面 + 右文字栏（标题 + 简介 + 播放）★
+///   · `stair` 高低错落：3 张竖版海报，中间抬高 / 左右下沉 ★
+///   · `twin` 上下双联：2 张横版通栏大图上下堆叠 ★
+///
+/// ★ = 2026-10-16 换掉「双排海报 / 左右双卡 / 九宫格」后的新样式。
 ///
 /// ⚠️ 各样式 `viewportFraction` 不同，而它**只能在 PageController 构造时**给
 /// → 切换样式时由调用方换 `key`，让整个 State + PageController 重建
@@ -1104,26 +1110,29 @@ const double _kBannerHeroHeight = 236;
 const double _kBannerFeatureHeight = 250;
 const int _kBannerFeaturePerPage = 4; // 1 大 + 3 小
 
-// ── 双排海报（grid）──
-//   一页 = **2 行 × 3 列 = 6 张**竖版海报（名称压在图上）。
+// ── 编辑推荐（spotlight，2026-10-16 换掉「双排海报」）──
+//   一页 = 1 张：左侧**竖版封面**（约 0.34 屏宽 / 2:3）+ 右侧**文字栏**
+//   （元信息行 · 大标题 · 简介 · 「立即播放」胶囊）。
+//   整套样式里唯一"以文为主"的一版：适合认真看一条推荐，而不是扫一墙海报。
+const double _kBannerSpotlightHeight = 250;
+const int _kBannerSpotlightPerPage = 1;
+
+// ── 高低错落（stair，2026-10-16 换掉「左右双卡」）──
+//   一页 = 3 张竖版海报：**中间那张抬高**（更高、略宽），左右两张下沉
+//   （顶部空出 [_kBannerStairDrop]）⇒ 三张不等高的错落节奏。
+//   与「交错瀑布」的区别：那边 2 列 / 1 大 2 小，这边 3 列等宽不等高。
 //
-//   ── 为什么换掉原来的「三格海报轨」（用户 2026-10-14：「太丑」）──
-//   原来一页只有 3 张、被压在一行里，看着像缩略图列表；而且整块矮（198）
-//   显得空。现在两行铺满：海报 ≈114×146（≈3:4），一屏 6 条 ✓。
-const double _kBannerGridHeight = 300;
-const int _kBannerGridPerPage = 6;
-const int _kBannerGridCols = 3;
+//   ⚠️ 高度不能给大：3 列并排时每张只有 ≈110 宽，再高就成"细长条"了
+//      （224 高 ⇒ 单张 ≈0.55 比例，接近竖版海报）。
+const double _kBannerStairHeight = 224;
+const int _kBannerStairPerPage = 3;
+const double _kBannerStairDrop = 24; // 左右两张比中间低多少
 
-// ── 左右双卡（duo，2026-10-15 新增）──
-//   一页 = **2 张竖版大海报并排**，整屏高度。张数最少、单张最大。
-const double _kBannerDuoHeight = 300;
-const int _kBannerDuoPerPage = 2;
-
-// ── 九宫格（nine，2026-10-15 新增）──
-//   一页 = **3 行 × 3 列 = 9 张**小海报。与「双排海报」（2×3=6）拉开密度差。
-const double _kBannerNineHeight = 380;
-const int _kBannerNinePerPage = 9;
-const int _kBannerNineCols = 3;
+// ── 上下双联（twin，2026-10-16 换掉「九宫格」）──
+//   一页 = 2 张**横版通栏大图**上下堆叠（各自左下标题 + 右下角标）。
+//   与「横版大图」的区别只是"同屏两张"——密度更高，画面仍是横向的。
+const double _kBannerTwinHeight = 330;
+const int _kBannerTwinPerPage = 2;
 
 // ── 交错瀑布（masonry，2026-10-15 新增）──
 //   2 列错位：左边 1 张**满高**大卡，右边上下 2 张短卡。
@@ -1149,14 +1158,14 @@ class _RecommendBannerState extends State<_RecommendBanner>
   /// 循环轮播的起始**绝对**页（取足够大的整数，前后都能滑，实现无限循环）
   static const int _kLoopAnchor = 100000;
 
-  /// 一页几条：分组样式（主次三栏 / 双排海报 / 左右双卡 / 九宫格 / 交错瀑布）
+  /// 一页几条：分组样式（主次三栏 / 交错瀑布 / 高低错落 / 上下双联）
   /// 一页多条，其余一页一条。
   int get _perPage => switch (widget.style) {
         HomeBannerStyle.feature => _kBannerFeaturePerPage,
-        HomeBannerStyle.grid => _kBannerGridPerPage,
-        HomeBannerStyle.duo => _kBannerDuoPerPage,
-        HomeBannerStyle.nine => _kBannerNinePerPage,
         HomeBannerStyle.masonry => _kBannerMasonryPerPage,
+        HomeBannerStyle.stair => _kBannerStairPerPage,
+        HomeBannerStyle.twin => _kBannerTwinPerPage,
+        HomeBannerStyle.spotlight => _kBannerSpotlightPerPage,
         _ => 1,
       };
 
@@ -1185,10 +1194,10 @@ class _RecommendBannerState extends State<_RecommendBanner>
       HomeBannerStyle.cards => _kBannerCardsViewport,
       HomeBannerStyle.hero => 1.0, // 满宽出血
       HomeBannerStyle.feature => 1.0, // 一页 = 整屏（1 大 + 3 小）
-      HomeBannerStyle.grid => 1.0, // 一页 = 整屏（6 张）
-      HomeBannerStyle.duo => 1.0, // 一页 = 整屏（2 张大）
-      HomeBannerStyle.nine => 1.0, // 一页 = 整屏（9 张）
       HomeBannerStyle.masonry => 1.0, // 一页 = 整屏（1 大 + 2 短）
+      HomeBannerStyle.spotlight => 1.0, // 一页 = 整屏（1 张图文）
+      HomeBannerStyle.stair => 1.0, // 一页 = 整屏（3 张错落）
+      HomeBannerStyle.twin => 1.0, // 一页 = 整屏（2 张横版）
       HomeBannerStyle.wide => 0.92,
     },
   );
@@ -1280,10 +1289,10 @@ class _RecommendBannerState extends State<_RecommendBanner>
             HomeBannerStyle.cards => _kBannerCardsHeight,
             HomeBannerStyle.hero => _kBannerHeroHeight,
             HomeBannerStyle.feature => _kBannerFeatureHeight,
-            HomeBannerStyle.grid => _kBannerGridHeight,
-            HomeBannerStyle.duo => _kBannerDuoHeight,
-            HomeBannerStyle.nine => _kBannerNineHeight,
             HomeBannerStyle.masonry => _kBannerMasonryHeight,
+            HomeBannerStyle.spotlight => _kBannerSpotlightHeight,
+            HomeBannerStyle.stair => _kBannerStairHeight,
+            HomeBannerStyle.twin => _kBannerTwinHeight,
           },
           child: PageView.builder(
             controller: _pageCtrl,
@@ -1297,10 +1306,10 @@ class _RecommendBannerState extends State<_RecommendBanner>
               HomeBannerStyle.cards => _coverflowItem(context, i),
               HomeBannerStyle.hero => _heroItem(context, i),
               HomeBannerStyle.feature => _featurePage(context, i),
-              HomeBannerStyle.grid => _gridPage(context, i),
-              HomeBannerStyle.duo => _duoPage(context, i),
-              HomeBannerStyle.nine => _ninePage(context, i),
               HomeBannerStyle.masonry => _masonryPage(context, i),
+              HomeBannerStyle.spotlight => _spotlightPage(context, i),
+              HomeBannerStyle.stair => _stairPage(context, i),
+              HomeBannerStyle.twin => _twinPage(context, i),
               HomeBannerStyle.wide => _wideItem(context, i),
             },
           ),
@@ -1384,12 +1393,19 @@ class _RecommendBannerState extends State<_RecommendBanner>
 
   /// 横版大图（原样式）：16:9 铺满 + 左下标题 + 右下来源角标。
   Widget _wideItem(BuildContext context, int i) {
-    final v = _videoAt(i);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: _wideBannerTile(_videoAt(i)),
+    );
+  }
+
+  /// 一张**横版通栏大图**卡（不带外边距，间距由调用方给）。
+  /// 「横版大图」与「上下双联」共用 —— 两处必须长得一样。
+  Widget _wideBannerTile(Video v) {
     final badge = VodCard.badgeText(v);
     return GestureDetector(
       onTap: () => Get.toNamed('/detail', arguments: v),
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
           color: AppTheme.backgroundSecondary,
@@ -1662,80 +1678,199 @@ class _RecommendBannerState extends State<_RecommendBanner>
     );
   }
 
-  /// 双排海报（grid）：一页 = **2 行 × 3 列 = 6 张**竖版海报。
+  /// 编辑推荐（spotlight，2026-10-16 换掉「双排海报」）：一页 = **1 张**。
   ///
-  /// ── 为什么换掉原来的「三格海报轨」（用户 2026-10-14：「太他妈丑」）──
-  /// 原来一页只有 3 张、被压在一行里、整块还矮（198）⇒ 看着像缩略图列表、
-  /// 又空又小 ✗。现在**两行铺满**：海报 ≈114×146（≈3:4），一屏 6 条 ✓，
-  /// 名称也压进图里（不再在图片外单占一行）✓。
-  Widget _gridPage(BuildContext context, int i) {
-    final start = i * _kBannerGridPerPage;
-    const rows = 2;
+  /// 左边竖版封面（≈0.34 屏宽），右边文字栏：元信息行 / 大标题 2 行 / 简介 3 行 /
+  /// 底部「立即播放」胶囊。整套样式里唯一**以文为主**的一版 ——
+  /// 前面几个（大图 / 轮播 / 瀑布）都是"扫图"，这个是"读一条"。
+  Widget _spotlightPage(BuildContext context, int i) {
+    final v = _videoAt(i);
+    final badge = VodCard.badgeText(v);
+    // 元信息行：只拼非空项（源里经常缺年份 / 地区 / 分类）
+    final meta = <String>[
+      if (v.year.trim().isNotEmpty) v.year.trim(),
+      if (v.area.trim().isNotEmpty) v.area.trim(),
+      if (v.type.trim().isNotEmpty) v.type.trim(),
+      if (badge.isNotEmpty) badge,
+    ].join(' · ');
+    // 简介：列表接口经常**不带** vod_content（那里只有详情才给），
+    // 于是用「主演 / 导演」兜底 —— 总比一律显示"暂无简介"有信息量。
+    final desc = v.des.trim().replaceAll(RegExp(r'\s+'), ' ');
+    final intro = desc.isNotEmpty
+        ? desc
+        : (v.actor.trim().isNotEmpty
+            ? '主演：${v.actor.trim()}'
+            : (v.director.trim().isNotEmpty ? '导演：${v.director.trim()}' : ''));
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        children: [
-          for (var r = 0; r < rows; r++) ...[
-            if (r > 0) const SizedBox(height: 8),
-            Expanded(
-              child: Row(
-                children: [
-                  for (var c = 0; c < _kBannerGridCols; c++) ...[
-                    if (c > 0) const SizedBox(width: 8),
-                    Expanded(
-                      child: _tileAt(start + r * _kBannerGridCols + c),
-                    ),
-                  ],
-                ],
+      child: GestureDetector(
+        onTap: () => Get.toNamed('/detail', arguments: v),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppTheme.backgroundSecondary,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppTheme.glassBorderSoft, width: 0.6),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // 左：竖版封面 —— 宽按 2:3 从卡片高度推（高度是固定常量）
+              // → ≈167 宽；再用屏宽 45% 封顶，免得小屏上把文字栏挤没。
+              SizedBox(
+                width: (_kBannerSpotlightHeight * 2 / 3)
+                    .clamp(96.0, MediaQuery.of(context).size.width * 0.45),
+                child: ColoredBox(
+                  color: AppTheme.backgroundTertiary,
+                  child: _BannerImage(url: v.pic),
+                ),
               ),
-            ),
-          ],
-        ],
+              // 右：文字栏
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (meta.isNotEmpty)
+                            Text(
+                              meta,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: AppTheme.textTertiary,
+                                fontSize: AppTheme.fontCaption,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          const SizedBox(height: 6),
+                          Text(
+                            v.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: AppTheme.fontTitle3,
+                              fontWeight: FontWeight.w700,
+                              height: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            intro.isEmpty ? '暂无简介' : intro,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: AppTheme.fontCaption,
+                              height: 1.45,
+                            ),
+                          ),
+                        ],
+                      ),
+                      // 播放胶囊（纯视觉提示，整卡可点）
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppTheme.accentColor,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.play_arrow_rounded,
+                              size: 16,
+                              color: AppTheme.accentColor.computeLuminance() >
+                                      0.5
+                                  ? Colors.black
+                                  : Colors.white,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              '立即播放',
+                              style: TextStyle(
+                                color:
+                                    AppTheme.accentColor.computeLuminance() > 0.5
+                                        ? Colors.black
+                                        : Colors.white,
+                                fontSize: AppTheme.fontCaption,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  /// 左右双卡（duo，2026-10-15 新增）：一页 = **2 张竖版大海报并排**，整屏高。
-  /// 张数最少、单张最大 —— 与「双排海报」的 6 张 / 「九宫格」的 9 张形成密度梯度。
-  Widget _duoPage(BuildContext context, int i) {
-    final start = i * _kBannerDuoPerPage;
+  /// 高低错落（stair，2026-10-16 换掉「左右双卡」）：一页 = **3 张竖版海报**。
+  ///
+  /// 中间那张**抬高**（更高、略宽），左右两张**下沉** [_kBannerStairDrop]
+  /// ⇒ 三张不等高的错落节奏（不是规整网格）。
+  /// 与「交错瀑布」的分工：那边 2 列 / 1 大 2 小，这边 3 列等宽不等高。
+  Widget _stairPage(BuildContext context, int i) {
+    final start = i * _kBannerStairPerPage;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (var c = 0; c < _kBannerDuoPerPage; c++) ...[
-            if (c > 0) const SizedBox(width: 10),
-            Expanded(
-              child: _tileAt(start + c, radius: BorderRadius.circular(16)),
+          Expanded(
+            flex: 10,
+            child: Padding(
+              padding: const EdgeInsets.only(top: _kBannerStairDrop),
+              child: _tileAt(start, radius: BorderRadius.circular(16)),
             ),
-          ],
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 11,
+            child: _tileAt(start + 1, radius: BorderRadius.circular(16)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 10,
+            child: Padding(
+              padding: const EdgeInsets.only(top: _kBannerStairDrop),
+              child: _tileAt(start + 2, radius: BorderRadius.circular(16)),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  /// 九宫格（nine，2026-10-15 新增）：一页 = **3 行 × 3 列 = 9 张**小海报。
-  /// 一眼看得最多，和「双排海报」（2×3=6）拉开密度差。
-  Widget _ninePage(BuildContext context, int i) {
-    final start = i * _kBannerNinePerPage;
-    const rows = 3;
+  /// 上下双联（twin，2026-10-16 换掉「九宫格」）：一页 = **2 张横版通栏大图**
+  /// 上下堆叠，各自左下标题 + 右下角标（与「横版大图」同款卡片）。
+  Widget _twinPage(BuildContext context, int i) {
+    final start = i * _kBannerTwinPerPage;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         children: [
-          for (var r = 0; r < rows; r++) ...[
-            if (r > 0) const SizedBox(height: 8),
+          for (var k = 0; k < _kBannerTwinPerPage; k++) ...[
+            if (k > 0) const SizedBox(height: 10),
             Expanded(
-              child: Row(
-                children: [
-                  for (var c = 0; c < _kBannerNineCols; c++) ...[
-                    if (c > 0) const SizedBox(width: 8),
-                    Expanded(
-                      child: _tileAt(start + r * _kBannerNineCols + c),
-                    ),
-                  ],
-                ],
-              ),
+              child: (start + k < widget.videos.length)
+                  ? _wideBannerTile(widget.videos[start + k])
+                  : const SizedBox.shrink(),
             ),
           ],
         ],

@@ -12,6 +12,7 @@ import '../wallpaper_page.dart';
 import 'settings_shared.dart';
 import '../../../widgets/app_toast.dart';
 import '../../../widgets/common_widgets.dart';
+import '../../../widgets/theme_preset_row.dart';
 
 /// 统一主题设置 —— 一个页面里分别调**影视/直播、音乐、阅读**的风格。
 ///
@@ -439,21 +440,12 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
               ),
             ),
             const SizedBox(height: 12),
-            // 「跟随阅读」+ 7 套预设
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                _followChip(module, current),
-                for (final p in readingThemePresets)
-                  _presetDot(
-                    module: module,
-                    presetId: p.id,
-                    name: p.name,
-                    selected: current == p.id,
-                    palette: p.palette,
-                  ),
-              ],
+            // 与阅读「主题风格」面板同一套：点开底部面板，里面是
+            // 「三色点 + 名称 + 右侧单选圈」的全宽圆角行（用户 2026-10-16 要求）
+            _pickRow(
+              dots: _dotsOf(effective),
+              onTap: () =>
+                  _pickPreset(module: module, current: current, title: title),
             ),
           ],
         ),
@@ -461,103 +453,78 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
     );
   }
 
-  Widget _followChip(String module, String current) {
-    final on = current == ModuleThemeStore.followReading;
-    return GestureDetector(
-      onTap: () async {
-        await store.setPreset(module, ModuleThemeStore.followReading);
-        await _afterPresetChanged();
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: on
-              ? AppTheme.accentColor.withValues(alpha: 0.14)
-              : AppTheme.backgroundTertiary,
-          borderRadius: BorderRadius.circular(9),
-          border: Border.all(
-            color: on ? AppTheme.accentColor : AppTheme.borderLight,
-          ),
-        ),
-        child: Text(
-          '跟随阅读',
-          style: TextStyle(
-            fontSize: AppTheme.fontSubhead,
-            fontWeight: on ? FontWeight.w600 : FontWeight.normal,
-            color: on ? AppTheme.accentColor : AppTheme.textSecondary,
-          ),
-        ),
-      ),
+  /// 模块卡里那一行「选择主题」入口 —— 用阅读面板同款行，右侧给箭头
+  Widget _pickRow({required List<Color> dots, required VoidCallback onTap}) {
+    return ThemePresetRow(
+      name: '选择主题',
+      subtitle: '与阅读「主题风格」同一套样式',
+      dots: dots,
+      selected: false,
+      trailing: Icon(Icons.chevron_right_rounded,
+          size: 20, color: AppTheme.textTertiary),
+      onTap: onTap,
     );
   }
 
-  Widget _presetDot({
+  /// 三色点：主色 / 强调色 / 浅底（与阅读面板上的色点同一取法）
+  List<Color> _dotsOf(String presetId) {
+    final p = _presetOf(presetId);
+    return [p.palette.primary, p.palette.accent, p.palette.backgroundLight];
+  }
+
+  ThemePresetInfo _presetOf(String id) => readingThemePresets.firstWhere(
+        (p) => p.id == id,
+        orElse: () => readingThemePresets.first,
+      );
+
+  /// 打开**与阅读同款**的底部面板选主题（用户 2026-10-16 要求）。
+  ///
+  /// [module] 传 `__reading__` 表示改阅读自己（走 SettingsService，
+  /// 它会同步给 ModuleThemeStore）；否则走 store 改该模块。
+  Future<void> _pickPreset({
     required String module,
-    required String presetId,
-    required String name,
-    required bool selected,
-    required JellyPalette palette,
-  }) {
-    return GestureDetector(
-      onTap: () async {
-        if (module == '__reading__') {
-          // 阅读模块：直接调 SettingsService，它内部会同步给
-          // ModuleThemeStore，选了"跟随阅读"的模块会跟着变
-          await SettingsService().setThemePreset(presetId);
-        } else {
-          await store.setPreset(module, presetId);
-        }
-        await _afterPresetChanged();
-      },
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              // 色块用该预设的"主色 + 浅色底 + 深色底"三色环，像阅读的主题列表
-              gradient: SweepGradient(
-                colors: [
-                  palette.backgroundLight,
-                  palette.primary,
-                  palette.backgroundDark,
-                  palette.accent,
-                  palette.backgroundLight,
-                ],
-              ),
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: selected ? AppTheme.accentColor : AppTheme.borderLight,
-                width: selected ? 2.5 : 1,
-              ),
-            ),
-            child: selected
-                ? Icon(
-                    Icons.check,
-                    size: 16,
-                    color: palette.backgroundLight.computeLuminance() > 0.5
-                        ? Colors.black
-                        : Colors.white,
-                  )
-                : null,
+    required String current,
+    required String title,
+  }) async {
+    final readingPreset = SettingsService().themePreset;
+
+    Future<void> pick(String id) async {
+      if (module == '__reading__') {
+        await SettingsService().setThemePreset(id);
+      } else {
+        await store.setPreset(module, id);
+      }
+      await _afterPresetChanged();
+    }
+
+    await showThemePresetSheet(
+      context: context,
+      title: '主题风格',
+      subtitle: title,
+      rowsBuilder: (sheetCtx) => [
+        // 「跟随阅读」也做成同款行（原来是个小胶囊 chip，与阅读面板不一致）
+        if (module != '__reading__')
+          ThemePresetRow(
+            name: '跟随阅读',
+            subtitle: '与阅读模块当前配色一致',
+            dots: _dotsOf(readingPreset),
+            selected: current == ModuleThemeStore.followReading,
+            onTap: () {
+              Navigator.of(sheetCtx).pop();
+              pick(ModuleThemeStore.followReading);
+            },
           ),
-          const SizedBox(height: 4),
-          SizedBox(
-            width: 52,
-            child: Text(
-              name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: AppTheme.fontCaption,
-                color: selected ? AppTheme.accentColor : AppTheme.textTertiary,
-              ),
-            ),
+        for (final p in readingThemePresets)
+          ThemePresetRow(
+            name: p.name,
+            dots: _dotsOf(p.id),
+            selected: current == p.id,
+            onTap: () {
+              Navigator.of(sheetCtx).pop();
+              pick(p.id);
+            },
           ),
-        ],
-      ),
+      ],
     );
   }
 
@@ -613,20 +580,14 @@ class _UnifiedThemeSettingsPageState extends State<UnifiedThemeSettingsPage> {
               ),
             ),
             const SizedBox(height: 12),
-            // 7 套预设（直接选，和影视/音乐同款）
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                for (final p in readingThemePresets)
-                  _presetDot(
-                    module: '__reading__',
-                    presetId: p.id,
-                    name: p.name,
-                    selected: readingPreset == p.id,
-                    palette: p.palette,
-                  ),
-              ],
+            // 与影视/音乐同款（都是阅读那套行 + 底部面板）
+            _pickRow(
+              dots: _dotsOf(readingPreset),
+              onTap: () => _pickPreset(
+                module: '__reading__',
+                current: readingPreset,
+                title: '阅读',
+              ),
             ),
             const SizedBox(height: 10),
             // 阅读独有高级功能的入口
