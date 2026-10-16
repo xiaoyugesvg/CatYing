@@ -940,11 +940,14 @@ class _HomePageState extends State<HomePage> {
                             listenable: SettingsService(),
                             builder: (context, _) {
                               final st = SettingsService().homeBannerStyle;
+                              // 取几个**由样式决定**（6~9，见 homeBannerItemCount）：
+                              // 一页 1 张的取 9、双卡取 8、九宫格取 9、双排海报取 6 …
+                              final n = homeBannerItemCount(st);
                               return _RecommendBanner(
                                 key: ValueKey('banner-${st.index}'),
                                 style: st,
-                                videos: homeVideos.length > 6
-                                    ? homeVideos.sublist(0, 6)
+                                videos: homeVideos.length > n
+                                    ? homeVideos.sublist(0, n)
                                     : List<Video>.from(homeVideos),
                               );
                             },

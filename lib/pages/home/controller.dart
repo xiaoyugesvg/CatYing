@@ -6,6 +6,7 @@ import '../../models/movie.dart';
 import '../../models/movie_sort.dart';
 import '../../services/api_config.dart';
 import '../../services/source_service.dart';
+import '../../reading/services/settings_service.dart';
 import '../../webhome/webhtv_site_health_page.dart';
 
 class HomeController extends GetxController {
@@ -272,7 +273,9 @@ class HomeController extends GetxController {
   /// 连分类列表都为空时什么都不做 —— 顶部由 `_buildContentArea` 整块隐藏。
   void _fillBannerFromCategory(String sourceKey) {
     if (homeVideos.isNotEmpty || videos.isEmpty) return;
-    final picks = videos.take(6).toList();
+    // 取**上限**张（9）：各样式实际用几张由 homeBannerItemCount 决定（6~9），
+    // 显示时再裁 —— 这里多抓几张才能让"九宫格 / 双卡"这些样式够用
+    final picks = videos.take(kHomeBannerMaxItems).toList();
     homeVideos.assignAll(picks);
     try {
       CacheStore.instance.setJsonCache(

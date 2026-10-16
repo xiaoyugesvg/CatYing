@@ -97,6 +97,36 @@ enum HomeBannerStyle {
       };
 }
 
+/// 首页幻灯片最多取几个视频（兜底抓取 / 缓存按这个上限来，显示时再按样式裁）。
+const int kHomeBannerMaxItems = 9;
+
+/// **每种幻灯片样式取几个视频**（用户 2026-10-16：「根据幻灯片的样式调整到 6~9 个」）。
+///
+/// 之前是**写死 6 个**（view.dart 里 `sublist(0, 6)`），于是
+/// 「九宫格」一页要 9 张只有 6 张、「主次三栏」一页 4 张第 2 页只剩 2 张、
+/// 「双排海报」一页 6 张刚好 —— 密度差被这个固定值抹平了。
+///
+/// 取值规则：**落在 6~9 之间，且尽量是"每页张数"的整数倍**（末页不留半屏空位）。
+/// ⚠️ 各样式"每页张数"的定义在 `pages/home/view.dart` 的 `_kBanner*PerPage`，
+/// 改那边记得同步这里。
+int homeBannerItemCount(HomeBannerStyle style) => switch (style) {
+      // 一页 1 张（大图 / 卡片轮播 / 沉浸大图）→ 9 张，轮播久一点
+      HomeBannerStyle.wide ||
+      HomeBannerStyle.cards ||
+      HomeBannerStyle.hero =>
+        9,
+      // 一页 2 张（左右双卡）→ 8
+      HomeBannerStyle.duo => 8,
+      // 一页 3 张（交错瀑布）→ 9
+      HomeBannerStyle.masonry => 9,
+      // 一页 4 张（主次三栏：1 大 + 3 小）→ 8
+      HomeBannerStyle.feature => 8,
+      // 一页 6 张（双排海报 2×3）→ 6（正好一页；12 就超上限了）
+      HomeBannerStyle.grid => 6,
+      // 一页 9 张（九宫格 3×3）→ 9
+      HomeBannerStyle.nine => 9,
+    };
+
 /// NavTab 与 DefaultHomePage 的双向转换辅助（两者值一一对应）
 extension NavTabDefaultHomePageX on NavTab {
   DefaultHomePage toDefaultHomePage() => DefaultHomePage.values[index];
