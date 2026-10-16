@@ -414,7 +414,7 @@ class _HikerHomePageState extends State<HikerHomePage> {
   ///   · **不动主列表** —— 关掉弹窗就回到原来的视频列表；
   ///   · **不落盘变量** —— 源切页靠改自己的 mode 变量，落了盘就回不去了
   ///     （见 [_replayLazyFor] 的 `persistVars`）。
-  /// 弹窗里的设置项按**一行两个卡片**排（[HikerBlocks.twoUpText]）。
+  /// 弹窗里的设置项按**一行三个卡片**排（[HikerBlocks.textColumns]）。
   Future<void> _openToolSheet(
       HikerSource src, HikerItem entry, List<String> chain) async {
     HikerResult r;
@@ -464,7 +464,7 @@ class _HikerHomePageState extends State<HikerHomePage> {
                     child: SingleChildScrollView(
                       child: HikerBlocks(
                         items: items,
-                        twoUpText: true,
+                        textColumns: 3,
                         shrinkWrap: true,
                         bottomPadding: 20,
                         onTapItem: (it) {

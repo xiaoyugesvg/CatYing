@@ -35,12 +35,12 @@ class HikerBlocks extends StatelessWidget {
   final VoidCallback? onTapSearch;
   final double bottomPadding;
 
-  /// 把整行的 `text_1` 设置项排成**一行两个卡片**。
+  /// 强制整行 `text_1` 按 N 列排（0 = 不动，用条目自己的 `col_type`）。
   ///
   /// 只给「工具入口弹窗」用：源里的设置项（接口域名 / 每页数量 / 列表样式…）
-  /// 一行一个会拖很长，弹窗里两列更紧凑（用户 2026-10-16 要求）。
+  /// 一行一个会拖很长，弹窗里多列更紧凑（用户 2026-10-16：先要两个、后改成三个）。
   /// 首页正常内容里保持原样（`text_1` 官方就是整行）。
-  final bool twoUpText;
+  final int textColumns;
 
   /// 由外层滚动容器接管滚动（弹窗里用：内容少时弹窗就贴内容高度，不硬撑满）
   final bool shrinkWrap;
@@ -53,13 +53,13 @@ class HikerBlocks extends StatelessWidget {
     this.onLongPress,
     this.onTapSearch,
     this.bottomPadding = 96,
-    this.twoUpText = false,
+    this.textColumns = 0,
     this.shrinkWrap = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final runs = _runsOf(items, twoUpText: twoUpText);
+    final runs = _runsOf(items, textColumns: textColumns);
     return ListView.builder(
       padding: EdgeInsets.fromLTRB(0, 2, 0, bottomPadding),
       shrinkWrap: shrinkWrap,
@@ -342,11 +342,32 @@ class HikerBlocks extends StatelessWidget {
         color: AppTheme.textPrimary,
         fontSize: AppTheme.fontFootnote,
         fontWeight: FontWeight.w600);
-    final body = Text.rich(
-      TextSpan(children: hikerRichSpans(it.title, style)),
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      textAlign: TextAlign.center,
+    // 设置项这类条目 `desc` 就是**当前值**（接口域名 → https://…、每页数量 → 30）：
+    // 多列之后一行放不下，改成"名称 / 值"两行居中，别把值丢了。
+    final value = hikerPlainText(it.desc);
+    final body = Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text.rich(
+          TextSpan(children: hikerRichSpans(it.title, style)),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+        ),
+        if (value.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                color: AppTheme.textTertiary, fontSize: AppTheme.fontCaption),
+          ),
+        ],
+      ],
     );
     if (!tappable) {
       return Padding(
@@ -358,9 +379,9 @@ class HikerBlocks extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: () => _tap(it, action: true),
       child: Container(
-        height: 42,
+        height: value.isEmpty ? 42 : 54,
         alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 6),
         decoration: BoxDecoration(
           color: AppTheme.backgroundTertiary,
           borderRadius: BorderRadius.circular(10),
@@ -514,9 +535,9 @@ _Kind _kindOf(String colType) {
 
 /// 分块：连续同类条目合成一块。
 ///
-/// [twoUpText] = true 时（工具入口弹窗），把相邻的整行 `text_1` 归并成
-/// `text2`（一行两个卡片）—— 这样设置项就不用一行一个拖很长。
-List<_Run> _runsOf(List<HikerItem> items, {bool twoUpText = false}) {
+/// [textColumns] > 0 时（工具入口弹窗），把相邻的整行 `text_1` 归并成 N 列
+/// （一行 N 个卡片）—— 这样设置项就不用一行一个拖很长。
+List<_Run> _runsOf(List<HikerItem> items, {int textColumns = 0}) {
   final runs = <_Run>[];
   for (final it in items) {
     final kind = _kindOf(it.colType);
@@ -534,15 +555,21 @@ List<_Run> _runsOf(List<HikerItem> items, {bool twoUpText = false}) {
     }
     merged.add(r);
   }
-  if (!twoUpText) return merged;
-  // 工具弹窗：相邻的整行 `text_1` 归并成 `text2` ⇒ 渲染成一行两个卡片
+  // 工具弹窗：相邻的整行 `text_1` 归并成 N 列 ⇒ 渲染成一行 N 个卡片
+  final wantKind = switch (textColumns) {
+    2 => _Kind.text2,
+    3 => _Kind.text3,
+    4 => _Kind.text4,
+    _ => null,
+  };
+  if (wantKind == null) return merged;
   final out = <_Run>[];
   for (final r in merged) {
     if (r.kind == _Kind.text) {
-      if (out.isNotEmpty && out.last.kind == _Kind.text2) {
+      if (out.isNotEmpty && out.last.kind == wantKind) {
         out.last.items.addAll(r.items);
       } else {
-        out.add(_Run(_Kind.text2, [...r.items]));
+        out.add(_Run(wantKind, [...r.items]));
       }
       continue;
     }
