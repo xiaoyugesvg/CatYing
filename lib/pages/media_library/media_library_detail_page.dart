@@ -248,7 +248,7 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
       // 媒体库模式但 TMDB 未配置（没填 Key）：媒体库页无数据可刮，
       // 直接回退默认详情页，不展示空壳媒体库界面
       if (!TmdbService.instance.configured) {
-        _fallbackToDefault(video);
+        _fallbackToDefault(video, deferred: true);
         return;
       }
     }
@@ -264,15 +264,30 @@ class _MediaLibraryDetailPageState extends State<MediaLibraryDetailPage> {
   /// TMDB 刮削失败 → 一律回退默认详情页。
   /// 主路径（有 Video）回退到默认详情页；类似作品/相关推荐路径
   /// （无 Video，默认详情页没有数据可渲染）回退为返回上一页。
-  void _fallbackToDefault(Video? video) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+  ///
+  /// [deferred] 只有**帧内调用**（`initState`）才需要 —— 那时正在 build，
+  /// 不能直接导航，得等本帧画完。
+  ///
+  /// ⚠️ 点击路径**必须直接导航，不能包 `addPostFrameCallback`**：
+  ///   帧外注册的 post-frame 回调只在"**下一帧**画完"才执行，而点击本身
+  ///   **不会安排帧**（实测 `hasScheduledFrame=false`）⇒ 页面静止（图片都加载完、
+  ///   没有动画在跑）时，点了会一直不执行，表象就是"按钮点了没反应"
+  ///   （用户 2026-10-16：「右上角那个切换不了默认详情页」）。
+  void _fallbackToDefault(Video? video, {bool deferred = false}) {
+    void go() {
       if (!mounted) return;
       if (video != null) {
         Get.off(() => DetailPage(), arguments: video);
       } else {
         Get.back();
       }
-    });
+    }
+
+    if (deferred) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => go());
+    } else {
+      go();
+    }
   }
 
   @override

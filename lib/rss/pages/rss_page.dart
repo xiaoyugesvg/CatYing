@@ -148,11 +148,27 @@ class _RssPageState extends State<RssPage> {
 
   void _reload() {
     final src = store.current;
+    if (src == null) return;
+    // `_siteLike` 是**上一个载入的源**的结论（抓完才发现"没规则 + 0 条 + 不像 feed"），
+    // 换源时必须丢掉，否则新源要么不加载列表、要么被旧网页顶替。
+    final sameAsLoaded = src.id == _loadedId;
     // 站点型源：刷新 = 重载内嵌网页
-    if (src != null && (src.isSiteOnly || _siteLike)) {
-      _web?.reload();
+    if (src.isSiteOnly || (sameAsLoaded && _siteLike)) {
+      // ⚠️ 只有**和当前内嵌网页同址**才叫"刷新"。换源/首次进入时原来只调
+      //   `_web?.reload()`：从普通源切到站点型源时 `_web` 还是 null ⇒ 什么都不
+      //   发生、界面也不重建（顶栏源名和内容都停在旧源上），用户看到的就是
+      //   "切换不生效，重启软件才行"（重启后 `_siteLike`/`_web` 归零才走对路）。
+      if (_web != null && _webUrl == src.url) {
+        _web!.reload();
+        return;
+      }
+      setState(() {
+        _siteLike = false;
+        _loadedId = src.id;
+      });
       return;
     }
+    if (!sameAsLoaded) _siteLike = false;
     _reloadAsync();
   }
 
