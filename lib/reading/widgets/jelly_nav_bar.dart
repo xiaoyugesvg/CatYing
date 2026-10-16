@@ -10,6 +10,17 @@ class JellyNavBar extends StatefulWidget {
   final Function(int) onTap;
   final Function(int)? onLongPress;
 
+  /// 点**当前** tab 时回调（默认没有）。
+  ///
+  /// ── 🔴 为什么需要它（用户 2026-10-16 实测）──────────────────────
+  /// 「进了书源页后点悬浮栏的**图书**按钮，还是书源页」——
+  /// 书源页是**内嵌子页**（`shellEmbeddedPage`，由外壳渲染，见
+  /// `shell_embedded_page.dart`），外壳只能靠 `_onNavTap` 把它清掉；
+  /// 而原来这里 `index != currentIndex` 才回调 ⇒ **点同一个 tab 什么都不做**
+  /// ⇒ 内嵌页退不出去 ✗。（宽屏左侧竖栏 [JellyNavRail] 没有这个守卫，
+  /// 所以只有手机底部栏有这个问题 —— 与用户"手机上传"的复现一致。）
+  final Function(int)? onReselect;
+
   /// 导航项上滑手势（书架 tab 上滑唤起批量多选）
   final Function(int)? onSlideUp;
   final List<JellyNavItem> items;
@@ -31,6 +42,7 @@ class JellyNavBar extends StatefulWidget {
     required this.currentIndex,
     required this.onTap,
     this.onLongPress,
+    this.onReselect,
     this.onSlideUp,
     required this.items,
     this.floating = false,
@@ -125,7 +137,11 @@ class _JellyNavBarState extends State<JellyNavBar>
       _controller.reset();
       _controller.forward();
       widget.onTap(index);
+      return;
     }
+    // 点当前的 tab：不播切页动画，但要**通知外壳** —— 这是"退出内嵌子页
+    // （书源页）"的唯一路径（见 [onReselect] 的说明）
+    widget.onReselect?.call(index);
   }
 
   @override

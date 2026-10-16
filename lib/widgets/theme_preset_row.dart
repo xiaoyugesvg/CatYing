@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 
 import '../common/theme.dart';
+import '../services/main_tab_controller.dart';
 
 /// 主题预设行 —— **与阅读模块「主题风格」面板同款**：三色点 + 名称 + 右侧单选圈。
 ///
@@ -115,74 +117,116 @@ class ThemePresetRow extends StatelessWidget {
 /// `Navigator.of(sheetCtx).pop()` 收面板。用调用方的 context 收面板是经典坑：
 /// 面板已被用户点暗区关掉时，那一下会 pop 掉**底下的页面**（阅读那边踩过，
 /// 症状是空栈黑屏）。
+///
+/// ⚠️ 只给**push 出来的设置页**用。音乐模块请用 `showMusicSheet`（中间弹出）——
+/// 见 `music/pages/profile_page.dart` 的说明：底部面板会压在音乐自己的
+/// 悬浮播放条/导航栏上。
 Future<void> showThemePresetSheet({
   required BuildContext context,
   required String title,
   String? subtitle,
   required List<Widget> Function(BuildContext sheetCtx) rowsBuilder,
 }) {
+  // 面板自己的路由（在 builder 里拿到）：切主 tab 时只 pop **它**，
+  // 不会误伤别的页面
+  ModalRoute<void>? selfRoute;
+
+  // ── 切模块自动收面板（用户 2026-10-16 实测问题）────────────────
+  // 底栏是 `IndexedStack`，**切 tab 不会 pop 路由** ⇒ 面板会一直留在屏幕上
+  // 盖住新模块。这里监听主 tab，一旦切走就把面板收掉。
+  final tab = _mainTabController()?.selectedTab;
+  void onTabChanged(int _) {
+    final r = selfRoute;
+    if (r == null || !r.isActive) return; // 已经关了 → 什么都不做
+    r.navigator?.pop();
+  }
+
+  final worker = tab == null ? null : ever<int>(tab, onTabChanged);
   return showModalBottomSheet<void>(
     context: context,
     backgroundColor: Colors.transparent,
     isScrollControlled: true,
-    builder: (ctx) => Container(
-      decoration: BoxDecoration(
-        color: AppTheme.backgroundSecondary,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppTheme.borderMedium,
-                  borderRadius: BorderRadius.circular(10),
-                ),
+    builder: (ctx) {
+      selfRoute = ModalRoute.of(ctx);
+      return _themePresetSheetBody(title, subtitle, rowsBuilder, ctx);
+    },
+  ).whenComplete(() => worker?.dispose());
+}
+
+/// 拿主 tab 控制器（**没注册时返回 null**，不抛 —— 单测/独立页面里也能用）
+MainTabController? _mainTabController() {
+  try {
+    return Get.isRegistered<MainTabController>()
+        ? MainTabController.instance
+        : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+Widget _themePresetSheetBody(
+  String title,
+  String? subtitle,
+  List<Widget> Function(BuildContext sheetCtx) rowsBuilder,
+  BuildContext ctx,
+) {
+  return Container(
+    decoration: BoxDecoration(
+      color: AppTheme.backgroundSecondary,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+    child: SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppTheme.borderMedium,
+                borderRadius: BorderRadius.circular(10),
               ),
             ),
-            const SizedBox(height: 12),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text(
+              title,
+              style: TextStyle(
+                fontSize: AppTheme.fontTitle3,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          ),
+          if (subtitle != null && subtitle.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(left: 4),
+              padding: const EdgeInsets.only(left: 4, top: 2),
               child: Text(
-                title,
+                subtitle,
                 style: TextStyle(
-                  fontSize: AppTheme.fontTitle3,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.textPrimary,
-                ),
+                    fontSize: AppTheme.fontCaption,
+                    color: AppTheme.textTertiary),
               ),
             ),
-            if (subtitle != null && subtitle.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(left: 4, top: 2),
-                child: Text(
-                  subtitle,
-                  style: TextStyle(
-                      fontSize: AppTheme.fontCaption,
-                      color: AppTheme.textTertiary),
-                ),
-              ),
-            const SizedBox(height: 12),
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(ctx).size.height * 0.6,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: rowsBuilder(ctx),
-                ),
+          const SizedBox(height: 12),
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.6,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: rowsBuilder(ctx),
               ),
             ),
-            const SizedBox(height: 8),
-          ],
-        ),
+          ),
+          const SizedBox(height: 8),
+        ],
       ),
     ),
   );

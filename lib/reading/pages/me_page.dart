@@ -469,7 +469,12 @@ class _MePageState extends State<MePage> {
 
   Widget _defaultAvatarIcon(double size, bool logged) => logged
       ? Image.asset(
-          'assets/icons/user.png',
+          // ⚠️ 原来引的是 `assets/icons/user.png` —— **这个文件根本不存在**
+          //（`assets/icons/` 下只有 folder / logo / magic_stick 三张）
+          // ⇒ 每次都走 errorBuilder，头像位只剩"白圈 + 一个小人图标"
+          //（用户 2026-10-16：「登录那个默认的头像没有吗？」）。
+          // 改用随包的**猫标**：确实存在，而且就是本 App 的标识。
+          'assets/images/cat_logo.png',
           width: size,
           height: size,
           fit: BoxFit.cover,
@@ -652,21 +657,40 @@ class _MePageState extends State<MePage> {
         ? z.username
         : (email.isNotEmpty ? email : '已登录');
 
-    await showModalBottomSheet<void>(
+    // 用户 2026-10-16：「这个弹窗我要**中间弹出**的那种」——
+    // 从底部面板改成屏幕中间弹出（四角圆角 + 淡入缩放），
+    // 内容超过屏高时**由内部滚动**（只限高不包滚动会把选项截断、点不到）。
+    await showGeneralDialog<void>(
       context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) => Container(
-        decoration: BoxDecoration(
-          color: sheetBg,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-        child: SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+      barrierDismissible: true,
+      barrierLabel: 'close',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (ctx, _, __) => Center(
+        child: Material(
+          type: MaterialType.transparency,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.68,
+            ),
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 24),
+              decoration: BoxDecoration(
+                color: sheetBg,
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: const [
+                  BoxShadow(
+                      color: Colors.black26,
+                      blurRadius: 24,
+                      offset: Offset(0, 8)),
+                ],
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
               // 头像
               Container(
                 width: 84,
@@ -838,7 +862,19 @@ class _MePageState extends State<MePage> {
                 ],
               ),
             ],
+                  ),
+                ),
+              ),
+            ),
           ),
+      ),
+      transitionBuilder: (ctx, anim, _, child) => FadeTransition(
+        opacity: anim,
+        child: ScaleTransition(
+          scale: Tween<double>(begin: 0.92, end: 1).animate(
+            CurvedAnimation(parent: anim, curve: Curves.easeOutCubic),
+          ),
+          child: child,
         ),
       ),
     );

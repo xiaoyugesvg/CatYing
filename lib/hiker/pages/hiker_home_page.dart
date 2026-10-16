@@ -8,6 +8,7 @@ import '../../services/app_log.dart';
 import '../../services/main_tab_controller.dart';
 import '../../services/nav_feature_service.dart';
 import '../../widgets/app_toast.dart';
+import '../widgets/card_source_sheet.dart';
 import '../models/hiker_source.dart';
 import '../services/hiker_builtin.dart';
 import '../services/hiker_engine.dart';
@@ -285,6 +286,14 @@ class _HikerHomePageState extends State<HikerHomePage> {
           item: it,
           lazyChain: _lazyChain,
           replayLazy: _replayLazyFor(src),
+          // 「下一页」不是 lazy 时（有些源直接给 http / 规则串）用它跑一次新房页面，
+          // 供看图阅读器的"下拉自动下一章"接续
+          runPage: (u) => HikerEngine.instance.category(
+            src,
+            u,
+            cateName: hikerPlainText(it.title),
+            vars: HikerStore.instance.varsOf(src.id),
+          ),
         ),
       ),
     );
@@ -616,86 +625,28 @@ class _HikerHomePageState extends State<HikerHomePage> {
       AppToast.message('还没有可用的海阔源，先去「海阔设置」导入');
       return;
     }
-    final picked = await showModalBottomSheet<String>(
+    // 版式**对齐影视模块的源切换面板**（底部面板 + 双排卡片网格 + 搜索），
+    // 原来是 ListTile 列表弹窗，与影视那个观感完全不同（用户 2026-10-16）
+    final picked = await CardSourceSheet.show(
       context: context,
-      backgroundColor: AppTheme.backgroundCard,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 12),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                  color: AppTheme.borderMedium, borderRadius: BorderRadius.circular(2)),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text('切换海阔源',
-                        style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: AppTheme.fontHeadline,
-                            fontWeight: FontWeight.bold)),
-                  ),
-                  GestureDetector(
-                    onTap: () {
-                      Navigator.of(ctx).pop();
-                      _openSettings();
-                    },
-                    child: Text('管理',
-                        style: TextStyle(
-                            color: AppTheme.accentOnSurface,
-                            fontSize: AppTheme.fontSubhead)),
-                  ),
-                ],
-              ),
-            ),
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: list.length,
-                itemBuilder: (_, i) {
-                  final s = list[i];
-                  final cur = s.id == _store.currentId;
-                  return ListTile(
-                    dense: true,
-                    title: Text(s.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: cur ? AppTheme.accentOnSurface : AppTheme.textPrimary,
-                            fontSize: AppTheme.fontBody,
-                            fontWeight: cur ? FontWeight.w700 : FontWeight.w500)),
-                    subtitle: Text(
-                      s.usable ? s.author : '${s.author} · 不可用',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: s.usable
-                              ? AppTheme.textTertiary
-                              : Colors.orange.shade400,
-                          fontSize: AppTheme.fontCaption),
-                    ),
-                    trailing: cur
-                        ? Icon(Icons.check_rounded,
-                            size: 18, color: AppTheme.accentOnSurface)
-                        : null,
-                    onTap: () => Navigator.of(ctx).pop(s.id),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+      title: '切换海阔源',
+      searchable: true,
+      actionLabel: '管理',
+      onAction: _openSettings,
+      emptyHint: '还没有可用的海阔源',
+      items: [
+        for (final s in list)
+          CardSourceItem(
+            id: s.id,
+            title: s.title,
+            // 不可用的源仍列出来（与「海阔设置」一致），只是标红提示
+            subtitle: s.usable ? s.author : '${s.author} · 不可用',
+            warn: !s.usable,
+            // 分类 tab 与「海阔源管理」页同一口径（源自己的 group）
+            group: s.groupLabel,
+            selected: s.id == _store.currentId,
+          ),
+      ],
     );
     if (picked != null && picked != _store.currentId) {
       await _store.setCurrent(picked);

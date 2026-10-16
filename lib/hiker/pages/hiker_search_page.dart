@@ -281,6 +281,13 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
         builder: (_) => HikerDetailPage(
           source: widget.source,
           item: it,
+          // 「下一页」不是 lazy 时（有些源直接给 http / 规则串）用它跑一次新房页面
+          runPage: (u) => HikerEngine.instance.category(
+            widget.source,
+            u,
+            cateName: hikerPlainText(it.title),
+            vars: HikerStore.instance.varsOf(widget.source.id),
+          ),
           // 延迟规则链条：用同一个关键词重跑搜索，逐层执行（见 hiker_engine.js）
           replayLazy: (ids) async {
             final vars = HikerStore.instance.varsOf(widget.source.id);

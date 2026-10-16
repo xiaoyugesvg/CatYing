@@ -59,7 +59,8 @@ class WebhtvSettingsPage extends StatelessWidget {
                 icon: Icons.add_link_rounded,
                 title: '站点注入',
                 subtitle: '添加自定义 WebHome / CSP 站点：启用状态、插入位置、'
-                    '首页 homePage、搜索与换源行为；支持粘贴松散站点 JSON 自动归类',
+                    '首页 homePage、搜索与换源行为；支持粘贴松散站点 JSON 自动归类，'
+                    '也可一键导入内置 TVBox 配置',
                 onTap: () => Get.to(() => const WebhtvSiteInjectPage()),
               ),
               SettingsRow(

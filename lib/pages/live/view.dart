@@ -1863,6 +1863,9 @@ class _LivePageState extends State<LivePage> {
   }
 
   /// 显示直播源选择弹窗 — 居中、不透明、过高可滚动
+  ///
+  /// ⚠️ 用户 2026-10-16：「只有这个，直播「选择直播源」这个不变」——
+  /// 别把它跟海阔的源切换面板统一（那个走 `CardSourceSheet`）。
   Future<void> _showSourcePicker(BuildContext context, LiveController c) async {
     final srcs = LiveService.instance.sources;
     showDialog(

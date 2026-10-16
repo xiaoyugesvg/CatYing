@@ -1,4 +1,5 @@
 import 'package:file_picker/file_picker.dart';
+import 'package:get/get.dart';
 import '../widgets/music_sheet.dart';
 import 'package:flutter/material.dart';
 
@@ -13,6 +14,7 @@ import 'source_manager_page.dart';
 import '../../common/module_theme_store.dart';
 import '../../common/module_theme_sync.dart';
 import '../../common/theme_mode_store.dart';
+import '../../services/main_tab_controller.dart';
 import '../../reading/theme/jelly_palette.dart';
 import '../../common/theme.dart';
 import '../../widgets/app_toast.dart';
@@ -611,7 +613,7 @@ class _AccentPicker extends StatelessWidget {
                 selected: false,
                 trailing: Icon(Icons.chevron_right_rounded,
                     size: 20, color: MusicTheme.secondary),
-                onTap: () => _openSheet(context, current),
+                onTap: () => _openPicker(context, current),
               ),
             ],
           ),
@@ -635,7 +637,17 @@ class _AccentPicker extends StatelessWidget {
     return [palette.primary, palette.accent, palette.backgroundLight];
   }
 
-  Future<void> _openSheet(BuildContext context, String current) async {
+  /// 打开选主题弹窗。
+  ///
+  /// ── 用户 2026-10-16 报的两个问题，都在这里解决 ──────────────────
+  /// ① **「退出音乐模块弹窗还留着」**：底栏是 `IndexedStack` 切 tab，
+  ///    切 tab **不会 pop 路由** → 弹窗会盖到影视/阅读上面去。
+  ///    所以弹窗期间监听主 tab，一旦不是音乐就立刻关。
+  /// ② **「和悬浮菜单栏冲突」**：原来用的是全宽**底部面板**，正好压在
+  ///    音乐自己的悬浮播放条 + 导航栏那一块。改用音乐模块统一的
+  ///    [showMusicSheet]（**屏幕中间弹出**，约 4 行高、内部滚动），
+  ///    与「音质 / 封面形态」那些弹窗同一套观感。
+  Future<void> _openPicker(BuildContext context, String current) async {
     final store = ModuleThemeStore.instance;
 
     Future<void> pick(String id) async {
@@ -648,32 +660,65 @@ class _AccentPicker extends StatelessWidget {
       await applyModuleThemes();
     }
 
-    await showThemePresetSheet(
-      context: context,
-      title: '主题风格',
-      subtitle: '音乐',
-      rowsBuilder: (sheetCtx) => [
-        ThemePresetRow(
-          name: '跟随阅读',
-          subtitle: '与阅读模块当前配色一致',
-          dots: _dotsOf(ModuleThemeStore.followReading, store),
-          selected: current == ModuleThemeStore.followReading,
-          onTap: () {
-            Navigator.of(sheetCtx).pop();
-            pick(ModuleThemeStore.followReading);
-          },
-        ),
-        for (final p in themePresets)
-          ThemePresetRow(
-            name: p.name,
-            dots: _dotsOf(p.id, store),
-            selected: current == p.id,
-            onTap: () {
-              Navigator.of(sheetCtx).pop();
-              pick(p.id);
-            },
+    final tab = MainTabController.instance.selectedTab;
+    var closed = false;
+    void onTabChanged(int _) {
+      if (closed) return;
+      if (tab.value == MainTabController.musicTabIndex) return;
+      closed = true;
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+
+    // GetX 的 Rx 用 `ever` 订阅（`addListener` 的签名是 RxInterface 那套，
+    // 传普通回调会报 argument_type_not_assignable）
+    final worker = ever<int>(tab, onTabChanged);
+    try {
+      await showMusicSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        // 行里的颜色都取自 AppTheme（与影视/设置页同一套），底色也用同一套，
+        // 免得音乐自己的卡片色和它撞色
+        backgroundColor: AppTheme.backgroundSecondary,
+        builder: (sheetCtx) => SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(left: 4, bottom: 10),
+                child: Text('主题风格',
+                    style: TextStyle(
+                        color: MusicTheme.label,
+                        fontSize: AppTheme.fontTitle3,
+                        fontWeight: FontWeight.w600)),
+              ),
+              ThemePresetRow(
+                name: '跟随阅读',
+                subtitle: '与阅读模块当前配色一致',
+                dots: _dotsOf(ModuleThemeStore.followReading, store),
+                selected: current == ModuleThemeStore.followReading,
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  pick(ModuleThemeStore.followReading);
+                },
+              ),
+              for (final p in themePresets)
+                ThemePresetRow(
+                  name: p.name,
+                  dots: _dotsOf(p.id, store),
+                  selected: current == p.id,
+                  onTap: () {
+                    Navigator.of(sheetCtx).pop();
+                    pick(p.id);
+                  },
+                ),
+            ],
           ),
-      ],
-    );
+        ),
+      );
+    } finally {
+      closed = true;
+      worker.dispose();
+    }
   }
 }

@@ -75,6 +75,10 @@ class AdBlockService extends ChangeNotifier {
 
   final List<AdBlockRule> _rules = [];
 
+  /// **回收站**：被删掉的规则（点选生成的也好、手加的也好）不直接丢，
+  /// 在这里留一份，设置页「最近删除」里能一键恢复（用户 2026-10-16）。
+  final List<AdBlockRule> _trash = [];
+
   /// 被用户**单条关掉**的内置通用选择器（prefs 里存 StringList）
   final Set<String> _builtinOff = {};
 
@@ -99,6 +103,12 @@ class AdBlockService extends ChangeNotifier {
   bool get builtinEnabled => _builtin;
 
   List<AdBlockRule> get rules => List.unmodifiable(_rules);
+
+  /// 最近删除（可恢复）
+  List<AdBlockRule> get trashRules => List.unmodifiable(_trash);
+
+  /// 回收站最多留多少条（够反悔就行，别把文件撑大）
+  static const int kTrashLimit = 50;
 
   /// 内置**通用**选择器 —— 只放"名字里明确就是广告"的，宁少勿滥。
   ///
@@ -168,6 +178,101 @@ class AdBlockService extends ChangeNotifier {
     try {
       await controller.runJavaScript('try{window.__tbPickStop&&window.__tbPickStop();}catch(e){}');
     } catch (_) {}
+  }
+
+  /// 清掉点选时打的**橙色预览框**（用户确认 / 取消后调用）
+  ///
+  /// 点选那一下故意**保留**预览框（让用户先看清"这些都会被藏掉"），
+  /// 所以必须由这边显式清 —— 否则框会一直挂在页面上（用户 2026-10-16 要求）。
+  Future<void> clearPickPreview(WebViewController controller) async {
+    try {
+      await controller.runJavaScript(
+          'try{window.__tbPickClear&&window.__tbPickClear();}catch(e){}');
+    } catch (_) {}
+  }
+
+  /// 把橙框重画到 [selector] 命中的元素上（确认框里改选择器时实时预览）
+  Future<void> previewSelector(WebViewController controller, String selector) async {
+    try {
+      await controller.runJavaScript(
+          'try{window.__tbPickApi&&window.__tbPickApi.preview(${jsonEncode(selector)});}catch(e){}');
+    } catch (_) {}
+  }
+
+  /// [selector] 在页面上会命中几个元素；-1 = 选择器非法/页面里没有点选脚本
+  Future<int> countSelector(WebViewController controller, String selector) async {
+    try {
+      final r = await controller.runJavaScriptReturningResult(
+          '(window.__tbPickApi?window.__tbPickApi.count(${jsonEncode(selector)}):-1)');
+      return int.tryParse(_jsString(r)) ?? -1;
+    } catch (_) {
+      return -1;
+    }
+  }
+
+  /// **微调**选择器（用户 2026-10-16：「功能更细化加强」）：
+  ///   · `wide`   放大范围（标签 + 第一个 class，命中同类更多）
+  ///   · `narrow` 精确到这一个（标签 + nth-of-type 路径）
+  ///   · `parent` 上一层（点到了图片/小链接时的标准出路）
+  /// 返回新选择器与新的命中数（同时页面上的橙框已经重画好）。
+  Future<({String selector, int count})?> adjustPick(
+    WebViewController controller,
+    String mode,
+  ) async {
+    try {
+      final r = await controller.runJavaScriptReturningResult(
+          'JSON.stringify((window.__tbPickApi&&'
+          'window.__tbPickApi.adjust(${jsonEncode(mode)}))||null)');
+      final raw = _jsString(r);
+      if (raw.isEmpty || raw == 'null') return null;
+      final j = jsonDecode(raw);
+      if (j is! Map) return null;
+      final sel = (j['selector'] ?? '').toString();
+      if (sel.isEmpty) return null;
+      return (selector: sel, count: (j['count'] as num?)?.toInt() ?? -1);
+    } catch (e) {
+      AppLog.instance.log('[AdBlock] 微调选择器失败: $e');
+      return null;
+    }
+  }
+
+  /// `runJavaScriptReturningResult` 的返回值可能是**带引号的字符串**（iOS）
+  /// 或裸值（Android），统一剥一层引号
+  static String _jsString(dynamic r) {
+    var s = '${r}'.trim();
+    if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {
+      s = s.substring(1, s.length - 1);
+    }
+    return s.replaceAll(r'\"', '"').replaceAll(r'\n', '');
+  }
+
+  /// 保存规则后**立刻生效并校验**：返回是否真的把 CSS 注进去了。
+  ///
+  /// 用户 2026-10-16：「点击去掉广告后应该自动刷新，感觉这个功能没成功」——
+  /// 注入是异步的、且部分站点（CSP / 动态挂载）可能当场不生效，
+  /// 所以这里做一次**实证校验**：确认 `<style id="__tbAdBlockStyle">` 存在、
+  /// 且里面确实带上了这条选择器。没生效由调用方决定要不要 reload 兜底。
+  Future<bool> applyAndVerify(
+    WebViewController controller,
+    String pageUrl,
+    String selector,
+  ) async {
+    await injectInto(controller, pageUrl);
+    try {
+      // 选择器要**转义后**再拼进 JS（`jsonEncode` 出来的字符串本身就是合法 JS 字面量）
+      final s = jsonEncode(selector);
+      final r = await controller.runJavaScriptReturningResult(
+          '(function(){try{'
+          'var st=document.getElementById("__tbAdBlockStyle");'
+          'if(!st)return "nostyle";'
+          'if(String(st.textContent||"").indexOf($s)<0)return "nosel";'
+          'return "ok";'
+          '}catch(e){return "err";}})()');
+      return '${r}'.replaceAll('"', '').trim() == 'ok';
+    } catch (e) {
+      AppLog.instance.log('[AdBlock] 校验注入结果失败: $e');
+      return false;
+    }
   }
 
   void onChannelMessage(String raw) {
@@ -320,8 +425,54 @@ class AdBlockService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> removeRule(AdBlockRule r) async {
-    _rules.removeWhere((x) => x.host == r.host && x.selector == r.selector);
+  Future<void> removeRule(AdBlockRule r, {bool toTrash = true}) async {
+    final idx =
+        _rules.indexWhere((x) => x.host == r.host && x.selector == r.selector);
+    if (idx < 0) return;
+    final gone = _rules.removeAt(idx);
+    // ── 回收站（用户 2026-10-16：「删除指定的选中广告能不能恢复」）──
+    // 删了直接丢就永远找不回来（广告管理页那个 ✕ 很容易手滑）。这里改成
+    // **软删除**：进回收站，设置页「最近删除」里可一键恢复。
+    if (toTrash) {
+      _trash.removeWhere(
+          (x) => x.host == gone.host && x.selector == gone.selector);
+      _trash.insert(0, gone);
+      if (_trash.length > kTrashLimit) {
+        _trash.removeRange(kTrashLimit, _trash.length);
+      }
+    }
+    await _persist();
+    notifyListeners();
+  }
+
+  /// 从回收站恢复一条（恢复后立刻参与注入）
+  Future<void> restoreRule(AdBlockRule r) async {
+    _trash
+        .removeWhere((x) => x.host == r.host && x.selector == r.selector);
+    if (!_rules.any((x) => x.host == r.host && x.selector == r.selector)) {
+      _rules.insert(0, r);
+    }
+    await _persist();
+    notifyListeners();
+  }
+
+  /// 恢复**全部**最近删除
+  Future<int> restoreAllTrash() async {
+    final n = _trash.length;
+    for (final r in _trash.reversed) {
+      if (!_rules.any((x) => x.host == r.host && x.selector == r.selector)) {
+        _rules.insert(0, r);
+      }
+    }
+    _trash.clear();
+    await _persist();
+    notifyListeners();
+    return n;
+  }
+
+  /// 清空回收站（彻底删除）
+  Future<void> clearTrash() async {
+    _trash.clear();
     await _persist();
     notifyListeners();
   }
@@ -347,7 +498,15 @@ class AdBlockService extends ChangeNotifier {
   }
 
   Future<void> clearRules() async {
+    // 清空也走回收站 —— "全删了"同样需要一个后悔药
+    for (final r in _rules.reversed) {
+      _trash.removeWhere((x) => x.host == r.host && x.selector == r.selector);
+      _trash.insert(0, r);
+    }
     _rules.clear();
+    if (_trash.length > kTrashLimit) {
+      _trash.removeRange(kTrashLimit, _trash.length);
+    }
     await _persist();
     notifyListeners();
   }
@@ -434,10 +593,13 @@ class AdBlockService extends ChangeNotifier {
         _filterOrigin = 'builtin';
         _filterCss = await _readBuiltinFilter();
       }
-      final list = await _readRules();
+      final parsed = await _readRules();
       _rules
         ..clear()
-        ..addAll(list);
+        ..addAll(parsed.rules);
+      _trash
+        ..clear()
+        ..addAll(parsed.trash);
     } catch (e) {
       AppLog.instance.log('[AdBlock] 加载失败: $e');
       return;
@@ -531,9 +693,13 @@ class AdBlockService extends ChangeNotifier {
     }
   }
 
-  Future<List<AdBlockRule>> _readRules() async {
+  /// 读规则（顺带读回收站）。文件里 `rules` / `trash` 是两个数组
+  Future<({List<AdBlockRule> rules, List<AdBlockRule> trash})> _readRules()
+      async {
     final f = await _file();
-    if (f == null) return const [];
+    if (f == null) {
+      return (rules: const <AdBlockRule>[], trash: const <AdBlockRule>[]);
+    }
     for (final path in [f.path, '${f.path}.bak']) {
       try {
         final file = File(path);
@@ -541,18 +707,30 @@ class AdBlockService extends ChangeNotifier {
         final raw = await file.readAsString();
         if (raw.trim().isEmpty) continue;
         final j = jsonDecode(raw);
-        final list = j is Map ? j['rules'] : j;
-        if (list is! List) continue;
-        return [
-          for (final e in list)
-            if (e is Map) AdBlockRule.fromJson(Map<String, dynamic>.from(e)),
-        ];
+        // 老格式：顶层直接是数组（还没有回收站）
+        if (j is! Map) {
+          if (j is List) {
+            return (rules: _rulesOf(j), trash: const <AdBlockRule>[]);
+          }
+          continue;
+        }
+        final rl = j['rules'];
+        final tl = j['trash'];
+        return (
+          rules: rl is List ? _rulesOf(rl) : const <AdBlockRule>[],
+          trash: tl is List ? _rulesOf(tl) : const <AdBlockRule>[],
+        );
       } catch (_) {
         // 主文件坏了就试 .bak
       }
     }
-    return const [];
+    return (rules: const <AdBlockRule>[], trash: const <AdBlockRule>[]);
   }
+
+  static List<AdBlockRule> _rulesOf(List<dynamic> list) => [
+        for (final e in list)
+          if (e is Map) AdBlockRule.fromJson(Map<String, dynamic>.from(e)),
+      ];
 
   Future<void> _persist() async {
     final f = await _file();
@@ -563,6 +741,8 @@ class AdBlockService extends ChangeNotifier {
         jsonEncode({
           'version': 1,
           'rules': _rules.map((r) => r.toJson()).toList(),
+          // 回收站（最近删除，可恢复）
+          'trash': _trash.map((r) => r.toJson()).toList(),
         }),
         flush: true,
       );
@@ -660,6 +840,17 @@ class AdBlockService extends ChangeNotifier {
   }
 
   /// 点选元素模式：高亮跟随 → 点一下算出选择器并回传（见 [AdBlockPick]）
+  ///
+  /// ── 用户 2026-10-16 的要求 ────────────────────────────────────
+  /// ① 「点击后要将选中的内容加个亮框」：原来 `onClick` 里 `stop()` 把悬停高亮
+  ///    一并清掉 ⇒ 点完没痕迹。现在点完给**所有命中该选择器的元素**加**橙框**
+  ///    （= "这些都会被藏掉"），留到确认/取消才清（[AdBlockService.clearPickPreview]）。
+  /// ② 「功能更细化加强」：暴露 `window.__tbPickApi`，让确认框里能：
+  ///    · `preview(sel)` 改选择器时**实时重画橙框**（所见即所得）
+  ///    · `count(sel)`   实时显示"会命中几个"
+  ///    · `adjust('wide'|'narrow'|'parent')` 一键**放大 / 精确 / 上一层**
+  ///      —— 点不准（点到图片、点到小链接）时的唯一出路，基于**最后点的那个元素**
+  ///      重新生成，比让用户手改 CSS 靠谱。
   static const String kPickStartJs = r'''
 (function(){
   try{
@@ -669,16 +860,42 @@ class AdBlockService extends ChangeNotifier {
     if (!hi) {
       hi = document.createElement('style');
       hi.id = '__tbPickHi';
-      hi.textContent = '.__tbPickHl{outline:2px solid #0FDC78 !important;outline-offset:-2px !important;background:rgba(15,220,120,.18) !important;}';
+      hi.textContent =
+        '.__tbPickHl{outline:2px solid #0FDC78 !important;outline-offset:-2px !important;background:rgba(15,220,120,.18) !important;}' +
+        '.__tbPickHit{outline:3px solid #FFB300 !important;outline-offset:-3px !important;background:rgba(255,179,0,.16) !important;}';
       (document.head || document.documentElement).appendChild(hi);
     }
-    var last = null;
+    var last = null;      // 悬停高亮的元素
+    var lastEl = null;    // **最后点中**的元素（微调要以它为基准）
+    var hits = [];
     var send = function(o){ try{ window.TbAdBlock.postMessage(JSON.stringify(o)); }catch(e){} };
     var hl = function(el){
       if (last === el) return;
       try{ if (last && last.classList) last.classList.remove('__tbPickHl'); }catch(e){}
       last = el;
       try{ if (el && el.classList) el.classList.add('__tbPickHl'); }catch(e){}
+    };
+    var clearHits = function(){
+      for (var i = 0; i < hits.length; i++) {
+        try{ if (hits[i] && hits[i].classList) hits[i].classList.remove('__tbPickHit'); }catch(e){}
+      }
+      hits = [];
+    };
+    window.__tbPickClear = clearHits;
+    var showHits = function(sel){
+      clearHits();
+      try{
+        var nodes = document.querySelectorAll(sel);
+        for (var i = 0; i < nodes.length && i < 60; i++) {
+          if (nodes[i] && nodes[i].classList) {
+            nodes[i].classList.add('__tbPickHit');
+            hits.push(nodes[i]);
+          }
+        }
+      }catch(e){}
+    };
+    var countOf = function(sel){
+      try{ return document.querySelectorAll(sel).length; }catch(e){ return -1; }
     };
     var okName = function(s){ return /^[A-Za-z][A-Za-z0-9_-]*$/.test(s); };
     // 去掉「同类各异」的部分：长数字后缀（ad-1234）与明显的随机串
@@ -687,6 +904,31 @@ class AdBlockService extends ChangeNotifier {
       if (/^[a-z]+[-_]?\d{3,}$/i.test(t)) return t.replace(/[-_]?\d{3,}$/, '');
       if (/^[A-Za-z0-9_-]{12,}$/.test(t) && /\d/.test(t)) return '';
       return t;
+    };
+    // 标签 + 第 n 个同类（只命中"这一个"，用于"精确"）
+    var nthOf = function(el){
+      var t = el.tagName ? el.tagName.toLowerCase() : 'div';
+      var p = el.parentNode;
+      if (p) {
+        var idx = 1, sib = p.firstElementChild;
+        while (sib) {
+          if (sib === el) break;
+          if (sib.tagName === el.tagName) idx++;
+          sib = sib.nextElementSibling;
+        }
+        t += ':nth-of-type(' + idx + ')';
+      }
+      return t;
+    };
+    // 逐级往上的路径（最多 3 层 nth-of-type）：保证"只命中这一处"
+    var genPath = function(el){
+      var parts = [], cur = el, depth = 0;
+      while (cur && cur.nodeType === 1 && depth < 3) {
+        parts.unshift(nthOf(cur));
+        cur = cur.parentNode;
+        depth++;
+      }
+      return parts.join(' > ');
     };
     // 生成"能命中同类型元素"的选择器：优先 tag + class（同类一般共享 class）
     var gen = function(el){
@@ -704,28 +946,45 @@ class AdBlockService extends ChangeNotifier {
         var sid = /^[a-z]+[-_]?\d{3,}$/i.test(id) ? id.replace(/[-_]?\d{3,}$/, '') : id;
         if (/^[A-Za-z]/.test(sid)) return '#' + sid;
       }
-      var parts = [], cur = el, depth = 0;
-      while (cur && cur.nodeType === 1 && depth < 3) {
-        var t = cur.tagName.toLowerCase();
-        var p = cur.parentNode;
-        if (p) {
-          var idx = 1, sib = p.firstElementChild;
-          while (sib) { if (sib === cur) break; if (sib.tagName === cur.tagName) idx++; sib = sib.nextElementSibling; }
-          t += ':nth-of-type(' + idx + ')';
-        }
-        parts.unshift(t);
-        cur = cur.parentNode;
-        depth++;
-      }
-      return parts.join(' > ');
+      return genPath(el);
     };
-    var stop = function(){
+    // ── 微调 API（确认框里的「放大 / 精确 / 上一层」与实时预览都走它）──
+    window.__tbPickApi = {
+      preview: function(sel){ showHits(sel); return 0; },
+      count: function(sel){ return countOf(sel); },
+      // mode: wide 更宽松（标签+第一个 class） / narrow 只此一个 / parent 上一层
+      adjust: function(mode){
+        var el = lastEl;
+        if (!el) return null;
+        var target = (mode === 'parent' && el.parentElement) ? el.parentElement : el;
+        var sel = '';
+        if (mode === 'wide') {
+          var tag = target.tagName ? target.tagName.toLowerCase() : 'div';
+          var raw = (target.className && target.className.toString) ? target.className.toString().trim() : '';
+          var first = raw ? stable(raw.split(/\s+/)[0]) : '';
+          sel = (first && okName(first)) ? (tag + '.' + first) : tag;
+        } else if (mode === 'narrow') {
+          sel = genPath(target);
+        } else if (mode === 'parent') {
+          sel = gen(target);
+        } else {
+          sel = gen(target);
+        }
+        if (!sel) return null;
+        lastEl = target;      // 连续点"上一层"能一路往上走
+        showHits(sel);
+        return { selector: sel, count: countOf(sel), tag: (target.tagName || '') };
+      }
+    };
+    // keepPreview=true 时保留"将命中"的橙框（点选完成，等用户确认）
+    var stop = function(keepPreview){
       try{
         window.__tbPickOn = 0;
         document.removeEventListener('mouseover', onMove, true);
         document.removeEventListener('touchstart', onTouch, true);
         document.removeEventListener('click', onClick, true);
         if (last && last.classList) last.classList.remove('__tbPickHl');
+        if (!keepPreview) clearHits();
       }catch(e){}
     };
     var onMove = function(e){ var el = e.target; if (el && el.nodeType === 1) hl(el); };
@@ -739,13 +998,16 @@ class AdBlockService extends ChangeNotifier {
       e.preventDefault();
       e.stopPropagation();
       var el = e.target;
-      if (!el || el.nodeType !== 1) { stop(); return; }
-      var sel = gen(el), n = 1;
-      try{ n = document.querySelectorAll(sel).length; }catch(err){}
+      if (!el || el.nodeType !== 1) { stop(false); return; }
+      lastEl = el;
+      var sel = gen(el), n = countOf(sel);
+      // ① 先给命中的元素打上橙框（用户看得到"要藏哪些"）
+      showHits(sel);
       send({type:'pick', selector:sel, count:n, tag:el.tagName, id:el.id || ''});
-      stop();
+      // ② 停监听但**保留橙框** —— 由 Dart 在确认/取消后调 __tbPickClear
+      stop(true);
     };
-    window.__tbPickStop = stop;
+    window.__tbPickStop = function(){ stop(false); };
     document.addEventListener('mouseover', onMove, true);
     document.addEventListener('touchstart', onTouch, true);
     document.addEventListener('click', onClick, true);

@@ -28,9 +28,11 @@
  *   ✅ 结果：`setResult` / `setHomeResult`（数组、`{data:[...]}`、JSON 字符串、
  *      海阔列表 DSL 字符串）
  *   ✅ 变量：`getParam` / `getMyVar` / `setMyVar` / `putMyVar` / `delMyVar`
+ *   ✅ 翻页：`setNextPage`（结果里的 `nextPage`；首页/搜索用它"加载更多"，
+ *      看图页用它做"下拉自动下一章" —— 见 simple_image_reader_page.dart）
  *   ✅ `x5://` 前缀剥离、`hiker://empty` 占位
  *   ❌ 未支持（Phase 2/3）：`hiker://page/*` 内置页面模块、`$.aes/$.des/$.rsa`、
- *      `hiker://assets/*`、多级 `pages` 跳转、`setNextPage` 翻页
+ *      `hiker://assets/*`、多级 `pages` 跳转
  */
 
 import * as cheerioNs from 'cheerio';
@@ -1902,7 +1904,41 @@ function buildCryptoGlobals() {
     toString: (w) => (w && typeof w.toString === 'function'
       ? w.toString(CryptoJS.enc.Utf8) : String(w == null ? '' : w)),
   };
-  return { AES, Data };
+  // ⚠️ `CryptoJS` 必须一起给：官方是把整份 `assets/aes.js`（CryptoJS 副本 + AES/Data
+  //    封装）**全局注入**的，源里除了 `AES.encrypt(...)` 还会直接写
+  //    `CryptoJS.MD5(...)` / `CryptoJS.enc.Base64` —— 少了它照样 "CryptoJS is not defined"。
+  return { AES, Data, CryptoJS };
+}
+
+/// 官方文档里的**裸加密函数**（hiker `assets/help_js.json`「md5」节）：
+///   `const a = md5('xxx')`；取文件 MD5：`md5('hiker://files/xxx.zip')`
+///
+/// ⚠️ 这是**引擎缺口**，不是源的问题：少了裸 `md5`，源在"取 token / 签名"那一步
+///    就抛 `md5 is not defined`，整条规则中断 —— 表现在界面上正好是
+///    "首页/分类能出，点进去拿不到详情和地址"（实测日志见 2026-10-16 审核）。
+///    `sha1/sha256/sha512` 同一族，一起给上（都是 CryptoJS 现成的）。
+const BARE_HASH_FNS = {
+  md5: 'MD5',
+  sha1: 'SHA1',
+  sha256: 'SHA256',
+  sha512: 'SHA512',
+};
+
+function bareHashHex(algo, input, rt) {
+  const s = String(input == null ? '' : input);
+  const fn = CryptoJS[BARE_HASH_FNS[algo]];
+  if (!fn) return '';
+  // `hiker://files/…` → 按**文件字节**算（官方文档写法）
+  if (s.startsWith('hiker://files/')) {
+    try {
+      const p = path.join(
+          rt && rt.filesDir ? rt.filesDir : '',
+          s.slice('hiker://files/'.length));
+      const buf = fs.readFileSync(p);
+      return fn(CryptoJS.lib.WordArray.create(new Uint8Array(buf))).toString();
+    } catch (_) {/* 文件不存在就走字符串分支 */}
+  }
+  return fn(s).toString();
 }
 
 // ============================================================
@@ -2014,6 +2050,22 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
     // ——实测 MissAV / 道长仓库Pro 直接按全局函数调用，只挂 `$.` 上不够
     base64Encode: (s) => Buffer.from(String(s == null ? '' : s), 'utf8').toString('base64'),
     base64Decode: (s) => Buffer.from(String(s == null ? '' : s), 'base64').toString('utf8'),
+    // 官方文档的**裸加密函数**（`const a = md5('xxx')`，见 help_js.json「md5」节）
+    // —— 实测有源直接裸调；少了它整条规则在取 token / 签名那步就炸，
+    //    表现就是"首页分类能出、点进去拿不到详情和地址"（见 [bareHashHex]）
+    md5: (s) => bareHashHex('md5', s, rt),
+    sha1: (s) => bareHashHex('sha1', s, rt),
+    sha256: (s) => bareHashHex('sha256', s, rt),
+    sha512: (s) => bareHashHex('sha512', s, rt),
+    /// 官方文档：16 进制串 → Uint8Array（常搭配 `fetch(url,{toHex:true})`）
+    hexToBytes: (h) => {
+      const s = String(h == null ? '' : h);
+      const out = new Uint8Array(Math.floor(s.length / 2));
+      for (let i = 0; i < out.length; i++) {
+        out[i] = parseInt(s.substr(i * 2, 2), 16) || 0;
+      }
+      return out;
+    },
     // `rc` / `requireCache` 也常有**裸调用**（实测有源直接写 `rc('http://…/x.js', 24)`）
     //   箭头在调用时才执行 ⇒ 这里引用外层的 `sandbox` 是安全的
     rc: (url, hours) => requireRemoteJs(rt, sandbox, url, hours),

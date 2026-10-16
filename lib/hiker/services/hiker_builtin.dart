@@ -19,8 +19,15 @@ import 'hiker_store.dart';
 /// （当时只写了 25 个，漏掉 20 个 —— 早期引擎缺 `input`/`KEY` 等能力，误判成跑不动）。
 /// 回归记录：45/45 有首页内容。
 ///
+/// 2026-10-16 分三批下架了 31 个（成人导航 / 论坛 / 工具 / 实测「分类内容·搜索·详情·地址」
+/// 拿不出东西的）⇒ 现在 **14 个**；已经装过老版本的用户由 [kRetiredIds] 清掉，见 [removeRetired]。
+///
+/// 口径说明：**「首页能出内容」不算数**。按「首页 / 分类内容 / 搜索 / 详情页 / 地址」
+/// 逐项真跑审核（`assets/nodejs-project/scratch/_audit_caps.mjs`），保留 ≥3 分的；
+/// 其中「网页吃瓜」本来被判 2 分，复核发现它第一层就能拿到 m3u8，是判据误伤，已留下。
+///
 /// 注意：UI 上的「可用 / 不可用」是 [HikerSource.usable] 的**静态**判定，
-/// 有假阴性（`𝟕𝐌𝐌𝐓𝐕`、`星集Media` 等被判不可用但实际能跑），所以它只作为
+/// 有假阴性（静态判「不可用」但实际能跑的源），所以它只作为
 /// 标签展示，**不再用来阻止加载**（见 hiker_home_page 的 `_load`）。
 ///
 /// 因此这份清单代表"当前引擎能力的真实边界"，而不是宣传口径。
@@ -31,6 +38,71 @@ class HikerBuiltin {
 
   /// 上次安装过的**内置清单指纹**（见 [installIfNeeded]）
   static const String _kStamp = 'hiker_builtin_stamp_v1';
+
+  /// 已**下架**的内置源 id（`标题\u0001作者`，见 [HikerSource.id]）。
+  ///
+  /// ── 为什么需要这张表（用户 2026-10-16：「去掉潮流私密屋这个源」）──
+  /// [install] 是**upsert**（补缺 + 更新），**从不删** —— 所以老用户升级后
+  /// 那个源还留在仓库里，"内置清单里没有了"和"用户看不到"是两回事。
+  /// 这里显式列出来，[installIfNeeded] 每次进来顺手清一遍（幂等，很快）。
+  ///
+  /// ⚠️ 按 id 删会连"用户自己导入的同一条源"一起删 —— 可接受：
+  /// id 就是 `标题+作者`，即同一条源；既然 App 侧决定下架，就统一不留。
+  static const List<String> kRetiredIds = [
+    // 2026-10-16 第一批：成人导航 / 非影视工具 / 论坛
+    '潮流私密屋\u0001时尚潮流',
+    '查询IP地址\u0001R',
+    '吾爱破解\u{1D525}\u0001Hood',
+    // 2026-10-16 第二批：用户实测点进去拿不到内容
+    '破解APP\u0001小棉袄🌞&永远の明日',
+    '某聚合\u0001none',
+    '模板·Q\u0001发粪涂墙',
+    'JavDB v5\u0001天空 / ChatGPT',
+    'JavDB v3\u0001天空 / ChatGPT',
+    '仙帝美图乐\u0001仙仙帝',
+    '发哥专属\u0001发哥',
+    '星集Media\u0001不知道叫啥好',
+    '比价.拒绝套路\u0001小棉袄🌞',
+    '色情导航\u0001Xiaohuihui',
+    '一个APP\u0001zhao',
+    '集芳阁云搜\u0001',
+    '聚涩吧\u0001',
+    // 2026-10-16 第三批（宽松口径：实测「首页/分类内容/搜索/详情/地址」≤2 分的）
+    '𝟕𝐌𝐌𝐓𝐕\u0001R',
+    'AnySex\u0001KFC',
+    '黄色仓库123\u0001FenMei',
+    '𝐗𝐎𝐉𝐚𝐯\u0001R',
+    '良家视频\u0001zz',
+    '大哥视频\u0001JiaYQAQ',
+    '绿帽社\u0001KFC',
+    '✨魔曰✨\u0001Aries',
+    'AVbebe\u0001Minis',
+    '漫小肆\u0001Sky&Guang',
+    '萝莉聚合AV\u0001西米露',
+    '91成人短剧\u0001KFC',
+    'XiuRen秀人网\u0001xiao&ai',
+    '新吾爱吃瓜网\u0001集&Aries',
+    '𝐉𝐌𝐂𝐨𝐦𝐢𝐜𝟐本地\u0001流苏',
+  ];
+
+  /// 清掉 [kRetiredIds] 里列出的源（幂等；不在仓库里的直接跳过）
+  static Future<int> removeRetired() async {
+    var n = 0;
+    try {
+      final store = HikerStore.instance;
+      if (!store.loaded) await store.load();
+      for (final id in kRetiredIds) {
+        if (!store.sources.any((s) => s.id == id)) continue;
+        await store.remove(id);
+        n++;
+        AppLog.instance.log(
+            '[Hiker] 已移除下架的内置源：${id.split('\u0001').first}');
+      }
+    } catch (e) {
+      AppLog.instance.log('[Hiker] 移除下架内置源失败: $e');
+    }
+    return n;
+  }
 
   /// 随包分发的「海阔 App 自带资源」目录（源文件取自 [hikerView] 的
   /// `app/src/main/assets/`：home.js / inject.js / theme.js / css.js …）。
@@ -93,6 +165,8 @@ class HikerBuiltin {
   static Future<void> installIfNeeded() async {
     final list = await load();
     if (list.isEmpty) return;
+    // 先清下架源：**要放在指纹早退之前** —— 否则"清单没变"的老用户永远清不掉
+    await removeRetired();
     final stamp = _fingerprint(list);
     String last = '';
     try {

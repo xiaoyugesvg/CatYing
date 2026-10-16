@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../common/theme.dart';
 import '../../widgets/app_toast.dart';
+import '../widgets/card_source_sheet.dart';
 import '../services/hiker_builtin.dart';
 import '../services/hiker_prefs.dart';
 import '../services/hiker_store.dart';
@@ -479,76 +480,27 @@ class _HikerSettingsPageState extends State<HikerSettingsPage> {
 
   Future<void> _pickSource() async {
     final list = _store.sources;
-    final picked = await showModalBottomSheet<String>(
+    // 版式**对齐影视模块的源切换面板**（底部面板 + 双排卡片网格 + 搜索）；
+    // 原来是 ListTile 列表弹窗，与影视那个观感完全不同（用户 2026-10-16）
+    final picked = await CardSourceSheet.show(
       context: context,
-      backgroundColor: AppTheme.backgroundCard,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 12),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                  color: AppTheme.borderMedium, borderRadius: BorderRadius.circular(2)),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text('选择当前源',
-                        style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: AppTheme.fontHeadline,
-                            fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              ),
-            ),
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: list.length,
-                itemBuilder: (_, i) {
-                  final s = list[i];
-                  final cur = s.id == _store.currentId;
-                  return ListTile(
-                    dense: true,
-                    title: Text(s.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: cur ? AppTheme.accentOnSurface : AppTheme.textPrimary,
-                            fontSize: AppTheme.fontBody,
-                            fontWeight: cur ? FontWeight.w700 : FontWeight.w500)),
-                    subtitle: Text(
-                      s.usable ? '${s.author} · 可用' : '${s.author} · ${s.unusableReason}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: s.usable
-                              ? AppTheme.textTertiary
-                              : Colors.orange.shade400,
-                          fontSize: AppTheme.fontCaption),
-                    ),
-                    trailing: cur
-                        ? Icon(Icons.check_rounded,
-                            size: 18, color: AppTheme.accentOnSurface)
-                        : null,
-                    onTap: () => Navigator.of(ctx).pop(s.id),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
+      title: '选择当前源',
+      searchable: true,
+      emptyHint: '还没有海阔源，先点「安装内置源」或导入',
+      items: [
+        for (final s in list)
+          CardSourceItem(
+            id: s.id,
+            title: s.title,
+            subtitle: s.usable
+                ? '${s.author} · 可用'
+                : '${s.author} · ${s.unusableReason}',
+            warn: !s.usable,
+            // 分类 tab 与「源管理」页同一口径（源自己的 group）
+            group: s.groupLabel,
+            selected: s.id == _store.currentId,
+          ),
+      ],
     );
     if (picked != null) await _store.setCurrent(picked);
   }

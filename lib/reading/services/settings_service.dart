@@ -83,9 +83,19 @@ enum HomeBannerStyle {
   /// 与「交错瀑布」的区别：那边是 2 列 / 1 大 2 小，这边是 3 列等宽不等高。
   stair,
 
-  /// 上下双联（2026-10-16 换掉「九宫格」）：一页 2 张**横版通栏大图**上下堆叠
-  /// （各自左下标题 + 右下方角标）—— 与「横版大图」的区别是"同屏两张"。
-  twin;
+  /// 走马灯（2026-10-16 **换掉**「上下双联」）：一页 1 张横版图文，
+  /// 图上叠加**左右箭头** + **底部圆点指示器**，5 秒自动播放 + 可拖动 / 点箭头。
+  /// 就是最常见的那种 Banner 走马灯（自动播 + 左右箭头 + 圆点）。
+  carousel,
+
+  /// 扑克牌（2026-10-16 新增）：卡牌**前后堆叠**，左右两张各露出一角，
+  /// 切换时带抽离 / 滑动（拖动过程中缩放、下沉、微旋与位移是连续的）。
+  /// 比"并排"更有层次，适合影视推荐这类偏年轻化的模块。
+  poker,
+
+  /// 标签页（2026-10-16 新增）：上方**标签条** + 下方卡片**联动** ——
+  /// 滑卡片时标签跟着切，点标签卡片滑过去。适合按"最新 / 精选 / 快看"分档展示。
+  tabs;
 
   String get label => switch (this) {
         // 名称统一**最多 4 个字**（用户 2026-10-14：多了去掉，卡片宽度才一致）
@@ -96,7 +106,9 @@ enum HomeBannerStyle {
         HomeBannerStyle.masonry => '交错瀑布',
         HomeBannerStyle.spotlight => '编辑推荐',
         HomeBannerStyle.stair => '高低错落',
-        HomeBannerStyle.twin => '上下双联',
+        HomeBannerStyle.carousel => '走马灯',
+        HomeBannerStyle.poker => '扑克牌',
+        HomeBannerStyle.tabs => '标签页',
       };
 }
 
@@ -143,14 +155,18 @@ const int kHomeBannerMaxItems = 9;
 /// ⚠️ 各样式"每页张数"的定义在 `pages/home/view.dart` 的 `_kBanner*PerPage`，
 /// 改那边记得同步这里。
 int homeBannerItemCount(HomeBannerStyle style) => switch (style) {
-      // 一页 1 张（大图 / 卡片轮播 / 沉浸大图 / 编辑推荐）→ 9 张，轮播久一点
+      // 一页 1 张（大图 / 卡片轮播 / 沉浸大图 / 编辑推荐 / 走马灯 / 扑克牌）
+      // → 9 张，轮播久一点
       HomeBannerStyle.wide ||
       HomeBannerStyle.cards ||
       HomeBannerStyle.hero ||
-      HomeBannerStyle.spotlight =>
+      HomeBannerStyle.spotlight ||
+      HomeBannerStyle.carousel ||
+      HomeBannerStyle.poker =>
         9,
-      // 一页 2 张（上下双联）→ 8
-      HomeBannerStyle.twin => 8,
+      // 一页 1 张，但上方还有一条**标签**要排 → 只取 6 个，
+      // 标签条不至于挤成一条缝（用户 2026-10-16 新增「标签页」）
+      HomeBannerStyle.tabs => 6,
       // 一页 3 张（交错瀑布 / 高低错落）→ 9
       HomeBannerStyle.masonry || HomeBannerStyle.stair => 9,
       // 一页 4 张（主次三栏：1 大 + 3 小）→ 8

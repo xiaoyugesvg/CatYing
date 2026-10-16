@@ -511,6 +511,10 @@ class _HomePageState extends State<HomePage>
                       currentIndex: currentIndex,
                       floating: floating,
                       onTap: (index) => _onNavTap(index, visible, currentIndex),
+                      // 点**当前** tab 也要走一次（否则内嵌的书源页退不出去，
+                      // 见 JellyNavBar.onReselect 的说明）
+                      onReselect: (index) =>
+                          _onNavTap(index, visible, currentIndex),
                       onLongPress: _onNavLongPress,
                       onSlideUp: _onNavSlideUp,
                       items: navItems,

@@ -292,7 +292,8 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
       helper: r.host.isEmpty ? '当前：所有网站' : '当前：${r.host}',
     );
     if (text == null || text.trim().isEmpty) return;
-    await _svc.removeRule(r);
+    // 编辑 = 先删旧再加新：这条**不进回收站**（否则每改一次就多一条垃圾）
+    await _svc.removeRule(r, toTrash: false);
     await _svc.importText(text);
     if (mounted) AppToast.message('已更新');
   }
@@ -301,11 +302,156 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
     final ok = await SettingsDialogs.confirm(
       context: context,
       title: '清空全部规则？',
-      message: '手选和导入的规则都会被删掉（内置通用选择器不受影响）',
+      message: '手选和导入的规则都会被删掉（内置通用选择器不受影响）。\n'
+          '删掉的规则会留在「最近删除」里，可以恢复。',
     );
     if (ok != true) return;
     await _svc.clearRules();
-    if (mounted) AppToast.message('已清空');
+    if (mounted) AppToast.message('已清空（可到「最近删除」里恢复）');
+  }
+
+  /// 「最近删除」：一行两张卡片，点卡片 = 恢复这一条（用户 2026-10-16 要求可恢复）
+  Future<void> _trashSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.backgroundSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final list = _svc.trashRules;
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height * 0.6,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 12),
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                        color: AppTheme.borderMedium,
+                        borderRadius: BorderRadius.circular(2)),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text('最近删除（${list.length}）',
+                              style: TextStyle(
+                                  color: AppTheme.textPrimary,
+                                  fontSize: AppTheme.fontHeadline,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                        if (list.isNotEmpty) ...[
+                          TextButton(
+                            onPressed: () async {
+                              final n = await _svc.restoreAllTrash();
+                              setSheet(() {});
+                              if (mounted) {
+                                AppToast.message('已恢复 $n 条');
+                              }
+                            },
+                            child: const Text('全部恢复'),
+                          ),
+                          TextButton(
+                            onPressed: () async {
+                              await _svc.clearTrash();
+                              setSheet(() {});
+                            },
+                            child: Text('清空',
+                                style: TextStyle(color: AppTheme.textTertiary)),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (list.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 30),
+                      child: Text('回收站是空的',
+                          style: TextStyle(
+                              color: AppTheme.textTertiary,
+                              fontSize: AppTheme.fontSubhead)),
+                    )
+                  else
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                        child: _grid(ctx, [
+                          for (final r in list) _trashCard(r, () => setSheet(() {})),
+                        ]),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 回收站里的一张卡片：点一下 = 恢复
+  Widget _trashCard(AdBlockRule r, VoidCallback after) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () async {
+        await _svc.restoreRule(r);
+        after();
+        if (mounted) {
+          AppToast.message(r.host.isEmpty ? '已恢复（所有网站）' : '已恢复（${r.host}）');
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppTheme.backgroundTertiary,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.borderLight, width: 0.6),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.restore_rounded,
+                    size: 14, color: AppTheme.accentOnSurface),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(r.host.isEmpty ? '所有网站' : r.host,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: AppTheme.fontCaption)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 5),
+            Text(r.selector,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: AppTheme.fontCaption,
+                    fontFamily: 'monospace',
+                    height: 1.25)),
+            const SizedBox(height: 4),
+            Text('点一下恢复',
+                style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption)),
+          ],
+        ),
+      ),
+    );
   }
 
   // ── CSS 过滤器（整份注入）──────────────────────────────────
@@ -455,7 +601,13 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
                           fontSize: AppTheme.fontCaption)),
                 ),
                 InkWell(
-                  onTap: () => _svc.removeRule(r),
+                  onTap: () async {
+                    await _svc.removeRule(r);
+                    // 说清楚"还能找回来"，不然用户不敢删、或删完以为永久没了
+                    if (mounted) {
+                      AppToast.message('已删除，可在「最近删除」里恢复');
+                    }
+                  },
                   child: Padding(
                     padding: const EdgeInsets.all(4),
                     child: Icon(Icons.close_rounded,
@@ -499,7 +651,7 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
               SettingsRow(
                 icon: Icons.ads_click_rounded,
                 title: '悬浮按钮',
-                subtitle: '网页里显示一个圆钮：点它再点广告即可隐藏',
+                subtitle: '网页里显示一个小猫头像圆钮：点它再点广告即可隐藏',
                 trailingSwitch: true,
                 switchValue: _svc.showBubble,
                 onSwitchChanged: (v) => _svc.setShowBubble(v),
@@ -560,7 +712,8 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
             title: '我的规则（${_svc.rules.length}）',
             hint: _svc.rules.isEmpty
                 ? '还没有：打开任意网页/RSS 正文，点右下角圆钮再点广告即可添加。'
-                : '点卡片 = 开关这条；右上角 ✕ = 删除；长按 = 改域名/选择器。',
+                : '点卡片 = 开关这条；右上角 ✕ = 删除（可在「最近删除」恢复）；'
+                    '长按 = 改域名/选择器。',
             children: [
               if (_svc.rules.isEmpty)
                 SettingsRow(
@@ -593,6 +746,18 @@ class _AdBlockSettingsPageState extends State<AdBlockSettingsPage> {
                 title: '清空我的规则',
                 value: '${_svc.rules.length} 条',
                 onTap: _svc.rules.isEmpty ? null : _clearAll,
+              ),
+              // 删除可恢复（用户 2026-10-16：「删除指定的选中广告能不能恢复」）——
+              // 删掉的规则都进回收站，这里恢复；条数为 0 时也能进去看说明
+              SettingsRow(
+                icon: Icons.restore_from_trash_rounded,
+                title: '最近删除',
+                subtitle: _svc.trashRules.isEmpty
+                    ? '删掉的规则会留在这里，可一键恢复'
+                    : '${_svc.trashRules.length} 条可恢复（最多留 '
+                        '${AdBlockService.kTrashLimit} 条）',
+                value: '${_svc.trashRules.length}',
+                onTap: _trashSheet,
               ),
             ],
           ),

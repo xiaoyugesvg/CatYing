@@ -44,12 +44,17 @@ class HikerDetailPage extends StatefulWidget {
   /// 延迟规则执行入口：宿主（列表页）拿**整条链**去重跑它那次查询，把结果返回。
   final Future<HikerResult> Function(List<String> lazyIds)? replayLazy;
 
+  /// 「打开一个新页面」——`nextPage` 不是 lazy 时用它：宿主用**同一个源**按那个地址
+  /// 跑一次 `find_rule`，等价于海阔里点「下一页」。（见 `_loadNextChapterImages`）
+  final Future<HikerResult> Function(String url)? runPage;
+
   const HikerDetailPage({
     super.key,
     required this.source,
     required this.item,
     this.lazyChain = const [],
     this.replayLazy,
+    this.runPage,
   });
 
   @override
@@ -106,6 +111,13 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
 
   /// 最近一次规则跑完的变量（回放 onClose 时用它当上下文）
   Map<String, dynamic> _lastVars = const {};
+
+  /// 源给的**下一页/下一章**地址（官方 `setNextPage`；空 = 没有下一页）。
+  /// 看图阅读器靠它做「下拉自动下一章」。
+  String _nextPage = '';
+
+  /// 产出当前候选的那条 lazy 链（`_nextPage` 还是 lazy 时要用它接续）
+  List<String> _lastChain = const [];
 
   @override
   void initState() {
@@ -176,6 +188,9 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
         final r = await HikerEngine.instance.detail(src, widget.item.url, vars: vars);
         await HikerStore.instance.saveVarsIfChanged(src.id, vars, r.vars);
         _lastVars = r.vars;
+        // 详情规则也能给「下一页」（漫画源常把下一章挂在这儿）
+        _nextPage = r.nextPage;
+        _lastChain = widget.lazyChain;
         // 规则登记的事件回调 → 本页关闭时回放（见 _fireOnClose）
         final closeCodes = r.listeners['onClose'];
         if (closeCodes != null) {
@@ -232,6 +247,9 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     if (!r.ok) throw Exception(r.error ?? '规则执行失败');
     // 变量/事件回调照旧（onClose 清理靠它）
     _lastVars = r.vars;
+    // 记录「下一页」与产出它的链条（看图页续章要用）
+    _nextPage = r.nextPage;
+    _lastChain = full;
     final closeCodes = r.listeners['onClose'];
     if (closeCodes != null) {
       for (final c in closeCodes) {
@@ -435,15 +453,74 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
   }
 
   /// 进看图阅读器（漫画 / 图集共用）
+  ///
+  /// 源给了「下一页」（官方 `setNextPage`）就带上 [SimpleImageReaderPage.onLoadNextChapter]
+  /// —— 用户一路往下滑会自动续章（对齐官方 `pics://` 的"下拉自动下一章"）。
   void _openImageReader(List<String> images, Map<String, String> headers) {
-    AppLog.instance
-        .log('[Hiker] 图片列表 → 看图阅读器（${images.length} 张）');
+    AppLog.instance.log('[Hiker] 图片列表 → 看图阅读器（${images.length} 张）'
+        '${_nextPage.isEmpty ? '' : ' · 有下一页，支持自动续章'}');
     SimpleImageReaderPage.open(
       title: widget.item.title,
       images: images,
       chapterName: widget.source.title,
       headers: headers,
+      onLoadNextChapter:
+          _nextPage.isEmpty ? null : _loadNextChapterImages,
     );
+  }
+
+  /// 拉「下一章」：`nextPage` 还是 lazy 就带链条重跑，否则交给宿主当新页面跑一次。
+  /// 返回 (新图片, 再下一页)。任何失败都返回空图片 —— 阅读器据此显示"没有下一章了"。
+  Future<NextChapterResult> _loadNextChapterImages() async {
+    final np = _nextPage;
+    if (np.isEmpty) return (images: const <String>[], nextPage: '');
+    HikerResult r;
+    try {
+      if (np.startsWith(kHikerLazyPrefix)) {
+        final replay = widget.replayLazy;
+        if (replay == null) return (images: const <String>[], nextPage: '');
+        r = await replay([..._lastChain, np.substring(kHikerLazyPrefix.length)]);
+      } else {
+        final run = widget.runPage;
+        if (run == null) return (images: const <String>[], nextPage: '');
+        r = await run(np);
+      }
+    } catch (e) {
+      AppLog.instance.log('[Hiker] 下一章拉取失败: $e');
+      return (images: const <String>[], nextPage: '');
+    }
+    if (!r.ok) {
+      AppLog.instance.log('[Hiker] 下一章规则报错: ${r.error}');
+      return (images: const <String>[], nextPage: '');
+    }
+    _lastVars = r.vars;
+    _nextPage = r.nextPage;
+    return (images: _imagesOf(r), nextPage: _nextPage);
+  }
+
+  /// 从一次规则结果里抽出"这一页的图片"：`pics://` 优先，其次单图候选（去重保序）。
+  static List<String> _imagesOf(HikerResult r) {
+    final out = <String>[];
+    for (final u in <String>[
+      if (r.playUrl.isNotEmpty) r.playUrl,
+      ...r.playUrlExtra,
+    ]) {
+      final pics = hikerPicList(u);
+      if (pics != null && pics.isNotEmpty) out.addAll(pics);
+    }
+    for (final it in r.list) {
+      final u = it.url;
+      if (u.isEmpty || u.startsWith(kHikerLazyPrefix)) continue;
+      final pics = hikerPicList(u);
+      if (pics != null && pics.isNotEmpty) {
+        out.addAll(pics);
+        continue;
+      }
+      if (hikerLinkKind(u) == HikerLinkKind.image) out.add(u);
+    }
+    final seen = <String>{};
+    out.retainWhere(seen.add);
+    return out;
   }
 
   /// 收集本页候选里的所有图片（官方"点一张图 → 翻本列表所有图"的等价实现）；
@@ -588,7 +665,7 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
 
           if (_candidates.isNotEmpty) ...[
             const SizedBox(height: 18),
-            Text('播放地址（${_candidates.length}）',
+            Text('解析结果（${_candidates.length}）',
                 style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: AppTheme.fontSubhead,
@@ -677,7 +754,9 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
               _infoRow('来源', widget.source.title),
               if (it.desc.isNotEmpty) _infoRow('备注', it.desc),
               if (it.colType.isNotEmpty) _infoRow('类型', it.colType),
-              _infoRow('地址', it.url.isEmpty ? '(空)' : _short(it.url)),
+              // 不再裸露 `hiker://lazy#14uwff4` 这种中间态地址 —— 翻成
+              // 「延迟规则 · 点一次才算得出真地址」这样看得懂的话
+              _infoRow('地址', it.url.isEmpty ? '(空)' : describeHikerLinkText(it.url)),
             ],
           ),
         ),
@@ -811,6 +890,20 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
                 ),
               ],
             ),
+            // 真正的内容：图片几张 / 正文多少字 / 视频直链 / 网页地址
+            // （用户 2026-10-16：「取地址要给我图片、正文、视频直链」）
+            if (!c.lazy && c.url.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                describeHikerLink(c.url).detail,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: AppTheme.fontCaption),
+              ),
+            ],
           ],
         ),
       ),

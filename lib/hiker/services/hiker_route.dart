@@ -276,3 +276,82 @@ String hikerStripScheme(String url) {
   }
   return s;
 }
+
+/// 取协议体（`toast://文本` → `文本`，`copy://内容.js:'x'` → `内容`）
+String _hikerPayloadOf(String url) {
+  final i = url.indexOf('://');
+  var body = i >= 0 ? url.substring(i + 3) : url;
+  // 官方的 `copy://内容.js:'…'` 尾巴要去掉
+  final dot = body.indexOf(".js:");
+  if (dot >= 0) body = body.substring(0, dot);
+  return body;
+}
+
+/// 把地址翻成**人话 + 它到底是什么内容**（详情页「地址」行与候选卡片都用它）。
+///
+/// 用户 2026-10-16：「上面的地址就有问题……点击取地址获取也不是我真正想要的，
+/// 图片、正文、视频直链等等」——
+/// `hiker://lazy#14uwff4`、`{"urls":[…]}` 这些都是**中间态**，直接印在界面上
+/// 等于什么都没说。这里统一翻成「类型 + 真内容」：
+///   图片 → 共 N 张图｜正文 → 共 N 字｜视频 → 真直链｜网页 → 剥壳后的地址。
+({String kind, String detail}) describeHikerLink(String raw) {
+  final s = raw.trim();
+  if (s.isEmpty) return (kind: '空', detail: '这一步没有地址');
+  if (s.startsWith('hiker://empty')) {
+    // 老写法 `hiker://empty##<地址>##<规则>`：把中间那段真地址露出来
+    final parts = s.split('##').where((x) => x.isNotEmpty);
+    final inner = parts.firstWhere(
+      (x) => x.startsWith('http') || x.startsWith('x5://'),
+      orElse: () => '',
+    );
+    return (
+      kind: '提示',
+      detail: inner.isEmpty ? '这一步只有文字说明，没有可打开的内容' : inner,
+    );
+  }
+  if (s.startsWith('hiker://lazy#')) {
+    return (kind: '延迟规则', detail: '源把 JS 放在地址里，点一次才算得出真地址');
+  }
+  switch (hikerLinkKind(s)) {
+    case HikerLinkKind.pics:
+      final n = hikerPicList(s)?.length ?? 0;
+      return (
+        kind: '图片列表',
+        detail: n > 0 ? '共 $n 张图' : '图片列表（但解析不出图）',
+      );
+    case HikerLinkKind.image:
+      return (kind: '图片', detail: hikerStripScheme(s));
+    case HikerLinkKind.novel:
+      final c = hikerNovelContent(s)?.content ?? '';
+      return (kind: '正文', detail: '共 ${c.length} 字');
+    case HikerLinkKind.media:
+      return (kind: '视频直链', detail: s);
+    case HikerLinkKind.playJson:
+      final j = hikerPlayJson(s);
+      final u = (j != null && j.urls.isNotEmpty) ? j.urls.first : '';
+      return (kind: '播放 JSON', detail: u.isEmpty ? s : u);
+    case HikerLinkKind.x5Play:
+      return (kind: '视频（强制播放器）', detail: hikerStripScheme(s));
+    case HikerLinkKind.videoSniff:
+      return (kind: '视频（需嗅探）', detail: hikerStripScheme(s));
+    case HikerLinkKind.x5:
+    case HikerLinkKind.web:
+      return (kind: '网页', detail: hikerStripScheme(s));
+    case HikerLinkKind.toast:
+      return (kind: '提示', detail: _hikerPayloadOf(s));
+    case HikerLinkKind.copyLink:
+      return (kind: '复制内容', detail: _hikerPayloadOf(s));
+    case HikerLinkKind.js:
+      return (kind: '脚本', detail: '需要浏览器执行这段 JS');
+    case HikerLinkKind.hikerPage:
+      return (kind: '海阔内部页', detail: '官方内部页面，本版不支持打开');
+    default:
+      return (kind: '其它', detail: s);
+  }
+}
+
+/// 单行文案版（详情页顶部「地址」行）：`类型 · 真内容`
+String describeHikerLinkText(String raw) {
+  final d = describeHikerLink(raw);
+  return d.detail.isEmpty ? d.kind : '${d.kind} · ${d.detail}';
+}

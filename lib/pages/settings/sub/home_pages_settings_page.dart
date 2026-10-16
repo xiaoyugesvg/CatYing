@@ -180,8 +180,10 @@ class HomePagesSettingsPage extends StatelessWidget {
               color: AppTheme.backgroundTertiary,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
+                // 「选中」那圈描边同理：深色下 accentColor 是墨灰，压在暗卡片上
+                // 看不出"选中了" ⇒ 用 accentOnSurface（浅色下同值，观感不变）
                 color: selected
-                    ? AppTheme.accentColor
+                    ? AppTheme.accentOnSurface
                     : AppTheme.glassBorderSoft,
                 width: selected ? 1.6 : 0.5,
               ),
@@ -211,7 +213,11 @@ class HomePagesSettingsPage extends StatelessWidget {
       builder: (context, box) {
         final w = box.maxWidth;
         final h = box.maxHeight;
-        final accent = AppTheme.accentColor;
+        // ⚠️ 深色下 `accentColor` 是调色板 primary（默认「水墨书香」= 墨灰 #3A3A3A），
+        //    压在暗底上几乎看不见 ⇒ 示意图会变成"空盒子"。
+        //    改用 `accentOnSurface`：浅色下与 accentColor 同值（观感不变），
+        //    深色下自动换成亮的一档（用户 2026-10-16）。
+        final accent = AppTheme.accentOnSurface;
         final block = accent.withValues(alpha: 0.42);
         final blockSoft = accent.withValues(alpha: 0.20);
         final line = AppTheme.textTertiary.withValues(alpha: 0.45);
@@ -345,14 +351,97 @@ class HomePagesSettingsPage extends StatelessWidget {
               ],
             );
 
-          // 上下双联（新增）：2 张横版通栏大图上下堆叠
-          case HomeBannerStyle.twin:
+          // 走马灯（新增）：图内左右箭头 + 底部圆点
+          case HomeBannerStyle.carousel:
             return Stack(
               children: [
                 Positioned(
-                    left: w * 0.06, top: h * 0.06, child: rect(0.88, 0.40, block)),
+                    left: w * 0.07,
+                    top: h * 0.14,
+                    child: rect(0.86, 0.58, block)),
                 Positioned(
-                    left: w * 0.06, top: h * 0.54, child: rect(0.88, 0.40, block)),
+                  left: w * 0.10,
+                  top: h * 0.36,
+                  child: Container(
+                    width: 7,
+                    height: 7,
+                    decoration:
+                        BoxDecoration(color: accent, shape: BoxShape.circle),
+                  ),
+                ),
+                Positioned(
+                  right: w * 0.10,
+                  top: h * 0.36,
+                  child: Container(
+                    width: 7,
+                    height: 7,
+                    decoration:
+                        BoxDecoration(color: accent, shape: BoxShape.circle),
+                  ),
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: h * 0.79,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      for (var i = 0; i < 3; i++)
+                        Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                          width: i == 0 ? 8 : 4,
+                          height: 3,
+                          decoration: BoxDecoration(
+                            color: i == 0 ? accent : line,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+
+          // 扑克牌（新增）：前后堆叠，左右各露一角
+          case HomeBannerStyle.poker:
+            return Stack(
+              children: [
+                Positioned(
+                    left: w * 0.08,
+                    top: h * 0.20,
+                    child: rect(0.24, 0.62, blockSoft, r: 2)),
+                Positioned(
+                    right: w * 0.08,
+                    top: h * 0.20,
+                    child: rect(0.24, 0.62, blockSoft, r: 2)),
+                Positioned(
+                    left: w * 0.36,
+                    top: h * 0.10,
+                    child: rect(0.28, 0.80, block, r: 3)),
+              ],
+            );
+
+          // 标签页（新增）：上方标签条 + 下方卡片
+          case HomeBannerStyle.tabs:
+            return Stack(
+              children: [
+                for (var i = 0; i < 3; i++)
+                  Positioned(
+                    left: w * (0.07 + i * 0.21),
+                    top: h * 0.08,
+                    child: Container(
+                      width: w * 0.17,
+                      height: h * 0.17,
+                      decoration: BoxDecoration(
+                        color: i == 0 ? accent : blockSoft,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ),
+                Positioned(
+                    left: w * 0.07,
+                    top: h * 0.36,
+                    child: rect(0.86, 0.52, block)),
               ],
             );
 
