@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 
 import '../../common/theme.dart';
 import '../../miniapp/pages/mini_app_player_page.dart';
+import '../../pages/detail/simple_image_reader_page.dart';
+import '../../pages/detail/simple_text_reader_page.dart';
 import '../../pages/play/webview_player_page.dart';
 import '../../services/app_log.dart';
 import '../../services/sniff_filter.dart';
@@ -13,30 +15,39 @@ import '../../widgets/app_toast.dart';
 import '../models/hiker_source.dart';
 import '../services/hiker_engine.dart';
 import '../services/hiker_prefs.dart';
+import '../services/hiker_route.dart';
 import '../services/hiker_store.dart';
 
-/// 海阔条目详情 + 播放。
+/// 海阔条目详情 + 打开。
 ///
 /// 取址逻辑：
-///   1. 源有 `detail_find_rule` → 跑它拿候选播放地址；
-///   2. 没有（Phase 1 里绝大多数）→ 把条目 `url` 当播放地址
+///   1. 源有 `detail_find_rule` → 跑它拿候选地址；
+///   2. 没有（Phase 1 里绝大多数）→ 把条目 `url` 当候选地址
 ///      （很多源的列表项本身就是直链 / 播放页）；
-///   3. 每个地址按影视模块**同一套判定**（[SniffFilter.isDirectMedia]，
-///      全项目唯一事实来源）分流：直链进原生播放器，网页进内嵌 WebView。
+///   3. 每个地址走 [hikerLinkKind]（海阔**官方** `dealWithUrl` + `UrlDetector`
+///      的等价实现）分流，而不是"不是直链就当网页"：
+///      `pics://` → 看图阅读器；`novel://` → 书籍阅读器；图片 → 图集阅读器；
+///      `toast://` / `copy://` → 提示或复制；影视直链 → 原生播放器；
+///      其余网页 → 内嵌 WebView。
 class HikerDetailPage extends StatefulWidget {
   final HikerSource source;
   final HikerItem item;
 
-  /// 延迟规则（`$('').lazyRule(fn)`）的**第二趟**执行入口。
+  /// 延迟规则**链条**（父→子）：本页条目是从哪个列表点进来的（空 = 顶层列表）。
   ///
-  /// 列表页把"重跑自己那次查询并带上 lazyId"的闭包传进来 —— 这样详情页不需要
-  /// 知道这条条目是从首页 / 分类 / 搜索哪个入口来的（规则重跑才能命中同一个 id）。
-  final Future<List<HikerItem>> Function(String lazyId)? replayLazy;
+  /// 海阔的 lazy URL 自带那段 JS，点嵌套条目只跑那一段（分类→详情→选集→立即播放）；
+  /// 我们是"重跑规则 + 带上要执行的 id"，所以必须把**父链**一起带着，
+  /// 引擎才能逐层执行到用户真正点的那一条（见 hiker_engine.js 的 lazyRuleImpl）。
+  final List<String> lazyChain;
+
+  /// 延迟规则执行入口：宿主（列表页）拿**整条链**去重跑它那次查询，把结果返回。
+  final Future<HikerResult> Function(List<String> lazyIds)? replayLazy;
 
   const HikerDetailPage({
     super.key,
     required this.source,
     required this.item,
+    this.lazyChain = const [],
     this.replayLazy,
   });
 
@@ -50,9 +61,34 @@ const String kHikerLazyPrefix = 'hiker://lazy#';
 /// 一条候选播放地址
 class _Candidate {
   final String url;
-  final String note; // 来源说明（详情规则 / 条目地址）
-  const _Candidate(this.url, this.note);
-  bool get isDirect => SniffFilter.isDirectMedia(url);
+  final String note; // 来源说明（详情规则 / 条目地址 / 选集 / 立即播放）
+
+  /// 还是延迟规则（点它要再解一层）
+  final bool lazy;
+
+  /// 产出它的那条链（点它时用 `chain + 自己的 id`）
+  final List<String> chain;
+
+  /// 播放请求头（来自海阔播放 JSON 的 headers，防盗链要用）
+  final Map<String, String> headers;
+
+  const _Candidate(
+    this.url,
+    this.note, {
+    this.lazy = false,
+    this.chain = const [],
+    this.headers = const {},
+  });
+
+  bool get isDirect => !lazy && SniffFilter.isDirectMedia(url);
+
+  /// 解开后能不能"直接打开"（播放器 / 看图 / 阅读 / 网页 / 提示都算）。
+  /// 只解出一条候选时宿主会自动打开它，省一次点击 —— 官方也是直接打开。
+  bool get isOpenable {
+    if (lazy) return false;
+    final k = hikerLinkKind(url);
+    return k != HikerLinkKind.unknown && k != HikerLinkKind.hikerPage;
+  }
 }
 
 class _HikerDetailPageState extends State<HikerDetailPage> {
@@ -117,26 +153,20 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       final isLazy = widget.item.url.startsWith(kHikerLazyPrefix);
 
       if (isLazy) {
-        // 延迟规则：第一趟只给了 `hiker://lazy#<id>`，这里跑第二趟拿真值
-        final id = widget.item.url.substring(kHikerLazyPrefix.length);
-        final replay = widget.replayLazy;
-        if (replay == null) {
-          if (!mounted) return;
-          setState(() => _error = '这个条目是延迟规则（lazyRule），当前入口无法执行');
-          return;
-        }
-        final items = await replay(id);
-        for (final x in items) {
-          if (x.url.isEmpty || x.url.startsWith(kHikerLazyPrefix)) continue;
-          if (out.any((c) => c.url == x.url)) continue;
-          out.add(_Candidate(x.url, x.title.isEmpty ? '延迟规则' : x.title));
-        }
-        _resolvedNote = '延迟规则第二趟：${out.length} 个地址';
+        // 延迟规则（分类/详情/选集/立即播放几乎都是它）：解一层，拿到候选
+        final next = await _resolveLazy(widget.item.url, widget.item.title, widget.lazyChain);
         if (!mounted) return;
         setState(() {
-          _candidates = out;
-          if (out.isEmpty) _error = '延迟规则执行后仍然没有可用地址';
+          _candidates = next;
+          _busy = false;
+          if (next.isEmpty) _error = '延迟规则执行后仍然没有可用地址';
         });
+        _resolvedNote = '延迟规则第二趟：${next.length} 个候选';
+        // 只解出**一个可直接打开**的候选时直接打开，省一次点击
+        //（不限于直链：`pics://` 漫画、`novel://` 正文也算）
+        if (next.length == 1 && next.first.isOpenable) {
+          await _play(next.first);
+        }
         return;
       }
 
@@ -159,7 +189,7 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
           return;
         }
         if (r.playUrl.isNotEmpty) {
-          out.add(_Candidate(r.playUrl, '详情规则'));
+          out.add(_Candidate(r.playUrl, '详情规则', headers: r.playHeaders));
         }
         for (final it in r.list) {
           if (it.url.isEmpty) continue;
@@ -186,23 +216,238 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
     }
   }
 
-  Future<void> _play(String url) async {
-    if (url.isEmpty) return;
-    if (SniffFilter.isDirectMedia(url)) {
-      // 直链 → 现有原生播放器（MiniAppPlayerPage 就是通用的「url + headers」播放页）
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => MiniAppPlayerPage(url: url, title: widget.item.title),
-        ),
-      );
-    } else {
-      // 网页 → 内嵌网页播放器（不做嗅探，与影视模块的嗅探开关解耦）
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => WebviewPlayerPage(url: url, title: widget.item.title),
-        ),
-      );
+  /// 解一层延迟规则（`hiker://lazy#<id>`）：
+  /// 把 **父链 + 自己** 交给宿主去重跑（见 hiker_engine.js 的 lazyRuleImpl），
+  /// 产出的候选里可能还有 lazy（海阔的"详情→选集→立即播放"就是链条）。
+  Future<List<_Candidate>> _resolveLazy(
+      String lazyUrl, String label, List<String> chain) async {
+    final replay = widget.replayLazy;
+    if (replay == null) {
+      throw Exception('这个条目是延迟规则（lazyRule），当前入口无法执行');
     }
+    final id = lazyUrl.substring(kHikerLazyPrefix.length);
+    final full = [...chain, id];
+    final r = await replay(full);
+    if (!r.ok) throw Exception(r.error ?? '规则执行失败');
+    // 变量/事件回调照旧（onClose 清理靠它）
+    _lastVars = r.vars;
+    final closeCodes = r.listeners['onClose'];
+    if (closeCodes != null) {
+      for (final c in closeCodes) {
+        if (_onClose.length >= 16) break;
+        if (!_onClose.contains(c)) _onClose.add(c);
+      }
+    }
+    final out = <_Candidate>[];
+    if (r.playUrl.isNotEmpty) {
+      out.add(_Candidate(r.playUrl,
+          label.isEmpty ? '播放地址' : label,
+          headers: r.playHeaders));
+    }
+    for (final u in r.playUrlExtra) {
+      out.add(_Candidate(u, '备用清晰度', headers: r.playHeaders));
+    }
+    for (final it in r.list) {
+      if (it.url.isEmpty) continue;
+      final lazy = it.url.startsWith(kHikerLazyPrefix);
+      out.add(_Candidate(
+        it.url,
+        it.title.isEmpty ? (lazy ? '选集' : '地址') : it.title,
+        lazy: lazy,
+        chain: full,
+      ));
+    }
+    return out;
+  }
+
+  Future<void> _play(_Candidate c) async {
+    if (c.lazy) {
+      // 又一层延迟规则（"立即播放"/选集）：再解一层，能出直链就直接播
+      setState(() {
+        _busy = true;
+        _error = null;
+      });
+      try {
+        final next = await _resolveLazy(c.url, c.note, c.chain);
+        if (!mounted) return;
+        setState(() {
+          _busy = false;
+          _candidates = next;
+          if (next.isEmpty) _error = '这一步没解析出地址';
+        });
+        final plain = next.where((x) => x.isOpenable).toList();
+        if (next.length == 1 && plain.length == 1) {
+          await _play(plain.first);
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _busy = false;
+            _error = '$e';
+          });
+        }
+      }
+      return;
+    }
+    final url = c.url;
+    if (url.isEmpty) return;
+
+    // 按海阔**官方** `dealWithUrl()` 的顺序分流（见 hiker_route.dart）。
+    // 原来只有"直链 / 网页"两支，导致漫画（`pics://`）、小说（`novel://`）、
+    // 图集（图片地址）和提示类（`toast://`）全被丢给 WebView，打开是空白页。
+    switch (hikerLinkKind(url)) {
+      case HikerLinkKind.pics:
+        // 多图模式（类似漫画）：`pics://图1&&图2`
+        final pics = hikerPicList(url) ?? const <String>[];
+        if (pics.isEmpty) {
+          AppToast.error('这个条目是图片列表，但没解析出图片');
+          return;
+        }
+        _openImageReader(pics, c.headers);
+        return;
+
+      case HikerLinkKind.novel:
+        // 正文协议（小说源）：`novel://{title,content}`
+        final novel = hikerNovelContent(url);
+        if (novel == null || novel.content.trim().isEmpty) {
+          AppToast.error('这个条目是正文，但内容是空的');
+          return;
+        }
+        SimpleTextReaderPage.open(
+          content: novel.content,
+          bookName: widget.item.title,
+          chapterName: novel.title,
+        );
+        return;
+
+      case HikerLinkKind.image:
+        // 官方：点列表里的一张图 → 把**当前候选里的所有图片**一起收进大图预览
+        //（可左右翻页），而不是只开这一张。
+        final pics = _collectImages(url);
+        _openImageReader(pics, c.headers);
+        return;
+
+      case HikerLinkKind.media:
+        await _pushPlayer(url, c.headers);
+        return;
+
+      case HikerLinkKind.x5Play:
+        // 官方语义：强制用播放器播这个地址 → 剥掉外壳再判一次
+        final real = hikerStripScheme(url);
+        if (SniffFilter.isDirectMedia(real)) {
+          await _pushPlayer(real, c.headers);
+        } else {
+          await _pushWeb(real);
+        }
+        return;
+
+      case HikerLinkKind.toast:
+        AppToast.message(_payloadOf(url));
+        return;
+
+      case HikerLinkKind.copyLink:
+      case HikerLinkKind.external:
+        // `copy://内容` / `magnet:…`：官方是复制到剪贴板 / 交第三方软件。
+        // 本模块没有外部 App 调起能力，统一复制 + 提示，别静默。
+        final text = hikerStripScheme(_payloadOf(url));
+        await Clipboard.setData(ClipboardData(text: text));
+        AppToast.message('已复制到剪贴板');
+        return;
+
+      case HikerLinkKind.download:
+      case HikerLinkKind.apk:
+        final real = hikerStripScheme(url);
+        await Clipboard.setData(ClipboardData(text: real));
+        AppToast.message('下载地址已复制（本模块不做下载）');
+        return;
+
+      case HikerLinkKind.hikerPage:
+        // `hiker://…` 是海阔 App 的内部页面/二级页面，本模块没有对应功能
+        AppToast.message('这个条目跳的是海阔内部页面，当前不支持：${_short(url)}');
+        return;
+
+      case HikerLinkKind.js:
+        // 官方叫"彩蛋模式"：url 本身就是一段 JS，跳浏览器执行。
+        // 我们没法执行它，也不能把 `javascript:…` 丢给 WebView（会白屏）。
+        AppToast.message('这个条目是一段 JS（海阔的彩蛋模式），当前不支持');
+        return;
+
+      case HikerLinkKind.x5:
+      case HikerLinkKind.web:
+      case HikerLinkKind.videoSniff:
+        // 都是"在网页里打开"：X5 全屏、强制网页、自动提取视频。
+        // 自动提取视频官方是进播放器嗅探；本模块与嗅探开关解耦，降级为网页，
+        // 用户可在内嵌网页里自己点播放（至少不是非法 scheme 导致的空白页）。
+        await _pushWeb(hikerStripScheme(url));
+        return;
+
+      case HikerLinkKind.http:
+        await _pushWeb(url);
+        return;
+
+      case HikerLinkKind.unknown:
+        // 官方兜底也是这条文案
+        AppToast.message('未知链接：${_short(url)}');
+        return;
+    }
+  }
+
+  /// 进原生播放器
+  Future<void> _pushPlayer(String url, Map<String, String> headers) {
+    return Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MiniAppPlayerPage(
+          url: url,
+          title: widget.item.title,
+          headers: headers.isEmpty ? null : headers,
+        ),
+      ),
+    );
+  }
+
+  /// 进内嵌网页
+  Future<void> _pushWeb(String url) {
+    return Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => WebviewPlayerPage(url: url, title: widget.item.title),
+      ),
+    );
+  }
+
+  /// 进看图阅读器（漫画 / 图集共用）
+  void _openImageReader(List<String> images, Map<String, String> headers) {
+    AppLog.instance
+        .log('[Hiker] 图片列表 → 看图阅读器（${images.length} 张）');
+    SimpleImageReaderPage.open(
+      title: widget.item.title,
+      images: images,
+      chapterName: widget.source.title,
+      headers: headers,
+    );
+  }
+
+  /// 收集本页候选里的所有图片（官方"点一张图 → 翻本列表所有图"的等价实现）；
+  /// [first] 强制排在最前，保证点谁就先看谁。
+  List<String> _collectImages(String first) {
+    final out = <String>[first];
+    for (final c in _candidates) {
+      if (c.lazy) continue;
+      if (c.url == first) continue;
+      if (hikerLinkKind(c.url) != HikerLinkKind.image) continue;
+      if (out.contains(c.url)) continue;
+      out.add(c.url);
+    }
+    return out;
+  }
+
+  /// 取协议体（`toast://文本` → `文本`，`copy://内容.js:'x'` → `内容`）
+  static String _payloadOf(String url) {
+    final i = url.indexOf('://');
+    var body = i >= 0 ? url.substring(i + 3) : url;
+    // 官方的 `copy://内容.js:'…'` 尾巴要去掉
+    final dot = body.indexOf(".js:");
+    if (dot >= 0) body = body.substring(0, dot);
+    return body;
   }
 
   void _copy(String text) {
@@ -363,7 +608,10 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       AppToast.error(_error ?? '没有可用地址');
       return;
     }
-    await _play(_candidates.first.url);
+    // 优先挑"直接能播"的那个；全是 lazy 就先解第一个（会再解一层）
+    final pick = _candidates.firstWhere((c) => !c.lazy,
+        orElse: () => _candidates.first);
+    await _play(pick);
   }
 
   Widget _head(HikerItem it) {
@@ -434,7 +682,40 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
       );
 
   Widget _candidateTile(_Candidate c) {
-    final direct = c.isDirect;
+    // lazy 候选（"选集"/"立即播放"这类）点了会再解一层，按钮文案给"打开"
+    final kind = c.lazy ? null : hikerLinkKind(c.url);
+    final actionLabel = c.lazy
+        ? '打开'
+        : switch (kind!) {
+            HikerLinkKind.media || HikerLinkKind.x5Play => '播放',
+            HikerLinkKind.pics || HikerLinkKind.image => '看图',
+            HikerLinkKind.novel => '阅读',
+            HikerLinkKind.toast ||
+            HikerLinkKind.copyLink ||
+            HikerLinkKind.external ||
+            HikerLinkKind.download ||
+            HikerLinkKind.apk ||
+            HikerLinkKind.hikerPage ||
+            HikerLinkKind.unknown =>
+              '提示',
+            _ => '网页',
+          };
+    final actionIcon = c.lazy
+        ? Icons.touch_app_rounded
+        : switch (kind!) {
+            HikerLinkKind.media || HikerLinkKind.x5Play => Icons.play_arrow_rounded,
+            HikerLinkKind.pics || HikerLinkKind.image => Icons.photo_library_rounded,
+            HikerLinkKind.novel => Icons.menu_book_rounded,
+            HikerLinkKind.toast ||
+            HikerLinkKind.copyLink ||
+            HikerLinkKind.external ||
+            HikerLinkKind.download ||
+            HikerLinkKind.apk ||
+            HikerLinkKind.hikerPage ||
+            HikerLinkKind.unknown =>
+              Icons.info_outline_rounded,
+            _ => Icons.language_rounded,
+          };
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
@@ -454,7 +735,7 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
               borderRadius: BorderRadius.circular(9),
             ),
             child: Icon(
-              direct ? Icons.play_arrow_rounded : Icons.language_rounded,
+              actionIcon,
               size: 17,
               color: AppTheme.accentOnSurface,
             ),
@@ -486,8 +767,8 @@ class _HikerDetailPageState extends State<HikerDetailPage> {
             icon: Icon(Icons.copy_rounded, size: 16, color: AppTheme.textTertiary),
           ),
           TextButton(
-            onPressed: () => _play(c.url),
-            child: Text(direct ? '播放' : '网页',
+            onPressed: () => _play(c),
+            child: Text(actionLabel,
                 style: TextStyle(
                     color: AppTheme.accentOnSurface, fontSize: AppTheme.fontFootnote)),
           ),

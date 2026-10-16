@@ -280,14 +280,14 @@ class _HikerSearchPageState extends State<HikerSearchPage> {
         builder: (_) => HikerDetailPage(
           source: widget.source,
           item: it,
-          // 延迟规则第二趟：用同一个关键词重跑搜索
-          replayLazy: (id) async {
+          // 延迟规则链条：用同一个关键词重跑搜索，逐层执行（见 hiker_engine.js）
+          replayLazy: (ids) async {
             final vars = HikerStore.instance.varsOf(widget.source.id);
             final r = await HikerEngine.instance
-                .search(widget.source, _keyword, vars: vars, lazyId: id);
+                .search(widget.source, _keyword, vars: vars, lazyIds: ids);
             await HikerStore.instance
                 .saveVarsIfChanged(widget.source.id, vars, r.vars);
-            return r.list;
+            return r;
           },
         ),
       ),

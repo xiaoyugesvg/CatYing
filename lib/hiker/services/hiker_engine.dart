@@ -44,11 +44,22 @@ class HikerResult {
   /// 事件回调里调过 `refreshPage()`（宿主可据此重拉当前页）
   final bool needRefresh;
 
+  /// 播放请求头（海阔播放 JSON 里的 `headers`，防盗链要用）。
+  ///
+  /// 实测「91短剧」的 playRule 会返回 `{urls:[…], headers:{'User-Agent':…}, parse:0}`，
+  /// 不带这些头去播就是 403。
+  final Map<String, String> playHeaders;
+
+  /// 同集备用地址（同 JSON 里的 `urls[1..]`，播放失败时可换着试）
+  final List<String> playUrlExtra;
+
   const HikerResult({
     required this.ok,
     this.error,
     this.list = const [],
     this.playUrl = '',
+    this.playHeaders = const {},
+    this.playUrlExtra = const [],
     this.nextPage = '',
     this.pageTitle = '',
     this.vars = const {},
@@ -184,11 +195,26 @@ class HikerEngine {
           if (codes.isNotEmpty) listeners[key] = codes;
         });
       }
+      final playHeaders = <String, String>{};
+      final rawPh = map['playHeaders'];
+      if (rawPh is Map) {
+        rawPh.forEach((k, v) => playHeaders[k.toString()] = v.toString());
+      }
+      final playUrlExtra = <String>[];
+      final rawPe = map['playUrlExtra'];
+      if (rawPe is List) {
+        for (final e in rawPe) {
+          final s = e.toString();
+          if (s.isNotEmpty) playUrlExtra.add(s);
+        }
+      }
       return HikerResult(
         ok: ok,
         error: ok ? null : (map['error'] ?? '规则执行失败').toString(),
         list: list,
         playUrl: (map['playUrl'] ?? '').toString(),
+        playHeaders: playHeaders,
+        playUrlExtra: playUrlExtra,
         nextPage: (map['nextPage'] ?? '').toString(),
         pageTitle: (map['pageTitle'] ?? '').toString(),
         vars: vars,
@@ -233,6 +259,8 @@ class HikerEngine {
     Map<String, dynamic> vars = const {},
     Map<String, dynamic>? config,
     String lazyId = '',
+    List<String> lazyIds = const [],
+    String lazyInput = '',
   }) async {
     // 文件系统根：规则里的 `hiker://files/*`（可读写）与 `hiker://assets/*`
     // （App 自带资源，见 HikerBuiltin.installAssets）都靠它落地。
@@ -248,6 +276,10 @@ class HikerEngine {
         ...params,
         // 延迟规则第二趟：带上 id，规则命中后直接执行 fn 拿真值
         if (lazyId.isNotEmpty) 'lazyId': lazyId,
+        // 嵌套延迟规则（分类→详情→播放）：把**父→子**整条链带上，引擎逐层执行
+        if (lazyIds.isNotEmpty) 'lazyIds': lazyIds,
+        // 条目地址（`URL + hiker://lazy#id` 里前面那截）：规则 fn 里的 `input` 就是它
+        if (lazyInput.isNotEmpty) 'lazyInput': lazyInput,
       },
       'vars': vars,
       // 源配置（规则里的 `config.xxx`）：调用方没传就用源仓库里存的
@@ -262,8 +294,11 @@ class HikerEngine {
     int page = 1,
     Map<String, dynamic> vars = const {},
     String lazyId = '',
+    List<String> lazyIds = const [],
+    String lazyInput = '',
   }) =>
-      _run(source, 'home', params: {'page': page}, vars: vars, lazyId: lazyId);
+      _run(source, 'home',
+          params: {'page': page}, vars: vars, lazyId: lazyId, lazyIds: lazyIds, lazyInput: lazyInput);
 
   /// 分类（同 `find_rule`，但把 `class_url` 作为当前页地址传下去）
   ///
@@ -276,13 +311,15 @@ class HikerEngine {
     int page = 1,
     Map<String, dynamic> vars = const {},
     String lazyId = '',
+    List<String> lazyIds = const [],
+    String lazyInput = '',
   }) =>
       _run(source, 'category', params: {
         'url': cateUrl,
         'cateUrl': cateUrl,
         'cateName': cateName,
         'page': page,
-      }, vars: vars, lazyId: lazyId);
+      }, vars: vars, lazyId: lazyId, lazyIds: lazyIds, lazyInput: lazyInput);
 
   /// 搜索（`search_url` 占位符 + `searchFind`）
   Future<HikerResult> search(
@@ -291,11 +328,15 @@ class HikerEngine {
     int page = 1,
     Map<String, dynamic> vars = const {},
     String lazyId = '',
+    List<String> lazyIds = const [],
+    String lazyInput = '',
   }) =>
       _run(source, 'search',
           params: {'keyword': keyword, 'page': page},
           vars: vars,
-          lazyId: lazyId);
+          lazyId: lazyId,
+          lazyIds: lazyIds,
+          lazyInput: lazyInput);
 
   /// 详情 / 取播放地址（`detail_find_rule` 为空时，引擎会把传入 url 当播放地址）
   Future<HikerResult> detail(
@@ -303,8 +344,11 @@ class HikerEngine {
     String url, {
     Map<String, dynamic> vars = const {},
     String lazyId = '',
+    List<String> lazyIds = const [],
+    String lazyInput = '',
   }) =>
-      _run(source, 'detail', params: {'url': url}, vars: vars, lazyId: lazyId);
+      _run(source, 'detail',
+          params: {'url': url}, vars: vars, lazyId: lazyId, lazyIds: lazyIds, lazyInput: lazyInput);
 
   /// 执行**页面事件回调**（`addListener(event, codes)` 登记的那批，见 [HikerResult.listeners]）。
   ///

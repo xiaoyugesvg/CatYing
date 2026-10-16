@@ -13,6 +13,7 @@ import '../services/hiker_builtin.dart';
 import '../services/hiker_engine.dart';
 import '../services/hiker_prefs.dart';
 import '../services/hiker_store.dart';
+import '../widgets/hiker_blocks.dart';
 import '../widgets/hiker_widgets.dart';
 import 'hiker_detail_page.dart';
 import 'hiker_search_page.dart';
@@ -41,8 +42,18 @@ class _HikerHomePageState extends State<HikerHomePage> {
   String _cate = '';
   String _cateName = '首页';
 
+  /// 当前列表对应的**延迟规则链条**（父→子）。
+  ///
+  /// 海阔的条目大多是"一段延迟规则"（分类/详情/选集/立即播放），点进去时要重跑
+  /// 产生它的那次查询并逐层执行 —— 所以每换一层列表就记一条链，
+  /// 点条目时连同链条一起交给详情页（见 hiker_engine.js 的 lazyRuleImpl）。
+  List<String> _lazyChain = const [];
+
   int _page = 1;
   bool _hasMore = false;
+
+  /// 规则返回 `needRefresh`（调过 `refreshPage()`）时只自动补拉一轮，防死循环
+  bool _didAutoRefresh = false;
 
   /// 上一次执行的统计（抓取次数 / 耗时 / 条数），显示在内容上方
   int _reqCount = 0;
@@ -172,9 +183,10 @@ class _HikerHomePageState extends State<HikerHomePage> {
     });
     final vars = _store.varsOf(src.id);
     final r = _cate.isEmpty
-        ? await HikerEngine.instance.home(src, page: page, vars: vars)
+        ? await HikerEngine.instance
+            .home(src, page: page, vars: vars, lazyIds: _lazyChain)
         : await HikerEngine.instance.category(src, _cate,
-            cateName: _cateName, page: page, vars: vars);
+            cateName: _cateName, page: page, vars: vars, lazyIds: _lazyChain);
     // 期间又发起了新的加载（切源 / 切分类 / 加载更多）⇒ 这次结果作废
     if (!mounted || seq != _loadSeq) return;
     // 变量**有变化**才落盘（判据见 HikerStore.saveVarsIfChanged 的注释：
@@ -205,6 +217,16 @@ class _HikerHomePageState extends State<HikerHomePage> {
               ...r.list.where((x) => !_items.any((y) => y.url == x.url)),
             ];
     });
+    // 规则调过 `refreshPage()`（海阔的分类按钮 / 自定义刷新都这么写）：
+    // 官方会重拉一次当前页 —— 我们跟着补一轮（只补一轮，防坏规则死循环）。
+    if (r.needRefresh) {
+      if (!_didAutoRefresh) {
+        _didAutoRefresh = true;
+        unawaited(_load(page: 1));
+      }
+    } else {
+      _didAutoRefresh = false;
+    }
   }
 
   void _pickCate(String url, String name) {
@@ -213,6 +235,7 @@ class _HikerHomePageState extends State<HikerHomePage> {
       _cate = url;
       _cateName = name;
       _items = const [];
+      _lazyChain = const []; // 换静态分类 = 回到顶层查询
     });
     _load(page: 1);
   }
@@ -251,25 +274,79 @@ class _HikerHomePageState extends State<HikerHomePage> {
         builder: (_) => HikerDetailPage(
           source: src,
           item: it,
+          lazyChain: _lazyChain,
           replayLazy: _replayLazyFor(src),
         ),
       ),
     );
   }
 
-  /// 延迟规则（lazyRule）第二趟：重跑**当前这次查询**并带上 lazyId
-  Future<List<HikerItem>> Function(String) _replayLazyFor(HikerSource src) {
+  /// 延迟规则执行入口：重跑**当前这次查询**并把父链带上（见 hiker_engine.js）
+  Future<HikerResult> Function(List<String>) _replayLazyFor(HikerSource src) {
     final cate = _cate;
     final cateName = _cateName;
-    return (id) async {
+    return (ids) async {
       final vars = _store.varsOf(src.id);
       final r = cate.isEmpty
-          ? await HikerEngine.instance.home(src, vars: vars, lazyId: id)
+          ? await HikerEngine.instance.home(src, vars: vars, lazyIds: ids)
           : await HikerEngine.instance.category(src, cate,
-              cateName: cateName, vars: vars, lazyId: id);
+              cateName: cateName, vars: vars, lazyIds: ids);
       await _store.saveVarsIfChanged(src.id, vars, r.vars);
-      return r.list;
+      return r;
     };
+  }
+
+  /// 分类 / 按钮 / 图标 / 文本类条目的点击 —— 海阔语义是**就地切换**（不是进详情页）。
+  ///
+  /// 为什么这么做（用户 2026-10-16：「海阔是将分类作为 tab 的，每个分类也有内容」）：
+  /// 规则给这类条目的地址一般是 `$('...').lazyRule(fn)` 产出的 `hiker://lazy#<id>`。
+  /// 官方流程 = 执行那一段 JS → 页面换成它产出的内容；我们等价实现为
+  /// **"带上父链重跑 + 直接用这次的结果当新列表"**（引擎会执行到最深那层 fn）。
+  Future<void> _triggerAction(HikerItem it) async {
+    final src = _store.current;
+    if (src == null) return;
+    final u = it.url;
+    if (u.isEmpty || u == 'hiker://empty') return;
+    if (!u.startsWith('hiker://lazy#')) {
+      // 老式写法：直接给一个分类地址（http 或 `hiker://empty##xxx##fypage` 规则串）
+      _pickCate(u, hikerPlainText(it.title));
+      return;
+    }
+    final chain = [..._lazyChain, u.substring('hiker://lazy#'.length)];
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    HikerResult r;
+    try {
+      r = await _replayLazyFor(src)(chain);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        AppToast.error('这个分类打不开：$e');
+      }
+      return;
+    }
+    if (!mounted) return;
+    if (r.playUrl.isNotEmpty) {
+      // 少数源的分类按钮直接给播放地址（少见）：交给详情页那套播放逻辑
+      setState(() => _loading = false);
+      _open(it);
+      return;
+    }
+    setState(() {
+      _loading = false;
+      _lazyChain = chain;
+      _items = r.list;
+      _page = 1;
+      _hasMore = false;
+      _reqCount = r.requests;
+      _elapsedMs = r.elapsedMs;
+      _error = r.ok ? null : (r.error ?? '规则执行失败');
+    });
+    if (r.list.isEmpty && r.ok) {
+      AppToast.message('这个分类没有内容');
+    }
   }
 
   void _showItemMenu(HikerItem it) {
@@ -620,16 +697,25 @@ class _HikerHomePageState extends State<HikerHomePage> {
         onRetry: () => _load(page: 1),
       );
     }
+    // 源产出的「分类区」（scroll_button / icon_* 行）固定在列表上方 —— 这就是海阔的
+    // 「分类 tab」语义（用户 2026-10-16：「海阔是将分类作为 tab 的，每个分类也有内容」）。
+    final split = splitLeadingNav(_items);
     return Column(
       children: [
         if (_loading) const LinearProgressIndicator(minHeight: 2),
+        if (split.pinned.isNotEmpty) ...[
+          HikerNavStrip(items: split.pinned, onTap: _triggerAction),
+          Divider(height: 1, thickness: 0.5, color: AppTheme.borderLight),
+        ],
         Expanded(
           child: RefreshIndicator(
             onRefresh: () => _load(page: 1),
-            child: HikerGrid(
-              items: _items,
-              onTap: _open,
+            child: HikerBlocks(
+              items: split.rest,
+              onTapItem: _open,
+              onTapAction: _triggerAction,
               onLongPress: _showItemMenu,
+              onTapSearch: _openSearch,
             ),
           ),
         ),

@@ -169,6 +169,9 @@ function newRuntime(ctx, kv) {
     assetsDir: String((ctx && ctx.assetsDir) || ''),
     kv: kv && typeof kv === 'object' ? { ...kv } : {},
     cache: new Map(),
+    /// 抓取**失败**过的地址（key → Error）：重放时把这些失败当异常抛回规则，
+    /// 让源自己的 `try/catch`（多线路容错）能生效，见 [httpSync]。
+    failedFetches: new Map(),
     cookies: new Map(), // host -> cookie 串
     touchedVars: false,
     lazyIds: new Set(), // 本趟遇到过的 lazyRule id（回报给宿主）
@@ -465,6 +468,14 @@ function httpSync(rt, url, opts) {
   }
   const key = cacheKeyOf(u, opts);
   if (rt.cache.has(key)) return rt.cache.get(key);
+  // ⚠️ 这个地址**这一趟已经抓失败过** ⇒ 把失败**当成异常抛给规则**（海阔里
+  //   `fetch` 失败就是抛错，源的 `try { fetch(u) } catch(e) { 换下一个域名 }`
+  //   全靠它）。原来这里是让错误直接冲出规则（见 runHikerRule 里 doHttp 的
+  //   catch）⇒ 源头写的多线路容错全部失效（实测「91短剧」4 个域名里死 1 个
+  //   就整条规则崩，永远走不到还活着的域名）。
+  if (rt.failedFetches && rt.failedFetches.has(key)) {
+    throw rt.failedFetches.get(key);
+  }
   // 记下"这一轮想要抓这个页面"：万一规则内部 `try { fetch() } catch(e) {}`
   // 把 NeedFetch 吞了，引擎仍能据此补抓一轮（见 runHikerRule 每轮之后的补抓闸门）。
   rt.wantFetch = { url: u, key, opts, webview: false };
@@ -481,9 +492,20 @@ function webViewSync(rt, input, opts) {
   }
   const key = `wv:${u}|${JSON.stringify(opts || {})}`;
   if (rt.cache.has(key)) return rt.cache.get(key);
+  // 同 httpSync：失败过就把失败当异常抛回规则（源自己会兜底）
+  if (rt.failedFetches && rt.failedFetches.has(key)) {
+    throw rt.failedFetches.get(key);
+  }
   // 同 httpSync：被规则吞掉时也要能补抓（走宿主的 WebView 桥）
   rt.wantFetch = { url: u, key, opts: opts || {}, webview: true };
   throw new NeedWebView(u, opts || {}, key);
+}
+
+/** 把"抓页失败"包装成**规则能看懂的异常**（重放时抛回规则，见 [httpSync]） */
+function fetchFailureError(url, err) {
+  const msg = (err && err.message) ? String(err.message) : String(err);
+  const e = new Error(`抓取失败：${String(url).slice(0, 90)}（${msg}）`);
+  return e;
 }
 
 /** 简易字符串指纹（lazyRule 的 id：同一段函数源码 → 同一个 id，保证第二趟能对上） */
@@ -502,20 +524,58 @@ function simpleHash(s) {
  * 我们实现成**两趟**：第一趟返回 `hiker://lazy#<id>`；宿主拿着 id 再请求一次
  * （`params.lazyId`），第二趟匹配到同一个 id 就直接 `fn()` 取真值。
  * 好处是不必把 JS 上下文常驻在 Node 里 —— 规则是确定性的，重跑结果一致。
+ *
+ * ⚠️ 第二趟的产物**以这段 fn 为准**：海阔点"分类/详情/立即播放"时**只跑那一段**，
+ *   而我们是重跑整条规则 ⇒ 外层规则随后自己的 `setResult(首页列表)` 会把 fn 里
+ *   `setResult(详情内容)` 盖掉（实测「91短剧」点剧集进详情永远拿到首页）。
+ *   所以这里把产物记到 `rt.lazyOutcome`，由 [runHikerRule] 优先采用。
  */
 function lazyRuleImpl(rt, ctx, fn, args) {
   const a = Array.isArray(args) ? args : [];
   let argSig = '';
   try {
-    argSig = JSON.stringify(a);
+    // ⚠️ 签名里的 **域名要归一化**：多镜像站（实测 91短剧 在 91crdjai.com / aicrdj3.com /
+    //   udhxjenp.cc 之间跳）同一集在不同趟会拿到不同域名的 URL ⇒ 按原始 args 算 id
+    //   会对不上，"点播放却什么都没执行"。参数本身照原样传给 fn，只有算 id 时替换。
+    argSig = JSON.stringify(a).replace(/https?:\/\/[^"'\s/]+/gi, 'HOST');
   } catch (_) {
     argSig = String(a.length);
   }
   const src = (typeof fn === 'function' ? fn.toString() : String(fn)) + '|' + argSig;
   const id = simpleHash(src);
   rt.lazyIds.add(id);
-  if (ctx.lazyId && String(ctx.lazyId) === id) {
-    return typeof fn === 'function' ? fn(...a) : undefined; // 第二趟：真正执行
+  // 第二趟：真正执行。`lazyIds` 是**父→子**的链条（海阔的 lazy URL 自带 JS，
+  // 点嵌套条目只跑那一段；我们靠"把父 id 一起带上、逐层执行"来等价实现）：
+  //   例：分类(icon) → 详情 → 立即播放 = [分类id, 详情id, 播放id]
+  const want = Array.isArray(ctx.lazyIds) && ctx.lazyIds.length
+    ? ctx.lazyIds
+    : (ctx.lazyId ? [String(ctx.lazyId)] : []);
+  if (want.includes(id)) {
+    // 期间 `setResult` 的产物单独收一份（见沙箱里的 setResult）
+    const prevIn = rt.inLazyFn;
+    const prevCollected = rt.lazyCollected;
+    rt.inLazyFn = true;
+    rt.lazyCollected = undefined;
+    rt.lazyDepth = (Number(rt.lazyDepth) || 0) + 1;
+    const myDepth = rt.lazyDepth;
+    let out;
+    // 海阔里"条目地址 + lazyRule"这种写法：fn 里的 `input` 就是前面那截地址
+    const swapInput = ctx.lazyInput ? String(ctx.lazyInput) : '';
+    if (swapInput && typeof rt.setInput === 'function') rt.setInput(swapInput);
+    try {
+      out = typeof fn === 'function' ? fn(...a) : undefined;
+    } finally {
+      if (swapInput && typeof rt.setInput === 'function') rt.setInput(rt.inputBase);
+      rt.lazyDepth = myDepth - 1;
+      rt.inLazyFn = prevIn;
+      // 只留**最内层**（嵌套最深）那次的产物：外层规则的 setResult 会盖掉内层，
+      // 而真正想要的是"用户点的那一条"的结果
+      if (!rt.lazyOutcome || myDepth >= rt.lazyOutcome.depth) {
+        rt.lazyOutcome = { returned: out, result: rt.lazyCollected, depth: myDepth };
+      }
+      rt.lazyCollected = prevCollected;
+    }
+    return out;
   }
   return `hiker://lazy#${id}`;
 }
@@ -705,6 +765,38 @@ function normItem(it, fallbackColType) {
     // 透传业务字段（pageTitle / searchTerms / hideSetting 等），Phase 1 只做展示
     extra: (it.extra && typeof it.extra === 'object') ? it.extra : undefined,
   };
+}
+
+/**
+ * 海阔「播放地址」的**合法形态** —— 按官方 `assets/help_link.json`，
+ * 详情/选集产出的"播放地址"远不止 http：
+ *   · `pics://图1&&图2`    多图模式（类似漫画），下拉自动下一章
+ *   · `novel://{…}`        正文（项目内 TVBox 约定）
+ *   · `x5Play://http://…`  强制用播放器播该地址
+ *   · `video://https://…`  进播放器自动提取视频
+ * 原来只认 `http(s)`/`x5://` ⇒ 漫画源、小说源的"立即播放"永远拿不到地址
+ * （点下去没反应），实测被丢弃的就是这一批。
+ */
+const PLAY_ADDR_SCHEMES = [
+  'pics://', 'mange://', 'pic://', 'image://', 'images://',
+  'novel://', 'book://', 'txt://', 'video://', 'x5play://',
+];
+
+function isPlayableAddr(s) {
+  const t = String(s || '').trim();
+  if (!t) return false;
+  if (/^https?:\/\//i.test(t)) return true;
+  const low = t.toLowerCase();
+  return PLAY_ADDR_SCHEMES.some((p) => low.startsWith(p));
+}
+
+/** 剥掉官方"外壳协议"（语义等同"就播/就看它"的那几个） */
+function stripOuterScheme(s) {
+  const t = String(s || '').trim();
+  const low = t.toLowerCase();
+  if (low.startsWith('x5play://')) return t.slice(9);
+  if (low.startsWith('x5://')) return t.slice(5);
+  return t;
 }
 
 /**
@@ -1855,7 +1947,7 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
       eq: (i) => jq($.eq ? $.eq(i) : $),
       toString: () => (typeof $ === 'function' ? $('body').html() : $.html()),
       // `$('').lazyRule(fn)` —— 延迟规则（见 lazyRuleImpl）
-      lazyRule: (fn) => lazyRuleImpl(rt, ctx, fn),
+      lazyRule: (fn, ...args) => lazyRuleImpl(rt, ctx, fn, args),
       // `$(url).rule(fn, ...args)` —— hiker 的「局部规则」：点它时执行 fn。
       // 与 lazyRule 共用同一套两趟机制（id 里带上参数签名，避免同规则内多次调用撞车）。
       rule: (fn, ...args) => lazyRuleImpl(rt, ctx, fn, args),
@@ -1869,10 +1961,10 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
       // ⚠️ 只有 `image` 不一样：它**必须当场出结果**（返回图片地址）。
       //   做成延迟规则会让封面变成 `hiker://lazy#…` ⇒ 列表里封面全空
       //   （见上方 `$.image` 那节说明）。
-      input: (fn) => lazyRuleImpl(rt, ctx, fn),
-      select: (fn) => lazyRuleImpl(rt, ctx, fn),
+      input: (fn, ...args) => lazyRuleImpl(rt, ctx, fn, args),
+      select: (fn, ...args) => lazyRuleImpl(rt, ctx, fn, args),
       image: (fn, ...args) => imageRuleImpl(asUrl, headers, fn, args),
-      x5Rule: (fn) => lazyRuleImpl(rt, ctx, fn),
+      x5Rule: (fn, ...args) => lazyRuleImpl(rt, ctx, fn, args),
     };
   }
 
@@ -1951,11 +2043,24 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
     /// 常用 UA 常量（实测有源直接用 `MOBILE_UA` / `PC_UA`）
     MOBILE_UA: UA_MOBILE,
     PC_UA: UA_PC,
+    /// 搜索关键词（海阔文档里的 `KEY`；实测「91短剧」的 `search()` 第一选择就是它 ——
+    /// 少了它源会走到"请输入关键词"分支，搜索永远出不了结果）
+    KEY: ctx.action === 'search' ? String(ctx.keyword || '') : '',
+    KEYWORD: ctx.action === 'search' ? String(ctx.keyword || '') : '',
 
     /// 源配置（海阔里用户可填的 `config`）—— 规则里 `config.host` 读的就是它。
     /// 没有配置时给个空对象，让 `config.x` 得到 undefined 而不是
-    /// `config is not defined`（后者会让整条规则在模块加载期就炸掉）。
+    /// `config is not defined`（后者会让整条规则在加载期就炸掉）。
     config: ctx.config && typeof ctx.config === 'object' ? ctx.config : {},
+
+    /// `input` —— 海阔里"当前输入/当前条目地址"。
+    ///
+    /// 两个常见用法（实测）：
+    ///   · 列表项 url 写成 `条目地址 + $('').lazyRule(fn)`（AVbebe / 7MMTV）⇒
+    ///     点它时 fn 里 `fetch(input)` 拿到的就是**前面那截地址**；
+    ///   · 输入框规则（`col_type: input`）⇒ fn 里读用户输入的文字。
+    /// 以前沙箱里**没有这个全局** ⇒ 这类源点了就报"只支持 http(s) 地址，规则要的是「(空)」"。
+    input: ctx.input == null ? '' : String(ctx.input),
 
     // ── 同步网络 ─────────────────────────────────────────
     fetch: (url, opts) => g(url, opts),
@@ -1967,7 +2072,7 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
     // WebView 抓页（Phase 2）：信号式同步 —— Node 里没有 WebView，
     // 抛 NeedWebView 交给宿主（Dart）去抓，再重放（见 webViewSync）
     fetchCodeByWebView: (input, opts) => webViewSync(rt, input, opts),
-    lazyRule: (fn) => lazyRuleImpl(rt, ctx, fn),
+    lazyRule: (fn, ...args) => lazyRuleImpl(rt, ctx, fn, args),
     // 取网页源码：不传 url = 「当前页面」（`source.url`），老式规则全靠它
     getResCode: (url) => {
       const u = url || ctx.url;
@@ -2039,8 +2144,8 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
     print: (...a) => console.log('[hiker]', ...a),
 
     // ── 结果 ─────────────────────────────────────────────
-    setResult: (r) => { state.result = r; },
-    setHomeResult: (r) => { state.homeResult = r; },
+    setResult: (r) => { state.result = r; if (rt.inLazyFn) rt.lazyCollected = r; },
+    setHomeResult: (r) => { state.homeResult = r; if (rt.inLazyFn) rt.lazyCollected = r; },
     setNextPage: (r) => { state.nextPage = r == null ? '' : String(r); },
     setPageTitle: (r) => { state.pageTitle = r == null ? '' : String(r); },
     setError: (r) => { state.error = r == null ? '' : String(r); },
@@ -2177,7 +2282,7 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
       },
       fetch: (url, opts) => g(url, opts),
       fetchCodeByWebView: (input, opts) => webViewSync(rt, input, opts),
-      lazyRule: (fn) => lazyRuleImpl(rt, ctx, fn),
+      lazyRule: (fn, ...args) => lazyRuleImpl(rt, ctx, fn, args),
       html: (h) => jq(cheerio.load(String(h || ''))),
       md5: (s) => CryptoJS.MD5(String(s)).toString(),
       sha1: (s) => CryptoJS.SHA1(String(s)).toString(),
@@ -2213,6 +2318,12 @@ function buildSandbox(rt, state, requireModule, evalPrivateJS) {
   };
   sandbox.globalThis = sandbox;
   sandbox.window = sandbox;
+  // 执行某段 lazyRule 时，宿主会把"条目地址"（`URL + hiker://lazy#id` 里前面那截）
+  // 作为 `lazyInput` 传进来，这里临时替换全局 `input`（见 [lazyRuleImpl]）
+  rt.inputBase = ctx.input == null ? '' : String(ctx.input);
+  rt.setInput = (v) => {
+    sandbox.input = v == null ? '' : String(v);
+  };
   return sandbox;
 }
 
@@ -2286,7 +2397,11 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
         };
       } catch (e) {
         if (e instanceof NeedFetch) {
-          rt.cache.set(e.key, await doHttp(rt, e.url, e.opts));
+          try {
+            rt.cache.set(e.key, await doHttp(rt, e.url, e.opts));
+          } catch (err) {
+            rt.failedFetches.set(e.key, fetchFailureError(e.url, err));
+          }
           continue; // 抓到页面后重放
         }
         throw e;
@@ -2314,6 +2429,10 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
     // 随机数序列也归零 —— 这样各轮走到同一行代码时拿到的随机值一致（见 [pseudoRandom]）
     rt.wantFetch = null;
     rt.randSeq = 0;
+    // 每轮复位"这一趟执行的 lazyRule 产物"（见 [lazyRuleImpl]）
+    rt.lazyOutcome = null;
+    rt.lazyCollected = undefined;
+    rt.lazyDepth = 0;
     const state = {
       result: undefined,
       homeResult: undefined,
@@ -2450,8 +2569,13 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
         .runInContext(sandbox, { timeout: SCRIPT_TIMEOUT_MS });
     } catch (e) {
       if (e instanceof NeedFetch) {
-        const body = await doHttp(rt, e.url, e.opts);
-        rt.cache.set(e.key, body);
+        // ⚠️ 抓失败**不要直接冲出去**：记下来、重放一轮，让规则自己的
+        //   `try { fetch(...) } catch(e) { 换线路/兜底 }` 能生效（见 [httpSync]）
+        try {
+          rt.cache.set(e.key, await doHttp(rt, e.url, e.opts));
+        } catch (err) {
+          rt.failedFetches.set(e.key, fetchFailureError(e.url, err));
+        }
         pending.push(e.url);
         continue; // 重放
       }
@@ -2463,8 +2587,12 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
             + '（宿主未就绪）',
           );
         }
-        const html = await opts.fetchWebView(e.url, e.opts);
-        rt.cache.set(e.key, html == null ? '' : String(html));
+        try {
+          const html = await opts.fetchWebView(e.url, e.opts);
+          rt.cache.set(e.key, html == null ? '' : String(html));
+        } catch (err) {
+          rt.failedFetches.set(e.key, fetchFailureError(e.url, err));
+        }
         pending.push(`webview:${e.url}`);
         continue; // 重放
       }
@@ -2494,19 +2622,40 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
             + '（宿主未就绪）',
           );
         }
-        const html = await opts.fetchWebView(w.url, w.opts);
-        rt.cache.set(w.key, html == null ? '' : String(html));
+        try {
+          const html = await opts.fetchWebView(w.url, w.opts);
+          rt.cache.set(w.key, html == null ? '' : String(html));
+        } catch (err) {
+          rt.failedFetches.set(w.key, fetchFailureError(w.url, err));
+        }
         pending.push(`webview:${w.url}`);
       } else {
-        const body = await doHttp(rt, w.url, w.opts);
-        rt.cache.set(w.key, body);
+        try {
+          rt.cache.set(w.key, await doHttp(rt, w.url, w.opts));
+        } catch (err) {
+          rt.failedFetches.set(w.key, fetchFailureError(w.url, err));
+        }
         pending.push(w.url);
       }
-      continue; // 重放：让规则拿到真页面
+      continue; // 重放：让规则拿到真页面（或看到抓取失败的异常）
     }
 
     if (state.error) throw new Error(String(state.error));
-    const raw = state.homeResult !== undefined ? state.homeResult : state.result;
+    let raw = state.homeResult !== undefined ? state.homeResult : state.result;
+    // 这一趟是"执行某个 lazyRule"（带 lazyId 的那次）⇒ **产物以那段 JS 为准**：
+    //   海阔点分类/详情/立即播放时只跑那一段，而我们是重跑整条规则，
+    //   外层规则随后自己的 setResult(首页列表) 会把它盖掉（实测「91短剧」点剧集拿不到详情）。
+    const lo = rt.lazyOutcome;
+    if (lo) {
+      const ret = lo.returned;
+      const retLooksNoop = typeof ret === 'string'
+        && (ret.trim() === '' || ret.trim().startsWith('hiker://empty') || ret.trim().startsWith('hiker://lazy#'));
+      if (ret !== undefined && ret !== null && !retLooksNoop) {
+        raw = ret;
+      } else if (lo.result !== undefined && lo.result !== null) {
+        raw = lo.result;
+      }
+    }
     let list = extractItems(raw, source && source.col_type, maxItems);
     // setPreResult 的"前段结果"要**排在前面**（文档：先返回上半屏、后面再追加）
     if (state.preResult !== undefined && state.preResult !== null) {
@@ -2515,16 +2664,39 @@ export async function runHikerRule(source, ctx, kv, opts = {}) {
     }
     // 详情规则常见写法：只 setResult 一条（或直接 setResult('播放地址')）
     let playUrl = '';
+    let playHeaders = null;
+    let playUrlExtra = [];
     if (typeof raw === 'string') {
       const s = raw.trim();
-      if (/^https?:\/\//i.test(s) || s.startsWith('x5://')) {
-        playUrl = s.startsWith('x5://') ? s.slice(5) : s;
+      if (isPlayableAddr(s)) {
+        // `x5://` / `x5Play://` 只剥外壳；`pics://` / `novel://` 原样交给宿主分流
+        playUrl = stripOuterScheme(s);
+      } else if (s.startsWith('{')) {
+        // 海阔的「播放地址」JSON 约定（实测 91短剧 / 野果短剧 的 playRule() 都返回它）：
+        //   {"urls":["…m3u8","备用"],"names":["HLS"],"headers":{"Referer":"…"},"parse":0}
+        // 原来只认纯 http 字符串 ⇒ 这类源的"立即播放"永远拿不到地址（点下去没反应）。
+        try {
+          const o = JSON.parse(s);
+          const urls = Array.isArray(o.urls) ? o.urls : (o.url ? [o.url] : []);
+          const first = urls.find((u) => isPlayableAddr(u));
+          if (first) playUrl = stripOuterScheme(String(first));
+          // 备用清晰度也带上，播放失败时可换（宿主会顺延同集其它候选）
+          if (urls.length > 1) {
+            playUrlExtra = urls.slice(1).map((u) => String(u)).filter((u) => isPlayableAddr(u));
+          }
+          if (o.headers && typeof o.headers === 'object') {
+            playHeaders = {};
+            for (const k of Object.keys(o.headers)) playHeaders[k] = String(o.headers[k]);
+          }
+        } catch (_) { /* 不是 JSON 就当普通文本，交给下面的兜底 */ }
       }
     }
     if (!playUrl && list.length === 1 && list[0].url) playUrl = list[0].url;
     return {
       list,
       playUrl,
+      playHeaders,
+      playUrlExtra,
       nextPage: state.nextPage || '',
       pageTitle: state.pageTitle || '',
       vars: rt.kv,
@@ -2930,8 +3102,7 @@ export async function handleHikerApi(data) {
 
     if (!rule) {
       // 没有规则：把传入的 url 当播放地址（很多源的列表项本身就是直链/播放页）
-      let playUrl = ctxUrl;
-      if (playUrl.startsWith('x5://')) playUrl = playUrl.slice(5);
+      let playUrl = stripOuterScheme(ctxUrl);
       return {
         ok: true, list: [], playUrl, nextPage: '', pageTitle: '',
         vars: kv, requests: 0, elapsedMs: Date.now() - t0,
@@ -2945,10 +3116,27 @@ export async function handleHikerApi(data) {
       cateUrl: params.cateUrl || '',
       /// 分类名（宿主传入；规则里 `MY_CLASS_NAME` 读它）
       cateName: params.cateName || '',
+      /// 搜索关键词（规则里 `KEY` 读它，见沙箱里的 KEY / KEYWORD）
+      keyword: String(params.keyword || ''),
+      /// 这条 lazyRule 的"输入"（海阔里 `条目地址 + hiker://lazy#id` 的前面那截）
+      lazyInput: String(params.lazyInput || ''),
       /// 本次动作（`MY_TYPE` 用它：home/search/detail）
       action,
       params: envParams,
       ua,
+      /// 延迟规则链条：`[父id, …, 目标id]`（宿主点嵌套条目时把链条带上，
+      /// 引擎逐层执行，见 [lazyRuleImpl]）。老的单 id 写法继续支持。
+      lazyIds: (() => {
+        const out = [];
+        if (Array.isArray(params.lazyIds)) {
+          for (const x of params.lazyIds) {
+            const s = String(x || '').trim();
+            if (s) out.push(s);
+          }
+        }
+        if (!out.length && params.lazyId) out.push(String(params.lazyId).trim());
+        return out;
+      })(),
       config: cfg,
       homeUrl: homeBase,
       rule,
@@ -2968,6 +3156,10 @@ export async function handleHikerApi(data) {
       ok: true,
       list: r.list || [],
       playUrl: r.playUrl || '',
+      /// 播放请求头（海阔播放 JSON 里的 `headers`，防盗链要用）
+      playHeaders: r.playHeaders || null,
+      /// 同集备用地址（同 JSON 里的 urls[1..]，播放失败时可顺延）
+      playUrlExtra: r.playUrlExtra || [],
       nextPage: r.nextPage || '',
       pageTitle: r.pageTitle || '',
       vars: r.vars || kv,
