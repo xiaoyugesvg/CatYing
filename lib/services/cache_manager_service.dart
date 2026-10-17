@@ -14,7 +14,7 @@ import '../../rss/services/rss_reader.dart';
 import '../models/cache_store.dart';
 import 'nodejs_manager.dart';
 
-/// 缓存分类：模块（影视/直播/音乐/阅读/TMDB/海阔/网页/RSS）在前，
+/// 缓存分类：模块（影视/直播/音乐/阅读/TMDB/海阔/观影同步/RSS）在前，
 /// 「软件本身」收纳图片/数据/JS/临时文件等跨模块分类。
 enum CacheModule {
   video('影视'),
@@ -24,7 +24,9 @@ enum CacheModule {
   tmdb('TMDB 缓存'),
   // ── 后加的模块（用户 2026-10-15 要求"把新模块也纳入缓存管理"）──────
   hiker('海阔'),
-  webhome('网页'),
+  // 原「网页(Webhtv)」：该模块已下线（用户 2026-10-16），
+  // 它名下只剩「观影记录同步」的游标这一项 → 直接以那个功能命名。
+  playbackSync('观影同步'),
   rss('RSS'),
   app('软件本身');
 
@@ -332,7 +334,7 @@ class CacheManagerService {
     );
     onSize?.call();
 
-    // ── 网页（Webhtv）：观影记录同步的**游标** ────────────────────
+    // ── 观影记录同步：增量同步的**游标** ──────────────────────────
     //   游标是纯缓存（清了下次全量拉一次）；**墓碑不清** —— 它挡的是"远端已删除
     //   的记录又被拉回来"，清掉会让已删记录复活。
     var cursorBytes = 0;
@@ -342,10 +344,10 @@ class CacheManagerService {
     } catch (_) {}
     out.add(
       CacheEntryInfo(
-        id: 'webhome_sync_cursor',
+        id: 'playback_sync_cursor',
         label: '观影记录同步游标',
         hint: '增量同步的进度；清了下次会重新全量拉一次（不会丢记录）',
-        module: CacheModule.webhome,
+        module: CacheModule.playbackSync,
         size: cursorBytes,
         clear: () async {
           try {

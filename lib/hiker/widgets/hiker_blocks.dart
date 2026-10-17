@@ -98,6 +98,8 @@ class HikerBlocks extends StatelessWidget {
         return _textCells(run.items, 3);
       case _Kind.text4:
         return _textCells(run.items, 4);
+      case _Kind.text5:
+        return _textCells(run.items, 5);
       case _Kind.paragraph:
         return _paragraph(run.items);
       case _Kind.gap:
@@ -463,6 +465,7 @@ enum _Kind {
   text2,
   text3,
   text4,
+  text5,
   paragraph,
   gap,
 }
@@ -521,6 +524,13 @@ _Kind _kindOf(String colType) {
       return _Kind.text3;
     case 'text_4':
       return _Kind.text4;
+    // `text_5`（官方 5 列 / 每排 5 个）**原来没被识别** ⇒ 落到 `default` 被当成
+    // `cards3`（3 列海报卡）渲染 ✗ —— 多个源（如「粉嫩小BB」）拿它当**分类**，
+    // 于是"分类"变成一堆没有图的卡片格，用户看到的就是"分类没做成 tab"
+    //（用户 2026-10-16）。这里补上识别，并让它在首页顶部走 tab 条（见
+    // `splitLeadingNav` / `HikerNavStrip`）。
+    case 'text_5':
+      return _Kind.text5;
     case 'long_text':
     case 'rich_text':
       return _Kind.paragraph;
@@ -591,10 +601,11 @@ bool _mergable(_Kind k) =>
     k == _Kind.cards1 ||
     k == _Kind.cards2 ||
     k == _Kind.cards3 ||
-    // 多列文本要合并成一行（2/3/4 个一组），整行的 text_1 仍各占一块
+    // 多列文本要合并成一行（2/3/4/5 个一组），整行的 text_1 仍各占一块
     k == _Kind.text2 ||
     k == _Kind.text3 ||
     k == _Kind.text4 ||
+    k == _Kind.text5 ||
     k == _Kind.paragraph;
 
 // ============================================================
@@ -730,10 +741,15 @@ Widget hikerIconRow(
   );
 }
 
-/// 页面顶部**固定**的分类区（分类行或图标行）。
+/// 页面顶部**固定**的分类区（统一渲染成 **tab 条**）。
 ///
-/// 用户 2026-10-16：「海阔是将分类作为 tab 的」—— 固定在列表上方、不随内容滚走，
-/// 点它就地换分类（见 `HikerHomePage._triggerAction`）。
+/// 用户 2026-10-16：「海阔是将分类作为 tab 的」+「这个海阔没有将分类弄 tab 吗」
+/// —— 固定在列表上方、不随内容滚走，点它就地换分类（见 `HikerHomePage._triggerAction`）。
+///
+/// ⚠️ 原来 `icon_*` 那一类（Apollo 风格源）走 [hikerIconRow] ⇒ 渲染成
+/// **图标九宫格**（`Wrap`），跟"分类 tab"根本不是一回事 ⇒ 用户看到的就是
+/// "分类没做成 tab"。现在两种都走 [hikerCategoryTabs]：
+/// 横向可滑的单行 tab，有图标就带图标（18px），选中 = 强调色淡底 + 加粗描边。
 class HikerNavStrip extends StatelessWidget {
   final List<HikerItem> items;
   final void Function(HikerItem item) onTap;
@@ -743,23 +759,106 @@ class HikerNavStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (items.isEmpty) return const SizedBox.shrink();
-    final kind = _kindOf(items.first.colType);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (kind == _Kind.chips)
-          hikerChipsRow(items, onTap: onTap)
-        else
-          hikerIconRow(items, kind == _Kind.icons3 ? 3 : 4, onTap: onTap),
-      ],
-    );
+    return hikerCategoryTabs(items, onTap: onTap);
   }
+}
+
+/// 分类 **tab 条**：横向滚动 + 单行 + 选中高亮。
+///
+/// 与 [hikerChipsRow] 的区别只有一个：**条目带图标时把图标也画进 tab 里**
+/// （在文字左边，18×18 圆角小图）—— 因为九宫格那类源的分类条目是
+/// `icon_*`，`it.pic` 是有值的，直接扔掉图标反而不如带上。
+Widget hikerCategoryTabs(
+  List<HikerItem> list, {
+  required void Function(HikerItem item) onTap,
+  void Function(HikerItem item)? onLongPress,
+}) {
+  return SizedBox(
+    height: 38,
+    child: SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
+      child: Row(
+        children: [
+          for (var i = 0; i < list.length; i++)
+            Padding(
+              padding: EdgeInsets.only(right: i == list.length - 1 ? 0 : 8),
+              child: Builder(builder: (_) {
+                final it = list[i];
+                final active = hikerRichIsActive(it.title);
+                final fg = active
+                    ? AppTheme.accentOnSurface
+                    : AppTheme.textSecondary;
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => onTap(it),
+                  onLongPress:
+                      onLongPress == null ? null : () => onLongPress(it),
+                  child: Container(
+                    // 有图标时左边只留 8，让图标跟文字凑得近一点
+                    padding: EdgeInsets.only(
+                        left: it.pic.isEmpty ? 14 : 8, right: 14),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: active
+                          ? AppTheme.accentSurface
+                          : AppTheme.backgroundTertiary,
+                      borderRadius: BorderRadius.circular(16),
+                      border: active
+                          ? Border.all(
+                              color:
+                                  AppTheme.accentColor.withValues(alpha: 0.45))
+                          : null,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (it.pic.isNotEmpty) ...[
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CachedNetworkImage(
+                                imageUrl: it.pic,
+                                fit: BoxFit.cover,
+                                // 图挂了就只显示文字，不留空洞
+                                errorBuilder: (_, _, _) =>
+                                    const SizedBox.shrink(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        Text.rich(
+                          TextSpan(
+                              children: hikerRichSpans(
+                                  it.title,
+                                  TextStyle(
+                                      color: fg,
+                                      fontSize: AppTheme.fontFootnote,
+                                      fontWeight: active
+                                          ? FontWeight.w700
+                                          : FontWeight.w500))),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ),
+        ],
+      ),
+    ),
+  );
 }
 
 /// 掐掉列表开头的"页面外壳"，只留内容 —— 给「工具入口弹窗」用。
 ///
 /// 源被重跑后产出的列表**总是又把整页的头带一遍**：源自带的搜索框（`input`）+
-/// 分类 chips + 「收藏 / 历史 / 设置」这一行（`text_2/3/4`）。弹窗里再显示这些
+/// 分类 chips + 「收藏 / 历史 / 设置」这一行（`text_2/3/4/5`）。弹窗里再显示这些
 /// 没意义（实测「麻豆传媒AI」第二轮 n=24 里有 10 条都是壳，真正的设置项从
 /// `text_center_1 程序设置` 才开始）。
 List<HikerItem> stripLeadingShell(List<HikerItem> items) {
@@ -773,6 +872,7 @@ List<HikerItem> stripLeadingShell(List<HikerItem> items) {
         k == _Kind.text2 ||
         k == _Kind.text3 ||
         k == _Kind.text4 ||
+        k == _Kind.text5 ||
         k == _Kind.gap) {
       i++;
       continue;
@@ -784,8 +884,13 @@ List<HikerItem> stripLeadingShell(List<HikerItem> items) {
 
 /// 把"顶部的分类区"从列表里摘出来（返回 pinned = 固定的那块，rest = 其余按序渲染）。
 ///
-/// 判定：从前往后找**第一个** 分类/图标行；它之前不能出现内容卡片
+/// 判定：从前往后找**第一个** 分类行；它之前不能出现内容卡片
 /// （出现卡片说明源是先内容后按钮，那就别固定了）。
+///
+/// ⚠️ 判定的 col_type 必须**覆盖源真正用的分类写法**，否则"分类"不会被固定、
+///    也就不会走 tab 条。实测「粉嫩小BB」的分类是 `text_5`（2 排 × 5 个），
+///    以前这里不认 ⇒ 它被当普通列表项渲染成卡片格（用户 2026-10-16：
+///    「这个海阔没有将分类弄 tab 吗」）。
 ({List<HikerItem> pinned, List<HikerItem> rest}) splitLeadingNav(
     List<HikerItem> items) {
   var idx = -1;
@@ -793,7 +898,10 @@ List<HikerItem> stripLeadingShell(List<HikerItem> items) {
   for (var i = 0; i < items.length; i++) {
     final k = _kindOf(items[i].colType);
     if (k == _Kind.cards1 || k == _Kind.cards2 || k == _Kind.cards3) break;
-    if (k == _Kind.chips || k == _Kind.icons4 || k == _Kind.icons3) {
+    if (k == _Kind.chips ||
+        k == _Kind.icons4 ||
+        k == _Kind.icons3 ||
+        k == _Kind.text5) {
       idx = i;
       kind = k;
       break;

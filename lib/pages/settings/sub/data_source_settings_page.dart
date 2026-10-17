@@ -5,10 +5,8 @@ import '../../../common/theme.dart';
 import '../../../models/subscription.dart';
 import '../../../services/api_config.dart';
 import '../../../services/source_kind.dart';
-import '../../../rss/pages/rss_manage_page.dart';
 import '../../../rss/services/rss_store.dart';
-import '../../../webhome/web_home_manage_page.dart';
-import '../../../webhome/web_home_prefs.dart';
+import '../../../rss/pages/rss_manage_page.dart';
 import '../../subscription/view.dart';
 import '../../../widgets/common_widgets.dart';
 import '../../../widgets/source_kind_badge.dart';
@@ -95,25 +93,9 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
                 onTap: () => Get.to(() => const ParseSettingsPage()),
               ),
             ),
-            // 网页管理（用户 2026-10-14）：内置/订阅/本地导入的网页源，
-            // 可切换、可拖动排序 —— 与「网页」页顶栏右边的设置按钮是同一页。
-            //
-            // ⚠️ 这里**不能包 `Obx`**（用户 2026-10-15 报「订阅管理里一条长白条」）：
-            //   `WebHomePrefs.sources` 是**普通 List**、不是 Rx，`Obx` 找不到
-            //   observable 会直接抛错 ⇒ 该子树塌成 ErrorWidget（就是那条灰白条），
-            //   并把下面所有行一起吃掉 ✗。改成「返回本页后 setState 刷新」。
-            SettingsRow(
-              icon: Icons.language_outlined,
-              title: 'Webhtv 管理',
-              value: '${WebHomePrefs.instance.sources.length} 个网页',
-              onTap: () async {
-                await Get.to(() => const WebHomeManagePage());
-                if (mounted) setState(() {});
-              },
-            ),
             // RSS 管理（用户 2026-10-15）：订阅源导入（JSON / OPML / 本地文件）、
             // 启用停用、删除 —— 与「RSS」页顶栏右边的 ⚙ 是同一页。
-            // ⚠️ 同「网页管理」：`RssStore.sources` 也不是 Rx，别用 `Obx`。
+            // ⚠️ `RssStore.sources` 不是 Rx，别用 `Obx`。
             SettingsRow(
               icon: Icons.rss_feed_outlined,
               title: 'RSS 管理',

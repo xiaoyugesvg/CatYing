@@ -50,7 +50,6 @@ import 'reading/services/reading_progress_service.dart';
 import 'reading/novel_source/analyze/cookie_store.dart';
 import 'reading/novel_source/web_book/runner_isolate.dart';
 import 'rss/services/rss_store.dart';
-import 'webhome/web_home_prefs.dart';
 import 'reading/services/trim_preset_service.dart';
 import 'reading/services/view_mode.dart';
 import 'reading/services/book_view_mode.dart';
@@ -136,9 +135,6 @@ void main() async {
   // 必须早于任何书源求值，故在此处（与其它启动期 restore 并列）恢复一次。
   await bootRestore('SourceCookieStore.load', SourceCookieStore.instance.load);
 
-  // 「网页首页」模块的配置（首页地址）：同属启动期读 prefs/文件的恢复类步骤，
-  // 走同一套 5s 超时保护（见 bootRestore 说明）。
-  await bootRestore('WebHomePrefs.load', WebHomePrefs.instance.load);
   // RSS 订阅源（设置里的「RSS 管理」+ 底栏 RSS 模块）
   await bootRestore('RssStore.load', RssStore.instance.load);
 

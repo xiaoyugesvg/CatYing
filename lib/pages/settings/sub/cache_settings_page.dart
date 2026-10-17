@@ -175,7 +175,7 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
         CacheModule.reading => Icons.menu_book_outlined,
         CacheModule.tmdb => Icons.movie_filter_outlined,
         CacheModule.hiker => Icons.rocket_launch_outlined,
-        CacheModule.webhome => Icons.language_outlined,
+        CacheModule.playbackSync => Icons.sync_rounded,
         CacheModule.rss => Icons.rss_feed_outlined,
         CacheModule.app => Icons.phone_iphone_rounded,
       };

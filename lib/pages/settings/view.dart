@@ -4,7 +4,6 @@ import '../../common/theme.dart';
 import '../../widgets/common_widgets.dart';
 import '../../widgets/glass.dart';
 import '../../miniapp/pages/mini_app_list_page.dart';
-import '../../webhome/webhtv_settings_page.dart';
 import '../../hiker/pages/hiker_settings_page.dart';
 import 'controller.dart';
 import 'sub/about_settings_page.dart';
@@ -151,17 +150,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 icon: Icons.block_rounded,
                 title: '广告管理',
                 onTap: () => Get.to(() => const AdBlockSettingsPage()),
-              ),
-              const SizedBox(height: AppTheme.spacingMD),
-
-              // Webhtv（独立模块，用户 2026-10-15）：
-              // 站点注入 / WebHome 扩展 / 网盘检测 / 站点健康排序 /
-              // 观影记录同步 / APP 代理 / 一键同步 / 局域网管理页 / 远程托管
-              // —— 全部集中在这一个独立设置页里分项管理。
-              _categoryTile(
-                icon: Icons.public_rounded,
-                title: 'Webhtv',
-                onTap: () => Get.to(() => const WebhtvSettingsPage()),
               ),
               const SizedBox(height: AppTheme.spacingMD),
 

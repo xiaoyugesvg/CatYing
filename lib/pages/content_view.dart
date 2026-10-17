@@ -21,7 +21,6 @@ import '../music/pages/root_view.dart';
 import '../miniapp/pages/mini_app_list_page.dart';
 import '../hiker/pages/hiker_home_page.dart';
 import '../rss/pages/rss_page.dart';
-import '../webhome/web_home_page.dart';
 import 'settings/view.dart';
 import 'search/view.dart';
 import 'search/controller.dart';
@@ -694,14 +693,10 @@ class _ContentViewState extends State<ContentView>
         reading_app.HomePage(),
         // 程序（索引 7）—— 独立「小程序」模块（TVBox 配置：影视 + 直播）
         const MiniAppListPage(),
-        // 网页（索引 8）—— 「网页首页」独立模块：加载用户自配的 HTML 首页，
-        // 注入 window.ant 后可直接搜片 / 播放 / 存取（默认不进底栏，
-        // 用户在「设置 → 主页页面」里自行开启；见 lib/webhome/）
-        const WebHomePage(),
-        // RSS（索引 9）—— 订阅源阅读（Legado RSS 源 / 标准 RSS / OPML；
+        // RSS（索引 8）—— 订阅源阅读（Legado RSS 源 / 标准 RSS / OPML；
         // 见 lib/rss/）。用户 2026-10-15 要求"直接加个 RSS 分类"
         const RssPage(),
-        // 海阔（索引 10）—— 海阔视界(hiker/hipy)小程序规则模块（见 lib/hiker/）。
+        // 海阔（索引 9）—— 海阔视界(hiker/hipy)小程序规则模块（见 lib/hiker/）。
         // 独立于「程序」里的 TVBox 小程序体系；默认不进底栏，
         // 用户在「设置 → 主页页面」里自行开启。
         const HikerHomePage(),

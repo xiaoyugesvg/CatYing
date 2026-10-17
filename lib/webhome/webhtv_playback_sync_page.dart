@@ -7,7 +7,10 @@ import '../common/theme.dart';
 import '../widgets/app_toast.dart';
 import 'webhtv_playback_sync_service.dart';
 
-/// 「Webhtv → 观影记录同步」（第 7 步，用户 2026-10-15）。
+/// 「观影记录同步」（原 Webhtv → 观影记录同步）。
+///
+/// 入口现为「设置 → 通用设置 → 观影记录同步」（Webhtv 模块下线后搬过来的，
+/// 用户 2026-10-16）。
 ///
 /// 协议来源：WebHomeTV 的《应用完整开发文档》第 13.4 节 **观影记录同步**，
 /// 版本固定 `webhtv.playback.v1`（时间戳毫秒、进度毫秒）。

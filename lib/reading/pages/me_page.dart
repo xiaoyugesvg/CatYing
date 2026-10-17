@@ -441,6 +441,12 @@ class _MePageState extends State<MePage> {
   ///   https://api.dicebear.com/9.x/fun-emoji/png?seed=<seed>&size=192&backgroundType=gradientLinear
   static const int _kAvatarCount = 40;
 
+  /// 没选头像时用的那款内置头像 id（`assets/avatars/aNN.png`）。
+  ///
+  /// 用户 2026-10-16：「之前让你下载内置的头像呢」—— 默认位本来就该摆
+  /// 内置素材里的一张，而不是 App 的猫标。
+  static const String _kDefaultAvatarId = 'a01';
+
   /// 头像图（按 id）：'' = 默认图标；'aNN' = 内置素材；'custom' = 相册上传
   Widget _avatarImageFor(String id, double size, {bool logged = true}) {
     if (id == 'custom') {
@@ -469,12 +475,12 @@ class _MePageState extends State<MePage> {
 
   Widget _defaultAvatarIcon(double size, bool logged) => logged
       ? Image.asset(
-          // ⚠️ 原来引的是 `assets/icons/user.png` —— **这个文件根本不存在**
-          //（`assets/icons/` 下只有 folder / logo / magic_stick 三张）
-          // ⇒ 每次都走 errorBuilder，头像位只剩"白圈 + 一个小人图标"
-          //（用户 2026-10-16：「登录那个默认的头像没有吗？」）。
-          // 改用随包的**猫标**：确实存在，而且就是本 App 的标识。
-          'assets/images/cat_logo.png',
+          // ⚠️ 默认头像用**随包内置素材**（`assets/avatars/`，40 款，见
+          // [_kAvatarCount]），不再用 App 的猫标 —— 用户 2026-10-16：
+          // 「阅读模块头像要是圆形，**并且之前让你下载内置的头像呢**」。
+          // 猫标是"应用图标"不是"用户头像"，而且它是**圆角方图**，
+          // 摆在圆形头像位里会露出方角（旧版这里就是那个粉猫方图）。
+          'assets/avatars/$_kDefaultAvatarId.png',
           width: size,
           height: size,
           fit: BoxFit.cover,
@@ -538,7 +544,11 @@ class _MePageState extends State<MePage> {
                 child: ListenableBuilder(
                   listenable: SettingsService(),
                   builder: (_, _) {
-                    final cur = SettingsService().readerAvatar;
+                    // 没选过（''）时，"当前"就是默认那款内置头像 —— 否则面板里
+                    // 一个都不高亮，会让人以为"选过了但没生效"（用户 2026-10-16）
+                    final cur = SettingsService().readerAvatar.isEmpty
+                        ? _kDefaultAvatarId
+                        : SettingsService().readerAvatar;
                     return GridView.builder(
                       padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
                       gridDelegate:
@@ -993,6 +1003,12 @@ class _MePageState extends State<MePage> {
                                   border:
                                       Border.all(color: avatarRing, width: 2),
                                 ),
+                                // ⚠️ 必须裁：`shape: BoxShape.circle` 只把**底色/描边**
+                                //    画成圆，**子级图片不会被裁** ⇒ 方形头像图会直接铺满
+                                //    方形区域、在圆里露出四个角（用户 2026-10-16 截图）。
+                                //    子级已被 decoration 按描边宽度内缩 2px，所以裁完
+                                //    描边仍然可见。
+                                clipBehavior: Clip.antiAlias,
                                 child: _avatarImage(60, logged: logged),
                               ),
                               // 相机角标（编辑头像入口）—— 点它开「选择头像」面板

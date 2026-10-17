@@ -22,16 +22,11 @@ enum NavFeature {
   music('music', '音乐', false, tabIndex: 5),
   books('books', '阅读', false, tabIndex: 6),
   apps('apps', '程序', false, tabIndex: 7),
-  // 「网页首页」模块（独立于小程序体系：加载用户自配的 HTML 首页）
-  // 名称用「Webhtv」——用户 2026-10-15：「将网页分类名称改成 Webhtv，
-  //  设置里面也是」。这一个 label 同时驱动**悬浮导航栏**和
-  //  「设置 → 菜单设置」里的分类名（那边读的就是 `f.label`）。
-  webhome('webhome', 'Webhtv', false, tabIndex: 8),
   // 「RSS」模块（订阅源阅读：Legado RSS 源 / 标准 RSS / OPML）
-  rss('rss', 'RSS', false, tabIndex: 9),
+  rss('rss', 'RSS', false, tabIndex: 8),
   // 「海阔」模块（海阔视界 hiker/hipy 小程序规则；**独立于** TVBox 小程序体系，
   //  见 lib/hiker/）。同样默认不进底栏，用户在「设置 → 主页页面」里自行开启。
-  hiker('hiker', '海阔', false, tabIndex: 10),
+  hiker('hiker', '海阔', false, tabIndex: 9),
   shelf('shelf', '史藏', false, tabIndex: 1),
   settings('settings', '设置', true, tabIndex: 3),
   search('search', '搜索', false, tabIndex: 0);
@@ -58,7 +53,6 @@ enum NavFeature {
         NavFeature.music => Icons.library_music_outlined,
         NavFeature.books => Icons.menu_book_outlined,
         NavFeature.apps => Icons.widgets_outlined,
-        NavFeature.webhome => Icons.language_outlined,
         NavFeature.rss => Icons.rss_feed_outlined,
         NavFeature.hiker => Icons.rocket_launch_outlined,
         NavFeature.shelf => Icons.schedule_outlined,
@@ -73,7 +67,6 @@ enum NavFeature {
         NavFeature.music => Icons.library_music,
         NavFeature.books => Icons.menu_book,
         NavFeature.apps => Icons.widgets,
-        NavFeature.webhome => Icons.language,
         NavFeature.rss => Icons.rss_feed,
         NavFeature.hiker => Icons.rocket_launch,
         NavFeature.shelf => Icons.schedule,
@@ -100,13 +93,12 @@ class NavFeatureService extends GetxService {
   /// 一次性迁移标记：见 [load] 里「把这三个请出底栏」那一段
   static const String _kDefaultOffOnce = 'nav_default_off_once_v1';
 
-  /// **默认不进悬浮底栏**的三个新增模块（用户 2026-10-15 明确要求）：
-  /// 「网页(Webhtv)」「RSS」「海阔」。
+  /// **默认不进悬浮底栏**的新增模块（用户 2026-10-15 明确要求）：
+  /// 「RSS」「海阔」。
   ///
   /// ⚠️ 注意语义：**只是不出现在底栏**，功能本身完全照常 ——
   ///    在「设置 → 菜单设置」里把开关打开，它们立刻回到悬浮底栏并正常工作。
   static const List<NavFeature> kDefaultOffFeatures = [
-    NavFeature.webhome,
     NavFeature.rss,
     NavFeature.hiker,
   ];

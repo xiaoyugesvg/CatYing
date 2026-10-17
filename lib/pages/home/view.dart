@@ -1140,14 +1140,21 @@ const double _kBannerStairDrop = 24; // 左右两张比中间低多少
 const double _kBannerCarouselHeight = 196;
 
 // ── 扑克牌（poker，2026-10-16 新增）──
-//   牌面自身是一张**竖版卡**（≈0.71 比例，像扑克牌），画布上按"离当前页的
+//   牌面自身是一张**竖版卡**（≈0.77 比例，像扑克牌），画布上按"离当前页的
 //   连续距离"横向铺开：左右各滞开 [_kBannerPokerStep] 露一角，越远越缩、
 //   越沉、越暗、越转 ⇒ 前后堆叠的层次感。
-//   ⚠️ 画布高度 = 牌高 + 最大下沉量，留够下沉空间，否则牌底被裁。
-const double _kBannerPokerCardW = 160;
-const double _kBannerPokerCardH = 224;
-const double _kBannerPokerStep = 40; // 每远一页横向滞开的像素
-const double _kBannerPokerHeight = 248;
+//
+//   尺寸是按**把两侧填满**倒推的（用户 2026-10-16：「尺寸宽一点、重叠区域
+//   小一点，两边还有空白」）—— 以 390 屏宽为例：
+//     · 牌宽 190、每远一页滞开 56 ⇒ 邻牌露出的"一角"就是 56 宽（原来 40）
+//     · `d = ±2` 那张（画到的最远一张）中心 = 195 ∓ 112，
+//       半宽 = 190 × (1-0.06) / 2 ≈ 89 ⇒ 左边缘 ≈ -6、右边缘 ≈ 396
+//       ⇒ **刚好顶到（并略微切出）屏幕两边**，不再留白
+//   ⚠️ 画布高度 = 牌高 + 最远那张的旋转外扩 + 下沉量，留够，否则牌角被裁。
+const double _kBannerPokerCardW = 190;
+const double _kBannerPokerCardH = 246;
+const double _kBannerPokerStep = 56; // 每远一页横向滞开的像素（= 邻牌露出宽度）
+const double _kBannerPokerHeight = 266;
 
 // ── 标签页（tabs，2026-10-16 新增）──
 //   上方一条**标签条**（固定宽标签、可横向滚动、活动标签自动居中）+
@@ -2307,9 +2314,11 @@ class _RecommendBannerState extends State<_RecommendBanner>
         Positioned.fill(
           child: Align(
             child: Transform.translate(
-              offset: Offset(d * _kBannerPokerStep, a * 6),
+              // 下沉量与侧倾都收了一档（0.045→0.035）：牌变大后同样的角度会把
+              // 最远那两张的角"转出"画布，收一档正好落在 [_kBannerPokerHeight] 内
+              offset: Offset(d * _kBannerPokerStep, a * 4),
               child: Transform.rotate(
-                angle: d * 0.045,
+                angle: d * 0.035,
                 child: Transform.scale(
                   scale: 1 - 0.06 * a,
                   child: Opacity(

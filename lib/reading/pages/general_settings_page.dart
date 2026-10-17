@@ -604,8 +604,8 @@ class _CacheCleanupPageState extends State<_CacheCleanupPage> {
         return Icons.movie_filter_rounded;
       case CacheModule.hiker:
         return Icons.rocket_launch_rounded;
-      case CacheModule.webhome:
-        return Icons.language_rounded;
+      case CacheModule.playbackSync:
+        return Icons.sync_rounded;
       case CacheModule.rss:
         return Icons.rss_feed_rounded;
       case CacheModule.app:

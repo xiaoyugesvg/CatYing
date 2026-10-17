@@ -4,9 +4,11 @@ import '../common/theme.dart';
 import '../reading/services/settings_service.dart';
 import '../services/api_config.dart';
 import '../widgets/app_toast.dart';
-import 'web_home_prefs.dart';
 
-/// 「Webhtv → APP 代理」（第 6 步，用户 2026-10-15）。
+/// 「网络代理」（原 Webhtv → APP 代理）。
+///
+/// 入口现为「设置 → 通用设置 → 网络代理」（Webhtv 模块下线后搬过来的，
+/// 用户 2026-10-16）。
 ///
 /// 对齐 WebHomeTV 的「APP 代理」：**按域名匹配的代理规则**。
 /// 全项目所有请求都走 `applyGlobalProxy`（27 处），所以这里只需要维护规则，
@@ -57,7 +59,6 @@ class _WebhtvProxyPageState extends State<WebhtvProxyPage> {
     for (final s in api.take(3)) {
       add(_hostOf(s.api));
     }
-    add(_hostOf(WebHomePrefs.instance.current.value));
     final have = SettingsService().proxyDomainRules;
     return out
         .where((h) => !SettingsService.hostMatchesProxyRules(h, have))

@@ -119,8 +119,8 @@ flutter:
     # 内置小程序（nemby / emby / web-links）已移除（用户 2026-10-13）：
     #   小程序改为全部由「市场」或本地导入，代码里对这些内置资产已无任何引用，
     #   继续随包只会白占体积，故连同 pubspec 声明一并删除。
-    # 网页首页模块的内置默认页（未配置自定义地址时加载；见 lib/webhome/）
-    - assets/webhome/
+    # 网页首页模块的内置默认页已随「Webhtv」模块下线（用户 2026-10-16），
+    #   故不再声明 assets/webhome/（目录也已删除）。
     # 「海阔」模块的**内置源**（随包分发；见 lib/hiker/services/hiker_builtin.dart）
     #   ⚠️ 这份清单是**实跑筛出来的**：拿一份 115 个源的导出文件逐个真跑 `home`，
     #      只有真出内容的才写进来（其余依赖海阔内置页 hiker://page/Apollo、

@@ -855,7 +855,6 @@ class AntBridge {
   /// 「退出当前网页」要执行的宿主动作（由宿主页在打开时注入）。
   ///
   /// · 小程序页（`MiniAppWebPage`）→ `Navigator.maybePop()`（返回上一页）
-  /// · 「网页首页」模块（`WebHomePage`）→ 切回影视首页 tab（它是底栏 tab，没有"返回"）
   static void Function()? onExitRequested;
 
   /// `ant.exitMiniApp()` 的宿主实现。

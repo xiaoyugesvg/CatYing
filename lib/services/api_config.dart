@@ -395,7 +395,8 @@ class ApiConfig extends GetxController {
         'api': bean.api,
         'type': bean.type,
         'ext': bean.ext,
-        // ── 站点注入（Webhtv）扩展字段 ──────────────────────────
+        // ── 站点注入留下的扩展字段（写入方已随 Webhtv 模块下线，
+        //    这里保留读写口径：老用户盘上的数据仍会被合并进线路表）──
         'enabled': enabled,
         'indexs': bean.indexs, // -1 = 插到最前；0 = 末尾（默认）
         'searchable': bean.searchable,
@@ -413,7 +414,10 @@ class ApiConfig extends GetxController {
     }
   }
 
-  /// 用户注入的站点列表（原始 JSON，供「Webhtv → 站点注入」管理页读写）
+  /// 用户注入的站点列表（原始 JSON）
+  ///
+  /// ⚠️ 写入方（「Webhtv → 站点注入」）已随该模块下线（用户 2026-10-16）；
+  ///    这里保留读取口径，只为不破坏老用户盘上的数据。
   Future<List<Map<String, dynamic>>> userInjectedSites() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -597,7 +601,7 @@ class ApiConfig extends GetxController {
 
   /// 把落盘的用户线路合并进 [target]（按 key 去重；接口已下发的同 key 不覆盖）
   ///
-  /// 「站点注入」扩展（Webhtv）：
+  /// 「站点注入」留下的扩展字段（写入方已随 Webhtv 下线，合并逻辑保留）：
   ///   · `enabled == false` 的**跳过**（只是不显示，配置仍留在盘上，随时改回来）；
   ///   · `indexs == -1` 的插到**最前**，其余按落盘顺序追加在末尾；
   ///   · `searchable / quickSearch / filterable` 决定它参与搜索 / 快速搜索 / 筛选。

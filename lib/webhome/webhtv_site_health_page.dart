@@ -7,7 +7,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../common/theme.dart';
 import '../services/app_log.dart';
 
-/// 「Webhtv → 站点健康排序」（第 5 步，用户 2026-10-15）。
+/// 「站点健康排序」（原 Webhtv → 站点健康排序）。
+///
+/// 入口现为「设置 → 通用设置 → 站点健康排序」（Webhtv 模块下线后搬过来的，
+/// 用户 2026-10-16）。
 ///
 /// 对齐 WebHomeTV 的「站点健康排序」：**自动学习站点的搜索 / 详情 / 播放成功率**，
 /// 搜索与换源时优先使用更可用的站点；站点弹窗**默认仍按用户配置顺序**，
